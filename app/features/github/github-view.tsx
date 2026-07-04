@@ -357,9 +357,12 @@ export function GithubViewPage({
 
   return (
     <div className="board-wrap" data-screen-label="GitHub">
-      {/* TODO(phase-6-wire): subscribe project scope — revalidate this route
-          on task.updated / violation.updated / projection.rebuilt SSE events
-          once app/features/live-updates lands. */}
+      {/* Live updates (phase 6): no subscription needed HERE — this route
+          is a child of routes/project.tsx, whose shell already subscribes
+          project:<slug> + user scopes (useLiveUpdates). task.updated /
+          violation.updated / projection.rebuilt all match the project
+          scope, and useRevalidator refreshes every active loader,
+          including this route's. */}
       <div className="board-head">
         <div>
           <h1>GitHub</h1>

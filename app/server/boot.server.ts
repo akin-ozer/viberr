@@ -5,6 +5,7 @@ import {
 } from "./auth/session.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
+import { startEventPublisher } from "./events/event-publisher.server";
 import { ensureDataRootDirs } from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
@@ -35,6 +36,10 @@ export function bootServer(): void {
   const swept = sweepExpiredSessions(db);
   if (swept > 0) logger.info("expired sessions swept at boot", { swept });
   startSessionSweeper(db);
+
+  // SSE bridge FIRST (Phase 6): projection emitter → broker, so watcher
+  // reprojects and every mutation reach connected clients from the start.
+  startEventPublisher();
 
   // File-native store watcher (dev AND prod) — drives incremental
   // projection rebuilds when project.md / task.md files change on disk.

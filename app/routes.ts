@@ -19,6 +19,8 @@ export default [
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
+  // SSE stream (Phase 6) — scoped live updates driving route revalidation.
+  route("resources/events", "routes/resources.events.ts"),
 
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [

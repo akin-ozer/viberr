@@ -9,6 +9,8 @@ import {
   listNotifications,
 } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
+import { sseScopes } from "~/features/live-updates/event-types";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
 import { Topbar } from "~/features/shell/topbar";
 
@@ -56,6 +58,19 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   const openTask = taskMatch?.data
     ? (taskMatch.data as { task: { key: string; title: string } }).task
     : null;
+
+  // Live updates (Phase 6): ONE stream per tab for the whole workspace
+  // shell. `project:` covers board columns + rail counts + violations,
+  // `user` covers the bell (notification.created is user-targeted; the
+  // badge updates silently — shell spec defines no incoming-notification
+  // toast), and the open task adds its own `task:` scope (task-detail
+  // brief) — any matching event revalidates layout + child loaders.
+  const slug = board.project.slug;
+  useLiveUpdates(
+    openTask
+      ? [sseScopes.project(slug), sseScopes.task(slug, openTask.key), sseScopes.user()]
+      : [sseScopes.project(slug), sseScopes.user()],
+  );
 
   return (
     <div className="app">

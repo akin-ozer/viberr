@@ -18,6 +18,8 @@ import {
 } from "~/features/home/home-query.server";
 import { createProject } from "~/features/home/project-create.server";
 import { HomePage } from "~/features/home/home-page";
+import { sseScopes } from "~/features/live-updates/event-types";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 
 // Home — multi-project landing (home spec). Route: `/`.
 
@@ -110,5 +112,8 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Index({ loaderData }: Route.ComponentProps) {
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
+  // Live updates (Phase 6): `user` scope = own notification.created (bell)
+  // + projection.rebuilt broadcasts (store re-scans refresh the cards).
+  useLiveUpdates([sseScopes.user()]);
   return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
 }
