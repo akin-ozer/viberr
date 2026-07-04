@@ -1,3 +1,8 @@
+import { seedInitialAdmin } from "./auth/seed-admin.server";
+import {
+  startSessionSweeper,
+  sweepExpiredSessions,
+} from "./auth/session.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
 import { logger } from "./logging/logger.server";
@@ -7,7 +12,9 @@ const BOOT_KEY = Symbol.for("viberr.booted");
 
 /**
  * One-time server startup: validates the environment (fail fast with a
- * clear message) and opens the database, applying pending migrations.
+ * clear message), opens the database (applying pending migrations), seeds
+ * the initial admin when the users table is empty, and sweeps expired
+ * sessions (once now + daily interval).
  * Called from entry.server.tsx module scope; safe to call repeatedly.
  */
 export function bootServer(): void {
@@ -15,7 +22,17 @@ export function bootServer(): void {
   if (cache[BOOT_KEY]) return;
 
   const env = getEnv();
-  getDb();
+  const db = getDb();
+
+  seedInitialAdmin(db, {
+    email: env.VIBERR_SEED_ADMIN_EMAIL,
+    password: env.VIBERR_SEED_ADMIN_PASSWORD,
+  });
+
+  const swept = sweepExpiredSessions(db);
+  if (swept > 0) logger.info("expired sessions swept at boot", { swept });
+  startSessionSweeper(db);
+
   logger.info("viberr server booted", {
     nodeEnv: env.NODE_ENV,
     port: env.PORT,

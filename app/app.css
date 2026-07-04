@@ -2071,3 +2071,55 @@ h1, h2, h3, h4 {
   border-radius: var(--radius-button);
   background: color-mix(in srgb, var(--fg), transparent 96%);
 }
+
+/* Phase 2: login surface + shared bits, copied VERBATIM from
+   design/html-app/app/home.css (which is otherwise ported with the Home
+   surface in phase 4 — when that happens, dedupe against this block).
+   Only the body override is scoped (home.css relaxes body overflow
+   globally; the workspace shell in viberr.css expects overflow:hidden). */
+
+body:has(.login-wrap) { overflow: auto; height: auto; min-height: 100vh; }
+
+.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+.login-card {
+  width: min(430px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-card);
+  padding: 2.2rem 2rem 1.6rem;
+  display: flex; flex-direction: column; gap: 1.1rem;
+}
+.login-brand { display: flex; flex-direction: column; align-items: center; gap: .9rem; text-align: center; }
+.login-brand .mark { width: 46px; height: 46px; font-size: 1.5rem; border-radius: 13px; box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%); }
+.login-brand h1 { font-size: 1.42rem; }
+.login-brand .sub { color: var(--faint); font-size: .84rem; margin-top: .35rem; }
+.login-providers { display: flex; flex-direction: column; gap: .55rem; }
+.btn.provider { width: 100%; min-height: 44px; justify-content: center; gap: .6rem; font-size: .92rem; }
+.btn.provider.github { background: var(--fg); border-color: var(--fg); color: var(--surface); }
+.btn.provider .gmark.lg { font-size: 1.05rem; }
+.login-div { display: flex; align-items: center; gap: .8rem; color: var(--placeholder); font-size: .74rem; white-space: nowrap; }
+.login-div::before, .login-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+.login-form { display: flex; flex-direction: column; gap: .9rem; }
+.login-foot { display: flex; justify-content: flex-end; }
+.login-err {
+  display: flex; align-items: flex-start; gap: .5rem;
+  padding: .55rem .7rem; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 70%);
+  background: color-mix(in srgb, var(--red-light), var(--surface) 45%);
+  font-size: .8rem; color: var(--coral-dark); line-height: 1.45;
+}
+.login-err .ico { width: 14px; height: 14px; flex: none; margin-top: .1rem; }
+.login-tag { text-align: center; font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); line-height: 1.6; }
+
+.gmark { font-family: var(--font-display); font-weight: 800; font-size: .72rem; line-height: 1; color: var(--muted); }
+.gmark.lg { font-size: .95rem; }
+.idp-chip { display: inline-flex; align-items: center; gap: .32rem; padding: .16rem .45rem; border: 1px solid var(--hairline); border-radius: 6px; font-family: var(--font-mono); font-size: .66rem; color: var(--faint); flex: none; }
+.idp-chip .ico { width: 11px; height: 11px; }
+.linkish { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.linkish:hover { color: var(--blue-pressed); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+/* App addition: home.css scopes .spin to .store-strip; the login button's
+   refresh icon (busy state) needs the same animation globally. */
+.ico.spin { animation: spin 1s linear infinite; }

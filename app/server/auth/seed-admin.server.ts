@@ -1,0 +1,83 @@
+import { randomBytes } from "node:crypto";
+import type Database from "better-sqlite3";
+import { newId } from "~/shared/ids/new-id.server";
+import { recordAudit, SYSTEM_ACTOR } from "../audit/audit-recorder.server";
+import { logger } from "../logging/logger.server";
+import { hashPassword } from "./password.server";
+import { countUsers, insertUser } from "./user-store.server";
+
+/**
+ * Boot-time bootstrap: when the users table is EMPTY, create the initial
+ * admin from VIBERR_SEED_ADMIN_EMAIL / VIBERR_SEED_ADMIN_PASSWORD.
+ * Without env credentials it falls back to arda@viberr.dev with a random
+ * generated password that is logged ONCE (clearly marked) and must be
+ * changed at first login (pwreset_required = 1).
+ */
+
+export const DEFAULT_SEED_ADMIN_EMAIL = "arda@viberr.dev";
+
+export interface SeedAdminResult {
+  created: boolean;
+  email?: string;
+  /** Set only when no env password was provided. Never persisted. */
+  generatedPassword?: string;
+}
+
+function nameForEmail(email: string): string {
+  if (email === DEFAULT_SEED_ADMIN_EMAIL) return "Arda Kaya"; // mock identity
+  const local = email.split("@")[0] ?? "Admin";
+  return local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function seedInitialAdmin(
+  db: Database.Database,
+  options: { email?: string; password?: string } = {},
+): SeedAdminResult {
+  if (countUsers(db) > 0) return { created: false };
+
+  const email = (options.email ?? DEFAULT_SEED_ADMIN_EMAIL).toLowerCase();
+  const generated = !options.password;
+  const password = options.password ?? randomBytes(12).toString("base64url");
+
+  const user = insertUser(db, {
+    id: newId("u"),
+    email,
+    name: nameForEmail(email),
+    role: "admin",
+    passwordHash: hashPassword(password),
+    // A generated password is unknown to the human — force a reset.
+    pwresetRequired: generated,
+    idp: "local",
+    avatarTone: "",
+    createdBy: null,
+  });
+
+  recordAudit(db, {
+    action: "org.user.created",
+    actor: SYSTEM_ACTOR,
+    subjectKind: "user",
+    subjectId: user.id,
+    details: { email, role: "admin", bootstrap: true },
+  });
+
+  if (generated) {
+    // The ONE place this password ever appears. Marked so it's easy to find.
+    logger.warn(
+      `VIBERR BOOTSTRAP ADMIN — email: ${email} password: ${password} ` +
+        `(one-time credentials; you must set a new password at first sign-in)`,
+      { bootstrap: true },
+    );
+  } else {
+    logger.info("seed admin created from environment", { email });
+  }
+
+  return {
+    created: true,
+    email,
+    ...(generated ? { generatedPassword: password } : {}),
+  };
+}

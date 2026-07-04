@@ -12,6 +12,7 @@ import "@fontsource/manrope/800.css";
 import "./app.css";
 
 import {
+  data,
   isRouteErrorResponse,
   Links,
   Meta,
@@ -22,6 +23,9 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { getCsrfToken } from "./server/auth/csrf.server";
+import { authenticate } from "./server/auth/require-user.server";
+import { sessionCookieHeader } from "./server/auth/session-cookie.server";
 import {
   getThemePreference,
   type ThemePreference,
@@ -32,7 +36,28 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function loader({ request }: Route.LoaderArgs) {
-  return { theme: getThemePreference(request) };
+  const theme = getThemePreference(request);
+  // Runs on every document request: identifies the signed-in user (for the
+  // shell + <CsrfInput />) and slides the 30-day rolling session forward.
+  const auth = authenticate(request);
+  const payload = {
+    theme,
+    user: auth?.user ?? null,
+    csrf: auth ? getCsrfToken(auth.sessionId) : null,
+  };
+  if (auth?.sessionRenewed) {
+    // Re-issue the cookie so its Max-Age slides along with the DB expiry.
+    return data(payload, {
+      headers: { "Set-Cookie": sessionCookieHeader(auth.sessionToken) },
+    });
+  }
+  return payload;
+}
+
+// Surface loader headers (Set-Cookie renewal) on routes without their own
+// headers export — React Router uses the deepest headers export available.
+export function headers({ loaderHeaders }: Route.HeadersArgs) {
+  return loaderHeaders;
 }
 
 /**
