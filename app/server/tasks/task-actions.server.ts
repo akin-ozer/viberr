@@ -388,6 +388,32 @@ export async function appendComment(
 // --------------------------------------------------------------- ownership
 
 /**
+ * Operator scheduling rule (contracts §3.3, shell §5.2 — generalized from
+ * the mock's VIB-148 demo script): when a quality-gated task that is
+ * waiting only on a human owner gains one, the OPERATOR reacts — readiness
+ * flips to ready, waiting flips to agent, and the operator writes its own
+ * `agent` event. "Quality-gated" = the newest operator event on the
+ * timeline announces a passed quality gate. This inline server rule is the
+ * documented stand-in until the Phase-8 operator runtime owns the reaction.
+ */
+function operatorSchedulesOnOwner(parsed: {
+  frontmatter: TaskFrontmatter;
+  packet: unknown;
+  timeline: TaskFileEvent[];
+}): boolean {
+  if (parsed.frontmatter.operator === null) return false;
+  if (parsed.frontmatter.waiting !== "human") return false;
+  if (parsed.packet) return false;
+  const newestOperatorEvent = parsed.timeline.find(
+    (e) => e.type === "agent" && e.actor.kind === "operator",
+  );
+  return (
+    newestOperatorEvent !== undefined &&
+    newestOperatorEvent.text.startsWith("**Quality gate:**")
+  );
+}
+
+/**
  * Take or hand off ownership. Exact typed `assign` event copy from
  * task-detail spec §5.2. RBAC: any project member may take (all four
  * roles hold the "Take / release task ownership" grant); handing off
@@ -448,9 +474,29 @@ export async function setOwner(
     evidence: null,
   };
 
+  // Operator scheduling stand-in: only an UNOWNED task gaining its owner
+  // triggers the reaction (spec §5.2 — VIB-148 generalization).
+  const scheduling = !currentOwnerId && operatorSchedulesOnOwner(existing.parsed);
+  const operatorEvent: TaskFileEvent | null = scheduling
+    ? {
+        occurredAt: event.occurredAt,
+        type: "agent",
+        actor: { kind: "operator" },
+        title: null,
+        text: `Acceptance boundary now owned by **${userName(db, input.targetUserId)}** — scheduling execution against the quality-gated scope.`,
+        toAgent: false,
+        evidence: null,
+      }
+    : null;
+
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.ownerUserId = input.targetUserId;
     parsed.timeline.unshift(event);
+    if (operatorEvent) {
+      parsed.frontmatter.readiness = "ready";
+      parsed.frontmatter.waiting = "agent";
+      parsed.timeline.unshift(operatorEvent);
+    }
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -464,6 +510,7 @@ export async function setOwner(
     details: {
       previousOwnerUserId: currentOwnerId,
       newOwnerUserId: input.targetUserId,
+      operatorScheduled: scheduling,
     },
   });
 

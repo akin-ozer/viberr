@@ -30,7 +30,15 @@ export type ProjectionEvent =
       /** Number of files whose projection actually changed. */
       changed: number;
     }
-  | { type: "notification.created"; userId: string; occurredAt: string };
+  | { type: "notification.created"; userId: string; occurredAt: string }
+  /** Phase 7: a scope violation was opened or resolved (rail badge,
+   * GitHub view, Settings card and Activity all revalidate on it). */
+  | {
+      type: "violation.updated";
+      projectSlug: string;
+      taskKey: string | null;
+      occurredAt: string;
+    };
 
 const EMITTER_KEY = Symbol.for("viberr.projectionEvents");
 const CHANNEL = "projection";

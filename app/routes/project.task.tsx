@@ -7,36 +7,198 @@ import {
 } from "react-router";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
-import { requireUser } from "~/server/auth/require-user.server";
+import { assertCsrf } from "~/server/auth/csrf.server";
+import { requireAuth, requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getTaskSummary } from "~/server/projections/task-query.server";
-import { Avatar } from "~/ui/avatar";
+import { isAppError } from "~/server/errors/app-error.server";
+import { getPref } from "~/server/prefs/user-prefs.server";
+import {
+  getTaskDetail,
+  getTaskSummary,
+} from "~/server/projections/task-query.server";
+import {
+  appendComment,
+  releaseOwner,
+  resolvePacket,
+  setOwner,
+  transitionStage,
+} from "~/server/tasks/task-actions.server";
+import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
+import type { TaskMemberView } from "~/features/task-detail/execution-profile";
+import type { TimelineFilterId } from "~/features/task-detail/timeline";
+import {
+  clampTimelineLimit,
+  sliceTimeline,
+} from "~/features/task-detail/timeline-slice";
 import { Icon } from "~/ui/icon";
-import { AgentGlyph } from "~/ui/identity";
-import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
 
 /**
- * /projects/:slug/tasks/:key — Phase-4 PLACEHOLDER: a minimal current-state
- * panel (title, stage/readiness/waiting pills, goal, owner, agents, real
- * store path). Phase 5 replaces this module with the full task workspace
- * port of task.jsx. The loader contract Phase 5 inherits: `{ task }` =
- * getTaskSummary shape; the layout's crumbs read `task.key`/`task.title`
- * from this route's data (match id "routes/project.task").
+ * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
  *
- * Unknown keys 404 into the in-shell ErrorBoundary below (the mock crashed;
- * cross-project notification rows to the stub projects land here too).
+ * Loader contract kept from Phase 4: `{ task }` with `task.key`/`task.title`
+ * (the layout's crumbs read this route's data by id "routes/project.task").
+ * `task.timeline` is a bounded newest-first slice (`?events=` param,
+ * progressive disclosure); members/myRole come from the layout loader.
+ *
+ * Action intents (all CSRF-checked; RBAC inside the phase-3 mutations;
+ * TOAST COPY IS THE VERBATIM SPEC §5 CONTRACT — it lives here so every
+ * caller shows identical strings):
+ *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
+ *   transition
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  requireUser(request);
+  const user = requireUser(request);
   const db = getDb();
-  const task = getTaskSummary(db, params.slug, params.key);
-  if (!task) {
+  const detail = getTaskDetail(db, params.slug, params.key);
+  if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
       status: 404,
     });
   }
-  return { task };
+  const limit = clampTimelineLimit(
+    new URL(request.url).searchParams.get("events"),
+  );
+  const slice = sliceTimeline(detail.timeline, limit);
+  const rawDefault = getPref<string>(db, user.id, "tlDefault");
+  const tlDefault: TimelineFilterId =
+    rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
+  return {
+    task: { ...detail, timeline: slice.events },
+    timelineTotal: slice.total,
+    timelineHasMore: slice.hasMore,
+    timelineRemaining: slice.remaining,
+    timelineNextLimit: slice.nextLimit,
+    tlDefault,
+  };
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+  const ctx = requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  await assertCsrf(request, ctx.sessionId, formData);
+  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const intent = String(formData.get("intent") ?? "");
+  const projectSlug = params.slug;
+  const taskKey = params.key;
+
+  try {
+    switch (intent) {
+      case "comment": {
+        const result = await appendComment(
+          db,
+          { projectSlug, taskKey, text: String(formData.get("text") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toAgent: result.toAgent,
+          toast: result.toAgent
+            ? "Comment posted · routed to mentioned agent"
+            : "Comment posted",
+        };
+      }
+      case "resolve-packet": {
+        const raw = Number(formData.get("option"));
+        const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+        const { option } = await resolvePacket(
+          db,
+          { projectSlug, taskKey, optionIndex },
+          actor,
+        );
+        const toast =
+          option.kind === "accept_completion"
+            ? `Completion accepted · ${taskKey} moved to Done`
+            : option.kind === "block_on_policy"
+              ? "Task held on policy · opening repository settings"
+              : option.kind === "hold_runtime_debug"
+                ? "Held for runtime debug — the session is recorded per audit policy"
+                : `Decision recorded: ${option.t}`;
+        return {
+          ok: true as const,
+          intent,
+          kind: option.kind,
+          toast,
+          // Mock flow: blocking on policy opens the repository settings.
+          ...(option.kind === "block_on_policy"
+            ? { navigateTo: `/projects/${projectSlug}/settings` }
+            : {}),
+        };
+      }
+      case "owner-take": {
+        await setOwner(
+          db,
+          { projectSlug, taskKey, targetUserId: ctx.user.id },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `You own ${taskKey} · review & acceptance`,
+        };
+      }
+      case "owner-assign": {
+        const targetUserId = String(formData.get("userId") ?? "");
+        const task = await setOwner(
+          db,
+          { projectSlug, taskKey, targetUserId },
+          actor,
+        );
+        const first =
+          task.owner && task.owner.kind === "human"
+            ? task.owner.name.split(" ")[0]
+            : "the member";
+        return {
+          ok: true as const,
+          intent,
+          toast: `Ownership handed to ${first}`,
+        };
+      }
+      case "owner-release": {
+        // Capture the seat before it empties (forced = admin releasing
+        // someone else — drives the distinct toast copy).
+        const before = getTaskSummary(db, projectSlug, taskKey);
+        const prev =
+          before?.owner && before.owner.kind === "human" ? before.owner : null;
+        const forced = !!(prev && prev.userId !== ctx.user.id);
+        await releaseOwner(db, { projectSlug, taskKey }, actor);
+        return {
+          ok: true as const,
+          intent,
+          forced,
+          toast: forced
+            ? `${prev!.name.split(" ")[0]} released from ${taskKey} · admin action`
+            : `Ownership released on ${taskKey}`,
+        };
+      }
+      case "transition": {
+        // No mock affordance renders this on task detail yet (packets carry
+        // the governed decisions); the intent exists so future surfaces and
+        // automations hit the same server-enforced boundary rules.
+        const task = await transitionStage(
+          db,
+          { projectSlug, taskKey, toStageId: String(formData.get("to") ?? "") },
+          actor,
+        );
+        return { ok: true as const, intent, stage: task.stage };
+      }
+      default:
+        return data(
+          { ok: false as const, error: "Unknown action." },
+          { status: 400 },
+        );
+    }
+  } catch (error) {
+    if (isAppError(error)) {
+      return data(
+        { ok: false as const, error: error.userMessage },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
 }
 
 export function meta({ data, params }: Route.MetaArgs) {
@@ -45,129 +207,34 @@ export function meta({ data, params }: Route.MetaArgs) {
   ];
 }
 
-function WaitLine({ waiting }: { waiting: string }) {
-  if (waiting === "agent") {
-    return (
-      <span className="wait-tag agent">
-        <span className="working" />
-        agent working
-      </span>
-    );
-  }
-  if (waiting === "human") {
-    return (
-      <span className="wait-tag human">
-        <Icon name="hand" />
-        waiting on you
-      </span>
-    );
-  }
-  return null;
-}
-
-export default function TaskPreview({ loaderData }: Route.ComponentProps) {
-  const { task } = loaderData;
+export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
-  const stage = layout?.board.project.stages.find((s) => s.id === task.stage);
+  if (!layout) return null;
+
+  const members: TaskMemberView[] = layout.board.members.map((m) => ({
+    userId: m.userId,
+    role: m.role,
+    user: {
+      name: m.user.name,
+      initials: m.user.kind === "human" ? m.user.initials : undefined,
+      tone: m.user.kind === "human" ? m.user.tone : undefined,
+    },
+  }));
 
   return (
-    <div className="task-preview" data-screen-label="Task detail — preview">
-      <section className="panel">
-        <div className="panel-head">
-          <h2>
-            <span className="mono">{task.key}</span> · {task.title}
-          </h2>
-        </div>
-        <div className="tp-pills">
-          <Pill kind="neutral" sm>
-            <span
-              className="sdot"
-              style={stage ? { background: stage.color } : undefined}
-            />
-            {stage?.name ?? task.stage}
-          </Pill>
-          <ReadinessPill value={task.displayReadiness} sm />
-          <ValidationPill value={task.validation} sm />
-          {task.urgent && (
-            <Pill kind="risk" sm>
-              urgent
-            </Pill>
-          )}
-          <WaitLine waiting={task.waiting} />
-        </div>
-
-        <div className="tp-section">
-          <div className="tp-label">Goal</div>
-          <p className="tp-goal">{task.goal}</p>
-        </div>
-
-        <div className="tp-section">
-          <div className="tp-label">People &amp; agents</div>
-          <div className="tp-chips">
-            {task.owner && task.owner.kind === "human" ? (
-              <span className="who-chip">
-                <Avatar person={task.owner} />
-                <span>
-                  <span className="nm">{task.owner.name}</span>
-                  <div className="sub">owner · review &amp; acceptance</div>
-                </span>
-              </span>
-            ) : (
-              <span className="who-chip">
-                <span className="avatar" style={{ opacity: 0.5 }}>
-                  ?
-                </span>
-                <span>
-                  <span className="nm">No owner</span>
-                  <div className="sub">
-                    {task.operator ? "awaiting owner" : "unassigned"}
-                  </div>
-                </span>
-              </span>
-            )}
-            {task.specialist && (
-              <span className="who-chip">
-                <AgentGlyph backend={task.specialist.backend} />
-                <span>
-                  <span className="nm">
-                    {task.specialist.name} · {task.specialist.role}
-                  </span>
-                  <div className="sub">primary specialist</div>
-                </span>
-              </span>
-            )}
-            {task.operator && (
-              <span className="who-chip">
-                <AgentGlyph op />
-                <span>
-                  <span className="nm">Operator</span>
-                  <div className="sub">since {task.operator.sinceLabel}</div>
-                </span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        {task.packet && (
-          <div className="tp-section">
-            <div className="tp-label">Decision packet</div>
-            <p className="tp-goal">
-              <Pill kind={task.packet.type === "blocked" ? "blocked" : "input"} sm>
-                {task.packet.kind}
-              </Pill>{" "}
-              {task.packet.title}
-            </p>
-          </div>
-        )}
-
-        <div className="tp-foot">
-          <span className="mono tp-path">{task.filePath}</span>
-          <span className="tp-note">
-            The full task workspace arrives in phase 5.
-          </span>
-        </div>
-      </section>
-    </div>
+    <TaskDetailPage
+      // Remount on task switch: resets composer draft, filter, dialogs and
+      // log selection (mock `key={task.key}` behavior, spec §1).
+      key={loaderData.task.key}
+      task={loaderData.task}
+      timelineHasMore={loaderData.timelineHasMore}
+      timelineRemaining={loaderData.timelineRemaining}
+      timelineNextLimit={loaderData.timelineNextLimit}
+      tlDefault={loaderData.tlDefault}
+      members={members}
+      me={{ id: layout.user.id, name: layout.user.name }}
+      myRole={layout.myRole}
+    />
   );
 }
 
