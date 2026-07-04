@@ -39,11 +39,41 @@ import {
  * Unknown `## Sections` are preserved verbatim (round-trip safe); malformed
  * timeline entries are skipped with a diagnostic — never a crash, never a
  * dropped task.
+ *
+ * Event-body escaping: free text inside a timeline event may legitimately
+ * contain lines that would otherwise read as file STRUCTURE (`## ` section
+ * headings, `### ` event headings, `title:`/`to:` metadata lines, the
+ * `evidence:` marker). The serializer prefixes such lines with a single
+ * backslash (`\## Notes`); the parser strips exactly one backslash from any
+ * line that is one-or-more backslashes followed by a structural pattern —
+ * so lines that already start that way gain one more backslash on write and
+ * lose it on read. The mapping is bijective: round-trips stay byte-stable
+ * and comment text can never split sections, forge events, or override the
+ * real `## Packet`. Documented in docs/architecture/file-formats.md §2.
  */
 
 const SECTION_RE = /^## (.+)$/;
 const EVENT_HEADING_PREFIX = "### ";
 const SEP = " · ";
+
+/** Line patterns the parser treats as structure inside an event block
+ * (mirrors SECTION_RE / EVENT_HEADING_PREFIX / metadata / evidence rules). */
+const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|\s*evidence:\s*$`;
+/** Serialize side: line needs a(nother) escape backslash. */
+const NEEDS_ESCAPE_RE = new RegExp(String.raw`^\\*(?:${STRUCTURAL_LINE_SRC})`);
+/** Parse side: line carries at least one escape backslash — strip one. */
+const ESCAPED_LINE_RE = new RegExp(String.raw`^\\+(?:${STRUCTURAL_LINE_SRC})`);
+
+function escapeEventText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (NEEDS_ESCAPE_RE.test(line) ? `\\${line}` : line))
+    .join("\n");
+}
+
+function unescapeEventTextLine(line: string): string {
+  return ESCAPED_LINE_RE.test(line) ? line.slice(1) : line;
+}
 
 interface RawSection {
   title: string; // "" = preamble before the first `## `
@@ -141,11 +171,13 @@ function parseEventBlock(
     }
   }
 
-  // Body: everything up to an `evidence:` marker line.
+  // Body: everything up to an `evidence:` marker line. Escaped structural
+  // lines (`\## …`, `\### …`, `\title: …`, `\to: …`, `\evidence:`) lose
+  // exactly one backslash — the reverse of escapeEventText.
   const rest = bodyLines.slice(i);
   const evidenceIdx = rest.findIndex((l) => l.trim() === "evidence:");
   const textLines = evidenceIdx === -1 ? rest : rest.slice(0, evidenceIdx);
-  const text = textLines.join("\n").trim();
+  const text = textLines.map(unescapeEventTextLine).join("\n").trim();
 
   let evidence: { label: string; add: string; del: string }[] | null = null;
   if (evidenceIdx !== -1) {
@@ -216,7 +248,7 @@ function serializeEvent(event: TaskFileEvent): string {
   if (event.title) lines.push(`title: ${event.title}`);
   if (event.toAgent) lines.push(`to: agent`);
   lines.push("");
-  lines.push(event.text);
+  lines.push(escapeEventText(event.text));
   if (event.evidence && event.evidence.length > 0) {
     lines.push("");
     lines.push("evidence:");
@@ -287,9 +319,25 @@ export function parseTaskFileContent(
   let goal = "";
   let sawGoal = false;
   let packet: TaskPacket | null = null;
+  let sawPacket = false;
   let timeline: TaskFileEvent[] = [];
   let sawTimeline = false;
   const extraSections: { title: string; raw: string }[] = [];
+
+  // Duplicate known sections: the FIRST occurrence wins (never silent
+  // last-wins — a later duplicate must not override real state). The
+  // duplicate is flagged and preserved verbatim as an extra section so no
+  // data is dropped.
+  const duplicateSection = (title: string, raw: string) => {
+    diagnostics.push(
+      diagWarning(
+        "body.duplicate_section",
+        `Duplicate \`## ${title}\` section — the first occurrence wins; the duplicate is preserved as an unrecognized section.`,
+        title.toLowerCase(),
+      ),
+    );
+    extraSections.push({ title, raw: raw.trim() });
+  };
 
   for (const section of sections) {
     const raw = section.lines.join("\n");
@@ -298,11 +346,24 @@ export function parseTaskFileContent(
       continue;
     }
     if (section.title === "Goal") {
+      if (sawGoal) {
+        duplicateSection("Goal", raw);
+        continue;
+      }
       goal = raw.trim();
       sawGoal = true;
     } else if (section.title === "Packet") {
+      if (sawPacket) {
+        duplicateSection("Packet", raw);
+        continue;
+      }
       packet = parsePacketSection(section.lines, diagnostics);
+      sawPacket = true;
     } else if (section.title === "Timeline") {
+      if (sawTimeline) {
+        duplicateSection("Timeline", raw);
+        continue;
+      }
       timeline = parseTimeline(section.lines, diagnostics);
       sawTimeline = true;
     } else {

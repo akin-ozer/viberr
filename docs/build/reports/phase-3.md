@@ -392,3 +392,63 @@ Runtime NDJSON logs are NOT seeded (Phase 8 extends the seed).
 - Attachments dirs, runtime NDJSON, `.viberr`-style KB browsing — later
   phases. `member@viberr.dev` in the dev DB is leftover phase-2 manual test
   data (not seed-created; harmless).
+
+## Post-phase fixes (data integrity)
+
+Two bugs fixed after phase close (2026-07-05). `npm run typecheck`,
+`npm test`, `npm run build` clean; `npm run seed -- --reset` still yields
+10 tasks / 32 events / 0 diagnostics and a clean-tree rescan reports
+0 changed / 13 unchanged.
+
+**1. Timeline text could break file structure**
+(`app/server/files/task-file.server.ts`). Event/comment text was serialized
+verbatim into task.md, so a multi-line comment containing lines like
+`## Packet`, `### <iso> · type · actor`, `title:` / `to:` / `evidence:`
+was re-interpreted as structure on the next parse: sections split, older
+events vanished into extraSections, and a `## Packet` inside a comment
+silently overrode the real packet (last-wins). Fixes:
+
+- **Backslash escape scheme** at the serialize/parse boundary: the writer
+  prefixes one `\` to any event-body line matching
+  `^\\*(## |### |title:\s|to:\s|\s*evidence:\s*$)` (lines already carrying
+  escape backslashes gain one more); the parser strips exactly one `\` from
+  lines matching the same pattern with at least one leading backslash. The
+  mapping is bijective — round-trips stay byte-stable, files stay
+  human-readable (`\## Notes` even renders as literal text in markdown),
+  and the scheme is self-escaping so no input can collide with it. Spec:
+  docs/architecture/file-formats.md §2 "Body-line escaping". External
+  appenders must apply the same escape.
+- **Duplicate `## Goal` / `## Packet` / `## Timeline` sections** now emit a
+  `body.duplicate_section` warning diagnostic and keep the FIRST occurrence
+  (previously silent last-wins); duplicates are preserved verbatim as extra
+  sections, never dropped.
+- New round-trip tests (task-file.server.test.ts): hostile comment carrying
+  `## Notes`/`## Packet` headings, a fake `### …` event heading,
+  `title:`/`to:`/`evidence:` lines, a fenced code block quoting structure,
+  and a pre-backslashed line — plus duplicate-Packet/Goal/Timeline fixtures
+  asserting the diagnostic, first-wins and re-serialization stability.
+
+**2. Stale task projections after project.md changes**
+(`app/server/projections/rebuilder.server.ts`). Task projections bake in
+project-derived data (stage-reference diagnostics + readiness floor,
+effective repo, guest flags), but the project→tasks cascade only fired when
+members or repo changed AND a previous project row existed; the task-side
+content-hash short-circuit then kept unchanged task files stale even in
+`rebuildAll`. So fixing an unknown-stage warning by adding the stage to
+project.md never cleared it, removing a stage never flagged tasks left
+behind, and a task projected before its project.md kept `repo=null`
+forever. Fixes:
+
+- `rebuildProjectFile` now cascades a forced task re-projection whenever
+  the project row is newly created OR its `content_hash` actually changed
+  (covers stages, members, repo — any content change). Unchanged files
+  still short-circuit first, so the common no-change rescan stays cheap.
+- `rebuildAll` suppresses that inner cascade (internal `skipTaskCascade`
+  option) and instead forces its own task walk for projects it just
+  (re)projected — every task is still visited exactly once per rescan and
+  the summary counts stay truthful.
+- New tests (rebuilder.server.test.ts): unknown stage `qa` warning +
+  `input_required` floor cleared by adding the stage to project.md (task
+  file untouched); removing a stage tasks sit in raises the warning on the
+  next rescan; a task projected before its project.md picks up the project
+  repo when the project row first lands.

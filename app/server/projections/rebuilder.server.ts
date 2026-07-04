@@ -39,6 +39,12 @@ export interface RebuildOptions {
   dataRoot?: string;
   /** Bypass the content-hash short-circuit. */
   force?: boolean;
+  /**
+   * Internal (rebuildAll only): suppress the project→tasks cascade because
+   * the caller walks the project's task files itself (with force when the
+   * project row changed) — avoids projecting every task twice per rescan.
+   */
+  skipTaskCascade?: boolean;
 }
 
 export type RebuildAction =
@@ -173,20 +179,12 @@ export function rebuildProjectFile(
   const content = readFileSync(absPath, "utf8");
   const contentHash = sha256(content);
   const existing = db
-    .prepare(
-      `SELECT content_hash, repo, stages_json FROM projects WHERE slug = ?`,
-    )
-    .get(slug) as
-    | { content_hash: string; repo: string | null; stages_json: string }
-    | undefined;
+    .prepare(`SELECT content_hash FROM projects WHERE slug = ?`)
+    .get(slug) as { content_hash: string } | undefined;
 
   if (!options.force && existing && existing.content_hash === contentHash) {
     return { action: "unchanged", kind: "project", projectSlug: slug };
   }
-
-  const previousMembers = existing
-    ? [...getMemberIds(db, slug)].sort().join(",")
-    : null;
 
   const { parsed, diagnostics } = parseProjectFileContent(content, {
     fallbackSlug: slug,
@@ -252,12 +250,16 @@ export function rebuildProjectFile(
     occurredAt: nowIso(),
   });
 
-  // Membership / default-repo changes alter task projections (guest flags,
-  // effective repo) — cascade a forced re-projection of this project's tasks.
-  const nextMembers = fm.members.map((m) => m.userId).sort().join(",");
+  // Project-derived data is baked into task projections (stage-reference
+  // diagnostics + readiness floors, effective repo, guest flags) — cascade a
+  // forced re-projection of this project's tasks whenever the project row is
+  // newly created OR its content actually changed (stages, members, repo,
+  // anything). Unchanged project files short-circuit above, so the common
+  // no-change rescan stays cheap. rebuildAll suppresses the cascade and
+  // forces its own task walk instead (see skipTaskCascade).
   const cascade =
-    existing !== undefined &&
-    (previousMembers !== nextMembers || existing.repo !== fm.repo);
+    !options.skipTaskCascade &&
+    (existing === undefined || existing.content_hash !== contentHash);
   if (cascade) {
     for (const key of listTaskDirs(slug, options.dataRoot)) {
       rebuildTaskFile(db, slug, key, { ...options, force: true });
@@ -558,16 +560,31 @@ export function rebuildAll(
   };
 
   for (const slug of slugs) {
+    // When the project row is (re)projected, its tasks must be re-projected
+    // too — stage-reference diagnostics, effective repo and guest flags are
+    // baked into task rows, so the task-side content-hash short-circuit
+    // would otherwise keep them stale forever. The cascade inside
+    // rebuildProjectFile is suppressed here (skipTaskCascade) because this
+    // walk visits every task file itself — with force when needed.
+    let projectChanged = false;
     if (existsSync(projectFilePath(slug, options.dataRoot))) {
       summary.projects += 1;
       seenProjects.add(slug);
-      track(rebuildPath(db, projectFilePath(slug, options.dataRoot), options));
+      const result = rebuildPath(db, projectFilePath(slug, options.dataRoot), {
+        ...options,
+        skipTaskCascade: true,
+      });
+      track(result);
+      projectChanged = result.action === "projected";
     }
+    const taskOptions = projectChanged ? { ...options, force: true } : options;
     for (const key of listTaskDirs(slug, options.dataRoot)) {
       if (!existsSync(taskFilePath(slug, key, options.dataRoot))) continue;
       summary.tasks += 1;
       seenTasks.add(`${slug} ${key}`);
-      track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), options));
+      track(
+        rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions),
+      );
     }
   }
 

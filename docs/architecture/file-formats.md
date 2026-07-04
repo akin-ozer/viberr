@@ -206,6 +206,25 @@ evidence:
   (comments routed to the operator — `comment-card toagent` tint).
 - Then a blank line and the event text (RichText micro-format: `**bold**`,
   `` `code` ``, `@mention`). Multi-line text is allowed.
+- **Body-line escaping** (structure-like text): an event-body line whose raw
+  form would read as file structure — starting with `## `, `### `,
+  `title:<ws>`, `to:<ws>`, or a line that is only (whitespace and)
+  `evidence:` — is written with ONE leading backslash: `\## Notes`,
+  `\### 2026-01-01T00:00:00Z · completion · operator`, `\title: x`,
+  `\evidence:`. Lines that already start with backslashes in front of such a
+  pattern gain one more on write. Readers strip exactly one backslash from
+  any line matching `^\\+(## |### |title:\s|to:\s|\s*evidence:\s*$)` when
+  reconstructing the text; all other lines (including `\` before
+  non-structural text) pass through verbatim. The mapping is bijective, so
+  round-trips stay byte-stable, and free text (including fenced code blocks
+  quoting headings) can never split sections, forge timeline events, or
+  override the real `## Packet`. External appenders MUST apply the same
+  escape to body lines they write.
+- **Duplicate known sections**: if `## Goal`, `## Packet` or `## Timeline`
+  appears more than once, the FIRST occurrence wins (never last-wins); each
+  duplicate is preserved verbatim as an unrecognized extra section and
+  flagged with a `body.duplicate_section` warning diagnostic (floors
+  readiness at `input_required`).
 - Optional evidence block (completion events): a line containing exactly
   `evidence:` followed by `- <label> · <add> · <del>` rows; add/del are the
   signed display strings (`+14`, `0`, `−4` with U+2212).

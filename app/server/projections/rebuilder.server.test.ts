@@ -4,9 +4,14 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
-import { taskFilePath } from "~/server/files/file-store-root.server";
+import {
+  projectFilePath,
+  taskFilePath,
+} from "~/server/files/file-store-root.server";
+import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
 import { rebuildAll, rebuildPath } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
@@ -179,5 +184,110 @@ describe("rebuilder", () => {
     rebuildPath(store.db, project.absPath, { dataRoot: store.dataRoot });
     detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail!.timeline[0]!.actor).toMatchObject({ guest: true });
+  });
+
+  it("adding a missing stage to project.md clears the task's unknown-stage warning", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "qa", readiness: "ready" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    let detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // Unknown stage → warning → readiness floors at input_required.
+    expect(detail?.readiness).toBe("input_required");
+    expect(
+      detail?.diagnostics.some((d) => d.code === "reference.unknown_stage"),
+    ).toBe(true);
+
+    // Fix the PROJECT file only — the task file stays byte-identical, so
+    // only a project→task cascade can clear the warning.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { writeFileAtomic } = await import("~/server/files/atomic-file.server");
+    const { serializeProjectFile } = await import("~/server/files/project-file.server");
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    project.parsed.frontmatter.stages = [
+      ...project.parsed.frontmatter.stages,
+      { id: "qa", name: "QA", color: "#187574" },
+    ];
+    writeFileAtomic(project.absPath, serializeProjectFile(project.parsed));
+
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(
+      detail?.diagnostics.some((d) => d.code === "reference.unknown_stage"),
+    ).toBe(false);
+    expect(detail?.readiness).toBe("ready");
+  });
+
+  it("removing a stage tasks sit in flags them on the next rescan", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "ready", readiness: "ready" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    let detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(detail?.readiness).toBe("ready");
+    expect(detail?.diagnostics).toEqual([]);
+
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { writeFileAtomic } = await import("~/server/files/atomic-file.server");
+    const { serializeProjectFile } = await import("~/server/files/project-file.server");
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    project.parsed.frontmatter.stages = project.parsed.frontmatter.stages.filter(
+      (s) => s.id !== "ready",
+    );
+    writeFileAtomic(project.absPath, serializeProjectFile(project.parsed));
+
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(
+      detail?.diagnostics.some((d) => d.code === "reference.unknown_stage"),
+    ).toBe(true);
+    expect(detail?.readiness).toBe("input_required");
+  });
+
+  it("task projected before its project.md picks up the project repo once it lands", () => {
+    const store = setupTestStore(ctx);
+    const slug = "fresh-proj";
+    // Fresh project dir copied in: the task file is projected FIRST (no
+    // project row yet) — e.g. the watcher fires for task.md before project.md.
+    writeTask(store.dataRoot, slug, {
+      frontmatter: baseTaskFrontmatter("FRS-1"),
+    });
+    rebuildPath(store.db, taskFilePath(slug, "FRS-1", store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+
+    const repoOf = () =>
+      (
+        store.db
+          .prepare(
+            `SELECT repo FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(slug, "FRS-1") as { repo: string | null }
+      ).repo;
+    expect(repoOf()).toBeNull();
+
+    // project.md lands afterwards — its first projection must cascade.
+    writeProject(store.dataRoot, {
+      name: "Fresh Project",
+      slug,
+      repo: "acme/fresh",
+      defaultBranch: "main",
+      taskPrefix: "FRS",
+      nextTaskNumber: 2,
+      stages: GOVERNED_TEMPLATE.stages,
+      workflow: GOVERNED_TEMPLATE.workflow,
+      members: [],
+      agents: [],
+      credentialPolicy: null,
+      guardrails: [],
+    });
+    rebuildPath(store.db, projectFilePath(slug, store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+
+    expect(repoOf()).toBe("acme/fresh");
   });
 });
