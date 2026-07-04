@@ -1,0 +1,138 @@
+import type Database from "better-sqlite3";
+import { deriveSyncState } from "~/server/github/branch-sync.server";
+import {
+  checkRepoAccess,
+  type RepoAccessResult,
+} from "~/server/github/repo-access-check.server";
+import {
+  getProject,
+  listProjectTasks,
+} from "~/server/projections/board-query.server";
+import {
+  getProjectCredentialHealth,
+  type ProjectCredentialHealth,
+} from "~/server/secrets/pat-store.server";
+import type { SyncState } from "./github-pills";
+
+/**
+ * Loader assembly for /projects/:slug/github (github-view spec §3.1
+ * `GithubViewData`, built on the phase-7-core recipe: `checkRepoAccess` +
+ * `getProjectCredentialHealth` for the repository panel; task_projections
+ * columns (branch / pr_json / github_json) for the PR + branch tables).
+ *
+ * Sync pill (ruling 12, merged > behind > synced): `merged` from the
+ * projected pr.state; `behind_main` from the REAL compare captured by the
+ * latest `github.reconcile` provenance row for the task (the reconciler
+ * records behindBy there) — never from `validation === "failing"` (the
+ * mock's conflation, dropped per spec §7.3). A never-reconciled branch has
+ * no compare data and honestly renders `synced`.
+ */
+
+export interface PrRowView {
+  taskKey: string;
+  number: number;
+  /** Cache vocabulary: "review" | "merged" | "closed" (ruling 12). */
+  state: string;
+  /** PR title (the row headline in the mock). */
+  title: string;
+  branch: string | null;
+}
+
+export interface BranchRowView {
+  taskKey: string;
+  /** Task title (the Task cell). */
+  title: string;
+  branch: string;
+  pr: { number: number; state: string } | null;
+  sync: SyncState;
+  /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
+  commitCount: number;
+}
+
+export interface GithubViewData {
+  project: {
+    slug: string;
+    name: string;
+    repo: string | null;
+    defaultBranch: string;
+  };
+  connection: RepoAccessResult;
+  credential: ProjectCredentialHealth;
+  prs: PrRowView[];
+  branches: BranchRowView[];
+}
+
+/** Latest reconciled behindBy for a task file, from provenance (or 0). */
+function behindByFor(db: Database.Database, sourcePath: string): number {
+  const row = db
+    .prepare(
+      `SELECT details_json FROM provenance
+       WHERE source_path = ? AND action = 'github.reconcile'
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(sourcePath) as { details_json: string | null } | undefined;
+  if (!row?.details_json) return 0;
+  try {
+    const details = JSON.parse(row.details_json) as { behindBy?: unknown };
+    return typeof details.behindBy === "number" ? details.behindBy : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getGithubViewData(
+  db: Database.Database,
+  projectSlug: string,
+  ctx: { fetchImpl?: typeof fetch } = {},
+): Promise<GithubViewData | null> {
+  const project = getProject(db, projectSlug);
+  if (!project) return null;
+
+  const credential = getProjectCredentialHealth(db, projectSlug);
+  const connection = await checkRepoAccess(db, projectSlug, {
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
+
+  const tasks = listProjectTasks(db, projectSlug);
+
+  // Branch table: every task with a branch, in task-key order (the query
+  // already sorts numerically — spec §7.11 deterministic-order deviation).
+  const branches: BranchRowView[] = tasks
+    .filter((t): t is typeof t & { branch: string } => t.branch !== null)
+    .map((t) => ({
+      taskKey: t.key,
+      title: t.title,
+      branch: t.branch,
+      pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
+      sync: deriveSyncState({
+        prMerged: t.pr?.state === "merged",
+        behindBy: behindByFor(db, t.filePath),
+      }),
+      commitCount: t.commits.length,
+    }));
+
+  // PR list: every task with a PR, newest PR first (spec §7.11).
+  const prs: PrRowView[] = tasks
+    .filter((t) => t.pr !== null)
+    .map((t) => ({
+      taskKey: t.key,
+      number: t.pr!.number,
+      state: t.pr!.state,
+      title: t.pr!.title,
+      branch: t.branch,
+    }))
+    .sort((a, b) => b.number - a.number);
+
+  return {
+    project: {
+      slug: project.slug,
+      name: project.name,
+      repo: project.repo,
+      defaultBranch: project.defaultBranch,
+    },
+    connection,
+    credential,
+    prs,
+    branches,
+  };
+}
