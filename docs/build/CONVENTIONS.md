@@ -48,6 +48,25 @@ db/migrations/*.sql   scripts/*.ts   e2e/   test-support/
 - Loading states: React Router pending states; no spinners-forever; long ops report server-derived progress.
 - Accessibility: keep the mock's aria-* usage; visible focus; keyboard menus/dialogs (Escape closes, scrim click closes).
 
+## ORCHESTRATOR RULINGS (binding; resolve docs/build/specs/cross-cutting-contracts.md §7 — read that doc)
+
+1. Readiness: canonical 4-value enum in files/Zod/SQLite; ONE mapping module → mock pill CSS kinds/labels (`input`, `risk`, ...); "accepted" is a derived display state (stage done + accepted), never stored readiness.
+2. Roles: THREE separate systems, kept separate. Org roles `admin|member` (schema tolerates `viewer`, UI uses admin|member). Project membership roles `admin|maintainer|reviewer|viewer` with the 9-row RBAC grant table from contracts §3.2, stored in project.md membership + enforced server-side. Agent capability policy per profile (`direct|recommend|human`), id-based against a shared CAP_CATALOG (`{capabilityId, mode}` + display-only extras); always-human server invariant list: merge PR, transition to done, change project policy.
+3. Task-file store per BUILD-PLAN (`$VIBERR_DATA_ROOT/projects/<slug>/tasks/<KEY>/task.md`); UI renders the REAL store-relative path wherever the mock showed `.viberr/...`.
+4. Timestamps: UTC ISO at all boundaries; one shared formatter in app/shared/dates/ reproducing mock display forms (today→`H:MM`, else `{day} · {t}`, relative forms for home/store). Seed back-dates events so rendering matches mock.
+5. PAT scope violations: server-derived per-scope validator results + per-violation open/resolved records; rail badge = open violation count; grant/re-validate writes typed `policy` event to the violation's own task, audit + SSE. No global boolean.
+6. Identity: compare by user id everywhere; display names are render-only. Session user id is authoritative.
+7. Packet options carry a stable `kind` (accept_completion | request_edit | block_on_policy | hold_runtime_debug | redirect | custom) — never dispatch on English titles. Accept-completion triggers a real async PR merge (Phase 7) with an explicit failure state.
+8. tweaks-panel.jsx: DO NOT PORT (dev harness, dead code). review.jsx: packet/acceptance mechanics in Phase 5, queue surface in Phase 9, new `app/features/review/`.
+9. Notifications: per-user rows in SQLite, sorted by real timestamp DESC; task/project references are soft refs; seed two small stub projects (deploy-pipeline, billing-service) so cross-project rows navigate for real.
+10. "Waiting on you"/review queue stay project-wide in V1 (do not scope per-user, do not change labels).
+11. Run lifecycle stored `queued|running|finished|error|interrupted`; map to mock pills (queued→neutral "queued"; interrupted→neutral "interrupted · by <actor>" footer). Raw NDJSON/JSONL is truth; LogLine display is a projection. Elapsed from startedAt; tokens from real usage envelopes only.
+12. PR states: merged→done pill; open/draft→"in review"; closed-unmerged→risk pill "closed". Sync pill precedence merged > behind > synced, from real compare data.
+13. Prefs: drop `ghConnected` (derive), keep email/nudge prefs schema-only (no mailer in V1), DO mount ProfileAppearance, map plural pref ids ↔ singular notification kinds explicitly.
+14. Shared single implementations for: notification meta, markdown-ish stripper + rich-text renderer, cred-card, bell popover (parameterized). All toast/empty-state/boundary copy in specs is verbatim contract — including intentionally divergent board vs review wording.
+15. Stages: per-project list in project.md (accept hex or var(--*) colors); instance-default workflow template (incl. "Lightweight · 3 stages") defined in Phase 3 config for org surfaces + project creation.
+16. Deliberate keeps: board rail count includes Done; `.card.urgent` stays visually untreated; `data-screen-label` attributes kept app-wide. Additions: minimal list-view empty state; Escape-close + focus-trap + scrim-click on every dialog (markup unchanged). `operator.since`: store stage id, render "stage <1-based index>". Login keeps mock's explicit copy but password min is 8; local dev seed password `viberr-dev-2828`.
+
 ## Route map (target)
 
 ```
