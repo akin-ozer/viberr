@@ -1,12 +1,25 @@
-import { Form } from "react-router";
+import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/_index";
-import { requireUser } from "~/server/auth/require-user.server";
-import { Avatar, initialsOf } from "~/ui/avatar";
-import { CsrfInput } from "~/ui/csrf-input";
-import { Icon } from "~/ui/icon";
+import type { loader as rootLoader } from "../root";
+import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import { assertCsrf } from "~/server/auth/csrf.server";
+import { getDb } from "~/server/db/sqlite.server";
+import { getEnv } from "~/server/config/env.server";
+import { isAppError } from "~/server/errors/app-error.server";
+import {
+  countUnreadNotifications,
+  listNotifications,
+} from "~/server/projections/notifications.server";
+import { rescanProjections } from "~/server/projections/rescan.server";
+import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
+import {
+  getHomeOrgSummary,
+  listHomeProjects,
+} from "~/features/home/home-query.server";
+import { createProject } from "~/features/home/project-create.server";
+import { HomePage } from "~/features/home/home-page";
 
-// Small authenticated landing — replaced by the real Home surface in
-// phase 4. Requires login; shows the signed-in identity + sign out.
+// Home — multi-project landing (home spec). Route: `/`.
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -17,53 +30,85 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = requireUser(request);
-  return { user };
+  const db = getDb();
+  const hour = new Date().getHours();
+  const greet =
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  return {
+    user,
+    greet,
+    projects: listHomeProjects(db),
+    prefs: getHomePrefs(db, user.id),
+    org: getHomeOrgSummary(db),
+    notifications: listNotifications(db, user.id, { limit: 100 }),
+    unread: countUnreadNotifications(db, user.id),
+    storeRoot: getEnv().VIBERR_DATA_ROOT,
+  };
+}
+
+export async function action({ request }: Route.ActionArgs) {
+  const ctx = requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  await assertCsrf(request, ctx.sessionId, formData);
+  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const intent = String(formData.get("intent") ?? "");
+
+  try {
+    if (intent === "pin") {
+      const slug = String(formData.get("slug") ?? "");
+      const pinned = formData.get("pinned") === "1";
+      const prefs = getHomePrefs(db, ctx.user.id);
+      patchHomePrefs(db, ctx.user.id, {
+        stars: { ...prefs.stars, [slug]: pinned },
+      });
+      return { ok: true as const };
+    }
+    if (intent === "view") {
+      const view = formData.get("view") === "list" ? "list" : ("grid" as const);
+      patchHomePrefs(db, ctx.user.id, { view: view as "grid" | "list" });
+      return { ok: true as const };
+    }
+    if (intent === "rescan") {
+      const summary = rescanProjections(db, { actor });
+      return { ok: true as const, ...summary };
+    }
+    if (intent === "create-project") {
+      const result = await createProject(
+        db,
+        {
+          name: String(formData.get("name") ?? ""),
+          key: String(formData.get("key") ?? ""),
+          owner: String(formData.get("owner") ?? ""),
+          repoName: String(formData.get("repoName") ?? ""),
+          template: formData.get("template") === "light" ? "light" : "governed",
+          policy:
+            formData.get("policy") === "strict"
+              ? "strict"
+              : formData.get("policy") === "auto"
+                ? "auto"
+                : "balanced",
+        },
+        actor,
+      );
+      return { ok: true as const, ...result };
+    }
+    return data(
+      { ok: false as const, error: "Unknown action." },
+      { status: 400 },
+    );
+  } catch (error) {
+    if (isAppError(error)) {
+      return data(
+        { ok: false as const, error: error.userMessage },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
 }
 
 export default function Index({ loaderData }: Route.ComponentProps) {
-  const { user } = loaderData;
-  return (
-    <main className="app-splash">
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Signed in to Viberr</h2>
-          <span className="right pill ready">
-            <span className="pdot" />
-            {user.role}
-          </span>
-        </div>
-        <span className="who-chip">
-          <Avatar person={{ initials: initialsOf(user.name) }} lg />
-          <span>
-            <span className="nm">{user.name}</span>
-            <div className="sub">
-              {user.title ? `${user.title} · ` : ""}
-              {user.email}
-            </div>
-          </span>
-        </span>
-        <p className="detail-line">
-          Auth &amp; org foundations are online. The Home surface arrives in
-          phase 4{user.role === "admin" ? (
-            <>
-              {" — until then, admins can manage users at "}
-              <a href="/org/users" className="linkish mono">
-                /org/users
-              </a>
-              .
-            </>
-          ) : (
-            "."
-          )}
-        </p>
-        <Form method="post" action="/logout">
-          <CsrfInput />
-          <button className="btn" type="submit">
-            <Icon name="arrow" />
-            Sign out
-          </button>
-        </Form>
-      </section>
-    </main>
-  );
+  const rootData = useRouteLoaderData<typeof rootLoader>("root");
+  return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
 }

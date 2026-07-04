@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Icon } from "./icon";
 
 /**
  * Toast stack, ported from design/html-app/app/ui.jsx: bottom-center,
  * auto-dismiss after 2600 ms, check icon (mock toasts are success-only —
- * errors render inline/route-level per CONVENTIONS). Phase 4 mounts
- * ToastHost in the shell; a context provider can wrap this hook there if
- * prop-drilling `push` gets unwieldy.
+ * errors render inline/route-level per CONVENTIONS). Phase 4 mounts ONE
+ * ToastProvider in root.tsx; features call useToast() instead of the
+ * mock's prop-drilled `push`.
  */
 
 export interface Toast {
@@ -51,4 +59,22 @@ export function ToastHost({ toasts }: { toasts: Toast[] }) {
       ))}
     </div>
   );
+}
+
+const ToastContext = createContext<(text: string) => void>(() => {});
+
+/** App-wide toast context: mounts the single ToastHost (root layout). */
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const { toasts, push } = useToasts();
+  return (
+    <ToastContext.Provider value={push}>
+      {children}
+      <ToastHost toasts={toasts} />
+    </ToastContext.Provider>
+  );
+}
+
+/** `push(text)` — 2600 ms auto-dismissing confirmation toast. */
+export function useToast(): (text: string) => void {
+  return useContext(ToastContext);
 }

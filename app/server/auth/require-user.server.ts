@@ -29,6 +29,8 @@ export interface SessionUser {
   role: UserRole;
   theme: ThemePreference;
   idp: string;
+  /** Avatar tone class ("" | "rose" | "teal" | "violet") — phase-4 shell. */
+  avatarTone: string;
 }
 
 export interface AuthContext {
@@ -67,6 +69,7 @@ export function authenticateRequest(
       role: user.role,
       theme: user.theme,
       idp: user.idp,
+      avatarTone: user.avatarTone ?? "",
     },
     pwresetRequired: user.pwresetRequired,
     sessionId: found.session.id,

@@ -11,6 +11,7 @@ import "@fontsource/manrope/700.css";
 import "@fontsource/manrope/800.css";
 import "./app.css";
 
+import { useEffect } from "react";
 import {
   data,
   isRouteErrorResponse,
@@ -23,6 +24,7 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { authenticate } from "./server/auth/require-user.server";
 import { sessionCookieHeader } from "./server/auth/session-cookie.server";
@@ -104,7 +106,30 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  const rootData = useRouteLoaderData<typeof loader>("root");
+  const theme: ThemePreference = rootData?.theme ?? "system";
+
+  // Keeps <html data-theme> in sync AFTER first paint (the boot script owns
+  // first paint): re-applies when the pref changes (user-menu cycling
+  // revalidates the root loader) and live-follows the OS on "system".
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    };
+    apply();
+    if (theme === "system") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+  }, [theme]);
+
+  return (
+    <ToastProvider>
+      <Outlet />
+    </ToastProvider>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

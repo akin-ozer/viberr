@@ -203,6 +203,21 @@ export function runDemoSeed(
     });
   }
 
+  // 7. Arda's Home pins — mirrors the mock's seeded `starred` flags
+  //    (viberr-core + deploy-pipeline pinned; phase-4 user_prefs table).
+  //    INSERT OR IGNORE: a user's own pin changes survive re-seeding.
+  db.prepare(
+    `INSERT OR IGNORE INTO user_prefs (user_id, key, value_json, updated_at)
+     VALUES (?, 'home', ?, ?)`,
+  ).run(
+    ids.arda,
+    JSON.stringify({
+      view: "grid",
+      stars: { "viberr-core": true, "deploy-pipeline": true },
+    }),
+    seededAt,
+  );
+
   recordAudit(db, {
     action: "seed.demo_dataset",
     actor: SYSTEM_ACTOR,

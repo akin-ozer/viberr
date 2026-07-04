@@ -68,6 +68,8 @@ describe("authenticateRequest", () => {
       role: "member",
       theme: "system",
       idp: "local",
+      // Phase 4: avatar tone rides the session for the shell avatars.
+      avatarTone: "",
     });
     expect(auth!.pwresetRequired).toBe(false);
     expect(auth!.sessionId).toBe(session.id);

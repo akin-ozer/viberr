@@ -8,6 +8,11 @@ import type { loader as rootLoader } from "../root";
  * Server side: actions call assertCsrf(request, sessionId, formData).
  */
 export function CsrfInput() {
+  return <input type="hidden" name="_csrf" value={useCsrfToken()} />;
+}
+
+/** The session-bound CSRF token for programmatic fetcher.submit calls. */
+export function useCsrfToken(): string {
   const data = useRouteLoaderData<typeof rootLoader>("root");
-  return <input type="hidden" name="_csrf" value={data?.csrf ?? ""} />;
+  return data?.csrf ?? "";
 }
