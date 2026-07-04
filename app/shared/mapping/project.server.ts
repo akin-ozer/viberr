@@ -1,0 +1,85 @@
+import type {
+  AgentDeployment,
+  CredentialPolicy,
+  Guardrail,
+  ProjectRole,
+  StageDef,
+  WorkflowBoundary,
+} from "~/schemas/project-file.schema";
+
+/**
+ * Centralized snake_case → camelCase mapping for the `projects` +
+ * `project_members` projection tables (CONVENTIONS "Data & naming").
+ */
+
+export interface ProjectRow {
+  slug: string;
+  name: string;
+  repo: string | null;
+  default_branch: string;
+  task_prefix: string;
+  description: string;
+  stages_json: string;
+  workflow_json: string;
+  agent_policy_json: string;
+  credential_policy_json: string | null;
+  guardrails_json: string;
+  source_path: string;
+  content_hash: string;
+  parsed_at: string;
+}
+
+export interface ProjectRecord {
+  slug: string;
+  name: string;
+  repo: string | null;
+  defaultBranch: string;
+  taskPrefix: string;
+  description: string;
+  stages: StageDef[];
+  workflow: WorkflowBoundary[];
+  agentPolicy: AgentDeployment[];
+  credentialPolicy: CredentialPolicy | null;
+  guardrails: Guardrail[];
+  /** Store-relative path, e.g. "projects/viberr-core/project.md". */
+  sourcePath: string;
+  contentHash: string;
+  parsedAt: string;
+}
+
+export function mapProjectRow(row: ProjectRow): ProjectRecord {
+  return {
+    slug: row.slug,
+    name: row.name,
+    repo: row.repo,
+    defaultBranch: row.default_branch,
+    taskPrefix: row.task_prefix,
+    description: row.description,
+    stages: JSON.parse(row.stages_json) as StageDef[],
+    workflow: JSON.parse(row.workflow_json) as WorkflowBoundary[],
+    agentPolicy: JSON.parse(row.agent_policy_json) as AgentDeployment[],
+    credentialPolicy: row.credential_policy_json
+      ? (JSON.parse(row.credential_policy_json) as CredentialPolicy)
+      : null,
+    guardrails: JSON.parse(row.guardrails_json) as Guardrail[],
+    sourcePath: row.source_path,
+    contentHash: row.content_hash,
+    parsedAt: row.parsed_at,
+  };
+}
+
+export interface ProjectMemberRow {
+  project_slug: string;
+  user_id: string;
+  role: ProjectRole;
+}
+
+export interface ProjectMemberRecord {
+  projectSlug: string;
+  userId: string;
+  role: ProjectRole;
+}
+
+export function mapProjectMemberRow(row: ProjectMemberRow): ProjectMemberRecord {
+  return { projectSlug: row.project_slug, userId: row.user_id, role: row.role };
+}

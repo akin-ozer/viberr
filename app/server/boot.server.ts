@@ -5,6 +5,8 @@ import {
 } from "./auth/session.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
+import { ensureDataRootDirs } from "./files/file-store-root.server";
+import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
@@ -22,6 +24,7 @@ export function bootServer(): void {
   if (cache[BOOT_KEY]) return;
 
   const env = getEnv();
+  ensureDataRootDirs();
   const db = getDb();
 
   seedInitialAdmin(db, {
@@ -32,6 +35,10 @@ export function bootServer(): void {
   const swept = sweepExpiredSessions(db);
   if (swept > 0) logger.info("expired sessions swept at boot", { swept });
   startSessionSweeper(db);
+
+  // File-native store watcher (dev AND prod) — drives incremental
+  // projection rebuilds when project.md / task.md files change on disk.
+  startFileWatcher();
 
   logger.info("viberr server booted", {
     nodeEnv: env.NODE_ENV,

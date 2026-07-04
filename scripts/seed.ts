@@ -1,9 +1,37 @@
 /**
- * Seeds the demo dataset (projects, tasks, people) into the data root.
- * Not implemented yet — the seed dataset arrives in phase 3 together with
- * the file store & projections it writes into.
+ * Seeds the full demo dataset (mock parity): users, agent profile
+ * templates, project + task files under ${VIBERR_DATA_ROOT}/projects,
+ * projections, and Arda's notification inbox.
+ *
+ *   npm run seed             — idempotent upsert/overwrite
+ *   npm run seed -- --reset  — wipe projects/, agents/profiles and all
+ *                              derived tables first, then seed fresh
  */
-console.error(
-  "viberr seed: not available yet — arrives in phase 3 (file store & projections).",
+import { getEnv } from "../app/server/config/env.server";
+import { getDb } from "../app/server/db/sqlite.server";
+import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/demo-seed.server";
+
+const env = getEnv();
+const reset = process.argv.includes("--reset");
+
+const summary = runDemoSeed(getDb(), {
+  dataRoot: env.VIBERR_DATA_ROOT,
+  reset,
+  adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+});
+
+console.log(
+  [
+    "viberr seed complete:",
+    `  users          ${summary.users}`,
+    `  projects       ${summary.projects}`,
+    `  tasks          ${summary.tasks}`,
+    `  timeline events ${summary.events}`,
+    `  notifications  ${summary.notifications}`,
+    `  agent profiles ${summary.agentProfiles}`,
+    `  projections changed ${summary.rescanChanged}`,
+    "",
+    `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,
+    `Other users (elif|murat|selin|deniz @viberr.dev): ${SEED_DEFAULT_PASSWORD}`,
+  ].join("\n"),
 );
-process.exit(1);

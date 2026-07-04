@@ -1,0 +1,360 @@
+import { z } from "zod";
+import {
+  diagError,
+  diagWarning,
+  type FileDiagnostic,
+} from "./file-diagnostics";
+
+/**
+ * Zod schemas + tolerant parser for `projects/<slug>/project.md` frontmatter
+ * (canonical format documented in docs/architecture/file-formats.md).
+ *
+ * Same tolerance contract as task-file.schema.ts: unknown fields preserved,
+ * missing/invalid fields produce diagnostics + fallbacks, never a throw.
+ */
+
+// ---------------------------------------------------------------- enums
+
+/** Project membership roles — the 4-role system from contracts §3.2
+ * (separate from org roles admin|member and from agent capability policy). */
+export const PROJECT_ROLES = ["admin", "maintainer", "reviewer", "viewer"] as const;
+export type ProjectRole = (typeof PROJECT_ROLES)[number];
+
+/** Workflow transition boundaries (contracts §2.5). review→done is locked
+ * `human` in V1 — enforced server-side, not just data. */
+export const BOUNDARY_VALUES = ["auto", "approval", "human"] as const;
+export type Boundary = (typeof BOUNDARY_VALUES)[number];
+
+/** Agent capability modes (orchestrator ruling 2): forbidden === "human". */
+export const CAPABILITY_MODES = ["direct", "recommend", "human"] as const;
+export type CapabilityMode = (typeof CAPABILITY_MODES)[number];
+
+// ------------------------------------------------------------ sub-shapes
+
+export const stageSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    /** Hex ("#7b61ff") or var(--*) string — both accepted (ruling 15). */
+    color: z.string().default("var(--muted)"),
+  })
+  .loose();
+export type StageDef = z.infer<typeof stageSchema>;
+
+export const workflowBoundarySchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    boundary: z.enum(BOUNDARY_VALUES),
+    /** Display copy — who moves the task across this boundary. */
+    by: z.string().default(""),
+    locked: z.boolean().default(false),
+  })
+  .loose();
+export type WorkflowBoundary = z.infer<typeof workflowBoundarySchema>;
+
+export const memberSchema = z
+  .object({
+    userId: z.string().min(1),
+    role: z.enum(PROJECT_ROLES),
+  })
+  .loose();
+export type ProjectMember = z.infer<typeof memberSchema>;
+
+export const capabilityGrantSchema = z
+  .object({
+    /** Id into the shared CAP_CATALOG (app/shared/capabilities.ts). */
+    capabilityId: z.string().min(1),
+    mode: z.enum(CAPABILITY_MODES),
+  })
+  .loose();
+export type CapabilityGrant = z.infer<typeof capabilityGrantSchema>;
+
+/** Per-project deployment of an org-level agent profile template.
+ * `capabilities` is the id-based policy; `extras` carries bespoke labels
+ * that have no catalog id (near-miss strings kept per contracts §7 #7). */
+export const agentDeploymentSchema = z
+  .object({
+    profileId: z.string().min(1),
+    capabilities: z.array(capabilityGrantSchema).default([]),
+    extras: z
+      .array(
+        z
+          .object({ label: z.string().min(1), mode: z.enum(CAPABILITY_MODES) })
+          .loose(),
+      )
+      .default([]),
+  })
+  .loose();
+export type AgentDeployment = z.infer<typeof agentDeploymentSchema>;
+
+/** Non-secret credential policy. The PAT itself lives AES-encrypted in
+ * SQLite (Phase 7) — never in files. */
+export const credentialPolicySchema = z
+  .object({
+    credentialLabel: z.string().default(""),
+    masked: z.string().default(""),
+    requiredScopes: z.array(z.string()).default([]),
+  })
+  .loose();
+export type CredentialPolicy = z.infer<typeof credentialPolicySchema>;
+
+export const guardrailSchema = z
+  .object({
+    id: z.string().min(1),
+    desc: z.string().default(""),
+    on: z.boolean().default(true),
+    value: z.number().optional(),
+    unit: z.string().optional(),
+  })
+  .loose();
+export type Guardrail = z.infer<typeof guardrailSchema>;
+
+// -------------------------------------------------------- frontmatter
+
+export const projectFrontmatterSchema = z.object({
+  name: z.string().min(1),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  /** Project default GitHub repo ("owner/name"); tasks may override. */
+  repo: z.string().nullable(),
+  defaultBranch: z.string().min(1),
+  /** Task key prefix ("VIB" → VIB-142). */
+  taskPrefix: z.string().regex(/^[A-Za-z]+$/),
+  /** Next task number for the atomic per-project counter. */
+  nextTaskNumber: z.number().int().min(1).nullable(),
+  stages: z.array(stageSchema),
+  workflow: z.array(workflowBoundarySchema),
+  members: z.array(memberSchema),
+  agents: z.array(agentDeploymentSchema),
+  credentialPolicy: credentialPolicySchema.nullable(),
+  guardrails: z.array(guardrailSchema),
+});
+export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
+
+export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
+  "name",
+  "slug",
+  "repo",
+  "defaultBranch",
+  "taskPrefix",
+  "nextTaskNumber",
+  "stages",
+  "workflow",
+  "members",
+  "agents",
+  "credentialPolicy",
+  "guardrails",
+];
+
+export interface TolerantProjectFrontmatterResult {
+  frontmatter: ProjectFrontmatter;
+  unknown: Record<string, unknown>;
+  diagnostics: FileDiagnostic[];
+}
+
+export interface ParsedProjectFile {
+  frontmatter: ProjectFrontmatter;
+  unknownFrontmatter: Record<string, unknown>;
+  /** Markdown body — the project description. */
+  description: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function tolerant<T>(
+  diagnostics: FileDiagnostic[],
+  path: string,
+  value: unknown,
+  schema: z.ZodType<T>,
+  fallback: T,
+  required = false,
+): T {
+  if (value === undefined) {
+    if (required) {
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.missing_field",
+          `Frontmatter field \`${path}\` is missing — using a default.`,
+          path,
+        ),
+      );
+    }
+    return fallback;
+  }
+  const result = schema.safeParse(value);
+  if (result.success) return result.data;
+  diagnostics.push(
+    diagWarning(
+      "frontmatter.invalid_field",
+      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}) — using a default.`,
+      path,
+    ),
+  );
+  return fallback;
+}
+
+function derivePrefix(slug: string): string {
+  const letters = slug.replace(/[^a-z]/gi, "");
+  return (letters.slice(0, 3) || "TSK").toUpperCase();
+}
+
+/**
+ * Tolerant project frontmatter parse. `fallbackSlug` (the project directory
+ * name) rescues files with a missing/invalid `slug`.
+ */
+export function parseProjectFrontmatter(
+  raw: unknown,
+  context: { fallbackSlug?: string } = {},
+): TolerantProjectFrontmatterResult {
+  const diagnostics: FileDiagnostic[] = [];
+  const data: Record<string, unknown> = isRecord(raw) ? raw : {};
+  if (!isRecord(raw)) {
+    diagnostics.push(
+      diagError(
+        "frontmatter.not_a_map",
+        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
+        undefined,
+        true,
+      ),
+    );
+  }
+
+  let slug: string;
+  const slugResult = projectFrontmatterSchema.shape.slug.safeParse(data.slug);
+  if (slugResult.success) {
+    slug = slugResult.data;
+    if (context.fallbackSlug && slug !== context.fallbackSlug) {
+      diagnostics.push(
+        diagError(
+          "frontmatter.slug_mismatch",
+          `Frontmatter slug \`${slug}\` does not match the project directory \`${context.fallbackSlug}\` — the directory name wins.`,
+          "slug",
+        ),
+      );
+      slug = context.fallbackSlug;
+    }
+  } else if (context.fallbackSlug) {
+    slug = context.fallbackSlug;
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.missing_slug",
+        `Frontmatter has no valid \`slug\` — inferred \`${slug}\` from the project directory.`,
+        "slug",
+      ),
+    );
+  } else {
+    slug = "unknown-project";
+    diagnostics.push(
+      diagError(
+        "frontmatter.missing_slug",
+        "Frontmatter has no valid `slug` and no directory fallback.",
+        "slug",
+        true,
+      ),
+    );
+  }
+
+  const frontmatter: ProjectFrontmatter = {
+    name: tolerant(
+      diagnostics,
+      "name",
+      data.name,
+      projectFrontmatterSchema.shape.name,
+      slug,
+      true,
+    ),
+    slug,
+    repo: tolerant(
+      diagnostics,
+      "repo",
+      data.repo,
+      projectFrontmatterSchema.shape.repo,
+      null,
+    ),
+    defaultBranch: tolerant(
+      diagnostics,
+      "defaultBranch",
+      data.defaultBranch,
+      projectFrontmatterSchema.shape.defaultBranch,
+      "main",
+    ),
+    taskPrefix: tolerant(
+      diagnostics,
+      "taskPrefix",
+      data.taskPrefix,
+      projectFrontmatterSchema.shape.taskPrefix,
+      derivePrefix(slug),
+    ),
+    nextTaskNumber: tolerant(
+      diagnostics,
+      "nextTaskNumber",
+      data.nextTaskNumber,
+      projectFrontmatterSchema.shape.nextTaskNumber,
+      null,
+    ),
+    stages: tolerant(
+      diagnostics,
+      "stages",
+      data.stages,
+      projectFrontmatterSchema.shape.stages,
+      [],
+      true,
+    ),
+    workflow: tolerant(
+      diagnostics,
+      "workflow",
+      data.workflow,
+      projectFrontmatterSchema.shape.workflow,
+      [],
+    ),
+    members: tolerant(
+      diagnostics,
+      "members",
+      data.members,
+      projectFrontmatterSchema.shape.members,
+      [],
+    ),
+    agents: tolerant(
+      diagnostics,
+      "agents",
+      data.agents,
+      projectFrontmatterSchema.shape.agents,
+      [],
+    ),
+    credentialPolicy: tolerant(
+      diagnostics,
+      "credentialPolicy",
+      data.credentialPolicy,
+      projectFrontmatterSchema.shape.credentialPolicy,
+      null,
+    ),
+    guardrails: tolerant(
+      diagnostics,
+      "guardrails",
+      data.guardrails,
+      projectFrontmatterSchema.shape.guardrails,
+      [],
+    ),
+  };
+
+  if (frontmatter.stages.length === 0) {
+    diagnostics.push(
+      diagError(
+        "project.no_stages",
+        "Project defines no stages — the board cannot render columns.",
+        "stages",
+      ),
+    );
+  }
+
+  const unknown: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (!(PROJECT_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
+      unknown[k] = v;
+    }
+  }
+
+  return { frontmatter, unknown, diagnostics };
+}
