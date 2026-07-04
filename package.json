@@ -1,0 +1,43 @@
+{
+  "name": "viberr",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "start": "react-router-serve ./build/server/index.js",
+    "typecheck": "react-router typegen && tsc",
+    "test": "vitest run",
+    "migrate": "tsx scripts/run-migrations.ts",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
+    "@fontsource/noto-sans": "^5.2.10",
+    "@react-router/node": "^7.18.1",
+    "@react-router/serve": "^7.18.1",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
+    "isbot": "^5.1.44",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^7.18.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.18.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.9"
+  }
+}
