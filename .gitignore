@@ -1,0 +1,12 @@
+node_modules/
+/build/
+/data/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+/coverage/
+/playwright-report/
+/test-results/
+.react-router/

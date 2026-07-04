@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Viberr - Governed AI Delivery</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --fg: #1c1c1e;
+      --muted: #555a6a;
+      --placeholder: #a5a8b5;
+      --border: #c7cad5;
+      --ring: #e0e2e8;
+      --blue: #5b76fe;
+      --blue-pressed: #2a41b6;
+      --success: #00b473;
+      --coral-light: #ffc6c6;
+      --coral-dark: #600000;
+      --rose-light: #ffd8f4;
+      --teal-light: #c3faf5;
+      --teal-dark: #187574;
+      --orange-light: #ffe6cd;
+      --yellow-dark: #746019;
+      --pink: #fde0f0;
+      --red-light: #fbd4d4;
+      --font-display: "Roobert PRO Medium", "Roobert PRO", "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --font-body: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --shadow-ring: 0 0 0 1px var(--ring);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      color: var(--fg);
+      background: var(--bg);
+      font-family: var(--font-body);
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-width: 0;
+      overflow-x: hidden;
+      background: var(--bg);
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button, input { font: inherit; }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 30;
+      background: color-mix(in srgb, var(--surface), transparent 12%);
+      border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 22%);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: .72rem;
+      font-family: var(--font-display);
+      font-weight: 900;
+      letter-spacing: .01em;
+    }
+
+    .mark {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: var(--fg);
+      color: var(--surface);
+      box-shadow: inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 60%);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: .55rem;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .42rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--fg);
+      padding: .58rem .88rem;
+      font-family: var(--font-display);
+      font-size: .94rem;
+      font-weight: 900;
+      letter-spacing: .01em;
+      cursor: pointer;
+      transition: transform .2s ease, border-color .2s ease, background .2s ease;
+    }
+
+    .button:hover { transform: translateY(-1px); border-color: var(--fg); }
+    .button.primary { background: var(--blue); border-color: var(--blue); color: var(--surface); }
+
+    .hero {
+      position: relative;
+      min-height: 92svh;
+      display: grid;
+      align-items: center;
+      padding: calc(72px + clamp(2rem, 5vw, 4rem)) 0 clamp(3rem, 6vw, 5rem);
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, color-mix(in srgb, var(--border), transparent 76%) 1px, transparent 1px),
+        linear-gradient(color-mix(in srgb, var(--border), transparent 76%) 1px, transparent 1px),
+        radial-gradient(circle at 82% 26%, color-mix(in srgb, var(--teal-light), transparent 22%), transparent 26rem),
+        radial-gradient(circle at 70% 74%, color-mix(in srgb, var(--rose-light), transparent 26%), transparent 34rem),
+        var(--bg);
+      background-size: 48px 48px, 48px 48px, auto, auto, auto;
+    }
+
+    .hero-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, .72fr) minmax(360px, 1.28fr);
+      align-items: center;
+      gap: clamp(2rem, 5vw, 5rem);
+      z-index: 1;
+    }
+
+    .hero-copy {
+      max-width: 620px;
+      padding: 1rem 0;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      margin-bottom: 1rem;
+      padding: .42rem .7rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 900;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+
+    .dot {
+      width: .55rem;
+      height: .55rem;
+      border-radius: 999px;
+      background: var(--success);
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--success), transparent 82%);
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-weight: 900;
+      color: var(--fg);
+      text-wrap: balance;
+    }
+
+    h1 {
+      max-width: 9ch;
+      font-size: clamp(4rem, 11.4vw, 9.2rem);
+      line-height: .89;
+      letter-spacing: -.04em;
+    }
+
+    .hero-copy p {
+      max-width: 59ch;
+      margin: 1.2rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1.06rem, 1.8vw, 1.34rem);
+      line-height: 1.48;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .75rem;
+      margin-top: 1.55rem;
+    }
+
+    .product-stage {
+      position: relative;
+      min-height: 610px;
+      border-radius: 44px;
+      border: 1px solid color-mix(in srgb, var(--border), transparent 12%);
+      background: color-mix(in srgb, var(--surface), transparent 6%);
+      box-shadow: var(--shadow-ring), 0 32px 90px color-mix(in srgb, var(--fg), transparent 88%);
+      padding: clamp(1rem, 2vw, 1.35rem);
+      overflow: hidden;
+    }
+
+    .product-stage::before {
+      content: "";
+      position: absolute;
+      inset: 5rem -8rem auto auto;
+      width: 22rem;
+      height: 22rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--blue), transparent 74%);
+      filter: blur(4px);
+    }
+
+    .browser-bar {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .74rem .82rem;
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--fg), transparent 95%);
+      border: 1px solid color-mix(in srgb, var(--border), transparent 28%);
+    }
+
+    .traffic {
+      display: flex;
+      gap: .4rem;
+    }
+
+    .traffic span {
+      width: .7rem;
+      height: .7rem;
+      border-radius: 999px;
+      background: var(--coral-light);
+    }
+
+    .traffic span:nth-child(2) { background: var(--orange-light); }
+    .traffic span:nth-child(3) { background: var(--teal-light); }
+
+    .mono {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: .78rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .product-layout {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .side,
+    .main-panel,
+    .decision {
+      border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
+      border-radius: 24px;
+      background: var(--surface);
+      padding: 1rem;
+    }
+
+    .side {
+      min-height: 470px;
+      background: color-mix(in srgb, var(--pink), var(--surface) 62%);
+    }
+
+    .nav-item,
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .7rem;
+      padding: .72rem .76rem;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface), transparent 7%);
+      border: 1px solid color-mix(in srgb, var(--border), transparent 42%);
+      margin-top: .55rem;
+      color: var(--muted);
+      font-size: .88rem;
+    }
+
+    .nav-item strong,
+    .row strong { color: var(--fg); font-family: var(--font-display); }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      width: max-content;
+      gap: .36rem;
+      border-radius: 999px;
+      padding: .3rem .55rem;
+      font-size: .76rem;
+      font-weight: 900;
+      white-space: nowrap;
+      background: var(--teal-light);
+      color: var(--teal-dark);
+    }
+
+    .pill.info { background: color-mix(in srgb, var(--blue), var(--surface) 82%); color: var(--blue-pressed); }
+    .pill.input { background: var(--orange-light); color: var(--yellow-dark); }
+    .pill.blocked { background: var(--red-light); color: var(--coral-dark); }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: .8rem;
+      margin-top: 1rem;
+    }
+
+    .column {
+      min-height: 245px;
+      border-radius: 18px;
+      padding: .72rem;
+      background: color-mix(in srgb, var(--fg), transparent 96%);
+      border: 1px solid color-mix(in srgb, var(--border), transparent 42%);
+    }
+
+    .column h3 {
+      font-size: .92rem;
+      margin-bottom: .68rem;
+    }
+
+    .mini-card {
+      border-radius: 16px;
+      background: var(--surface);
+      border: 1px solid color-mix(in srgb, var(--border), transparent 36%);
+      padding: .75rem;
+      margin-top: .55rem;
+    }
+
+    .mini-card h4 {
+      margin: .25rem 0 0;
+      font-family: var(--font-display);
+      line-height: 1.1;
+    }
+
+    .decision {
+      margin-top: 1rem;
+      background: color-mix(in srgb, var(--orange-light), var(--surface) 58%);
+    }
+
+    .decision h3 { font-size: 1.35rem; }
+
+    .section {
+      padding: clamp(3.5rem, 7vw, 6.5rem) 0;
+      border-top: 1px solid color-mix(in srgb, var(--border), transparent 26%);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, .68fr) minmax(280px, .32fr);
+      gap: 1.5rem;
+      align-items: end;
+      margin-bottom: 1.5rem;
+    }
+
+    .section h2 {
+      font-size: clamp(2.4rem, 5.4vw, 5.3rem);
+      line-height: .98;
+      letter-spacing: -.035em;
+    }
+
+    .section-copy {
+      margin: .8rem 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 64ch;
+      font-size: 1.06rem;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .feature {
+      min-height: 270px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+      border-radius: 28px;
+      padding: 1.25rem;
+      background: var(--surface);
+      box-shadow: var(--shadow-ring);
+    }
+
+    .feature:nth-child(1) { background: color-mix(in srgb, var(--teal-light), var(--surface) 72%); }
+    .feature:nth-child(2) { background: color-mix(in srgb, var(--rose-light), var(--surface) 76%); }
+    .feature:nth-child(3) { background: color-mix(in srgb, var(--orange-light), var(--surface) 72%); }
+
+    .feature h3 {
+      font-size: clamp(1.55rem, 2.6vw, 2.05rem);
+      line-height: 1.04;
+      letter-spacing: -.025em;
+    }
+
+    .feature p {
+      color: var(--muted);
+      line-height: 1.48;
+      margin: .75rem 0 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: .8rem;
+      counter-reset: step;
+    }
+
+    .step {
+      position: relative;
+      min-height: 200px;
+      border-radius: 24px;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+      box-shadow: var(--shadow-ring);
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step, decimal-leading-zero);
+      display: inline-flex;
+      margin-bottom: 1rem;
+      font-family: var(--font-mono);
+      color: var(--blue-pressed);
+      background: color-mix(in srgb, var(--blue), var(--surface) 84%);
+      border-radius: 999px;
+      padding: .32rem .55rem;
+      font-size: .78rem;
+      font-weight: 900;
+    }
+
+    .step h3 { font-size: 1.25rem; }
+    .step p { color: var(--muted); line-height: 1.45; }
+
+    .cta {
+      display: grid;
+      grid-template-columns: minmax(0, .62fr) minmax(320px, .38fr);
+      gap: clamp(1.5rem, 4vw, 3.5rem);
+      align-items: center;
+      border-radius: 44px;
+      padding: clamp(1.2rem, 4vw, 3rem);
+      background: var(--fg);
+      color: var(--surface);
+      overflow: hidden;
+    }
+
+    .cta h2 { color: var(--surface); }
+    .cta p { color: color-mix(in srgb, var(--surface), transparent 24%); }
+
+    .form {
+      display: grid;
+      gap: .72rem;
+      padding: 1rem;
+      border-radius: 24px;
+      background: var(--surface);
+      color: var(--fg);
+    }
+
+    label {
+      display: grid;
+      gap: .35rem;
+      color: var(--muted);
+      font-size: .86rem;
+      font-weight: 700;
+    }
+
+    input {
+      min-height: 48px;
+      border: 1px solid #e9eaef;
+      border-radius: 8px;
+      padding: .75rem .9rem;
+      outline: 0;
+      color: var(--fg);
+      background: var(--surface);
+    }
+
+    input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue), transparent 82%); }
+
+    .message {
+      min-height: 1.3rem;
+      color: var(--teal-dark);
+      font-weight: 800;
+      font-size: .9rem;
+    }
+
+    footer {
+      padding: 3rem 0;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    @media (max-width: 1040px) {
+      .hero-grid,
+      .section-head,
+      .cta { grid-template-columns: 1fr; }
+      .product-stage { min-height: auto; }
+      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 24px, 1180px); }
+      header { position: sticky; }
+      .nav { flex-direction: column; align-items: flex-start; padding: .85rem 0; }
+      .nav-links, .button, .actions { width: 100%; }
+      .hero { padding-top: 2rem; min-height: auto; }
+      h1 { max-width: 8ch; }
+      .product-layout,
+      .board,
+      .feature-grid,
+      .flow { grid-template-columns: 1fr; }
+      .side { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="shell nav" aria-label="Primary">
+      <a class="brand" href="index.html"><span class="mark">V</span><span>Viberr</span></a>
+      <div class="nav-links">
+        <a class="button" href="design-system.html">Design system</a>
+        <a class="button" href="#flow">Workflow</a>
+        <a class="button primary" href="#early-access">Request access</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="dot"></span>File-native AI delivery</div>
+          <h1 id="hero-title">Viberr</h1>
+          <p>Govern coding agents with task contracts, persistent operators, concise decision packets, and GitHub-backed review.</p>
+          <div class="actions">
+            <a class="button primary" href="#early-access">Request early access</a>
+            <a class="button" href="#proof">See the control plane</a>
+          </div>
+        </div>
+
+        <div class="product-stage" aria-label="Viberr product preview">
+          <div class="browser-bar">
+            <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span class="mono">Viberr / Project board</span>
+          </div>
+          <div class="product-layout">
+            <aside class="side">
+              <span class="pill info">Viberr Core</span>
+              <div class="nav-item"><strong>Board</strong><span>18</span></div>
+              <div class="nav-item"><strong>Review</strong><span>4</span></div>
+              <div class="nav-item"><strong>Policy</strong><span>2</span></div>
+              <div class="nav-item"><strong>GitHub</strong><span>healthy</span></div>
+            </aside>
+            <section class="main-panel">
+              <div class="row"><strong>Canonical source</strong><span class="mono">tasks/VIB-142/task.md</span></div>
+              <div class="board">
+                <div class="column">
+                  <h3>Ready</h3>
+                  <div class="mini-card"><span class="pill">ready</span><p class="mono">VIB-142</p><h4>Attach execution workspace</h4></div>
+                </div>
+                <div class="column">
+                  <h3>Input</h3>
+                  <div class="mini-card"><span class="pill input">input</span><p class="mono">VIB-148</p><h4>Validate PAT scope</h4></div>
+                </div>
+                <div class="column">
+                  <h3>Review</h3>
+                  <div class="mini-card"><span class="pill">PR ready</span><p class="mono">VIB-151</p><h4>Accept completion</h4></div>
+                </div>
+              </div>
+              <div class="decision">
+                <span class="pill input">decision packet</span>
+                <h3>Human acceptance gates done.</h3>
+                <p class="section-copy">The operator summarizes changed files, validation evidence, branch state, and the next decision.</p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="proof" class="shell section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Why teams need it</div>
+          <h2>The missing layer between plans, agents, and PRs.</h2>
+        </div>
+        <p class="section-copy">Viberr keeps delivery truth inspectable. The task file is the durable contract; operators and specialists work around it; GitHub remains the execution surface.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature">
+          <div>
+            <span class="pill">file truth</span>
+            <h3>Every task has a canonical contract.</h3>
+            <p>Identity, goal, state, context, timeline, related files, commits, subtasks, and human decisions live in one readable task directory.</p>
+          </div>
+          <span class="mono">tasks/VIB-142/task.md</span>
+        </article>
+        <article class="feature">
+          <div>
+            <span class="pill info">operator model</span>
+            <h3>Agents get continuity without taking control.</h3>
+            <p>A persistent operator watches quality, chooses specialist handoffs, and prepares decision packets. Official state changes remain governed.</p>
+          </div>
+          <span class="mono">operator + specialist memory</span>
+        </article>
+        <article class="feature">
+          <div>
+            <span class="pill input">review gate</span>
+            <h3>GitHub work stays traceable to intent.</h3>
+            <p>Branches, commits, PRs, sync health, and PAT diagnostics attach to the task without replacing the file-native source of truth.</p>
+          </div>
+          <span class="mono">branch: vib-142</span>
+        </article>
+      </div>
+    </section>
+
+    <section id="flow" class="shell section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Operating loop</div>
+          <h2>Humans govern. Agents execute. Files remember.</h2>
+        </div>
+        <p class="section-copy">The interface is designed around meaningful boundaries instead of noisy commentary.</p>
+      </div>
+      <div class="flow">
+        <article class="step"><h3>Author task</h3><p>The task file captures goal, constraints, context, and current readiness.</p></article>
+        <article class="step"><h3>Assign operator</h3><p>A dedicated operator monitors the contract and recommends specialist work.</p></article>
+        <article class="step"><h3>Execute in GitHub</h3><p>Specialists work in a fresh branch and report consequential evidence back to the timeline.</p></article>
+        <article class="step"><h3>Accept completion</h3><p>Review ends with explicit human acceptance, not automatic transition to done.</p></article>
+      </div>
+    </section>
+
+    <section id="early-access" class="shell section">
+      <div class="cta">
+        <div>
+          <div class="eyebrow">Early access</div>
+          <h2>Bring agent delivery under one governed roof.</h2>
+          <p class="section-copy">Best for small AI-forward engineering teams already using Codex or Claude Code with GitHub-centric delivery.</p>
+        </div>
+        <form class="form" id="accessForm" novalidate>
+          <label>
+            Work email
+            <input id="email" name="email" type="email" placeholder="you@company.com" autocomplete="email" required>
+          </label>
+          <label>
+            Team context
+            <input id="team" name="team" type="text" placeholder="e.g. 8 engineers using coding agents" required>
+          </label>
+          <button class="button primary" type="submit">Request access</button>
+          <div class="message" id="formMessage" role="status"></div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <span>Viberr UI system</span>
+    <span style="float:right;"><a href="index.html">Project launcher</a></span>
+  </footer>
+
+  <script>
+    const form = document.querySelector("#accessForm");
+    const email = document.querySelector("#email");
+    const team = document.querySelector("#team");
+    const message = document.querySelector("#formMessage");
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value.trim());
+      if (!validEmail || team.value.trim().length < 4) {
+        message.style.color = "var(--coral-dark)";
+        message.textContent = "Add a valid work email and a short team context.";
+        return;
+      }
+      message.style.color = "var(--teal-dark)";
+      message.textContent = "Request staged. A Viberr operator packet would be created next.";
+      form.reset();
+    });
+  </script>
+</body>
+</html>
