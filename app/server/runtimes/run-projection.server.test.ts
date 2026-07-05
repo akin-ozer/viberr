@@ -101,7 +101,7 @@ describe("projectRunsForTask grouping", () => {
     insert({
       id: "run_c",
       threadId: "c0",
-      kind: "consultant",
+      kind: "reviewer",
       role: "Consultant",
       backend: "codex",
       agentName: "reviewer",

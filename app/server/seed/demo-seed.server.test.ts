@@ -109,7 +109,7 @@ describe("demo seed", () => {
     expect(task.changed).toEqual({ files: 9, add: 412, del: 87 });
     expect(task.owner).toMatchObject({ name: "Arda Kaya" });
     expect(task.specialist).toMatchObject({ profileId: "developer", backend: "codex", role: "Developer" });
-    expect(task.consultants[0]).toMatchObject({ backend: "claude", role: "Reviewer" });
+    expect(task.reviewers[0]).toMatchObject({ backend: "claude", role: "Reviewer" });
     expect(task.operator).toMatchObject({ assignedAtStageId: "triage", sinceLabel: "stage 1" });
     expect(task.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
 

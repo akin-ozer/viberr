@@ -15,7 +15,7 @@ export type DeploymentStatus =
   | "on call"
   | "anchored · on call";
 
-export type Engagement = "operator" | "primary" | "consultant";
+export type Engagement = "operator" | "primary" | "reviewer";
 
 /** One live engagement instance (projection over task assignments joined
  * with agent_runs — profile-id keyed, never role-string matched). */

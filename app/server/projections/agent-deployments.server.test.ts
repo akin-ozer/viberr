@@ -31,7 +31,7 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "human",
       operator: { assignedAtStageId: "triage" },
       specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     }),
   });
   // impl + waiting agent → operator "coordinating", primary "working".
@@ -41,7 +41,7 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "agent",
       operator: { assignedAtStageId: "ready" },
       specialist: { profileId: "developer", backend: "claude", role: "Developer" },
-      consultants: [{ profileId: "consultant", backend: "codex", role: "Consultant" }],
+      reviewers: [{ profileId: "consultant", backend: "codex", role: "Consultant" }],
     }),
   });
   // ready + waiting none → primary "on call".
@@ -84,12 +84,12 @@ describe("listAgentDeployments", () => {
     expect(byKey("VIB-1").map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "packet open"],
       ["developer", "primary", "waiting on human"],
-      ["reviewer", "consultant", "anchored · on call"],
+      ["reviewer", "reviewer", "anchored · on call"],
     ]);
     expect(byKey("VIB-2").map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
       ["developer", "primary", "working"],
-      ["consultant", "consultant", "anchored · on call"],
+      ["consultant", "reviewer", "anchored · on call"],
     ]);
     expect(byKey("VIB-3").map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
@@ -132,7 +132,7 @@ describe("listAgentDeployments", () => {
       id: "run_c",
       taskKey: "VIB-2",
       threadId: "c0",
-      kind: "consultant",
+      kind: "reviewer",
       backend: "codex",
       state: "running",
     });
@@ -149,7 +149,7 @@ describe("listAgentDeployments", () => {
     const deployments = listAgentDeployments(store.db, store.slug);
     const vib2 = deployments.filter((d) => d.taskKey === "VIB-2");
     expect(vib2.find((d) => d.engagement === "primary")!.running).toBe(true);
-    expect(vib2.find((d) => d.engagement === "consultant")!.running).toBe(true);
+    expect(vib2.find((d) => d.engagement === "reviewer")!.running).toBe(true);
     expect(vib2.find((d) => d.engagement === "operator")!.running).toBe(false);
     // A finished run does NOT mark its engagement running.
     const vib1Primary = deployments.find(

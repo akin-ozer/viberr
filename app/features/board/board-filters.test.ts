@@ -47,7 +47,7 @@ const task: SearchableTask = {
   branch: "vib-142-attach-workspace",
   owner: { name: "Arda Kaya" },
   specialist: { name: "Codex", role: "Developer" },
-  consultants: [{ name: "Claude Code", role: "Reviewer" }],
+  reviewers: [{ name: "Claude Code", role: "Reviewer" }],
   operator: { name: "Operator" },
 };
 

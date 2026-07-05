@@ -38,7 +38,7 @@ export interface SearchableTask {
   branch: string | null;
   owner: { name: string } | null;
   specialist: { name: string; role: string } | null;
-  consultants: { name: string; role: string }[];
+  reviewers: { name: string; role: string }[];
   operator: { name: string } | null;
 }
 
@@ -53,7 +53,7 @@ export function matchesSearch(task: SearchableTask, query: string): boolean {
     task.branch ?? "",
     task.owner?.name ?? "",
     task.specialist ? `${task.specialist.name} ${task.specialist.role}` : "",
-    ...task.consultants.map((c) => `${c.name} ${c.role}`),
+    ...task.reviewers.map((c) => `${c.name} ${c.role}`),
     task.operator?.name ?? "",
   ]
     .join(" ")

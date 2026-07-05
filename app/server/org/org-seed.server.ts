@@ -131,7 +131,7 @@ const KB_SEEDS: {
         rel: "schemas/task-contract.md",
         date: [5, 30],
         content:
-          "# Task contract\n\nKey `/^[A-Za-z]+-\\d+$/`, one human owner, one primary specialist, 0..n consultants. Timestamps are UTC ISO at every boundary.\n",
+          "# Task contract\n\nKey `/^[A-Za-z]+-\\d+$/`, one human owner, one primary specialist, 0..n reviewers. Timestamps are UTC ISO at every boundary.\n",
       },
       {
         rel: "schemas/event-types.md",

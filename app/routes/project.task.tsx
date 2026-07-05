@@ -24,9 +24,12 @@ import {
   transitionStage,
 } from "~/server/tasks/task-actions.server";
 import {
+  assignReviewer,
   assignSpecialist,
   hasRunningRun,
   listDeployedSpecialists,
+  removeReviewer,
+  startReviewerRun,
   startSpecialistRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
@@ -53,7 +56,8 @@ import { Icon } from "~/ui/icon";
  * TOAST COPY IS THE VERBATIM SPEC §5 CONTRACT — it lives here so every
  * caller shows identical strings):
  *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
- *   transition · run-interrupt · assign-specialist · run-specialist
+ *   transition · run-interrupt · assign-specialist · run-specialist ·
+ *   assign-reviewer · run-reviewer · remove-reviewer
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -269,6 +273,47 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           toast: `${result.backend === "claude" ? "Claude Code" : "Codex"} run started · streaming to agent logs`,
+        };
+      }
+      case "assign-reviewer": {
+        // Engage a deployed specialist as a reviewer (admin|maintainer).
+        const result = await assignReviewer(
+          db,
+          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: result.alreadyEngaged
+            ? `${result.name} is already a reviewer`
+            : `Engaged ${result.name} as a reviewer`,
+        };
+      }
+      case "run-reviewer": {
+        // Start a run for a specific engaged reviewer.
+        const result = await startReviewerRun(
+          db,
+          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `${result.backend === "claude" ? "Claude Code" : "Codex"} reviewer run started · streaming to agent logs`,
+        };
+      }
+      case "remove-reviewer": {
+        // Release a reviewer from the task.
+        const result = await removeReviewer(
+          db,
+          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: result.removed ? "Reviewer released" : "That reviewer wasn't engaged",
         };
       }
       default:

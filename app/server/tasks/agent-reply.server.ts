@@ -92,7 +92,7 @@ function handleMatchesSpecialist(
 /**
  * The most-recent run row (created_at DESC) on this task, matching `backend`,
  * that carries a session_id — the resumable provider session for this agent.
- * When `backend` is null, any specialist/consultant run with a session wins.
+ * When `backend` is null, any specialist/reviewer run with a session wins.
  */
 function latestSessionRun(
   db: Database.Database,

@@ -233,7 +233,7 @@ export async function createTask(
     waiting: "human",
     ownerUserId: null,
     specialist: null,
-    consultants: [],
+    reviewers: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
     operator:
       stageId === project.stages[0]?.id

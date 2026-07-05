@@ -364,7 +364,7 @@ export function rebuildTaskFile(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
         waiting, urgent, validation, owner_user_id, specialist_json,
-        consultants_json, operator_json, branch, repo, pr_json, github_json,
+        reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, event_count, comment_count, diagnostic_count,
         created_at, updated_at, source_path, content_hash, parsed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -374,7 +374,7 @@ export function rebuildTaskFile(
        waiting = excluded.waiting, urgent = excluded.urgent,
        validation = excluded.validation, owner_user_id = excluded.owner_user_id,
        specialist_json = excluded.specialist_json,
-       consultants_json = excluded.consultants_json,
+       reviewers_json = excluded.reviewers_json,
        operator_json = excluded.operator_json, branch = excluded.branch,
        repo = excluded.repo, pr_json = excluded.pr_json,
        github_json = excluded.github_json, goal = excluded.goal,
@@ -396,7 +396,7 @@ export function rebuildTaskFile(
     fm.validation,
     fm.ownerUserId,
     fm.specialist ? JSON.stringify(fm.specialist) : null,
-    JSON.stringify(fm.consultants),
+    JSON.stringify(fm.reviewers),
     fm.operator ? JSON.stringify(fm.operator) : null,
     fm.branch,
     fm.repo ?? project?.repo ?? null,

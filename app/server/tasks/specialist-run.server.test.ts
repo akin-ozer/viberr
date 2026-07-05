@@ -15,9 +15,12 @@ import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
+  assignReviewer,
   assignSpecialist,
   listDeployedSpecialists,
+  removeReviewer,
   resolveDeployedSpecialist,
+  startReviewerRun,
   startSpecialistRun,
 } from "./specialist-run.server";
 
@@ -272,5 +275,111 @@ describe("startSpecialistRun", () => {
         ),
       ).rejects.toMatchObject({ status: 403 });
     }
+  });
+});
+
+describe("assignReviewer / removeReviewer", () => {
+  it("appends to reviewers[] with a typed agent event + audit", async () => {
+    const result = await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ profileId: "dev", alreadyEngaged: false });
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.reviewers).toEqual([
+      { profileId: "dev", backend: "claude", role: "developer" },
+    ]);
+    expect(file.parsed.timeline[0]!.text).toContain("Engaged **dev**");
+    expect(file.parsed.timeline[0]!.text).toContain("as a reviewer");
+    expect(
+      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+    ).toBe("VIB-1");
+  });
+
+  it("is idempotent — a second assign is a no-op (alreadyEngaged)", async () => {
+    const opts = { dataRoot: store.dataRoot };
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    expect(again.alreadyEngaged).toBe(true);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.reviewers).toHaveLength(1);
+  });
+
+  it("removeReviewer drops the ref (+ event/audit); missing id is a no-op", async () => {
+    const opts = { dataRoot: store.dataRoot };
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    expect(removed.removed).toBe(true);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.reviewers).toEqual([]);
+    expect(file.parsed.timeline[0]!.text).toContain("Released reviewer **dev**");
+    expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]?.taskKey).toBe("VIB-1");
+
+    const noop = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" }, actor(store.users.arda), opts);
+    expect(noop.removed).toBe(false);
+  });
+
+  it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
+    for (const user of [store.users.selin, store.users.elif]) {
+      await expect(
+        assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(user), { dataRoot: store.dataRoot }),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+  });
+});
+
+describe("startReviewerRun", () => {
+  async function engage(): Promise<void> {
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  it("errors when the profile is not an engaged reviewer", async () => {
+    await expect(
+      startReviewerRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("creates a kind='reviewer' run on its own thread with a simulated stream", async () => {
+    await engage();
+    const result = await startReviewerRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const run = getRun(store.db, result.runId)!;
+    expect(run.kind).toBe("reviewer");
+    expect(run.role).toBe("Reviewer");
+    expect(run.thread_id.startsWith("r0-")).toBe(true);
+    expect(run.agent_profile_id).toBe("dev");
+    const lineCount = await waitForLines(result.runId, 1);
+    expect(lineCount).toBeGreaterThan(0);
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda),
+    );
+    expect(
+      listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]?.taskKey,
+    ).toBe("VIB-1");
   });
 });

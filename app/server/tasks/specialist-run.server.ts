@@ -228,6 +228,157 @@ export async function assignSpecialist(
   };
 }
 
+// --------------------------------------------------------------- assignReviewer
+
+export interface AssignReviewerResult {
+  profileId: string;
+  name: string;
+  role: string;
+  backend: RealBackend;
+  /** True when the profile was already engaged as a reviewer (idempotent no-op). */
+  alreadyEngaged: boolean;
+}
+
+/**
+ * Engages a deployed specialist as a REVIEWER (advisory, non-primary): appends
+ * an AgentRef to the task's `reviewers` frontmatter array and announces it with
+ * a typed `agent` timeline event, then reprojects + audits. Idempotent — a
+ * profile already in `reviewers` is a no-op. RBAC: admin|maintainer.
+ */
+export async function assignReviewer(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; profileId: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<AssignReviewerResult> {
+  requireRuntimeRole(ctx, input.projectSlug, actor, "assign a reviewer");
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  const reviewer = resolveDeployedSpecialist(
+    ctx,
+    input.projectSlug,
+    input.profileId,
+  );
+
+  const alreadyEngaged = existing.parsed.frontmatter.reviewers.some(
+    (r) => r.profileId === reviewer.profileId,
+  );
+  if (alreadyEngaged) {
+    return {
+      profileId: reviewer.profileId,
+      name: reviewer.name,
+      role: reviewer.role,
+      backend: reviewer.backend,
+      alreadyEngaged: true,
+    };
+  }
+
+  const backendLabel = reviewer.backend === "claude" ? "Claude Code" : "Codex";
+  const ref: AgentRef = {
+    profileId: reviewer.profileId,
+    backend: reviewer.backend,
+    role: reviewer.role,
+  };
+  const event = agentEvent(
+    `Engaged **${reviewer.name}** (${reviewer.role}, ${backendLabel}) as a reviewer.`,
+  );
+
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.reviewers.push(ref);
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.reviewer.assigned",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      profileId: reviewer.profileId,
+      backend: reviewer.backend,
+      role: reviewer.role,
+    },
+  });
+
+  return {
+    profileId: reviewer.profileId,
+    name: reviewer.name,
+    role: reviewer.role,
+    backend: reviewer.backend,
+    alreadyEngaged: false,
+  };
+}
+
+// --------------------------------------------------------------- removeReviewer
+
+export interface RemoveReviewerResult {
+  profileId: string;
+  /** False when the profile wasn't engaged as a reviewer (nothing to remove). */
+  removed: boolean;
+}
+
+/**
+ * Releases a REVIEWER from a task: drops the matching AgentRef from `reviewers`
+ * and appends a typed `agent` timeline event, then reprojects + audits. A
+ * profile that isn't currently a reviewer is a no-op. RBAC: admin|maintainer.
+ */
+export async function removeReviewer(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; profileId: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<RemoveReviewerResult> {
+  requireRuntimeRole(ctx, input.projectSlug, actor, "remove a reviewer");
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  const target = existing.parsed.frontmatter.reviewers.find(
+    (r) => r.profileId === input.profileId,
+  );
+  if (!target) return { profileId: input.profileId, removed: false };
+
+  // Best-effort display name for the event; falls back to the role snapshot.
+  let label = target.role;
+  try {
+    label = resolveDeployedSpecialist(ctx, input.projectSlug, input.profileId).name;
+  } catch {
+    // Profile may have been undeployed since engagement — keep the role label.
+  }
+  const event = agentEvent(`Released reviewer **${label}** from the task.`);
+
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.reviewers = parsed.frontmatter.reviewers.filter(
+        (r) => r.profileId !== input.profileId,
+      );
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.reviewer.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { profileId: input.profileId },
+  });
+
+  return { profileId: input.profileId, removed: true };
+}
+
 // --------------------------------------------------------- startSpecialistRun
 
 export interface StartSpecialistRunResult {
@@ -373,6 +524,130 @@ export async function startSpecialistRun(
   });
 
   return { runId, backend, simulated, role: sp.role };
+}
+
+// ------------------------------------------------------------ startReviewerRun
+
+/**
+ * Starts a REVIEWER run for a specific engaged reviewer (by profile id) —
+ * the reviewer counterpart of {@link startSpecialistRun}. Same analyze prompt +
+ * best-effort clone + simulated-fallback script, but the run is `kind:
+ * "reviewer"` on its own `r<index>-…` thread so it groups under the reviewer's
+ * own Agent-logs entry. RBAC: admin|maintainer.
+ */
+export async function startReviewerRun(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; profileId: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<StartSpecialistRunResult> {
+  requireRuntimeRole(ctx, input.projectSlug, actor, "start a reviewer run");
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  const reviewers = existing.parsed.frontmatter.reviewers;
+  const index = reviewers.findIndex((r) => r.profileId === input.profileId);
+  if (index < 0) {
+    throw AppError.validation(
+      "That reviewer is not engaged on this task. Assign it first.",
+    );
+  }
+  const rev = reviewers[index]!;
+  const backend: RealBackend = rev.backend === "codex" ? "codex" : "claude";
+
+  let model = backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5";
+  let effort = "";
+  let agentName = rev.profileId;
+  try {
+    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
+    model = resolved.model;
+    effort = resolved.effort;
+    agentName = resolved.name;
+  } catch {
+    // Profile may have been undeployed since engagement — keep the default.
+  }
+
+  const title = existing.parsed.frontmatter.title;
+  const goal = existing.parsed.goal;
+  const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+
+  const clone =
+    repo && isBackendAvailable(backend)
+      ? await cloneRepo(db, {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          repo,
+          dataRoot: ctx.dataRoot,
+        })
+      : null;
+
+  const prompt = buildAnalyzePrompt({
+    role: rev.role,
+    taskKey: input.taskKey,
+    title,
+    goal,
+    repo,
+    cloned: !!clone,
+  });
+
+  const script = buildAnalyzeScript({
+    backend,
+    model,
+    repo,
+    cloned: !!clone,
+  });
+
+  const { runId, simulated } = await startRun(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    // `r<index>-<uid>`: the index groups this reviewer's runs in the agents
+    // deployment projection; the uid keeps re-runs from colliding on the thread.
+    threadId: `r${index}-` + newId("t").replace("t_", "").slice(0, 8),
+    role: "Reviewer",
+    kind: "reviewer",
+    backend,
+    model,
+    ...(effort ? { effort } : {}),
+    agentName,
+    agentProfileId: rev.profileId,
+    prompt,
+    script,
+    actor: { userId: actor.userId, label: actor.label },
+    ...(clone ? { workdir: clone } : {}),
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+
+  const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(
+        agentEvent(
+          `Started a ${backendLabel} run for the ${rev.role} reviewer — streaming to the agent logs.`,
+        ),
+      );
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.reviewer.run_started",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      runId,
+      profileId: rev.profileId,
+      backend,
+      simulated,
+      cloned: !!clone,
+    },
+  });
+
+  return { runId, backend, simulated, role: rev.role };
 }
 
 // ----------------------------------------------------------------- prompt/script

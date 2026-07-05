@@ -194,7 +194,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Assign the primary specialist", "Summon consultant specialists", "Generate decision & blocking packets", "Append typed important events", "Compress long-running timelines"],
+      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events", "Compress long-running timelines"],
       recommend: ["Stage transitions", "Completion for human acceptance", "Owner re-assignment"],
       forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
     },
@@ -261,7 +261,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   ),
   profile(
     {
-      id: "consultant", kind: "specialist", name: "Consultant", role: "Advisory",
+      id: "consultant", kind: "specialist", name: "Advisor", role: "Advisory",
       icon: "message", backends: ["claude", "codex"], model: "claude-sonnet · codex-large",
       scope: "Global base · customized for Viberr Core",
       stages: ["triage", "ready", "impl", "review"],
@@ -393,7 +393,7 @@ function fm(input: {
   waiting: TaskFrontmatter["waiting"];
   owner: string | null;
   specialist: TaskFrontmatter["specialist"];
-  consultants: TaskFrontmatter["consultants"];
+  reviewers: TaskFrontmatter["reviewers"];
   operator: TaskFrontmatter["operator"];
   urgent: boolean;
   validation: TaskFrontmatter["validation"];
@@ -411,7 +411,7 @@ function fm(input: {
     waiting: input.waiting,
     ownerUserId: input.owner,
     specialist: input.specialist,
-    consultants: input.consultants,
+    reviewers: input.reviewers,
     operator: input.operator,
     urgent: input.urgent,
     validation: input.validation,
@@ -429,7 +429,7 @@ const dev = (backend: "codex" | "claude") =>
 const reviewer = (backend: "codex" | "claude") =>
   ({ profileId: "reviewer", backend, role: "Reviewer" }) as const;
 const consultant = (backend: "codex" | "claude") =>
-  ({ profileId: "consultant", backend, role: "Consultant" }) as const;
+  ({ profileId: "consultant", backend, role: "Advisory" }) as const;
 
 export function seedTasks(ids: SeedUserIds): SeedTask[] {
   return [
@@ -443,7 +443,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: ids.arda,
         specialist: dev("codex"),
-        consultants: [reviewer("claude")],
+        reviewers: [reviewer("claude")],
         operator: { assignedAtStageId: "triage" },
         urgent: true,
         validation: "changed",
@@ -497,7 +497,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(9, 2), type: "transition", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Transition request:** move VIB-142 from In Progress to Review. Branch healthy, evidence attached." },
         { occurredAt: todayAt(8, 30), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "Re-engaged **Claude Code (Reviewer)** as consultant; re-anchored on `task.md` before review." },
+          text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
         { occurredAt: todayAt(8, 12), type: "comment", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Branch work complete. Handing back to operator for the review boundary." },
         { occurredAt: yesterdayAt(15, 12), type: "assign", actor: humanRef(ids, "arda"), title: null, toAgent: false, evidence: null,
@@ -514,7 +514,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: null,
         specialist: null,
-        consultants: [],
+        reviewers: [],
         operator: { assignedAtStageId: "triage" },
         urgent: false,
         validation: "none",
@@ -542,7 +542,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "agent",
         owner: ids.selin,
         specialist: dev("claude"),
-        consultants: [consultant("codex")],
+        reviewers: [consultant("codex")],
         operator: { assignedAtStageId: "ready" },
         urgent: false,
         validation: "healthy",
@@ -557,7 +557,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(10, 24), type: "comment", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Threshold sweep running against the 40-event fixture. Typed events survive every compression pass so far." },
         { occurredAt: todayAt(9, 47), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "Re-anchored **Codex (Consultant)** on `task.md` for a second opinion on threshold defaults." },
+          text: "Re-anchored **Codex (Advisor)** on `task.md` for a second opinion on threshold defaults." },
         { occurredAt: todayAt(9, 31), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed 2 commits to `vib-151-timeline-compression` — compaction map and threshold config." },
         { occurredAt: yesterdayAt(14, 20), type: "assign", actor: humanRef(ids, "selin"), title: null, toAgent: false, evidence: null,
@@ -576,7 +576,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "agent",
         owner: null,
         specialist: dev("codex"),
-        consultants: [],
+        reviewers: [],
         operator: { assignedAtStageId: "ready" },
         urgent: false,
         validation: "healthy",
@@ -606,7 +606,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: ids.murat,
         specialist: dev("claude"),
-        consultants: [consultant("codex")],
+        reviewers: [consultant("codex")],
         operator: { assignedAtStageId: "impl" },
         urgent: false,
         validation: "failing",
@@ -637,13 +637,13 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(10, 31), type: "blocked", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Blocked decision:** provider history unavailable and two rehydrate checks failing — recovery packet raised for human review." },
-        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("Consultant"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("Advisor"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag:** the rehydrate path drops evidence references recorded before the continuity break." },
         { occurredAt: todayAt(10, 5), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Continuity warning:** runtime history unavailable — re-anchored **Claude Code (Developer)** on the canonical task file." },
         { occurredAt: todayAt(9, 52), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed `vib-160-rehydrate` — recovery shim and continuity marker." },
-        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("Consultant"), title: null, toAgent: false, evidence: null,
+        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("Advisor"), title: null, toAgent: false, evidence: null,
           text: "**Validation failing** on the rehydrate path — evidence attached, re-run requested." },
         { occurredAt: yesterdayAt(11, 20), type: "comment", actor: humanRef(ids, "murat"), title: null, toAgent: false, evidence: null,
           text: "Opened the Developer runtime session to debug continuity — session recorded per audit policy." },
@@ -659,7 +659,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "agent",
         owner: null,
         specialist: dev("codex"),
-        consultants: [],
+        reviewers: [],
         operator: { assignedAtStageId: "ready" },
         urgent: false,
         validation: "healthy",
@@ -689,7 +689,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "none",
         owner: ids.elif,
         specialist: null,
-        consultants: [],
+        reviewers: [],
         operator: { assignedAtStageId: "triage" },
         urgent: false,
         validation: "healthy",
@@ -717,7 +717,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "none",
         owner: ids.murat,
         specialist: dev("codex"),
-        consultants: [],
+        reviewers: [],
         operator: { assignedAtStageId: "triage" },
         urgent: false,
         validation: "healthy",
@@ -745,7 +745,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: null,
         specialist: null,
-        consultants: [],
+        reviewers: [],
         operator: null,
         urgent: false,
         validation: "none",
@@ -768,7 +768,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: null,
         specialist: null,
-        consultants: [],
+        reviewers: [],
         operator: null,
         urgent: false,
         validation: "none",

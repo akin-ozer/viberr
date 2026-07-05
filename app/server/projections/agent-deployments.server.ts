@@ -10,7 +10,7 @@ import { getProject } from "./board-query.server";
 /**
  * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 7):
  * engagement instances derived from task assignment records (operator /
- * specialist / consultants in task_projections — PROFILE-ID keyed, never the
+ * specialist / reviewers in task_projections — PROFILE-ID keyed, never the
  * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so
  * an engagement with a live run is honestly marked `running`.
  *
@@ -19,7 +19,7 @@ import { getProject } from "./board-query.server";
  *   operator   waiting=human → "packet open", else "coordinating"
  *   primary    waiting=agent → "working" · waiting=human → "waiting on
  *              human" · else "on call"
- *   consultant always "anchored · on call"
+ *   reviewer always "anchored · on call"
  *
  * Done-stage tasks (the project's LAST stage) contribute nothing.
  */
@@ -30,13 +30,13 @@ interface DeploymentTaskRow {
   stage: string;
   waiting: Waiting;
   specialist_json: string | null;
-  consultants_json: string;
+  reviewers_json: string;
   operator_json: string | null;
 }
 
 interface RunningRunRow {
   task_key: string;
-  kind: "operator" | "primary" | "consultant";
+  kind: "operator" | "primary" | "reviewer";
   thread_id: string;
 }
 
@@ -50,9 +50,10 @@ function primaryStatus(waiting: Waiting): DeploymentStatus {
   return "on call";
 }
 
-/** Consultant thread ids are "c0", "c1", … — index into consultants[]. */
-function consultantIndex(threadId: string): number {
-  const match = /^c(\d+)$/.exec(threadId);
+/** Reviewer thread ids index into reviewers[] — "r0", "r1", … for app-started
+ *  runs, "c0", "c1", … for legacy/seed rows (both accepted). */
+function reviewerIndex(threadId: string): number {
+  const match = /^[rc](\d+)/.exec(threadId);
   return match ? Number(match[1]) : 0;
 }
 
@@ -67,7 +68,7 @@ export function listAgentDeployments(
   const tasks = db
     .prepare(
       `SELECT task_key, title, stage, waiting, specialist_json,
-              consultants_json, operator_json
+              reviewers_json, operator_json
          FROM task_projections
         WHERE project_slug = ?
         ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
@@ -84,16 +85,16 @@ export function listAgentDeployments(
   const running = new Map<string, Set<string>>();
   for (const row of runningRows) {
     const key =
-      row.kind === "consultant"
-        ? `${row.task_key}·consultant·${consultantIndex(row.thread_id)}`
+      row.kind === "reviewer"
+        ? `${row.task_key}·reviewer·${reviewerIndex(row.thread_id)}`
         : `${row.task_key}·${row.kind}`;
     if (!running.has(key)) running.set(key, new Set());
     running.get(key)!.add(row.thread_id);
   }
   const isRunning = (taskKey: string, engagement: Engagement, index = 0) =>
     running.has(
-      engagement === "consultant"
-        ? `${taskKey}·consultant·${index}`
+      engagement === "reviewer"
+        ? `${taskKey}·reviewer·${index}`
         : `${taskKey}·${engagement}`,
     );
 
@@ -133,17 +134,17 @@ export function listAgentDeployments(
       });
     }
 
-    const consultants = JSON.parse(task.consultants_json) as AgentRef[];
-    consultants.forEach((consultant, index) => {
+    const reviewers = JSON.parse(task.reviewers_json) as AgentRef[];
+    reviewers.forEach((reviewer, index) => {
       instances.push({
-        profileId: consultant.profileId,
-        role: consultant.role,
-        backend: consultant.backend,
-        engagement: "consultant",
+        profileId: reviewer.profileId,
+        role: reviewer.role,
+        backend: reviewer.backend,
+        engagement: "reviewer",
         taskKey: task.task_key,
         taskTitle: task.title,
         status: "anchored · on call",
-        running: isRunning(task.task_key, "consultant", index),
+        running: isRunning(task.task_key, "reviewer", index),
       });
     });
   }

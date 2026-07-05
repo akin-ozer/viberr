@@ -276,14 +276,17 @@ export function TaskDetailPage({
   const resolveFetcher = useFetcher<ActionResult>();
   const runFetcher = useFetcher<ActionResult>();
   const specialistFetcher = useFetcher<ActionResult>();
+  const reviewerFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
   useActionFeedback(runFetcher);
   useActionFeedback(specialistFetcher);
+  useActionFeedback(reviewerFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
   const specialistBusy = specialistFetcher.state !== "idle";
+  const reviewerBusy = reviewerFetcher.state !== "idle";
 
   // Assign a deployed specialist / start a specialist run — admin|maintainer
   // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
@@ -303,6 +306,34 @@ export function TaskDetailPage({
     fd.set("_csrf", csrf);
     fd.set("intent", "run-specialist");
     specialistFetcher.submit(fd, { method: "post" });
+  };
+
+  // Reviewer engagement (admin|maintainer; server re-checks). Assign a deployed
+  // specialist as a reviewer, run a specific reviewer (gated on runActive so
+  // one run streams at a time, same as the primary), or release one.
+  const onAssignReviewer = (profileId: string) => {
+    if (reviewerBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "assign-reviewer");
+    fd.set("profileId", profileId);
+    reviewerFetcher.submit(fd, { method: "post" });
+  };
+  const onRunReviewer = (profileId: string) => {
+    if (reviewerBusy || runActive) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-reviewer");
+    fd.set("profileId", profileId);
+    reviewerFetcher.submit(fd, { method: "post" });
+  };
+  const onRemoveReviewer = (profileId: string) => {
+    if (reviewerBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "remove-reviewer");
+    fd.set("profileId", profileId);
+    reviewerFetcher.submit(fd, { method: "post" });
   };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -456,6 +487,10 @@ export function TaskDetailPage({
           runBusy={specialistBusy}
           onAssignSpecialist={onAssignSpecialist}
           onRunSpecialist={onRunSpecialist}
+          reviewerBusy={reviewerBusy}
+          onAssignReviewer={onAssignReviewer}
+          onRunReviewer={onRunReviewer}
+          onRemoveReviewer={onRemoveReviewer}
         />
 
         <AgentLogsSlot

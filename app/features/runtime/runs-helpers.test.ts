@@ -37,7 +37,7 @@ describe("runLabel / roleShort", () => {
   it("roleShort maps op/primary/consultant", () => {
     expect(roleShort({ ...base, op: true })).toBe("operator");
     expect(roleShort(base)).toBe("primary");
-    expect(roleShort({ ...base, role: "Consultant" })).toBe("consultant");
+    expect(roleShort({ ...base, role: "Reviewer" })).toBe("reviewer");
   });
 });
 

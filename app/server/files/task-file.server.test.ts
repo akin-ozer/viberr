@@ -19,7 +19,7 @@ const FULL: ParsedTaskFile = {
     waiting: "human",
     ownerUserId: "u_arda01",
     specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-    consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     operator: { assignedAtStageId: "triage" },
     urgent: true,
     validation: "changed",

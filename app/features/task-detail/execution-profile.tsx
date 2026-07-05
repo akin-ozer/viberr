@@ -268,6 +268,101 @@ export function SpecialistControl({
   );
 }
 
+/**
+ * Assign-reviewer affordance — the reviewer counterpart of SpecialistControl.
+ * Offers the deployed specialists NOT already engaged as reviewers on this
+ * task; picking one submits `assign-reviewer`. When every deployed specialist
+ * is already a reviewer the menu says so; when none are deployed it links to
+ * the Agents page. Only rendered for admin|maintainer (caller gates).
+ */
+export function ReviewerControl({
+  projectSlug,
+  specialists,
+  hasAnyDeployed,
+  busy,
+  onAssign,
+}: {
+  projectSlug: string;
+  /** Deployed specialists available to add (already-engaged ones filtered out). */
+  specialists: DeployedSpecialistView[];
+  /** Whether the project has any deployed specialist at all (empty-state copy). */
+  hasAnyDeployed: boolean;
+  busy: boolean;
+  onAssign: (profileId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!hasAnyDeployed) {
+    return (
+      <span className="sub">
+        No specialists deployed —{" "}
+        <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
+        .
+      </span>
+    );
+  }
+
+  return (
+    <div className="own-wrap" ref={ref}>
+      <button
+        type="button"
+        className={"rev-add" + (open ? " open" : "")}
+        disabled={busy}
+        onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Icon name="plus" />
+        Add reviewer
+      </button>
+      {open && (
+        <div className="own-menu" role="menu" aria-label="Add a reviewer">
+          <div className="own-lbl">Deployed specialists</div>
+          {specialists.length === 0 ? (
+            <div className="menu-item" aria-disabled>
+              <span className="sub">All deployed specialists are already reviewers.</span>
+            </div>
+          ) : (
+            specialists.map((s) => (
+              <button
+                type="button"
+                className="menu-item"
+                role="menuitem"
+                key={s.id}
+                onClick={() => {
+                  setOpen(false);
+                  onAssign(s.id);
+                }}
+              >
+                <AgentGlyph backend={s.backend} />
+                {s.name}
+                <span className="own-role">{s.role}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExecutionProfile({
   task,
   meId,
@@ -282,6 +377,10 @@ export function ExecutionProfile({
   runBusy,
   onAssignSpecialist,
   onRunSpecialist,
+  reviewerBusy,
+  onAssignReviewer,
+  onRunReviewer,
+  onRemoveReviewer,
 }: {
   task: TaskSummary;
   meId: string;
@@ -300,7 +399,16 @@ export function ExecutionProfile({
   runBusy: boolean;
   onAssignSpecialist: (profileId: string) => void;
   onRunSpecialist: () => void;
+  /** The reviewer assign/run/remove fetcher is in flight. */
+  reviewerBusy: boolean;
+  onAssignReviewer: (profileId: string) => void;
+  onRunReviewer: (profileId: string) => void;
+  onRemoveReviewer: (profileId: string) => void;
 }) {
+  // Deployed specialists not already engaged as reviewers — what "Add reviewer" offers.
+  const availableReviewers = deployedSpecialists.filter(
+    (s) => !task.reviewers.some((r) => r.profileId === s.id),
+  );
   const sp = task.specialist;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
@@ -383,30 +491,62 @@ export function ExecutionProfile({
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">Consultants</div>
+          <div className="lbl">Reviewers</div>
           <div className="val">
-            {task.consultants.length ? (
-              <div className="consultants">
-                {task.consultants.map((c, i) => (
-                  <span
-                    className="who-chip"
-                    key={i}
-                    style={{
-                      padding: ".25rem .5rem",
-                      border: "1px solid var(--hairline)",
-                      borderRadius: "999px",
-                    }}
-                  >
-                    <AgentGlyph backend={c.backend} />
-                    <span className="nm" style={{ fontSize: ".8rem" }}>
-                      {c.name} · {c.role}
+            <div className="rev-list">
+              {task.reviewers.length ? (
+                <div className="reviewers">
+                  {task.reviewers.map((c) => (
+                    <span className="reviewer-chip" key={c.profileId}>
+                      <AgentGlyph backend={c.backend} />
+                      <span className="nm">{c.role}</span>
+                      <span className="rc-sub">
+                        {c.backend === "claude" ? "Claude Code" : "Codex"}
+                      </span>
+                      {canRunAgents && (
+                        <>
+                          <button
+                            type="button"
+                            className="rc-run"
+                            disabled={reviewerBusy || runActive}
+                            onClick={() => onRunReviewer(c.profileId)}
+                            title={
+                              runActive
+                                ? "A run is already streaming for this task"
+                                : "Start a run for this reviewer"
+                            }
+                          >
+                            <Icon name="bolt" />
+                            {runActive ? "Running…" : "Run"}
+                          </button>
+                          <button
+                            type="button"
+                            className="rc-x"
+                            disabled={reviewerBusy}
+                            aria-label={`Release ${c.role} reviewer`}
+                            title="Release reviewer"
+                            onClick={() => onRemoveReviewer(c.profileId)}
+                          >
+                            <Icon name="x" />
+                          </button>
+                        </>
+                      )}
                     </span>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <span className="sub">None engaged</span>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <span className="sub">None engaged</span>
+              )}
+              {canRunAgents && (
+                <ReviewerControl
+                  projectSlug={task.projectSlug}
+                  specialists={availableReviewers}
+                  hasAnyDeployed={deployedSpecialists.length > 0}
+                  busy={reviewerBusy}
+                  onAssign={onAssignReviewer}
+                />
+              )}
+            </div>
           </div>
         </div>
         <div className="profile-cell">

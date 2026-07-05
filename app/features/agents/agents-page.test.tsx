@@ -231,7 +231,7 @@ describe("ProfileDetail", () => {
 describe("LiveRoster", () => {
   it("sorts by task key then operator→primary→consultant and renders backends", () => {
     const rows = [
-      mkDeployment({ taskKey: "VIB-2", engagement: "consultant", role: "Reviewer", backend: "claude", status: "anchored · on call" }),
+      mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", role: "Reviewer", backend: "claude", status: "anchored · on call" }),
       mkDeployment({ taskKey: "VIB-1", engagement: "primary", status: "working" }),
       mkDeployment({ taskKey: "VIB-1", engagement: "operator", profileId: "operator", role: "Operator", backend: null, status: "coordinating" }),
     ];

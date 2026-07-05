@@ -21,7 +21,7 @@ export interface CapabilityDef {
 export const CAP_CATALOG: readonly CapabilityDef[] = [
   // Operator coordination
   { id: "assign-primary-specialist", label: "Assign the primary specialist" },
-  { id: "summon-consultants", label: "Summon consultant specialists" },
+  { id: "summon-reviewers", label: "Summon reviewer specialists" },
   { id: "generate-packets", label: "Generate decision & blocking packets" },
   { id: "append-typed-events", label: "Append typed important events" },
   { id: "compress-timelines", label: "Compress long-running timelines" },

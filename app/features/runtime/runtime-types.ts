@@ -22,7 +22,7 @@ export type RunState =
 /** The requested backend — kept for glyph/SDK fidelity even when simulated. */
 export type RunBackend = "claude" | "codex" | "simulated";
 
-export type RunKind = "operator" | "primary" | "consultant";
+export type RunKind = "operator" | "primary" | "reviewer";
 
 /**
  * Projected LogLine — one console row. Mirrors the mock's `cc.*`/`cx.*`

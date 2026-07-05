@@ -160,7 +160,7 @@ const OPERATOR_ACTOR: AuditActor = { userId: null, label: "operator" };
 const DEFAULT_THREAD: Record<RunKind, string> = {
   operator: "op",
   primary: "primary",
-  consultant: "c0",
+  reviewer: "r0",
 };
 
 /**

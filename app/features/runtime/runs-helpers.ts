@@ -41,7 +41,7 @@ export function runLabel(run: RunView): string {
 }
 
 export function roleShort(run: RunView): string {
-  return run.op ? "operator" : run.role === "Primary specialist" ? "primary" : "consultant";
+  return run.op ? "operator" : run.role === "Primary specialist" ? "primary" : "reviewer";
 }
 
 export function fmtClock(s: number): string {

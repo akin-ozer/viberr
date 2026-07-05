@@ -94,7 +94,7 @@ describe("loader — VIB-142 fidelity", () => {
     expect(t.operator?.sinceLabel).toBe("stage 1");
     expect(t.specialist?.backend).toBe("codex");
     expect(t.specialist?.role).toBe("Developer");
-    expect(t.consultants.map((c) => c.role)).toEqual(["Reviewer"]);
+    expect(t.reviewers.map((c) => c.role)).toEqual(["Reviewer"]);
     expect(t.owner?.kind).toBe("human");
 
     // Decision packet: stable option kinds (ruling 7), observations, rec.

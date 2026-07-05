@@ -190,7 +190,7 @@ export function seedRuntimes(
           model: run.model,
           op,
           lines: run.live,
-          // VIB-151/153/145 primaries + consultants stay "running" after
+          // VIB-151/153/145 primaries + reviewers stay "running" after
           // their live batch (they hold the thread open); the mock never
           // ends them. Keep running so the strip stays live for the demo.
           keepRunning: true,

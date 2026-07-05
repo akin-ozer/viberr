@@ -405,7 +405,7 @@ function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
     ...taskFixture("u-arda", "Arda Kaya"),
     projectSlug: "viberr-core",
     specialist: null,
-    consultants: [],
+    reviewers: [],
     operator: null,
     ...patch,
   } as unknown as TaskSummary;
@@ -430,6 +430,10 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         runBusy={false}
         onAssignSpecialist={onAssign}
         onRunSpecialist={onRun}
+        reviewerBusy={false}
+        onAssignReviewer={() => {}}
+        onRunReviewer={() => {}}
+        onRemoveReviewer={() => {}}
         {...props}
       />
     </MemoryRouter>,
@@ -519,5 +523,67 @@ describe("ExecutionProfile — assign menu + run button", () => {
     ).toBe(false);
     // The read-only "None yet …" copy is shown instead.
     expect(container.textContent).toContain("the operator assigns one");
+  });
+});
+
+describe("ExecutionProfile — reviewers", () => {
+  const reviewerTask = () =>
+    execTask({
+      reviewers: [
+        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude Code", role: "Code review" },
+      ],
+    } as unknown as Partial<TaskSummary>);
+
+  it("labels the cell 'Reviewers' and renders a chip with Run + remove", () => {
+    const onRunReviewer = vi.fn();
+    const onRemoveReviewer = vi.fn();
+    const { container } = renderExec(reviewerTask(), { onRunReviewer, onRemoveReviewer });
+    expect(container.textContent).toContain("Reviewers");
+    const chip = container.querySelector(".reviewer-chip")!;
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toContain("Code review");
+    fireEvent.click(chip.querySelector(".rc-run")!);
+    expect(onRunReviewer).toHaveBeenCalledWith("reviewer");
+    fireEvent.click(chip.querySelector(".rc-x")!);
+    expect(onRemoveReviewer).toHaveBeenCalledWith("reviewer");
+  });
+
+  it("'Add reviewer' menu offers specialists not already engaged; picking submits", () => {
+    const onAssignReviewer = vi.fn();
+    // 'reviewer' is already engaged → only 'developer' remains available.
+    const { container } = renderExec(reviewerTask(), { onAssignReviewer });
+    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
+      b.textContent?.includes("Add reviewer"),
+    ) as HTMLButtonElement;
+    expect(addBtn).toBeDefined();
+    fireEvent.click(addBtn);
+    const menu = container.querySelector('[aria-label="Add a reviewer"]')!;
+    const items = menu.querySelectorAll(".menu-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain("Developer");
+    fireEvent.click(items[0]!);
+    expect(onAssignReviewer).toHaveBeenCalledWith("developer");
+  });
+
+  it("reviewer Run buttons are disabled while a run is active", () => {
+    const { container } = renderExec(reviewerTask(), { runActive: true });
+    const runBtn = container.querySelector(".reviewer-chip .rc-run") as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(runBtn.textContent).toContain("Running");
+  });
+
+  it("non-privileged role: chips render read-only (no Run/remove/Add)", () => {
+    const { container } = renderExec(reviewerTask(), {
+      myRole: "reviewer",
+      canRunAgents: false,
+    });
+    expect(container.querySelector(".reviewer-chip")).not.toBeNull();
+    expect(container.querySelector(".reviewer-chip .rc-run")).toBeNull();
+    expect(container.querySelector(".reviewer-chip .rc-x")).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
+        b.textContent?.includes("Add reviewer"),
+      ),
+    ).toBe(false);
   });
 });

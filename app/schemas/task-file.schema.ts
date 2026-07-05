@@ -65,7 +65,7 @@ export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
 
 // ------------------------------------------------------------ sub-shapes
 
-/** Agent reference (specialist/consultants): profile id is the join key
+/** Agent reference (specialist/reviewers): profile id is the join key
  * (ruling: never join by role string). backend+role are display data. */
 export const agentRefSchema = z
   .object({
@@ -161,7 +161,7 @@ export const taskFrontmatterSchema = z.object({
   waiting: z.enum(WAITING_VALUES),
   ownerUserId: z.string().nullable(),
   specialist: agentRefSchema.nullable(),
-  consultants: z.array(agentRefSchema),
+  reviewers: z.array(agentRefSchema),
   operator: operatorRefSchema.nullable(),
   urgent: z.boolean(),
   validation: z.enum(VALIDATION_VALUES),
@@ -183,7 +183,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "waiting",
   "ownerUserId",
   "specialist",
-  "consultants",
+  "reviewers",
   "operator",
   "urgent",
   "validation",
@@ -347,11 +347,13 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.specialist,
       null,
     ),
-    consultants: tolerant(
+    // `reviewers` was formerly `consultants`; read the old key when a
+    // pre-rename task.md hasn't been rewritten yet (back-compat migration).
+    reviewers: tolerant(
       diagnostics,
-      "consultants",
-      data.consultants,
-      taskFrontmatterSchema.shape.consultants,
+      "reviewers",
+      data.reviewers ?? data.consultants,
+      taskFrontmatterSchema.shape.reviewers,
       [],
     ),
     operator: tolerant(
@@ -417,6 +419,9 @@ export function parseTaskFrontmatter(
 
   const unknown: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
+    // `consultants` is the pre-rename alias of `reviewers` — already absorbed
+    // above; don't preserve it as "unknown" or a rewrite would emit both keys.
+    if (k === "consultants") continue;
     if (!(TASK_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
       unknown[k] = v;
     }

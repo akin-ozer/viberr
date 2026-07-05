@@ -373,7 +373,7 @@ describe("governed actions record audit rows (table-driven)", () => {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             role: "R",
-            kind: "consultant", // distinct thread — VIB-1 already has a primary
+            kind: "reviewer", // distinct thread — VIB-1 already has a primary
             backend: "claude",
             model: "m",
             prompt: "go",

@@ -71,7 +71,7 @@ function projectRow(
   const op = row.kind === "operator";
   const backend = row.backend === "simulated" ? "claude" : (row.backend as "claude" | "codex");
   // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
-  // consultant's name) when the run carries an identity; seed/historical rows
+  // reviewer's name) when the run carries an identity; seed/historical rows
   // (null agent_name) fall back to the backend WHO_NAME so nothing regresses.
   const who = op
     ? { kind: "agent" as const, name: row.agent_name ?? "Operator" }
@@ -157,11 +157,11 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
 /**
  * All runs for a task as RunView[], GROUPED to ONE entry per agent (BUG 2):
  * the operator, the primary specialist (across every resume), and any
- * consultant each appear exactly once, labeled by the agent's own name.
+ * reviewer each appears exactly once, labeled by the agent's own name.
  *
  * Grouping preserves the representatives' created_at order (the first group a
  * key appears defines its slot), so a task with an operator + a primary "dev"
- * (with many resume runs) + an optional consultant shows 2–3 named entries.
+ * (with many resume runs) + an optional reviewer shows 2–3 named entries.
  */
 export function projectRunsForTask(
   db: Database.Database,

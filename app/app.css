@@ -709,7 +709,33 @@ h1, h2, h3, h4 {
 }
 .mem-row .ico { width: 15px; height: 15px; color: var(--teal-dark); }
 
-.consultants { display: flex; gap: .4rem; flex-wrap: wrap; }
+/* reviewers cell (execution profile) */
+.rev-list { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.reviewers { display: flex; gap: .4rem; flex-wrap: wrap; }
+.reviewer-chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .25rem .35rem .25rem .5rem;
+  border: 1px solid var(--hairline); border-radius: 999px;
+  background: var(--surface);
+}
+.reviewer-chip .nm { font-size: .8rem; font-weight: 700; color: var(--fg); }
+.reviewer-chip .rc-sub { font-size: .72rem; color: var(--placeholder); }
+.reviewer-chip .rc-run {
+  display: inline-flex; align-items: center; gap: .2rem;
+  font-size: .72rem; font-weight: 700; font-family: var(--font-display);
+  color: var(--agent-dark); background: var(--agent-soft);
+  border: 0; border-radius: 999px; padding: .18rem .5rem; cursor: pointer;
+}
+.reviewer-chip .rc-run:disabled { opacity: .55; cursor: default; }
+.reviewer-chip .rc-run svg { width: 12px; height: 12px; }
+.reviewer-chip .rc-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--placeholder); cursor: pointer;
+}
+.reviewer-chip .rc-x:hover { background: color-mix(in srgb, var(--coral), transparent 85%); color: var(--coral-dark); }
+.reviewer-chip .rc-x:disabled { opacity: .5; cursor: default; }
+.reviewer-chip .rc-x svg { width: 12px; height: 12px; }
 
 /* timeline */
 .tl-filter { display: flex; gap: .35rem; flex-wrap: wrap; }

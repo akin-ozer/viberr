@@ -436,7 +436,7 @@ export function ProfileDetail({
 
 // -------------------------------------------------------------- live tab
 
-const ENGAGEMENT_ORDER = { operator: 0, primary: 1, consultant: 2 } as const;
+const ENGAGEMENT_ORDER = { operator: 0, primary: 1, reviewer: 2 } as const;
 
 export function LiveRoster({
   deployments,

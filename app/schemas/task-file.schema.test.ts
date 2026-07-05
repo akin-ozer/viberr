@@ -13,7 +13,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     waiting: "human",
     ownerUserId: "u_abc",
     specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-    consultants: [],
+    reviewers: [],
     operator: { assignedAtStageId: "triage" },
     urgent: true,
     validation: "changed",
@@ -44,6 +44,36 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       futureField: { nested: [1, 2] },
       xCustom: "keep me",
     });
+  });
+
+  it("reads the pre-rename `consultants` key as `reviewers` (back-compat)", () => {
+    const legacy = {
+      ...valid,
+      reviewers: undefined,
+      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    };
+    delete (legacy as Record<string, unknown>).reviewers;
+    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.reviewers).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+    ]);
+    // The legacy alias is absorbed, NOT preserved as an unknown field (so a
+    // rewrite emits only `reviewers:`, never both keys).
+    expect(result.unknown).toEqual({});
+  });
+
+  it("prefers `reviewers` over a stale `consultants` when both are present", () => {
+    const both = {
+      ...valid,
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
+    };
+    const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
+    expect(result.frontmatter.reviewers).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+    ]);
+    expect(result.unknown).toEqual({});
   });
 
   it("missing required fields → warnings + safe fallbacks, never a throw", () => {

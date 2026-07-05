@@ -29,7 +29,7 @@ export interface TaskProjectionRow {
   validation: Validation;
   owner_user_id: string | null;
   specialist_json: string | null;
-  consultants_json: string;
+  reviewers_json: string;
   operator_json: string | null;
   branch: string | null;
   repo: string | null;
@@ -94,7 +94,7 @@ export interface TaskSummary {
   validation: Validation;
   owner: ActorRender | null;
   specialist: AgentRender | null;
-  consultants: AgentRender[];
+  reviewers: AgentRender[];
   operator: OperatorRender | null;
   branch: string | null;
   repo: string | null;
@@ -163,7 +163,7 @@ export function mapTaskProjectionRow(
   const specialist = row.specialist_json
     ? mapAgentRef(JSON.parse(row.specialist_json) as AgentRef)
     : null;
-  const consultants = (JSON.parse(row.consultants_json) as AgentRef[])
+  const reviewers = (JSON.parse(row.reviewers_json) as AgentRef[])
     .map((c) => mapAgentRef(c))
     .filter((c): c is AgentRender => c !== null);
   const operator = row.operator_json
@@ -185,7 +185,7 @@ export function mapTaskProjectionRow(
     validation: row.validation,
     owner: context.owner,
     specialist,
-    consultants,
+    reviewers,
     operator,
     branch: row.branch,
     repo: row.repo,

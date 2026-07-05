@@ -124,7 +124,7 @@ export function baseTaskFrontmatter(
     waiting: "human",
     ownerUserId: null,
     specialist: null,
-    consultants: [],
+    reviewers: [],
     operator: null,
     urgent: false,
     validation: "none",

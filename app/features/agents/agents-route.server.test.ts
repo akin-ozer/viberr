@@ -127,11 +127,11 @@ describe("loader", () => {
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
       ["developer", "primary", "working"],
-      ["consultant", "consultant", "anchored · on call"],
+      ["consultant", "reviewer", "anchored · on call"],
     ]);
     // Phase-8 seeds VIB-151 with a running claude primary + codex c0.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
-    expect(vib151.find((d) => d.engagement === "consultant")!.running).toBe(true);
+    expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
 
     // Done tasks contribute nothing; triage tasks have no operator.
     expect(data.deployments.some((d) => d.taskKey === "VIB-139")).toBe(false);
