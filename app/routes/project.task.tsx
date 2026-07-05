@@ -29,6 +29,7 @@ import {
   listDeployedSpecialists,
   startSpecialistRun,
 } from "~/server/tasks/specialist-run.server";
+import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
@@ -82,6 +83,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const deployedSpecialists = listDeployedSpecialists(db, params.slug);
   const runActive = hasRunningRun(db, params.slug, params.key);
 
+  // @-mention autocomplete directory for the comment composer: deployed
+  // specialists, registered users, and the reserved backend/role handles —
+  // the same targets the server resolves an @mention to when a comment posts.
+  const mentionables = getMentionables(db, params.slug, params.key);
+
   return {
     task: { ...detail, timeline: slice.events },
     timelineTotal: slice.total,
@@ -92,6 +98,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     runtime,
     deployedSpecialists,
     runActive,
+    mentionables,
   };
 }
 
@@ -314,6 +321,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       members={members}
       me={{ id: layout.user.id, name: layout.user.name }}
       myRole={layout.myRole}
+      mentionables={loaderData.mentionables}
     />
   );
 }

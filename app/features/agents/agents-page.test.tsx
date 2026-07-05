@@ -1,12 +1,76 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  type RenderResult,
+} from "@testing-library/react";
+import { createRoutesStub } from "react-router";
 import type { AgentDeploymentView, AgentProfileView } from "./agent-types";
+import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
-import { CreateProfileModal } from "./create-profile-modal";
+import {
+  CreateProfileModal,
+  type ProfileFormPayload,
+} from "./create-profile-modal";
 import { LiveRoster, ProfileDetail } from "./agents-page";
 
 afterEach(cleanup);
+
+/** Curated-ish catalogs the stub's /resources/model-catalog loader returns. */
+const CLAUDE_CATALOG: ModelCatalog = {
+  models: [
+    { value: "sonnet", displayName: "Claude Sonnet", description: "Balanced.", supportsEffort: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { value: "opus", displayName: "Claude Opus", description: "Most capable.", supportsEffort: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
+  ],
+  efforts: ["low", "medium", "high", "xhigh", "max"],
+  defaultModel: "sonnet",
+  defaultEffort: "high",
+};
+const CODEX_CATALOG: ModelCatalog = {
+  models: [
+    { value: "gpt-5-codex", displayName: "GPT-5 Codex", description: "Coding.", supportsEffort: true, efforts: ["minimal", "low", "medium", "high", "xhigh"] },
+  ],
+  efforts: ["minimal", "low", "medium", "high", "xhigh"],
+  defaultModel: "gpt-5-codex",
+  defaultEffort: "medium",
+};
+
+/** Render CreateProfileModal inside a route stub so its useFetcher for the
+ * model catalog has a data router + a loader to hit. */
+function renderModal(props: {
+  initial: AgentProfileView | null;
+  error?: string | null;
+  onSubmit?: (p: ProfileFormPayload) => void;
+  onClose?: () => void;
+}): RenderResult {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <CreateProfileModal
+          initial={props.initial}
+          stages={STAGES}
+          projectName="Viberr Core"
+          busy={false}
+          error={props.error ?? null}
+          onClose={props.onClose ?? (() => {})}
+          onSubmit={props.onSubmit ?? (() => {})}
+        />
+      ),
+    },
+    {
+      path: "/resources/model-catalog",
+      loader: ({ request }) => {
+        const backend = new URL(request.url).searchParams.get("backend");
+        return { data: backend === "codex" ? CODEX_CATALOG : CLAUDE_CATALOG };
+      },
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
 
 const STAGES = [
   { id: "triage", name: "Triage", color: "#a5a8b5" },
@@ -25,6 +89,7 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     icon: "branch",
     backends: ["codex", "claude"],
     model: "codex-large · claude-sonnet",
+    effort: "",
     scope: "Global base · customized for Viberr Core",
     desc: "Implements stage work on the task-key branch.",
     stages: ["ready", "impl"],
@@ -231,19 +296,12 @@ describe("CapabilityMatrixModal", () => {
 });
 
 describe("CreateProfileModal", () => {
-  it("create mode: validation hint until required fields are set, then submits the payload", () => {
+  it("create mode: validation hint until required fields are set, then submits the payload", async () => {
     const onSubmit = vi.fn();
-    const { container, getByText, getByPlaceholderText } = render(
-      <CreateProfileModal
-        initial={null}
-        stages={STAGES}
-        projectName="Viberr Core"
-        busy={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={onSubmit}
-      />,
-    );
+    const { container, getByText, getByPlaceholderText } = renderModal({
+      initial: null,
+      onSubmit,
+    });
     expect(
       getByText(
         "Name, role, one execution backend, and at least one stage are required.",
@@ -260,6 +318,20 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Ready"));
     expect(getByText("Ready to add to Viberr Core.")).toBeTruthy();
 
+    // The catalog fetch resolves the codex default model + effort.
+    await waitFor(() =>
+      expect(
+        (container.querySelector('select[aria-label="Model"]') as HTMLSelectElement)
+          ?.value,
+      ).toBe("gpt-5-codex"),
+    );
+    await waitFor(() =>
+      expect(
+        (container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement)
+          ?.value,
+      ).toBe("medium"),
+    );
+
     fireEvent.click(getByText("Create profile"));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     const payload = onSubmit.mock.calls[0]![0];
@@ -268,6 +340,8 @@ describe("CreateProfileModal", () => {
       role: "Schema changes",
       backend: "codex",
       stages: ["ready"],
+      model: "gpt-5-codex",
+      effort: "medium",
     });
     // Catalog defaults seed the caps record.
     expect(payload.caps["merge-pull-request"]).toBe("human");
@@ -275,23 +349,51 @@ describe("CreateProfileModal", () => {
     expect(container.querySelector(".cap-matrix")).not.toBeNull();
   });
 
-  it("edit mode: seeds from the profile (id-based) and renders the server error in the foot hint", () => {
-    const { getByText, getByDisplayValue } = render(
-      <CreateProfileModal
-        initial={mkProfile({})}
-        stages={STAGES}
-        projectName="Viberr Core"
-        busy={false}
-        error="Only project admins can change agent capability policy."
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
+  it("shows Model + Effort dropdowns populated from the catalog for the selected backend", async () => {
+    const { container, getByText } = renderModal({ initial: null });
+    // Before a backend is picked the model select is disabled.
+    const modelSel = () =>
+      container.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
+    expect(modelSel().disabled).toBe(true);
+
+    fireEvent.click(getByText("Claude Code"));
+    // The claude catalog loads → sonnet/opus options + high default effort.
+    await waitFor(() => expect(modelSel().value).toBe("sonnet"));
+    const modelValues = Array.from(modelSel().options).map((o) => o.value);
+    expect(modelValues).toEqual(["sonnet", "opus"]);
+    const effortSel = () =>
+      container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement;
+    await waitFor(() => expect(effortSel().value).toBe("high"));
+    expect(Array.from(effortSel().options).map((o) => o.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("edit mode: seeds model + effort from the profile", async () => {
+    const { container, getByText, getByDisplayValue } = renderModal({
+      initial: mkProfile({ backends: ["claude"], model: "opus", effort: "max" }),
+      error: "Only project admins can change agent capability policy.",
+    });
     expect(getByText("Edit Developer")).toBeTruthy();
     expect(getByDisplayValue("Developer")).toBeTruthy();
     expect(getByText("Save changes")).toBeTruthy();
     expect(
       getByText("Only project admins can change agent capability policy."),
     ).toBeTruthy();
+    // Seeded picks survive the catalog load (opus is in the claude catalog).
+    await waitFor(() =>
+      expect(
+        (container.querySelector('select[aria-label="Model"]') as HTMLSelectElement)
+          .value,
+      ).toBe("opus"),
+    );
+    expect(
+      (container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement)
+        .value,
+    ).toBe("max");
   });
 });

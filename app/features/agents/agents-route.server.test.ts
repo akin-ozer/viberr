@@ -200,7 +200,10 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       role: "Schema changes",
       icon: "agents",
       backends: ["codex"],
-      model: "codex-large",
+      // No picked model in FORM → per-backend catalog default (no more the
+      // old invalid hardcoded id).
+      model: "gpt-5-codex",
+      effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],
       source: "project",
@@ -229,6 +232,41 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       projectSlug: "viberr-core",
       actorUserId: ids.arda,
     });
+  });
+
+  it("stores the picked model + effort on the deployment definition", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Reasoner",
+        role: "Deep analysis",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Thinks hard.",
+        model: "opus",
+        effort: "xhigh",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean; profileId: string };
+    expect(result.ok).toBe(true);
+    expect(result.profileId).toBe("reasoner");
+
+    const data = await runLoader(ids.arda);
+    const created = data.profiles.find((p) => p.id === "reasoner")!;
+    expect(created.model).toBe("opus");
+    expect(created.effort).toBe("xhigh");
+
+    // project.md carries the picked model + effort (canonical file truth).
+    const file = readFileSync(
+      path.join(app.dataRoot, "projects/viberr-core/project.md"),
+      "utf8",
+    );
+    expect(file).toContain("model: opus");
+    expect(file).toContain("effort: xhigh");
+
+    // Clean up so later count-sensitive tests are unaffected.
+    await postAction(ids.arda, { intent: "delete-profile", profileId: "reasoner" });
   });
 
   it("a second profile with the same name gets a uniquified id", async () => {

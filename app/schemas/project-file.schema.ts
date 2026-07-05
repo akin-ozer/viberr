@@ -70,9 +70,36 @@ export const capabilityGrantSchema = z
   .loose();
 export type CapabilityGrant = z.infer<typeof capabilityGrantSchema>;
 
+/** Loose per-deployment `definition` override (agents spec §8.1). Every field
+ * is optional — the org template value wins when absent. Kept `.loose()` so
+ * project-created profiles can carry their full definition here without every
+ * field being enumerated. `effort` is the profile's chosen reasoning level,
+ * threaded into a run alongside `model`. */
+export const agentDeploymentDefinitionSchema = z
+  .object({
+    kind: z.enum(["operator", "specialist"]).optional(),
+    name: z.string().optional(),
+    role: z.string().optional(),
+    icon: z.string().optional(),
+    backends: z.array(z.enum(["codex", "claude"])).optional(),
+    model: z.string().optional(),
+    /** Reasoning/effort level the run passes to the SDK. */
+    effort: z.string().optional(),
+    scope: z.string().optional(),
+    desc: z.string().optional(),
+    stages: z.array(z.string()).optional(),
+    spanAll: z.boolean().optional(),
+  })
+  .loose();
+export type AgentDeploymentDefinition = z.infer<
+  typeof agentDeploymentDefinitionSchema
+>;
+
 /** Per-project deployment of an org-level agent profile template.
  * `capabilities` is the id-based policy; `extras` carries bespoke labels
- * that have no catalog id (near-miss strings kept per contracts §7 #7). */
+ * that have no catalog id (near-miss strings kept per contracts §7 #7).
+ * `definition` is the optional loose per-field override (project-created
+ * profiles carry their full definition here). */
 export const agentDeploymentSchema = z
   .object({
     profileId: z.string().min(1),
@@ -84,6 +111,7 @@ export const agentDeploymentSchema = z
           .loose(),
       )
       .default([]),
+    definition: agentDeploymentDefinitionSchema.optional(),
   })
   .loose();
 export type AgentDeployment = z.infer<typeof agentDeploymentSchema>;

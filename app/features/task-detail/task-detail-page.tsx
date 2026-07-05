@@ -16,6 +16,7 @@ import {
 import { ReleaseConfirm } from "./release-confirm";
 import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
+import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
@@ -245,6 +246,7 @@ export function TaskDetailPage({
   members,
   me,
   myRole,
+  mentionables,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -261,6 +263,8 @@ export function TaskDetailPage({
   members: TaskMemberView[];
   me: { id: string; name: string };
   myRole: string | null;
+  /** @-mention autocomplete directory for the comment composer (loader). */
+  mentionables: Mentionables;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [logSel, setLogSel] = useState<string | null>(null);
@@ -441,6 +445,7 @@ export function TaskDetailPage({
           nextLimit={timelineNextLimit}
           tlDefault={tlDefault}
           ask={ask}
+          mentionables={mentionables}
         />
       </div>
 

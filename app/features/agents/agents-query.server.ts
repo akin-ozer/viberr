@@ -31,6 +31,8 @@ export interface AgentDeploymentDefinition {
   icon?: string;
   backends?: ("codex" | "claude")[];
   model?: string;
+  /** Reasoning/effort level the run passes to the SDK. */
+  effort?: string;
   scope?: string;
   desc?: string;
   stages?: string[];
@@ -63,6 +65,7 @@ export function parseDeploymentDefinition(
   );
   if (backends) def.backends = backends;
   if (typeof raw.model === "string") def.model = raw.model;
+  if (typeof raw.effort === "string" && raw.effort) def.effort = raw.effort;
   if (typeof raw.scope === "string") def.scope = raw.scope;
   if (typeof raw.desc === "string") def.desc = raw.desc;
   const stages = stringArray(raw.stages);
@@ -165,6 +168,7 @@ export function effectiveProfileView(
     icon: def?.icon ?? template?.icon ?? "agents",
     backends: def?.backends ?? template?.backends ?? [],
     model: def?.model ?? template?.model ?? "",
+    effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
     desc: def?.desc ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],

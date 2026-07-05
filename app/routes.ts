@@ -26,6 +26,9 @@ export default [
   route("resources/run-log", "routes/resources.run-log.ts"),
   // Ops health probe (Phase 10) — { ok, projections, watcher }.
   route("resources/health", "routes/resources.health.ts"),
+  // Model + effort catalog — the agent create/edit modal fetches this to
+  // populate the model and effort (reasoning) pickers per backend.
+  route("resources/model-catalog", "routes/resources.model-catalog.ts"),
 
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [

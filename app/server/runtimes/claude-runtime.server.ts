@@ -31,6 +31,8 @@ import { projectEnvelope } from "./wire-format.server";
 export interface ClaudeQueryOptions {
   cwd?: string;
   model?: string;
+  /** Reasoning effort: 'low'|'medium'|'high'|'xhigh'|'max' (default high). */
+  effort?: string;
   maxTurns?: number;
   permissionMode?: string;
   resume?: string;
@@ -119,6 +121,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // Only set model when we have a real id/alias; otherwise let the SDK
           // (and the subscription) pick its default.
           ...(resolvedModel ? { model: resolvedModel } : {}),
+          // Pass the profile's chosen reasoning effort when present; otherwise
+          // the SDK uses its default (high).
+          ...(spec.effort ? { effort: spec.effort } : {}),
           // Fully autonomous: bypass ALL permission prompts so a
           // server-spawned run never blocks waiting for approval (there is no
           // human at the CLI). acceptEdits still gated non-edit tools like

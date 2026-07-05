@@ -84,6 +84,8 @@ export interface ResolvedSpecialist {
   role: string;
   backend: RealBackend;
   model: string;
+  /** Reasoning/effort level threaded into the run (empty when unset). */
+  effort: string;
 }
 
 /** First runnable backend for a profile (codex|claude), defaulting to claude
@@ -102,6 +104,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     backend,
     model:
       view.model || (backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5"),
+    effort: view.effort || "",
   };
 }
 
@@ -265,10 +268,15 @@ export async function startSpecialistRun(
     );
   }
   const backend: RealBackend = sp.backend === "codex" ? "codex" : "claude";
-  // Resolve the model from the deployment (falls back to a sane default).
+  // Resolve the model + effort from the deployment (falls back to a sane
+  // default). Effort is threaded into the run so the SDK gets the profile's
+  // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
   let model = backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5";
+  let effort = "";
   try {
-    model = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId).model;
+    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+    model = resolved.model;
+    effort = resolved.effort;
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
@@ -319,6 +327,7 @@ export async function startSpecialistRun(
     kind: "primary",
     backend,
     model,
+    ...(effort ? { effort } : {}),
     prompt,
     script,
     actor: { userId: actor.userId, label: actor.label },

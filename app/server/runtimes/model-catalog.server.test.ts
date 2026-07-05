@@ -1,0 +1,166 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ClaudeQuery, ClaudeQueryFn } from "./claude-runtime.server";
+import {
+  curatedCatalog,
+  getModelCatalog,
+  resetModelCatalogCache,
+  type SdkModelInfo,
+} from "./model-catalog.server";
+
+/**
+ * Catalog tests: curated fallback for both backends (works offline, no
+ * credential), the claude LIVE-fetch path via an injected fake SDK query
+ * (respecting supportsEffort + supportedEffortLevels), the in-process cache,
+ * and graceful degradation to curated on a throwing/empty live fetch.
+ */
+
+afterEach(() => resetModelCatalogCache());
+
+describe("curated catalog", () => {
+  it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", () => {
+    const cat = curatedCatalog("claude");
+    expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+    expect(cat.models.every((m) => m.supportsEffort)).toBe(true);
+    expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(cat.defaultModel).toBe("sonnet");
+    expect(cat.defaultEffort).toBe("high");
+  });
+
+  it("codex curated: a small model list + minimal…xhigh efforts", () => {
+    const cat = curatedCatalog("codex");
+    expect(cat.models.map((m) => m.value)).toContain("gpt-5-codex");
+    expect(cat.efforts).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
+    expect(cat.defaultModel).toBe("gpt-5-codex");
+    expect(cat.defaultEffort).toBe("medium");
+  });
+
+  it("returns fresh copies (callers cannot mutate the shared constant)", () => {
+    const a = curatedCatalog("claude");
+    a.models[0]!.value = "mutated";
+    expect(curatedCatalog("claude").models[0]!.value).toBe("sonnet");
+  });
+});
+
+describe("getModelCatalog", () => {
+  it("codex is curated-only (never calls the SDK)", async () => {
+    const queryFn = vi.fn();
+    const cat = await getModelCatalog("codex", {
+      claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
+      isAvailable: () => true,
+    });
+    expect(cat.defaultModel).toBe("gpt-5-codex");
+    expect(queryFn).not.toHaveBeenCalled();
+  });
+
+  it("claude falls back to curated when the backend is unavailable", async () => {
+    const queryFn = vi.fn();
+    const cat = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
+      isAvailable: () => false,
+    });
+    expect(cat.defaultModel).toBe("sonnet");
+    expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+    expect(queryFn).not.toHaveBeenCalled();
+  });
+
+  it("claude enhances with the LIVE supportedModels() list when available", async () => {
+    const live: SdkModelInfo[] = [
+      {
+        value: "sonnet",
+        displayName: "Claude Sonnet (live)",
+        description: "live sonnet",
+        supportsEffort: true,
+        supportedEffortLevels: ["low", "high", "max"],
+      },
+      {
+        value: "haiku-lite",
+        displayName: "Haiku Lite",
+        description: "no effort",
+        supportsEffort: false,
+      },
+    ];
+    const queryFn = makeFakeQuery(live);
+    const cat = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "haiku-lite"]);
+    // Effort levels are taken per-model from supportedEffortLevels.
+    expect(cat.models[0]).toMatchObject({
+      value: "sonnet",
+      displayName: "Claude Sonnet (live)",
+      supportsEffort: true,
+      efforts: ["low", "high", "max"],
+    });
+    // A non-effort model carries no efforts list.
+    expect(cat.models[1]!.supportsEffort).toBe(false);
+    expect(cat.models[1]!.efforts).toBeUndefined();
+    // Curated default anchors the default selection.
+    expect(cat.defaultModel).toBe("sonnet");
+    expect(cat.defaultEffort).toBe("high");
+  });
+
+  it("caches the live result (a second call does not re-query)", async () => {
+    const live: SdkModelInfo[] = [
+      { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
+    ];
+    let calls = 0;
+    const queryFn = ((_params: unknown) => {
+      calls += 1;
+      return fakeQueryObject(live);
+    }) as unknown as ClaudeQueryFn;
+
+    const first = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    const second = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(first.models.map((m) => m.value)).toEqual(["sonnet"]);
+    expect(second.models.map((m) => m.value)).toEqual(["sonnet"]);
+    expect(calls).toBe(1); // second served from cache
+  });
+
+  it("falls back to curated when the live fetch throws", async () => {
+    const queryFn = (() => {
+      const q = {
+        supportedModels: async () => {
+          throw new Error("network down");
+        },
+        interrupt: async () => {},
+      };
+      return q as unknown as ClaudeQuery;
+    }) as unknown as ClaudeQueryFn;
+    const cat = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+  });
+
+  it("falls back to curated when the live list is empty", async () => {
+    const queryFn = makeFakeQuery([]);
+    const cat = await getModelCatalog("claude", {
+      claudeQueryFn: queryFn,
+      isAvailable: () => true,
+    });
+    expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+  });
+});
+
+// -------------------------------------------------------------- test helpers
+
+/** A fake query object exposing supportedModels()/interrupt() (never iterated). */
+function fakeQueryObject(models: SdkModelInfo[]): ClaudeQuery {
+  const q = {
+    supportedModels: async () => models,
+    interrupt: async () => {},
+  };
+  return q as unknown as ClaudeQuery;
+}
+
+function makeFakeQuery(models: SdkModelInfo[]): ClaudeQueryFn {
+  return (() => fakeQueryObject(models)) as unknown as ClaudeQueryFn;
+}

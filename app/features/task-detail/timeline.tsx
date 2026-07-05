@@ -8,6 +8,9 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useToast } from "~/ui/toast";
 import { eventMeta, typedKind } from "./event-meta";
+import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import { MentionMenu } from "./mention-menu";
+import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
 /**
  * Unified timeline — 1:1 port of Timeline/TimelineItem (task.jsx §4.6/§4.7):
@@ -113,6 +116,7 @@ export function Timeline({
   nextLimit,
   tlDefault,
   ask,
+  mentionables,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -122,10 +126,13 @@ export function Timeline({
   tlDefault: TimelineFilterId;
   /** "Ask operator" counter — each bump prefills + focuses the composer. */
   ask: number;
+  /** @-mention autocomplete directory (loader) — agents/users/reserved. */
+  mentionables: Mentionables;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{ ok: boolean; toast?: string; error?: string }>();
@@ -212,15 +219,41 @@ export function Timeline({
 
       <div className="composer">
         <div className="composer-box">
-          <textarea
-            ref={taRef}
-            placeholder="Add a comment… type @ to tag the operator, an agent, or a teammate"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
-            }}
-          />
+          <div style={{ position: "relative" }}>
+            <textarea
+              ref={taRef}
+              placeholder="Add a comment… type @ to tag the operator, an agent, or a teammate"
+              value={draft}
+              role="combobox"
+              aria-expanded={mentions.open}
+              aria-controls={mentions.open ? mentions.listId : undefined}
+              aria-autocomplete="list"
+              aria-activedescendant={mentions.activeId}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                // Recompute after React applies the value (caret is settled).
+                requestAnimationFrame(mentions.refresh);
+              }}
+              onKeyUp={mentions.refresh}
+              onClick={mentions.refresh}
+              onSelect={mentions.refresh}
+              onBlur={mentions.close}
+              onKeyDown={(e) => {
+                // The autocomplete claims navigation/selection keys while open;
+                // ⌘/Ctrl+Enter always falls through to send.
+                if (mentions.onKeyDown(e)) return;
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
+              }}
+            />
+            <MentionMenu
+              id={mentions.listId}
+              items={mentions.open ? mentions.items : []}
+              active={mentions.active}
+              query={mentions.query}
+              onPick={mentions.pick}
+              onHover={mentions.setActive}
+            />
+          </div>
           <div className="composer-foot">
             <span style={{ fontSize: ".72rem", color: "var(--placeholder)" }}>
               Open to every registered user · @mentions route to agents

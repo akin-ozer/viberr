@@ -43,6 +43,8 @@ export interface AgentProfileView {
   icon: string;
   backends: ("codex" | "claude")[];
   model: string;
+  /** Reasoning/effort level ("" when unset) — the picker's stored effort. */
+  effort: string;
   scope: string;
   desc: string;
   stages: string[];

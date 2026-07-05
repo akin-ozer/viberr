@@ -16,6 +16,8 @@ import { getRun, listRunLines } from "./run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { SimulatedScript } from "./simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import type { RunSpec, RuntimeAdapter } from "./adapter.server";
+import type { AdapterSet } from "./runtime-registry.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -136,6 +138,37 @@ describe("run-service lifecycle (simulated)", () => {
     const tail = getRunLog(store.db, runId, 0)!;
     expect(tail.lines.map((l) => l.display.text)).toEqual(["b", "c"]);
     expect(tail.headSeq).toBe(2);
+  });
+
+  it("forwards input.effort onto the RunSpec handed to the adapter", async () => {
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "simulated", simulated: true, sessionId: null });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    const adapters: AdapterSet = { claude: capture, codex: capture, simulated: capture };
+    configureRunServiceForTests(adapters);
+
+    await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", effort: "xhigh", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[0]?.effort).toBe("xhigh");
+    expect(specs[0]?.model).toBe("sonnet");
+
+    // Omitting effort leaves spec.effort undefined (SDK default applies).
+    await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t2", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[1]?.effort).toBeUndefined();
   });
 });
 

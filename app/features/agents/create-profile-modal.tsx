@@ -1,4 +1,6 @@
-import { useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useFetcher } from "react-router";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
@@ -31,6 +33,9 @@ export interface ProfileFormPayload {
   backend: "codex" | "claude";
   stages: string[];
   definition: string;
+  /** Picked model id/alias + reasoning effort (from the model catalog). */
+  model: string;
+  effort: string;
   caps: Record<string, CapMode>;
   resources: ResourceSelection;
 }
@@ -39,6 +44,49 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude Code" },
 ];
+
+/** Client mirror of the /resources/model-catalog payload shape. */
+interface CatalogModel {
+  value: string;
+  displayName: string;
+  description: string;
+  supportsEffort: boolean;
+  efforts?: string[];
+}
+interface ModelCatalog {
+  models: CatalogModel[];
+  efforts: string[];
+  defaultModel: string;
+  defaultEffort: string;
+}
+
+const EFFORT_LABEL: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
+};
+
+function effortLabel(id: string): string {
+  return EFFORT_LABEL[id] ?? id;
+}
+
+/** Inline styling mirroring `.field input` (app.css) — the design system has
+ * no `<select>` rule and this feature may not edit app.css, so the dropdowns
+ * match the modal's other fields via matching tokens here. */
+const selectStyle: CSSProperties = {
+  width: "100%",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-button)",
+  padding: ".55rem .7rem",
+  background: "var(--surface)",
+  color: "var(--fg)",
+  fontFamily: "var(--font-body)",
+  fontSize: ".9rem",
+  outline: 0,
+};
 
 function seedCaps(initial: AgentProfileView | null): Record<string, CapMode> {
   if (!initial) return { ...CAP_MODAL_DEFAULTS };
@@ -78,6 +126,11 @@ export function CreateProfileModal({
     initial ? (initial.backends[0] ?? "") : "",
   );
   const [definition, setDefinition] = useState(initial ? initial.desc : "");
+  // Model + effort picks (seeded from the profile in edit mode). The catalog
+  // (fetched below) supplies the option lists + defaults; a seeded value that
+  // is not in the catalog is still preserved and rendered.
+  const [model, setModel] = useState(initial ? initial.model : "");
+  const [effort, setEffort] = useState(initial ? initial.effort : "");
   const [caps, setCaps] = useState<Record<string, CapMode>>(() =>
     seedCaps(initial),
   );
@@ -115,6 +168,41 @@ export function CreateProfileModal({
 
   const valid = Boolean(name.trim() && role.trim() && backend && stg.length);
 
+  // Model + effort catalog — fetched from /resources/model-catalog whenever a
+  // backend is selected (open in edit mode, or the backend radio changes in
+  // create mode). The endpoint returns the curated fallback even with no
+  // credential, so the pickers always populate.
+  const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
+  useEffect(() => {
+    if (!backend) return;
+    catalogFetcher.load(`/resources/model-catalog?backend=${backend}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend]);
+  const catalog = catalogFetcher.data?.data ?? null;
+  const catalogLoading = catalogFetcher.state === "loading";
+
+  // Default the picks to the catalog defaults once it loads and no pick is set
+  // (create mode, or a backend switch that invalidated the prior model).
+  useEffect(() => {
+    if (!catalog) return;
+    const known = catalog.models.some((m) => m.value === model);
+    if (!model || !known) setModel(catalog.defaultModel);
+    if (!effort) setEffort(catalog.defaultEffort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog]);
+
+  // Effort options come from the selected model (when it constrains them),
+  // else the backend-wide list. Hidden entirely when the model has no effort.
+  const selectedModel = useMemo(
+    () => catalog?.models.find((m) => m.value === model) ?? null,
+    [catalog, model],
+  );
+  const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
+  const effortOptions =
+    selectedModel?.efforts && selectedModel.efforts.length
+      ? selectedModel.efforts
+      : (catalog?.efforts ?? []);
+
   const submit = () => {
     if (!valid || busy) return;
     onSubmit({
@@ -123,6 +211,8 @@ export function CreateProfileModal({
       backend: backend as "codex" | "claude",
       stages: [...stg],
       definition,
+      model: model.trim(),
+      effort: showEffort ? effort.trim() : "",
       caps,
       resources: res,
     });
@@ -208,6 +298,70 @@ export function CreateProfileModal({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label className="flabel">
+                Model
+                <span className="fhint">
+                  {catalogLoading
+                    ? "loading available models…"
+                    : "the model this profile runs on"}
+                </span>
+              </label>
+              <select
+                aria-label="Model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                disabled={!backend || catalogLoading}
+                style={selectStyle}
+              >
+                {!backend && <option value="">Pick a backend first</option>}
+                {/* Preserve a seeded value that is not in the catalog. */}
+                {backend &&
+                  model &&
+                  catalog &&
+                  !catalog.models.some((m) => m.value === model) && (
+                    <option value={model}>{model}</option>
+                  )}
+                {(catalog?.models ?? []).map((m) => (
+                  <option key={m.value} value={m.value} title={m.description}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+              {selectedModel?.description && (
+                <span className="fhint" style={{ marginLeft: 0 }}>
+                  {selectedModel.description}
+                </span>
+              )}
+            </div>
+            {showEffort && (
+              <div className="field">
+                <label className="flabel">
+                  Effort
+                  <span className="fhint">reasoning level per turn</span>
+                </label>
+                <select
+                  aria-label="Effort"
+                  value={effort}
+                  onChange={(e) => setEffort(e.target.value)}
+                  disabled={!backend || catalogLoading}
+                  style={selectStyle}
+                >
+                  {!backend && <option value="">—</option>}
+                  {effort && !effortOptions.includes(effort) && (
+                    <option value={effort}>{effortLabel(effort)}</option>
+                  )}
+                  {effortOptions.map((e) => (
+                    <option key={e} value={e}>
+                      {effortLabel(e)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="field">

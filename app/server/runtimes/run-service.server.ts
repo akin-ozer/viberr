@@ -131,6 +131,9 @@ export interface StartRunInput {
   kind: RunKind;
   backend: RealBackend;
   model: string;
+  /** Reasoning/effort level (claude options.effort · codex
+   *  modelReasoningEffort). Optional — the SDK default applies when absent. */
+  effort?: string;
   prompt: string;
   /** Optional scripted stream (simulated backend / seed resumer). */
   script?: SimulatedScript;
@@ -215,6 +218,7 @@ export async function startRun(
     kind: input.kind,
     backend: input.backend,
     model: input.model,
+    ...(input.effort ? { effort: input.effort } : {}),
     prompt: input.prompt,
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,

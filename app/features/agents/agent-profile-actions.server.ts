@@ -44,12 +44,30 @@ export interface ProfileMutationContext {
 
 const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 
+/** Per-backend fallbacks when the form omits a picked model/effort (older
+ * client, or a create before the catalog loads). These match the model
+ * catalog's curated defaults so a real run has a VALID model id — the old
+ * hardcoded "claude-sonnet" was invalid ("model may not exist"). */
+const DEFAULT_MODEL: Record<"claude" | "codex", string> = {
+  claude: "sonnet",
+  codex: "gpt-5-codex",
+};
+const DEFAULT_EFFORT: Record<"claude" | "codex", string> = {
+  claude: "high",
+  codex: "medium",
+};
+
 export const profileFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   role: z.string().trim().min(1, "Role is required."),
   backend: z.enum(["codex", "claude"]),
   stages: z.array(z.string().min(1)).min(1, "At least one stage is required."),
   definition: z.string().default(""),
+  /** Picked model id/alias (from the model catalog) + reasoning effort.
+   * Defaulted so older clients that omit them still parse; the actions apply
+   * a per-backend fallback when the string is empty. */
+  model: z.string().default(""),
+  effort: z.string().default(""),
   caps: z.record(z.string(), modeSchema).default({}),
   resources: z
     .object({
@@ -172,7 +190,11 @@ export async function createAgentProfile(
       role: form.role,
       icon: "agents",
       backends: [form.backend],
-      model: form.backend === "claude" ? "claude-sonnet" : "codex-large",
+      // Store the picked model + effort (from the catalog picker). No more
+      // hardcoded invalid "claude-sonnet" — fall back per-backend only when
+      // the form omits a pick.
+      model: form.model.trim() || DEFAULT_MODEL[form.backend],
+      effort: form.effort.trim() || DEFAULT_EFFORT[form.backend],
       scope: `Created in ${parsed.frontmatter.name}`,
       desc:
         form.definition.trim() ||
@@ -244,11 +266,16 @@ export async function updateAgentProfile(
       role: form.role,
       icon: current.icon,
       backends: [form.backend],
+      // The operator keeps its own runtime label; specialists store the
+      // picked model + effort (falling back per-backend when omitted).
       model: isOperator
         ? current.model
-        : form.backend === "claude"
-          ? "claude-sonnet"
-          : "codex-large",
+        : form.model.trim() || DEFAULT_MODEL[form.backend],
+      ...(isOperator
+        ? current.effort
+          ? { effort: current.effort }
+          : {}
+        : { effort: form.effort.trim() || DEFAULT_EFFORT[form.backend] }),
       scope: current.scope,
       desc:
         form.definition.trim() ||

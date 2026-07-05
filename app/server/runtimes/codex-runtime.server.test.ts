@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import { createCodexAdapter, type CodexClient, type CodexThread } from "./codex-runtime.server";
 
-/** A fake Codex client: yields the given ThreadEvents, honors abort signal. */
-function fakeCodex(events: unknown[]): { factory: () => CodexClient } {
+/** A fake Codex client: yields the given ThreadEvents, honors abort signal,
+ *  and records the options passed to startThread. */
+function fakeCodex(events: unknown[]): {
+  factory: () => CodexClient;
+  startOptions: () => Record<string, unknown> | undefined;
+} {
+  let startOpts: Record<string, unknown> | undefined;
   const makeThread = (): CodexThread => ({
     id: "0199a1f3-4c02-7d31",
     async runStreamed(_input, turnOptions) {
@@ -20,10 +25,13 @@ function fakeCodex(events: unknown[]): { factory: () => CodexClient } {
     },
   });
   const client: CodexClient = {
-    startThread: () => makeThread(),
+    startThread: (opts) => {
+      startOpts = opts as Record<string, unknown> | undefined;
+      return makeThread();
+    },
     resumeThread: () => makeThread(),
   };
-  return { factory: () => client };
+  return { factory: () => client, startOptions: () => startOpts };
 }
 
 const SPEC: RunSpec = {
@@ -63,6 +71,31 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(JSON.parse(lines[0]!.raw).type).toBe("thread.started");
     expect(lines[0]!.facts.sessionId).toBe("0199abc");
     expect(exit).toMatchObject({ outcome: "finished", simulated: false, effectiveBackend: "codex" });
+  });
+
+  it("threads spec.effort into startThread modelReasoningEffort (omits when absent)", async () => {
+    const events = [
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+
+    const withEffort = fakeCodex(events);
+    createCodexAdapter({ codexFactory: withEffort.factory }).start(
+      { ...SPEC, effort: "high" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(withEffort.startOptions()).toMatchObject({
+      model: "gpt-5.4-codex",
+      modelReasoningEffort: "high",
+    });
+
+    const noEffort = fakeCodex(events);
+    createCodexAdapter({ codexFactory: noEffort.factory }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    expect(noEffort.startOptions()?.modelReasoningEffort).toBeUndefined();
   });
 
   it("errors on turn.failed", async () => {

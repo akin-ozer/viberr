@@ -41,6 +41,8 @@ export interface CodexThread {
 export interface CodexClient {
   startThread(options?: {
     model?: string;
+    /** 'minimal'|'low'|'medium'|'high'|'xhigh'. */
+    modelReasoningEffort?: string;
     sandboxMode?: string;
     workingDirectory?: string;
     skipGitRepoCheck?: boolean;
@@ -101,6 +103,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
             })
           : codex.startThread({
               model: spec.model,
+              // Pass the profile's chosen reasoning effort when present.
+              ...(spec.effort ? { modelReasoningEffort: spec.effort } : {}),
               sandboxMode,
               workingDirectory: spec.workdir,
               skipGitRepoCheck: true,

@@ -23,6 +23,9 @@ export interface RunSpec {
   /** The requested backend — kept for glyph fidelity even on fallback. */
   backend: "claude" | "codex";
   model: string;
+  /** Reasoning/effort level for the run (claude: options.effort · codex:
+   *  modelReasoningEffort). Optional — the SDK uses its default when absent. */
+  effort?: string;
   /** The instruction. */
   prompt: string;
   /** Absolute working directory for the spawned CLI. */

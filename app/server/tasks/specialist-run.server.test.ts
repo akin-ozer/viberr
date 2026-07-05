@@ -17,6 +17,7 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   assignSpecialist,
   listDeployedSpecialists,
+  resolveDeployedSpecialist,
   startSpecialistRun,
 } from "./specialist-run.server";
 
@@ -70,7 +71,8 @@ function deployDevSpecialist(): void {
           name: "dev",
           role: "developer",
           backends: ["claude"],
-          model: "claude-sonnet",
+          model: "sonnet",
+          effort: "xhigh",
         },
       } as never,
     ],
@@ -112,6 +114,22 @@ describe("listDeployedSpecialists", () => {
       name: "dev",
       role: "developer",
       backend: "claude",
+    });
+  });
+});
+
+describe("resolveDeployedSpecialist", () => {
+  it("resolves the picked model + effort from the deployment definition", () => {
+    const resolved = resolveDeployedSpecialist(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "dev",
+    );
+    expect(resolved).toMatchObject({
+      profileId: "dev",
+      backend: "claude",
+      model: "sonnet",
+      effort: "xhigh",
     });
   });
 });

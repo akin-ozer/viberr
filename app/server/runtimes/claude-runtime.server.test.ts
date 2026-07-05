@@ -103,6 +103,35 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "error" });
   });
 
+  it("threads spec.effort into options.effort (and omits it when absent)", async () => {
+    const result = [
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
+    ];
+    let captured: { model?: string; effort?: string } | undefined;
+    const queryFn = (params: { options?: { model?: string; effort?: string } }) => {
+      captured = params.options;
+      const { q } = fakeQuery(result);
+      return q;
+    };
+
+    // With effort set.
+    createClaudeAdapter({ queryFn: queryFn as never }).start(
+      { ...SPEC, model: "sonnet", effort: "xhigh" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(captured?.effort).toBe("xhigh");
+    expect(captured?.model).toBe("sonnet");
+
+    // Without effort → options.effort is absent (SDK default applies).
+    createClaudeAdapter({ queryFn: queryFn as never }).start(
+      { ...SPEC, model: "sonnet" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(captured?.effort).toBeUndefined();
+  });
+
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ type: "assistant", message: { content: [{ type: "text", text: "line " + i }] } }));
     const { q, wasInterrupted } = fakeQuery(many);
