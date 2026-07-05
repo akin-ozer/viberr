@@ -92,6 +92,15 @@ describe("Markdown", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 
+  it("chips a KNOWN multi-word name as one .mention span", () => {
+    const { container } = render(
+      <Markdown text={"thanks @Arda Kaya for the review"} mentionNames={["Arda Kaya"]} />,
+    );
+    const chips = [...container.querySelectorAll("span.mention")].map((n) => n.textContent);
+    expect(chips).toEqual(["@Arda Kaya"]); // the whole name, not just "@Arda"
+    expect(container.textContent).toContain("for the review");
+  });
+
   it("re-chips @mentions inside comment text as .mention spans", () => {
     // Regression: switching comments from RichText to GFM dropped the chip.
     const { container } = render(

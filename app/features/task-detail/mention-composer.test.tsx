@@ -106,8 +106,9 @@ describe("comment composer @-mention autocomplete", () => {
     expect(before).toHaveLength(1);
     fireEvent.keyDown(ta, { key: "ArrowDown" });
     fireEvent.keyDown(ta, { key: "Enter" });
-    // Something was inserted (an @handle followed by a space).
-    await waitFor(() => expect(/^@[\w-]+ $/.test(ta.value)).toBe(true));
+    // Something was inserted: an @mention (a display name, which may contain
+    // spaces like "@Arda Kaya") followed by a trailing space.
+    await waitFor(() => expect(/^@.+ $/.test(ta.value)).toBe(true));
   });
 
   it("Arrow navigation survives the caret keyUp refresh (no snap back to top)", async () => {

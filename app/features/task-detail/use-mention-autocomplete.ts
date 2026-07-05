@@ -104,7 +104,9 @@ export function useMentionAutocomplete(
   const pick = useCallback(
     (s: MentionSuggestion) => {
       if (!token) return;
-      const { text, caret } = insertMention(value, token, s.handle);
+      // Insert the display NAME (not the lowercased handle) so the mention
+      // reads with the real name and highlights as one chip.
+      const { text, caret } = insertMention(value, token, s.name);
       setValue(text);
       close();
       // Restore focus + caret after the controlled re-render.

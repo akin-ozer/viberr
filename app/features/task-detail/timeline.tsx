@@ -12,6 +12,7 @@ import { formatDayDotTime } from "~/shared/dates/format";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
+import { findMentionSpans } from "~/ui/mention-spans";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useToast } from "~/ui/toast";
@@ -41,34 +42,41 @@ const TL_FILTERS = [
   { id: "comment", label: "Comments" },
 ] as const;
 
-// Same @handle grammar the server + rendered comments use.
-const COMPOSER_MENTION_RE = /@[A-Za-z][\w-]*/g;
-
 /**
- * Render the composer draft with `@mention` tokens wrapped in `.mention` for
- * the highlight backdrop behind the textarea. Text between mentions is plain
- * (the backdrop mirrors the textarea character-for-character; only the mention
- * spans are styled — and with NO layout-affecting padding, so the backdrop
- * stays pixel-aligned with the transparent textarea text on top). The trailing
- * "\n" keeps the box height in sync when the draft ends on a newline.
+ * Render the composer draft with `@mention` spans wrapped in `.mention` for the
+ * highlight backdrop behind the textarea. Mentions are matched by the shared
+ * span-finder against the known mentionable NAMES (so a multi-word "@Arda Kaya"
+ * highlights as one chip), falling back to the `@word` token. Text between
+ * mentions is plain — the backdrop mirrors the textarea character-for-character
+ * (mention spans carry NO layout-affecting padding), so it stays pixel-aligned
+ * with the transparent textarea text on top. The trailing "\n" keeps the box
+ * height in sync when the draft ends on a newline.
  */
-function highlightDraft(text: string): ReactNode {
+function highlightDraft(text: string, names: string[]): ReactNode {
+  const spans = findMentionSpans(text, names);
   const parts: ReactNode[] = [];
   let last = 0;
   let key = 0;
-  COMPOSER_MENTION_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = COMPOSER_MENTION_RE.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
+  for (const { start, end } of spans) {
+    if (start > last) parts.push(text.slice(last, start));
     parts.push(
       <span className="mention" key={key++}>
-        {m[0]}
+        {text.slice(start, end)}
       </span>,
     );
-    last = m.index + m[0].length;
+    last = end;
   }
   parts.push(text.slice(last) + "\n");
   return <Fragment>{parts}</Fragment>;
+}
+
+/** All mentionable display strings, for whole-name highlight matching. */
+function mentionNamesOf(m: Mentionables): string[] {
+  return [
+    ...m.agents.map((a) => a.name),
+    ...m.users.map((u) => u.name),
+    ...m.reserved.map((r) => r.handle),
+  ];
 }
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
@@ -85,7 +93,13 @@ const COLLAPSE_MAX = 340;
  * SSR-safe: starts un-clamped (matches the server render), then the effect
  * measures on the client and clamps.
  */
-function CollapsibleComment({ text }: { text: string }) {
+function CollapsibleComment({
+  text,
+  mentionNames,
+}: {
+  text: string;
+  mentionNames?: string[];
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -111,7 +125,7 @@ function CollapsibleComment({ text }: { text: string }) {
         className={"tl-text md-body" + (clamped ? " clamped" : "")}
         style={clamped ? { maxHeight: COLLAPSE_MAX } : undefined}
       >
-        <Markdown text={text} />
+        <Markdown text={text} mentionNames={mentionNames} />
       </div>
       {overflowing && (
         <button
@@ -128,7 +142,14 @@ function CollapsibleComment({ text }: { text: string }) {
   );
 }
 
-export function TimelineItem({ ev }: { ev: TimelineEventRender }) {
+export function TimelineItem({
+  ev,
+  mentionNames = [],
+}: {
+  ev: TimelineEventRender;
+  /** Known mentionable names, for whole-name highlight in comment bodies. */
+  mentionNames?: string[];
+}) {
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
@@ -172,7 +193,7 @@ export function TimelineItem({ ev }: { ev: TimelineEventRender }) {
                 markdown — render with the GFM renderer, not the inline-only
                 RichText. Long replies clamp behind a Show more toggle so one
                 answer can't swallow the timeline. Typed events stay on RichText. */}
-            <CollapsibleComment text={ev.text} />
+            <CollapsibleComment text={ev.text} mentionNames={mentionNames} />
           </div>
         ) : (
           <>
@@ -233,6 +254,9 @@ export function Timeline({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const hlRef = useRef<HTMLDivElement>(null);
   const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
+  // Known mentionable names — drives whole-name @mention highlighting in the
+  // composer backdrop and in rendered comment bodies.
+  const mentionNames = useMemo(() => mentionNamesOf(mentionables), [mentionables]);
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{
@@ -332,7 +356,7 @@ export function Timeline({
                 sitting behind the transparent-text textarea so mentions light
                 up live as you type — matching the posted comment. */}
             <div className="composer-hl" aria-hidden="true" ref={hlRef}>
-              {highlightDraft(draft)}
+              {highlightDraft(draft, mentionNames)}
             </div>
             <textarea
               ref={taRef}
@@ -413,7 +437,9 @@ export function Timeline({
             No activity yet — this task hasn't started its operator loop.
           </div>
         ) : (
-          items.map((ev) => <TimelineItem key={ev.id} ev={ev} />)
+          items.map((ev) => (
+            <TimelineItem key={ev.id} ev={ev} mentionNames={mentionNames} />
+          ))
         )}
         {hasMore && (
           <button

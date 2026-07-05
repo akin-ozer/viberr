@@ -176,16 +176,19 @@ export interface InsertResult {
 }
 
 /**
- * Replace the active token `[start, end)` with `@handle ` (trailing space so
- * the next word starts fresh, and so the finished handle is no longer an
- * active token). Returns the new text + caret.
+ * Replace the active token `[start, end)` with `@<mention> ` (trailing space so
+ * the next word starts fresh). `mention` is the DISPLAY name the user picked
+ * (e.g. "Arda Kaya", "dev", "operator"), not the lowercased handle — so the
+ * comment reads with the real name and highlights as one chip. The server still
+ * routes it (users by first-name / email local-part; agents by name). Returns
+ * the new text + caret.
  */
 export function insertMention(
   text: string,
   token: MentionToken,
-  handle: string,
+  mention: string,
 ): InsertResult {
-  const insert = `@${handle} `;
+  const insert = `@${mention} `;
   const next = text.slice(0, token.start) + insert + text.slice(token.end);
   return { text: next, caret: token.start + insert.length };
 }

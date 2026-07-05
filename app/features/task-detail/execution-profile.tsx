@@ -409,6 +409,12 @@ export function ExecutionProfile({
   const availableReviewers = deployedSpecialists.filter(
     (s) => !task.reviewers.some((r) => r.profileId === s.id),
   );
+  // Resolve an agent's display NAME by profile id. The AgentRef stored on the
+  // task carries only profileId/backend/role (its `name` is the backend label),
+  // so the real name comes from the deployed profile; fall back to `role` when
+  // the agent is no longer deployed.
+  const agentNameOf = (profileId: string, fallback: string) =>
+    deployedSpecialists.find((s) => s.id === profileId)?.name ?? fallback;
   const sp = task.specialist;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
@@ -447,7 +453,7 @@ export function ExecutionProfile({
               <>
                 <AgentGlyph backend={sp.backend} />
                 <span>
-                  <div className="nm">{sp.name}</div>
+                  <div className="nm">{agentNameOf(sp.profileId, sp.role)}</div>
                   <div className="sub">
                     {sp.role} · {sp.backend === "claude" ? "Claude Code" : "Codex"}
                   </div>
@@ -499,9 +505,9 @@ export function ExecutionProfile({
                   {task.reviewers.map((c) => (
                     <span className="reviewer-chip" key={c.profileId}>
                       <AgentGlyph backend={c.backend} />
-                      <span className="nm">{c.role}</span>
+                      <span className="nm">{agentNameOf(c.profileId, c.role)}</span>
                       <span className="rc-sub">
-                        {c.backend === "claude" ? "Claude Code" : "Codex"}
+                        {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
                       </span>
                       {canRunAgents && (
                         <>

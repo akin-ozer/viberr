@@ -1,6 +1,7 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { findMentionSpans } from "./mention-spans";
 
 /**
  * Real GFM markdown renderer for MULTI-LINE comment content (agent replies AND
@@ -30,10 +31,6 @@ import remarkGfm from "remark-gfm";
  * flows through react-markdown untouched.
  */
 
-// Mirrors the server's MENTION_RE (mention-suggestions) and RichText: a letter
-// start, then word chars / hyphens. Non-global here — we exec-loop our own.
-const MENTION_RE = /@[A-Za-z][\w-]*/g;
-
 // Minimal hast node shapes we touch (react-markdown's tree post mdast→hast).
 interface HastText {
   type: "text";
@@ -48,35 +45,35 @@ interface HastElement {
 type HastNode = HastText | HastElement | { type: string; children?: HastNode[] };
 
 /**
- * Split a text value into text nodes + `.mention` span elements. Returns null
- * when the value has no mention at all — the caller then leaves the node as-is.
- * (A returned array of length 1 is legitimate: a text node that is ENTIRELY a
- * mention, e.g. a table cell `@codex`, chips to a single span.)
+ * Split a text value into text nodes + `.mention` span elements, using the
+ * shared span-finder so a KNOWN multi-word name ("@Arda Kaya") chips as one
+ * span (falling back to the `@word` token). Returns null when the value has no
+ * mention at all — the caller then leaves the node as-is. (A returned array of
+ * length 1 is legitimate: a text node that is ENTIRELY a mention chips to a
+ * single span.)
  */
-function chipMentions(value: string): HastNode[] | null {
+function chipMentions(value: string, names: string[]): HastNode[] | null {
+  const spans = findMentionSpans(value, names);
+  if (spans.length === 0) return null;
   const out: HastNode[] = [];
   let last = 0;
-  let found = false;
-  MENTION_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = MENTION_RE.exec(value))) {
-    found = true;
-    if (m.index > last) out.push({ type: "text", value: value.slice(last, m.index) });
+  for (const { start, end } of spans) {
+    if (start > last) out.push({ type: "text", value: value.slice(last, start) });
     out.push({
       type: "element",
       tagName: "span",
       properties: { className: ["mention"] },
-      children: [{ type: "text", value: m[0] }],
+      children: [{ type: "text", value: value.slice(start, end) }],
     });
-    last = m.index + m[0].length;
+    last = end;
   }
-  if (!found) return null;
   if (last < value.length) out.push({ type: "text", value: value.slice(last) });
   return out;
 }
 
-/** rehype plugin: re-chip @mentions in text nodes, skipping code/pre subtrees. */
-function rehypeMentions() {
+/** rehype plugin factory: re-chip @mentions in text nodes (skipping code/pre),
+ *  matching known `names` as whole units. */
+function rehypeMentions(names: string[] = []) {
   return function transform(tree: HastNode) {
     walk(tree);
   };
@@ -93,7 +90,7 @@ function rehypeMentions() {
       } else if (child.type === "text") {
         const value = (child as HastText).value;
         if (value.indexOf("@") === -1) continue;
-        const parts = chipMentions(value);
+        const parts = chipMentions(value, names);
         if (parts) {
           children.splice(i, 1, ...parts);
           i += parts.length - 1;
@@ -125,11 +122,18 @@ const COMPONENTS = {
   },
 } as const;
 
-export function Markdown({ text }: { text: string }): ReactNode {
+export function Markdown({
+  text,
+  mentionNames,
+}: {
+  text: string;
+  /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
+  mentionNames?: string[];
+}): ReactNode {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeMentions]}
+      rehypePlugins={[[rehypeMentions, mentionNames ?? []]]}
       components={COMPONENTS}
     >
       {text}
