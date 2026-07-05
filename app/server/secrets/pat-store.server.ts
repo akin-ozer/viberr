@@ -144,6 +144,40 @@ export function listPats(
   return rows.map(mapRow);
 }
 
+/**
+ * Swaps the encrypted token on an EXISTING PAT row (Phase 9B org
+ * connections: "the old token stays active unless validation passes" —
+ * callers validate the replacement BEFORE calling this). Clears the cached
+ * validation; callers record the fresh one via `recordPatValidation`.
+ */
+export function replacePatToken(
+  db: Database.Database,
+  patId: string,
+  token: string,
+  actor: AuditActor,
+): PatMetadata {
+  const existing = getPatMetadata(db, patId);
+  if (!existing) throw AppError.notFound("That credential no longer exists.");
+  const trimmed = token.trim();
+  if (trimmed.length < 8 || /\s/.test(trimmed)) {
+    throw AppError.validation("That doesn't look like a GitHub token.");
+  }
+  db.prepare(
+    `UPDATE github_pats
+     SET encrypted_token = ?, token_suffix = ?,
+         validation_json = NULL, last_validated_at = NULL
+     WHERE id = ?`,
+  ).run(sealSecret(trimmed), trimmed.slice(-4), patId);
+  recordAudit(db, {
+    action: "github.pat.token_replaced",
+    actor,
+    subjectKind: "github_pat",
+    subjectId: patId,
+    details: { label: existing.label, suffix: trimmed.slice(-4) },
+  });
+  return getPatMetadata(db, patId)!;
+}
+
 /** Deletes a PAT (project bindings cascade). Idempotent. */
 export function deletePat(
   db: Database.Database,

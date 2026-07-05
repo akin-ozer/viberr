@@ -9,6 +9,7 @@
  */
 import { getEnv } from "../app/server/config/env.server";
 import { getDb } from "../app/server/db/sqlite.server";
+import { seedOrgResources } from "../app/server/org/org-seed.server";
 import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/demo-seed.server";
 
 const env = getEnv();
@@ -18,6 +19,14 @@ const summary = runDemoSeed(getDb(), {
   dataRoot: env.VIBERR_DATA_ROOT,
   reset,
   adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+});
+
+// Phase 9B: org resources (KBs with real files, skills, MCP servers,
+// domain allowlist, placeholder GitHub connection). Additive — the demo
+// seed above is untouched.
+const org = seedOrgResources(getDb(), {
+  dataRoot: env.VIBERR_DATA_ROOT,
+  reset,
 });
 
 console.log(
@@ -32,6 +41,11 @@ console.log(
     `  agent runs     ${summary.runs}`,
     `  run log lines  ${summary.runLogLines}`,
     `  projections changed ${summary.rescanChanged}`,
+    `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
+    `  org skills     ${org.skills}`,
+    `  org mcps       ${org.mcps}`,
+    `  org domains    ${org.domains}`,
+    `  gh connections ${org.connections}`,
     "",
     `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,
     `Other users (elif|murat|selin|deniz @viberr.dev): ${SEED_DEFAULT_PASSWORD}`,

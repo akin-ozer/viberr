@@ -1,0 +1,646 @@
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+} from "react";
+import { useFetcher } from "react-router";
+import { formatRelative } from "~/shared/dates/format";
+import { useCsrfToken } from "~/ui/csrf-input";
+import { Icon } from "~/ui/icon";
+import { useToast } from "~/ui/toast";
+import { FolderIco, FolderUpIco, UploadIco } from "./icons";
+import {
+  entriesFromDataTransfer,
+  entriesFromFileList,
+  type UploadEntry,
+} from "./local-files";
+import {
+  countKbDirs,
+  countKbFiles,
+  flatten,
+  prettySize,
+  type StoreNode,
+} from "./tree";
+
+/**
+ * StoreBrowser — the store-folder file manager popup (kb-browser spec,
+ * 1:1 port of design/html-app/app/kb-browser.jsx). Differences from the
+ * mock are the sanctioned real-app replacements:
+ *
+ * - the tree comes from the loader (a real disk scan) and every mutation
+ *   is a fetcher POST to the org-settings action → real fs write → the
+ *   revalidated scan re-renders the tree; sizes/dates are formatted from
+ *   sizeBytes/mtime at render time;
+ * - GitHub import is the real snapshot action (default org connection);
+ *   the honest "needs a connection" / failure states render in the
+ *   `.cred-warn` under the import bar;
+ * - SKILL.md capture happens server-side (the skill body is re-read from
+ *   disk) — the capture toast rides the action response;
+ * - Escape closes the TOPMOST layer only (confirm → new-folder input →
+ *   modal), and the card goes `inert` under the nested confirm.
+ */
+
+export interface StoreBrowserResource {
+  kind: "kb" | "skill";
+  id: string;
+}
+
+export function StoreBrowser({
+  title,
+  subMono,
+  root,
+  metaTail,
+  tree,
+  resource,
+  onClose,
+  action = "/org/settings",
+}: {
+  title: string;
+  subMono: string;
+  /** e.g. "store://kb/api-contracts" (no trailing slash). */
+  root: string;
+  metaTail?: string;
+  tree: StoreNode[];
+  resource: StoreBrowserResource;
+  onClose: () => void;
+  action?: string;
+}) {
+  const push = useToast();
+  const csrf = useCsrfToken();
+  const opsFetcher = useFetcher<Record<string, unknown>>();
+  const ghFetcher = useFetcher<Record<string, unknown>>();
+
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () =>
+      new Set(
+        tree.filter((n) => n.type === "dir").map((n) => n.name),
+      ),
+  );
+  const [newIn, setNewIn] = useState<string[] | null>(null);
+  const [ghOpen, setGhOpen] = useState(false);
+  const [ghUrl, setGhUrl] = useState("");
+  const [ghErr, setGhErr] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{
+    path: string[];
+    node: StoreNode;
+  } | null>(null);
+  const [dropTgt, setDropTgt] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dirRef = useRef<HTMLInputElement>(null);
+  const uploadTarget = useRef<string[]>([]);
+  const newRef = useRef<HTMLInputElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const importing = ghFetcher.state !== "idle";
+
+  // ---- layered dialog behavior: Escape closes the topmost layer only.
+  const layers = useRef({ confirm: false, newIn: false });
+  layers.current = { confirm: confirm !== null, newIn: newIn !== null };
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    cardRef.current
+      ?.querySelector<HTMLElement>("button, input, [tabindex]")
+      ?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (layers.current.confirm) {
+        setConfirm(null);
+      } else if (layers.current.newIn) {
+        setNewIn(null);
+      } else {
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, []);
+  useEffect(() => {
+    if (newIn && newRef.current) newRef.current.focus();
+  }, [newIn]);
+  useEffect(() => {
+    const clear = () => setDropTgt(null);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+    };
+  }, []);
+
+  // ---- action feedback (toasts ride the server response).
+  const handledOps = useRef<unknown>(null);
+  useEffect(() => {
+    if (opsFetcher.state !== "idle" || !opsFetcher.data) return;
+    if (handledOps.current === opsFetcher.data) return;
+    handledOps.current = opsFetcher.data;
+    const d = opsFetcher.data as {
+      ok?: boolean;
+      toast?: string;
+      captureToast?: string;
+      error?: string;
+    };
+    if (d.ok) {
+      if (d.toast) push(d.toast);
+      if (d.captureToast) push(d.captureToast);
+    } else if (d.error) {
+      push(d.error);
+    }
+  }, [opsFetcher.state, opsFetcher.data, push]);
+
+  const handledGh = useRef<unknown>(null);
+  useEffect(() => {
+    if (ghFetcher.state !== "idle" || !ghFetcher.data) return;
+    if (handledGh.current === ghFetcher.data) return;
+    handledGh.current = ghFetcher.data;
+    const d = ghFetcher.data as {
+      ok?: boolean;
+      toast?: string;
+      folder?: string;
+      error?: string;
+    };
+    if (d.ok) {
+      if (d.toast) push(d.toast);
+      if (d.folder) {
+        setExpanded((s) => new Set([...s, d.folder!]));
+      }
+      setGhOpen(false);
+      setGhUrl("");
+      setGhErr(null);
+    } else if (d.error) {
+      setGhErr(d.error);
+    }
+  }, [ghFetcher.state, ghFetcher.data, push]);
+
+  const nodes = tree;
+  const toggle = (key: string) =>
+    setExpanded((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  const expand = (path: string[]) =>
+    setExpanded((s) => {
+      const n = new Set(s);
+      for (let i = 1; i <= path.length; i++) n.add(path.slice(0, i).join("/"));
+      return n;
+    });
+
+  // ---- mutations (real fs writes via the org-settings action).
+  const submitFields = (fields: Record<string, string>) => {
+    opsFetcher.submit(
+      {
+        _csrf: csrf,
+        kind: resource.kind,
+        id: resource.id,
+        ...fields,
+      },
+      { method: "post", action },
+    );
+  };
+  const submitUpload = (
+    path: string[],
+    entries: UploadEntry[],
+    mode: "files" | "folder",
+  ) => {
+    if (entries.length === 0) return;
+    const fd = new FormData();
+    fd.set("intent", "store-upload");
+    fd.set("mode", mode);
+    fd.set("kind", resource.kind);
+    fd.set("id", resource.id);
+    fd.set("path", JSON.stringify(path));
+    for (const e of entries) {
+      fd.append("files", e.file);
+      fd.append("filePaths", e.relPath);
+    }
+    fd.set("_csrf", csrf);
+    opsFetcher.submit(fd, {
+      method: "post",
+      action,
+      encType: "multipart/form-data",
+    });
+    expand(path);
+    for (const e of entries) {
+      const top = e.relPath.split("/")[0];
+      if (top && e.relPath.includes("/")) expand([...path, top]);
+    }
+  };
+
+  const startUpload = (path: string[]) => {
+    uploadTarget.current = path;
+    fileRef.current?.click();
+  };
+  const startDirUpload = (path: string[]) => {
+    uploadTarget.current = path;
+    dirRef.current?.click();
+  };
+  const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    submitUpload(
+      uploadTarget.current,
+      entriesFromFileList(e.target.files ?? []),
+      "files",
+    );
+    e.target.value = "";
+  };
+  const onDirFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    submitUpload(
+      uploadTarget.current,
+      entriesFromFileList(e.target.files ?? []),
+      "folder",
+    );
+    e.target.value = "";
+  };
+
+  const hasFiles = (e: ReactDragEvent) =>
+    Boolean(e.dataTransfer) &&
+    Array.from(e.dataTransfer.types ?? []).includes("Files");
+  const overDir = (e: ReactDragEvent, key: string) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    if (dropTgt !== key) setDropTgt(key);
+  };
+  const dropInto = (e: ReactDragEvent, path: string[]) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTgt(null);
+    const dt = e.dataTransfer;
+    void entriesFromDataTransfer(dt).then((entries) => {
+      const mode = entries.some((x) => x.relPath.includes("/"))
+        ? "folder"
+        : "files";
+      submitUpload(path, entries, mode);
+    });
+  };
+
+  const createFolder = (path: string[], name: string) => {
+    const trimmed = (name || "").trim();
+    setNewIn(null);
+    if (!trimmed) return;
+    submitFields({ intent: "store-mkdir", path: JSON.stringify(path), name: trimmed });
+    expand([
+      ...path,
+      ...trimmed
+        .split("/")
+        .map((s) => s.trim().replace(/\\/g, "-"))
+        .filter(Boolean),
+    ]);
+  };
+
+  const removeNode = (path: string[], node: StoreNode) => {
+    submitFields({
+      intent: "store-delete",
+      path: JSON.stringify([...path, node.name]),
+    });
+    setConfirm(null);
+  };
+
+  const ghImport = () => {
+    if (importing) return;
+    if (!ghUrl.trim()) {
+      setGhErr(
+        "Paste a GitHub link — a repo, or a folder like github.com/owner/repo/tree/main/docs.",
+      );
+      return;
+    }
+    setGhErr(null);
+    ghFetcher.submit(
+      {
+        _csrf: csrf,
+        intent: "store-import-github",
+        kind: resource.kind,
+        id: resource.id,
+        url: ghUrl.trim(),
+      },
+      { method: "post", action },
+    );
+  };
+
+  const rows = flatten(nodes, [], 0, expanded, []);
+  const nFiles = countKbFiles(nodes);
+  const nDirs = countKbDirs(nodes);
+
+  const newFolderRow = (path: string[], depth: number) => (
+    <div className="fm-row dir" style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}>
+      <span className="twist"></span>
+      <FolderIco />
+      <input
+        ref={newRef}
+        className="fm-newinp mono"
+        placeholder="folder name"
+        aria-label="New folder name"
+        onKeyDown={(e) => {
+          if (e.key === "Enter")
+            createFolder(path, (e.target as HTMLInputElement).value);
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setNewIn(null);
+          }
+        }}
+        onBlur={(e) => {
+          if (newIn) createFolder(path, e.target.value);
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <>
+      <div className="confirm-scrim" onClick={onClose}></div>
+      <div
+        ref={cardRef}
+        className="modal-card modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label={"Files — " + title}
+        data-screen-label={"Files — " + title}
+        inert={confirm !== null}
+      >
+        <div className="modal-head">
+          <span className="conn-ico" style={{ width: 34, height: 34, borderRadius: 10 }}>
+            <Icon name="memory" />
+          </span>
+          <span className="mh-main">
+            <h2>{title}</h2>
+            <div className="mh-sub mono">{subMono}</div>
+          </span>
+          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="fm-toolbar">
+            <button className="btn sm" onClick={() => startUpload([])}>
+              <UploadIco />
+              Upload files
+            </button>
+            <button className="btn sm" onClick={() => startDirUpload([])}>
+              <FolderUpIco />
+              Upload folder
+            </button>
+            <button
+              className="btn sm"
+              onClick={() => {
+                setGhOpen((v) => !v);
+                setGhErr(null);
+              }}
+            >
+              <Icon name="github" />
+              Add from GitHub
+            </button>
+            <button className="btn ghost sm" onClick={() => setNewIn([])}>
+              <FolderIco />
+              New folder
+            </button>
+            <span className="fm-hint">drag files or folders onto a folder to upload there</span>
+          </div>
+          {ghOpen && (
+            <div className="fm-gh">
+              <input
+                type="text"
+                className="mono"
+                value={ghUrl}
+                placeholder="https://github.com/owner/repo/tree/main/docs"
+                onChange={(e) => {
+                  setGhUrl(e.target.value);
+                  setGhErr(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") ghImport();
+                }}
+                autoFocus
+              />
+              <button
+                className="btn sm"
+                onClick={ghImport}
+                disabled={importing}
+                aria-busy={importing || undefined}
+                style={importing ? { opacity: 0.6 } : undefined}
+              >
+                <Icon
+                  name={importing ? "refresh" : "arrow"}
+                  className={importing ? "spin" : ""}
+                />
+                {importing ? "Importing…" : "Import"}
+              </button>
+            </div>
+          )}
+          {ghErr && (
+            <div className="cred-warn">
+              <Icon name="alert" />
+              {ghErr}
+            </div>
+          )}
+
+          <div
+            className={"fm-tree" + (dropTgt === "" ? " droptgt" : "")}
+            onDragOver={(e) => overDir(e, "")}
+            onDrop={(e) => dropInto(e, [])}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropTgt(null);
+              }
+            }}
+          >
+            {newIn && newIn.length === 0 && newFolderRow([], 0)}
+            {rows.map((r) => (
+              <Fragment key={r.key + (r.node.type || "")}>
+                <div
+                  className={
+                    "fm-row " +
+                    (r.node.type === "dir" ? "dir" : "file") +
+                    (dropTgt &&
+                    dropTgt ===
+                      (r.node.type === "dir" ? r.key : r.path.join("/"))
+                      ? " droptgt"
+                      : "")
+                  }
+                  style={{ paddingLeft: `${0.6 + r.depth * 1.3}rem` }}
+                  onClick={r.node.type === "dir" ? () => toggle(r.key) : undefined}
+                  onDragOver={(e) =>
+                    overDir(e, r.node.type === "dir" ? r.key : r.path.join("/"))
+                  }
+                  onDrop={(e) =>
+                    dropInto(
+                      e,
+                      r.node.type === "dir" ? [...r.path, r.node.name] : r.path,
+                    )
+                  }
+                >
+                  <span className="twist">
+                    {r.node.type === "dir" && (
+                      <Icon name="chevron" className={r.open ? "r90" : ""} />
+                    )}
+                  </span>
+                  {r.node.type === "dir" ? (
+                    <FolderIco open={r.open} />
+                  ) : (
+                    <Icon name="file" />
+                  )}
+                  <span className="fm-name">{r.node.name}</span>
+                  {r.node.type === "dir" ? (
+                    <span className="fm-meta">
+                      {countKbFiles(r.node.children) +
+                        " file" +
+                        (countKbFiles(r.node.children) === 1 ? "" : "s")}
+                    </span>
+                  ) : (
+                    <span className="fm-meta">
+                      {prettySize(r.node.sizeBytes)}
+                      {r.node.mtime ? " · " + formatRelative(r.node.mtime) : ""}
+                    </span>
+                  )}
+                  <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
+                    {r.node.type === "dir" && (
+                      <>
+                        <button
+                          className="fm-act"
+                          title="Upload here"
+                          aria-label={"Upload into " + r.node.name}
+                          onClick={() => startUpload([...r.path, r.node.name])}
+                        >
+                          <UploadIco />
+                        </button>
+                        <button
+                          className="fm-act"
+                          title="New subfolder"
+                          aria-label={"New folder in " + r.node.name}
+                          onClick={() => {
+                            expand([...r.path, r.node.name]);
+                            setNewIn([...r.path, r.node.name]);
+                          }}
+                        >
+                          <Icon name="plus" />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="fm-act del"
+                      title="Delete"
+                      aria-label={"Delete " + r.node.name}
+                      onClick={() => setConfirm({ path: r.path, node: r.node })}
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </span>
+                </div>
+                {newIn &&
+                  r.node.type === "dir" &&
+                  newIn.join("/") === r.key &&
+                  newFolderRow(newIn, r.depth + 1)}
+              </Fragment>
+            ))}
+            {rows.length === 0 && !newIn && (
+              <div className="fm-empty">
+                Empty — drag files or folders here, upload, or import from GitHub.
+              </div>
+            )}
+          </div>
+          <div className="def-note">
+            <Icon name="file" />
+            <span>
+              This is the real folder on disk — files added outside Viberr appear
+              after the next re-scan. Deleting here deletes from the store.
+            </span>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <span className="foot-hint mono">
+            {nDirs + " folder" + (nDirs === 1 ? "" : "s") + " · " + nFiles + " file" + (nFiles === 1 ? "" : "s")}
+            {metaTail ? " · " + metaTail : ""}
+          </span>
+          <span className="foot-actions">
+            <button className="btn primary" onClick={onClose}>
+              Done
+            </button>
+          </span>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={onFiles}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+        <input
+          ref={dirRef}
+          type="file"
+          // @ts-expect-error non-standard folder-picker attributes (mock parity)
+          webkitdirectory=""
+          directory=""
+          multiple
+          style={{ display: "none" }}
+          onChange={onDirFiles}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+      </div>
+      {confirm && (
+        <>
+          <div
+            className="confirm-scrim"
+            style={{ zIndex: 70 }}
+            onClick={() => setConfirm(null)}
+          ></div>
+          <div
+            className="confirm-card"
+            style={{ zIndex: 71 }}
+            role="alertdialog"
+            aria-modal="true"
+          >
+            <div className="confirm-icon">
+              <Icon name="alert" />
+            </div>
+            <h3>
+              Delete “{confirm.node.name}”
+              {confirm.node.type === "dir" &&
+              countKbFiles(confirm.node.children) > 0
+                ? " and its contents"
+                : ""}
+              ?
+            </h3>
+            <p>
+              {confirm.node.type === "dir"
+                ? countKbFiles(confirm.node.children) > 0
+                  ? countKbFiles(confirm.node.children) +
+                    " file" +
+                    (countKbFiles(confirm.node.children) === 1 ? "" : "s") +
+                    " inside will be removed from the store. Agents lose them on their next context load."
+                  : "The empty folder is removed from the store."
+                : "The file is removed from the store. Agents lose it on their next context load."}
+            </p>
+            <div className="confirm-actions">
+              <button className="btn ghost" onClick={() => setConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn danger"
+                onClick={() => removeNode(confirm.path, confirm.node)}
+              >
+                {confirm.node.type === "dir" ? "Delete folder" : "Delete file"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}

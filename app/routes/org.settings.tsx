@@ -1,14 +1,60 @@
-import { Link } from "react-router";
+import { data } from "react-router";
 import type { Route } from "./+types/org.settings";
-import { requireUser } from "~/server/auth/require-user.server";
-import { Icon } from "~/ui/icon";
+import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
+import { assertCsrf } from "~/server/auth/csrf.server";
+import { requireAuth, requireRole } from "~/server/auth/require-user.server";
+import { getDb } from "~/server/db/sqlite.server";
+import { isAppError } from "~/server/errors/app-error.server";
+import {
+  createConnection,
+  removeConnection,
+  replaceConnectionToken,
+  setDefaultConnection,
+} from "~/server/org/connections.server";
+import {
+  deleteGlobalAgentProfile,
+  saveGlobalAgentProfile,
+} from "~/server/org/gagents.server";
+import {
+  addDomain,
+  createLocalAccount,
+  deleteOrgUser,
+  removeDomain,
+  resetLocalPassword,
+  setOrgUserRole,
+  updateOrgUser,
+  whitelistGithubUser,
+  whitelistGoogleAccount,
+} from "~/server/org/org-users.server";
+import { getOrgSettingsView } from "~/server/org/org-view.server";
+import {
+  deleteKnowledgeBase,
+  deleteMcpServer,
+  deleteSkill,
+  reindexKnowledgeBase,
+  resolveStoreTarget,
+  saveKnowledgeBase,
+  saveMcpServer,
+  saveSkill,
+  testMcpServer,
+} from "~/server/org/resources.server";
+import {
+  createStoreFolder,
+  deleteStoreNode,
+  importGithubSnapshot,
+  writeStoreFiles,
+  type UploadFileInput,
+} from "~/server/org/store-files.server";
 
 /**
- * /org/settings — PLACEHOLDER so the Home settings tiles are real links
- * (no dead ends). Phase 9 ports the full tabbed org-settings.jsx surface
- * here (tab comes from ?tab=connections|users|resources — already passed
- * by the Home tiles). Until then, admins are pointed at the phase-2 temp
- * user admin page.
+ * /org/settings — the instance-level admin surface (org-settings spec),
+ * replacing the phase-4 placeholder. Admin-only (org RBAC, phase-2
+ * requireRole). Loader returns every slice (connections, users & domains,
+ * agent resources incl. real disk-scanned kb/skill trees). Every mutation
+ * is a CSRF-checked POST intent; toast copy is computed server-side
+ * (phase-5 pattern) and errors come back as `{ ok:false, error }` for the
+ * open dialog's `.cred-warn` / a toast. StoreBrowser uploads arrive as
+ * multipart with per-file relative paths (structure-preserving).
  */
 
 export function meta(_: Route.MetaArgs) {
@@ -16,36 +62,325 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = requireUser(request);
-  return { isAdmin: user.role === "admin" };
+  const user = requireRole(request, "admin");
+  return { view: getOrgSettingsView(getDb()), meId: user.id };
+}
+
+type Ok = { ok: true; toast?: string } & Record<string, unknown>;
+
+function ok(toast?: string, extra: Record<string, unknown> = {}): Ok {
+  return { ok: true, ...(toast ? { toast } : {}), ...extra };
+}
+
+function fail(error: string, status = 400) {
+  return data({ ok: false as const, error }, { status });
+}
+
+function parseRole(raw: string): "admin" | "member" {
+  return raw === "admin" ? "admin" : "member";
+}
+
+function parseJsonStringArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((x): x is string => typeof x === "string");
+    }
+  } catch {
+    // fall through
+  }
+  return [];
+}
+
+export async function action({ request }: Route.ActionArgs) {
+  const admin = requireRole(request, "admin");
+  const ctx = requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  await assertCsrf(request, ctx.sessionId, formData);
+  const actor = { userId: admin.id, label: admin.email };
+  const field = (name: string) => String(formData.get(name) ?? "");
+  const intent = field("intent");
+
+  try {
+    switch (intent) {
+      // ------------------------------------------------- connections
+      case "connection-add": {
+        const result = await createConnection(
+          db,
+          { owner: field("owner"), token: field("token"), userId: admin.id },
+          actor,
+        );
+        if (result.status !== "saved") return fail(result.message);
+        return ok(result.toast);
+      }
+      case "connection-replace": {
+        const result = await replaceConnectionToken(
+          db,
+          { connectionId: field("connectionId"), token: field("token") },
+          actor,
+        );
+        if (result.status !== "saved") {
+          return fail(result.message, result.status === "not_found" ? 404 : 400);
+        }
+        return ok(result.toast);
+      }
+      case "connection-default": {
+        const result = setDefaultConnection(db, field("connectionId"), actor);
+        if (result.status !== "ok") {
+          return fail("That connection no longer exists.", 404);
+        }
+        return ok(result.toast);
+      }
+      case "connection-remove": {
+        const result = removeConnection(db, field("connectionId"), actor);
+        if (result.status === "not_found") {
+          return fail("That connection no longer exists.", 404);
+        }
+        if (result.status === "is_default") return fail(result.message, 409);
+        return ok(result.toast);
+      }
+
+      // ------------------------------------------------- users & access
+      case "user-role": {
+        const role = parseRole(field("role"));
+        if (field("userId") === admin.id && role !== "admin") {
+          return fail("You can't demote yourself", 409);
+        }
+        const user = setOrgUserRole(db, { userId: field("userId"), role }, actor);
+        return ok(`${user.name} → ${role}`);
+      }
+      case "user-edit": {
+        const role = parseRole(field("role"));
+        const isSelf = field("userId") === admin.id;
+        if (isSelf && role !== "admin") {
+          return fail("You can't demote yourself", 409);
+        }
+        const user = updateOrgUser(
+          db,
+          {
+            userId: field("userId"),
+            name: field("name"),
+            email: field("email"),
+            role,
+          },
+          actor,
+        );
+        return ok(isSelf ? "Profile updated" : `${user.name} updated`);
+      }
+      case "user-reset-password": {
+        const result = resetLocalPassword(db, field("userId"), actor);
+        return ok(result.toast, { tempPassword: result.tempPassword });
+      }
+      case "user-remove": {
+        if (field("userId") === admin.id) {
+          return fail("You can't remove your own account", 409);
+        }
+        const result = deleteOrgUser(db, field("userId"), actor);
+        return ok(result.toast);
+      }
+      case "invite-github": {
+        const result = whitelistGithubUser(
+          db,
+          { handle: field("handle"), role: parseRole(field("role")) },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "invite-google": {
+        const result = whitelistGoogleAccount(
+          db,
+          { email: field("email"), role: parseRole(field("role")) },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "invite-domain": {
+        const result = addDomain(
+          db,
+          { domain: field("email"), role: parseRole(field("role")) },
+          actor,
+        );
+        if (result.status === "invalid") return fail(result.message);
+        if (result.status === "duplicate") {
+          // Mock: toast + the modal stays open.
+          return ok(result.message, { duplicate: true });
+        }
+        return ok(result.toast);
+      }
+      case "invite-local": {
+        const result = createLocalAccount(
+          db,
+          {
+            name: field("name"),
+            email: field("email"),
+            role: parseRole(field("role")),
+          },
+          actor,
+        );
+        return ok(result.toast, {
+          tempPassword: result.tempPassword,
+          email: result.user.email,
+        });
+      }
+      case "domain-remove": {
+        const result = removeDomain(db, field("domainId"), actor);
+        return ok(result.toast);
+      }
+
+      // ------------------------------------------------- agent resources
+      case "kb-save": {
+        const result = saveKnowledgeBase(
+          db,
+          {
+            id: field("kbId") || null,
+            name: field("name"),
+            refresh: field("refresh"),
+          },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "kb-delete":
+        return ok(deleteKnowledgeBase(db, field("kbId"), actor).toast);
+      case "kb-reindex":
+        return ok(reindexKnowledgeBase(db, field("kbId"), actor).toast);
+      case "mcp-save": {
+        const result = await saveMcpServer(
+          db,
+          {
+            id: field("mcpId") || null,
+            name: field("name"),
+            transport: field("transport"),
+            target: field("target"),
+            cred: field("cred"),
+          },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "mcp-test":
+        return ok((await testMcpServer(db, field("mcpId"), actor)).toast);
+      case "mcp-delete":
+        return ok(deleteMcpServer(db, field("mcpId"), actor).toast);
+      case "skill-save": {
+        const result = saveSkill(
+          db,
+          {
+            id: field("skillId") || null,
+            name: field("name"),
+            summary: field("summary"),
+            body: field("body"),
+          },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "skill-delete":
+        return ok(deleteSkill(db, field("skillId"), actor).toast);
+      case "agent-save": {
+        const result = saveGlobalAgentProfile(
+          db,
+          {
+            id: field("profileId") || null,
+            name: field("name"),
+            backend: field("backend") === "claude" ? "claude" : "codex",
+            summary: field("summary"),
+            stages: parseJsonStringArray(field("stages")),
+            skills: parseJsonStringArray(field("skills")),
+            mcps: parseJsonStringArray(field("mcps")),
+            kbs: parseJsonStringArray(field("kbs")),
+          },
+          actor,
+        );
+        return ok(result.toast);
+      }
+      case "agent-delete": {
+        const result = deleteGlobalAgentProfile(db, field("profileId"), actor);
+        if (result.status === "in_use") return fail(result.message, 409);
+        return ok(result.toast);
+      }
+
+      // ------------------------------------------------- store browser
+      case "store-upload": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const dirPath = parseJsonStringArray(field("path"));
+        const rawFiles = formData
+          .getAll("files")
+          .filter((f): f is File => f instanceof File);
+        const relPaths = formData.getAll("filePaths").map(String);
+        const files: UploadFileInput[] = [];
+        for (let i = 0; i < rawFiles.length; i++) {
+          const file = rawFiles[i]!;
+          files.push({
+            relPath: relPaths[i] || file.name,
+            data: Buffer.from(await file.arrayBuffer()),
+          });
+        }
+        const result = writeStoreFiles(db, target, dirPath, files, actor);
+        if (result.added === 0) return ok();
+        const atPath = [target.rootUri, ...dirPath].join("/") + "/";
+        const toast =
+          field("mode") === "folder" && result.topLevelDirs.length > 0
+            ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is — ${result.added} file${result.added === 1 ? "" : "s"}`
+            : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`;
+        return ok(toast, {
+          ...(result.capturedSkillMd
+            ? {
+                captureToast:
+                  "SKILL.md content captured — fully editable in the skill editor",
+              }
+            : {}),
+        });
+      }
+      case "store-mkdir": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const result = createStoreFolder(
+          db,
+          target,
+          parseJsonStringArray(field("path")),
+          field("name"),
+          actor,
+        );
+        return ok(`Folder ${result.createdPath.join("/")}/ ready`);
+      }
+      case "store-delete": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const result = deleteStoreNode(
+          db,
+          target,
+          parseJsonStringArray(field("path")),
+          actor,
+        );
+        return ok(
+          result.wasDir ? `Folder “${result.name}” deleted` : `“${result.name}” deleted`,
+        );
+      }
+      case "store-import-github": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const result = await importGithubSnapshot(db, target, field("url"), actor);
+        if (result.status !== "imported") return fail(result.message);
+        return ok(result.toast, { folder: result.folder });
+      }
+
+      default:
+        return fail("Unknown action.");
+    }
+  } catch (error) {
+    if (isAppError(error)) {
+      return data(
+        { ok: false as const, error: error.userMessage },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
 }
 
 export default function OrgSettings({ loaderData }: Route.ComponentProps) {
-  return (
-    <main className="app-splash" data-screen-label="Org settings — placeholder">
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Viberr settings</h2>
-          <span className="right pill neutral">phase 9</span>
-        </div>
-        <p className="detail-line">
-          Instance settings (GitHub connections, users &amp; access, agent
-          resources) arrive in phase 9.
-          {loaderData.isAdmin
-            ? " Until then, admins can manage users at the temporary page below."
-            : ""}
-        </p>
-        {loaderData.isAdmin && (
-          <Link className="btn" to="/org/users">
-            <Icon name="user" />
-            Org users (temp)
-          </Link>
-        )}
-        <Link className="btn ghost" to="/">
-          <Icon name="arrow" />
-          Back to projects
-        </Link>
-      </section>
-    </main>
-  );
+  return <OrgSettingsPage view={loaderData.view} meId={loaderData.meId} />;
 }

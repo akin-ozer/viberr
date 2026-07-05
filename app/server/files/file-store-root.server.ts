@@ -10,6 +10,10 @@ import { getEnv } from "../config/env.server";
  *   projects/<slug>/tasks/<KEY>/task.md   (+ attachments/ later)
  *   agents/profiles/<id>.md               (org-level agent profile templates)
  *   runtimes/                             (NDJSON run logs — Phase 8)
+ *   kb/<dir>/                             (knowledge-base folders — Phase 9B;
+ *                                          UI renders them as store://kb/<dir>/)
+ *   skills/<name>/SKILL.md                (skill folders — Phase 9B;
+ *                                          store://skills/<name>/)
  *   state/projection.sqlite               (SQLite — managed by db/)
  *   cache/  auth/  logs/
  *
@@ -22,6 +26,8 @@ export const DATA_ROOT_SUBDIRS = [
   "agents",
   "agents/profiles",
   "runtimes",
+  "kb",
+  "skills",
   "state",
   "cache",
   "auth",
@@ -75,6 +81,26 @@ export function agentProfileFilePath(
   dataRoot?: string,
 ): string {
   return path.join(agentProfilesDir(dataRoot), `${profileId}.md`);
+}
+
+/** Knowledge-base store root: ${DATA_ROOT}/kb (store://kb/…). Phase 9B. */
+export function kbRootDir(dataRoot?: string): string {
+  return path.join(getDataRoot(dataRoot), "kb");
+}
+
+/** One knowledge base's folder: ${DATA_ROOT}/kb/<dir>. */
+export function kbDirPath(dir: string, dataRoot?: string): string {
+  return path.join(kbRootDir(dataRoot), dir);
+}
+
+/** Skill store root: ${DATA_ROOT}/skills (store://skills/…). Phase 9B. */
+export function skillsRootDir(dataRoot?: string): string {
+  return path.join(getDataRoot(dataRoot), "skills");
+}
+
+/** One skill's folder: ${DATA_ROOT}/skills/<name>. */
+export function skillDirPath(name: string, dataRoot?: string): string {
+  return path.join(skillsRootDir(dataRoot), name);
 }
 
 /**
