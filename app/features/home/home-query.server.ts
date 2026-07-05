@@ -7,6 +7,7 @@ import {
 } from "~/server/projections/board-query.server";
 import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { listUsers } from "~/server/auth/user-store.server";
+import { listConnections } from "~/server/org/connections.server";
 import {
   createActorResolver,
   initialsOfName,
@@ -109,8 +110,8 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
 }
 
 export interface HomeOrgSummary {
-  /** GitHub connection owners — Phase-4 stand-in derived from the distinct
-   * repo owners already in use; Phase 7's PAT store replaces this. */
+  /** GitHub connection owners from the real connections store (Phase 7) — the
+   * New-project modal offers these as the repo root. */
   connectionOwners: string[];
   users: {
     total: number;
@@ -129,11 +130,11 @@ export function getHomeOrgSummary(
   db: Database.Database,
   options: { dataRoot?: string } = {},
 ): HomeOrgSummary {
+  // Real GitHub connections (Phase 7 store), newest-first via the query, so a
+  // freshly-added connection is immediately offered in the New-project modal
+  // even before any project references its repo.
   const owners = new Set<string>();
-  for (const p of listProjects(db)) {
-    const owner = p.repo?.split("/")[0];
-    if (owner) owners.add(owner);
-  }
+  for (const c of listConnections(db)) owners.add(c.owner);
 
   const users = listUsers(db).filter((u) => !u.disabled);
   const admins = users.filter((u) => u.role === "admin").length;
