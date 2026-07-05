@@ -14,10 +14,12 @@ orchestrator finished and verified it.
 - `compose.yml` — app service, `env_file: .env`, forces prod env, `./docker-data:/data`
   volume, `/resources/health` healthcheck, `restart: unless-stopped`.
 - `.dockerignore` present.
-- **Not executed locally**: this machine has no running Docker daemon (`docker info`
-  hangs), so the image build/run was not performed here. The Dockerfile/compose are
-  statically well-formed and follow the locked stack; build on a Docker host before first
-  deploy. Documented as the one unexecuted verification.
+- **Verified locally**: image builds clean (~856 MB); container boots in production mode,
+  applies migrations 0001–0009 (0007 intentionally absent — 9A needed no migration),
+  creates the bootstrap admin from env, serves `/resources/health` → 200
+  `{"ok":true,...,"watcher":true}`, redirects `/` → `/login`, and renders the login page.
+  `docker exec … npm run seed` inside the container populated 3 projects / 10 tasks
+  (health reflected it live). Container, volume, and image cleaned up after.
 
 ### CI
 - `.github/workflows/ci.yml` — push/PR to `main`: checkout, setup-node 22 (npm cache),
@@ -73,7 +75,7 @@ orchestrator finished and verified it.
 | `npm run e2e` | **13 passed** |
 | Live admin sweep (all rail views, org settings, profile, notifications) | clean, console clean |
 | Live reviewer RBAC sweep | controls gated; `/org/settings` → 403 |
-| Docker image build/run | **not executed** (no local daemon) — Dockerfile/compose reviewed |
+| Docker image build + container run | **verified** — boots, migrates, health 200, auth gate, in-container seed populates 3/10 |
 | Store restored pristine | 10 tasks / 32 events / 18 runs / 0 diagnostics |
 
 ## Known gaps (carried into README release notes)
