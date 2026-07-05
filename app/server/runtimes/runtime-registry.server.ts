@@ -126,6 +126,10 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
     ...(env.CLAUDE_CODE_OAUTH_TOKEN
       ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
       : {}),
+    // Persist the session store so resuming an agent (via a task comment)
+    // works across restarts. Must ride in the SDK's env (which replaces the
+    // child env) or the config dir would fall back to ephemeral ~/.claude.
+    ...(env.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR } : {}),
   };
   return {
     claude: createClaudeAdapter({
@@ -149,17 +153,22 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
 function safeEnv(): {
   ANTHROPIC_API_KEY?: string;
   CLAUDE_CODE_OAUTH_TOKEN?: string;
+  CLAUDE_CONFIG_DIR?: string;
   CODEX_API_KEY?: string;
   OPENAI_API_KEY?: string;
   CODEX_HOME?: string;
 } {
   try {
     const env = getEnv();
+    // Default Claude's session store under the data volume when not overridden.
+    const claudeConfigDir =
+      env.CLAUDE_CONFIG_DIR ?? `${env.VIBERR_DATA_ROOT}/runtimes/claude-home`;
     return {
       ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
       ...(env.CLAUDE_CODE_OAUTH_TOKEN
         ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
         : {}),
+      CLAUDE_CONFIG_DIR: claudeConfigDir,
       ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
       ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
       ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}),

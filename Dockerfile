@@ -47,6 +47,9 @@ ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
 # host directory (or named volume) at this path.
 ENV VIBERR_DATA_ROOT=/data
+# Persist Claude Agent SDK sessions on the data volume so resuming an agent
+# (commenting on a task) survives container restarts.
+ENV CLAUDE_CONFIG_DIR=/data/runtimes/claude-home
 ENV PORT=3000
 
 WORKDIR /app

@@ -80,6 +80,10 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   CLAUDE_CODE_OAUTH_TOKEN: z.string().min(1).optional(),
   VIBERR_CLAUDE_USE_CLI_AUTH: z.string().optional(),
+  // Claude Agent SDK config/session dir. Sessions live at
+  // $CLAUDE_CONFIG_DIR/projects/<cwd>/<id>.jsonl; default it under the data
+  // volume so a resumed session (commenting an agent) survives restarts.
+  CLAUDE_CONFIG_DIR: z.string().optional(),
   CODEX_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   // Codex ChatGPT-plan (subscription) login dir — `codex login` writes

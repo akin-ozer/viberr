@@ -26,6 +26,7 @@ export const DATA_ROOT_SUBDIRS = [
   "agents",
   "agents/profiles",
   "runtimes",
+  "runtimes/claude-home",
   "kb",
   "skills",
   "state",
