@@ -134,9 +134,13 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
     }),
     codex: createCodexAdapter({
       ...(deps.codexFactory ? { codexFactory: deps.codexFactory } : {}),
+      // API key when present; otherwise NO key so the Codex SDK falls back to
+      // the ChatGPT-plan (subscription) login in $CODEX_HOME/auth.json.
       ...(env.CODEX_API_KEY || env.OPENAI_API_KEY
         ? { apiKey: (env.CODEX_API_KEY ?? env.OPENAI_API_KEY)! }
         : {}),
+      // Point the SDK's spawned `codex` at the subscription login dir.
+      ...(env.CODEX_HOME ? { env: { CODEX_HOME: env.CODEX_HOME } } : {}),
     }),
     simulated: createSimulatedAdapter(),
   };
@@ -147,6 +151,7 @@ function safeEnv(): {
   CLAUDE_CODE_OAUTH_TOKEN?: string;
   CODEX_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  CODEX_HOME?: string;
 } {
   try {
     const env = getEnv();
@@ -157,6 +162,7 @@ function safeEnv(): {
         : {}),
       ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
       ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
+      ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}),
     };
   } catch {
     // Env not configured (tests) — no real keys, simulated carries everything.

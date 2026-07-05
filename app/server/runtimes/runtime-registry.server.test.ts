@@ -11,8 +11,11 @@ describe("runtime-registry — detection & fallback", () => {
   afterEach(() => {
     resetRegistryForTests();
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.VIBERR_CLAUDE_USE_CLI_AUTH;
     delete process.env.CODEX_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
   });
 
   it("detects claude available when ANTHROPIC_API_KEY is present (no API call)", () => {
@@ -20,8 +23,23 @@ describe("runtime-registry — detection & fallback", () => {
     expect(isBackendAvailable("claude")).toBe(true);
   });
 
+  it("detects claude available via a subscription OAuth token (claude setup-token)", () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-test";
+    expect(isBackendAvailable("claude")).toBe(true);
+  });
+
+  it("detects claude available via the CLI-auth opt-in flag", () => {
+    process.env.VIBERR_CLAUDE_USE_CLI_AUTH = "1";
+    expect(isBackendAvailable("claude")).toBe(true);
+  });
+
   it("detects codex available via CODEX_API_KEY or OPENAI_API_KEY", () => {
     process.env.OPENAI_API_KEY = "sk-test";
+    expect(isBackendAvailable("codex")).toBe(true);
+  });
+
+  it("detects codex available via the ChatGPT-plan CLI-auth opt-in flag", () => {
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
     expect(isBackendAvailable("codex")).toBe(true);
   });
 

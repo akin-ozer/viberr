@@ -38,16 +38,22 @@ admin on first boot of an empty DB), and the agent backends below.
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
 linux binaries (installed by `npm ci` in the linux build stage) plus `git` and a CA
 bundle in the runtime stage (a real run clones the task's repo and the coding agent
-shells out to git). The container is stateless and has no logged-in CLI, so **auth is
-purely credential-based — inject one env var**:
+shells out to git). The container is stateless with no logged-in CLI, so credentials
+are injected. **You can use a subscription (no per-token API key) for either backend:**
 
-- **Claude** — set **`ANTHROPIC_API_KEY`**, or **`CLAUDE_CODE_OAUTH_TOKEN`** (generate
-  once on any machine with `claude setup-token` using your Claude subscription, then put
-  the token in the container's `.env`). Either flows to the SDK.
-- **Codex** — set `CODEX_API_KEY` or `OPENAI_API_KEY`.
+**Claude — Pro/Max subscription (recommended, one env var):**
+1. On any machine with the `claude` CLI logged in: `claude setup-token` → prints a
+   long-lived OAuth token (`sk-ant-oat01-…`).
+2. Put it in the container's `.env`: `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`.
+The SDK authenticates with it — verified: an invalid token returns a 401, a valid one
+runs. (An `ANTHROPIC_API_KEY` also works if you prefer pay-as-you-go.)
 
-`VIBERR_CLAUDE_USE_CLI_AUTH` / `VIBERR_CODEX_USE_CLI_AUTH` are for hosts with an
-already-logged-in CLI and are **not** useful in a fresh container — use a key/token there.
+**Codex — ChatGPT plan subscription (mount the login):**
+1. On the host: `codex login` (writes `~/.codex/auth.json`).
+2. In `compose.yml` (examples are inlined there): mount `~/.codex` into the container,
+   set `CODEX_HOME=/codex` and `VIBERR_CODEX_USE_CLI_AUTH=1`. Mount read-write so the SDK
+   can refresh the token; the files must be readable by uid 1000 (the `node` user).
+(A `CODEX_API_KEY` / `OPENAI_API_KEY` also works for pay-as-you-go.)
 
 Without any credential the app falls back to the built-in **simulated** backend (runs
 still stream in the UI, clearly labelled). Confirm what's active:

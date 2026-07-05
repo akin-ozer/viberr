@@ -85,16 +85,20 @@ first sign-in).
 ## Enabling real agent backends
 
 Out of the box every agent run uses the built-in **simulated** engine (clearly labeled,
-streams the seeded demo scripts live over SSE). To run real agents, set credentials in
-`.env` and restart — detection is presence-of-key only, no paid API call:
+streams the seeded demo scripts live over SSE). To run real agents you can use a
+**subscription (no per-token API key)** or an API key; set it in `.env` and restart —
+detection is presence-only, no paid call:
 
-- **Claude** (via `@anthropic-ai/claude-agent-sdk`): `ANTHROPIC_API_KEY=sk-ant-…`
-- **Codex** (via `@openai/codex-sdk`): `CODEX_API_KEY=…` or `OPENAI_API_KEY=sk-…`,
-  or an existing interactive `codex login` on the host (requires a working `codex` binary).
+- **Claude — Pro/Max subscription:** `claude setup-token` (once, on any logged-in
+  machine) → `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`. _(Or pay-as-you-go
+  `ANTHROPIC_API_KEY=sk-ant-…`.)_
+- **Codex — ChatGPT plan subscription:** `codex login` (writes `~/.codex/auth.json`),
+  then `VIBERR_CODEX_USE_CLI_AUTH=1` + `CODEX_HOME=<login dir>` (in Docker, mount
+  `~/.codex` — see `compose.yml`). _(Or `CODEX_API_KEY` / `OPENAI_API_KEY`.)_
 
-With a key present, new runs stream real SDK output; the raw NDJSON of every run is
-persisted under `<data root>/runtimes/`. Without keys the simulated engine carries the
-demo transparently.
+Confirm what's live: `GET /resources/health` → `backends: { claude, codex }` reports
+`real` vs `simulated`. New runs then stream real SDK output; raw NDJSON of every run is
+persisted under `<data root>/runtimes/`. Container specifics: `docs/operations/deployment.md`.
 
 ## Enabling GitHub integration
 

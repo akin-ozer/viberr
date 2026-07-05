@@ -82,6 +82,10 @@ const envSchema = z.object({
   VIBERR_CLAUDE_USE_CLI_AUTH: z.string().optional(),
   CODEX_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
+  // Codex ChatGPT-plan (subscription) login dir — `codex login` writes
+  // auth.json here (default ~/.codex). Point it at a mounted volume in a
+  // container so the subscription auth (and its token refresh) persists.
+  CODEX_HOME: z.string().optional(),
   VIBERR_CODEX_USE_CLI_AUTH: z.string().optional(),
 });
 

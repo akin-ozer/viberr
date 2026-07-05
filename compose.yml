@@ -7,6 +7,14 @@ services:
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
       NODE_ENV: production
       VIBERR_DATA_ROOT: /data
+      # --- Run agents on a SUBSCRIPTION (no per-token API key) ---
+      # Claude (Claude Pro/Max): run `claude setup-token` once on any machine,
+      # put the token in .env as CLAUDE_CODE_OAUTH_TOKEN=... (env_file injects it).
+      #
+      # Codex (ChatGPT plan): run `codex login` once on the host (writes
+      # ~/.codex/auth.json), mount that dir below, and enable CLI auth:
+      # VIBERR_CODEX_USE_CLI_AUTH: "1"
+      # CODEX_HOME: /codex
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the
       # container, so the mapping always matches what the server listens on.
@@ -15,6 +23,10 @@ services:
       # Everything stateful lives under the data root: canonical project/task
       # markdown, SQLite projections + app DB, run logs, KBs. Back this up.
       - ./docker-data:/data
+      # Codex subscription login (uncomment with CODEX_HOME=/codex above).
+      # Mount read-write so the SDK can refresh the OAuth token. The container
+      # runs as uid 1000 (node) — ensure the files are readable by it.
+      # - ${HOME}/.codex:/codex
     healthcheck:
       test:
         [
