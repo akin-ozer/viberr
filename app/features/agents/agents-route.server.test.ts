@@ -202,7 +202,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       backends: ["codex"],
       // No picked model in FORM → per-backend catalog default (no more the
       // old invalid hardcoded id).
-      model: "gpt-5-codex",
+      model: "gpt-5.5",
       effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],

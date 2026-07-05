@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeQuery, ClaudeQueryFn } from "./claude-runtime.server";
 import {
   curatedCatalog,
+  defaultEffortFor,
+  defaultModelFor,
   getModelCatalog,
   resetModelCatalogCache,
   type SdkModelInfo,
@@ -30,7 +32,7 @@ describe("curated catalog", () => {
     const cat = curatedCatalog("codex");
     expect(cat.models.map((m) => m.value)).toContain("gpt-5-codex");
     expect(cat.efforts).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
-    expect(cat.defaultModel).toBe("gpt-5-codex");
+    expect(cat.defaultModel).toBe("gpt-5.5");
     expect(cat.defaultEffort).toBe("medium");
   });
 
@@ -38,6 +40,18 @@ describe("curated catalog", () => {
     const a = curatedCatalog("claude");
     a.models[0]!.value = "mutated";
     expect(curatedCatalog("claude").models[0]!.value).toBe("sonnet");
+  });
+
+  it("defaultModel is the FIRST available model (not a separate hardcoded id)", () => {
+    for (const backend of ["claude", "codex"] as const) {
+      const cat = curatedCatalog(backend);
+      expect(cat.defaultModel).toBe(cat.models[0]!.value);
+      // defaultModelFor mirrors the catalog default (what run/reply fall back to).
+      expect(defaultModelFor(backend)).toBe(cat.models[0]!.value);
+      expect(cat.models.some((m) => m.value === defaultModelFor(backend))).toBe(true);
+      // the default effort is one the backend actually supports
+      expect(cat.efforts).toContain(defaultEffortFor(backend));
+    }
   });
 });
 
@@ -48,7 +62,7 @@ describe("getModelCatalog", () => {
       claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
       isAvailable: () => true,
     });
-    expect(cat.defaultModel).toBe("gpt-5-codex");
+    expect(cat.defaultModel).toBe("gpt-5.5");
     expect(queryFn).not.toHaveBeenCalled();
   });
 

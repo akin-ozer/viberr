@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  codexSpawnEnv,
   createAdapters,
   isBackendAvailable,
   resetRegistryForTests,
@@ -68,6 +69,23 @@ describe("runtime-registry — detection & fallback", () => {
     const { adapter, simulated } = selectAdapter("codex", adapters);
     expect(simulated).toBe(true);
     expect(adapter).toBe(adapters.simulated);
+  });
+
+  it("codexSpawnEnv hands the Codex SDK a FULL env (process.env + CODEX_HOME)", () => {
+    // The Codex SDK REPLACES the child env with what we pass, so it must be
+    // complete — the bug was passing only { CODEX_HOME }, stripping PATH/HOME
+    // and breaking the spawned `codex` binary.
+    process.env.PATH = process.env.PATH || "/usr/bin:/bin";
+    process.env.VIBERR_CODEX_TEST_MARKER = "present";
+    try {
+      const env = codexSpawnEnv("/codex");
+      expect(env.CODEX_HOME).toBe("/codex"); // forced
+      expect(env.PATH).toBeTruthy(); // preserved (would be missing with the bug)
+      expect(env.VIBERR_CODEX_TEST_MARKER).toBe("present"); // process.env carried through
+      expect(Object.keys(env).length).toBeGreaterThan(2);
+    } finally {
+      delete process.env.VIBERR_CODEX_TEST_MARKER;
+    }
   });
 
   it("createAdapters accepts injected SDK fakes (no real SDK constructed)", () => {

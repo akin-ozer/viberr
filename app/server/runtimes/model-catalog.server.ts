@@ -55,32 +55,37 @@ export interface ModelCatalog {
  *  that tier the account can use, so they are always valid. */
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
+const CLAUDE_MODELS: CatalogModel[] = [
+  {
+    value: "sonnet",
+    displayName: "Claude Sonnet",
+    description: "Balanced speed and capability — the everyday default.",
+    supportsEffort: true,
+    efforts: [...CLAUDE_EFFORTS],
+  },
+  {
+    value: "opus",
+    displayName: "Claude Opus",
+    description: "Most capable — deepest reasoning for the hardest work.",
+    supportsEffort: true,
+    efforts: [...CLAUDE_EFFORTS],
+  },
+  {
+    value: "haiku",
+    displayName: "Claude Haiku",
+    description: "Fastest and lightest — quick, cheap turns.",
+    supportsEffort: true,
+    efforts: [...CLAUDE_EFFORTS],
+  },
+];
+
 const CLAUDE_CURATED: ModelCatalog = {
-  models: [
-    {
-      value: "sonnet",
-      displayName: "Claude Sonnet",
-      description: "Balanced speed and capability — the everyday default.",
-      supportsEffort: true,
-      efforts: [...CLAUDE_EFFORTS],
-    },
-    {
-      value: "opus",
-      displayName: "Claude Opus",
-      description: "Most capable — deepest reasoning for the hardest work.",
-      supportsEffort: true,
-      efforts: [...CLAUDE_EFFORTS],
-    },
-    {
-      value: "haiku",
-      displayName: "Claude Haiku",
-      description: "Fastest and lightest — quick, cheap turns.",
-      supportsEffort: true,
-      efforts: [...CLAUDE_EFFORTS],
-    },
-  ],
+  models: CLAUDE_MODELS,
   efforts: [...CLAUDE_EFFORTS],
-  defaultModel: "sonnet",
+  // The default is just the FIRST available model — it's a starting point the
+  // user changes in the picker, so we never hardcode a specific id that could
+  // drift out of the list.
+  defaultModel: CLAUDE_MODELS[0]!.value,
   defaultEffort: "high",
 };
 
@@ -88,32 +93,47 @@ const CLAUDE_CURATED: ModelCatalog = {
  *  reasonable current ids — intentionally editable. */
 const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
+const CODEX_MODELS: CatalogModel[] = [
+  {
+    value: "gpt-5.5",
+    displayName: "GPT-5.5",
+    description:
+      "Default for coding runs. Works on a ChatGPT-plan (subscription) login.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5-codex",
+    displayName: "GPT-5 Codex (API key)",
+    description:
+      "Codex-tuned GPT-5. Only available with an OpenAI API key — a ChatGPT-plan login rejects it.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5",
+    displayName: "GPT-5 (API key)",
+    description: "General-purpose GPT-5. API key only (rejected on a ChatGPT plan).",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "o4-mini",
+    displayName: "o4-mini",
+    description: "Small, fast reasoning model for lighter turns.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+];
+
 const CODEX_CURATED: ModelCatalog = {
-  models: [
-    {
-      value: "gpt-5-codex",
-      displayName: "GPT-5 Codex",
-      description: "Codex-tuned GPT-5 — the default for coding runs.",
-      supportsEffort: true,
-      efforts: [...CODEX_EFFORTS],
-    },
-    {
-      value: "gpt-5",
-      displayName: "GPT-5",
-      description: "General-purpose GPT-5.",
-      supportsEffort: true,
-      efforts: [...CODEX_EFFORTS],
-    },
-    {
-      value: "o4-mini",
-      displayName: "o4-mini",
-      description: "Small, fast reasoning model for lighter turns.",
-      supportsEffort: true,
-      efforts: [...CODEX_EFFORTS],
-    },
-  ],
+  models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
-  defaultModel: "gpt-5-codex",
+  // Default = the first available model (a changeable starting point). gpt-5.5
+  // is listed first deliberately: it is the safe cross-account id (valid on a
+  // ChatGPT-plan login AND with an API key), whereas the codex-tuned / bare
+  // gpt-5 ids are API-key-only.
+  defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };
 
@@ -133,6 +153,21 @@ function cloneCatalog(cat: ModelCatalog): ModelCatalog {
 /** The always-available curated fallback for a backend (fresh copy). */
 export function curatedCatalog(backend: RealBackend): ModelCatalog {
   return cloneCatalog(backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED);
+}
+
+/**
+ * The default model id for a backend — the FIRST available (curated) model.
+ * Sync + always a valid, currently-available id, so run/reply/profile code can
+ * fall back to it without hardcoding a specific model that might drift out of
+ * the catalog (the user changes it in the picker anyway).
+ */
+export function defaultModelFor(backend: RealBackend): string {
+  return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultModel;
+}
+
+/** The default reasoning effort for a backend (from the curated catalog). */
+export function defaultEffortFor(backend: RealBackend): string {
+  return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
 
 // ------------------------------------------------------------ live (claude)

@@ -10,6 +10,10 @@ import {
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import {
+  defaultEffortFor,
+  defaultModelFor,
+} from "~/server/runtimes/model-catalog.server";
 import { existsSync } from "node:fs";
 import {
   effectiveProfileView,
@@ -44,18 +48,10 @@ export interface ProfileMutationContext {
 
 const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 
-/** Per-backend fallbacks when the form omits a picked model/effort (older
- * client, or a create before the catalog loads). These match the model
- * catalog's curated defaults so a real run has a VALID model id — the old
- * hardcoded "claude-sonnet" was invalid ("model may not exist"). */
-const DEFAULT_MODEL: Record<"claude" | "codex", string> = {
-  claude: "sonnet",
-  codex: "gpt-5-codex",
-};
-const DEFAULT_EFFORT: Record<"claude" | "codex", string> = {
-  claude: "high",
-  codex: "medium",
-};
+// Per-backend fallbacks when the form omits a picked model/effort (older
+// client, or a create before the catalog loads) come from the model catalog —
+// the FIRST available model + the default effort — so we never hardcode a
+// specific id that could drift out of the list.
 
 export const profileFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
@@ -193,8 +189,8 @@ export async function createAgentProfile(
       // Store the picked model + effort (from the catalog picker). No more
       // hardcoded invalid "claude-sonnet" — fall back per-backend only when
       // the form omits a pick.
-      model: form.model.trim() || DEFAULT_MODEL[form.backend],
-      effort: form.effort.trim() || DEFAULT_EFFORT[form.backend],
+      model: form.model.trim() || defaultModelFor(form.backend),
+      effort: form.effort.trim() || defaultEffortFor(form.backend),
       scope: `Created in ${parsed.frontmatter.name}`,
       desc:
         form.definition.trim() ||
@@ -270,12 +266,12 @@ export async function updateAgentProfile(
       // picked model + effort (falling back per-backend when omitted).
       model: isOperator
         ? current.model
-        : form.model.trim() || DEFAULT_MODEL[form.backend],
+        : form.model.trim() || defaultModelFor(form.backend),
       ...(isOperator
         ? current.effort
           ? { effort: current.effort }
           : {}
-        : { effort: form.effort.trim() || DEFAULT_EFFORT[form.backend] }),
+        : { effort: form.effort.trim() || defaultEffortFor(form.backend) }),
       scope: current.scope,
       desc:
         form.definition.trim() ||

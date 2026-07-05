@@ -8,6 +8,7 @@ import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/ru
 import { buildScript, type SimulatedScript } from "~/server/runtimes/simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   listDeployedSpecialists,
   type DeployedSpecialistView,
@@ -180,7 +181,7 @@ export function resolveMentionedAgent(
       name: sp?.name ?? primaryRef.profileId,
       role,
       backend,
-      model: sp?.model ?? (backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5"),
+      model: sp?.model ?? (defaultModelFor(backend)),
       effort: sp?.effort ?? "",
       actorRef: agentActorRef(backend, role),
       isPrimary: true,
@@ -224,7 +225,7 @@ export function resolveMentionedAgent(
         name: primaryRef.profileId,
         role: primaryRef.role,
         backend,
-        model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+        model: defaultModelFor(backend),
         effort: "",
         actorRef: agentActorRef(backend, primaryRef.role),
         isPrimary: true,

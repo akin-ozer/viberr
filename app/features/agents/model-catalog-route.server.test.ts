@@ -80,7 +80,7 @@ describe("resources/model-catalog", () => {
     const res = await runLoader("?backend=codex", ardaId);
     const body = (await res.json()) as { data: ModelCatalog };
     expect(body.data.models.map((m) => m.value)).toContain("gpt-5-codex");
-    expect(body.data.defaultModel).toBe("gpt-5-codex");
+    expect(body.data.defaultModel).toBe("gpt-5.5");
     expect(body.data.efforts).toEqual([
       "minimal",
       "low",

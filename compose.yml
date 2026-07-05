@@ -11,10 +11,11 @@ services:
       # Claude (Claude Pro/Max): run `claude setup-token` once on any machine,
       # put the token in .env as CLAUDE_CODE_OAUTH_TOKEN=... (env_file injects it).
       #
-      # Codex (ChatGPT plan): run `codex login` once on the host (writes
-      # ~/.codex/auth.json), mount that dir below, and enable CLI auth:
-      # VIBERR_CODEX_USE_CLI_AUTH: "1"
-      # CODEX_HOME: /codex
+      # Codex (ChatGPT plan): the container reads the host's `codex login` from
+      # the ~/.codex -> /codex mount below. Keyless — the Codex SDK uses that
+      # login (and refreshes the OAuth token, since the mount is read-write).
+      CODEX_HOME: /codex
+      VIBERR_CODEX_USE_CLI_AUTH: "1"
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the
       # container, so the mapping always matches what the server listens on.
@@ -23,10 +24,12 @@ services:
       # Everything stateful lives under the data root: canonical project/task
       # markdown, SQLite projections + app DB, run logs, KBs. Back this up.
       - ./docker-data:/data
-      # Codex subscription login (uncomment with CODEX_HOME=/codex above).
-      # Mount read-write so the SDK can refresh the OAuth token. The container
-      # runs as uid 1000 (node) — ensure the files are readable by it.
-      # - ${HOME}/.codex:/codex
+      # Codex subscription login: `codex login` on the host writes ~/.codex/
+      # auth.json; mount it read-write (default) so the SDK can refresh the
+      # OAuth token. The container runs as uid 1000 (node) — Docker Desktop bind
+      # mounts are accessible regardless of host uid. Remove this line (and the
+      # CODEX_HOME / VIBERR_CODEX_USE_CLI_AUTH env above) if you don't use Codex.
+      - ${HOME}/.codex:/codex
     healthcheck:
       test:
         [

@@ -28,6 +28,7 @@ import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { isBackendAvailable, type RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   buildScript,
   type SimulatedScript,
@@ -103,7 +104,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     role: view.role || view.name,
     backend,
     model:
-      view.model || (backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5"),
+      view.model || (defaultModelFor(backend)),
     effort: view.effort || "",
   };
 }
@@ -422,7 +423,7 @@ export async function startSpecialistRun(
   // Resolve the model + effort from the deployment (falls back to a sane
   // default). Effort is threaded into the run so the SDK gets the profile's
   // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
-  let model = backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5";
+  let model = defaultModelFor(backend);
   let effort = "";
   // The agent's display name for the Agent-logs picker (grouped one-per-agent).
   // Falls back to the profile id when the deployment can't be resolved.
@@ -556,7 +557,7 @@ export async function startReviewerRun(
   const rev = reviewers[index]!;
   const backend: RealBackend = rev.backend === "codex" ? "codex" : "claude";
 
-  let model = backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5";
+  let model = defaultModelFor(backend);
   let effort = "";
   let agentName = rev.profileId;
   try {

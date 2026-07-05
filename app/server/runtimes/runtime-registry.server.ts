@@ -115,6 +115,21 @@ export interface AdapterDeps {
   codexFactory?: CodexFactory;
 }
 
+/**
+ * A COMPLETE spawn env for the Codex SDK. The `@openai/codex-sdk` `env` option
+ * replaces the child process env wholesale (it does not merge `process.env`),
+ * so we snapshot the current env and force `CODEX_HOME` — giving the spawned
+ * `codex` binary its PATH/HOME/etc. plus the subscription login dir.
+ */
+export function codexSpawnEnv(codexHome: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string") out[key] = value;
+  }
+  out.CODEX_HOME = codexHome;
+  return out;
+}
+
 /** Constructs the three adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const env = safeEnv();
@@ -143,8 +158,12 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
       ...(env.CODEX_API_KEY || env.OPENAI_API_KEY
         ? { apiKey: (env.CODEX_API_KEY ?? env.OPENAI_API_KEY)! }
         : {}),
-      // Point the SDK's spawned `codex` at the subscription login dir.
-      ...(env.CODEX_HOME ? { env: { CODEX_HOME: env.CODEX_HOME } } : {}),
+      // Point the SDK's spawned `codex` at the subscription login dir. NOTE:
+      // the Codex SDK REPLACES the child env with this object (unlike the
+      // Claude SDK, which merges into process.env), so we must hand it a FULL
+      // env — otherwise `codex` spawns with only CODEX_HOME and loses PATH/HOME
+      // (git/auth break). Merge process.env, then force CODEX_HOME.
+      ...(env.CODEX_HOME ? { env: codexSpawnEnv(env.CODEX_HOME) } : {}),
     }),
     simulated: createSimulatedAdapter(),
   };
