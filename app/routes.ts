@@ -24,6 +24,8 @@ export default [
   // Run-log tail (Phase 8) — the dedicated logs consumer fetches lines since
   // a seq after a run.log-appended SSE reference.
   route("resources/run-log", "routes/resources.run-log.ts"),
+  // Ops health probe (Phase 10) — { ok, projections, watcher }.
+  route("resources/health", "routes/resources.health.ts"),
 
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [

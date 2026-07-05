@@ -109,8 +109,9 @@ export function listOrgUsers(db: Database.Database): OrgUserView[] {
 
 // ------------------------------------------------------------- whitelists
 
-/** GitHub-handle placeholder email (mock display contract). */
-function githubPlaceholderEmail(handle: string): string {
+/** GitHub-handle placeholder email (mock display contract). Also consumed
+ * by the GitHub OAuth callback to claim the row at first sign-in. */
+export function githubPlaceholderEmail(handle: string): string {
   return `github.com/${handle.toLowerCase()}`;
 }
 

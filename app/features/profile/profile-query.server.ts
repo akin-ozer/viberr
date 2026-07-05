@@ -40,6 +40,8 @@ export interface ProfileView {
     avatarTone: string;
     hasPassword: boolean;
     githubConnected: boolean;
+    /** GitHub login captured at OAuth sign-in (Phase 10); null until then. */
+    githubHandle: string | null;
   };
   /** All project memberships, most-active project first. */
   memberships: ProfileMembership[];
@@ -128,6 +130,7 @@ export function getProfileView(
       avatarTone: user.avatarTone ?? "",
       hasPassword: user.passwordHash !== null,
       githubConnected: user.idp === "github",
+      githubHandle: user.githubHandle,
     },
     memberships,
     accessRole,

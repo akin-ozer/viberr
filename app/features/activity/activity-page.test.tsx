@@ -55,6 +55,8 @@ const AUDIT: AuditLogEntryView[] = [
     taskKey: "VIB-142",
     occurredAt: iso(0, 9, 38),
     status: "open",
+    resolvedAt: null,
+    resolvedBy: null,
   },
   {
     id: "evt_1",
@@ -63,12 +65,15 @@ const AUDIT: AuditLogEntryView[] = [
     taskKey: null,
     occurredAt: iso(1, 11, 20),
     status: null,
+    resolvedAt: null,
+    resolvedBy: null,
   },
 ];
 
 function renderActivity(
   stream: ActivityStreamRowView[] = STREAM,
   audit: AuditLogEntryView[] = AUDIT,
+  totals: { streamTotal?: number; auditTotal?: number } = {},
 ) {
   const Stub = createRoutesStub([
     {
@@ -78,7 +83,9 @@ function renderActivity(
           projectSlug="viberr-core"
           projectName="Viberr Core"
           stream={stream}
+          streamTotal={totals.streamTotal ?? stream.length}
           audit={audit}
+          auditTotal={totals.auditTotal ?? audit.length}
         />
       ),
     },
@@ -170,13 +177,38 @@ describe("ActivityPage", () => {
     expect(audit[1]!.querySelector(".pev-ico.change")).toBeTruthy();
     expect(audit[1]!.querySelector(".pill")).toBeNull();
 
-    // Resolved violations flip the pill.
+    // Resolved violations flip the pill and carry resolve context (Phase 10).
     cleanup();
     const resolved = renderActivity(STREAM, [
-      { ...AUDIT[0]!, status: "resolved" },
+      {
+        ...AUDIT[0]!,
+        status: "resolved",
+        resolvedAt: iso(0, 10, 2),
+        resolvedBy: "Arda Kaya",
+      },
     ]);
+    const pill = resolved.container.querySelector(".pev-list .pill.done")!;
+    expect(pill.textContent).toBe("resolved");
+    expect(pill.parentElement!.getAttribute("title")).toContain(
+      "Resolved by Arda Kaya",
+    );
+  });
+
+  it("shows 'Show older' buttons only when the store holds more rows (Phase 10)", () => {
+    const paged = renderActivity(STREAM, AUDIT, {
+      streamTotal: 250,
+      auditTotal: 75,
+    });
     expect(
-      resolved.container.querySelector(".pev-list .pill.done")!.textContent,
-    ).toBe("resolved");
+      paged.getByText(`Show older events · ${250 - STREAM.length} more`),
+    ).toBeTruthy();
+    expect(
+      paged.getByText(`Show older entries · ${75 - AUDIT.length} more`),
+    ).toBeTruthy();
+    cleanup();
+
+    // Fully loaded → no buttons.
+    const full = renderActivity();
+    expect(full.queryByText(/Show older/)).toBeNull();
   });
 });

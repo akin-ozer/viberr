@@ -146,6 +146,9 @@ export function getHomeOrgSummary(
     ).length;
   }
 
+  const countOf = (table: string): number =>
+    (db.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }).c;
+
   return {
     connectionOwners: [...owners].sort(),
     users: {
@@ -159,10 +162,10 @@ export function getHomeOrgSummary(
       })),
     },
     globalAgents,
-    // Knowledge bases / MCP servers / skills arrive with Phase 9's agent
-    // resources — honest zeros until then.
-    knowledgeBases: 0,
-    mcpServers: 0,
-    skills: 0,
+    // Real counts from the 9B org-resource tables (migration 0008); the
+    // phase-4 loader predated them (Phase 10 closed the honest-zeros gap).
+    knowledgeBases: countOf("org_knowledge_bases"),
+    mcpServers: countOf("org_mcp_servers"),
+    skills: countOf("org_skills"),
   };
 }

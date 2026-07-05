@@ -90,6 +90,12 @@ export function startFileWatcher(options: { dataRoot?: string } = {}): FSWatcher
   return watcher;
 }
 
+/** True while a store watcher is running in this process (health route). */
+export function isFileWatcherAlive(): boolean {
+  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
+  return cache[WATCHER_KEY] !== undefined;
+}
+
 /** Stops the running watcher (tests / graceful shutdown). */
 export async function stopFileWatcher(): Promise<void> {
   const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;

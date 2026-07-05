@@ -24,6 +24,7 @@ export interface UserRow {
   updated_at: string;
   last_login_at: string | null;
   created_by: string | null;
+  github_handle: string | null;
 }
 
 export interface UserRecord {
@@ -42,6 +43,8 @@ export interface UserRecord {
   updatedAt: string;
   lastLoginAt: string | null;
   createdBy: string | null;
+  /** GitHub login captured at OAuth sign-in (phase 10); null until then. */
+  githubHandle: string | null;
 }
 
 export function mapUserRow(row: UserRow): UserRecord {
@@ -61,5 +64,6 @@ export function mapUserRow(row: UserRow): UserRecord {
     updatedAt: row.updated_at,
     lastLoginAt: row.last_login_at,
     createdBy: row.created_by,
+    githubHandle: row.github_handle ?? null,
   };
 }

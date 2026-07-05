@@ -6,13 +6,24 @@ import {
 } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { UserRecord } from "~/shared/mapping/user.server";
+import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "../audit/audit-recorder.server";
+import {
+  findDomainAllowlistRole,
+  githubPlaceholderEmail,
+} from "../org/org-users.server";
 import {
   createSession,
   type CreatedSession,
   type SessionMeta,
 } from "./session.server";
-import { findUserByEmail, recordUserLogin, updateUserFields } from "./user-store.server";
+import {
+  findUserByEmail,
+  insertUser,
+  normalizeEmail,
+  recordUserLogin,
+  updateUserFields,
+} from "./user-store.server";
 
 /**
  * Shared OAuth plumbing: state/PKCE generation, the short-lived signed state
@@ -20,8 +31,19 @@ import { findUserByEmail, recordUserLogin, updateUserFields } from "./user-store
  * share. Provider specifics live in oauth-github.server.ts /
  * oauth-google.server.ts.
  *
- * Whitelist model: OAuth sign-in succeeds ONLY when a user row with that
- * verified email already exists (any idp). No self-signup.
+ * Whitelist model (Phase 10 wired the 9B org data into it):
+ * - A user row with the verified email (any idp) is the base whitelist —
+ *   existing accounts keep the exact phase-2 behavior.
+ * - Google: an email whose domain is in `google_domain_allowlist` is
+ *   provisioned on first sign-in (passwordless row, the allowlist's mapped
+ *   role) — audit `auth.oauth.user_provisioned`.
+ * - GitHub: a placeholder whitelist row (`github.com/<handle>`, created by
+ *   org-settings "Users & access") is CLAIMED on first sign-in — the row
+ *   gets the real verified email + display name — audit
+ *   `auth.oauth.placeholder_claimed`.
+ * - The GitHub login is persisted to users.github_handle at every GitHub
+ *   sign-in (9C decision 3 follow-up: attribution no longer email-only).
+ * No open self-signup anywhere.
  */
 
 export type OAuthProvider = "github" | "google";
@@ -170,31 +192,27 @@ export type OAuthLoginResult =
   | { status: "no_verified_email" }
   | { status: "exchange_failed"; detail: string };
 
-/**
- * Whitelist sign-in shared by both providers: the verified provider email
- * must match an existing, non-disabled user row. Updates user.idp on first
- * OAuth login, stamps last_login_at, creates the session, records audit.
- */
-export function signInVerifiedOAuthEmail(
+function oauthNotWhitelisted(
   db: Database.Database,
   provider: OAuthProvider,
   email: string,
-  meta: SessionMeta = {},
+  reason: "disabled" | "not_whitelisted",
 ): OAuthLoginResult {
-  const user = findUserByEmail(db, email);
-  if (!user || user.disabled) {
-    recordAudit(db, {
-      action: "auth.oauth.failure",
-      actor: { userId: null, label: email },
-      details: {
-        provider,
-        email,
-        reason: user ? "disabled" : "not_whitelisted",
-      },
-    });
-    return { status: "not_whitelisted", email };
-  }
+  recordAudit(db, {
+    action: "auth.oauth.failure",
+    actor: { userId: null, label: email },
+    details: { provider, email, reason },
+  });
+  return { status: "not_whitelisted", email };
+}
 
+/** Session + audit + idp sync for an authenticated, whitelisted user. */
+function establishOAuthSession(
+  db: Database.Database,
+  provider: OAuthProvider,
+  user: UserRecord,
+  meta: SessionMeta,
+): OAuthLoginResult {
   if (user.idp !== provider) {
     updateUserFields(db, user.id, { idp: provider });
   }
@@ -213,6 +231,130 @@ export function signInVerifiedOAuthEmail(
     session,
     mustResetPassword: user.pwresetRequired,
   };
+}
+
+/**
+ * Whitelist sign-in shared by both providers: the verified provider email
+ * must match an existing, non-disabled user row. Updates user.idp on first
+ * OAuth login, stamps last_login_at, creates the session, records audit.
+ */
+export function signInVerifiedOAuthEmail(
+  db: Database.Database,
+  provider: OAuthProvider,
+  email: string,
+  meta: SessionMeta = {},
+): OAuthLoginResult {
+  const user = findUserByEmail(db, email);
+  if (!user || user.disabled) {
+    return oauthNotWhitelisted(
+      db,
+      provider,
+      email,
+      user ? "disabled" : "not_whitelisted",
+    );
+  }
+  return establishOAuthSession(db, provider, user, meta);
+}
+
+/**
+ * Google sign-in (Phase 10): the account-existence whitelist first (exact
+ * phase-2 behavior for existing rows), then the 9B `google_domain_allowlist`
+ * — a verified email on an allowlisted domain is provisioned on first login
+ * as a passwordless Google account with the domain's mapped role.
+ */
+export function signInGoogleVerifiedEmail(
+  db: Database.Database,
+  identity: { email: string; name?: string | null },
+  meta: SessionMeta = {},
+): OAuthLoginResult {
+  const email = normalizeEmail(identity.email);
+  const existing = findUserByEmail(db, email);
+  if (existing) {
+    if (existing.disabled) {
+      return oauthNotWhitelisted(db, "google", email, "disabled");
+    }
+    return establishOAuthSession(db, "google", existing, meta);
+  }
+
+  const role = findDomainAllowlistRole(db, email);
+  if (!role) return oauthNotWhitelisted(db, "google", email, "not_whitelisted");
+
+  const user = insertUser(db, {
+    id: newId("u"),
+    email,
+    name: identity.name?.trim() || email.split("@")[0] || email,
+    role,
+    passwordHash: null, // OAuth-only account (the row IS the whitelist)
+    idp: "google",
+  });
+  recordAudit(db, {
+    action: "auth.oauth.user_provisioned",
+    actor: { userId: user.id, label: user.email },
+    subjectKind: "user",
+    subjectId: user.id,
+    details: { provider: "google", email, role, via: "domain_allowlist" },
+  });
+  return establishOAuthSession(db, "google", user, meta);
+}
+
+/**
+ * GitHub sign-in (Phase 10): the account-existence whitelist first, then the
+ * 9B github-handle placeholder rows — a whitelisted `@handle` row is claimed
+ * on first sign-in (real email + display name replace the placeholders).
+ * The GitHub login is persisted to users.github_handle on every path.
+ */
+export function signInGithubVerifiedIdentity(
+  db: Database.Database,
+  identity: { email: string; handle: string | null; name?: string | null },
+  meta: SessionMeta = {},
+): OAuthLoginResult {
+  const email = normalizeEmail(identity.email);
+  const handle = identity.handle?.trim().replace(/^@/, "") || null;
+
+  const existing = findUserByEmail(db, email);
+  if (existing) {
+    if (existing.disabled) {
+      return oauthNotWhitelisted(db, "github", email, "disabled");
+    }
+    if (handle && existing.githubHandle !== handle) {
+      updateUserFields(db, existing.id, { githubHandle: handle });
+    }
+    return establishOAuthSession(
+      db,
+      "github",
+      { ...existing, githubHandle: handle ?? existing.githubHandle },
+      meta,
+    );
+  }
+
+  const placeholder = handle
+    ? findUserByEmail(db, githubPlaceholderEmail(handle))
+    : null;
+  if (!placeholder || placeholder.disabled) {
+    return oauthNotWhitelisted(db, "github", email, "not_whitelisted");
+  }
+
+  // Claim the placeholder: the whitelisted row becomes the real identity.
+  db.prepare(
+    `UPDATE users SET email = ?, name = ?, github_handle = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    email,
+    identity.name?.trim() || placeholder.name,
+    handle,
+    new Date().toISOString(),
+    placeholder.id,
+  );
+  recordAudit(db, {
+    action: "auth.oauth.placeholder_claimed",
+    actor: { userId: placeholder.id, label: email },
+    subjectKind: "user",
+    subjectId: placeholder.id,
+    details: { provider: "github", handle, email },
+  });
+  const claimed = findUserByEmail(db, email);
+  if (!claimed) return oauthNotWhitelisted(db, "github", email, "not_whitelisted");
+  return establishOAuthSession(db, "github", claimed, meta);
 }
 
 export type FetchLike = (

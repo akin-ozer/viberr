@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { formatClock, formatDayBucket } from "~/shared/dates/format";
+import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 
 /**
  * Activity view — project-wide cross-task stream + audit logs
@@ -33,6 +34,9 @@ export interface AuditLogEntryView {
   taskKey: string | null;
   occurredAt: string;
   status: "open" | "resolved" | null;
+  /** Violations only — resolve context surfaced on the pill (Phase 10). */
+  resolvedAt: string | null;
+  resolvedBy: string | null;
 }
 
 /** Stream event type → icon (mock ACT_ICON; unknown → dot). */
@@ -92,11 +96,16 @@ export function auditTimeLabel(iso: string, now: Date = new Date()): string {
 
 function AuditLogs({
   entries,
+  total,
   onOpen,
+  onShowOlder,
 }: {
   entries: AuditLogEntryView[];
+  total: number;
   onOpen: (key: string) => void;
+  onShowOlder: () => void;
 }) {
+  const remaining = Math.max(0, total - entries.length);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -112,6 +121,7 @@ function AuditLogs({
       <div className="pev-list">
         {entries.map((e) => {
           const m = PEV_META[e.kind] ?? PEV_META.change!;
+          const resolved = e.status === "resolved";
           return (
             <div className="pol-ev" key={e.id}>
               <span className={"pev-ico " + m.cls}>
@@ -134,9 +144,21 @@ function AuditLogs({
                 {e.kind === "violation" && (
                   <>
                     {" "}
-                    <Pill kind={e.status === "resolved" ? "done" : "input"} sm>
-                      {e.status === "resolved" ? "resolved" : "open"}
-                    </Pill>
+                    <span
+                      title={
+                        resolved
+                          ? "Resolved" +
+                            (e.resolvedBy ? ` by ${e.resolvedBy}` : "") +
+                            (e.resolvedAt
+                              ? ` · ${auditTimeLabel(e.resolvedAt)}`
+                              : "")
+                          : "Open — grant the missing scope to resolve"
+                      }
+                    >
+                      <Pill kind={resolved ? "done" : "input"} sm>
+                        {resolved ? "resolved" : "open"}
+                      </Pill>
+                    </span>
                   </>
                 )}
               </span>
@@ -155,6 +177,17 @@ function AuditLogs({
             No policy or access events yet.
           </div>
         )}
+        {remaining > 0 && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ width: "100%", marginTop: ".6rem" }}
+            onClick={onShowOlder}
+          >
+            <Icon name="chevron" />
+            Show older entries · {remaining} more
+          </button>
+        )}
       </div>
     </div>
   );
@@ -171,22 +204,41 @@ export function ActivityPage({
   projectSlug,
   projectName,
   stream,
+  streamTotal,
   audit,
+  auditTotal,
 }: {
   projectSlug: string;
   projectName: string;
   stream: ActivityStreamRowView[];
+  /** Total rows in the store (drives the "Show older" affordances). */
+  streamTotal: number;
   audit: AuditLogEntryView[];
+  auditTotal: number;
 }) {
   const navigate = useNavigate();
+  const [, setSearchParams] = useSearchParams();
   const [f, setF] = useState<ActorFilter>("all");
   const onOpen = (key: string) =>
     navigate(`/projects/${projectSlug}/tasks/${key}`);
+
+  // "Show older" raises the loader limit via URL state (task-detail
+  // `?events=` pattern; survives revalidation, no client accumulation).
+  const showOlder = (param: "stream" | "audit", next: number) =>
+    setSearchParams(
+      (prev) => {
+        const url = new URLSearchParams(prev);
+        url.set(param, String(next));
+        return url;
+      },
+      { replace: true, preventScrollReset: true },
+    );
 
   const shown = groupStreamByDay(
     stream.filter((r) => matchesActorFilter(r, f)),
   );
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
+  const streamRemaining = Math.max(0, streamTotal - stream.length);
 
   return (
     <div className="board-wrap" data-screen-label="Activity">
@@ -267,9 +319,32 @@ export function ActivityPage({
                   : "No events match this filter."}
               </div>
             )}
+            {streamRemaining > 0 && (
+              <button
+                type="button"
+                className="btn ghost sm"
+                style={{ width: "100%", marginTop: ".6rem" }}
+                onClick={() =>
+                  showOlder(
+                    "stream",
+                    Math.min(stream.length + STREAM_STEP, STREAM_MAX),
+                  )
+                }
+              >
+                <Icon name="chevron" />
+                Show older events · {streamRemaining} more
+              </button>
+            )}
           </div>
 
-          <AuditLogs entries={audit} onOpen={onOpen} />
+          <AuditLogs
+            entries={audit}
+            total={auditTotal}
+            onOpen={onOpen}
+            onShowOlder={() =>
+              showOlder("audit", Math.min(audit.length + AUDIT_STEP, AUDIT_MAX))
+            }
+          />
         </div>
       </div>
     </div>

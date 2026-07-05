@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { Env } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import {
-  signInVerifiedOAuthEmail,
+  signInGoogleVerifiedEmail,
   type FetchLike,
   type OAuthLoginResult,
 } from "./oauth-shared.server";
@@ -96,7 +96,7 @@ export async function completeGoogleLogin(
     return { status: "exchange_failed", detail: "token exchange threw" };
   }
 
-  let claims: { email?: string; email_verified?: boolean };
+  let claims: { email?: string; email_verified?: boolean; name?: string };
   try {
     const userinfoResponse = await fetchImpl(USERINFO_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -119,5 +119,11 @@ export async function completeGoogleLogin(
     return { status: "no_verified_email" };
   }
 
-  return signInVerifiedOAuthEmail(db, "google", claims.email, args.meta);
+  // Account-existence whitelist first; else the 9B domain allowlist
+  // provisions the account on first sign-in (Phase 10 wiring).
+  return signInGoogleVerifiedEmail(
+    db,
+    { email: claims.email, name: claims.name ?? null },
+    args.meta,
+  );
 }

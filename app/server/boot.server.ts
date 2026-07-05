@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import type Database from "better-sqlite3";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import {
   startSessionSweeper,
@@ -6,13 +9,55 @@ import {
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
 import { startEventPublisher } from "./events/event-publisher.server";
-import { ensureDataRootDirs } from "./files/file-store-root.server";
+import {
+  DATA_ROOT_SUBDIRS,
+  ensureDataRootDirs,
+  getDataRoot,
+} from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
+import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
+
+/**
+ * Boot integrity report (Phase 10): data-root dirs + migration state +
+ * projection counts, logged once at startup. Basic runtime sanity — no
+ * security posture implied.
+ */
+function logBootIntegrity(db: Database.Database): void {
+  const root = getDataRoot();
+  const missingDirs = DATA_ROOT_SUBDIRS.filter(
+    (dir) => !existsSync(path.join(root, dir)),
+  );
+  const migrations = db
+    .prepare(
+      `SELECT count(*) AS c, max(filename) AS latest FROM schema_migrations`,
+    )
+    .get() as { c: number; latest: string | null };
+  const projects = (
+    db.prepare(`SELECT count(*) AS c FROM projects`).get() as { c: number }
+  ).c;
+  const tasks = (
+    db.prepare(`SELECT count(*) AS c FROM task_projections`).get() as {
+      c: number;
+    }
+  ).c;
+  const users = (
+    db.prepare(`SELECT count(*) AS c FROM users`).get() as { c: number }
+  ).c;
+  logger.info("boot integrity check", {
+    dataRoot: root,
+    dataRootDirsOk: missingDirs.length === 0,
+    ...(missingDirs.length > 0 ? { missingDirs } : {}),
+    migrationsApplied: migrations.c,
+    latestMigration: migrations.latest,
+    projections: { projects, tasks },
+    users,
+  });
+}
 
 /**
  * One-time server startup: validates the environment (fail fast with a
@@ -42,6 +87,21 @@ export function bootServer(): void {
   // reprojects and every mutation reach connected clients from the start.
   startEventPublisher();
 
+  // Boot reconcile (Phase 10 recovery): edits made while the server was
+  // down never reached the watcher (ignoreInitial) — one hash-short-circuit
+  // rescan converges projections with the store before the watcher takes
+  // over. Cheap on a clean tree; failures must never block boot.
+  try {
+    const summary = rescanProjections(db);
+    if (summary.changed > 0 || summary.removed > 0 || summary.errors > 0) {
+      logger.info("boot rescan reconciled offline drift", { ...summary });
+    }
+  } catch (error) {
+    logger.error("boot rescan failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
   // File-native store watcher (dev AND prod) — drives incremental
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
@@ -50,6 +110,8 @@ export function bootServer(): void {
   // runs' live lines in THIS process so the first client subscribe drips
   // them over SSE (the seed's own registration ran in a separate process).
   registerSeededLiveFromData(db);
+
+  logBootIntegrity(db);
 
   logger.info("viberr server booted", {
     nodeEnv: env.NODE_ENV,

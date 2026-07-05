@@ -618,6 +618,43 @@ export function HomePage({
     rescanFetcher.submit(fd, { method: "post" });
   };
 
+  // Full projection rebuild (Phase 10 recovery) — admin-only, confirmed.
+  // ADDITION over the mock: the mock's store strip has only Re-scan; the
+  // recovery hammer lives beside it per the Phase-10 plan.
+  const rebuildFetcher = useFetcher<{
+    ok: boolean;
+    projects?: number;
+    tasks?: number;
+    error?: string;
+  }>();
+  const [rebuildConfirm, setRebuildConfirm] = useState(false);
+  const rebuilding = rebuildFetcher.state !== "idle";
+  const rebuildDone = useRef(false);
+  useEffect(() => {
+    if (rebuildFetcher.state === "submitting") rebuildDone.current = false;
+    if (
+      rebuildFetcher.state === "idle" &&
+      rebuildFetcher.data &&
+      !rebuildDone.current
+    ) {
+      rebuildDone.current = true;
+      const d = rebuildFetcher.data;
+      push(
+        d.ok
+          ? `Projections rebuilt from files — ${d.projects} projects, ${d.tasks} tasks re-projected`
+          : (d.error ?? "Rebuild failed — check the server log"),
+      );
+    }
+  }, [rebuildFetcher.state, rebuildFetcher.data, push]);
+  const rebuild = () => {
+    setRebuildConfirm(false);
+    if (rebuilding) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "rebuild-projections");
+    rebuildFetcher.submit(fd, { method: "post" });
+  };
+
   const filtered = projects.filter((p) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -925,8 +962,25 @@ export function HomePage({
             <Icon name="refresh" className={scanning ? "spin" : ""} />
             {scanning ? "Scanning…" : "Re-scan"}
           </button>
+          {user.role === "admin" && (
+            <button
+              className="btn ghost sm"
+              onClick={() => setRebuildConfirm(true)}
+              title="Drop every projection row and re-project the whole store from files"
+            >
+              <Icon name="memory" className={rebuilding ? "spin" : ""} />
+              {rebuilding ? "Rebuilding…" : "Rebuild projections"}
+            </button>
+          )}
         </footer>
       </main>
+
+      {rebuildConfirm && (
+        <RebuildConfirm
+          onCancel={() => setRebuildConfirm(false)}
+          onConfirm={rebuild}
+        />
+      )}
 
       {modal && (
         <NewProjectModal
@@ -936,5 +990,46 @@ export function HomePage({
         />
       )}
     </div>
+  );
+}
+
+/** Confirm dialog for the full projection rebuild (admin recovery action). */
+function RebuildConfirm({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useDialog(onCancel);
+  return (
+    <>
+      <div className="confirm-scrim" onClick={onCancel}></div>
+      <div
+        ref={ref}
+        className="confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+      >
+        <div className="confirm-icon">
+          <Icon name="alert" />
+        </div>
+        <h3>Rebuild all projections?</h3>
+        <p>
+          Drops every derived board/task row and re-projects the whole store
+          from the files on disk. Canonical task files are never touched.
+          Day-to-day drift only needs Re-scan — rebuild when projections look
+          wrong.
+        </p>
+        <div className="confirm-actions">
+          <button className="btn ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn primary" onClick={onConfirm}>
+            Rebuild projections
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

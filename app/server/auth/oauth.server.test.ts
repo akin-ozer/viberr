@@ -280,3 +280,257 @@ describe("generatePkcePair", () => {
     expect(challenge).toBe(expected);
   });
 });
+
+// ---------------------------------------------------------------- Phase 10
+// OAuth ↔ 9B org-data wiring: google domain allowlist provisioning and
+// github placeholder-row claiming (+ handle persistence).
+
+describe("google domain-allowlist provisioning (Phase 10)", () => {
+  const googleArgs = {
+    code: "c0de",
+    codeVerifier: "v",
+    clientId: "cid",
+    clientSecret: "cs",
+    redirectUri: "http://localhost:5173/auth/google/callback",
+  };
+
+  function googleFetch(claims: unknown): FetchLike {
+    return async (input) => {
+      if (input.includes("oauth2.googleapis.com/token")) {
+        return jsonResponse({ access_token: "goog-token" });
+      }
+      if (input.includes("openidconnect.googleapis.com/v1/userinfo")) {
+        return jsonResponse(claims);
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    };
+  }
+
+  function allowDomain(db: ReturnType<typeof ctx.makeDb>, domain: string, role: string) {
+    db.prepare(
+      `INSERT INTO google_domain_allowlist (id, domain, role, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run(`dom_${domain.slice(1)}`, domain, role, new Date().toISOString());
+  }
+
+  it("provisions a first-login user from an allowlisted domain with the mapped role", async () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@hepapi.com", "member");
+    const result = await completeGoogleLogin(db, {
+      ...googleArgs,
+      fetchImpl: googleFetch({
+        email: "Codex@hepapi.com",
+        email_verified: true,
+        name: "Codex Ozer",
+      }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.email).toBe("codex@hepapi.com");
+    expect(result.user.name).toBe("Codex Ozer");
+    expect(result.user.role).toBe("member");
+    expect(result.user.idp).toBe("google");
+    // Passwordless — the row IS the whitelist; OAuth-only sign-in.
+    expect(result.user.passwordHash).toBeNull();
+    expect(result.mustResetPassword).toBe(false);
+    expect(result.session.token.length).toBeGreaterThan(0);
+    expect(
+      listAuditEvents(db, { action: "auth.oauth.user_provisioned" }),
+    ).toHaveLength(1);
+    expect(listAuditEvents(db, { action: "auth.oauth.login" })).toHaveLength(1);
+  });
+
+  it("maps an admin domain role onto the provisioned account", async () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@ops.example", "admin");
+    const result = await completeGoogleLogin(db, {
+      ...googleArgs,
+      fetchImpl: googleFetch({ email: "root@ops.example", email_verified: true }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.role).toBe("admin");
+    expect(result.user.name).toBe("root"); // local-part fallback, no name claim
+  });
+
+  it("still rejects a verified email whose domain is NOT allowlisted", async () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@hepapi.com", "member");
+    const result = await completeGoogleLogin(db, {
+      ...googleArgs,
+      fetchImpl: googleFetch({ email: "x@other.dev", email_verified: true }),
+    });
+    expect(result).toEqual({ status: "not_whitelisted", email: "x@other.dev" });
+    expect(listAuditEvents(db, { action: "auth.oauth.failure" })).toHaveLength(1);
+  });
+
+  it("existing accounts keep the exact pre-Phase-10 path (no reprovisioning)", async () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@hepapi.com", "admin"); // must NOT touch the row's role
+    insertUser(db, {
+      id: "u_prior",
+      email: "prior@hepapi.com",
+      name: "Prior",
+      role: "member",
+    });
+    const result = await completeGoogleLogin(db, {
+      ...googleArgs,
+      fetchImpl: googleFetch({ email: "prior@hepapi.com", email_verified: true }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.id).toBe("u_prior");
+    expect(result.user.role).toBe("member"); // unchanged
+    expect(
+      listAuditEvents(db, { action: "auth.oauth.user_provisioned" }),
+    ).toHaveLength(0);
+  });
+});
+
+describe("github placeholder claim + handle persistence (Phase 10)", () => {
+  const githubArgs = {
+    code: "c0de",
+    clientId: "cid",
+    clientSecret: "csecret",
+    redirectUri: "http://localhost:5173/auth/github/callback",
+  };
+
+  function githubFetch(options: {
+    emails: unknown;
+    profile?: unknown;
+    profileStatus?: number;
+  }): FetchLike {
+    return async (input) => {
+      if (input.includes("login/oauth/access_token")) {
+        return jsonResponse({ access_token: "gh-token" });
+      }
+      if (input.includes("/user/emails")) {
+        return jsonResponse(options.emails);
+      }
+      if (input.endsWith("/user")) {
+        return jsonResponse(
+          options.profile ?? { login: "akin-ozer", name: "Akin Ozer" },
+          options.profileStatus ?? 200,
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    };
+  }
+
+  it("claims a whitelisted placeholder row at first sign-in", async () => {
+    const db = ctx.makeDb();
+    // The 9B org-settings convention: name "@handle", email "github.com/handle".
+    insertUser(db, {
+      id: "u_ph",
+      email: "github.com/akin-ozer",
+      name: "@akin-ozer",
+      role: "member",
+      idp: "github",
+    });
+    const result = await completeGithubLogin(db, {
+      ...githubArgs,
+      fetchImpl: githubFetch({
+        emails: [{ email: "akin@hepapi.com", primary: true, verified: true }],
+      }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.id).toBe("u_ph");
+    const claimed = findUserById(db, "u_ph")!;
+    expect(claimed.email).toBe("akin@hepapi.com"); // placeholder replaced
+    expect(claimed.name).toBe("Akin Ozer");
+    expect(claimed.githubHandle).toBe("akin-ozer");
+    expect(claimed.lastLoginAt).toBeTruthy();
+    expect(
+      listAuditEvents(db, { action: "auth.oauth.placeholder_claimed" }),
+    ).toHaveLength(1);
+    expect(listAuditEvents(db, { action: "auth.oauth.login" })).toHaveLength(1);
+  });
+
+  it("persists the handle on an existing email-whitelisted account", async () => {
+    const db = ctx.makeDb();
+    insertUser(db, {
+      id: "u_mail",
+      email: "mail@viberr.test",
+      name: "Mail",
+      role: "member",
+    });
+    const result = await completeGithubLogin(db, {
+      ...githubArgs,
+      fetchImpl: githubFetch({
+        emails: [{ email: "mail@viberr.test", primary: true, verified: true }],
+        profile: { login: "mailer", name: null },
+      }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.id).toBe("u_mail");
+    expect(findUserById(db, "u_mail")?.githubHandle).toBe("mailer");
+    expect(result.user.githubHandle).toBe("mailer");
+  });
+
+  it("email match wins over a placeholder; no claim happens", async () => {
+    const db = ctx.makeDb();
+    insertUser(db, {
+      id: "u_real",
+      email: "dev@viberr.test",
+      name: "Dev",
+      role: "member",
+    });
+    insertUser(db, {
+      id: "u_ph2",
+      email: "github.com/devhandle",
+      name: "@devhandle",
+      role: "admin",
+      idp: "github",
+    });
+    const result = await completeGithubLogin(db, {
+      ...githubArgs,
+      fetchImpl: githubFetch({
+        emails: [{ email: "dev@viberr.test", primary: true, verified: true }],
+        profile: { login: "devhandle", name: "Dev H" },
+      }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.id).toBe("u_real");
+    // The placeholder row is untouched (still claimable / removable).
+    expect(findUserById(db, "u_ph2")?.email).toBe("github.com/devhandle");
+    expect(
+      listAuditEvents(db, { action: "auth.oauth.placeholder_claimed" }),
+    ).toHaveLength(0);
+  });
+
+  it("no account, no placeholder → still not_whitelisted", async () => {
+    const db = ctx.makeDb();
+    const result = await completeGithubLogin(db, {
+      ...githubArgs,
+      fetchImpl: githubFetch({
+        emails: [{ email: "ghost@x.test", primary: true, verified: true }],
+        profile: { login: "ghosthandle" },
+      }),
+    });
+    expect(result).toEqual({ status: "not_whitelisted", email: "ghost@x.test" });
+  });
+
+  it("a failed /user profile lookup degrades gracefully (email path intact)", async () => {
+    const db = ctx.makeDb();
+    insertUser(db, {
+      id: "u_deg",
+      email: "deg@viberr.test",
+      name: "Deg",
+      role: "member",
+    });
+    const result = await completeGithubLogin(db, {
+      ...githubArgs,
+      fetchImpl: githubFetch({
+        emails: [{ email: "deg@viberr.test", primary: true, verified: true }],
+        profileStatus: 500,
+      }),
+    });
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.user.id).toBe("u_deg");
+    expect(findUserById(db, "u_deg")?.githubHandle).toBeNull();
+  });
+});

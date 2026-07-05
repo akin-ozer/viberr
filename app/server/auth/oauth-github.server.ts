@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { Env } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import {
-  signInVerifiedOAuthEmail,
+  signInGithubVerifiedIdentity,
   type FetchLike,
   type OAuthLoginResult,
 } from "./oauth-shared.server";
@@ -19,6 +19,7 @@ import type { SessionMeta } from "./session.server";
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const TOKEN_URL = "https://github.com/login/oauth/access_token";
 const EMAILS_URL = "https://api.github.com/user/emails";
+const USER_URL = "https://api.github.com/user";
 
 export function isGithubOAuthEnabled(
   env: Pick<Env, "GITHUB_OAUTH_CLIENT_ID" | "GITHUB_OAUTH_CLIENT_SECRET">,
@@ -131,5 +132,38 @@ export async function completeGithubLogin(
     emails.find((entry) => entry.verified);
   if (!verified) return { status: "no_verified_email" };
 
-  return signInVerifiedOAuthEmail(db, "github", verified.email, args.meta);
+  // GitHub login + display name — the handle matches the org-settings
+  // placeholder whitelist rows and is persisted to users.github_handle
+  // (Phase 10). Best-effort: a profile-lookup failure only degrades the
+  // handle capture; the verified email alone still signs existing rows in.
+  let handle: string | null = null;
+  let displayName: string | null = null;
+  try {
+    const userResponse = await fetchImpl(USER_URL, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${accessToken}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "viberr",
+      },
+    });
+    if (userResponse.ok) {
+      const profile = (await userResponse.json()) as {
+        login?: string;
+        name?: string | null;
+      };
+      handle = profile.login ?? null;
+      displayName = profile.name ?? null;
+    }
+  } catch (error) {
+    logger.warn("github profile lookup failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  return signInGithubVerifiedIdentity(
+    db,
+    { email: verified.email, handle, name: displayName },
+    args.meta,
+  );
 }

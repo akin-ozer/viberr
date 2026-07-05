@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
 import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { getDataRoot, taskDir } from "~/server/files/file-store-root.server";
@@ -97,7 +100,12 @@ export interface StartRunInput {
   autonomous?: boolean;
   /** Override the data root (tests). */
   dataRoot?: string;
+  /** Who caused the run (audit). Defaults to the operator system actor. */
+  actor?: AuditActor;
 }
+
+/** Runs started by the operator runtime itself (scheduling reactions). */
+const OPERATOR_ACTOR: AuditActor = { userId: null, label: "operator" };
 
 const DEFAULT_THREAD: Record<RunKind, string> = {
   operator: "op",
@@ -136,6 +144,25 @@ export async function startRun(
     state: "queued",
   });
 
+  // Governed action: opening a runtime session is audited (BUILD-PLAN
+  // Phase 10 / contracts — run start + interrupt both leave audit rows).
+  recordAudit(db, {
+    action: "runtime.run.started",
+    actor: input.actor ?? OPERATOR_ACTOR,
+    subjectKind: "run",
+    subjectId: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      threadId,
+      backend: input.backend,
+      role: input.role,
+      kind: input.kind,
+      simulated,
+      resumed: Boolean(input.resumeSessionId),
+    },
+  });
+
   const spec: RunSpec & { script?: SimulatedScript } = {
     runId,
     projectSlug: input.projectSlug,
@@ -163,7 +190,13 @@ export async function startRun(
  */
 export async function resumeRun(
   db: Database.Database,
-  input: { runId: string; prompt: string; script?: SimulatedScript; dataRoot?: string },
+  input: {
+    runId: string;
+    prompt: string;
+    script?: SimulatedScript;
+    dataRoot?: string;
+    actor?: AuditActor;
+  },
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
@@ -183,6 +216,7 @@ export async function resumeRun(
     resumeSessionId: prev.session_id,
     ...(input.script ? { script: input.script } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
+    ...(input.actor ? { actor: input.actor } : {}),
   });
 }
 

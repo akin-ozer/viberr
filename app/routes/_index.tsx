@@ -11,6 +11,7 @@ import {
   listNotifications,
 } from "~/server/projections/notifications.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
+import { rebuildProjections } from "~/server/projections/rebuild.server";
 import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
 import {
   getHomeOrgSummary,
@@ -73,6 +74,21 @@ export async function action({ request }: Route.ActionArgs) {
     }
     if (intent === "rescan") {
       const summary = rescanProjections(db, { actor });
+      return { ok: true as const, ...summary };
+    }
+    if (intent === "rebuild-projections") {
+      // Phase 10 recovery: drop + re-project everything from files.
+      // Admin-only (instance maintenance beyond the everyday re-scan).
+      if (ctx.user.role !== "admin") {
+        return data(
+          {
+            ok: false as const,
+            error: "Rebuilding projections requires the org admin role.",
+          },
+          { status: 403 },
+        );
+      }
+      const summary = rebuildProjections(db, { actor });
       return { ok: true as const, ...summary };
     }
     if (intent === "create-project") {

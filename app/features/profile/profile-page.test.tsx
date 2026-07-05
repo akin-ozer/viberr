@@ -19,6 +19,7 @@ const BASE: ProfileData = {
     avatarTone: "",
     hasPassword: true,
     githubConnected: false,
+    githubHandle: null,
   },
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
   accessRole: "maintainer",

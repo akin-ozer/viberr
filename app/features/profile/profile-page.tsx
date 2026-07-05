@@ -37,6 +37,7 @@ export interface ProfileData {
     avatarTone: string;
     hasPassword: boolean;
     githubConnected: boolean;
+    githubHandle: string | null;
   };
   memberships: { slug: string; name: string; role: RoleId }[];
   accessRole: RoleId | null;
@@ -447,7 +448,11 @@ function ProfileGithub({
           <span className="k">GitHub account</span>
           <span className="v">
             <span className="mono">
-              {gh ? "linked · GitHub sign-in" : "not connected"}
+              {gh
+                ? user.githubHandle
+                  ? `@${user.githubHandle} · GitHub sign-in`
+                  : "linked · GitHub sign-in"
+                : "not connected"}
             </span>
           </span>
         </div>
@@ -478,8 +483,11 @@ function ProfileGithub({
             <Icon name="check" />
             <span>
               Connected — your approvals, acceptances, and runtime-session
-              opens are attributed to <strong>{user.email}</strong> in audit
-              records.
+              opens are attributed to{" "}
+              <strong>
+                {user.githubHandle ? `@${user.githubHandle}` : user.email}
+              </strong>{" "}
+              in audit records.
             </span>
             <button
               className="btn ghost sm"

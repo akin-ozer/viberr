@@ -110,6 +110,7 @@ const UPDATABLE_COLUMNS = {
   passwordHash: "password_hash",
   pwresetRequired: "pwreset_required",
   avatarTone: "avatar_tone",
+  githubHandle: "github_handle",
 } as const;
 
 export interface UserFieldPatch {
@@ -122,6 +123,7 @@ export interface UserFieldPatch {
   passwordHash?: string | null;
   pwresetRequired?: boolean;
   avatarTone?: string | null;
+  githubHandle?: string | null;
 }
 
 /** Generic column patch; bumps updated_at. Returns the fresh record. */

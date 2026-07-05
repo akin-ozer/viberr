@@ -5,6 +5,7 @@ import type {
   ScopeCheck,
 } from "~/schemas/github-pat.schema";
 import {
+  recordAudit,
   type AuditActor,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
@@ -333,8 +334,26 @@ export async function revalidateProjectCredential(
   actor: AuditActor = SYSTEM_ACTOR,
   ctx: RevalidateContext = {},
 ): Promise<RevalidateProjectCredentialResult> {
+  // Governed action (Phase 10): the grant/re-check ATTEMPT itself is
+  // audited with its outcome — not only the violation resolutions.
+  const auditAttempt = (
+    outcome: RevalidateProjectCredentialResult["status"],
+    extra: Record<string, unknown> = {},
+  ) =>
+    recordAudit(db, {
+      action: "github.credential.revalidated",
+      actor,
+      subjectKind: "github_credential",
+      subjectId: projectSlug,
+      projectSlug,
+      details: { outcome, ...extra },
+    });
+
   const credential = getProjectCredential(db, projectSlug);
-  if (!credential) return { status: "no_pat_configured" };
+  if (!credential) {
+    auditAttempt("no_pat_configured");
+    return { status: "no_pat_configured" };
+  }
 
   const projectRow = db
     .prepare(
@@ -366,8 +385,12 @@ export async function revalidateProjectCredential(
     knownExpiresAt: credential.validation?.expiresAt ?? null,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
-  if (!validation) return { status: "no_pat_configured" };
+  if (!validation) {
+    auditAttempt("no_pat_configured");
+    return { status: "no_pat_configured" };
+  }
   if (validation.status === "network_error") {
+    auditAttempt("network_unavailable");
     return { status: "network_unavailable", validation };
   }
 
@@ -387,5 +410,9 @@ export async function revalidateProjectCredential(
     );
     if (result?.resolved) resolvedViolations.push(result.violation);
   }
+  auditAttempt("revalidated", {
+    validationStatus: validation.status,
+    resolvedViolations: resolvedViolations.length,
+  });
   return { status: "revalidated", validation, resolvedViolations };
 }

@@ -15,9 +15,13 @@ import { listScopeViolations } from "./policy-violations.server";
  * Audit logs: the REAL `scope_violations` + `audit_events` tables merged
  * into the mock's four display kinds (violation / blockedact / change /
  * audit). Violations carry their own per-row open/resolved state
- * (ruling 5). audit_events rows are mapped through an explicit whitelist —
- * everything else (auth noise, task comments, org-level actions) stays out
- * of this panel. Sparse on a fresh seed by design; Phase 10 deepens it.
+ * (ruling 5) plus resolve context (who/when — Phase 10). audit_events rows
+ * are mapped through an explicit whitelist covering every project-scoped
+ * governance action family, each with a readable text template (the
+ * fallback template guarantees no raw JSON ever reaches the UI) —
+ * stream-visible activity (comments, transitions, github events) stays in
+ * the Stream panel, auth/org-scoped rows have no project home. Both panels
+ * are capped with loader-driven "show older" pagination (Phase 10).
  */
 
 export interface ActivityStreamRow {
@@ -32,6 +36,18 @@ export interface ActivityStreamRow {
 }
 
 export const ACTIVITY_STREAM_LIMIT = 200;
+
+/** Total stream rows for the project (drives the "show older" button). */
+export function countActivityStream(
+  db: Database.Database,
+  slug: string,
+): number {
+  return (
+    db
+      .prepare(`SELECT count(*) AS c FROM task_events WHERE project_slug = ?`)
+      .get(slug) as { c: number }
+  ).c;
+}
 
 export function listActivityStream(
   db: Database.Database,
@@ -72,12 +88,20 @@ export interface AuditLogEntry {
   occurredAt: string;
   /** Violations only — drives the open/resolved pill. */
   status: "open" | "resolved" | null;
+  /** Violations only — resolve context for the resolved pill (Phase 10). */
+  resolvedAt: string | null;
+  /** Resolver display name (user id resolved; label fallback). */
+  resolvedBy: string | null;
 }
 
 export const AUDIT_LOG_LIMIT = 60;
 
 /** audit_events actions surfaced in the panel, mapped to display kinds.
- * Deliberately a whitelist — Phase 10 owns the full audit console. */
+ * A deliberate whitelist of the project-scoped GOVERNANCE families —
+ * stream-visible activity (comments, transitions, github/completion
+ * events) renders in the Stream panel instead. Every listed action has a
+ * readable template in `auditText`; the default template covers additions
+ * that land here before a bespoke sentence does. */
 const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.policy.boundary_changed": "change",
   "project.member.role_changed": "change",
@@ -95,8 +119,10 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.created": "change",
   "github.credential.assigned": "change",
   "github.credential.cleared": "change",
+  "github.credential.revalidated": "change",
   "github.pr.merge_refused": "blockedact",
   "task.ownership.admin_released": "audit",
+  "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
 };
 
@@ -179,10 +205,29 @@ function auditText(
       return `${actor} assigned the project GitHub credential.`;
     case "github.credential.cleared":
       return `${actor} cleared the project GitHub credential.`;
+    case "github.credential.revalidated": {
+      // The grant-scope / re-check attempt with its typed outcome (Phase 10).
+      const outcome = str(d.outcome);
+      if (outcome === "no_pat_configured") {
+        return `${actor} requested a scope grant — no GitHub credential configured.`;
+      }
+      if (outcome === "network_unavailable") {
+        return `${actor} re-checked the project credential — GitHub was unreachable.`;
+      }
+      const resolved =
+        typeof d.resolvedViolations === "number" ? d.resolvedViolations : 0;
+      return resolved > 0
+        ? `${actor} re-validated the project credential — ${resolved} policy flag${resolved === 1 ? "" : "s"} resolved.`
+        : `${actor} re-checked the project credential scopes.`;
+    }
     case "github.pr.merge_refused":
       return `Blocked: review PR merge refused — the project credential is missing \`${str(d.scope) ?? "a scope"}\` — on`;
     case "task.ownership.admin_released":
       return `${actor} released the task owner — recorded per audit policy on`;
+    case "runtime.run.started": {
+      const role = str(d.role) ?? "agent";
+      return `${actor} opened the ${role} runtime session — recorded per audit policy on`;
+    }
     case "runtime.run.interrupted":
       return `${actor} interrupted an agent run — recorded per audit policy on`;
     default:
@@ -198,12 +243,45 @@ function finishText(text: string, taskKey: string | null): string {
   return text.slice(0, -3) + ".";
 }
 
+/** Total audit-panel rows for the project (drives "show older"). */
+export function countAuditLog(db: Database.Database, slug: string): number {
+  const violations = (
+    db
+      .prepare(
+        `SELECT count(*) AS c FROM scope_violations WHERE project_slug = ?`,
+      )
+      .get(slug) as { c: number }
+  ).c;
+  const actions = Object.keys(AUDIT_ACTION_KINDS);
+  const placeholders = actions.map(() => "?").join(", ");
+  const audits = (
+    db
+      .prepare(
+        `SELECT count(*) AS c FROM audit_events
+         WHERE project_slug = ? AND action IN (${placeholders})`,
+      )
+      .get(slug, ...actions) as { c: number }
+  ).c;
+  return violations + audits;
+}
+
 export function listAuditLog(
   db: Database.Database,
   slug: string,
   options: { limit?: number } = {},
 ): AuditLogEntry[] {
   const limit = options.limit ?? AUDIT_LOG_LIMIT;
+
+  const nameStmt = db.prepare(`SELECT name FROM users WHERE id = ?`);
+  const nameCache = new Map<string, string | null>();
+  const resolveUserName = (userId: string | null | undefined): string | null => {
+    if (!userId) return null;
+    if (!nameCache.has(userId)) {
+      const hit = nameStmt.get(userId) as { name: string } | undefined;
+      nameCache.set(userId, hit?.name ?? null);
+    }
+    return nameCache.get(userId) ?? null;
+  };
 
   const violations: AuditLogEntry[] = listScopeViolations(db, slug).map(
     (v) => ({
@@ -215,6 +293,11 @@ export function listAuditLog(
       taskKey: v.taskKey,
       occurredAt: v.createdAt,
       status: v.status,
+      resolvedAt: v.resolvedAt,
+      // resolved_by stores a user id when known, else the actor label.
+      resolvedBy: v.resolvedBy
+        ? (resolveUserName(v.resolvedBy) ?? v.resolvedBy)
+        : null,
     }),
   );
 
@@ -230,17 +313,6 @@ export function listAuditLog(
     )
     .all(slug, ...actions, limit) as AuditRow[];
 
-  const nameStmt = db.prepare(`SELECT name FROM users WHERE id = ?`);
-  const nameCache = new Map<string, string | null>();
-  const resolveUserName = (userId: string | null | undefined): string | null => {
-    if (!userId) return null;
-    if (!nameCache.has(userId)) {
-      const hit = nameStmt.get(userId) as { name: string } | undefined;
-      nameCache.set(userId, hit?.name ?? null);
-    }
-    return nameCache.get(userId) ?? null;
-  };
-
   const auditEntries: AuditLogEntry[] = rows.map((row) => ({
     id: row.id,
     kind: AUDIT_ACTION_KINDS[row.action] ?? "change",
@@ -248,6 +320,8 @@ export function listAuditLog(
     taskKey: row.task_key,
     occurredAt: row.occurred_at,
     status: null,
+    resolvedAt: null,
+    resolvedBy: null,
   }));
 
   return [...violations, ...auditEntries]
