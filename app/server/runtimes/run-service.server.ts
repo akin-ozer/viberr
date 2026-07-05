@@ -22,7 +22,9 @@ import {
 } from "./run-store.server";
 import {
   createAdapters,
+  resetRegistryForTests,
   selectAdapter,
+  setBackendAvailability,
   type AdapterDeps,
   type AdapterSet,
   type RealBackend,
@@ -68,6 +70,13 @@ function getState(): ServiceState {
 export function configureRunServiceForTests(
   adaptersOrDeps?: AdapterSet | AdapterDeps,
 ): void {
+  // Deterministic: force both real backends unavailable so runs use the
+  // simulated engine regardless of any ambient credential in the dev `.env`
+  // (e.g. a CLAUDE_CODE_OAUTH_TOKEN). A test that wants the real path injects
+  // a fake adapter AND calls setBackendAvailability(backend, true) after this.
+  resetRegistryForTests();
+  setBackendAvailability("claude", false);
+  setBackendAvailability("codex", false);
   const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
   const adapters =
     adaptersOrDeps && "simulated" in adaptersOrDeps
