@@ -341,6 +341,33 @@ export function TaskDetailPage({
     });
   };
 
+  // BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
+  // scrolls the Agent-logs panel into view. The reply run is the group
+  // representative → selecting its id shows its live output (streamed by the
+  // existing useRunLogStream). Revalidation (fired by the comment fetcher)
+  // brings the run into `runtime`; the pending id is kept until it appears so
+  // the selection lands after revalidation, not before it.
+  const [pendingLogSel, setPendingLogSel] = useState<string | null>(null);
+  const onAgentLog = (threadId: string) => {
+    setPendingLogSel(threadId);
+    setLogSel(threadId);
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+  // Once revalidation lands the reply run in `runtime`, confirm the selection
+  // (guards against a race where logSel was cleared or the id only just
+  // appeared), then clear the pending marker.
+  useEffect(() => {
+    if (!pendingLogSel) return;
+    if (runtime.some((r) => r.id === pendingLogSel)) {
+      setLogSel(pendingLogSel);
+      setPendingLogSel(null);
+    }
+  }, [pendingLogSel, runtime]);
+
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;
     const fd = new FormData();
@@ -446,6 +473,7 @@ export function TaskDetailPage({
           tlDefault={tlDefault}
           ask={ask}
           mentionables={mentionables}
+          onAgentLog={onAgentLog}
         />
       </div>
 

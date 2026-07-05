@@ -273,10 +273,14 @@ export async function startSpecialistRun(
   // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
   let model = backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5";
   let effort = "";
+  // The agent's display name for the Agent-logs picker (grouped one-per-agent).
+  // Falls back to the profile id when the deployment can't be resolved.
+  let agentName = sp.profileId;
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
     model = resolved.model;
     effort = resolved.effort;
+    agentName = resolved.name;
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
@@ -328,6 +332,10 @@ export async function startSpecialistRun(
     backend,
     model,
     ...(effort ? { effort } : {}),
+    // Persist the agent identity so the Agent-logs picker groups this run's
+    // resumes into one entry labeled by the specialist's name (e.g. "dev").
+    agentName,
+    agentProfileId: sp.profileId,
     prompt,
     script,
     actor: { userId: actor.userId, label: actor.label },

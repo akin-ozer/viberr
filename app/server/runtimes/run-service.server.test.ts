@@ -9,6 +9,7 @@ import {
   getRunLog,
   interruptRun,
   listRunsForTask,
+  resumeRun,
   scheduleOperatorRun,
   startRun,
 } from "./run-service.server";
@@ -242,5 +243,57 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     const result = interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: store.users.arda.id, label: store.users.arda.email });
     expect(result.outcome).toBe("already-terminal");
     expect(getRun(store.db, runId)!.state).toBe("finished");
+  });
+});
+
+describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () => {
+  it("startRun persists agent_name + agent_profile_id on the run row", async () => {
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
+      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "x" }]),
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    const row = getRun(store.db, runId)!;
+    expect(row.agent_name).toBe("dev");
+    expect(row.agent_profile_id).toBe("dev");
+  });
+
+  it("resumeRun carries the prior run's agent identity onto the new row by default", async () => {
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
+      script: instantScript([{ t: "1", ev: "init", tag: "system·init", text: "s" }, { t: "2", ev: "text", tag: "assistant", text: "x" }]),
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "reply" }]),
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    const newRow = getRun(store.db, resumed.runId)!;
+    expect(newRow.id).not.toBe(runId); // a NEW row
+    expect(newRow.agent_name).toBe("dev");
+    expect(newRow.agent_profile_id).toBe("dev");
+
+    // Both runs group into ONE Agent-logs entry labeled by the agent name.
+    const views = listRunsForTask(store.db, store.slug, "VIB-1");
+    const devViews = views.filter((v) => v.who.name === "dev");
+    expect(devViews.length).toBe(1);
+  });
+
+  it("scheduleOperatorRun stamps the Operator identity", async () => {
+    await scheduleOperatorRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", ownerName: "Arda Kaya", dataRoot: store.dataRoot,
+    });
+    await settle();
+    const views = listRunsForTask(store.db, store.slug, "VIB-1");
+    const op = views.find((v) => v.op)!;
+    expect(op.who.name).toBe("Operator");
   });
 });

@@ -323,6 +323,33 @@ describe("commentToAgent", () => {
     expect(posted).toBe(true);
   });
 
+  it("returns the grouped Agent-logs id (logThreadId) for the reply run (BUG 3)", async () => {
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev kick things off" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("started");
+    // The reply run's grouped RunView.id, so the UI can auto-select + stream it.
+    expect(result.logThreadId).toBeTruthy();
+    // It resolves to a real grouped entry for the "dev" agent.
+    const views = listRunsForTask(store.db, store.slug, "VIB-1");
+    const target = views.find((v) => v.id === result.logThreadId);
+    expect(target).toBeTruthy();
+    expect(target!.who.name).toBe("dev");
+  });
+
+  it("logThreadId is null when no agent was engaged", async () => {
+    const plain = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "just a plain note" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(plain.logThreadId).toBeNull();
+  });
+
   it("records a viewer/reviewer @mention but does NOT trigger a run (RBAC)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;

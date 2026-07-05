@@ -4,6 +4,7 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { formatDayDotTime } from "~/shared/dates/format";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useToast } from "~/ui/toast";
@@ -75,8 +76,11 @@ export function TimelineItem({ ev }: { ev: TimelineEventRender }) {
 
         {ev.type === "comment" ? (
           <div className={"comment-card" + (ev.toAgent ? " toagent" : "")}>
-            <div className="tl-text">
-              <RichText text={ev.text} />
+            {/* Comments (agent replies AND user comments) are real multi-line
+                markdown — render with the GFM renderer, not the inline-only
+                RichText. Typed events below stay on RichText. */}
+            <div className="tl-text md-body">
+              <Markdown text={ev.text} />
             </div>
           </div>
         ) : (
@@ -117,6 +121,7 @@ export function Timeline({
   tlDefault,
   ask,
   mentionables,
+  onAgentLog,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -128,6 +133,9 @@ export function Timeline({
   ask: number;
   /** @-mention autocomplete directory (loader) — agents/users/reserved. */
   mentionables: Mentionables;
+  /** BUG 3: when an @agent comment triggers a run, the server returns the
+   *  grouped Agent-logs id to auto-select + stream. Fired once per success. */
+  onAgentLog?: (threadId: string) => void;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
@@ -135,7 +143,12 @@ export function Timeline({
   const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
-  const fetcher = useFetcher<{ ok: boolean; toast?: string; error?: string }>();
+  const fetcher = useFetcher<{
+    ok: boolean;
+    toast?: string;
+    error?: string;
+    logThreadId?: string | null;
+  }>();
   const csrf = useCsrfToken();
   const push = useToast();
   const busy = fetcher.state !== "idle";
@@ -162,8 +175,11 @@ export function Timeline({
     if (fetcher.data.ok) {
       setDraft("");
       if (fetcher.data.toast) push(fetcher.data.toast);
+      // BUG 3: hand the grouped Agent-logs id up so the page selects + scrolls
+      // to the mentioned agent's live output.
+      if (fetcher.data.logThreadId && onAgentLog) onAgentLog(fetcher.data.logThreadId);
     }
-  }, [fetcher.state, fetcher.data, push]);
+  }, [fetcher.state, fetcher.data, push, onAgentLog]);
 
   const commentError =
     fetcher.state === "idle" && fetcher.data && !fetcher.data.ok

@@ -23,6 +23,12 @@ export interface AgentRunRow {
   model: string;
   session_id: string | null;
   sdk: string;
+  /** The deployed agent's display name ("dev"/"Operator"/…); null on seed/
+   *  historical rows (the projection falls back to the backend WHO_NAME). */
+  agent_name: string | null;
+  /** The deployed profile id — the stable per-agent grouping key; null on
+   *  seed/historical rows (the projection falls back to the run's role). */
+  agent_profile_id: string | null;
   state: RunState;
   phase: string | null;
   step: string | null;
@@ -61,6 +67,10 @@ export interface InsertRunInput {
   model: string;
   sdk: string;
   sessionId?: string | null;
+  /** The deployed agent's display name (grouped-picker label). */
+  agentName?: string | null;
+  /** The deployed profile id (per-agent grouping key). */
+  agentProfileId?: string | null;
   state: RunState;
   phase?: string | null;
   step?: string | null;
@@ -80,19 +90,23 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
   db.prepare(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, simulated,
-        model, session_id, sdk, state, phase, step, started_at, finished_at,
+        model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
+        started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend, @simulated,
-        @model, @sessionId, @sdk, @state, @phase, @step, @startedAt, @finishedAt,
+        @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
+        @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
         backend=excluded.backend, simulated=excluded.simulated, model=excluded.model,
-        session_id=excluded.session_id, sdk=excluded.sdk, state=excluded.state,
+        session_id=excluded.session_id, sdk=excluded.sdk,
+        agent_name=excluded.agent_name, agent_profile_id=excluded.agent_profile_id,
+        state=excluded.state,
         phase=excluded.phase, step=excluded.step, started_at=excluded.started_at,
         finished_at=excluded.finished_at, turns=excluded.turns,
         input_tokens=excluded.input_tokens, cached_input_tokens=excluded.cached_input_tokens,
@@ -110,6 +124,8 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
     model: input.model,
     sessionId: input.sessionId ?? null,
     sdk: input.sdk,
+    agentName: input.agentName ?? null,
+    agentProfileId: input.agentProfileId ?? null,
     state: input.state,
     phase: input.phase ?? null,
     step: input.step ?? null,

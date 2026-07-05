@@ -2056,6 +2056,61 @@ h1, h2, h3, h4 {
 .session-id-copy:hover { color: var(--ink); background: var(--panel-2, rgba(127,127,127,.12)); }
 .session-id-copy .ico { width: 13px; height: 13px; }
 
+/* Markdown comment bodies (agent replies + user comments) rendered by
+   ~/ui/markdown.tsx. Real GFM: paragraphs, lists, tables, headings, code.
+   Tokenized spacing/typography only — no Tailwind, no inline hex; inherits
+   the .tl-text color/size so it sits flush in the comment card. */
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body p { margin: .4rem 0; }
+.md-body ul, .md-body ol { margin: .4rem 0; padding-left: 1.35rem; }
+.md-body li { margin: .12rem 0; }
+.md-body li > p { margin: .12rem 0; }
+.md-body h1, .md-body h2, .md-body h3,
+.md-body h4, .md-body h5, .md-body h6 {
+  font-family: var(--font-display);
+  color: var(--fg);
+  margin: .7rem 0 .35rem;
+  line-height: 1.3;
+}
+.md-body h1 { font-size: 1.02rem; }
+.md-body h2 { font-size: .96rem; }
+.md-body h3 { font-size: .9rem; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: .86rem; }
+.md-body strong { color: var(--fg); font-weight: 700; }
+.md-body a { color: var(--blue-pressed); text-decoration: underline; }
+.md-body code.mono {
+  background: color-mix(in srgb, var(--fg), transparent 94%);
+  padding: .04rem .3rem;
+  border-radius: 5px;
+  font-size: .8em;
+}
+.md-body pre {
+  margin: .5rem 0;
+  padding: .6rem .75rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg), transparent 96%);
+  overflow-x: auto;
+}
+.md-body pre code.mono { background: none; padding: 0; border-radius: 0; }
+.md-body blockquote {
+  margin: .5rem 0;
+  padding: .1rem .8rem;
+  border-left: 3px solid var(--hairline);
+  color: var(--faint);
+}
+.md-body hr { border: none; border-top: 1px solid var(--hairline); margin: .8rem 0; }
+/* Wide tables scroll inside their own container — the page body never scrolls. */
+.md-table-wrap { overflow-x: auto; margin: .5rem 0; }
+.md-body table { border-collapse: collapse; font-size: .82rem; }
+.md-body th, .md-body td {
+  border: 1px solid var(--hairline);
+  padding: .32rem .55rem;
+  text-align: left;
+}
+.md-body th { background: color-mix(in srgb, var(--fg), transparent 96%); font-weight: 700; color: var(--fg); }
+
 /* The mock HTML <head> overrides the display face because Roobert PRO is not
    web-available; Manrope is the stand-in shipped with the app (bundled via
    @fontsource, no CDN). Ported from the inline <style> in design/html-app/*.html. */

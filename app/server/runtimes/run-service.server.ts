@@ -134,6 +134,11 @@ export interface StartRunInput {
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional — the SDK default applies when absent. */
   effort?: string;
+  /** The deployed agent's display name persisted on the run (Agent-logs
+   *  picker label). Null → the projection falls back to the backend name. */
+  agentName?: string | null;
+  /** The deployed profile id persisted on the run (per-agent grouping key). */
+  agentProfileId?: string | null;
   prompt: string;
   /** Optional scripted stream (simulated backend / seed resumer). */
   script?: SimulatedScript;
@@ -187,6 +192,8 @@ export async function startRun(
     model: input.model,
     sdk: SDK_LABEL[input.backend] ?? "",
     sessionId: input.resumeSessionId ?? null,
+    agentName: input.agentName ?? null,
+    agentProfileId: input.agentProfileId ?? null,
     state: "queued",
   });
 
@@ -253,6 +260,11 @@ export async function resumeRun(
     model?: string;
     /** Reasoning effort for the resumed turns (defaults to none). */
     effort?: string;
+    /** Carry/override the agent identity onto the resumed run so it groups
+     *  with the prior run in the Agent-logs picker. Defaults to the prior
+     *  row's agent_name/agent_profile_id. */
+    agentName?: string | null;
+    agentProfileId?: string | null;
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
@@ -282,6 +294,11 @@ export async function resumeRun(
     // when its session is resumed via a comment.
     model: input.model ?? prev.model,
     ...(input.effort ? { effort: input.effort } : {}),
+    // Carry the prior run's agent identity so the resume groups under the same
+    // Agent-logs entry (one entry per agent, across every resume). A caller can
+    // override (e.g. a comment-resume that knows the current profile name).
+    agentName: input.agentName ?? prev.agent_name,
+    agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
     ...(input.script ? { script: input.script } : {}),
@@ -488,6 +505,8 @@ export async function scheduleOperatorRun(
       kind: "operator",
       backend: "claude",
       model: "claude-sonnet-4-5",
+      agentName: "Operator",
+      agentProfileId: "operator",
       prompt,
       script,
       ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),

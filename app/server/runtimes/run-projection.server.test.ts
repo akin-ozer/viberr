@@ -1,0 +1,125 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { upsertRun, type InsertRunInput } from "./run-store.server";
+import { projectRunsForTask } from "./run-projection.server";
+
+/**
+ * Run projection GROUPING (BUG 2): one Agent-logs entry PER AGENT, not per run
+ * row. Every resume mints a new run row (fresh thread id, shared session), so
+ * grouping collapses an agent's runs into a single entry labeled by the agent's
+ * own NAME. The representative run is the running one (if any), else the newest.
+ */
+
+let ctx: TestDbContext;
+let db: import("better-sqlite3").Database;
+
+const SLUG = "viberr-core";
+const TASK = "VIB-1";
+
+beforeEach(() => {
+  ctx = createTestDbContext();
+  db = ctx.makeDb();
+});
+
+afterEach(() => ctx.cleanup());
+
+let seq = 0;
+function insert(patch: Partial<InsertRunInput>): void {
+  seq += 1;
+  upsertRun(db, {
+    id: patch.id ?? `run_${seq}`,
+    projectSlug: SLUG,
+    taskKey: TASK,
+    threadId: patch.threadId ?? `t${seq}`,
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "claude",
+    simulated: true,
+    model: "claude-sonnet-4-5",
+    sdk: "Claude Agent SDK",
+    state: "finished",
+    ...patch,
+  });
+}
+
+describe("projectRunsForTask grouping", () => {
+  it("collapses 3 runs of one specialist + 1 operator into 2 grouped RunViews", () => {
+    // Operator (its own group).
+    insert({
+      id: "run_op",
+      threadId: "op",
+      kind: "operator",
+      role: "Operator",
+      agentName: "Operator",
+      agentProfileId: "operator",
+      state: "finished",
+    });
+    // Three runs of the SAME specialist "dev" (resumes → new rows).
+    insert({ id: "run_d1", threadId: "primary", agentName: "dev", agentProfileId: "dev", state: "finished" });
+    insert({ id: "run_d2", threadId: "primary-r1", agentName: "dev", agentProfileId: "dev", state: "finished" });
+    insert({ id: "run_d3", threadId: "primary-r2", agentName: "dev", agentProfileId: "dev", state: "running" });
+
+    const views = projectRunsForTask(db, SLUG, TASK);
+
+    // Exactly 2 grouped entries: the operator + the single "dev" specialist.
+    expect(views.length).toBe(2);
+    const [op, dev] = views;
+    expect(op!.op).toBe(true);
+    expect(op!.who.name).toBe("Operator");
+
+    // The "dev" group is labeled by the agent's NAME (not the backend name).
+    expect(dev!.who.name).toBe("dev");
+    // Representative = the RUNNING run (run_d3), so the live strip keeps working.
+    expect(dev!.serverRunId).toBe("run_d3");
+    expect(dev!.id).toBe("primary-r2");
+    expect(dev!.state).toBe("running");
+  });
+
+  it("picks the most-recently-created run as representative when none is running", () => {
+    insert({ id: "run_a", threadId: "primary", agentName: "dev", agentProfileId: "dev", state: "finished" });
+    insert({ id: "run_b", threadId: "primary-r1", agentName: "dev", agentProfileId: "dev", state: "interrupted" });
+    insert({ id: "run_c", threadId: "primary-r2", agentName: "dev", agentProfileId: "dev", state: "finished" });
+
+    const views = projectRunsForTask(db, SLUG, TASK);
+    expect(views.length).toBe(1);
+    // Newest by created_at / rowid is run_c.
+    expect(views[0]!.serverRunId).toBe("run_c");
+    expect(views[0]!.id).toBe("primary-r2");
+  });
+
+  it("who.name falls back to the backend name for null-identity (seed) rows", () => {
+    // No agent_name / agent_profile_id → seed/historical row shape.
+    insert({ id: "run_seed", threadId: "primary", state: "finished" });
+    const views = projectRunsForTask(db, SLUG, TASK);
+    expect(views.length).toBe(1);
+    expect(views[0]!.who.name).toBe("Claude Code"); // WHO_NAME[claude]
+  });
+
+  it("groups distinct agents separately and keeps three entries (op + primary + consultant)", () => {
+    insert({ id: "run_op", threadId: "op", kind: "operator", role: "Operator", agentName: "Operator", agentProfileId: "operator" });
+    insert({ id: "run_p", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
+    insert({
+      id: "run_c",
+      threadId: "c0",
+      kind: "consultant",
+      role: "Consultant",
+      backend: "codex",
+      agentName: "reviewer",
+      agentProfileId: "reviewer",
+    });
+
+    const views = projectRunsForTask(db, SLUG, TASK);
+    expect(views.map((v) => v.who.name)).toEqual(["Operator", "dev", "reviewer"]);
+    // Order preserved by first-seen (created_at ASC).
+    expect(views.map((v) => v.id)).toEqual(["op", "primary", "c0"]);
+  });
+
+  it("groups null-identity runs of the same role together (seed op/primary/c0 shape)", () => {
+    // Legacy rows with NO identity still collapse per role (kind:role key).
+    insert({ id: "run_p1", threadId: "primary", role: "Primary specialist", state: "finished" });
+    insert({ id: "run_p2", threadId: "primary-r1", role: "Primary specialist", state: "running" });
+    const views = projectRunsForTask(db, SLUG, TASK);
+    expect(views.length).toBe(1);
+    expect(views[0]!.serverRunId).toBe("run_p2"); // the running one
+  });
+});

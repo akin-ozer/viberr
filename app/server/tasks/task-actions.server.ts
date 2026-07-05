@@ -25,6 +25,8 @@ import {
   markTaskPacketApprovalRead,
 } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
+import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
+import { getRun } from "~/server/runtimes/run-store.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
@@ -403,6 +405,14 @@ export interface CommentToAgentResult extends AppendCommentResult {
   /** How the mentioned agent was engaged (null when no agent was engaged). */
   triggered: "resumed" | "started" | null;
   /**
+   * The Agent-logs selection id (a RunView.id — the grouped representative
+   * thread) for the engaged agent's reply run, so the UI can auto-select and
+   * stream it (BUG 3). Null when no run was triggered. Since the reply run is
+   * the newest for that agent, it is the group representative → selecting this
+   * shows its live output.
+   */
+  logThreadId: string | null;
+  /**
    * True when an agent was mentioned but the commenter lacks the runtime role
    * (admin|maintainer) — the comment is recorded, the run is NOT triggered.
    * The route can toast about this; we never throw for a well-formed comment.
@@ -465,7 +475,7 @@ export async function commentToAgent(
   );
 
   if (!target) {
-    return { ...base, agent: null, triggered: null, runtimeDenied: false };
+    return { ...base, agent: null, triggered: null, logThreadId: null, runtimeDenied: false };
   }
 
   const agentIdentity = {
@@ -481,6 +491,7 @@ export async function commentToAgent(
       ...base,
       agent: agentIdentity,
       triggered: null,
+      logThreadId: null,
       runtimeDenied: true,
     };
   }
@@ -526,6 +537,11 @@ export async function commentToAgent(
       // must take effect when its session is resumed via a comment).
       model: target.model,
       ...(target.effort ? { effort: target.effort } : {}),
+      // Stamp the agent's identity so the reply run groups under (and labels)
+      // the agent's own Agent-logs entry ("dev"), even when resuming a seeded
+      // session row that predates the identity columns.
+      agentName: target.name,
+      agentProfileId: target.profileId,
       autonomous: true,
       script,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
@@ -569,7 +585,38 @@ export async function commentToAgent(
     });
   });
 
-  return { ...base, agent: agentIdentity, triggered, runtimeDenied: false };
+  // BUG 3: the Agent-logs selection id for the reply run's grouped entry. The
+  // reply run is the NEWEST for this agent → the group representative, so its
+  // group's RunView.id is the thread the UI should auto-select + stream. Look
+  // it up from the freshly-projected grouped list (best-effort — a projection
+  // hiccup just yields null and the UI simply doesn't auto-select).
+  const logThreadId = resolveReplyLogThread(db, input.projectSlug, input.taskKey, runId);
+
+  return { ...base, agent: agentIdentity, triggered, logThreadId, runtimeDenied: false };
+}
+
+/**
+ * The grouped RunView.id (Agent-logs selection key) that the just-started reply
+ * `runId` will appear under. Finds the grouped run whose representative is this
+ * run's DB id; falls back to the run's own thread id, then null.
+ */
+function resolveReplyLogThread(
+  db: Database.Database,
+  projectSlug: string,
+  taskKey: string,
+  runId: string,
+): string | null {
+  try {
+    const runViews = projectRunsForTask(db, projectSlug, taskKey);
+    const byRepresentative = runViews.find((r) => r.serverRunId === runId);
+    if (byRepresentative) return byRepresentative.id;
+    // Fallback: the run's own thread id (it may not yet be the representative
+    // if a concurrent run is also running for the same agent).
+    const row = getRun(db, runId);
+    return row?.thread_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** admin|maintainer against project membership (runtime-action gate). */

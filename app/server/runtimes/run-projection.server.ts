@@ -70,12 +70,15 @@ function projectRow(
 ): RunView {
   const op = row.kind === "operator";
   const backend = row.backend === "simulated" ? "claude" : (row.backend as "claude" | "codex");
+  // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
+  // consultant's name) when the run carries an identity; seed/historical rows
+  // (null agent_name) fall back to the backend WHO_NAME so nothing regresses.
   const who = op
-    ? { kind: "agent" as const, name: "Operator" }
+    ? { kind: "agent" as const, name: row.agent_name ?? "Operator" }
     : {
         kind: "agent" as const,
         backend,
-        name: WHO_NAME[backend] ?? "Agent",
+        name: row.agent_name ?? WHO_NAME[backend] ?? "Agent",
         role: row.role,
       };
 
@@ -116,18 +119,77 @@ function projectRow(
   };
 }
 
-/** All runs for a task as RunView[] (with full log lines each). */
+/**
+ * The per-agent grouping key for a run row. Every resume of an agent's session
+ * mints a NEW run row (fresh thread id, shared provider session), so grouping
+ * by agent collapses all of one agent's runs into a single picker entry:
+ *
+ *   operator          → "operator"           (one operator thread per task)
+ *   specialist/etc.   → "<kind>:<profileId>" (stable across resumes)
+ *                       …falling back to "<kind>:<role>" for seed/historical
+ *                       rows that predate agent_profile_id (still one entry per
+ *                       distinct role, matching the seeded op/primary/c0 shape).
+ */
+function groupKeyOf(row: AgentRunRow): string {
+  if (row.kind === "operator") return "operator";
+  return `${row.kind}:${row.agent_profile_id ?? row.role}`;
+}
+
+/**
+ * The REPRESENTATIVE run for a group: the one that is `running` if any, else
+ * the most-recently-created. Its thread_id becomes the group's RunView id
+ * (selection key) and its row supplies serverRunId — so a running run keeps the
+ * live-run strip working and the newest run (a fresh reply) becomes the entry.
+ *
+ * Rows arrive created_at ASC; we track "latest" as the last seen and prefer the
+ * first running row we meet.
+ */
+function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
+  let running: AgentRunRow | null = null;
+  let latest = rows[0]!;
+  for (const row of rows) {
+    latest = row; // ASC input → the last one is the newest
+    if (row.state === "running" && !running) running = row;
+  }
+  return running ?? latest;
+}
+
+/**
+ * All runs for a task as RunView[], GROUPED to ONE entry per agent (BUG 2):
+ * the operator, the primary specialist (across every resume), and any
+ * consultant each appear exactly once, labeled by the agent's own name.
+ *
+ * Grouping preserves the representatives' created_at order (the first group a
+ * key appears defines its slot), so a task with an operator + a primary "dev"
+ * (with many resume runs) + an optional consultant shows 2–3 named entries.
+ */
 export function projectRunsForTask(
   db: Database.Database,
   projectSlug: string,
   taskKey: string,
 ): RunView[] {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
-  return rows.map((row) => {
-    const stored = listRunLines(db, row.id);
+
+  // Group rows by agent, preserving first-seen (created_at ASC) group order.
+  const order: string[] = [];
+  const groups = new Map<string, AgentRunRow[]>();
+  for (const row of rows) {
+    const key = groupKeyOf(row);
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = [];
+      groups.set(key, bucket);
+      order.push(key);
+    }
+    bucket.push(row);
+  }
+
+  return order.map((key) => {
+    const representative = pickRepresentative(groups.get(key)!);
+    const stored = listRunLines(db, representative.id);
     return projectRow(
       db,
-      row,
+      representative,
       stored.map((l) => l.display),
       stored.map((l) => l.raw),
     );

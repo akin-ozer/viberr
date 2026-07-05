@@ -114,6 +114,57 @@ describe("AgentLogsPanel", () => {
     expect(getByText(/@openai\/codex-sdk · runStreamed\(\) · thread/)).toBeTruthy();
   });
 
+  it("the picker labels each agent by its who.name (grouped, one per agent)", () => {
+    // Two grouped entries: the operator + a "dev" specialist (BUG 2).
+    const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
+    const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "dev", role: "developer" }, state: "idle", lifecycle: "finished" });
+    const { container } = render(
+      <AgentLogsPanel runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
+    );
+    // The picker button shows the selected agent's name (not "Claude Code").
+    expect(container.querySelector(".rsel-nm")!.textContent).toContain("dev");
+    // Open the dropdown → both grouped entries appear as options, by name.
+    fireEvent.click(container.querySelector(".rsel-btn")!);
+    const optionText = [...container.querySelectorAll('[role="option"] .ri-nm')].map((n) => n.textContent);
+    expect(optionText.some((t) => t?.includes("Operator"))).toBe(true);
+    expect(optionText.some((t) => t?.includes("dev"))).toBe(true);
+  });
+
+  it("selecting an agent in the picker shows that agent's lines (BUG 3 auto-select)", () => {
+    const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "dev", role: "developer" }, state: "running", lifecycle: "running" });
+    const other = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
+    const onSel = vi.fn();
+    // Select "dev": its streamed lines render in the console.
+    const { container, getByText, rerender } = render(
+      <AgentLogsPanel
+        runtime={[other, dev]}
+        sel="op"
+        onSel={onSel}
+        linesByThread={{
+          op: [{ display: { t: "1", ev: "text", tag: "assistant", text: "operator line" }, raw: "{}" }],
+          primary: [{ display: { t: "1", ev: "text", tag: "assistant", text: "dev is streaming" }, raw: "{}" }],
+        }}
+      />,
+    );
+    // Initially the operator's line shows.
+    expect(container.textContent).toContain("operator line");
+    // Simulate the auto-select landing on "dev" (parent set sel=primary).
+    rerender(
+      <AgentLogsPanel
+        runtime={[other, dev]}
+        sel="primary"
+        onSel={onSel}
+        linesByThread={{
+          op: [{ display: { t: "1", ev: "text", tag: "assistant", text: "operator line" }, raw: "{}" }],
+          primary: [{ display: { t: "1", ev: "text", tag: "assistant", text: "dev is streaming" }, raw: "{}" }],
+        }}
+      />,
+    );
+    expect(getByText("dev is streaming")).toBeTruthy();
+    // Streaming footer confirms the live (running) dev thread is selected.
+    expect(getByText("streaming — raw output stays here as evidence, never in the task record")).toBeTruthy();
+  });
+
   it("session id is trimmed but expandable and copyable in full", () => {
     const run = mkRun({ backend: "claude", sid: "51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151", state: "idle", lifecycle: "finished" });
     const { getByRole, getByText } = render(

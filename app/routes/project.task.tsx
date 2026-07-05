@@ -141,6 +141,9 @@ export async function action({ request, params }: Route.ActionArgs) {
           toAgent: result.toAgent,
           agent: result.agent?.name ?? null,
           triggered: result.triggered,
+          // BUG 3: the grouped Agent-logs entry to auto-select + stream so the
+          // user sees the mentioned agent's live output without hunting for it.
+          logThreadId: result.logThreadId,
           toast,
         };
       }

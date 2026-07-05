@@ -127,7 +127,7 @@ describe("DecisionPacket", () => {
 /* -------------------------------------------------------- TimelineItem */
 
 describe("TimelineItem", () => {
-  it("comment: card, no type pill, today time, mention span", () => {
+  it("comment: markdown body card, no type pill, today time, mention as plain text", () => {
     const { container } = render(
       <TimelineItem ev={ev({ text: "ping @operator now" })} />,
     );
@@ -135,7 +135,13 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
     expect(container.querySelector(".tl-meta .pill")).toBeNull();
     expect(container.querySelector(".tl-time")!.textContent).toBe("9:41");
-    expect(container.querySelector(".mention")!.textContent).toBe("@operator");
+    // Comments now render as GFM markdown (multi-line agent replies + user
+    // comments). @mentions inside a comment stay as PLAIN TEXT (documented
+    // decision) — no `.mention` chip; the single-line typed events keep it.
+    const body = container.querySelector(".comment-card .md-body")!;
+    expect(body).not.toBeNull();
+    expect(container.querySelector(".comment-card .mention")).toBeNull();
+    expect(body.textContent).toContain("@operator");
   });
 
   it("agent-routed comment gets the toagent tint", () => {
