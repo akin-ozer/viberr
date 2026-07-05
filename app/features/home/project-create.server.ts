@@ -8,13 +8,40 @@ import {
   projectFilePath,
 } from "~/server/files/file-store-root.server";
 import { createProjectFile } from "~/server/files/project-writer.server";
+import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
 import { slugifyProjectName } from "./project-name";
+
+/**
+ * Best-effort fetch of the repo's real default branch so branch/PR sync
+ * targets the right base (e.g. `master`, not a hardcoded `main`). Returns
+ * `null` on any failure — creation then falls back to `main`.
+ */
+async function fetchRemoteDefaultBranch(
+  token: string,
+  repo: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "viberr",
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { default_branch?: string };
+    return data.default_branch ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * "New governed project" action (home spec §5.9/§5.10, §6.1): writes
@@ -78,6 +105,21 @@ export async function createProject(
   const template =
     input.template === "light" ? LIGHTWEIGHT_TEMPLATE : GOVERNED_TEMPLATE;
   const repoName = input.repoName.trim() || "new-project";
+  const repo = `${owner}/${repoName}`;
+
+  // Resolve the selected connection so we can (a) fetch the repo's real
+  // default branch and (b) bind its PAT to the project — a project isn't
+  // "connected" to GitHub just by holding a repo string; branch/PR sync and
+  // credential health need the credential bound (project_github_credentials).
+  const connection = getConnection(db, owner);
+  let defaultBranch = "main";
+  if (connection) {
+    const token = getPatToken(db, connection.patId);
+    if (token) {
+      const remote = await fetchRemoteDefaultBranch(token, repo);
+      if (remote) defaultBranch = remote;
+    }
+  }
 
   // Synthesized description — verbatim mock mapping (home spec §5.10).
   const desc =
@@ -94,8 +136,8 @@ export async function createProject(
   const frontmatter: ProjectFrontmatter = {
     name,
     slug,
-    repo: `${owner}/${repoName}`,
-    defaultBranch: "main",
+    repo,
+    defaultBranch,
     taskPrefix: key,
     nextTaskNumber: 1,
     stages: template.stages,
@@ -113,6 +155,12 @@ export async function createProject(
   rebuildPath(db, projectFilePath(slug, ctx.dataRoot), {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+
+  // Bind the selected connection's PAT to the project so credential health,
+  // branch creation, and PR sync work against the real repo.
+  if (connection) {
+    setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
+  }
 
   recordAudit(db, {
     action: "project.created",
