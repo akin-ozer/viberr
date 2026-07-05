@@ -1,6 +1,6 @@
 # Build state
 
-**Current status:** Phases 1–10 complete. Next: Phase 11 (hardening — Dockerfile/compose, CI, README/ops docs, smoke script, Playwright e2e, full manual pass). Phase 11 notes: `/resources/health` (200/503, no auth) is ready for container healthchecks; the audit-action registry lives in `app/server/audit/audit-actions.ts` (static sweep test enforces registration); boot now logs an integrity check + reconciling rescan; the full projection rebuild is `rebuildProjections` (Home store strip, admin).
+**Current status:** ALL PHASES COMPLETE (1–11). The full Viberr application is built, tested (753 unit/integration + 13 Playwright e2e), and verified live. Docker/compose, CI, README, and ops docs are in place. See docs/build/reports/phase-11.md for the final verification matrix and known gaps.
 
 ## Environment facts
 

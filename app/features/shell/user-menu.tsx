@@ -14,7 +14,7 @@ import { useToast } from "~/ui/toast";
  *
  * Deliberate mock behavior kept: the Theme item does NOT close the menu
  * (rapid cycling UX). Additions (sanctioned): Escape closes; admins get an
- * "Org users (temp)" link until Phase 9's org settings replace it.
+ * "Org settings" quick link to the instance admin surface.
  */
 
 export interface MenuUser {
@@ -140,11 +140,11 @@ export function UserMenu({
               <Link
                 className="menu-item"
                 role="menuitem"
-                to="/org/users"
+                to="/org/settings"
                 onClick={() => setMenu(false)}
               >
                 <Icon name="sliders" />
-                Org users (temp)
+                Org settings
               </Link>
             )}
             <div className="menu-sep" />
