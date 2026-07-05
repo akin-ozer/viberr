@@ -1,0 +1,857 @@
+import { useEffect, useRef, useState } from "react";
+import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
+import { Avatar } from "~/ui/avatar";
+import { useCsrfToken } from "~/ui/csrf-input";
+import { Icon } from "~/ui/icon";
+import { Pill } from "~/ui/pill";
+import { useToast } from "~/ui/toast";
+import { TglP } from "~/ui/toggle";
+import { useDialog } from "~/ui/use-dialog";
+import { CredentialCard } from "~/features/github/credential-card";
+import type { MembershipView } from "./membership.server";
+import type { SettingsViewData } from "./settings-query.server";
+
+/**
+ * Project Settings view (design/html-app/app/settings.jsx → 1:1 port,
+ * project-settings spec): project identity, workflow-stages editor
+ * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
+ * members panel (invite/remove — roles live in Policy), repository &
+ * credentials (shared CredentialCard + the real Grant-scope flow), danger
+ * zone. All governed state comes from the loader; every mutation is a
+ * route-action POST (no optimistic UI). Client-side guard toasts mirror
+ * the mock; the server re-checks every guard.
+ */
+
+type ActionResult =
+  | { ok: true; toast: string; stageId?: string }
+  | { ok: false; error: string };
+
+function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
+  const push = useToast();
+  const handled = useRef<unknown>(null);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (handled.current === fetcher.data) return;
+    handled.current = fetcher.data;
+    const d = fetcher.data;
+    if (d.ok) {
+      if (d.toast) push(d.toast);
+    } else if (d.error) {
+      push(d.error);
+    }
+  }, [fetcher.state, fetcher.data, push]);
+}
+
+const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
+const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".8rem" } as const;
+
+/** Mock STAGE_LOCK copy (client mirror of the server guard). */
+const STAGE_LOCK: Record<string, string> = {
+  triage: "it's the entry point",
+  done: "human acceptance stays terminal",
+};
+
+// ------------------------------------------------------------------ project
+
+export function ProjectPanel({
+  project,
+  canManage,
+  onSave,
+}: {
+  project: SettingsViewData["project"];
+  canManage: boolean;
+  onSave: (fields: { name: string; prefix: string; description: string }) => void;
+}) {
+  const [name, setName] = useState(project.name);
+  const [prefix, setPrefix] = useState(project.prefix);
+  const [desc, setDesc] = useState(project.description);
+
+  // Revalidation resync (a save or an SSE-driven reload brings new values).
+  useEffect(() => {
+    setName(project.name);
+    setPrefix(project.prefix);
+    setDesc(project.description);
+  }, [project.name, project.prefix, project.description]);
+
+  const saveIfDirty = () => {
+    if (
+      name.trim() === project.name &&
+      prefix === project.prefix &&
+      desc.trim() === project.description
+    ) {
+      return; // only save when dirty (spec §7.2)
+    }
+    onSave({ name, prefix, description: desc });
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="board" />
+        <h2>Project</h2>
+      </div>
+      <div className="set-fields">
+        <div className="field-row" style={{ gridTemplateColumns: "1fr 120px" }}>
+          <div className="field">
+            <label className="flabel">Project name</label>
+            <input
+              type="text"
+              value={name}
+              disabled={!canManage}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={saveIfDirty}
+            />
+          </div>
+          <div className="field">
+            <label className="flabel">Task prefix</label>
+            <input
+              type="text"
+              className="mono"
+              value={prefix}
+              disabled={!canManage}
+              onChange={(e) => setPrefix(e.target.value.toUpperCase().slice(0, 4))}
+              onBlur={saveIfDirty}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <label className="flabel">Description</label>
+          <textarea
+            rows={2}
+            value={desc}
+            disabled={!canManage}
+            onChange={(e) => setDesc(e.target.value)}
+            onBlur={saveIfDirty}
+          ></textarea>
+        </div>
+      </div>
+      <div className="kv" style={{ marginTop: ".4rem" }}>
+        <div className="kv-row">
+          <span className="k">Task keys</span>
+          <span className="v">
+            <span className="mono">{prefix}-###</span>
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Canonical task file</span>
+          <span className="v">
+            <Icon name="file" />
+            <span className="mono">{project.taskFilePattern}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------- stages
+
+export function StagesPanel({
+  stages,
+  counts,
+  canManage,
+  editingId,
+  setEditingId,
+  onRename,
+  onReorder,
+  onAdd,
+  onRemove,
+  onNavPolicy,
+}: {
+  stages: SettingsViewData["stages"];
+  counts: Record<string, number>;
+  canManage: boolean;
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
+  onRename: (stageId: string, name: string) => void;
+  onReorder: (orderedIds: string[]) => void;
+  onAdd: () => void;
+  onRemove: (stageId: string) => void;
+  onNavPolicy: () => void;
+}) {
+  const push = useToast();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  const count = (id: string) => counts[id] ?? 0;
+
+  const commitName = (s: { id: string; name: string }, raw: string) => {
+    setEditingId(null);
+    const v = raw.trim();
+    if (!v || v === s.name) return;
+    onRename(s.id, v);
+  };
+
+  const remove = (s: { id: string; name: string }) => {
+    const locked = STAGE_LOCK[s.id];
+    if (locked) {
+      push(`${s.name} can't be removed — ${locked}`);
+      return;
+    }
+    const n = count(s.id);
+    if (n > 0) {
+      push(`Move ${n} ${n === 1 ? "task" : "tasks"} out of ${s.name} first`);
+      return;
+    }
+    onRemove(s.id);
+  };
+
+  const drop = (targetId: string) => {
+    const src = dragId;
+    setDragId(null);
+    setOverId(null);
+    if (!src || src === targetId) return;
+    let next = [...stages];
+    const [moved] = next.splice(next.findIndex((s) => s.id === src), 1);
+    next.splice(next.findIndex((s) => s.id === targetId), 0, moved!);
+    // triage stays first, done stays last (mock normalization — the server
+    // re-applies it regardless).
+    next = [
+      next.find((s) => s.id === "triage"),
+      ...next.filter((s) => s.id !== "triage" && s.id !== "done"),
+      next.find((s) => s.id === "done"),
+    ].filter((s): s is NonNullable<typeof s> => Boolean(s));
+    onReorder(next.map((s) => s.id));
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="branch" />
+        <h2>Workflow stages</h2>
+        <span className="right sub" style={PANEL_COUNT_STYLE}>
+          {stages.length} stages
+        </span>
+      </div>
+      <div className="stg-list">
+        {stages.map((s) => {
+          const locked = STAGE_LOCK[s.id];
+          const n = count(s.id);
+          return (
+            <div
+              className={
+                "stg-row" +
+                (dragId === s.id ? " dragging" : "") +
+                (overId === s.id && dragId !== s.id ? " over" : "")
+              }
+              key={s.id}
+              draggable={canManage && !locked && editingId !== s.id}
+              onDragStart={(e) => {
+                setDragId(s.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (overId !== s.id) setOverId(s.id);
+              }}
+              onDragLeave={() => {
+                if (overId === s.id) setOverId(null);
+              }}
+              onDrop={() => drop(s.id)}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
+            >
+              <span
+                className={"stg-handle" + (locked ? " off" : "")}
+                title={locked ? `${s.name} is fixed — ${locked}` : "Drag to reorder"}
+              >
+                <Icon name={locked ? "lock" : "grip"} />
+              </span>
+              <span className="sdot" style={{ background: s.color }}></span>
+              {editingId === s.id ? (
+                <input
+                  type="text"
+                  className="stg-input"
+                  defaultValue={s.name}
+                  autoFocus
+                  onFocus={(e) => e.target.select()}
+                  onBlur={(e) => commitName(s, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="stg-name"
+                  title="Rename stage"
+                  disabled={!canManage}
+                  onClick={() => setEditingId(s.id)}
+                >
+                  {s.name}
+                </button>
+              )}
+              <span className="stg-count">
+                {n} {n === 1 ? "task" : "tasks"}
+              </span>
+              <button
+                type="button"
+                className={"stg-x" + (locked ? " off" : "")}
+                aria-label={"Remove " + s.name}
+                title={locked ? `${s.name} can't be removed` : "Remove stage"}
+                disabled={!canManage}
+                onClick={() => remove(s)}
+              >
+                <Icon name="x" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {canManage && (
+        <button
+          className="btn ghost sm"
+          style={{ width: "100%", marginTop: ".8rem" }}
+          onClick={onAdd}
+        >
+          <Icon name="plus" />
+          Add stage
+        </button>
+      )}
+      <div className="pol-note" style={POL_NOTE_STYLE}>
+        <Icon name="shield" />
+        <span>
+          Drag to reorder · click a name to rename. Who may move tasks between
+          stages is set in{" "}
+          <button type="button" className="keybtn" onClick={onNavPolicy}>
+            Policy → Workflow rules
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ members
+
+export function MembersPanel({
+  members,
+  meId,
+  projectName,
+  canManage,
+  busy,
+  onInvite,
+  onRemove,
+  onNavPolicy,
+}: {
+  members: MembershipView[];
+  meId: string | null;
+  projectName: string;
+  canManage: boolean;
+  busy: boolean;
+  onInvite: (name: string, email: string) => void;
+  onRemove: (member: MembershipView) => void;
+  onNavPolicy: () => void;
+}) {
+  const push = useToast();
+  const [nm, setNm] = useState("");
+  const [em, setEm] = useState("");
+  const pending = members.filter((m) => m.status === "invited").length;
+
+  const invite = () => {
+    const name = nm.trim();
+    const email = em.trim().toLowerCase();
+    if (!name || !email.includes("@")) {
+      push("Enter a name and a valid email");
+      return;
+    }
+    if (members.some((m) => m.email.toLowerCase() === email)) {
+      push(`${email} is already a member`);
+      return;
+    }
+    onInvite(name, email);
+    setNm("");
+    setEm("");
+  };
+
+  const remove = (m: MembershipView) => {
+    if (m.userId === meId) {
+      push(`You can't remove yourself from ${projectName}`);
+      return;
+    }
+    if (
+      m.role === "admin" &&
+      members.filter((x) => x.role === "admin").length <= 1
+    ) {
+      push(`${m.name} is the only admin — assign another admin in Policy first`);
+      return;
+    }
+    onRemove(m);
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="user" />
+        <h2>Members</h2>
+        <span className="right sub" style={PANEL_COUNT_STYLE}>
+          {members.length - pending} active
+          {pending > 0 ? ` · ${pending} invited` : ""}
+        </span>
+      </div>
+      <div className="member-list" style={{ marginBottom: 0 }}>
+        {members.map((m) => (
+          <div className="member-row" key={m.userId}>
+            <Avatar person={{ initials: m.initials, tone: m.tone }} />
+            <span className="member-main">
+              <div className="nm">
+                {m.name}
+                {m.userId === meId && <span className="you-tag">you</span>}
+              </div>
+              <div className="em">{m.email}</div>
+            </span>
+            {m.status === "invited" && (
+              <Pill kind="input" sm>
+                invite pending
+              </Pill>
+            )}
+            {canManage && (
+              <button
+                type="button"
+                className="stg-x"
+                aria-label={"Remove " + m.name}
+                title={m.status === "invited" ? "Revoke invite" : "Remove member"}
+                disabled={busy}
+                onClick={() => remove(m)}
+              >
+                <Icon name="x" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {canManage && (
+        <div className="invite-row">
+          <input
+            type="text"
+            placeholder="Full name"
+            value={nm}
+            onChange={(e) => setNm(e.target.value)}
+          />
+          <input
+            type="text"
+            placeholder="email@company.dev"
+            value={em}
+            onChange={(e) => setEm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") invite();
+            }}
+          />
+          <button className="btn sm" onClick={invite} disabled={busy}>
+            <Icon name="send" />
+            Invite
+          </button>
+        </div>
+      )}
+      <div className="pol-note" style={POL_NOTE_STYLE}>
+        <Icon name="shield" />
+        <span>
+          New members join as Viewer. Roles are managed in{" "}
+          <button type="button" className="keybtn" onClick={onNavPolicy}>
+            Policy → Human access
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------- repository & credentials
+
+export function RepoPanel({
+  repo,
+  override,
+  credential,
+  canOverride,
+  canGrant,
+  busy,
+  onToggleOverride,
+  onGrantScope,
+  onOpenTask,
+}: {
+  repo: string | null;
+  override: boolean;
+  credential: SettingsViewData["credential"];
+  canOverride: boolean;
+  canGrant: boolean;
+  busy: boolean;
+  onToggleOverride: () => void;
+  onGrantScope: () => void;
+  onOpenTask: (taskKey: string) => void;
+}) {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="github" />
+        <h2>Repository &amp; credentials</h2>
+      </div>
+      <div className="kv">
+        <div className="kv-row">
+          <span className="k">Default repository</span>
+          <span className="v">
+            <Icon name="github" />
+            {repo ? (
+              <span className="mono">{repo}</span>
+            ) : (
+              <span style={{ color: "var(--placeholder)", fontSize: ".8rem" }}>
+                —
+              </span>
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Task-level override</span>
+          <span className="v" style={{ gap: ".6rem" }}>
+            <span
+              style={{
+                fontSize: ".78rem",
+                color: "var(--faint)",
+                fontFamily: "var(--font-body)",
+                fontWeight: 400,
+              }}
+            >
+              {override
+                ? "tasks may attach a different repo"
+                : "all tasks use the default"}
+            </span>
+            {canOverride ? (
+              <TglP
+                on={override}
+                onChange={onToggleOverride}
+                label="Task-level repository override"
+              />
+            ) : (
+              <span style={{ fontSize: ".78rem", color: "var(--faint)" }}>
+                {override ? "on" : "off"}
+              </span>
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Repos per task</span>
+          <span className="v">1 · V1 limit</span>
+        </div>
+      </div>
+
+      <CredentialCard
+        credential={credential}
+        onOpenTask={onOpenTask}
+        warnActions={
+          canGrant ? (
+            <button
+              className="btn sm"
+              style={{ marginLeft: "auto" }}
+              onClick={onGrantScope}
+              disabled={busy}
+              title="Re-check the credential's scopes against GitHub"
+            >
+              <Icon name="check" />
+              Grant scope
+            </button>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+// -------------------------------------------------------------- danger zone
+
+function DeleteProjectDialog({
+  projectName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  projectName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (confirmName: string) => void;
+}) {
+  const dialogRef = useDialog(onCancel);
+  const [confirmName, setConfirmName] = useState("");
+  const matches = confirmName.trim() === projectName;
+  return (
+    <>
+      <div className="confirm-scrim" onClick={onCancel} />
+      <div
+        className="confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Delete project"
+        ref={dialogRef}
+      >
+        <div className="confirm-icon">
+          <Icon name="alert" />
+        </div>
+        <h3>Delete {projectName}?</h3>
+        <p>
+          Removes tasks, timelines, and audit logs. This cannot be undone.
+          Type <strong>{projectName}</strong> to confirm.
+        </p>
+        <div className="field" style={{ marginTop: ".6rem" }}>
+          <input
+            type="text"
+            value={confirmName}
+            autoFocus
+            placeholder={projectName}
+            onChange={(e) => setConfirmName(e.target.value)}
+          />
+        </div>
+        <div className="confirm-actions">
+          <button className="btn ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className="btn danger"
+            disabled={!matches || busy}
+            style={!matches ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+            onClick={() => onConfirm(confirmName)}
+          >
+            <Icon name="x" />
+            Delete project
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function DangerZone({
+  projectName,
+  myRole,
+  busy,
+  onDelete,
+}: {
+  projectName: string;
+  myRole: string | null;
+  busy: boolean;
+  onDelete: (confirmName: string) => void;
+}) {
+  const push = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const isAdmin = myRole === "admin";
+  const deny = (what: string) =>
+    push(`${what} is admin-only — you're signed in as a ${myRole ?? "guest"}`);
+
+  return (
+    <div className="panel danger-panel">
+      <div className="panel-head">
+        <Icon name="alert" />
+        <h2>Danger zone</h2>
+      </div>
+      <div className="dz-row">
+        <span className="dz-main">
+          <div className="dn">Archive {projectName}</div>
+          <div className="dd">
+            Board becomes read-only, running agents stop, timelines are
+            preserved.
+          </div>
+        </span>
+        <button
+          className="btn ghost sm"
+          onClick={() =>
+            isAdmin
+              ? push("Archiving isn't available yet — projects stay active in V1")
+              : deny("Archiving")
+          }
+        >
+          Archive
+        </button>
+      </div>
+      <div className="dz-row">
+        <span className="dz-main">
+          <div className="dn">Delete project</div>
+          <div className="dd">
+            Removes tasks, timelines, and audit logs. This cannot be undone.
+          </div>
+        </span>
+        <button
+          className="btn danger sm"
+          onClick={() => (isAdmin ? setConfirming(true) : deny("Deletion"))}
+        >
+          Delete project
+        </button>
+      </div>
+      {confirming && (
+        <DeleteProjectDialog
+          projectName={projectName}
+          busy={busy}
+          onCancel={() => setConfirming(false)}
+          onConfirm={(confirmName) => {
+            setConfirming(false);
+            onDelete(confirmName);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------- page
+
+export function SettingsPage({
+  data,
+  meId,
+  myRole,
+}: {
+  data: SettingsViewData;
+  meId: string | null;
+  myRole: string | null;
+}) {
+  const navigate = useNavigate();
+  const csrf = useCsrfToken();
+  const identityFetcher = useFetcher<ActionResult>();
+  const stageFetcher = useFetcher<ActionResult>();
+  const memberFetcher = useFetcher<ActionResult>();
+  const repoFetcher = useFetcher<ActionResult>();
+  const dangerFetcher = useFetcher<ActionResult>();
+  useActionToast(identityFetcher);
+  useActionToast(stageFetcher);
+  useActionToast(memberFetcher);
+  useActionToast(repoFetcher);
+  useActionToast(dangerFetcher);
+
+  const isAdmin = myRole === "admin";
+  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const slug = data.project.slug;
+
+  // Stage rename edit-mode lives here so a fresh add-stage response can
+  // drop the new row straight into edit mode (mock behavior).
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const autoEdited = useRef<unknown>(null);
+  useEffect(() => {
+    if (stageFetcher.state !== "idle" || !stageFetcher.data) return;
+    if (autoEdited.current === stageFetcher.data) return;
+    autoEdited.current = stageFetcher.data;
+    if (stageFetcher.data.ok && stageFetcher.data.stageId) {
+      setEditingStageId(stageFetcher.data.stageId);
+    }
+  }, [stageFetcher.state, stageFetcher.data]);
+
+  const onNavPolicy = () => navigate(`/projects/${slug}/policy`);
+  const onOpenTask = (taskKey: string) =>
+    navigate(`/projects/${slug}/tasks/${taskKey}`);
+
+  return (
+    <div className="board-wrap" data-screen-label="Settings">
+      <div className="board-head">
+        <div>
+          <h1>Settings</h1>
+          <div className="sub">Board configuration for {data.project.name}</div>
+        </div>
+      </div>
+      <div className="policy-wrap">
+        <div className="policy-cols">
+          <ProjectPanel
+            project={data.project}
+            canManage={isAdmin}
+            onSave={(fields) =>
+              identityFetcher.submit(
+                { intent: "save-project", _csrf: csrf, ...fields },
+                { method: "post" },
+              )
+            }
+          />
+          <StagesPanel
+            stages={data.stages}
+            counts={data.stageCounts}
+            canManage={isAdmin}
+            editingId={editingStageId}
+            setEditingId={setEditingStageId}
+            onRename={(stageId, name) =>
+              stageFetcher.submit(
+                { intent: "rename-stage", _csrf: csrf, stageId, name },
+                { method: "post" },
+              )
+            }
+            onReorder={(orderedIds) =>
+              stageFetcher.submit(
+                {
+                  intent: "reorder-stages",
+                  _csrf: csrf,
+                  orderedIds: orderedIds.join(","),
+                },
+                { method: "post" },
+              )
+            }
+            onAdd={() =>
+              stageFetcher.submit(
+                { intent: "add-stage", _csrf: csrf },
+                { method: "post" },
+              )
+            }
+            onRemove={(stageId) =>
+              stageFetcher.submit(
+                { intent: "remove-stage", _csrf: csrf, stageId },
+                { method: "post" },
+              )
+            }
+            onNavPolicy={onNavPolicy}
+          />
+        </div>
+        <div className="policy-cols">
+          <MembersPanel
+            members={data.members}
+            meId={meId}
+            projectName={data.project.name}
+            canManage={isAdmin}
+            busy={memberFetcher.state !== "idle"}
+            onInvite={(name, email) =>
+              memberFetcher.submit(
+                { intent: "invite", _csrf: csrf, name, email },
+                { method: "post" },
+              )
+            }
+            onRemove={(member) =>
+              memberFetcher.submit(
+                { intent: "remove-member", _csrf: csrf, userId: member.userId },
+                { method: "post" },
+              )
+            }
+            onNavPolicy={onNavPolicy}
+          />
+          <RepoPanel
+            repo={data.project.repo}
+            override={data.repoOverride}
+            credential={data.credential}
+            canOverride={isAdmin}
+            canGrant={canGrant}
+            busy={repoFetcher.state !== "idle"}
+            onToggleOverride={() =>
+              repoFetcher.submit(
+                {
+                  intent: "override",
+                  _csrf: csrf,
+                  enabled: String(!data.repoOverride),
+                },
+                { method: "post" },
+              )
+            }
+            onGrantScope={() =>
+              repoFetcher.submit(
+                { intent: "grant-scope", _csrf: csrf },
+                { method: "post" },
+              )
+            }
+            onOpenTask={onOpenTask}
+          />
+        </div>
+        <DangerZone
+          projectName={data.project.name}
+          myRole={myRole}
+          busy={dangerFetcher.state !== "idle"}
+          onDelete={(confirmName) =>
+            dangerFetcher.submit(
+              { intent: "delete-project", _csrf: csrf, confirmName },
+              { method: "post" },
+            )
+          }
+        />
+      </div>
+    </div>
+  );
+}

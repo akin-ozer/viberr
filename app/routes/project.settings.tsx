@@ -1,15 +1,184 @@
+import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
-import { requireUser } from "~/server/auth/require-user.server";
-import { PlaceholderView } from "~/features/shell/placeholder-view";
+import type { loader as projectLoader } from "./project";
+import { assertCsrf } from "~/server/auth/csrf.server";
+import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import { getDb } from "~/server/db/sqlite.server";
+import { isAppError } from "~/server/errors/app-error.server";
+import { listProjectMembers } from "~/server/projections/board-query.server";
+import { runGrantScope } from "~/features/github/github-actions.server";
+import {
+  addStage,
+  deleteProject,
+  inviteMember,
+  removeMember,
+  removeStage,
+  renameStage,
+  reorderStages,
+  setRepoOverride,
+  updateProjectIdentity,
+} from "~/features/project-settings/settings-actions.server";
+import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
+import { SettingsPage } from "~/features/project-settings/settings-page";
 
-/** Real route, placeholder surface — the full Settings view is Phase 9. */
-export function loader({ request }: Route.LoaderArgs) {
+/**
+ * /projects/:slug/settings — the project-admin surface (project-settings
+ * spec), replacing the phase-4 placeholder. Loader: identity + stages +
+ * per-stage counts + membership (with invite status) + credential health
+ * (ruling-5 single fact) + the repo-override flag. Actions (POST + CSRF):
+ * identity save, stage editor mutations, membership CRUD, override toggle,
+ * grant-scope (phase-7 revalidateProjectCredential — resolves the seeded
+ * VIB-142 violation and drops the rail badge), and the danger-zone delete.
+ * Toast copy is computed server-side (phase-5 pattern); mutations write
+ * project.md → reproject → audit, and the shell's project-scope SSE
+ * subscription revalidates open Boards (columns follow stage edits live).
+ */
+
+export async function loader({ request, params }: Route.LoaderArgs) {
   requireUser(request);
-  return null;
+  const db = getDb();
+  const view = getSettingsViewData(db, params.slug);
+  if (!view) {
+    throw data(`No project at projects/${params.slug}.`, { status: 404 });
+  }
+  return { view };
 }
 
-export default function SettingsView() {
+export async function action({ request, params }: Route.ActionArgs) {
+  const ctx = requireAuth(request);
+  const db = getDb();
+  const formData = await request.formData();
+  await assertCsrf(request, ctx.sessionId, formData);
+  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const intent = String(formData.get("intent") ?? "");
+  const field = (name: string) => String(formData.get(name) ?? "");
+  const slug = params.slug;
+
+  try {
+    switch (intent) {
+      case "save-project": {
+        const result = await updateProjectIdentity(
+          db,
+          {
+            projectSlug: slug,
+            name: field("name"),
+            prefix: field("prefix"),
+            description: field("description"),
+          },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "rename-stage": {
+        const result = await renameStage(
+          db,
+          { projectSlug: slug, stageId: field("stageId"), name: field("name") },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "add-stage": {
+        const result = await addStage(db, { projectSlug: slug }, actor);
+        return {
+          ok: true as const,
+          toast: result.toast,
+          stageId: result.stageId,
+        };
+      }
+      case "remove-stage": {
+        const result = await removeStage(
+          db,
+          { projectSlug: slug, stageId: field("stageId") },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "reorder-stages": {
+        const result = await reorderStages(
+          db,
+          {
+            projectSlug: slug,
+            orderedIds: field("orderedIds").split(",").filter(Boolean),
+          },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "invite": {
+        const result = await inviteMember(
+          db,
+          { projectSlug: slug, name: field("name"), email: field("email") },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "remove-member": {
+        const result = await removeMember(
+          db,
+          { projectSlug: slug, targetUserId: field("userId") },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "override": {
+        const result = await setRepoOverride(
+          db,
+          { projectSlug: slug, enabled: field("enabled") === "true" },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "grant-scope": {
+        // Same RBAC as the GitHub view's action: credential re-check is
+        // admin|maintainer (the settings mutations above are admin-only
+        // inside their server functions).
+        const myRole =
+          listProjectMembers(db, slug).find((m) => m.userId === ctx.user.id)
+            ?.role ?? null;
+        if (myRole !== "admin" && myRole !== "maintainer") {
+          return data(
+            {
+              ok: false as const,
+              error:
+                "Only project admins and maintainers can re-check the credential.",
+            },
+            { status: 403 },
+          );
+        }
+        return await runGrantScope(db, slug, actor);
+      }
+      case "delete-project": {
+        await deleteProject(
+          db,
+          { projectSlug: slug, confirmName: field("confirmName") },
+          actor,
+        );
+        return redirect("/");
+      }
+      default:
+        return data(
+          { ok: false as const, error: "Unknown action." },
+          { status: 400 },
+        );
+    }
+  } catch (error) {
+    if (isAppError(error)) {
+      return data(
+        { ok: false as const, error: error.userMessage },
+        { status: error.status },
+      );
+    }
+    throw error;
+  }
+}
+
+export default function SettingsView({ loaderData }: Route.ComponentProps) {
+  const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   return (
-    <PlaceholderView title="Settings" phase={9} screenLabel="Settings — placeholder" />
+    <SettingsPage
+      data={loaderData.view}
+      meId={layout?.user.id ?? null}
+      myRole={layout?.myRole ?? null}
+    />
   );
 }

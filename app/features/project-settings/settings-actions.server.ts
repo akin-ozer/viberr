@@ -1,0 +1,514 @@
+import { existsSync, rmSync } from "node:fs";
+import type Database from "better-sqlite3";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { createUser } from "~/server/auth/user-admin.server";
+import { findUserByEmail } from "~/server/auth/user-store.server";
+import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
+import {
+  projectDir,
+  projectFilePath,
+} from "~/server/files/file-store-root.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
+import { newId } from "~/shared/ids/new-id.server";
+
+/**
+ * Project-settings mutations (project-settings spec §5): identity, the
+ * workflow-stages editor, membership CRUD, the repo-override policy flag,
+ * and the danger-zone delete. Every mutation follows the canonical order
+ * file write → incremental reproject → audit (SSE `project.updated` rides
+ * the rebuild — open Boards re-render columns via the shell's project
+ * scope).
+ *
+ * RBAC (contracts §3.2, enforced HERE): identity/stages/override/delete =
+ * "Edit workflow & policy" → admin; membership CRUD = "Manage members &
+ * roles" → admin. (Grant-scope stays admin|maintainer in the route,
+ * matching the GitHub view.) Guards the mock did client-side (locked
+ * stages, non-empty stages, self-removal, last-admin) are re-checked
+ * server-side with the spec-verbatim toast copy as the error message.
+ */
+
+export interface SettingsActor {
+  userId: string;
+  label: string;
+}
+
+export interface SettingsMutationContext {
+  dataRoot?: string;
+}
+
+/** Mock STAGE_LOCK — reasons double as title/toast copy. */
+export const STAGE_LOCK: Record<string, string> = {
+  triage: "it's the entry point",
+  done: "human acceptance stays terminal",
+};
+
+export const NEW_STAGE_COLORS = [
+  "var(--blue)",
+  "var(--yellow-dark)",
+  "var(--agent)",
+  "var(--teal-dark)",
+] as const;
+
+function forbidden(userMessage: string): AppError {
+  return new AppError({
+    code: ERROR_CODES.FORBIDDEN,
+    status: 403,
+    userMessage,
+    kind: "user",
+  });
+}
+
+function conflict(userMessage: string): AppError {
+  return new AppError({
+    code: ERROR_CODES.CONFLICT,
+    status: 409,
+    userMessage,
+    kind: "user",
+  });
+}
+
+function requireProjectAdmin(
+  ctx: SettingsMutationContext,
+  projectSlug: string,
+  actor: SettingsActor,
+  what: string,
+): { projectName: string } {
+  const file = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
+  const role = file.parsed.frontmatter.members.find(
+    (m) => m.userId === actor.userId,
+  )?.role;
+  if (role !== "admin") {
+    throw forbidden(`Only project admins can ${what}.`);
+  }
+  return { projectName: file.parsed.frontmatter.name };
+}
+
+function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
+  return {
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  };
+}
+
+function reprojectProject(
+  db: Database.Database,
+  ctx: SettingsMutationContext,
+  projectSlug: string,
+): void {
+  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+}
+
+// ----------------------------------------------------------------- identity
+
+export async function updateProjectIdentity(
+  db: Database.Database,
+  input: { projectSlug: string; name: string; prefix: string; description: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+
+  const name = input.name.trim();
+  const prefix = input.prefix.trim().toUpperCase().slice(0, 4);
+  if (!name) throw AppError.validation("Project name is required.");
+  if (!/^[A-Z]{1,4}$/.test(prefix)) {
+    throw AppError.validation("Task prefix must be 1–4 letters.");
+  }
+  const description = input.description.trim();
+
+  const changedFields: string[] = [];
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    if (parsed.frontmatter.name !== name) {
+      parsed.frontmatter.name = name;
+      changedFields.push("name");
+    }
+    // Prefix changes affect FUTURE keys only — existing task keys/dirs are
+    // immutable (spec §5.1).
+    if (parsed.frontmatter.taskPrefix !== prefix) {
+      parsed.frontmatter.taskPrefix = prefix;
+      changedFields.push("prefix");
+    }
+    if (parsed.description !== description) {
+      parsed.description = description;
+      changedFields.push("description");
+    }
+  });
+
+  if (changedFields.length === 0) {
+    return { toast: "Project settings saved", changed: false };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.settings.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { fields: changedFields },
+  });
+  return { toast: "Project settings saved", changed: true };
+}
+
+// ------------------------------------------------------------------- stages
+
+export async function renameStage(
+  db: Database.Database,
+  input: { projectSlug: string; stageId: string; name: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  const name = input.name.trim();
+  if (!name) throw AppError.validation("Stage name is required.");
+
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const stage = parsed.frontmatter.stages.find((s) => s.id === input.stageId);
+    if (!stage) throw AppError.notFound(`No stage ${input.stageId}.`);
+    if (stage.name === name) return;
+    stage.name = name;
+    changed = true;
+  });
+
+  const toast = `Stage renamed to "${name}" — board and policy follow`;
+  if (!changed) return { toast, changed: false };
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.stage.renamed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "stage",
+    subjectId: input.stageId,
+    projectSlug: input.projectSlug,
+    details: { name },
+  });
+  return { toast, changed: true };
+}
+
+export async function addStage(
+  db: Database.Database,
+  input: { projectSlug: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; stageId: string }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+
+  // Server-generated id (spec §5.2 — never the mock's Date.now scheme).
+  const stageId = newId("stage").toLowerCase().replace(/_/g, "-");
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const stages = parsed.frontmatter.stages;
+    const stage = {
+      id: stageId,
+      name: "New stage",
+      color: NEW_STAGE_COLORS[stages.length % NEW_STAGE_COLORS.length]!,
+    };
+    // Inserted immediately before `done` (appended when no done exists).
+    const doneIdx = stages.findIndex((s) => s.id === "done");
+    stages.splice(doneIdx < 0 ? stages.length : doneIdx, 0, stage);
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.stage.added",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "stage",
+    subjectId: stageId,
+    projectSlug: input.projectSlug,
+    details: {},
+  });
+  return { toast: "Stage added — it appears on the board immediately", stageId };
+}
+
+export async function removeStage(
+  db: Database.Database,
+  input: { projectSlug: string; stageId: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+
+  // Non-empty guard re-checked at ACTION time from projections (spec §5.2 —
+  // client counts can be stale).
+  const count = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM task_projections
+          WHERE project_slug = ? AND stage = ?`,
+      )
+      .get(input.projectSlug, input.stageId) as { n: number }
+  ).n;
+
+  let stageName = input.stageId;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const stage = parsed.frontmatter.stages.find((s) => s.id === input.stageId);
+    if (!stage) throw AppError.notFound(`No stage ${input.stageId}.`);
+    stageName = stage.name;
+    const locked = STAGE_LOCK[input.stageId];
+    if (locked) {
+      throw conflict(`${stage.name} can't be removed — ${locked}`);
+    }
+    if (count > 0) {
+      throw conflict(
+        `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
+      );
+    }
+    parsed.frontmatter.stages = parsed.frontmatter.stages.filter(
+      (s) => s.id !== input.stageId,
+    );
+    // Transition rules referencing a removed stage are dropped with it
+    // (spec §7.4 decision — documented in the phase report).
+    parsed.frontmatter.workflow = parsed.frontmatter.workflow.filter(
+      (w) => w.from !== input.stageId && w.to !== input.stageId,
+    );
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.stage.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "stage",
+    subjectId: input.stageId,
+    projectSlug: input.projectSlug,
+    details: { name: stageName },
+  });
+  return { toast: `Stage "${stageName}" removed` };
+}
+
+export async function reorderStages(
+  db: Database.Database,
+  input: { projectSlug: string; orderedIds: string[] },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const stages = parsed.frontmatter.stages;
+    const byId = new Map(stages.map((s) => [s.id, s]));
+    if (
+      input.orderedIds.length !== stages.length ||
+      input.orderedIds.some((id) => !byId.has(id))
+    ) {
+      throw AppError.validation("Stage order is out of date — try again.");
+    }
+    let next = input.orderedIds.map((id) => byId.get(id)!);
+    // Server re-applies the normalization — never trust client order
+    // (spec §5.2): triage stays first, done stays last.
+    next = [
+      next.find((s) => s.id === "triage"),
+      ...next.filter((s) => s.id !== "triage" && s.id !== "done"),
+      next.find((s) => s.id === "done"),
+    ].filter((s): s is NonNullable<typeof s> => Boolean(s));
+    parsed.frontmatter.stages = next;
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.stage.reordered",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { order: input.orderedIds },
+  });
+  return { toast: "Stage order updated — board columns follow" };
+}
+
+// ------------------------------------------------------------------ members
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Invite (spec §5.3): registered email → membership entry (role viewer,
+ * status invited). Unregistered email → a passwordless whitelist user row
+ * is created first (phase-2 model: the user row IS the whitelist entry;
+ * they sign in via OAuth — no mailer in V1, ruling 13), then the entry.
+ */
+export async function inviteMember(
+  db: Database.Database,
+  input: { projectSlug: string; name: string; email: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; userId: string }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "manage members & roles");
+
+  const name = input.name.trim();
+  const email = input.email.trim().toLowerCase();
+  if (!name || !EMAIL_RE.test(email)) {
+    throw AppError.validation("Enter a name and a valid email");
+  }
+
+  const auditActor = { userId: actor.userId, label: actor.label };
+  let user = findUserByEmail(db, email);
+  if (!user) {
+    user = createUser(
+      db,
+      { email, name, role: "member", tempPassword: null },
+      auditActor,
+    );
+  }
+  const userId = user.id;
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    if (parsed.frontmatter.members.some((m) => m.userId === userId)) {
+      throw conflict(`${email} is already a member`);
+    }
+    const member = { userId, role: "viewer" as const };
+    (member as Record<string, unknown>).status = "invited";
+    parsed.frontmatter.members.push(member);
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.member.invited",
+    actor: auditActor,
+    subjectKind: "user",
+    subjectId: userId,
+    projectSlug: input.projectSlug,
+    details: { email, role: "viewer" },
+  });
+  return { toast: `Invite sent to ${email} · joins as Viewer`, userId };
+}
+
+export async function removeMember(
+  db: Database.Database,
+  input: { projectSlug: string; targetUserId: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string }> {
+  const { projectName } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+    "manage members & roles",
+  );
+
+  if (input.targetUserId === actor.userId) {
+    throw conflict(`You can't remove yourself from ${projectName}`);
+  }
+
+  const userRow = db
+    .prepare(`SELECT name, email FROM users WHERE id = ?`)
+    .get(input.targetUserId) as { name: string; email: string } | undefined;
+  const displayName = userRow?.name ?? input.targetUserId;
+
+  let wasInvited = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const member = parsed.frontmatter.members.find(
+      (m) => m.userId === input.targetUserId,
+    );
+    if (!member) {
+      throw AppError.notFound("That user is not a member of this project.");
+    }
+    if (member.role === "admin") {
+      const admins = parsed.frontmatter.members.filter(
+        (m) => m.role === "admin",
+      ).length;
+      if (admins <= 1) {
+        throw conflict(
+          `${displayName} is the only admin — assign another admin in Policy first`,
+        );
+      }
+    }
+    wasInvited = (member as Record<string, unknown>).status === "invited";
+    parsed.frontmatter.members = parsed.frontmatter.members.filter(
+      (m) => m.userId !== input.targetUserId,
+    );
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.member.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "user",
+    subjectId: input.targetUserId,
+    projectSlug: input.projectSlug,
+    details: { invited: wasInvited },
+  });
+  return {
+    toast: wasInvited
+      ? `Invite revoked · ${userRow?.email ?? input.targetUserId}`
+      : `${displayName} removed from ${projectName}`,
+  };
+}
+
+// ----------------------------------------------------------------- override
+
+export async function setRepoOverride(
+  db: Database.Database,
+  input: { projectSlug: string; enabled: boolean },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string }> {
+  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    parsed.unknownFrontmatter.taskRepoOverride = input.enabled;
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.repo_override.changed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { enabled: input.enabled },
+  });
+  return {
+    toast: input.enabled
+      ? "Task-level repo override enabled"
+      : "Task-level repo override disabled",
+  };
+}
+
+// -------------------------------------------------------------- danger zone
+
+/**
+ * Delete project (spec §5.6): destructive, typed-name confirmation
+ * required, admin-only. Removes the project directory (project.md + every
+ * task file), then a full rescan prunes all derived rows. Audit logs keep
+ * the trail (audit_events are app-owned, not store-derived).
+ */
+export async function deleteProject(
+  db: Database.Database,
+  input: { projectSlug: string; confirmName: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string }> {
+  const { projectName } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+    "delete this project",
+  );
+  if (input.confirmName.trim() !== projectName) {
+    throw AppError.validation("Type the project name to confirm deletion.");
+  }
+
+  const dir = projectDir(input.projectSlug, ctx.dataRoot);
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  rebuildAll(db, {
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+
+  recordAudit(db, {
+    action: "project.deleted",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { name: projectName },
+  });
+  return { toast: `Project "${projectName}" deleted` };
+}

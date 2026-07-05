@@ -1,0 +1,165 @@
+import type Database from "better-sqlite3";
+import type { AgentRef, OperatorRef, Waiting } from "~/schemas/task-file.schema";
+import type {
+  AgentDeploymentView,
+  DeploymentStatus,
+  Engagement,
+} from "~/features/agents/agent-types";
+import { getProject } from "./board-query.server";
+
+/**
+ * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 7):
+ * engagement instances derived from task assignment records (operator /
+ * specialist / consultants in task_projections — PROFILE-ID keyed, never the
+ * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so
+ * an engagement with a live run is honestly marked `running`.
+ *
+ * Status vocabulary is the mock's, derived from real waiting state
+ * (contracts §2.4):
+ *   operator   waiting=human → "packet open", else "coordinating"
+ *   primary    waiting=agent → "working" · waiting=human → "waiting on
+ *              human" · else "on call"
+ *   consultant always "anchored · on call"
+ *
+ * Done-stage tasks (the project's LAST stage) contribute nothing.
+ */
+
+interface DeploymentTaskRow {
+  task_key: string;
+  title: string;
+  stage: string;
+  waiting: Waiting;
+  specialist_json: string | null;
+  consultants_json: string;
+  operator_json: string | null;
+}
+
+interface RunningRunRow {
+  task_key: string;
+  kind: "operator" | "primary" | "consultant";
+  thread_id: string;
+}
+
+function operatorStatus(waiting: Waiting): DeploymentStatus {
+  return waiting === "human" ? "packet open" : "coordinating";
+}
+
+function primaryStatus(waiting: Waiting): DeploymentStatus {
+  if (waiting === "agent") return "working";
+  if (waiting === "human") return "waiting on human";
+  return "on call";
+}
+
+/** Consultant thread ids are "c0", "c1", … — index into consultants[]. */
+function consultantIndex(threadId: string): number {
+  const match = /^c(\d+)$/.exec(threadId);
+  return match ? Number(match[1]) : 0;
+}
+
+export function listAgentDeployments(
+  db: Database.Database,
+  projectSlug: string,
+): AgentDeploymentView[] {
+  const project = getProject(db, projectSlug);
+  const lastStageId =
+    project?.stages[project.stages.length - 1]?.id ?? "done";
+
+  const tasks = db
+    .prepare(
+      `SELECT task_key, title, stage, waiting, specialist_json,
+              consultants_json, operator_json
+         FROM task_projections
+        WHERE project_slug = ?
+        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
+    )
+    .all(projectSlug) as DeploymentTaskRow[];
+
+  const runningRows = db
+    .prepare(
+      `SELECT task_key, kind, thread_id
+         FROM agent_runs
+        WHERE project_slug = ? AND state = 'running'`,
+    )
+    .all(projectSlug) as RunningRunRow[];
+  const running = new Map<string, Set<string>>();
+  for (const row of runningRows) {
+    const key =
+      row.kind === "consultant"
+        ? `${row.task_key}·consultant·${consultantIndex(row.thread_id)}`
+        : `${row.task_key}·${row.kind}`;
+    if (!running.has(key)) running.set(key, new Set());
+    running.get(key)!.add(row.thread_id);
+  }
+  const isRunning = (taskKey: string, engagement: Engagement, index = 0) =>
+    running.has(
+      engagement === "consultant"
+        ? `${taskKey}·consultant·${index}`
+        : `${taskKey}·${engagement}`,
+    );
+
+  const instances: AgentDeploymentView[] = [];
+  for (const task of tasks) {
+    if (task.stage === lastStageId) continue; // done tasks contribute nothing
+
+    const operator = task.operator_json
+      ? (JSON.parse(task.operator_json) as OperatorRef)
+      : null;
+    if (operator) {
+      instances.push({
+        profileId: "operator",
+        role: "Operator",
+        backend: null,
+        engagement: "operator",
+        taskKey: task.task_key,
+        taskTitle: task.title,
+        status: operatorStatus(task.waiting),
+        running: isRunning(task.task_key, "operator"),
+      });
+    }
+
+    const specialist = task.specialist_json
+      ? (JSON.parse(task.specialist_json) as AgentRef)
+      : null;
+    if (specialist) {
+      instances.push({
+        profileId: specialist.profileId,
+        role: specialist.role,
+        backend: specialist.backend,
+        engagement: "primary",
+        taskKey: task.task_key,
+        taskTitle: task.title,
+        status: primaryStatus(task.waiting),
+        running: isRunning(task.task_key, "primary"),
+      });
+    }
+
+    const consultants = JSON.parse(task.consultants_json) as AgentRef[];
+    consultants.forEach((consultant, index) => {
+      instances.push({
+        profileId: consultant.profileId,
+        role: consultant.role,
+        backend: consultant.backend,
+        engagement: "consultant",
+        taskKey: task.task_key,
+        taskTitle: task.title,
+        status: "anchored · on call",
+        running: isRunning(task.task_key, "consultant", index),
+      });
+    });
+  }
+  return instances;
+}
+
+/** Distinct-task engagement count per profile id (ActiveBadge numbers). */
+export function deploymentCountsByProfile(
+  deployments: AgentDeploymentView[],
+): Record<string, number> {
+  const sets = new Map<string, Set<string>>();
+  for (const d of deployments) {
+    if (!sets.has(d.profileId)) sets.set(d.profileId, new Set());
+    sets.get(d.profileId)!.add(d.taskKey);
+  }
+  const counts: Record<string, number> = {};
+  for (const [profileId, keys] of sets) counts[profileId] = keys.size;
+  return counts;
+}
