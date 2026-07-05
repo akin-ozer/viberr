@@ -2111,6 +2111,25 @@ h1, h2, h3, h4 {
 }
 .md-body th { background: color-mix(in srgb, var(--fg), transparent 96%); font-weight: 700; color: var(--fg); }
 
+/* Collapsible long comments — a very tall agent reply clamps by default and a
+   soft fade signals more below; the toggle expands to the full output. */
+.md-collapse { position: relative; }
+.md-collapse .md-body.clamped {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
+  mask-image: linear-gradient(to bottom, #000 78%, transparent);
+}
+.md-collapse-toggle {
+  display: inline-flex; align-items: center; gap: .3rem;
+  margin-top: .5rem; padding: 0;
+  font-family: var(--font-body); font-size: .78rem; font-weight: 700;
+  color: var(--blue-pressed);
+  background: none; border: 0; cursor: pointer;
+}
+.md-collapse-toggle:hover { text-decoration: underline; }
+.md-collapse-toggle svg { width: 14px; height: 14px; transition: transform .15s ease; }
+.md-collapse-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+
 /* The mock HTML <head> overrides the display face because Roobert PRO is not
    web-available; Manrope is the stand-in shipped with the app (bundled via
    @fontsource, no CDN). Ported from the inline <style> in design/html-app/*.html. */

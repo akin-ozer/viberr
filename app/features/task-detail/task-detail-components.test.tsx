@@ -127,7 +127,7 @@ describe("DecisionPacket", () => {
 /* -------------------------------------------------------- TimelineItem */
 
 describe("TimelineItem", () => {
-  it("comment: markdown body card, no type pill, today time, mention as plain text", () => {
+  it("comment: markdown body card, no type pill, today time, @mention chip restored", () => {
     const { container } = render(
       <TimelineItem ev={ev({ text: "ping @operator now" })} />,
     );
@@ -135,13 +135,14 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
     expect(container.querySelector(".tl-meta .pill")).toBeNull();
     expect(container.querySelector(".tl-time")!.textContent).toBe("9:41");
-    // Comments now render as GFM markdown (multi-line agent replies + user
-    // comments). @mentions inside a comment stay as PLAIN TEXT (documented
-    // decision) — no `.mention` chip; the single-line typed events keep it.
+    // Comments render as GFM markdown (multi-line agent replies + user
+    // comments), and @mentions inside a comment are re-chipped by the
+    // rehypeMentions pass so they get the shared `.mention` highlight back.
     const body = container.querySelector(".comment-card .md-body")!;
     expect(body).not.toBeNull();
-    expect(container.querySelector(".comment-card .mention")).toBeNull();
-    expect(body.textContent).toContain("@operator");
+    const chip = container.querySelector(".comment-card .mention")!;
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toBe("@operator");
   });
 
   it("agent-routed comment gets the toagent tint", () => {

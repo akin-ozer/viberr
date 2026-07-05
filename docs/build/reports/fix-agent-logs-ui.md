@@ -42,14 +42,14 @@ commit, container not rebuilt.
   spacing using existing `--fg`/`--muted`/`--hairline`/`--blue-pressed` tokens.
   No Tailwind, no inline hex.
 
-### @mention decision
+### @mention decision  — ⚠️ SUPERSEDED (see `fix-mention-chip-and-collapse.md`)
 
-Mentions **inside a comment** render as **plain text** (the markdown AST has no
-mention concept, and a rehype re-chip step isn't worth it on this surface). The
-`@mention` chip is still rendered by `RichText` on the single-line typed events.
-This is the documented trade-off; the one existing test that asserted a
-`.mention` span inside a comment was updated to assert the plain-text +
-`.md-body` behavior.
+Originally mentions **inside a comment** rendered as **plain text** (the markdown
+AST has no mention concept, and a rehype re-chip step was judged not worth it).
+That reads as a regression — the `@` highlight users expect disappeared from
+posted comments. The follow-up fix **reversed this**: `markdown.tsx` now runs a
+`rehypeMentions` pass that re-chips `@mentions` in comment text (skipping
+`code`/`pre`), restoring the `.mention` highlight everywhere.
 
 ---
 

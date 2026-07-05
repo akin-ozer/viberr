@@ -36,6 +36,61 @@ const TL_FILTERS = [
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
 
+/** Comments taller than this (px) clamp by default with a "Show more" toggle. */
+const COLLAPSE_MAX = 340;
+
+/**
+ * A comment body that clamps when it's very tall (long agent replies) so a
+ * single answer can't dominate the timeline. Measures the rendered markdown's
+ * full height after mount; if it exceeds COLLAPSE_MAX it renders clamped (with
+ * a soft fade) behind a Show more / Show less toggle. Expanding restores the
+ * full output verbatim — nothing is truncated from the record, only the view.
+ * SSR-safe: starts un-clamped (matches the server render), then the effect
+ * measures on the client and clamps.
+ */
+function CollapsibleComment({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // scrollHeight reports the FULL content height even while clamped by
+    // max-height, so this stays correct in both states.
+    const measure = () => setOverflowing(el.scrollHeight > COLLAPSE_MAX + 24);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+
+  const clamped = overflowing && !expanded;
+  return (
+    <div className="md-collapse">
+      <div
+        ref={ref}
+        className={"tl-text md-body" + (clamped ? " clamped" : "")}
+        style={clamped ? { maxHeight: COLLAPSE_MAX } : undefined}
+      >
+        <Markdown text={text} />
+      </div>
+      {overflowing && (
+        <button
+          type="button"
+          className="md-collapse-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <Icon name="chevron" />
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function TimelineItem({ ev }: { ev: TimelineEventRender }) {
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
@@ -78,10 +133,9 @@ export function TimelineItem({ ev }: { ev: TimelineEventRender }) {
           <div className={"comment-card" + (ev.toAgent ? " toagent" : "")}>
             {/* Comments (agent replies AND user comments) are real multi-line
                 markdown — render with the GFM renderer, not the inline-only
-                RichText. Typed events below stay on RichText. */}
-            <div className="tl-text md-body">
-              <Markdown text={ev.text} />
-            </div>
+                RichText. Long replies clamp behind a Show more toggle so one
+                answer can't swallow the timeline. Typed events stay on RichText. */}
+            <CollapsibleComment text={ev.text} />
           </div>
         ) : (
           <>

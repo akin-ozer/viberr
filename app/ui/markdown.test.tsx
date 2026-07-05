@@ -91,4 +91,38 @@ describe("Markdown", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("b")).toBeNull();
   });
+
+  it("re-chips @mentions inside comment text as .mention spans", () => {
+    // Regression: switching comments from RichText to GFM dropped the chip.
+    const { container } = render(
+      <Markdown text={"thanks @dev — please loop in @operator"} />,
+    );
+    const chips = [...container.querySelectorAll("span.mention")].map(
+      (n) => n.textContent,
+    );
+    expect(chips).toEqual(["@dev", "@operator"]);
+    // Surrounding prose is preserved.
+    expect(container.textContent).toContain("please loop in");
+  });
+
+  it("chips mentions inside list items and table cells too", () => {
+    const { container } = render(
+      <Markdown text={"- assigned to @dev\n\n| who |\n| --- |\n| @codex |"} />,
+    );
+    const chips = [...container.querySelectorAll("span.mention")].map(
+      (n) => n.textContent,
+    );
+    expect(chips).toContain("@dev");
+    expect(chips).toContain("@codex");
+  });
+
+  it("does NOT chip an @ inside code (stays literal)", () => {
+    const { container } = render(
+      <Markdown text={"run `deploy @prod` now\n\n```\nssh @host\n```"} />,
+    );
+    // No mention chips anywhere — both @s live inside code.
+    expect(container.querySelector("span.mention")).toBeNull();
+    expect(container.textContent).toContain("@prod");
+    expect(container.textContent).toContain("@host");
+  });
 });
