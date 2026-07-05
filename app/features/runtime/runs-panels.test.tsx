@@ -111,6 +111,21 @@ describe("AgentLogsPanel", () => {
     const { getByText } = render(
       <AgentLogsPanel runtime={[codex]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
-    expect(getByText(/@openai\/codex-sdk · runStreamed\(\) · thread 0199a2c4-7b31…/)).toBeTruthy();
+    expect(getByText(/@openai\/codex-sdk · runStreamed\(\) · thread/)).toBeTruthy();
+  });
+
+  it("session id is trimmed but expandable and copyable in full", () => {
+    const run = mkRun({ backend: "claude", sid: "51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151", state: "idle", lifecycle: "finished" });
+    const { getByRole, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    // Trimmed by default.
+    const idBtn = getByRole("button", { name: /Session id 51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151/ });
+    expect(idBtn.textContent).toBe("51d8f0e2…");
+    // Click expands to the full id.
+    fireEvent.click(idBtn);
+    expect(idBtn.textContent).toBe("51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151");
+    // A copy control is present.
+    expect(getByRole("button", { name: /Copy full session id/ })).toBeTruthy();
   });
 });

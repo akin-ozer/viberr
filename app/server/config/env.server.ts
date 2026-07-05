@@ -72,11 +72,17 @@ const envSchema = z.object({
   // real backend falls back to the simulated engine (simulated=1, requested
   // backend kept for glyph fidelity). Presence is a cheap auth check — the
   // registry NEVER makes a paid call to detect availability.
-  //  - Claude Agent SDK: ANTHROPIC_API_KEY
-  //  - Codex SDK: CODEX_API_KEY / OPENAI_API_KEY, or an existing `codex login`
+  //  - Claude Agent SDK: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (from
+  //    `claude setup-token` — the subscription/OAuth path), or set
+  //    VIBERR_CLAUDE_USE_CLI_AUTH=1 to use an already-logged-in `claude` CLI.
+  //  - Codex SDK: CODEX_API_KEY / OPENAI_API_KEY, or VIBERR_CODEX_USE_CLI_AUTH=1
+  //    for an existing `codex login`.
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  CLAUDE_CODE_OAUTH_TOKEN: z.string().min(1).optional(),
+  VIBERR_CLAUDE_USE_CLI_AUTH: z.string().optional(),
   CODEX_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
+  VIBERR_CODEX_USE_CLI_AUTH: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

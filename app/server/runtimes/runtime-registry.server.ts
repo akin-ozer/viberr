@@ -46,10 +46,32 @@ function getState(): RegistryState {
   return state;
 }
 
-/** Cheap credential-presence check (no API call). */
+/**
+ * Cheap credential-presence check (no API call). A real backend is usable
+ * when a credential the spawned process can actually see is present:
+ *   - claude: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN (from
+ *     `claude setup-token`), or the explicit opt-in VIBERR_CLAUDE_USE_CLI_AUTH=1
+ *     for machines whose `claude` CLI is already logged in (keychain auth).
+ *   - codex: CODEX_API_KEY / OPENAI_API_KEY, or VIBERR_CODEX_USE_CLI_AUTH=1.
+ * When none is present the registry falls back to the simulated backend.
+ */
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (backend === "claude") return !!env.ANTHROPIC_API_KEY;
-  return !!(env.CODEX_API_KEY || env.OPENAI_API_KEY);
+  if (backend === "claude") {
+    return !!(
+      env.ANTHROPIC_API_KEY ||
+      env.CLAUDE_CODE_OAUTH_TOKEN ||
+      isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH)
+    );
+  }
+  return !!(
+    env.CODEX_API_KEY ||
+    env.OPENAI_API_KEY ||
+    isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH)
+  );
+}
+
+function isTruthy(v: string | undefined): boolean {
+  return v === "1" || v === "true" || v === "yes";
 }
 
 /**
@@ -96,10 +118,19 @@ export interface AdapterDeps {
 /** Constructs the three adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const env = safeEnv();
+  // Inject only the credential vars that are present. When neither is set
+  // (pure CLI/keychain auth via VIBERR_CLAUDE_USE_CLI_AUTH), pass no env so
+  // the spawned SDK inherits the full process env (and the logged-in CLI).
+  const claudeEnv: Record<string, string> = {
+    ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
+    ...(env.CLAUDE_CODE_OAUTH_TOKEN
+      ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
+      : {}),
+  };
   return {
     claude: createClaudeAdapter({
       ...(deps.claudeQueryFn ? { queryFn: deps.claudeQueryFn } : {}),
-      ...(env.ANTHROPIC_API_KEY ? { env: { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } } : {}),
+      ...(Object.keys(claudeEnv).length ? { env: claudeEnv } : {}),
     }),
     codex: createCodexAdapter({
       ...(deps.codexFactory ? { codexFactory: deps.codexFactory } : {}),
@@ -111,11 +142,19 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   };
 }
 
-function safeEnv(): { ANTHROPIC_API_KEY?: string; CODEX_API_KEY?: string; OPENAI_API_KEY?: string } {
+function safeEnv(): {
+  ANTHROPIC_API_KEY?: string;
+  CLAUDE_CODE_OAUTH_TOKEN?: string;
+  CODEX_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+} {
   try {
     const env = getEnv();
     return {
       ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
+      ...(env.CLAUDE_CODE_OAUTH_TOKEN
+        ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
+        : {}),
       ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
       ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
     };

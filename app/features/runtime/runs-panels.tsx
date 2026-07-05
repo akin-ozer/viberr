@@ -223,10 +223,51 @@ export function LiveRunPanel({
 
 // ---------------------------------------------------------- AgentLogsPanel
 
-const CODEX_META = (sid: string | null) =>
-  "@openai/codex-sdk · runStreamed() · thread " + String(sid || "").slice(0, 13) + "…";
-const CLAUDE_META = (sid: string | null) =>
-  "@anthropic-ai/claude-agent-sdk · stream-json · session " + String(sid || "").slice(0, 8) + "…";
+const CODEX_META = "@openai/codex-sdk · runStreamed() · thread ";
+const CLAUDE_META = "@anthropic-ai/claude-agent-sdk · stream-json · session ";
+
+/**
+ * The provider session/thread id. Trimmed by default (long uuids), but
+ * click-to-expand shows it in full and click again (or the copy affordance)
+ * copies the whole id — so it can actually be pasted into `--resume`.
+ */
+function SessionIdChip({ sid }: { sid: string | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (!sid) return <span className="mono faint">—</span>;
+  const short = sid.length > 10 ? sid.slice(0, 8) + "…" : sid;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(sid);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setExpanded(true);
+    }
+  };
+  return (
+    <span className="session-id">
+      <button
+        type="button"
+        className="session-id-val mono"
+        title={expanded ? "Click to trim" : sid}
+        aria-label={"Session id " + sid + " — click to " + (expanded ? "trim" : "expand")}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        {expanded ? sid : short}
+      </button>
+      <button
+        type="button"
+        className="session-id-copy"
+        onClick={copy}
+        title="Copy full session id"
+        aria-label={copied ? "Copied session id" : "Copy full session id"}
+      >
+        <Icon name={copied ? "check" : "copy"} />
+      </button>
+    </span>
+  );
+}
 
 /**
  * The "Agent logs" dark console. Live streaming is fed by the dedicated SSE
@@ -305,8 +346,9 @@ export function AgentLogsPanel({
         <Pill kind={st.kind} sm dot={cur!.state === "running"}>
           {st.label}
         </Pill>
-        <span className="logs-meta mono" title={cur!.sid ?? undefined}>
-          {cur!.backend === "codex" ? CODEX_META(cur!.sid) : CLAUDE_META(cur!.sid)}
+        <span className="logs-meta mono">
+          {cur!.backend === "codex" ? CODEX_META : CLAUDE_META}
+          <SessionIdChip sid={cur!.sid} />
         </span>
         <span className="spacer" />
         <button

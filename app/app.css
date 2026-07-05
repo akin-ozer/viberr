@@ -2039,6 +2039,23 @@ h1, h2, h3, h4 {
    design/html-app/app/viberr.css. New phases append here only — the ported
    block above must stay verbatim so future mock diffs stay reviewable. */
 
+/* Copyable / expandable provider session id in the Agent logs meta line. */
+.session-id { display: inline-flex; align-items: center; gap: .25rem; }
+.session-id-val {
+  background: none; border: none; padding: 0; margin: 0;
+  color: var(--ink); font: inherit; cursor: pointer;
+  text-decoration: underline dotted var(--faint); text-underline-offset: 2px;
+  word-break: break-all; text-align: left;
+}
+.session-id-val:hover { color: var(--teal); }
+.session-id-copy {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 1px; margin: 0; cursor: pointer;
+  color: var(--faint); border-radius: 5px;
+}
+.session-id-copy:hover { color: var(--ink); background: var(--panel-2, rgba(127,127,127,.12)); }
+.session-id-copy .ico { width: 13px; height: 13px; }
+
 /* The mock HTML <head> overrides the display face because Roobert PRO is not
    web-available; Manrope is the stand-in shipped with the app (bundled via
    @fontsource, no CDN). Ported from the inline <style> in design/html-app/*.html. */
