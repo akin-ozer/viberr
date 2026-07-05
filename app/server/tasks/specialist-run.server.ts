@@ -310,6 +310,11 @@ export async function startSpecialistRun(
   const { runId, simulated } = await startRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
+    // Unique thread per specialist run so re-running a task starts a fresh
+    // stream instead of colliding with a prior run on the "primary" thread
+    // (agent_runs is unique on project+task+thread). Each run shows in the
+    // Agent-logs picker; the label comes from the role, not the thread id.
+    threadId: "primary-" + newId("t").replace("t_", "").slice(0, 8),
     role: "Primary specialist",
     kind: "primary",
     backend,
