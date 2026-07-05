@@ -26,6 +26,8 @@ import {
 } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { FileActorRef } from "~/schemas/task-file.schema";
+import { logger } from "~/server/logging/logger.server";
 
 /**
  * Task mutations (Phase 3 server functions; Phase 4/5 route actions call
@@ -295,7 +297,15 @@ export interface AppendCommentResult {
  */
 export async function appendComment(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; text: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    text: string;
+    /** Force the routed-to-agent tint (commentToAgent sets this when a named
+     *  agent like `@dev` is mentioned — the reserved-handle regex alone would
+     *  miss profile-name mentions). */
+    forceToAgent?: boolean;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<AppendCommentResult> {
@@ -307,7 +317,7 @@ export async function appendComment(
     throw AppError.notFound(`Task ${input.taskKey} not found.`);
   }
 
-  const toAgent = AGENT_HANDLE_RE.test(text);
+  const toAgent = input.forceToAgent === true || AGENT_HANDLE_RE.test(text);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -383,6 +393,273 @@ export async function appendComment(
     toAgent,
     mentionedUserIds,
   };
+}
+
+// ----------------------------------------------------------- commentToAgent
+
+export interface CommentToAgentResult extends AppendCommentResult {
+  /** The agent the comment @mentioned, or null when none was mentioned. */
+  agent: { profileId: string; name: string; role: string } | null;
+  /** How the mentioned agent was engaged (null when no agent was engaged). */
+  triggered: "resumed" | "started" | null;
+  /**
+   * True when an agent was mentioned but the commenter lacks the runtime role
+   * (admin|maintainer) — the comment is recorded, the run is NOT triggered.
+   * The route can toast about this; we never throw for a well-formed comment.
+   */
+  runtimeDenied: boolean;
+}
+
+/**
+ * App-wide commenting that ALSO resumes a mentioned agent's provider session
+ * and posts the agent's reply back into the timeline as an agent-authored
+ * comment (the "comment → resume that agent → reply as a comment" flow).
+ *
+ * Behavior:
+ *  1. Always append the comment (existing `appendComment` behavior, `toAgent`
+ *     when an agent handle is present). Non-agent comments behave exactly as
+ *     before — this is a superset of `appendComment`.
+ *  2. Resolve the @mentioned agent on the task (name/backend/role/generic).
+ *     No agent mentioned → returns like `appendComment` with `agent: null`.
+ *  3. RBAC: triggering a run is a runtime action — admin|maintainer only
+ *     (mirrors specialist runs). A viewer/reviewer @mention still RECORDS the
+ *     comment but does NOT trigger the run (`runtimeDenied: true`, no throw).
+ *  4. If the agent has a prior session → RESUME it (reuse its clone workdir).
+ *     If it has no prior session → start a FRESH specialist run (first-mention
+ *     fallback so the agent still replies). Autonomous either way.
+ *  5. Register a completion callback: when the run finishes, extract the final
+ *     assistant text and append it as an AGENT-authored `comment` event
+ *     (actor = the agent's actorRef, NOT toAgent) → reproject → SSE.
+ */
+export async function commentToAgent(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; text: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<CommentToAgentResult> {
+  // Resolve the mentioned agent FIRST (dynamic import avoids a module cycle:
+  // agent-reply → specialist-run → task-actions). We need it before appending
+  // so a named mention like `@dev` still flags the comment as routed-to-agent
+  // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
+  const {
+    resolveMentionedAgent,
+    replyTextForRun,
+    resumeWorkdir,
+    buildReplyScript,
+  } = await import("./agent-reply.server");
+  const target = resolveMentionedAgent(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.text,
+  );
+
+  // 1. Record the comment (existing behavior, incl. mention fan-out). Flag
+  //    the routed tint when an agent was resolved.
+  const base = await appendComment(
+    db,
+    { ...input, ...(target ? { forceToAgent: true } : {}) },
+    actor,
+    ctx,
+  );
+
+  if (!target) {
+    return { ...base, agent: null, triggered: null, runtimeDenied: false };
+  }
+
+  const agentIdentity = {
+    profileId: target.profileId,
+    name: target.name,
+    role: target.role,
+  };
+
+  // 3. RBAC: only admin|maintainer trigger runtime work. A lower role still
+  //    got their comment recorded above — just skip the run (no throw).
+  if (!hasRuntimeRole(ctx, input.projectSlug, actor)) {
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: null,
+      runtimeDenied: true,
+    };
+  }
+
+  const commenterName = userName(db, actor.userId);
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  const title = existing?.parsed.frontmatter.title ?? input.taskKey;
+  const repo = existing?.parsed.frontmatter.repo ?? projectRepoFor(ctx, input.projectSlug);
+
+  // The follow-up prompt built from the comment (autonomous reply).
+  const followUp =
+    `A human (${commenterName}) commented on task ${input.taskKey} ("${title}"): ` +
+    `"${input.text.trim()}". Respond to their comment directly. Continue or ` +
+    `adjust your work on the repository in your working directory as needed, ` +
+    `then give a concise reply.`;
+
+  const { registerRunCompletion, resumeRun } = await import(
+    "~/server/runtimes/run-service.server"
+  );
+
+  let runId: string;
+  let triggered: "resumed" | "started";
+
+  if (target.session) {
+    // 4a. Resume the agent's existing provider session, reusing the clone
+    //     workdir so it keeps its repo context.
+    const workdir = resumeWorkdir(
+      input.projectSlug,
+      input.taskKey,
+      repo,
+      ctx.dataRoot,
+    );
+    const script = buildReplyScript(
+      target.session.backend === "codex" ? "codex" : "claude",
+      target.session.model,
+    );
+    const resumed = await resumeRun(db, {
+      runId: target.session.id,
+      prompt: followUp,
+      workdir,
+      autonomous: true,
+      script,
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      actor: { userId: actor.userId, label: actor.label },
+    });
+    runId = resumed.runId;
+    triggered = "resumed";
+  } else {
+    // 4b. No prior session — start a FRESH specialist run (first-mention
+    //     fallback). Assign the specialist first if the task has none, then
+    //     start the run through the normal specialist-run path.
+    const { assignSpecialist, startSpecialistRun } = await import(
+      "./specialist-run.server"
+    );
+    if (!existing?.parsed.frontmatter.specialist) {
+      await assignSpecialist(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
+        actor,
+        ctx,
+      );
+    }
+    const started = await startSpecialistRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+    runId = started.runId;
+    triggered = "started";
+  }
+
+  // 5. Post the agent's reply as an agent-authored comment when it finishes.
+  registerRunCompletion(runId, (finished) => {
+    postAgentReplyComment(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef: target.actorRef,
+      replyText: replyTextForRun(db, finished.id),
+    });
+  });
+
+  return { ...base, agent: agentIdentity, triggered, runtimeDenied: false };
+}
+
+/** admin|maintainer against project membership (runtime-action gate). */
+function hasRuntimeRole(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  actor: TaskActor,
+): boolean {
+  const file = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  const role = file?.parsed.frontmatter.members.find(
+    (m) => m.userId === actor.userId,
+  )?.role;
+  return role === "admin" || role === "maintainer";
+}
+
+function projectRepoFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): string | null {
+  const file = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  return file?.parsed.frontmatter.repo ?? null;
+}
+
+/**
+ * Append the agent's reply as an agent-authored `comment` timeline event
+ * (actor = the agent's actorRef, type "comment", NOT toAgent) → reproject
+ * (SSE rides the file write). Best-effort: a failure here is logged and
+ * never propagated (the run already finished; the transcript is in the logs).
+ * When the run produced no usable text, we skip posting a comment.
+ */
+function postAgentReplyComment(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    runId: string;
+    actorRef: FileActorRef;
+    replyText: string | null;
+  },
+): void {
+  if (!input.replyText) {
+    logger.info("agent reply run produced no text — no comment posted", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+    });
+    return;
+  }
+  try {
+    const event: TaskFileEvent = {
+      occurredAt: new Date().toISOString(),
+      type: "comment",
+      actor: input.actorRef,
+      title: null,
+      text: input.replyText,
+      toAgent: false,
+      evidence: null,
+    };
+    // updateTaskFile is async; fire-and-forget with a catch — the completion
+    // callback is sync (fired from the run's onExit), so we cannot await.
+    void updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift(event);
+    })
+      .then(() => {
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        recordAudit(db, {
+          action: "task.agent.replied",
+          actor: { userId: null, label: "operator" },
+          subjectKind: "task",
+          subjectId: input.taskKey,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          details: { runId: input.runId },
+        });
+      })
+      .catch((error: unknown) => {
+        logger.error("agent reply comment write failed", {
+          taskKey: input.taskKey,
+          runId: input.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      });
+  } catch (error) {
+    logger.error("agent reply comment failed", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // --------------------------------------------------------------- ownership

@@ -143,6 +143,34 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".comment-card.toagent")).not.toBeNull();
   });
 
+  it("agent-authored comment renders the agent identity + pill in a comment card", () => {
+    // The reply an agent posts back: a `comment` event whose actor is an agent.
+    const { container } = render(
+      <TimelineItem
+        ev={ev({
+          type: "comment",
+          actor: { kind: "agent", backend: "claude", name: "Claude Code", role: "developer" },
+          text: "Re-checked the parser — the edge case is handled now.",
+          toAgent: false,
+        })}
+      />,
+    );
+    // Renders in the comment area (a comment-card), NOT the toagent tint.
+    expect(container.querySelector(".comment-card")).not.toBeNull();
+    expect(container.querySelector(".comment-card.toagent")).toBeNull();
+    // Shows the agent identity (name · role) and the agent pill.
+    expect(container.querySelector(".tl-actor")!.textContent).toBe(
+      "Claude Code · developer",
+    );
+    const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
+      (p) => p.textContent,
+    );
+    expect(pills).toEqual(["agent"]); // no type pill for comments; just the agent pill
+    expect(container.querySelector(".tl-text")!.textContent).toContain(
+      "Re-checked the parser",
+    );
+  });
+
   it("guest commenter renders the app-user pill (Deniz on VIB-153)", () => {
     const { container } = render(
       <TimelineItem

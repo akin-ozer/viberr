@@ -52,7 +52,23 @@ import { newId } from "~/shared/ids/new-id.server";
 interface ServiceState {
   handles: Map<string, RunHandle>;
   adapters: AdapterSet;
+  /**
+   * In-process run-completion callbacks keyed by run id. `launch()`'s onExit
+   * invokes the callback (after `sink.finalize`) with the finished run row,
+   * then deletes it. This is how task-actions posts an agent's reply back as
+   * a comment when a resumed/started reply run finishes — run-service stays
+   * decoupled (it invokes an OPAQUE callback and never imports task-actions).
+   *
+   * CAVEAT: callbacks live only in this process. A server restart mid-run
+   * loses the pending callback, so the reply comment is not posted for a run
+   * that finishes after a restart (acceptable — the transcript is still in
+   * the agent logs). Documented in feature-agent-reply.md.
+   */
+  completions: Map<string, RunCompletionCallback>;
 }
+
+/** Invoked once when a registered run reaches a terminal state. */
+export type RunCompletionCallback = (finished: AgentRunRow) => void;
 
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
@@ -60,10 +76,24 @@ function getState(): ServiceState {
   const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
   let state = cache[SERVICE_KEY];
   if (!state) {
-    state = { handles: new Map(), adapters: createAdapters() };
+    state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
     cache[SERVICE_KEY] = state;
   }
+  // Older cached states (hot-reload / tests) may predate the completions map.
+  if (!state.completions) state.completions = new Map();
   return state;
+}
+
+/**
+ * Register a one-shot completion callback for a run id. `launch()` fires it
+ * after the run's sink finalizes, then removes it. Idempotent-safe: a second
+ * registration for the same run id overwrites the first (last writer wins).
+ */
+export function registerRunCompletion(
+  runId: string,
+  cb: RunCompletionCallback,
+): void {
+  getState().completions.set(runId, cb);
 }
 
 /** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
@@ -82,7 +112,7 @@ export function configureRunServiceForTests(
     adaptersOrDeps && "simulated" in adaptersOrDeps
       ? (adaptersOrDeps as AdapterSet)
       : createAdapters((adaptersOrDeps as AdapterDeps) ?? {});
-  cache[SERVICE_KEY] = { handles: new Map(), adapters };
+  cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
 }
 
 // ---------------------------------------------- start / resume
@@ -200,6 +230,11 @@ export async function startRun(
  * Resume an existing run's provider session with a follow-up prompt. Creates
  * a NEW run row (a fresh stream) that shares the session id, matching how
  * both CLIs emit a fresh full stream on resume (research §1.4 / §2.4).
+ *
+ * `workdir` lets the resumed run keep the ORIGINAL run's working directory
+ * (the specialist-run clone at `<taskDir>/workspace/<repo>`) so the agent
+ * still has its repo context on resume — without it the resumed run would
+ * default to the bare task dir and lose the checkout. Returns the new run id.
  */
 export async function resumeRun(
   db: Database.Database,
@@ -207,6 +242,9 @@ export async function resumeRun(
     runId: string;
     prompt: string;
     script?: SimulatedScript;
+    /** Reuse the original run's clone workdir (defaults to the task dir). */
+    workdir?: string;
+    autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
   },
@@ -217,10 +255,16 @@ export async function resumeRun(
     // Purely-simulated runs resume as simulated too.
   }
   const backend: RealBackend = prev.backend === "codex" ? "codex" : "claude";
+  // A resume creates a NEW run row (a fresh stream) that shares the PROVIDER
+  // session id. It must NOT reuse the prior thread_id — agent_runs is unique
+  // on (project, task, thread), and the prior row still exists. Derive a fresh
+  // thread id from the original so the picker still groups it recognizably.
+  const resumeThreadId =
+    prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
   return startRun(db, {
     projectSlug: prev.project_slug,
     taskKey: prev.task_key,
-    threadId: prev.thread_id,
+    threadId: resumeThreadId,
     role: prev.role,
     kind: prev.kind,
     backend,
@@ -228,6 +272,8 @@ export async function resumeRun(
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
     ...(input.script ? { script: input.script } : {}),
+    ...(input.workdir ? { workdir: input.workdir } : {}),
+    ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
     ...(input.actor ? { actor: input.actor } : {}),
   });
@@ -252,6 +298,22 @@ function launch(
     onExit: (exit) => {
       sink.finalize(exit);
       state.handles.delete(spec.runId);
+      // Fire a one-shot completion callback (opaque to run-service — the
+      // reply-comment wiring lives in task-actions). Reads the finalized row
+      // so the callback sees the terminal state + folded session/usage facts.
+      const cb = state.completions.get(spec.runId);
+      if (cb) {
+        state.completions.delete(spec.runId);
+        try {
+          const finished = getRun(db, spec.runId);
+          if (finished) cb(finished);
+        } catch (error) {
+          logger.error("run completion callback failed", {
+            runId: spec.runId,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      }
     },
   });
   state.handles.set(spec.runId, handle);

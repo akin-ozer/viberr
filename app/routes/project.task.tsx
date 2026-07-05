@@ -17,7 +17,7 @@ import {
   getTaskSummary,
 } from "~/server/projections/task-query.server";
 import {
-  appendComment,
+  commentToAgent,
   releaseOwner,
   resolvePacket,
   setOwner,
@@ -108,18 +108,33 @@ export async function action({ request, params }: Route.ActionArgs) {
   try {
     switch (intent) {
       case "comment": {
-        const result = await appendComment(
+        // commentToAgent is a superset of appendComment: records the comment,
+        // and when an agent is @mentioned (and the commenter is admin|
+        // maintainer) resumes THAT agent's session — the agent's reply arrives
+        // later as a new agent-authored comment via SSE revalidation.
+        const result = await commentToAgent(
           db,
           { projectSlug, taskKey, text: String(formData.get("text") ?? "") },
           actor,
         );
+        // Toast copy: name the agent when one is picking the comment up;
+        // note when a mention was recorded but the run was not triggered (RBAC);
+        // else the original routed/plain copy (verbatim spec contract).
+        const toast =
+          result.triggered && result.agent
+            ? `Comment posted · @${result.agent.name} is picking it up`
+            : result.runtimeDenied && result.agent
+              ? "Comment posted · your role can't trigger agent runs"
+              : result.toAgent
+                ? "Comment posted · routed to mentioned agent"
+                : "Comment posted";
         return {
           ok: true as const,
           intent,
           toAgent: result.toAgent,
-          toast: result.toAgent
-            ? "Comment posted · routed to mentioned agent"
-            : "Comment posted",
+          agent: result.agent?.name ?? null,
+          triggered: result.triggered,
+          toast,
         };
       }
       case "resolve-packet": {

@@ -179,32 +179,73 @@ describe("loader — VIB-142 fidelity", () => {
 /* ------------------------------------------------------ comment routing */
 
 describe("comment action — @agent routing detection", () => {
-  it("@operator routes to the agent side (toagent tint + routed toast)", async () => {
+  // VIB-153 carries a codex specialist, so @operator/@codex now RESUME/START
+  // that agent (a runtime action). Force the simulated engine so those runs
+  // are deterministic + offline, and interrupt any run each test triggers so
+  // its cadence timer never outlives the shared app's DB.
+  beforeAll(async () => {
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    configureRunServiceForTests();
+  });
+
+  async function stopTaskRuns(key: string, userId: string) {
+    const { listRunsForTaskRows } = await import(
+      "~/server/runtimes/run-store.server"
+    );
+    const { interruptRun } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
+      if (run.state === "running" || run.state === "queued") {
+        try {
+          interruptRun(
+            app.db,
+            { projectSlug: "viberr-core", taskKey: key, runId: run.id },
+            { userId, label: "test" },
+          );
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  it("@operator on a task WITH a specialist triggers the agent + names it in the toast", async () => {
     const result = (await postIntent("VIB-153", ids.arda, {
       intent: "comment",
       text: "@operator please tighten the packet budget",
-    })) as { ok: true; toAgent: boolean; toast: string };
+    })) as { ok: true; toAgent: boolean; agent: string | null; triggered: string | null; toast: string };
     expect(result.ok).toBe(true);
     expect(result.toAgent).toBe(true);
-    expect(result.toast).toBe("Comment posted · routed to mentioned agent");
+    // Resolves to VIB-153's codex specialist and engages it.
+    expect(result.agent).toBeTruthy();
+    expect(result.triggered).toBeTruthy();
+    expect(result.toast).toContain("is picking it up");
+    await stopTaskRuns("VIB-153", ids.arda);
 
     const after = await runLoader("VIB-153", ids.arda);
-    expect(after.task.timeline[0]).toMatchObject({
-      type: "comment",
-      toAgent: true,
-    });
+    // The human comment is recorded with the routed tint.
+    const humanComment = after.task.timeline.find(
+      (e) => e.type === "comment" && e.actor.kind === "human",
+    )!;
+    expect(humanComment).toMatchObject({ type: "comment", toAgent: true });
   });
 
-  it("@codex and @claude also route; plain member mentions do not", async () => {
+  it("@codex also routes + triggers; plain member mentions do not", async () => {
     const codex = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "@codex check the linter",
-    })) as { toAgent: boolean };
+    })) as { toAgent: boolean; triggered: string | null };
     expect(codex.toAgent).toBe(true);
+    expect(codex.triggered).toBeTruthy();
+    await stopTaskRuns("VIB-153", ids.arda);
 
     const plain = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "cc @murat for a second look",
-    })) as { ok: true; toAgent: boolean; toast: string };
+    })) as { ok: true; toAgent: boolean; triggered: string | null; toast: string };
     expect(plain.toAgent).toBe(false);
+    expect(plain.triggered).toBeNull();
     expect(plain.toast).toBe("Comment posted");
   });
 

@@ -96,6 +96,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.ownership.admin_released": "task",
   "task.specialist.assigned": "task",
   "task.specialist.run_started": "task",
+  "task.agent.replied": "task",
 
   // -- GitHub integration (phase 7) ----------------------------------------
   "github.pat.created": "org",
