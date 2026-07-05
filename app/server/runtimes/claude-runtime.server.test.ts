@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
-import { createClaudeAdapter, type ClaudeQuery } from "./claude-runtime.server";
+import {
+  createClaudeAdapter,
+  resolveClaudeModel,
+  type ClaudeQuery,
+} from "./claude-runtime.server";
+
+describe("resolveClaudeModel", () => {
+  it("maps friendly family labels to CLI aliases", () => {
+    expect(resolveClaudeModel("claude-sonnet")).toBe("sonnet");
+    expect(resolveClaudeModel("claude-opus")).toBe("opus");
+    expect(resolveClaudeModel("claude-haiku")).toBe("haiku");
+  });
+  it("passes real dated ids through unchanged", () => {
+    expect(resolveClaudeModel("claude-sonnet-4-5")).toBe("claude-sonnet-4-5");
+  });
+  it("returns undefined for unknown/empty so the SDK uses its default", () => {
+    expect(resolveClaudeModel("")).toBeUndefined();
+    expect(resolveClaudeModel(undefined)).toBeUndefined();
+    expect(resolveClaudeModel("codex-large")).toBeUndefined();
+  });
+});
 
 /** A fake Query: yields the given messages, records interrupt() calls. */
 function fakeQuery(messages: unknown[], opts: { throwAfter?: number } = {}) {

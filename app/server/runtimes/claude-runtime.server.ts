@@ -54,6 +54,26 @@ interface ClaudeAdapterDeps {
   env?: Record<string, string>;
 }
 
+/**
+ * Resolve the app's model label to something the SDK/CLI accepts. Agent
+ * profiles carry friendly labels ("claude-sonnet") that are NOT valid model
+ * ids and make a real run fail ("model may not exist"). Map family labels to
+ * the short aliases the CLI understands (`sonnet`/`opus`/`haiku`, which
+ * resolve to the latest of that tier the account can use); pass real dated
+ * ids through; return undefined for anything unknown so the SDK falls back to
+ * the subscription's default model.
+ */
+export function resolveClaudeModel(model?: string): string | undefined {
+  if (!model) return undefined;
+  const m = model.toLowerCase().trim();
+  // A versioned/dated real id (e.g. claude-sonnet-4-5) — use as-is.
+  if (m.startsWith("claude-") && /\d/.test(m)) return model;
+  if (m.includes("opus")) return "opus";
+  if (m.includes("haiku")) return "haiku";
+  if (m.includes("sonnet")) return "sonnet";
+  return undefined;
+}
+
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
   yield {
@@ -93,9 +113,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
 
       const run = async () => {
         const queryFn = deps.queryFn ?? (await realQuery());
+        const resolvedModel = resolveClaudeModel(spec.model);
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
-          model: spec.model,
+          // Only set model when we have a real id/alias; otherwise let the SDK
+          // (and the subscription) pick its default.
+          ...(resolvedModel ? { model: resolvedModel } : {}),
           permissionMode: spec.autonomous ? "acceptEdits" : "default",
           maxTurns: 50,
         };
