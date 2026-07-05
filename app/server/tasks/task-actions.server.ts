@@ -515,12 +515,17 @@ export async function commentToAgent(
     );
     const script = buildReplyScript(
       target.session.backend === "codex" ? "codex" : "claude",
-      target.session.model,
+      target.model,
     );
     const resumed = await resumeRun(db, {
       runId: target.session.id,
       prompt: followUp,
       workdir,
+      // Apply the agent's CURRENT profile model/effort on resume — not the
+      // stale value on the prior run row (editing an agent to a new model
+      // must take effect when its session is resumed via a comment).
+      model: target.model,
+      ...(target.effort ? { effort: target.effort } : {}),
       autonomous: true,
       script,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),

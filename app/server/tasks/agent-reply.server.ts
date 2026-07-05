@@ -58,6 +58,8 @@ export interface MentionedAgent {
   role: string;
   backend: RealBackend;
   model: string;
+  /** The agent's current reasoning effort (empty when unset). */
+  effort: string;
   /** The agent's file actor ref (author of the reply comment). */
   actorRef: FileActorRef;
   /** The most-recent run row on this task that has a session_id, or null when
@@ -156,6 +158,7 @@ export function resolveMentionedAgent(
       role,
       backend,
       model: sp?.model ?? (backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5"),
+      effort: sp?.effort ?? "",
       actorRef: agentActorRef(backend, role),
       session: latestSessionRun(db, projectSlug, taskKey, backend),
     };
@@ -170,6 +173,7 @@ export function resolveMentionedAgent(
       role: matched.role,
       backend: matched.backend,
       model: matched.model,
+      effort: matched.effort,
       actorRef: agentActorRef(matched.backend, matched.role),
       session: latestSessionRun(db, projectSlug, taskKey, matched.backend),
     };
@@ -187,6 +191,7 @@ export function resolveMentionedAgent(
         role: primaryRef.role,
         backend,
         model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+        effort: "",
         actorRef: agentActorRef(backend, primaryRef.role),
         session: latestSessionRun(db, projectSlug, taskKey, backend),
       };

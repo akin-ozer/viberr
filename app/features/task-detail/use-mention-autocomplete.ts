@@ -65,6 +65,11 @@ export function useMentionAutocomplete(
   const all = useMemo(() => flattenMentionables(mentionables), [mentionables]);
   const [token, setToken] = useState<MentionToken | null>(null);
   const [active, setActiveIndex] = useState(0);
+  // Identity of the token the active row currently points into. refresh()
+  // fires on every keyup/select/click, so it must NOT reset the highlight
+  // while the token is unchanged — otherwise Arrow keys (whose keyup also
+  // fires refresh) get their selection snapped back to 0 mid-navigation.
+  const tokenKeyRef = useRef<string | null>(null);
   const listId = useRef(
     "mention-list-" + Math.random().toString(36).slice(2, 8),
   ).current;
@@ -79,11 +84,19 @@ export function useMentionAutocomplete(
     const ta = taRef.current;
     if (!ta) return;
     const next = detectMentionToken(ta.value, ta.selectionStart ?? 0);
+    // Reset the highlight to the top ONLY when the token identity changes
+    // (a new @-token, or the query was edited) — never on plain caret moves
+    // like Arrow-key navigation, which also emit keyup → refresh.
+    const key = next ? `${next.start}:${next.query}` : null;
+    if (key !== tokenKeyRef.current) {
+      tokenKeyRef.current = key;
+      setActiveIndex(0);
+    }
     setToken(next);
-    setActiveIndex(0);
   }, [taRef]);
 
   const close = useCallback(() => {
+    tokenKeyRef.current = null;
     setToken(null);
     setActiveIndex(0);
   }, []);

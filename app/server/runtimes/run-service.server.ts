@@ -248,6 +248,11 @@ export async function resumeRun(
     script?: SimulatedScript;
     /** Reuse the original run's clone workdir (defaults to the task dir). */
     workdir?: string;
+    /** Override the model for the resumed turns (defaults to the prior run's).
+     *  Lets a comment-resume pick up the agent profile's CURRENT model. */
+    model?: string;
+    /** Reasoning effort for the resumed turns (defaults to none). */
+    effort?: string;
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
@@ -272,7 +277,11 @@ export async function resumeRun(
     role: prev.role,
     kind: prev.kind,
     backend,
-    model: prev.model,
+    // Prefer the caller's model (the agent's current profile) over the stale
+    // model on the prior run row — editing an agent to a new model must apply
+    // when its session is resumed via a comment.
+    model: input.model ?? prev.model,
+    ...(input.effort ? { effort: input.effort } : {}),
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
     ...(input.script ? { script: input.script } : {}),

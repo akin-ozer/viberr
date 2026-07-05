@@ -574,6 +574,9 @@ export interface DeployedSpecialistView {
   role: string;
   backend: RealBackend;
   model: string;
+  /** Reasoning effort (empty when unset) — carried so a comment-resume can
+   *  apply the agent's current effort, not the prior run's. */
+  effort: string;
 }
 
 /**
@@ -603,6 +606,7 @@ export function listDeployedSpecialists(
       role: resolved.role,
       backend: resolved.backend,
       model: resolved.model,
+      effort: resolved.effort,
     });
   }
   return out;

@@ -110,6 +110,25 @@ describe("comment composer @-mention autocomplete", () => {
     await waitFor(() => expect(/^@[\w-]+ $/.test(ta.value)).toBe(true));
   });
 
+  it("Arrow navigation survives the caret keyUp refresh (no snap back to top)", async () => {
+    const { ta } = renderComposer();
+    type(ta, "@a"); // multi-item list (arda, agent, claude, …)
+    await waitFor(() => expect(listbox()).toBeTruthy());
+    const selectedIndex = () =>
+      Array.from(document.querySelectorAll('[role="option"]')).findIndex(
+        (o) => o.getAttribute("aria-selected") === "true",
+      );
+    expect(selectedIndex()).toBe(0);
+    fireEvent.keyDown(ta, { key: "ArrowDown" });
+    // The bug: every keyUp fires refresh(), which used to reset the highlight
+    // to 0 even when the token is unchanged — snapping Arrow-nav back to top.
+    fireEvent.keyUp(ta);
+    expect(selectedIndex()).toBe(1);
+    fireEvent.keyDown(ta, { key: "ArrowDown" });
+    fireEvent.keyUp(ta);
+    expect(selectedIndex()).toBe(2);
+  });
+
   it("Escape closes the dropdown without inserting", async () => {
     const { ta } = renderComposer();
     type(ta, "@de");
