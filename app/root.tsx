@@ -28,6 +28,8 @@ import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { authenticate } from "./server/auth/require-user.server";
 import { sessionCookieHeader } from "./server/auth/session-cookie.server";
+import { getDb } from "./server/db/sqlite.server";
+import { getPref } from "./server/prefs/user-prefs.server";
 import {
   getThemePreference,
   type ThemePreference,
@@ -42,8 +44,16 @@ export function loader({ request }: Route.LoaderArgs) {
   // Runs on every document request: identifies the signed-in user (for the
   // shell + <CsrfInput />) and slides the 30-day rolling session forward.
   const auth = authenticate(request);
+  // Reduce-motion preference (Phase 9C, ruling 13): user_prefs is the
+  // truth; SSR renders <html data-motion> directly so the [data-motion]
+  // CSS hook applies without a flash. Signed-out pages default to "full".
+  const motion: "full" | "reduce" =
+    auth && getPref<string>(getDb(), auth.user.id, "motion") === "reduce"
+      ? "reduce"
+      : "full";
   const payload = {
     theme,
+    motion,
     user: auth?.user ?? null,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
@@ -85,8 +95,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // SSR renders the explicit preference; "system" starts light and is
   // corrected pre-paint by the inline script (hence suppressHydrationWarning).
   const ssrTheme = theme === "dark" ? "dark" : "light";
+  const motion = data?.motion ?? "full";
   return (
-    <html lang="en" data-theme={ssrTheme} suppressHydrationWarning>
+    <html
+      lang="en"
+      data-theme={ssrTheme}
+      data-motion={motion}
+      suppressHydrationWarning
+    >
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

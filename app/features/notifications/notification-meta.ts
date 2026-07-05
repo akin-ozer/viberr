@@ -36,3 +36,23 @@ export function ntfMeta(n: {
 export function plainText(s: string | null | undefined): string {
   return (s || "").replace(/\*\*/g, "").replace(/`/g, "");
 }
+
+/**
+ * Notification kind → type-pill on the /notifications "Waiting on you"
+ * cards (contracts §4; mock `ntfPill`, notifications.jsx — Phase 9C).
+ */
+export interface NtfPill {
+  kind: "info" | "blocked" | "input";
+  label: string;
+}
+
+export function ntfPill(n: {
+  kind: string;
+  ptype?: "input" | "blocked" | null;
+}): NtfPill {
+  if (n.kind === "approval") return { kind: "info", label: "approval" };
+  if (n.ptype === "blocked") {
+    return { kind: "blocked", label: "blocked decision" };
+  }
+  return { kind: "input", label: "completion report" };
+}

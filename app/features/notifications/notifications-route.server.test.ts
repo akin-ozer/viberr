@@ -1,0 +1,139 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  setupAppTest,
+  type AppTestContext,
+} from "../../../test-support/test-app";
+import {
+  splitNotifications,
+  type NotificationPageItem,
+} from "./notifications-page";
+
+/**
+ * Route-level tests for the /notifications page (Phase 9C): per-user rows
+ * sorted timestamp DESC, the needs-you/stream split, cross-project soft
+ * refs resolving to the seeded stub projects, packet resolution
+ * auto-marking (phase-3/5 behavior — verified, not rebuilt), and the ONE
+ * shared read action route.
+ */
+
+let app: AppTestContext;
+let ardaId: string;
+
+beforeAll(async () => {
+  app = await setupAppTest();
+  const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
+  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { findUserByEmail } = await import("~/server/auth/user-store.server");
+  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+});
+afterAll(() => app.cleanup());
+
+async function runLoader(cookie?: string) {
+  const { loader } = await import("~/routes/notifications");
+  return loader({
+    request: app.request("/notifications", cookie ? { cookie } : {}),
+    params: {},
+    context: {},
+  } as never) as Promise<{
+    notifications: NotificationPageItem[];
+    unread: number;
+  }>;
+}
+
+describe("/notifications", () => {
+  it("redirects signed-out users to /login", async () => {
+    const thrown = await runLoader().catch((e) => e);
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+  });
+
+  it("lists arda's 10 seeded rows sorted by real timestamp DESC, 6 unread", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const result = await runLoader(cookie);
+
+    expect(result.notifications).toHaveLength(10);
+    expect(result.unread).toBe(6);
+    const times = result.notifications.map((n) => n.occurredAt);
+    expect([...times].sort().reverse()).toEqual(times);
+    // Producing actors ship for the stream lines.
+    expect(
+      result.notifications.every(
+        (n) => n.from === null || typeof n.from.name === "string",
+      ),
+    ).toBe(true);
+  });
+
+  it("cross-project rows are real soft refs into the seeded stub projects", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const { notifications } = await runLoader(cookie);
+
+    const dep = notifications.find((n) => n.taskKey === "DEP-31")!;
+    expect(dep.projectSlug).toBe("deploy-pipeline");
+    expect(dep.projectName).toBe("Deploy Pipeline");
+    const bil = notifications.find((n) => n.taskKey === "BIL-9")!;
+    expect(bil.projectSlug).toBe("billing-service");
+    expect(bil.projectName).toBe("Billing Service");
+  });
+
+  it("splits packets+approvals into the needs-you panel; unread filter applies to both", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const { notifications } = await runLoader(cookie);
+
+    const all = splitNotifications(notifications, "all");
+    expect(all.needs).toHaveLength(5); // 3 packets + 2 approvals
+    expect(
+      all.needs.every((n) => n.kind === "packet" || n.kind === "approval"),
+    ).toBe(true);
+    expect(all.rest).toHaveLength(5); // mentions / quality / policy
+
+    const unread = splitNotifications(notifications, "unread");
+    expect(unread.needs.every((n) => n.unread)).toBe(true);
+    expect(unread.rest.every((n) => n.unread)).toBe(true);
+    expect(unread.needs.length + unread.rest.length).toBe(6);
+  });
+
+  it("packet resolution auto-marks that task's packet/approval rows read (phase-5 contract)", async () => {
+    const before = await runLoader((await app.cookieFor(ardaId)).cookie);
+    expect(
+      before.notifications.find((n) => n.id === "n-142-packet")?.unread,
+    ).toBe(true);
+
+    const { resolvePacket } = await import(
+      "~/server/tasks/task-actions.server"
+    );
+    // "Request one edit" — resolves the packet without the merge path.
+    await resolvePacket(
+      app.db,
+      { projectSlug: "viberr-core", taskKey: "VIB-142", optionIndex: 1 },
+      { userId: ardaId, label: "arda@viberr.dev" },
+    );
+
+    const after = await runLoader((await app.cookieFor(ardaId)).cookie);
+    expect(
+      after.notifications.find((n) => n.id === "n-142-packet")?.unread,
+    ).toBe(false);
+  });
+
+  it("mark-all-read via the ONE shared read action drops unread to zero", async () => {
+    const { cookie, sessionId } = await app.cookieFor(ardaId);
+    const csrf = await app.csrfFor(sessionId);
+    const { action } = await import("~/routes/notifications.read");
+
+    const body = new URLSearchParams({ _csrf: csrf, intent: "read-all" });
+    const result = (await action({
+      request: app.request("/notifications/read", {
+        method: "POST",
+        cookie,
+        body,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+      params: {},
+      context: {},
+    } as never)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const after = await runLoader(cookie);
+    expect(after.unread).toBe(0);
+    expect(after.notifications.every((n) => !n.unread)).toBe(true);
+  });
+});

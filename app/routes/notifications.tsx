@@ -6,20 +6,23 @@ import {
   countUnreadNotifications,
   listNotifications,
 } from "~/server/projections/notifications.server";
+import { sseScopes } from "~/features/live-updates/event-types";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
 import {
-  NotificationItem,
-  type NotificationView,
-} from "~/features/notifications/notification-item";
+  NotificationsPage,
+  type NotificationPageItem,
+} from "~/features/notifications/notifications-page";
 
 /**
- * /notifications — URL-addressable PageOverlay route (bell "See all").
- * Phase 4 ships the full per-user list with mark-read / mark-all-read and
- * real navigation (cross-project included); Phase 9 ports the richer
- * notifications.jsx surface ("Waiting on you" cards, filters, RichText)
- * into this same route.
+ * /notifications — URL-addressable PageOverlay route (phase-4 shell
+ * decision, kept). Phase 9C fills it with the full notifications.jsx
+ * surface: "Waiting on you" packet/approval cards, "Everything else"
+ * day-grouped stream, All/Unread filter, mark-all-read. Read mutations go
+ * through the ONE existing /notifications/read action; row clicks navigate
+ * for real, cross-project included (ruling 9 seeded the stub projects).
  */
 
 export function meta(_: Route.MetaArgs) {
@@ -43,21 +46,37 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   const csrf = useCsrfToken();
   const push = useToast();
 
+  // New rows / packet-resolution auto-reads land live (the badge in the
+  // shells is already SSE-wired; the overlay subscribes on its own since
+  // it renders without the workspace shell underneath).
+  useLiveUpdates([sseScopes.user()]);
+
+  const items = notifications as NotificationPageItem[];
+
   const close = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     navigate(returnTo ?? "/");
   };
 
-  const markRead = (ids: string[]) => {
+  const markRead = (id: string) => {
+    const item = items.find((n) => n.id === id);
+    if (!item || !item.unread) return; // monotonic — nothing to do
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read");
-    for (const id of ids) fd.append("id", id);
+    fd.append("id", id);
     fetcher.submit(fd, { method: "post", action: "/notifications/read" });
   };
 
-  const openItem = (n: NotificationView) => {
-    if (n.unread) markRead([n.id]);
+  const markAllRead = () => {
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "read-all");
+    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
+    push("All notifications marked read");
+  };
+
+  const openItem = (n: NotificationPageItem) => {
     if (n.projectSlug && n.taskKey) {
       navigate(`/projects/${n.projectSlug}/tasks/${n.taskKey}`);
     }
@@ -65,39 +84,13 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 
   return (
     <PageOverlay label="Notifications" onClose={close}>
-      <div className="ntf-page">
-        <div className="ntf-pop-head">
-          <h3>Notifications</h3>
-          <span className="ct mono">
-            {unread > 0 ? unread + " unread" : "caught up"}
-          </span>
-          {unread > 0 && (
-            <button
-              className="btn ghost sm"
-              onClick={() => {
-                const fd = new FormData();
-                fd.set("_csrf", csrf);
-                fd.set("intent", "read-all");
-                fetcher.submit(fd, {
-                  method: "post",
-                  action: "/notifications/read",
-                });
-                push("All notifications marked read");
-              }}
-            >
-              Mark all read
-            </button>
-          )}
-        </div>
-        <div className="ntf-pop-list">
-          {notifications.length === 0 && (
-            <div className="empty">Nothing yet — you're caught up.</div>
-          )}
-          {notifications.map((n) => (
-            <NotificationItem key={n.id} notification={n} onOpen={openItem} />
-          ))}
-        </div>
-      </div>
+      <NotificationsPage
+        items={items}
+        unread={unread}
+        onRead={markRead}
+        onReadAll={markAllRead}
+        onOpen={openItem}
+      />
     </PageOverlay>
   );
 }
