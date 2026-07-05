@@ -231,7 +231,17 @@ const CLAUDE_META = "@anthropic-ai/claude-agent-sdk · stream-json · session ";
  * click-to-expand shows it in full and click again (or the copy affordance)
  * copies the whole id — so it can actually be pasted into `--resume`.
  */
-function SessionIdChip({ sid }: { sid: string | null }) {
+function SessionIdChip({
+  sid,
+  runId,
+  exportable,
+}: {
+  sid: string | null;
+  /** Server run id — the export download key. */
+  runId?: string;
+  /** True for a real (non-simulated) run with a resumable on-disk session. */
+  exportable?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   if (!sid) return <span className="mono faint">—</span>;
@@ -245,13 +255,27 @@ function SessionIdChip({ sid }: { sid: string | null }) {
       setExpanded(true);
     }
   };
+  // The id identifies the provider session (claude session_id / codex thread),
+  // stored inside the app's runtime (in Docker, under CLAUDE_CONFIG_DIR /
+  // CODEX_HOME on the data volume). It IS resumable on your own machine with
+  // your own subscription — use Export to download an installer that places the
+  // transcript where the local CLI expects it and prints `claude --resume` /
+  // `codex resume`. (Or continue in-app by @mentioning the agent.)
+  const scopeNote =
+    "Runtime session, stored inside the app. It can be resumed on your own " +
+    "machine with your own subscription — use Export to download an installer " +
+    "that sets up `claude --resume` / `codex resume`. (Or @mention the agent to " +
+    "continue here.)";
   return (
-    <span className="session-id">
+    <span className="session-id" title={scopeNote}>
       <button
         type="button"
         className="session-id-val mono"
-        title={expanded ? "Click to trim" : sid}
-        aria-label={"Session id " + sid + " — click to " + (expanded ? "trim" : "expand")}
+        title={expanded ? "Click to trim" : sid + "\n\n" + scopeNote}
+        aria-label={
+          "Session id " + sid + ", stored in the app runtime — click to " +
+          (expanded ? "trim" : "expand")
+        }
         onClick={() => setExpanded((e) => !e)}
       >
         {expanded ? sid : short}
@@ -265,6 +289,22 @@ function SessionIdChip({ sid }: { sid: string | null }) {
       >
         <Icon name={copied ? "check" : "copy"} />
       </button>
+      {exportable && runId && (
+        <a
+          className="session-id-export"
+          href={`/resources/session-export?run=${encodeURIComponent(runId)}`}
+          download
+          title={
+            "Export this session to resume on your own machine (same " +
+            "subscription). Downloads a bash installer; run it from your local " +
+            "checkout, then use the printed resume command."
+          }
+          aria-label="Export session to resume locally"
+        >
+          <Icon name="ext" />
+          Export
+        </a>
+      )}
     </span>
   );
 }
@@ -348,7 +388,11 @@ export function AgentLogsPanel({
         </Pill>
         <span className="logs-meta mono">
           {cur!.backend === "codex" ? CODEX_META : CLAUDE_META}
-          <SessionIdChip sid={cur!.sid} />
+          <SessionIdChip
+            sid={cur!.sid}
+            runId={cur!.serverRunId}
+            exportable={!cur!.simulated && !!cur!.sid}
+          />
         </span>
         <span className="spacer" />
         <button

@@ -2105,6 +2105,15 @@ h1, h2, h3, h4 {
 }
 .session-id-copy:hover { color: var(--ink); background: var(--panel-2, rgba(127,127,127,.12)); }
 .session-id-copy .ico { width: 13px; height: 13px; }
+.session-id-export {
+  display: inline-flex; align-items: center; gap: .18rem;
+  font-family: var(--font-display); font-size: .68rem; font-weight: 700;
+  color: var(--faint); text-decoration: none;
+  padding: .05rem .3rem; margin-left: .1rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--faint), transparent 55%);
+}
+.session-id-export:hover { color: var(--teal); border-color: var(--teal); }
+.session-id-export .ico { width: 11px; height: 11px; }
 
 /* Markdown comment bodies (agent replies + user comments) rendered by
    ~/ui/markdown.tsx. Real GFM: paragraphs, lists, tables, headings, code.

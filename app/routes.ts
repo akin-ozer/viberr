@@ -29,6 +29,9 @@ export default [
   // Model + effort catalog — the agent create/edit modal fetches this to
   // populate the model and effort (reasoning) pickers per backend.
   route("resources/model-catalog", "routes/resources.model-catalog.ts"),
+  // Session export — downloads a bash installer that carries a run's provider
+  // transcript so the conversation can be resumed locally (same subscription).
+  route("resources/session-export", "routes/resources.session-export.ts"),
 
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [
