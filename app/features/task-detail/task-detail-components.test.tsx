@@ -534,17 +534,17 @@ describe("ExecutionProfile — reviewers", () => {
       ],
     } as unknown as Partial<TaskSummary>);
 
-  it("labels the cell 'Reviewers' and renders a chip with Run + remove", () => {
+  it("labels the cell 'Reviewers' and renders a row with Run + remove", () => {
     const onRunReviewer = vi.fn();
     const onRemoveReviewer = vi.fn();
     const { container } = renderExec(reviewerTask(), { onRunReviewer, onRemoveReviewer });
     expect(container.textContent).toContain("Reviewers");
-    const chip = container.querySelector(".reviewer-chip")!;
+    const chip = container.querySelector(".rev-agent")!;
     expect(chip).not.toBeNull();
     expect(chip.textContent).toContain("Code review");
-    fireEvent.click(chip.querySelector(".rc-run")!);
+    fireEvent.click(chip.querySelector(".btn.primary")!);
     expect(onRunReviewer).toHaveBeenCalledWith("reviewer");
-    fireEvent.click(chip.querySelector(".rc-x")!);
+    fireEvent.click(chip.querySelector(".rev-x")!);
     expect(onRemoveReviewer).toHaveBeenCalledWith("reviewer");
   });
 
@@ -567,7 +567,7 @@ describe("ExecutionProfile — reviewers", () => {
 
   it("reviewer Run buttons are disabled while a run is active", () => {
     const { container } = renderExec(reviewerTask(), { runActive: true });
-    const runBtn = container.querySelector(".reviewer-chip .rc-run") as HTMLButtonElement;
+    const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
     expect(runBtn.disabled).toBe(true);
     expect(runBtn.textContent).toContain("Running");
   });
@@ -577,9 +577,9 @@ describe("ExecutionProfile — reviewers", () => {
       myRole: "reviewer",
       canRunAgents: false,
     });
-    expect(container.querySelector(".reviewer-chip")).not.toBeNull();
-    expect(container.querySelector(".reviewer-chip .rc-run")).toBeNull();
-    expect(container.querySelector(".reviewer-chip .rc-x")).toBeNull();
+    expect(container.querySelector(".rev-agent")).not.toBeNull();
+    expect(container.querySelector(".rev-agent .btn.primary")).toBeNull();
+    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
     expect(
       Array.from(container.querySelectorAll(".rev-add")).some((b) =>
         b.textContent?.includes("Add reviewer"),

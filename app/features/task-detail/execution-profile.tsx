@@ -498,61 +498,61 @@ export function ExecutionProfile({
         </div>
         <div className="profile-cell">
           <div className="lbl">Reviewers</div>
-          <div className="val">
-            <div className="rev-list">
-              {task.reviewers.length ? (
-                <div className="reviewers">
-                  {task.reviewers.map((c) => (
-                    <span className="reviewer-chip" key={c.profileId}>
-                      <AgentGlyph backend={c.backend} />
-                      <span className="nm">{agentNameOf(c.profileId, c.role)}</span>
-                      <span className="rc-sub">
-                        {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
-                      </span>
-                      {canRunAgents && (
-                        <>
-                          <button
-                            type="button"
-                            className="rc-run"
-                            disabled={reviewerBusy || runActive}
-                            onClick={() => onRunReviewer(c.profileId)}
-                            title={
-                              runActive
-                                ? "A run is already streaming for this task"
-                                : "Start a run for this reviewer"
-                            }
-                          >
-                            <Icon name="bolt" />
-                            {runActive ? "Running…" : "Run"}
-                          </button>
-                          <button
-                            type="button"
-                            className="rc-x"
-                            disabled={reviewerBusy}
-                            aria-label={`Release ${c.role} reviewer`}
-                            title="Release reviewer"
-                            onClick={() => onRemoveReviewer(c.profileId)}
-                          >
-                            <Icon name="x" />
-                          </button>
-                        </>
-                      )}
+          {/* Each reviewer renders as a row identical to the Primary specialist
+              above (glyph · name / role·backend · Run), with a release (×). */}
+          <div className="val revs">
+            {task.reviewers.length ? (
+              task.reviewers.map((c) => (
+                <div className="rev-agent" key={c.profileId}>
+                  <AgentGlyph backend={c.backend} />
+                  <span>
+                    <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
+                    <div className="sub">
+                      {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
+                    </div>
+                  </span>
+                  {canRunAgents && (
+                    <span className="right">
+                      <button
+                        type="button"
+                        className="btn primary sm"
+                        disabled={reviewerBusy || runActive}
+                        onClick={() => onRunReviewer(c.profileId)}
+                        title={
+                          runActive
+                            ? "A run is already streaming for this task"
+                            : "Start a run for this reviewer"
+                        }
+                      >
+                        <Icon name="bolt" />
+                        {runActive ? "Running…" : "Run"}
+                      </button>
+                      <button
+                        type="button"
+                        className="rev-x"
+                        disabled={reviewerBusy}
+                        aria-label={`Release ${c.role} reviewer`}
+                        title="Release reviewer"
+                        onClick={() => onRemoveReviewer(c.profileId)}
+                      >
+                        <Icon name="x" />
+                      </button>
                     </span>
-                  ))}
+                  )}
                 </div>
-              ) : (
-                <span className="sub">None engaged</span>
-              )}
-              {canRunAgents && (
-                <ReviewerControl
-                  projectSlug={task.projectSlug}
-                  specialists={availableReviewers}
-                  hasAnyDeployed={deployedSpecialists.length > 0}
-                  busy={reviewerBusy}
-                  onAssign={onAssignReviewer}
-                />
-              )}
-            </div>
+              ))
+            ) : (
+              <span className="sub">None engaged</span>
+            )}
+            {canRunAgents && (
+              <ReviewerControl
+                projectSlug={task.projectSlug}
+                specialists={availableReviewers}
+                hasAnyDeployed={deployedSpecialists.length > 0}
+                busy={reviewerBusy}
+                onAssign={onAssignReviewer}
+              />
+            )}
           </div>
         </div>
         <div className="profile-cell">
