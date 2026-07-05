@@ -20,7 +20,7 @@ import { projectEnvelope } from "./wire-format.server";
  * Interrupt: the SDK's `Query.interrupt()` — only available in STREAMING
  * INPUT mode (the docs on the `Query` interface say so), so we feed the
  * prompt as an async iterable of one SDKUserMessage. Resume: `options.resume
- * = <session_id>`. Autonomous: `options.permissionMode = 'acceptEdits'`.
+ * = <session_id>`. Autonomous: `options.permissionMode = 'bypassPermissions'`.
  * Success is gated on the final result's `is_error`, NOT any exit code.
  *
  * Auth: ANTHROPIC_API_KEY (env). The SDK factory is injectable so tests
@@ -119,7 +119,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // Only set model when we have a real id/alias; otherwise let the SDK
           // (and the subscription) pick its default.
           ...(resolvedModel ? { model: resolvedModel } : {}),
-          permissionMode: spec.autonomous ? "acceptEdits" : "default",
+          // Fully autonomous: bypass ALL permission prompts so a
+          // server-spawned run never blocks waiting for approval (there is no
+          // human at the CLI). acceptEdits still gated non-edit tools like
+          // Bash; bypassPermissions runs unattended end-to-end.
+          permissionMode: spec.autonomous ? "bypassPermissions" : "default",
           maxTurns: 50,
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;

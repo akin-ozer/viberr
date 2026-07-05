@@ -89,15 +89,19 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
         const codex = factory(
           deps.apiKey || deps.env ? { ...(deps.apiKey ? { apiKey: deps.apiKey } : {}), ...(deps.env ? { env: deps.env } : {}) } : undefined,
         );
+        // Fully autonomous: no approval gating. `danger-full-access` mirrors
+        // Claude's bypassPermissions so a server-spawned run never blocks on
+        // an approval it can't answer; a non-autonomous run stays sandboxed.
+        const sandboxMode = spec.autonomous ? "danger-full-access" : "workspace-write";
         const thread = spec.resumeSessionId
           ? codex.resumeThread(spec.resumeSessionId, {
               workingDirectory: spec.workdir,
               skipGitRepoCheck: true,
-              sandboxMode: "workspace-write",
+              sandboxMode,
             })
           : codex.startThread({
               model: spec.model,
-              sandboxMode: "workspace-write",
+              sandboxMode,
               workingDirectory: spec.workdir,
               skipGitRepoCheck: true,
             });
