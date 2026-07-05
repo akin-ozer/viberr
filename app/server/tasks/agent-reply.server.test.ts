@@ -376,3 +376,74 @@ describe("commentToAgent", () => {
     expect(humanComments.length).toBe(2);
   });
 });
+
+/* --------------------------------- mention routing / per-agent session isolation */
+
+describe("mention routing keeps each agent on its OWN session (regression)", () => {
+  /** Redeploy with dev (primary, claude) + analyst (a second claude specialist). */
+  function deployTwoSpecialists(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet" } } as never,
+        { profileId: "analyst", capabilities: [], extras: [], definition: { kind: "specialist", name: "analyst", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("@analyst does NOT inherit the primary dev's claude session (matched by identity, not backend)", async () => {
+    deployTwoSpecialists();
+    // The PRIMARY dev gets a real session on the SAME backend (claude) as analyst.
+    await startSpecialistRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await waitFor(() =>
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+        (r) => r.kind === "primary" && !!r.session_id,
+      ),
+    );
+
+    const target = resolveMentionedAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "@analyst please review",
+    );
+    expect(target).not.toBeNull();
+    expect(target!.profileId).toBe("analyst");
+    expect(target!.isPrimary).toBe(false);
+    // The dev has a claude session; analyst must NOT be handed it (the bug).
+    expect(target!.session).toBeNull();
+  });
+
+  it("commenting @analyst starts a reviewer run and leaves the primary (dev) intact", async () => {
+    deployTwoSpecialists();
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@analyst take a look" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("started");
+    expect(result.agent).toMatchObject({ profileId: "analyst" });
+
+    // A reviewer-kind run was created for analyst — NOT a primary run.
+    const reviewerRun = listRunsForTaskRows(store.db, store.slug, "VIB-1").find(
+      (r) => r.kind === "reviewer",
+    );
+    expect(reviewerRun).toBeTruthy();
+    expect(reviewerRun!.agent_profile_id).toBe("analyst");
+
+    // The primary specialist is still dev; analyst is engaged as a reviewer.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.specialist!.profileId).toBe("dev");
+    expect(file.parsed.frontmatter.reviewers.map((r) => r.profileId)).toContain("analyst");
+  });
+});

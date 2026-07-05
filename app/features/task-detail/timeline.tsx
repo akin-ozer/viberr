@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { formatDayDotTime } from "~/shared/dates/format";
@@ -33,6 +40,36 @@ const TL_FILTERS = [
   { id: "typed", label: "Important events" },
   { id: "comment", label: "Comments" },
 ] as const;
+
+// Same @handle grammar the server + rendered comments use.
+const COMPOSER_MENTION_RE = /@[A-Za-z][\w-]*/g;
+
+/**
+ * Render the composer draft with `@mention` tokens wrapped in `.mention` for
+ * the highlight backdrop behind the textarea. Text between mentions is plain
+ * (the backdrop mirrors the textarea character-for-character; only the mention
+ * spans are styled — and with NO layout-affecting padding, so the backdrop
+ * stays pixel-aligned with the transparent textarea text on top). The trailing
+ * "\n" keeps the box height in sync when the draft ends on a newline.
+ */
+function highlightDraft(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  COMPOSER_MENTION_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = COMPOSER_MENTION_RE.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(
+      <span className="mention" key={key++}>
+        {m[0]}
+      </span>,
+    );
+    last = m.index + m[0].length;
+  }
+  parts.push(text.slice(last) + "\n");
+  return <Fragment>{parts}</Fragment>;
+}
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
 
@@ -194,6 +231,7 @@ export function Timeline({
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const hlRef = useRef<HTMLDivElement>(null);
   const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
@@ -289,7 +327,13 @@ export function Timeline({
 
       <div className="composer">
         <div className="composer-box">
-          <div style={{ position: "relative" }}>
+          <div className="composer-input" style={{ position: "relative" }}>
+            {/* Highlight backdrop: mirrors the draft with @mentions styled,
+                sitting behind the transparent-text textarea so mentions light
+                up live as you type — matching the posted comment. */}
+            <div className="composer-hl" aria-hidden="true" ref={hlRef}>
+              {highlightDraft(draft)}
+            </div>
             <textarea
               ref={taRef}
               placeholder="Add a comment… type @ to tag the operator, an agent, or a teammate"
@@ -307,6 +351,10 @@ export function Timeline({
               onKeyUp={mentions.refresh}
               onClick={mentions.refresh}
               onSelect={mentions.refresh}
+              onScroll={(e) => {
+                // Keep the highlight backdrop scroll-locked to the textarea.
+                if (hlRef.current) hlRef.current.scrollTop = e.currentTarget.scrollTop;
+              }}
               onBlur={mentions.close}
               onKeyDown={(e) => {
                 // The autocomplete claims navigation/selection keys while open;

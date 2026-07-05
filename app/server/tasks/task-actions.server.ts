@@ -550,27 +550,53 @@ export async function commentToAgent(
     runId = resumed.runId;
     triggered = "resumed";
   } else {
-    // 4b. No prior session — start a FRESH specialist run (first-mention
-    //     fallback). Assign the specialist first if the task has none, then
-    //     start the run through the normal specialist-run path.
-    const { assignSpecialist, startSpecialistRun } = await import(
-      "./specialist-run.server"
-    );
-    if (!existing?.parsed.frontmatter.specialist) {
-      await assignSpecialist(
+    // 4b. No prior session for THIS agent — start a FRESH run, routed by how
+    //     the agent is engaged so a reviewer mention never clobbers the
+    //     primary specialist (the bug where `@reviewer` ran as / answered as
+    //     the dev):
+    //       · the primary — or the FIRST agent on a task with no primary yet —
+    //         is assigned as the primary specialist and run as primary;
+    //       · anyone else is engaged as a reviewer (idempotent) and run as a
+    //         reviewer on its own thread.
+    const hasPrimary = !!existing?.parsed.frontmatter.specialist;
+    if (target.isPrimary || !hasPrimary) {
+      const { assignSpecialist, startSpecialistRun } = await import(
+        "./specialist-run.server"
+      );
+      if (!hasPrimary) {
+        await assignSpecialist(
+          db,
+          { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
+          actor,
+          ctx,
+        );
+      }
+      const started = await startSpecialistRun(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        actor,
+        ctx,
+      );
+      runId = started.runId;
+    } else {
+      const { assignReviewer, startReviewerRun } = await import(
+        "./specialist-run.server"
+      );
+      // Engage as a reviewer if not already (idempotent), then run as reviewer.
+      await assignReviewer(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
         actor,
         ctx,
       );
+      const started = await startReviewerRun(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
+        actor,
+        ctx,
+      );
+      runId = started.runId;
     }
-    const started = await startSpecialistRun(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      actor,
-      ctx,
-    );
-    runId = started.runId;
     triggered = "started";
   }
 

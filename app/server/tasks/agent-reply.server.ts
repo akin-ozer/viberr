@@ -62,8 +62,12 @@ export interface MentionedAgent {
   effort: string;
   /** The agent's file actor ref (author of the reply comment). */
   actorRef: FileActorRef;
-  /** The most-recent run row on this task that has a session_id, or null when
-   *  the agent has never run here (→ the caller starts a FRESH run). */
+  /** True when this agent is the task's PRIMARY specialist (drives whether a
+   *  fresh run engages it as primary vs. reviewer, and how its session matches). */
+  isPrimary: boolean;
+  /** The most-recent run row on this task that is THIS agent's OWN resumable
+   *  session, or null when the agent has never run here as itself (→ the caller
+   *  starts a FRESH run). Matched by agent identity, never merely by backend. */
   session: AgentRunRow | null;
 }
 
@@ -90,25 +94,44 @@ function handleMatchesSpecialist(
 }
 
 /**
- * The most-recent run row (created_at DESC) on this task, matching `backend`,
- * that carries a session_id — the resumable provider session for this agent.
- * When `backend` is null, any specialist/reviewer run with a session wins.
+ * The most-recent run row (created_at DESC) that is THIS agent's OWN resumable
+ * session — matched by AGENT IDENTITY, never merely by backend. Matching by
+ * backend alone let `@reviewer` resume the dev's most-recent claude session
+ * (the dev then answered "as the dev"); this keeps each agent on its own thread.
+ *
+ * Pass 1 — the agent's own runs: `agent_profile_id === profileId` AND the run
+ * kind matches how the agent is engaged (`primary` vs `reviewer`), so a run
+ * stamped with an identity but the wrong kind (a legacy cross-agent resume) is
+ * NOT reused. Pass 2 — a legacy fallback for the PRIMARY only: a pre-identity
+ * (`agent_profile_id IS NULL`) primary run of the same backend, so primaries
+ * that ran before the identity columns still resume.
  */
 function latestSessionRun(
   db: Database.Database,
   projectSlug: string,
   taskKey: string,
-  backend: RealBackend | null,
+  target: { profileId: string; backend: RealBackend; isPrimary: boolean },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
-  // listRunsForTaskRows returns created_at ASC — walk newest-first.
+  const wantKind = target.isPrimary ? "primary" : "reviewer";
+  // Pass 1 — the agent's own session (identity + engagement kind).
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
-    if (row.kind === "operator") continue;
     if (!row.session_id) continue;
-    const rowBackend: RealBackend = row.backend === "codex" ? "codex" : "claude";
-    if (backend && rowBackend !== backend) continue;
-    return row;
+    if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
+      return row;
+    }
+  }
+  // Pass 2 — legacy null-identity primary session (pre-0010), same backend.
+  if (target.isPrimary) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i]!;
+      if (row.kind !== "primary") continue;
+      if (!row.session_id) continue;
+      if (row.agent_profile_id != null) continue;
+      const rowBackend: RealBackend = row.backend === "codex" ? "codex" : "claude";
+      if (rowBackend === target.backend) return row;
+    }
   }
   return null;
 }
@@ -160,13 +183,19 @@ export function resolveMentionedAgent(
       model: sp?.model ?? (backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5"),
       effort: sp?.effort ?? "",
       actorRef: agentActorRef(backend, role),
-      session: latestSessionRun(db, projectSlug, taskKey, backend),
+      isPrimary: true,
+      session: latestSessionRun(db, projectSlug, taskKey, {
+        profileId: primaryRef.profileId,
+        backend,
+        isPrimary: true,
+      }),
     };
   }
 
   // 2. A deployed specialist by name / id / backend.
   const matched = specialists.find((s) => handleMatchesSpecialist(handleSet, s));
   if (matched) {
+    const isPrimary = primaryRef?.profileId === matched.id;
     return {
       profileId: matched.id,
       name: matched.name,
@@ -175,7 +204,12 @@ export function resolveMentionedAgent(
       model: matched.model,
       effort: matched.effort,
       actorRef: agentActorRef(matched.backend, matched.role),
-      session: latestSessionRun(db, projectSlug, taskKey, matched.backend),
+      isPrimary,
+      session: latestSessionRun(db, projectSlug, taskKey, {
+        profileId: matched.id,
+        backend: matched.backend,
+        isPrimary,
+      }),
     };
   }
 
@@ -193,7 +227,12 @@ export function resolveMentionedAgent(
         model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
         effort: "",
         actorRef: agentActorRef(backend, primaryRef.role),
-        session: latestSessionRun(db, projectSlug, taskKey, backend),
+        isPrimary: true,
+        session: latestSessionRun(db, projectSlug, taskKey, {
+          profileId: primaryRef.profileId,
+          backend,
+          isPrimary: true,
+        }),
       };
     }
   }

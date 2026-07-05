@@ -815,8 +815,32 @@ h1, h2, h3, h4 {
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .composer-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue), transparent 86%); }
-.composer-box textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font-family: var(--font-body); font-size: .9rem; line-height: 1.5; color: var(--fg); min-height: 44px; }
-.composer-box textarea::placeholder { color: var(--placeholder); }
+/* The textarea + its highlight backdrop MUST share identical box metrics
+   (font, size, line-height, padding, border, min-height, wrapping) so the
+   backdrop stays character-aligned with the transparent textarea text. */
+.composer-box textarea,
+.composer-box .composer-hl {
+  width: 100%; border: 0; margin: 0; padding: 0;
+  font-family: var(--font-body); font-size: .9rem; line-height: 1.5;
+  min-height: 44px;
+  letter-spacing: normal; tab-size: 4;
+}
+.composer-box textarea {
+  outline: 0; resize: none; background: transparent;
+  position: relative; z-index: 1;
+  /* text is transparent — the backdrop shows the styled text; caret stays visible */
+  color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--fg);
+}
+.composer-box textarea::placeholder { color: var(--placeholder); -webkit-text-fill-color: var(--placeholder); }
+.composer-box .composer-hl {
+  position: absolute; inset: 0; z-index: 0;
+  pointer-events: none; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+  color: var(--fg);
+}
+/* In the backdrop the mention highlight must NOT add horizontal padding (that
+   would shift following characters out of alignment) — background + color only. */
+.composer-box .composer-hl .mention { padding: 0; border-radius: 3px; }
 .composer-foot { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 .composer-hint { font-size: .74rem; color: var(--placeholder); }
 .composer-hint .at { font-family: var(--font-mono); font-weight: 700; color: var(--agent-dark); }
