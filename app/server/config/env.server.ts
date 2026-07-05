@@ -67,6 +67,16 @@ const envSchema = z.object({
     .string()
     .min(8, "must be at least 8 characters")
     .optional(),
+
+  // Optional runtime-backend API keys (Phase 8). When absent the requested
+  // real backend falls back to the simulated engine (simulated=1, requested
+  // backend kept for glyph fidelity). Presence is a cheap auth check — the
+  // registry NEVER makes a paid call to detect availability.
+  //  - Claude Agent SDK: ANTHROPIC_API_KEY
+  //  - Codex SDK: CODEX_API_KEY / OPENAI_API_KEY, or an existing `codex login`
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  CODEX_API_KEY: z.string().min(1).optional(),
+  OPENAI_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

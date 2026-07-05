@@ -1,0 +1,116 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
+import type { RunView } from "./runtime-types";
+import type { StreamedLine } from "./use-run-log-stream";
+
+afterEach(cleanup);
+
+function mkRun(patch: Partial<RunView>): RunView {
+  return {
+    id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",
+    who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
+    backend: "claude", simulated: true, sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
+    sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
+    phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
+    finished: null, turns: 0, tokens: 0,
+    lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
+    raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
+    ...patch,
+  };
+}
+
+describe("LiveRunPanel", () => {
+  it("renders nothing when no run is running", () => {
+    const { container } = render(
+      <LiveRunPanel runtime={[mkRun({ state: "idle", lifecycle: "finished" })]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    expect(container.querySelector(".runbar")).toBeNull();
+  });
+
+  it("shows the running run + a who-chip (single) with elapsed from startedAt", () => {
+    const { container, getByText } = render(
+      <LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    expect(container.querySelector(".runbar")).not.toBeNull();
+    expect(getByText("1 agent running")).toBeTruthy();
+    expect(container.querySelector(".who-chip")).not.toBeNull();
+    // Elapsed derives from startedAt (~402s → 06:42), never a fabricated count.
+    expect(getByText("06:42")).toBeTruthy();
+  });
+
+  it("shows the AgentPicker when 2+ runs are running (concurrent case)", () => {
+    const runs = [mkRun({ id: "primary" }), mkRun({ id: "c0", who: { kind: "agent", backend: "codex", name: "Codex", role: "Consultant" }, backend: "codex" })];
+    const { container, getByText } = render(
+      <LiveRunPanel runtime={runs} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    expect(getByText("2 agents running")).toBeTruthy();
+    expect(container.querySelector(".rsel")).not.toBeNull();
+    expect(container.querySelector(".who-chip")).toBeNull();
+  });
+
+  it("hides Interrupt when the viewer cannot interrupt; fires onInterrupt otherwise", () => {
+    const onInterrupt = vi.fn();
+    const { queryByText, rerender, getByText } = render(
+      <LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt={false} interrupting={false} />,
+    );
+    expect(queryByText("Interrupt")).toBeNull();
+    rerender(<LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt interrupting={false} />);
+    fireEvent.click(getByText("Interrupt"));
+    expect(onInterrupt).toHaveBeenCalledWith("primary");
+  });
+});
+
+describe("AgentLogsPanel", () => {
+  it("renders the exact empty state when the task has no runtime", () => {
+    const { getByText } = render(<AgentLogsPanel runtime={[]} sel={null} onSel={() => {}} linesByThread={{}} />);
+    expect(getByText("No agent runs yet — runtime streams appear here once the operator engages a specialist.")).toBeTruthy();
+  });
+
+  it("running thread: streaming footer + cursor line + running pill", () => {
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "x" }, raw: "{}" }] }} />,
+    );
+    expect(getByText("streaming — raw output stays here as evidence, never in the task record")).toBeTruthy();
+    expect(container.querySelector(".log-line.cursor")).not.toBeNull();
+    expect(container.querySelector(".logs-bar .pill.agent")).not.toBeNull();
+  });
+
+  it("done thread: 'run finished at …' footer, no cursor", () => {
+    const run = mkRun({ state: "done", lifecycle: "finished", finished: "9:41" });
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: run.lines.map((d, i) => ({ display: d, raw: run.raw[i]! })) }} />,
+    );
+    expect(getByText("run finished at 9:41 — thread can be re-engaged")).toBeTruthy();
+    expect(container.querySelector(".log-line.cursor")).toBeNull();
+  });
+
+  it("error thread: continuity-error footer + blocked pill", () => {
+    const run = mkRun({ state: "error", lifecycle: "error" });
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "err", tag: "tool_result", text: "boom" }, raw: "{}" }] }} />,
+    );
+    expect(getByText("stream ended on a continuity error — see the blocked packet")).toBeTruthy();
+    expect(container.querySelector(".logs-bar .pill.blocked")).not.toBeNull();
+  });
+
+  it("raw toggle renders the stored wire envelope verbatim", () => {
+    const raw = '{"type":"system","subtype":"init","session_id":"51d8f0e2"}';
+    const { container, getByText, queryByText } = render(
+      <AgentLogsPanel runtime={[mkRun({ state: "idle", lifecycle: "finished" })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "friendly text" }, raw }] }} />,
+    );
+    expect(getByText("friendly text")).toBeTruthy();
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.textContent).toContain(raw);
+    expect(queryByText("friendly text")).toBeNull();
+  });
+
+  it("codex meta line vs claude meta line", () => {
+    const codex = mkRun({ backend: "codex", sid: "0199a2c4-7b31-7802", state: "idle", lifecycle: "finished" });
+    const { getByText } = render(
+      <AgentLogsPanel runtime={[codex]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(getByText(/@openai\/codex-sdk · runStreamed\(\) · thread 0199a2c4-7b31…/)).toBeTruthy();
+  });
+});

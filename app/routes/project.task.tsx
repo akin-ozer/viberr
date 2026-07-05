@@ -23,6 +23,8 @@ import {
   setOwner,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
+import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
@@ -63,6 +65,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const rawDefault = getPref<string>(db, user.id, "tlDefault");
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
+
+  // Runtime (Phase 8): the per-task run projection + kick the seed-resumer so
+  // seeded "running" runs drip their live lines over SSE on first subscribe.
+  resumeSeededRunningRuns(db, params.slug, params.key);
+  const runtime = listRunsForTask(db, params.slug, params.key);
+
   return {
     task: { ...detail, timeline: slice.events },
     timelineTotal: slice.total,
@@ -70,6 +78,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     timelineRemaining: slice.remaining,
     timelineNextLimit: slice.nextLimit,
     tlDefault,
+    runtime,
   };
 }
 
@@ -184,6 +193,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, intent, stage: task.stage };
       }
+      case "run-interrupt": {
+        // Real governed action (runs spec §5.1): RBAC admin|maintainer,
+        // writes interrupted state + audit event. Idempotent-safe.
+        const result = interruptRun(
+          db,
+          { projectSlug, taskKey, runId: String(formData.get("runId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast:
+            result.outcome === "interrupted"
+              ? "Run interrupted — the thread stays resumable"
+              : "That run already finished — nothing to interrupt",
+        };
+      }
       default:
         return data(
           { ok: false as const, error: "Unknown action." },
@@ -227,6 +253,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       // log selection (mock `key={task.key}` behavior, spec §1).
       key={loaderData.task.key}
       task={loaderData.task}
+      runtime={loaderData.runtime}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}

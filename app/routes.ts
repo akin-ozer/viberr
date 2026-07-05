@@ -21,6 +21,9 @@ export default [
   route("prefs/theme", "routes/prefs.theme.tsx"),
   // SSE stream (Phase 6) — scoped live updates driving route revalidation.
   route("resources/events", "routes/resources.events.ts"),
+  // Run-log tail (Phase 8) — the dedicated logs consumer fetches lines since
+  // a seq after a run.log-appended SSE reference.
+  route("resources/run-log", "routes/resources.run-log.ts"),
 
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [

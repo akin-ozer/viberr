@@ -514,6 +514,24 @@ export async function setOwner(
     },
   });
 
+  // Phase 8: when scheduling fires, the operator "schedules execution" — spin
+  // up a REAL operator run so the run strip / agent logs reflect the reaction
+  // (generalizes the Phase-5 stand-in; the operator timeline event copy above
+  // is unchanged). Best-effort: a runtime failure never breaks the ownership
+  // mutation (file write + audit already committed). Dynamically imported to
+  // avoid a module cycle; skipped when a seeded operator run already exists.
+  if (scheduling) {
+    const { scheduleOperatorRun } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    await scheduleOperatorRun(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      ownerName: userName(db, input.targetUserId),
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
+  }
+
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
 

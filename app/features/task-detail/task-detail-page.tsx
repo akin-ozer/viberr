@@ -15,6 +15,8 @@ import {
 import { ReleaseConfirm } from "./release-confirm";
 import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
+import type { RunView } from "~/features/runtime/runtime-types";
+import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
 /**
  * Task detail workspace — port of TaskDetail (task.jsx). Operator-first
@@ -232,6 +234,7 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 
 export function TaskDetailPage({
   task,
+  runtime,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -242,6 +245,8 @@ export function TaskDetailPage({
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
+  /** Per-task run projection (Phase 8). */
+  runtime: RunView[];
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -258,10 +263,49 @@ export function TaskDetailPage({
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
+  const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
+  useActionFeedback(runFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
+  const runBusy = runFetcher.state !== "idle";
+
+  // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
+  // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
+  // live lines via run.log-appended; revalidates on run.state-changed.
+  const { linesByThread } = useRunLogStream({
+    projectSlug: task.projectSlug,
+    taskKey: task.key,
+    threads: runtime.map((r) => ({
+      threadId: r.id,
+      runId: r.serverRunId,
+      lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
+    })),
+  });
+
+  // Interrupt is admin|maintainer (contracts §3.2); the button hides for
+  // everyone else. Server re-checks RBAC regardless.
+  const canInterrupt = myRole === "admin" || myRole === "maintainer";
+  const onInterrupt = (runThreadId: string) => {
+    if (runBusy) return;
+    const run = runtime.find((r) => r.id === runThreadId);
+    if (!run) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-interrupt");
+    fd.set("runId", run.serverRunId);
+    runFetcher.submit(fd, { method: "post" });
+  };
+  const onViewLogs = (id: string) => {
+    setLogSel(id);
+    // Scroll the logs panel into view (spec §5.2 addition).
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;
@@ -318,7 +362,13 @@ export function TaskDetailPage({
           <p className="goal">{task.goal}</p>
         </div>
 
-        <LiveRunSlot taskKey={task.key} />
+        <LiveRunSlot
+          runtime={runtime}
+          onViewLogs={onViewLogs}
+          onInterrupt={onInterrupt}
+          canInterrupt={canInterrupt}
+          interrupting={runBusy}
+        />
 
         <DiagnosticsPanel diagnostics={task.diagnostics} />
 
@@ -341,7 +391,12 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
         />
 
-        <AgentLogsSlot taskKey={task.key} logSel={logSel} onLogSel={setLogSel} />
+        <AgentLogsSlot
+          runtime={runtime}
+          logSel={logSel}
+          onLogSel={setLogSel}
+          linesByThread={linesByThread}
+        />
 
         <Timeline
           events={task.timeline}

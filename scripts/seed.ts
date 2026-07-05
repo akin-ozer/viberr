@@ -29,6 +29,8 @@ console.log(
     `  timeline events ${summary.events}`,
     `  notifications  ${summary.notifications}`,
     `  agent profiles ${summary.agentProfiles}`,
+    `  agent runs     ${summary.runs}`,
+    `  run log lines  ${summary.runLogLines}`,
     `  projections changed ${summary.rescanChanged}`,
     "",
     `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,

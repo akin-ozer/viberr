@@ -9,6 +9,7 @@ import { startEventPublisher } from "./events/event-publisher.server";
 import { ensureDataRootDirs } from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
+import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -44,6 +45,11 @@ export function bootServer(): void {
   // File-native store watcher (dev AND prod) — drives incremental
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
+
+  // Seed running-run resumer (Phase 8): re-register the seeded "running"
+  // runs' live lines in THIS process so the first client subscribe drips
+  // them over SSE (the seed's own registration ran in a separate process).
+  registerSeededLiveFromData(db);
 
   logger.info("viberr server booted", {
     nodeEnv: env.NODE_ENV,

@@ -1,0 +1,177 @@
+import type { LogLine, RunBackend } from "~/features/runtime/runtime-types";
+import type { EmittedLine, RunCallbacks, RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
+import { projectEnvelope, rawLineFromDisplay } from "./wire-format.server";
+
+/**
+ * The simulated runtime — THE default demo engine (BUILD-PLAN Phase 8).
+ * Replays a scripted stream of display LogLines, fabricating an authentic
+ * wire envelope for each via `rawLineFromDisplay` so raw_json is real
+ * Claude/Codex JSON and display_json is its projection (round-trips through
+ * the SAME normalizer the real adapters use). Requires no external anything.
+ *
+ * Two modes:
+ * - script(): drive a fixed line list over realistic timers (live streaming
+ *   over SSE for a "running" run; instant for a backfill). Used by the seed
+ *   resumer and by real-backend fallback.
+ * - The run-service constructs it with a script derived from the requested
+ *   backend + the mock RUNTIME data (or a generic scripted stream for a
+ *   freshly-started run with no seed).
+ *
+ * Interrupt stops the timer and emits no result envelope → the run ends
+ * `interrupted` and stays resumable (mirrors the real SIGINT behavior).
+ */
+
+export interface SimulatedScript {
+  /** The display lines to replay, in order. */
+  lines: LogLine[];
+  /** ISO occurrence times, one per line (defaults to now-based cadence). */
+  occurredAt?: string[];
+  /** Provider session id to stamp into raw envelopes (claude/codex). */
+  sessionId: string;
+  /** Requested backend (glyph fidelity). */
+  backend: "claude" | "codex";
+  model: string;
+  op: boolean;
+  /** true → this run's script ends "running" (open thread, no exit). */
+  keepRunning?: boolean;
+  /** true → replay instantly (backfill of already-persisted lines). */
+  instant?: boolean;
+  /** Whether this run counts as a real-backend fallback (simulated=1 but
+   *  keeps effectiveBackend=the sim engine). Default: natively simulated. */
+  effectiveBackend?: RunBackend;
+}
+
+/** Build a script from a plain line list (used by run-service / seed resumer). */
+export function buildScript(input: SimulatedScript): SimulatedScript {
+  return input;
+}
+
+interface SimTimers {
+  setTimeout: typeof setTimeout;
+  clearTimeout: typeof clearTimeout;
+}
+
+const REAL_TIMERS: SimTimers = { setTimeout, clearTimeout };
+
+export function createSimulatedAdapter(timers: SimTimers = REAL_TIMERS): RuntimeAdapter {
+  return {
+    backend: "simulated",
+    start(spec: RunSpec, cb: RunCallbacks): RunHandle {
+      // The spec carries the script through a symbol channel (the service
+      // sets it); a bare start with no script produces a tiny generic stream.
+      const script = (spec as RunSpec & { script?: SimulatedScript }).script;
+      return startSimulated(spec, cb, script, timers);
+    },
+  };
+}
+
+/**
+ * Drives a script. Exposed for the seed resumer, which streams a specific
+ * live-line list for an already-persisted running run.
+ */
+export function startSimulated(
+  spec: RunSpec,
+  cb: RunCallbacks,
+  script: SimulatedScript | undefined,
+  timers: SimTimers = REAL_TIMERS,
+): RunHandle {
+  const s: SimulatedScript = script ?? {
+    lines: [
+      { t: "", ev: "init", tag: spec.backend === "codex" ? "thread.started" : "system·init", text: "session started" },
+      { t: "", ev: "text", tag: spec.backend === "codex" ? "agent_message" : "assistant", text: spec.prompt.slice(0, 120) },
+    ],
+    sessionId: spec.resumeSessionId ?? spec.threadId,
+    backend: spec.backend,
+    model: spec.model,
+    op: spec.kind === "operator",
+    keepRunning: false,
+  };
+
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let i = 0;
+  let interruptedByUser: string | null = null;
+
+  const emit = (line: LogLine, idx: number, occurredAt: string) => {
+    // Fabricate the wire envelope, then RE-PROJECT it through the real
+    // normalizer so display_json is exactly what a real run would produce.
+    const raw = rawLineFromDisplay(
+      { backend: s.backend, sid: s.sessionId, model: s.model, op: s.op },
+      line,
+      idx,
+      s.lines,
+    );
+    let display: LogLine | null = line;
+    let facts: EmittedLine["facts"] = {};
+    try {
+      const projected = projectEnvelope(s.backend, JSON.parse(raw), occurredAt);
+      // Keep the seed's exact display text/timestamp for fidelity, but take
+      // the FACTS (usage/cost/turns/session) from the normalized envelope.
+      facts = projected.facts;
+    } catch {
+      // rawLineFromDisplay always emits valid JSON; defensive only.
+    }
+    cb.onLine({ raw, display, facts, occurredAt });
+  };
+
+  const finishRun = () => {
+    if (stopped) return;
+    stopped = true;
+    if (interruptedByUser) {
+      cb.onExit({
+        outcome: "interrupted",
+        effectiveBackend: s.effectiveBackend ?? "simulated",
+        simulated: true,
+        sessionId: s.sessionId,
+      });
+      return;
+    }
+    // The last line's ev decides finished-vs-error (a result with an error
+    // subtype, or a codex err/turn.failed, means the run errored).
+    const last = s.lines[s.lines.length - 1];
+    const errored =
+      last?.ev === "err" ||
+      (last?.ev === "result" && !!last.stats?.subtype && last.stats.subtype !== "success");
+    cb.onExit({
+      outcome: errored ? "error" : "finished",
+      effectiveBackend: s.effectiveBackend ?? "simulated",
+      simulated: true,
+      sessionId: s.sessionId,
+    });
+  };
+
+  const step = () => {
+    if (stopped) return;
+    if (i >= s.lines.length) {
+      if (!s.keepRunning) finishRun();
+      return;
+    }
+    const idx = i;
+    const line = s.lines[idx]!;
+    const occurredAt = s.occurredAt?.[idx] ?? new Date().toISOString();
+    emit(line, idx, occurredAt);
+    i += 1;
+    if (i >= s.lines.length) {
+      if (!s.keepRunning) finishRun();
+      return;
+    }
+    // Realistic cadence 1.0–3.2s (mock's `1000 + ((i*733) % 2200)`), instant
+    // for backfills of already-persisted lines.
+    const delay = s.instant ? 0 : 1000 + ((idx * 733) % 2200);
+    timer = timers.setTimeout(step, delay);
+  };
+
+  // Kick off asynchronously so the caller can register the handle first.
+  timer = timers.setTimeout(step, 0);
+
+  return {
+    runId: spec.runId,
+    interrupt(byUserId: string) {
+      if (stopped) return;
+      interruptedByUser = byUserId;
+      if (timer !== null) timers.clearTimeout(timer);
+      timer = null;
+      finishRun();
+    },
+  };
+}

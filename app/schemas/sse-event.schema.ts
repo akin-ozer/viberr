@@ -28,6 +28,13 @@ export const SSE_EVENT_NAMES = [
   "projection.rebuilt",
   "notification.created",
   "violation.updated",
+  // Phase 8 — high-frequency runtime stream. Published STRAIGHT to the
+  // broker from the run-service (NOT the projection emitter): reference-only
+  // payloads (runId + seq); the dedicated logs consumer fetches content.
+  // `run.state-changed` carries the new lifecycle so the strip/pill flip
+  // without a loader round-trip. Both scoped to the task.
+  "run.log-appended",
+  "run.state-changed",
   "stream.open",
   "stream.resync",
 ] as const;
@@ -103,6 +110,32 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     entityId,
     occurredAt,
     data: z.object({ projectSlug: slug, taskKey: taskKey.nullable() }),
+  }),
+  z.object({
+    type: z.literal("run.log-appended"),
+    entityId,
+    occurredAt,
+    // Compact reference only — the logs consumer fetches lines since `seq`.
+    data: z.object({
+      projectSlug: slug,
+      taskKey,
+      runId: z.string().min(1),
+      threadId: z.string().min(1),
+      /** Highest seq now available for this run. */
+      seq: z.number().int().nonnegative(),
+    }),
+  }),
+  z.object({
+    type: z.literal("run.state-changed"),
+    entityId,
+    occurredAt,
+    data: z.object({
+      projectSlug: slug,
+      taskKey,
+      runId: z.string().min(1),
+      threadId: z.string().min(1),
+      state: z.enum(["queued", "running", "finished", "error", "interrupted"]),
+    }),
   }),
   z.object({
     type: z.literal("stream.open"),

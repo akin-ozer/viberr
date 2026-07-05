@@ -1,39 +1,62 @@
+import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
+import type { RunView } from "~/features/runtime/runtime-types";
+import type { StreamedLine } from "~/features/runtime/use-run-log-stream";
+
 /**
  * ═══════════════════ PHASE 8 MOUNT POINTS (runs.jsx port) ═══════════════════
  *
  * The task-detail layout order is a load-bearing contract (task-detail spec
  * §2): hero → LIVE RUN STRIP → decision packet → execution profile →
- * AGENT LOGS → timeline. These two slots hold the runtime positions so
- * Phase 8 mounts LiveRunPanel / AgentLogsPanel without touching the layout.
+ * AGENT LOGS → timeline. These two slots hold the runtime positions.
  *
- * Contract (spec §4.10):
- *   - LiveRunSlot → LiveRunPanel({ runtime, onViewLogs, push }): renders
- *     null unless some run has state === "running"; its "View logs" button
- *     calls onViewLogs(run.id) which must set the parent-held `logSel`.
- *   - AgentLogsSlot → AgentLogsPanel({ runtime, sel, onSel }): per-agent log
- *     console; the parent (TaskDetailPage) already holds the `logSel`
- *     selection state + setter these props wire into.
- *
- * Until the runtime registry exists there is NO runtime data source, so both
- * slots render nothing (per the Phase-5 brief — not even the mock's
- * "No agent runs yet" empty state; that copy ships with the real panel).
- * Phase 6's SSE revalidation and Phase 8's run streams feed these through
- * the task route loader (add a `runtime` field there).
+ * The dedicated run-log SSE consumer + the interrupt fetcher live in the
+ * parent (TaskDetailPage); these slots are thin adapters passing the shared
+ * `runtime` + live `linesByThread` into the ported panels. `logSel` is the
+ * parent-held agent-logs thread selection (spec §4.10 wiring); the strip's
+ * "View logs" calls `onLogSel`.
  */
 
-export function LiveRunSlot({ taskKey: _taskKey }: { taskKey: string }) {
-  return null;
+export function LiveRunSlot({
+  runtime,
+  onViewLogs,
+  onInterrupt,
+  canInterrupt,
+  interrupting,
+}: {
+  runtime: RunView[];
+  onViewLogs: (id: string) => void;
+  onInterrupt: (runId: string) => void;
+  canInterrupt: boolean;
+  interrupting: boolean;
+}) {
+  if (runtime.length === 0) return null;
+  return (
+    <LiveRunPanel
+      runtime={runtime}
+      onViewLogs={onViewLogs}
+      onInterrupt={onInterrupt}
+      canInterrupt={canInterrupt}
+      interrupting={interrupting}
+    />
+  );
 }
 
 export function AgentLogsSlot({
-  taskKey: _taskKey,
-  logSel: _logSel,
-  onLogSel: _onLogSel,
+  runtime,
+  logSel,
+  onLogSel,
+  linesByThread,
 }: {
-  taskKey: string;
+  runtime: RunView[];
   /** Parent-held agent-logs thread selection (spec §4.10 wiring). */
   logSel: string | null;
   onLogSel: (id: string | null) => void;
+  linesByThread: Record<string, StreamedLine[]>;
 }) {
-  return null;
+  // Suppress the panel entirely (incl. the mock's empty state) only when the
+  // task has never had any runtime thread — matches the mock: VIB-166/168.
+  if (runtime.length === 0) return null;
+  return (
+    <AgentLogsPanel runtime={runtime} sel={logSel} onSel={onLogSel} linesByThread={linesByThread} />
+  );
 }

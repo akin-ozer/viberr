@@ -22,6 +22,7 @@ import { serializeTaskFile } from "~/server/files/task-file.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { seedRuntimes } from "~/server/runtimes/runtime-seed.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   SEED_AGENT_PROFILES,
@@ -64,9 +65,13 @@ export interface DemoSeedSummary {
   notifications: number;
   agentProfiles: number;
   rescanChanged: number;
+  runs: number;
+  runLogLines: number;
 }
 
 const DERIVED_TABLES = [
+  "run_log_lines",
+  "agent_runs",
   "notifications",
   "provenance",
   "diagnostics",
@@ -127,6 +132,11 @@ export function runDemoSeed(
     const profilesRoot = path.join(dataRoot, "agents", "profiles");
     if (existsSync(profilesRoot)) {
       rmSync(profilesRoot, { recursive: true, force: true });
+    }
+    // Wipe the raw runtime .jsonl truth too (rebuilt from RUNTIME_SEED).
+    const runtimesRoot = path.join(dataRoot, "runtimes");
+    if (existsSync(runtimesRoot)) {
+      rmSync(runtimesRoot, { recursive: true, force: true });
     }
     for (const table of DERIVED_TABLES) {
       db.prepare(`DELETE FROM ${table}`).run();
@@ -203,7 +213,12 @@ export function runDemoSeed(
     });
   }
 
-  // 7. Arda's Home pins — mirrors the mock's seeded `starred` flags
+  // 7. Runtime dataset (agent_runs + run_log_lines + raw .jsonl truth) for
+  //    every runtime-bearing task; seeded running runs register their live
+  //    lines with the in-process resumer.
+  const runtimeSummary = seedRuntimes(db, { dataRoot });
+
+  // 8. Arda's Home pins — mirrors the mock's seeded `starred` flags
   //    (viberr-core + deploy-pipeline pinned; phase-4 user_prefs table).
   //    INSERT OR IGNORE: a user's own pin changes survive re-seeding.
   db.prepare(
@@ -237,6 +252,8 @@ export function runDemoSeed(
     notifications: notifications.length,
     agentProfiles: SEED_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
+    runs: runtimeSummary.runs,
+    runLogLines: runtimeSummary.lines,
   };
   logger.info("demo seed complete", { ...summary });
   return summary;
