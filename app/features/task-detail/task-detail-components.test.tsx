@@ -3,10 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
+import { MemoryRouter } from "react-router";
 import { DecisionPacket } from "./decision-packet";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
-import type { TaskMemberView } from "./execution-profile";
+import {
+  ExecutionProfile,
+  type DeployedSpecialistView,
+  type TaskMemberView,
+} from "./execution-profile";
 
 afterEach(cleanup);
 
@@ -350,5 +355,134 @@ describe("ReleaseConfirm", () => {
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+/* -------------------------------------------------- ExecutionProfile */
+
+const deployedFixture: DeployedSpecialistView[] = [
+  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
+  { id: "reviewer", name: "Reviewer", role: "Code review", backend: "claude", model: "claude-sonnet" },
+];
+
+function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
+  return {
+    ...taskFixture("u-arda", "Arda Kaya"),
+    projectSlug: "viberr-core",
+    specialist: null,
+    consultants: [],
+    operator: null,
+    ...patch,
+  } as unknown as TaskSummary;
+}
+
+function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> = {}) {
+  const onAssign = vi.fn();
+  const onRun = vi.fn();
+  const utils = render(
+    <MemoryRouter>
+      <ExecutionProfile
+        task={task}
+        meId="u-arda"
+        myRole="admin"
+        members={membersFixture}
+        busy={false}
+        onOwner={() => {}}
+        onRelease={() => {}}
+        deployedSpecialists={deployedFixture}
+        canRunAgents
+        runActive={false}
+        runBusy={false}
+        onAssignSpecialist={onAssign}
+        onRunSpecialist={onRun}
+        {...props}
+      />
+    </MemoryRouter>,
+  );
+  return { ...utils, onAssign, onRun };
+}
+
+describe("ExecutionProfile — assign menu + run button", () => {
+  it("no specialist + admin: assign menu lists deployed specialists; picking submits", () => {
+    const { container, onAssign } = renderExec(execTask());
+    const btn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+      b.textContent?.includes("Assign specialist"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    const menu = container.querySelector('[aria-label="Assign a specialist"]')!;
+    const items = menu.querySelectorAll(".menu-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]!.textContent).toContain("Developer");
+    expect(items[0]!.textContent).toContain("Implementation");
+    fireEvent.click(items[0]!);
+    expect(onAssign).toHaveBeenCalledWith("developer");
+  });
+
+  it("no deployed specialists: hint links to the Agents page", () => {
+    const { container } = renderExec(execTask(), { deployedSpecialists: [] });
+    const link = container.querySelector('a[href="/projects/viberr-core/agents"]');
+    expect(link).not.toBeNull();
+    // No "Assign specialist" trigger when there is nothing to assign (the
+    // owner "Manage" button is a separate .own-btn and may still be present).
+    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+      b.textContent?.includes("Assign specialist"),
+    );
+    expect(assignBtn).toBeUndefined();
+  });
+
+  it("specialist assigned: a primary Run button submits run-specialist", () => {
+    const task = execTask({
+      specialist: {
+        kind: "agent",
+        profileId: "developer",
+        backend: "codex",
+        name: "Codex",
+        role: "Implementation",
+      },
+    } as unknown as Partial<TaskSummary>);
+    const { container, onRun } = renderExec(task);
+    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
+      (b) => b.textContent?.includes("Run"),
+    ) as HTMLButtonElement;
+    expect(runBtn).toBeDefined();
+    expect(runBtn.disabled).toBe(false);
+    fireEvent.click(runBtn);
+    expect(onRun).toHaveBeenCalled();
+  });
+
+  it("Run button is disabled while a run is active", () => {
+    const task = execTask({
+      specialist: {
+        kind: "agent",
+        profileId: "developer",
+        backend: "codex",
+        name: "Codex",
+        role: "Implementation",
+      },
+    } as unknown as Partial<TaskSummary>);
+    const { container } = renderExec(task, { runActive: true });
+    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
+      (b) => b.textContent?.includes("Running"),
+    ) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+  });
+
+  it("non-privileged role: no assign/run affordances (RBAC-gated)", () => {
+    const { container } = renderExec(execTask(), {
+      myRole: "reviewer",
+      canRunAgents: false,
+    });
+    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+      b.textContent?.includes("Assign specialist"),
+    );
+    expect(assignBtn).toBeUndefined();
+    expect(
+      Array.from(container.querySelectorAll("button.btn.primary")).some((b) =>
+        b.textContent?.includes("Run"),
+      ),
+    ).toBe(false);
+    // The read-only "None yet …" copy is shown instead.
+    expect(container.textContent).toContain("the operator assigns one");
   });
 });

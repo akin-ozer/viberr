@@ -9,6 +9,7 @@ import { useToast } from "~/ui/toast";
 import { DecisionPacket } from "./decision-packet";
 import {
   ExecutionProfile,
+  type DeployedSpecialistView,
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
@@ -235,6 +236,8 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 export function TaskDetailPage({
   task,
   runtime,
+  deployedSpecialists,
+  runActive,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -247,6 +250,10 @@ export function TaskDetailPage({
   task: TaskDetail;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
+  /** Deployed specialists the assign menu offers (loader). */
+  deployedSpecialists: DeployedSpecialistView[];
+  /** A run for this task is currently running — disables the Run button. */
+  runActive: boolean;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -264,12 +271,35 @@ export function TaskDetailPage({
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
   const runFetcher = useFetcher<ActionResult>();
+  const specialistFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
   useActionFeedback(runFetcher);
+  useActionFeedback(specialistFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
+  const specialistBusy = specialistFetcher.state !== "idle";
+
+  // Assign a deployed specialist / start a specialist run — admin|maintainer
+  // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
+  // these affordances when canRunAgents.
+  const canRunAgents = myRole === "admin" || myRole === "maintainer";
+  const onAssignSpecialist = (profileId: string) => {
+    if (specialistBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "assign-specialist");
+    fd.set("profileId", profileId);
+    specialistFetcher.submit(fd, { method: "post" });
+  };
+  const onRunSpecialist = () => {
+    if (specialistBusy || runActive) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-specialist");
+    specialistFetcher.submit(fd, { method: "post" });
+  };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -389,6 +419,12 @@ export function TaskDetailPage({
           busy={ownerBusy}
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
+          deployedSpecialists={deployedSpecialists}
+          canRunAgents={canRunAgents}
+          runActive={runActive}
+          runBusy={specialistBusy}
+          onAssignSpecialist={onAssignSpecialist}
+          onRunSpecialist={onRunSpecialist}
         />
 
         <AgentLogsSlot

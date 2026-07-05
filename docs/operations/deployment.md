@@ -30,9 +30,35 @@ Inject them at runtime — do not bake them into the image. With Compose they co
 makes existing encrypted tokens undecryptable** (users must re-add PATs).
 
 Optional integrations, enabled only when their vars are present:
-`ANTHROPIC_API_KEY` / `CODEX_API_KEY` (real agent backends — otherwise the simulated
-backend runs), `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*`
-(bootstrap admin on first boot of an empty DB).
+`GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*` (bootstrap
+admin on first boot of an empty DB), and the agent backends below.
+
+## Agent backends in the container
+
+The image ships everything needed to run real agents: the Claude/Codex SDKs' native
+linux binaries (installed by `npm ci` in the linux build stage) plus `git` and a CA
+bundle in the runtime stage (a real run clones the task's repo and the coding agent
+shells out to git). The container is stateless and has no logged-in CLI, so **auth is
+purely credential-based — inject one env var**:
+
+- **Claude** — set **`ANTHROPIC_API_KEY`**, or **`CLAUDE_CODE_OAUTH_TOKEN`** (generate
+  once on any machine with `claude setup-token` using your Claude subscription, then put
+  the token in the container's `.env`). Either flows to the SDK.
+- **Codex** — set `CODEX_API_KEY` or `OPENAI_API_KEY`.
+
+`VIBERR_CLAUDE_USE_CLI_AUTH` / `VIBERR_CODEX_USE_CLI_AUTH` are for hosts with an
+already-logged-in CLI and are **not** useful in a fresh container — use a key/token there.
+
+Without any credential the app falls back to the built-in **simulated** backend (runs
+still stream in the UI, clearly labelled). Confirm what's active:
+
+```bash
+curl -s localhost:${PORT:-3000}/resources/health | jq .backends
+# {"claude":"real","codex":"simulated"}   ← claude credential reached the container
+```
+
+`real` means the credential is present (SDK executes); it is not a validity check — an
+invalid key surfaces as a failed run in the agent log, not here.
 
 ## First run
 

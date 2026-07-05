@@ -33,6 +33,16 @@ RUN npm run build \
 # ============================================================================
 FROM node:22-slim
 
+# Real agent runs (Claude Agent SDK / Codex SDK) execute against a repo:
+# the specialist run clones it and the coding agent shells out to git, so the
+# runtime needs git + a CA bundle for HTTPS to github.com and the model APIs.
+# (The SDKs' own native binaries are already inside node_modules from the
+# linux `npm ci` in the build stage.)
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
 # host directory (or named volume) at this path.

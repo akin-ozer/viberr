@@ -23,6 +23,12 @@ import {
   setOwner,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import {
+  assignSpecialist,
+  hasRunningRun,
+  listDeployedSpecialists,
+  startSpecialistRun,
+} from "~/server/tasks/specialist-run.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
@@ -46,7 +52,7 @@ import { Icon } from "~/ui/icon";
  * TOAST COPY IS THE VERBATIM SPEC §5 CONTRACT — it lives here so every
  * caller shows identical strings):
  *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
- *   transition
+ *   transition · run-interrupt · assign-specialist · run-specialist
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -71,6 +77,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   resumeSeededRunningRuns(db, params.slug, params.key);
   const runtime = listRunsForTask(db, params.slug, params.key);
 
+  // Deployed specialists the "Assign specialist" menu offers; runActive
+  // disables the Run button while a run for this task is already running.
+  const deployedSpecialists = listDeployedSpecialists(db, params.slug);
+  const runActive = hasRunningRun(db, params.slug, params.key);
+
   return {
     task: { ...detail, timeline: slice.events },
     timelineTotal: slice.total,
@@ -79,6 +90,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     timelineNextLimit: slice.nextLimit,
     tlDefault,
     runtime,
+    deployedSpecialists,
+    runActive,
   };
 }
 
@@ -210,6 +223,29 @@ export async function action({ request, params }: Route.ActionArgs) {
               : "That run already finished — nothing to interrupt",
         };
       }
+      case "assign-specialist": {
+        // Deploy a project specialist as the task's primary (contracts §3.2
+        // "Open agent runtime sessions" — admin|maintainer, enforced server-side).
+        const result = await assignSpecialist(
+          db,
+          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `Deployed ${result.name} as specialist`,
+        };
+      }
+      case "run-specialist": {
+        // Start a real (or simulated-fallback) run for the assigned specialist.
+        const result = await startSpecialistRun(db, { projectSlug, taskKey }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toast: `${result.backend === "claude" ? "Claude Code" : "Codex"} run started · streaming to agent logs`,
+        };
+      }
       default:
         return data(
           { ok: false as const, error: "Unknown action." },
@@ -254,6 +290,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       key={loaderData.task.key}
       task={loaderData.task}
       runtime={loaderData.runtime}
+      deployedSpecialists={loaderData.deployedSpecialists}
+      runActive={loaderData.runActive}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}

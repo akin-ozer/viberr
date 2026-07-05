@@ -98,6 +98,9 @@ export interface StartRunInput {
   /** Resume an existing provider session. */
   resumeSessionId?: string | null;
   autonomous?: boolean;
+  /** Override the run working directory (defaults to the task dir). Used by
+   *  the specialist-run flow to point a run at a freshly-cloned repo. */
+  workdir?: string;
   /** Override the data root (tests). */
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
@@ -125,7 +128,8 @@ export async function startRun(
   const state = getState();
   const threadId = input.threadId ?? DEFAULT_THREAD[input.kind];
   const runId = newId("run");
-  const workdir = taskDir(input.projectSlug, input.taskKey, input.dataRoot);
+  const workdir =
+    input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
   const { simulated } = selectAdapter(input.backend, state.adapters);
 

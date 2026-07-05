@@ -455,3 +455,94 @@ describe("transition action (server-enforced boundaries)", () => {
     expect(result.data.error).toContain("No governed boundary");
   });
 });
+
+/* ------------------------------------------ specialist assign + run intents */
+
+describe("loader — deployed specialists", () => {
+  it("exposes the project's deployed specialists (developer) + runActive flag", async () => {
+    const result = await runLoader("VIB-166", ids.arda);
+    const ids2 = result.deployedSpecialists.map((s) => s.id);
+    // The seed deploys operator + developer/reviewer/tester/consultant; the
+    // operator must NOT appear (specialists only).
+    expect(ids2).toContain("developer");
+    expect(ids2).not.toContain("operator");
+    const dev = result.deployedSpecialists.find((s) => s.id === "developer")!;
+    expect(dev).toMatchObject({ role: "Implementation" });
+    expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
+    expect(result.runActive).toBe(false); // no running run on VIB-166 (triage)
+  });
+});
+
+describe("assign-specialist + run-specialist intents", () => {
+  it("assigns the developer specialist (admin) → frontmatter + agent event + toast", async () => {
+    // VIB-166 is a triage task with no specialist.
+    const result = (await postIntent("VIB-166", ids.arda, {
+      intent: "assign-specialist", profileId: "developer",
+    })) as { ok: true; toast: string };
+    expect(result.ok).toBe(true);
+    expect(result.toast).toBe("Deployed Developer as specialist");
+
+    const after = await runLoader("VIB-166", ids.arda);
+    expect(after.task.specialist).toMatchObject({
+      profileId: "developer",
+      role: "Implementation",
+    });
+    expect(after.task.timeline[0]).toMatchObject({ type: "agent" });
+    expect(after.task.timeline[0]!.text).toContain("Deployed **Developer**");
+  });
+
+  it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {
+    const reviewer = (await postIntent("VIB-145", ids.selin, {
+      intent: "assign-specialist", profileId: "developer",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(reviewer.init.status).toBe(403);
+  });
+
+  it("assigning an unknown profile id is a validation error", async () => {
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "assign-specialist", profileId: "does-not-exist",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(400);
+  });
+
+  it("run-specialist requires an assigned specialist", async () => {
+    // VIB-148 has no specialist assigned.
+    const result = (await postIntent("VIB-148", ids.arda, {
+      intent: "run-specialist",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("Assign a specialist");
+  });
+
+  it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
+    // VIB-166 now has the developer specialist assigned (from the earlier test).
+    const result = (await postIntent("VIB-166", ids.arda, {
+      intent: "run-specialist",
+    })) as { ok: true; toast: string };
+    expect(result.ok).toBe(true);
+    expect(result.toast).toContain("run started · streaming to agent logs");
+
+    const after = await runLoader("VIB-166", ids.arda);
+    // A primary run now exists on the task.
+    const primary = after.runtime.find((r) => r.kind === "primary");
+    expect(primary).toBeDefined();
+    expect(after.task.timeline[0]!.text).toContain("run for the Implementation specialist");
+
+    // Stop the run's realistic-cadence timer so it does not outlive the suite
+    // and write to the DB after afterAll() closes it (the sink guards this,
+    // but interrupting keeps the run registry + logs clean).
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      app.db,
+      { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+    );
+  });
+
+  it("reviewer is denied run-specialist (admin|maintainer only)", async () => {
+    const result = (await postIntent("VIB-166", ids.selin, {
+      intent: "run-specialist",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(403);
+  });
+});

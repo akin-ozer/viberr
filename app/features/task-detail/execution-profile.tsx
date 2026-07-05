@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
+
+/** Client-safe view of a deployed specialist the assign menu offers (mirrors
+ * the loader's DeployedSpecialistView — kept here to avoid a server import). */
+export interface DeployedSpecialistView {
+  id: string;
+  name: string;
+  role: string;
+  backend: "codex" | "claude";
+  model: string;
+}
 
 /**
  * Execution profile panel + OwnerControl — 1:1 port of task.jsx §4.3/§4.4.
@@ -172,6 +183,91 @@ export function OwnerControl({
   );
 }
 
+/**
+ * Assign-specialist affordance — mirrors OwnerControl's menu (spec §4.4): a
+ * button opening a menu that lists the project's deployed specialists by
+ * name/role/backend-glyph; picking one submits the `assign-specialist` intent.
+ * When the project has zero deployed specialists, a hint links to the Agents
+ * page. Only rendered for admin|maintainer (the caller gates on canRunAgents).
+ */
+export function SpecialistControl({
+  projectSlug,
+  specialists,
+  busy,
+  onAssign,
+}: {
+  projectSlug: string;
+  specialists: DeployedSpecialistView[];
+  busy: boolean;
+  onAssign: (profileId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (specialists.length === 0) {
+    return (
+      <span className="sub">
+        No specialists deployed —{" "}
+        <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
+        .
+      </span>
+    );
+  }
+
+  return (
+    <div className="own-wrap" ref={ref}>
+      <button
+        type="button"
+        className={"own-btn" + (open ? " open" : "")}
+        disabled={busy}
+        onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        Assign specialist
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        <div className="own-menu" role="menu" aria-label="Assign a specialist">
+          <div className="own-lbl">Deployed specialists</div>
+          {specialists.map((s) => (
+            <button
+              type="button"
+              className="menu-item"
+              role="menuitem"
+              key={s.id}
+              onClick={() => {
+                setOpen(false);
+                onAssign(s.id);
+              }}
+            >
+              <AgentGlyph backend={s.backend} />
+              {s.name}
+              <span className="own-role">{s.role}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExecutionProfile({
   task,
   meId,
@@ -180,6 +276,12 @@ export function ExecutionProfile({
   busy,
   onOwner,
   onRelease,
+  deployedSpecialists,
+  canRunAgents,
+  runActive,
+  runBusy,
+  onAssignSpecialist,
+  onRunSpecialist,
 }: {
   task: TaskSummary;
   meId: string;
@@ -188,6 +290,16 @@ export function ExecutionProfile({
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   onRelease: () => void;
+  /** Deployed specialists the assign menu offers (loader). */
+  deployedSpecialists: DeployedSpecialistView[];
+  /** admin|maintainer — gates the assign/run affordances (server re-checks). */
+  canRunAgents: boolean;
+  /** A run for this task is currently running — disables Run. */
+  runActive: boolean;
+  /** The assign/run fetcher is in flight. */
+  runBusy: boolean;
+  onAssignSpecialist: (profileId: string) => void;
+  onRunSpecialist: () => void;
 }) {
   const sp = task.specialist;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
@@ -232,7 +344,37 @@ export function ExecutionProfile({
                     {sp.role} · {sp.backend === "claude" ? "Claude Code" : "Codex"}
                   </div>
                 </span>
+                {canRunAgents && (
+                  <span className="right">
+                    <button
+                      type="button"
+                      className="btn primary sm"
+                      disabled={runBusy || runActive}
+                      onClick={onRunSpecialist}
+                      title={
+                        runActive
+                          ? "A run is already streaming for this task"
+                          : "Start an agent run for the assigned specialist"
+                      }
+                    >
+                      <Icon name="bolt" />
+                      {runActive ? "Running…" : "Run"}
+                    </button>
+                  </span>
+                )}
               </>
+            ) : canRunAgents ? (
+              <div className="rev-row">
+                <span className="sub">
+                  None yet — assign a deployed specialist to run it
+                </span>
+                <SpecialistControl
+                  projectSlug={task.projectSlug}
+                  specialists={deployedSpecialists}
+                  busy={runBusy}
+                  onAssign={onAssignSpecialist}
+                />
+              </div>
             ) : (
               <span className="sub">
                 None yet — the operator assigns one when execution starts
