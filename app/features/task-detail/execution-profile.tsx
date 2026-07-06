@@ -363,6 +363,63 @@ export function ReviewerControl({
   );
 }
 
+/**
+ * Operator run control — pick a backend (Claude Code / Codex) and an autonomy
+ * level (supervised / full), then run the operator to coordinate the task.
+ * Full autonomy lets the operator drive stages and accept completion itself;
+ * supervised has it recommend at governed boundaries. Server re-checks RBAC.
+ */
+export function OperatorRunControl({
+  busy,
+  runActive,
+  onRun,
+}: {
+  busy: boolean;
+  runActive: boolean;
+  onRun: (backend: string, autonomy: string) => void;
+}) {
+  const [backend, setBackend] = useState("claude");
+  const [autonomy, setAutonomy] = useState("supervised");
+  return (
+    <span className="op-run">
+      <select
+        className="op-sel"
+        aria-label="Operator backend"
+        value={backend}
+        onChange={(e) => setBackend(e.target.value)}
+        disabled={busy || runActive}
+      >
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex</option>
+      </select>
+      <select
+        className="op-sel"
+        aria-label="Operator autonomy"
+        value={autonomy}
+        onChange={(e) => setAutonomy(e.target.value)}
+        disabled={busy || runActive}
+      >
+        <option value="supervised">Supervised</option>
+        <option value="full">Full autonomy</option>
+      </select>
+      <button
+        type="button"
+        className="btn primary sm"
+        disabled={busy || runActive}
+        onClick={() => onRun(backend, autonomy)}
+        title={
+          runActive
+            ? "A run is already streaming for this task"
+            : "Run the operator to coordinate this task"
+        }
+      >
+        <Icon name="shield" />
+        {busy ? "Running…" : "Run operator"}
+      </button>
+    </span>
+  );
+}
+
 export function ExecutionProfile({
   task,
   meId,
@@ -381,6 +438,8 @@ export function ExecutionProfile({
   onAssignReviewer,
   onRunReviewer,
   onRemoveReviewer,
+  operatorBusy,
+  onRunOperator,
 }: {
   task: TaskSummary;
   meId: string;
@@ -404,6 +463,10 @@ export function ExecutionProfile({
   onAssignReviewer: (profileId: string) => void;
   onRunReviewer: (profileId: string) => void;
   onRemoveReviewer: (profileId: string) => void;
+  /** The operator-run fetcher is in flight. */
+  operatorBusy: boolean;
+  /** Run the operator agent with a chosen backend + autonomy. */
+  onRunOperator: (backend: string, autonomy: string) => void;
 }) {
   // Deployed specialists not already engaged as reviewers — what "Add reviewer" offers.
   const availableReviewers = deployedSpecialists.filter(
@@ -434,16 +497,25 @@ export function ExecutionProfile({
       <div className="profile-grid">
         <div className="profile-cell">
           <div className="lbl">Operator</div>
-          <div className="val">
-            <span className="agent-glyph">
-              <Icon name="shield" />
-            </span>
-            <span>
-              <div className="nm">Operator</div>
-              <div className="sub">
-                coordinator · {task.operator ? task.operator.sinceLabel : "—"}
-              </div>
-            </span>
+          <div className="val op-val">
+            <div className="op-id">
+              <span className="agent-glyph">
+                <Icon name="shield" />
+              </span>
+              <span>
+                <div className="nm">Operator</div>
+                <div className="sub">
+                  coordinator · {task.operator ? task.operator.sinceLabel : "—"}
+                </div>
+              </span>
+            </div>
+            {canRunAgents && (
+              <OperatorRunControl
+                busy={operatorBusy}
+                runActive={runActive}
+                onRun={onRunOperator}
+              />
+            )}
           </div>
         </div>
         <div className="profile-cell">

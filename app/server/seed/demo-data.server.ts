@@ -184,11 +184,11 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "operator", kind: "operator", name: "Operator", role: "Task coordinator",
-      icon: "shield", backends: ["claude"], model: "orchestration runtime",
+      icon: "shield", backends: ["claude", "codex"], model: "orchestration runtime",
       scope: "System role · one per active task",
       stages: ["triage", "ready", "impl", "review", "done"], spanAll: true,
       resources: {
-        skills: ["packet-authoring", "timeline-compression", "continuity-reanchor"],
+        skills: ["viberr-app-expertise", "packet-authoring", "timeline-compression", "continuity-reanchor"],
         mcps: ["viberr-task-store"],
         kb: ["Project workflow rules", "Agent capability matrix"],
       },
@@ -285,6 +285,14 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
 export interface SeedProject {
   frontmatter: ProjectFrontmatter;
   description: string;
+}
+
+/** The default agent roster deployed into a project — the operator plus the
+ *  base specialists, each carrying its capability policy. Used by the demo seed
+ *  AND by app-created projects so the operator (and specialists it can assign)
+ *  are preinstalled in every project. */
+export function defaultAgentDeployments(): AgentDeployment[] {
+  return deployments();
 }
 
 function deployments(): AgentDeployment[] {

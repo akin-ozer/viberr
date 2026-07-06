@@ -16,6 +16,7 @@ import {
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
+import { defaultAgentDeployments } from "~/server/seed/demo-data.server";
 import { slugifyProjectName } from "./project-name";
 
 /**
@@ -143,7 +144,9 @@ export async function createProject(
     stages: template.stages,
     workflow: template.workflow,
     members: [{ userId: actor.userId, role: "admin" }],
-    agents: [],
+    // Preinstall the default agent roster — the operator plus the base
+    // specialists it can assign — so every project can run governed agent work.
+    agents: defaultAgentDeployments(),
     credentialPolicy: null,
     guardrails: [],
   };

@@ -51,7 +51,27 @@ export interface TaskActor {
 export interface TaskMutationContext {
   /** Override the data root (tests). Defaults to env VIBERR_DATA_ROOT. */
   dataRoot?: string;
+  /**
+   * Set by the operator runtime (operator-actions.server) when an action is
+   * performed by the OPERATOR agent rather than a human. It bypasses the
+   * human project-membership RBAC (operator authority is enforced upstream by
+   * the operator's capability policy) and stamps operator actor/audit refs so
+   * the timeline and audit trail attribute the action to the operator, not a
+   * user. Never set from a route — only the in-process operator toolkit sets it.
+   */
+  operatorAuthorized?: boolean;
 }
+
+/** Audit actor for operator-performed mutations (no human user id). */
+export const OPERATOR_AUDIT_ACTOR = { userId: null, label: "operator" } as const;
+
+/** Placeholder TaskActor the operator toolkit threads through the shared
+ *  mutations; its user id is never read once `operatorAuthorized` is set (the
+ *  RBAC check is skipped and audit uses {@link OPERATOR_AUDIT_ACTOR}). */
+export const OPERATOR_TASK_ACTOR: TaskActor = {
+  userId: "operator",
+  label: "operator",
+};
 
 // ---------------------------------------------------------------- helpers
 
@@ -994,7 +1014,20 @@ export async function transitionStage(
     );
   }
 
-  if (boundary.boundary === "auto") {
+  const firstStageId = project.stages[0]?.id;
+  const lastStageId = project.stages[project.stages.length - 1]?.id;
+
+  if (ctx.operatorAuthorized) {
+    // Operator authority is gated upstream by its capability policy; skip the
+    // human RBAC. The final stage stays off this path — the operator reaches
+    // Done only through the controlled accept-completion route (full autonomy),
+    // never a bare stage move.
+    if (input.toStageId === lastStageId) {
+      throw forbidden(
+        "The operator reaches Done only by accepting completion, not a bare transition.",
+      );
+    }
+  } else if (boundary.boundary === "auto") {
     requireMemberRole(project, actor, "any-member", "move this task");
   } else if (boundary.boundary === "approval") {
     requireMemberRole(
@@ -1013,15 +1046,14 @@ export async function transitionStage(
     );
   }
 
-  const firstStageId = project.stages[0]?.id;
-  const lastStageId = project.stages[project.stages.length - 1]?.id;
-
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
-    actor: humanActorRef(db, actor),
+    actor: ctx.operatorAuthorized ? { kind: "operator" } : humanActorRef(db, actor),
     title: null,
-    text: `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+    text: ctx.operatorAuthorized
+      ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
+      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
     toAgent: false,
     evidence: null,
   };
@@ -1044,7 +1076,9 @@ export async function transitionStage(
 
   recordAudit(db, {
     action: "task.transition",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: ctx.operatorAuthorized
+      ? OPERATOR_AUDIT_ACTOR
+      : { userId: actor.userId, label: actor.label },
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -1053,6 +1087,7 @@ export async function transitionStage(
       from: fromStageId,
       to: input.toStageId,
       boundary: boundary.boundary,
+      ...(ctx.operatorAuthorized ? { by: "operator" } : {}),
     },
   });
 

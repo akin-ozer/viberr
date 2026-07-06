@@ -277,16 +277,19 @@ export function TaskDetailPage({
   const runFetcher = useFetcher<ActionResult>();
   const specialistFetcher = useFetcher<ActionResult>();
   const reviewerFetcher = useFetcher<ActionResult>();
+  const operatorFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
   useActionFeedback(runFetcher);
   useActionFeedback(specialistFetcher);
   useActionFeedback(reviewerFetcher);
+  useActionFeedback(operatorFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
   const specialistBusy = specialistFetcher.state !== "idle";
   const reviewerBusy = reviewerFetcher.state !== "idle";
+  const operatorBusy = operatorFetcher.state !== "idle";
 
   // Assign a deployed specialist / start a specialist run — admin|maintainer
   // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
@@ -334,6 +337,19 @@ export function TaskDetailPage({
     fd.set("intent", "remove-reviewer");
     fd.set("profileId", profileId);
     reviewerFetcher.submit(fd, { method: "post" });
+  };
+
+  // Run the operator agent (admin|maintainer; server re-checks). The operator
+  // coordinates the task under its capability policy; backend + autonomy are
+  // chosen for this run (full autonomy lets it drive to Done).
+  const onRunOperator = (backend: string, autonomy: string) => {
+    if (operatorBusy || runActive) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-operator");
+    fd.set("backend", backend);
+    fd.set("autonomy", autonomy);
+    operatorFetcher.submit(fd, { method: "post" });
   };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -491,6 +507,8 @@ export function TaskDetailPage({
           onAssignReviewer={onAssignReviewer}
           onRunReviewer={onRunReviewer}
           onRemoveReviewer={onRemoveReviewer}
+          operatorBusy={operatorBusy}
+          onRunOperator={onRunOperator}
         />
 
         <AgentLogsSlot

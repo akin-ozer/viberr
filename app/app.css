@@ -726,6 +726,21 @@ h1, h2, h3, h4 {
 .rev-x:disabled { opacity: .5; cursor: default; }
 .rev-x svg { width: 14px; height: 14px; }
 
+/* operator cell stacks its identity row above the run control (like Reviewers),
+   so the control wraps within the cell instead of overflowing into the next */
+.profile-cell .val.op-val { flex-direction: column; align-items: stretch; gap: .6rem; }
+.op-id { display: flex; align-items: center; gap: .6rem; }
+/* operator run control — backend + autonomy selects and the Run-operator
+   button; wraps within the Operator cell */
+.op-run { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; justify-content: flex-start; }
+.op-sel {
+  font-size: .72rem; font-family: var(--font-display); font-weight: 600;
+  padding: .26rem .4rem; border-radius: 7px;
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--muted);
+  cursor: pointer;
+}
+.op-sel:disabled { opacity: .5; cursor: default; }
+
 /* timeline */
 .tl-filter { display: flex; gap: .35rem; flex-wrap: wrap; }
 .tl-filter button {

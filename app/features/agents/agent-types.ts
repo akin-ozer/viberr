@@ -53,9 +53,9 @@ export interface AgentProfileView {
    * pcap counts and the matrix modal render. */
   actions: { direct: string[]; recommend: string[]; forbidden: string[] };
   /** Id-based policy (edit-modal seeding; ruling 7). */
-  capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" }[];
+  capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
   /** Bespoke labels with no catalog id — display-only, preserved on save. */
-  extras: { label: string; mode: "direct" | "recommend" | "human" }[];
+  extras: { label: string; mode: "direct" | "recommend" | "human" | "off" }[];
   resources: { skills: string[]; mcps: string[]; kb: string[] };
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";

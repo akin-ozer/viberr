@@ -34,6 +34,10 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
+import { runOperator } from "~/server/runtimes/operator-run.server";
+import { listProjectMembers } from "~/server/projections/board-query.server";
+import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
@@ -314,6 +318,44 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           toast: result.removed ? "Reviewer released" : "That reviewer wasn't engaged",
+        };
+      }
+      case "run-operator": {
+        // Run the operator agent to coordinate the task. Triggering runtime
+        // work is admin|maintainer (contracts §3.2) — the operator's OWN
+        // capability policy governs what it may then do to the task. The
+        // backend (claude|codex) and autonomy (supervised|full) are chosen for
+        // this run; full autonomy lets the operator drive to Done.
+        const role = listProjectMembers(db, projectSlug).find(
+          (m) => m.userId === actor.userId,
+        )?.role;
+        if (role !== "admin" && role !== "maintainer") {
+          throw new AppError({
+            code: ERROR_CODES.FORBIDDEN,
+            status: 403,
+            userMessage: "Running the operator requires the admin or maintainer role.",
+            kind: "user",
+          });
+        }
+        const backend =
+          String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude";
+        const autonomy =
+          String(formData.get("autonomy") ?? "supervised") === "full"
+            ? "full"
+            : "supervised";
+        const result = await runOperator(db, {
+          projectSlug,
+          taskKey,
+          backend,
+          autonomy,
+          actor: { userId: null, label: actor.label },
+        });
+        return {
+          ok: true as const,
+          intent,
+          toast:
+            `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy` +
+            (result.mode === "scripted" ? " (scripted)" : ""),
         };
       }
       default:

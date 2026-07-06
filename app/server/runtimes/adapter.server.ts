@@ -34,6 +34,16 @@ export interface RunSpec {
   resumeSessionId?: string | null;
   /** Whether the run should be autonomous (acceptEdits / workspace-write). */
   autonomous?: boolean;
+  /** Custom system prompt (operator persona + expertise skill). Claude only —
+   *  the Codex adapter ignores it and relies on the prompt. */
+  systemPrompt?: string;
+  /** In-process SDK MCP servers keyed by name (operator governance tools).
+   *  Claude only — `{ viberr: createSdkMcpServer(...) }`. Opaque here so the
+   *  adapter contract stays backend-agnostic. */
+  mcpServers?: Record<string, unknown>;
+  /** Allowlist confining which tools the run may call (e.g. the operator to
+   *  only its `mcp__viberr__*` governance tools — it can never write code). */
+  allowedTools?: string[];
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

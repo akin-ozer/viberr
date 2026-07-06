@@ -18,6 +18,7 @@ import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
+import { seedDefaultOperatorAssets } from "./seed/default-assets.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -72,6 +73,10 @@ export function bootServer(): void {
 
   const env = getEnv();
   ensureDataRootDirs();
+  // Ship the default operator assets (viberr-app-expertise skill + operator
+  // definition) into the store when a store lacks them — before anything reads
+  // them. Idempotent and best-effort (never blocks boot).
+  seedDefaultOperatorAssets();
   const db = getDb();
 
   seedInitialAdmin(db, {

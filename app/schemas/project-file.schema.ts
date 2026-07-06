@@ -25,8 +25,11 @@ export type ProjectRole = (typeof PROJECT_ROLES)[number];
 export const BOUNDARY_VALUES = ["auto", "approval", "human"] as const;
 export type Boundary = (typeof BOUNDARY_VALUES)[number];
 
-/** Agent capability modes (orchestrator ruling 2): forbidden === "human". */
-export const CAPABILITY_MODES = ["direct", "recommend", "human"] as const;
+/** Agent capability modes (orchestrator ruling 2): forbidden === "human".
+ * `off` is the operator-RBAC "don't recommend" mode — the capability is
+ * withheld entirely (the tool is not even offered), distinct from `human`
+ * (reserved for a human to perform). Added for operator assignment RBAC. */
+export const CAPABILITY_MODES = ["direct", "recommend", "human", "off"] as const;
 export type CapabilityMode = (typeof CAPABILITY_MODES)[number];
 
 // ------------------------------------------------------------ sub-shapes

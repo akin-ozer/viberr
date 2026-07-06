@@ -39,6 +39,12 @@ export interface ClaudeQueryOptions {
   includePartialMessages?: boolean;
   env?: Record<string, string>;
   abortController?: AbortController;
+  /** Custom system prompt (operator persona). A string REPLACES the default. */
+  systemPrompt?: string;
+  /** In-process SDK MCP servers (operator governance tools). */
+  mcpServers?: Record<string, unknown>;
+  /** Tool allowlist — confines the run to the listed tools. */
+  allowedTools?: string[];
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -133,6 +139,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         if (deps.env) options.env = deps.env;
+        // Operator runs carry a persona + in-process governance tools, and are
+        // confined to those tools (they never write code). A plain specialist
+        // run leaves all three unset → default prompt + full toolset.
+        if (spec.systemPrompt) options.systemPrompt = spec.systemPrompt;
+        if (spec.mcpServers) options.mcpServers = spec.mcpServers;
+        if (spec.allowedTools && spec.allowedTools.length) {
+          options.allowedTools = spec.allowedTools;
+        }
 
         const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
         queryHandle = q;

@@ -434,6 +434,8 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onAssignReviewer={() => {}}
         onRunReviewer={() => {}}
         onRemoveReviewer={() => {}}
+        operatorBusy={false}
+        onRunOperator={() => {}}
         {...props}
       />
     </MemoryRouter>,
@@ -481,8 +483,9 @@ describe("ExecutionProfile — assign menu + run button", () => {
       },
     } as unknown as Partial<TaskSummary>);
     const { container, onRun } = renderExec(task);
+    // The primary specialist's Run button — not the operator "Run operator" one.
     const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
-      (b) => b.textContent?.includes("Run"),
+      (b) => b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
     ) as HTMLButtonElement;
     expect(runBtn).toBeDefined();
     expect(runBtn.disabled).toBe(false);

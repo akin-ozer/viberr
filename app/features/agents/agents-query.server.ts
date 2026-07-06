@@ -89,8 +89,11 @@ export function capabilitiesToActionLabels(
   extras: { label: string; mode: CapabilityMode }[],
 ): { direct: string[]; recommend: string[]; forbidden: string[] } {
   const buckets = { direct: [] as string[], recommend: [] as string[], forbidden: [] as string[] };
+  // `human` (reserved for a human) and `off` (withheld from the operator) both
+  // surface in the forbidden/"can't act" bucket for the read-only policy label
+  // display; the operator runtime distinguishes them when gating tools.
   const bucketOf = (mode: CapabilityMode) =>
-    mode === "human" ? buckets.forbidden : buckets[mode];
+    mode === "human" || mode === "off" ? buckets.forbidden : buckets[mode];
   for (const grant of capabilities) {
     const def = capabilityById(grant.capabilityId);
     bucketOf(grant.mode).push(def ? def.label : grant.capabilityId);

@@ -152,6 +152,17 @@ export interface StartRunInput {
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
   actor?: AuditActor;
+  /** Custom system prompt (operator persona + expertise skill). Claude only. */
+  systemPrompt?: string;
+  /** In-process SDK MCP governance tools (operator run). Claude only. */
+  mcpServers?: Record<string, unknown>;
+  /** Tool allowlist confining the run (operator → its governance tools only). */
+  allowedTools?: string[];
+  /** Force the simulated engine regardless of backend credential. The operator
+   *  scripted-drive uses this to stream a narration run for a backend that has
+   *  no in-process tools (Codex) or when Claude is unavailable — the real work
+   *  is done by the operator-actions calls, this run is the log of it. */
+  simulate?: boolean;
 }
 
 /** Runs started by the operator runtime itself (scheduling reactions). */
@@ -178,7 +189,8 @@ export async function startRun(
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
-  const { simulated } = selectAdapter(input.backend, state.adapters);
+  const { simulated: detected } = selectAdapter(input.backend, state.adapters);
+  const simulated = input.simulate === true ? true : detected;
 
   upsertRun(db, {
     id: runId,
@@ -231,6 +243,9 @@ export async function startRun(
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
     script: input.script,
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+    ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
   };
 
   launch(db, spec, simulated);

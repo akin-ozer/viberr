@@ -100,6 +100,11 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.reviewer.removed": "task",
   "task.reviewer.run_started": "task",
   "task.agent.replied": "task",
+  // Operator-authored governance actions (operator-actions.server).
+  "task.operator.commented": "task",
+  "task.operator.recommended": "task",
+  "task.operator.recommended_completion": "task",
+  "task.operator.accepted_completion": "task",
 
   // -- GitHub integration (phase 7) ----------------------------------------
   "github.pat.created": "org",

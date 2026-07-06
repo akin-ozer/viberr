@@ -177,7 +177,12 @@ export async function assignSpecialist(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<AssignSpecialistResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "assign a specialist");
+  const auditActor = runtimeAuditActor(
+    ctx,
+    input.projectSlug,
+    actor,
+    "assign a specialist",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -209,7 +214,7 @@ export async function assignSpecialist(
 
   recordAudit(db, {
     action: "task.specialist.assigned",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -252,7 +257,12 @@ export async function assignReviewer(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<AssignReviewerResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "assign a reviewer");
+  const auditActor = runtimeAuditActor(
+    ctx,
+    input.projectSlug,
+    actor,
+    "assign a reviewer",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -297,7 +307,7 @@ export async function assignReviewer(
 
   recordAudit(db, {
     action: "task.reviewer.assigned",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -408,7 +418,12 @@ export async function startSpecialistRun(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "start a specialist run");
+  const auditActor = runtimeAuditActor(
+    ctx,
+    input.projectSlug,
+    actor,
+    "start a specialist run",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -490,7 +505,7 @@ export async function startSpecialistRun(
     agentProfileId: sp.profileId,
     prompt,
     script,
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -510,7 +525,7 @@ export async function startSpecialistRun(
 
   recordAudit(db, {
     action: "task.specialist.run_started",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -542,7 +557,12 @@ export async function startReviewerRun(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "start a reviewer run");
+  const auditActor = runtimeAuditActor(
+    ctx,
+    input.projectSlug,
+    actor,
+    "start a reviewer run",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -614,7 +634,7 @@ export async function startReviewerRun(
     agentProfileId: rev.profileId,
     prompt,
     script,
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -634,7 +654,7 @@ export async function startReviewerRun(
 
   recordAudit(db, {
     action: "task.reviewer.run_started",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -823,6 +843,21 @@ function reproject(
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+}
+
+/** Audit actor for the current caller: the operator (no user id) when the
+ *  context is operator-authorized, else the human — after enforcing the
+ *  human runtime RBAC. Operator authority is gated upstream by its capability
+ *  policy (operator-actions.server), so operator callers skip the human check. */
+function runtimeAuditActor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  actor: TaskActor,
+  what: string,
+): { userId: string | null; label: string } {
+  if (ctx.operatorAuthorized) return { userId: null, label: "operator" };
+  requireRuntimeRole(ctx, projectSlug, actor, what);
+  return { userId: actor.userId, label: actor.label };
 }
 
 /**
