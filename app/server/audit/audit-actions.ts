@@ -105,6 +105,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.operator.recommended": "task",
   "task.operator.recommended_completion": "task",
   "task.operator.accepted_completion": "task",
+  // Human resolution of operator recommendation cards.
+  "task.recommendation.applied": "task",
+  "task.recommendation.dismissed": "task",
 
   // -- GitHub integration (phase 7) ----------------------------------------
   "github.pat.created": "org",

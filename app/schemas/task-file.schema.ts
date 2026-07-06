@@ -83,6 +83,33 @@ export const operatorRefSchema = z
   .loose();
 export type OperatorRef = z.infer<typeof operatorRefSchema>;
 
+/** Operator recommendation kinds — a supervised operator RECOMMENDS an action
+ * (rather than performing it); the task UI renders each as a one-click card a
+ * human accepts (applies) or dismisses. Distinct from packets (single decision):
+ * a task can carry several pending recommendations at once. */
+export const RECOMMENDATION_KINDS = [
+  "assign_specialist",
+  "assign_reviewer",
+  "transition",
+] as const;
+export type RecommendationKind = (typeof RECOMMENDATION_KINDS)[number];
+
+export const recommendationSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(RECOMMENDATION_KINDS),
+    /** assign_specialist / assign_reviewer — the deployed specialist to engage. */
+    profileId: z.string().optional(),
+    /** transition — the target stage id. */
+    toStageId: z.string().optional(),
+    /** Button label, e.g. "Assign Dev as primary specialist". */
+    label: z.string().min(1),
+    /** The operator's reasoning for the recommendation (rendered under it). */
+    detail: z.string().default(""),
+  })
+  .loose();
+export type Recommendation = z.infer<typeof recommendationSchema>;
+
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
@@ -163,6 +190,8 @@ export const taskFrontmatterSchema = z.object({
   specialist: agentRefSchema.nullable(),
   reviewers: z.array(agentRefSchema),
   operator: operatorRefSchema.nullable(),
+  /** Pending operator recommendations rendered as one-click action cards. */
+  recommendations: z.array(recommendationSchema),
   urgent: z.boolean(),
   validation: z.enum(VALIDATION_VALUES),
   branch: z.string().nullable(),
@@ -185,6 +214,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "specialist",
   "reviewers",
   "operator",
+  "recommendations",
   "urgent",
   "validation",
   "branch",
@@ -362,6 +392,13 @@ export function parseTaskFrontmatter(
       data.operator,
       taskFrontmatterSchema.shape.operator,
       null,
+    ),
+    recommendations: tolerant(
+      diagnostics,
+      "recommendations",
+      data.recommendations,
+      taskFrontmatterSchema.shape.recommendations,
+      [],
     ),
     // urgent is an optional boolean by contract — absent means false, silently.
     urgent: tolerant(

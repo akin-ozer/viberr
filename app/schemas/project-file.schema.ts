@@ -92,6 +92,9 @@ export const agentDeploymentDefinitionSchema = z
     desc: z.string().optional(),
     stages: z.array(z.string()).optional(),
     spanAll: z.boolean().optional(),
+    /** Operator only: default autonomy level (supervised recommends at governed
+     *  boundaries; full performs them + may accept completion to Done). */
+    autonomy: z.enum(["supervised", "full"]).optional(),
   })
   .loose();
 export type AgentDeploymentDefinition = z.infer<

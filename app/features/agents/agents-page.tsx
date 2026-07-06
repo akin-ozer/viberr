@@ -350,35 +350,39 @@ export function ProfileDetail({
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
-            <div className="lbl">
-              {a.kind === "operator" ? "Runtime" : "Execution backend"}
-            </div>
+            <div className="lbl">Execution backend</div>
             <div className="rt-val">
-              {a.kind === "operator" ? (
-                <span className="be-chip">
-                  <span
-                    className="agent-glyph op"
-                    style={{ width: 22, height: 22 }}
-                  >
-                    <Icon name="shield" />
+              <div className="be-list">
+                {a.backends.length ? (
+                  a.backends.map((b, i) => <BackendChip key={i} b={b} />)
+                ) : (
+                  <span className="be-chip">
+                    <span className="agent-glyph op" style={{ width: 22, height: 22 }}>
+                      <Icon name="shield" />
+                    </span>
+                    Orchestration runtime
                   </span>
-                  Orchestration runtime
-                </span>
-              ) : (
-                <div className="be-list">
-                  {a.backends.map((b, i) => (
-                    <BackendChip key={i} b={b} />
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
-          <div className="rt-cell">
-            <div className="lbl">Model</div>
-            <div className="rt-val mono" style={{ fontSize: ".82rem" }}>
-              {a.model}
+          {a.kind === "operator" ? (
+            <div className="rt-cell">
+              <div className="lbl">Autonomy</div>
+              <div className="rt-val">
+                <Pill kind={a.autonomy === "full" ? "agent" : "neutral"} sm dot>
+                  {a.autonomy === "full" ? "Full autonomy" : "Supervised"}
+                </Pill>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="rt-cell">
+              <div className="lbl">Model</div>
+              <div className="rt-val mono" style={{ fontSize: ".82rem" }}>
+                {a.model}
+              </div>
+            </div>
+          )}
           <div className="rt-cell">
             <div className="lbl">Continuity</div>
             <div className="rt-val mem-row" style={{ marginTop: 0 }}>

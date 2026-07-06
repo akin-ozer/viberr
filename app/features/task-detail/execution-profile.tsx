@@ -371,11 +371,9 @@ export function ReviewerControl({
  */
 export function OperatorRunControl({
   busy,
-  runActive,
   onRun,
 }: {
   busy: boolean;
-  runActive: boolean;
   onRun: (backend: string, autonomy: string) => void;
 }) {
   const [backend, setBackend] = useState("claude");
@@ -387,7 +385,7 @@ export function OperatorRunControl({
         aria-label="Operator backend"
         value={backend}
         onChange={(e) => setBackend(e.target.value)}
-        disabled={busy || runActive}
+        disabled={busy}
       >
         <option value="claude">Claude Code</option>
         <option value="codex">Codex</option>
@@ -397,21 +395,19 @@ export function OperatorRunControl({
         aria-label="Operator autonomy"
         value={autonomy}
         onChange={(e) => setAutonomy(e.target.value)}
-        disabled={busy || runActive}
+        disabled={busy}
       >
         <option value="supervised">Supervised</option>
         <option value="full">Full autonomy</option>
       </select>
+      {/* The operator coordinates ongoing work, so it stays runnable even while
+          a specialist run streams — only its own in-flight run disables it. */}
       <button
         type="button"
         className="btn primary sm"
-        disabled={busy || runActive}
+        disabled={busy}
         onClick={() => onRun(backend, autonomy)}
-        title={
-          runActive
-            ? "A run is already streaming for this task"
-            : "Run the operator to coordinate this task"
-        }
+        title="Run the operator to coordinate this task"
       >
         <Icon name="shield" />
         {busy ? "Running…" : "Run operator"}
@@ -512,7 +508,6 @@ export function ExecutionProfile({
             {canRunAgents && (
               <OperatorRunControl
                 busy={operatorBusy}
-                runActive={runActive}
                 onRun={onRunOperator}
               />
             )}

@@ -13,6 +13,8 @@ import {
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorPostComment,
+  operatorRunReviewer,
+  operatorRunSpecialist,
   operatorSnapshot,
   operatorTransitionStage,
   resolveOperatorAuthority,
@@ -21,9 +23,10 @@ import {
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
+import { replyTextForRun } from "~/server/tasks/agent-reply.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
-import { startRun } from "./run-service.server";
+import { registerRunCompletion, startRun } from "./run-service.server";
 import { buildScript } from "./simulated-runtime.server";
 
 /**
@@ -76,14 +79,208 @@ export async function runOperator(
   });
   const backend = authority.backend;
 
-  // Real tool-driven operator only on Claude with a live credential — Codex has
-  // no in-process tool channel, so it takes the scripted path.
-  const real = backend === "claude" && isBackendAvailable("claude");
-
-  if (real) {
+  // Claude: real tool-driven operator (in-process MCP tools). Codex: no
+  // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
+  // model emits a decision plan we execute through the same capability-gated
+  // actions). Neither available → deterministic scripted drive.
+  if (backend === "claude" && isBackendAvailable("claude")) {
     return startRealOperatorRun(db, ctx, input, authority);
   }
+  if (backend === "codex" && isBackendAvailable("codex")) {
+    return startCodexOperatorRun(db, ctx, input, authority);
+  }
   return runScriptedOperatorDrive(db, ctx, input, authority);
+}
+
+// ------------------------------------------------- codex (structured output)
+
+/**
+ * JSON schema constraining the codex operator's decision plan. OpenAI strict
+ * structured output requires EVERY object to set additionalProperties:false and
+ * list ALL properties in `required` — optional fields are expressed as nullable
+ * (the model emits null when unused). The executor treats null/"" as absent.
+ */
+const OPERATOR_PLAN_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    reasoning: {
+      type: "string",
+      description: "A concise operator comment: observed → changed → recommended → decision required.",
+    },
+    actions: {
+      type: "array",
+      description: "The coordination actions to take, in order.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          tool: {
+            type: "string",
+            enum: [
+              "post_comment",
+              "assign_specialist",
+              "run_specialist",
+              "assign_reviewer",
+              "run_reviewer",
+              "transition_stage",
+              "accept_completion",
+            ],
+          },
+          profileId: { type: ["string", "null"], description: "For assign_/run_ actions, else null." },
+          toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
+          text: { type: ["string", "null"], description: "For post_comment, else null." },
+          reason: { type: ["string", "null"], description: "Short why — shown on recommendation cards." },
+        },
+        required: ["tool", "profileId", "toStageId", "text", "reason"],
+      },
+    },
+  },
+  required: ["reasoning", "actions"],
+} as const;
+
+interface OperatorPlanAction {
+  tool: string;
+  profileId?: string;
+  toStageId?: string;
+  text?: string;
+  reason?: string;
+}
+
+async function startCodexOperatorRun(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  authority: OperatorAuthority,
+): Promise<RunOperatorResult> {
+  const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  const prompt = buildCodexOperatorPrompt(authority, snapshot, input.dataRoot);
+
+  const { runId } = await startRun(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
+    role: "Operator",
+    kind: "operator",
+    backend: "codex",
+    model: authority.model,
+    ...(authority.effort ? { effort: authority.effort } : {}),
+    agentName: authority.name,
+    agentProfileId: "operator",
+    prompt,
+    outputSchema: OPERATOR_PLAN_SCHEMA,
+    autonomous: true,
+    actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+  });
+
+  // When the run finishes, parse its decision plan and execute it through the
+  // capability-gated operator-actions (so codex honors the exact same RBAC +
+  // autonomy as the Claude tool-driven operator).
+  registerRunCompletion(runId, (finished) => {
+    void executeCodexPlan(db, ctx, input, authority, finished.id).catch((error) => {
+      logger.error("codex operator plan execution failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  });
+
+  logger.info("operator run started (codex structured output)", {
+    taskKey: input.taskKey,
+    runId,
+    autonomy: authority.autonomy,
+  });
+  return { runId, backend: "codex", mode: "real", autonomy: authority.autonomy };
+}
+
+/** Pull the first JSON object out of a model response (tolerates prose around it). */
+function extractPlanJson(text: string): unknown {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/** Execute a finished codex operator run's decision plan (capability-gated). */
+async function executeCodexPlan(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  authority: OperatorAuthority,
+  runId: string,
+): Promise<void> {
+  const text = replyTextForRun(db, runId);
+  if (!text) {
+    logger.info("codex operator produced no plan text", { taskKey: input.taskKey, runId });
+    return;
+  }
+  const plan = extractPlanJson(text) as
+    | { reasoning?: string; actions?: OperatorPlanAction[] }
+    | null;
+  if (!plan) {
+    logger.warn("codex operator plan was not valid JSON", { taskKey: input.taskKey, runId });
+    return;
+  }
+  const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  if (plan.reasoning) {
+    await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
+  }
+  for (const a of plan.actions ?? []) {
+    try {
+      switch (a.tool) {
+        case "post_comment":
+          if (a.text) await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
+          break;
+        case "assign_specialist":
+          if (a.profileId)
+            await operatorAssignSpecialist(
+              db,
+              ctx,
+              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
+              authority,
+            );
+          break;
+        case "run_specialist":
+          await operatorRunSpecialist(db, ctx, base, authority);
+          break;
+        case "assign_reviewer":
+          if (a.profileId)
+            await operatorAssignReviewer(
+              db,
+              ctx,
+              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
+              authority,
+            );
+          break;
+        case "run_reviewer":
+          if (a.profileId) await operatorRunReviewer(db, ctx, { ...base, profileId: a.profileId }, authority);
+          break;
+        case "transition_stage":
+          if (a.toStageId)
+            await operatorTransitionStage(
+              db,
+              ctx,
+              { ...base, toStageId: a.toStageId, ...(a.reason ? { reason: a.reason } : {}) },
+              authority,
+            );
+          break;
+        case "accept_completion":
+          await operatorAcceptCompletion(db, ctx, base, authority);
+          break;
+      }
+    } catch (error) {
+      logger.error("codex operator action failed", {
+        taskKey: input.taskKey,
+        tool: a.tool,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
 }
 
 // ------------------------------------------------------- real (tool-driven)
@@ -328,16 +525,16 @@ function readOperatorDefinition(dataRoot?: string): string {
   return FALLBACK_OPERATOR_DEFINITION;
 }
 
-/** Read the Viberr app-expertise skill body, if shipped. */
-function readViberrSkill(dataRoot?: string): string {
+/** Read one skill's body from the store, or "" when absent. */
+function readSkillBody(name: string, dataRoot?: string): string {
   try {
-    const file = path.join(skillDirPath("viberr-app-expertise", dataRoot), "SKILL.md");
+    const file = path.join(skillDirPath(name, dataRoot), "SKILL.md");
     if (existsSync(file)) {
       const { body } = splitFrontmatter(readFileSync(file, "utf8"));
       return body.trim();
     }
   } catch {
-    // no skill shipped — the definition alone still guides the operator
+    // missing/unreadable skill — skip it
   }
   return "";
 }
@@ -348,16 +545,17 @@ export function buildOperatorSystemPrompt(
   dataRoot?: string,
 ): string {
   const definition = readOperatorDefinition(dataRoot);
-  const skill = readViberrSkill(dataRoot);
   const policyLines = [...authority.policy.entries()]
     .map(([id, mode]) => `- ${id}: ${mode}`)
     .join("\n");
 
   const parts = [definition];
-  if (skill) {
-    parts.push(
-      "\n\n---\n# Viberr app expertise (reference skill)\n\n" + skill,
-    );
+  // Load EVERY declared skill that exists in the store (not just one), so the
+  // operator's profile-declared skills are actually in its context.
+  const skills = authority.skills.length ? authority.skills : ["viberr-app-expertise"];
+  for (const name of skills) {
+    const body = readSkillBody(name, dataRoot);
+    if (body) parts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
   }
   parts.push(
     "\n\n---\n# Your authority for this task\n\n" +
@@ -372,6 +570,36 @@ export function buildOperatorSystemPrompt(
       "- Never write code, run shell commands, or touch the repository. You have only the `mcp__viberr__*` tools.",
   );
   return parts.join("");
+}
+
+/**
+ * The full prompt for the CODEX structured-output operator. Codex has no
+ * system-prompt field and no in-process tools, so the persona + expertise, the
+ * live task snapshot, and the output instruction all go in one prompt; the
+ * model returns a decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we
+ * execute through the same capability-gated actions.
+ */
+export function buildCodexOperatorPrompt(
+  authority: OperatorAuthority,
+  snapshot: OperatorTaskSnapshot,
+  dataRoot?: string,
+): string {
+  const persona = buildOperatorSystemPrompt(authority, dataRoot);
+  return (
+    persona +
+    "\n\n---\n# This task\n\n" +
+    "```json\n" +
+    JSON.stringify(snapshot, null, 2) +
+    "\n```\n\n" +
+    "# Your decision\n\n" +
+    "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
+    "Use the deployedSpecialists' profileId values for assign actions, and nextStages' ids for transitions. " +
+    "Respect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
+    "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
+    "Return ONLY a JSON object of the form " +
+    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "assign_specialist", "profileId": "…", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
+    "Include a short reason on each governed action (it is shown on the recommendation card)."
+  );
 }
 
 /** The operator's opening turn prompt (points it at get_task). */

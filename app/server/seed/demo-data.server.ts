@@ -188,9 +188,11 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       scope: "System role · one per active task",
       stages: ["triage", "ready", "impl", "review", "done"], spanAll: true,
       resources: {
-        skills: ["viberr-app-expertise", "packet-authoring", "timeline-compression", "continuity-reanchor"],
-        mcps: ["viberr-task-store"],
-        kb: ["Project workflow rules", "Agent capability matrix"],
+        // Real, non-placeholder resources: the shipped skill, the actual
+        // in-process governance MCP server ("viberr"), and a real KB on disk.
+        skills: ["viberr-app-expertise"],
+        mcps: ["viberr"],
+        kb: ["architecture-notes"],
       },
     },
     {
@@ -429,6 +431,7 @@ function fm(input: {
     specialist: input.specialist,
     reviewers: input.reviewers,
     operator: input.operator,
+    recommendations: [],
     urgent: input.urgent,
     validation: input.validation,
     branch: input.branch,

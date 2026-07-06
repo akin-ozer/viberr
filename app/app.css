@@ -726,6 +726,31 @@ h1, h2, h3, h4 {
 .rev-x:disabled { opacity: .5; cursor: default; }
 .rev-x svg { width: 14px; height: 14px; }
 
+/* operator recommendations — highlighted cards a human applies or dismisses */
+.op-recs { border: 1px solid color-mix(in srgb, var(--agent), transparent 70%); }
+.op-recs .panel-head h2 { color: var(--agent-dark); }
+.op-rec-list { display: flex; flex-direction: column; gap: .55rem; }
+.op-rec {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .7rem .8rem; border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--agent), transparent 92%);
+  border: 1px solid color-mix(in srgb, var(--agent), transparent 78%);
+}
+.op-rec-main { flex: 1; min-width: 0; }
+.op-rec-label { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.op-rec-kind {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-family: var(--font-display); font-weight: 700; font-size: .68rem;
+  text-transform: uppercase; letter-spacing: .03em;
+  color: var(--agent-dark);
+  padding: .12rem .4rem; border-radius: var(--radius-chip);
+  background: color-mix(in srgb, var(--agent), transparent 82%);
+}
+.op-rec-kind svg { width: 12px; height: 12px; }
+.op-rec-title { font-family: var(--font-display); font-weight: 600; font-size: .92rem; color: var(--fg); }
+.op-rec-detail { margin-top: .25rem; font-size: .84rem; color: var(--muted); line-height: 1.45; }
+.op-rec-actions { display: inline-flex; align-items: center; gap: .35rem; flex: none; }
+
 /* operator cell stacks its identity row above the run control (like Reviewers),
    so the control wraps within the cell instead of overflowing into the next */
 .profile-cell .val.op-val { flex-direction: column; align-items: stretch; gap: .6rem; }

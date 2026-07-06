@@ -81,6 +81,48 @@ export const CAP_MODAL_DEFAULTS: Readonly<Record<string, CapMode>> =
     CAP_MODAL_CATALOG.flatMap((g) => g.caps.map((c) => [c.id, c.def])),
   );
 
+/**
+ * The OPERATOR's coordination capabilities — what the operator RBAC editor
+ * shows when editing the operator profile (assignment recommend/assign/off,
+ * governance modes). Distinct from the specialist catalog above.
+ */
+export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] = [
+  {
+    group: "Assignment",
+    caps: [
+      cap("assign-primary-specialist", "direct"),
+      cap("summon-reviewers", "direct"),
+    ],
+  },
+  {
+    group: "Coordination",
+    caps: [
+      cap("generate-packets", "direct"),
+      cap("append-typed-events", "direct"),
+      cap("compress-timelines", "direct"),
+    ],
+  },
+  {
+    group: "Governance",
+    caps: [
+      cap("stage-transitions", "recommend"),
+      cap("completion-for-acceptance", "recommend"),
+      cap("owner-reassignment", "recommend"),
+    ],
+  },
+];
+
+/** Every operator capability id the operator editor governs. */
+export const OPERATOR_CAP_IDS: ReadonlySet<string> = new Set(
+  OPERATOR_CAP_CATALOG.flatMap((g) => g.caps.map((c) => c.id)),
+);
+
+/** Default mode per operator capability. */
+export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
+  Object.fromEntries(
+    OPERATOR_CAP_CATALOG.flatMap((g) => g.caps.map((c) => [c.id, c.def])),
+  );
+
 export const CAP_MODES: readonly { id: CapMode; label: string }[] = [
   { id: "direct", label: "Direct" },
   { id: "recommend", label: "Recommend" },
@@ -111,6 +153,7 @@ export const RES_CATALOG: readonly ResCatalogGroup[] = [
     key: "skills",
     mono: true,
     items: [
+      { id: "viberr-app-expertise", def: false },
       { id: "repo-write", def: true },
       { id: "test-runner", def: true },
       { id: "lint-autofix", def: false },
@@ -128,9 +171,9 @@ export const RES_CATALOG: readonly ResCatalogGroup[] = [
     key: "mcps",
     mono: true,
     items: [
+      { id: "viberr", def: false },
       { id: "github", def: true },
       { id: "filesystem", def: false },
-      { id: "viberr-task-store", def: false },
       { id: "http-fetch", def: false },
       { id: "postgres", def: false },
       { id: "docker", def: false },
@@ -141,6 +184,9 @@ export const RES_CATALOG: readonly ResCatalogGroup[] = [
     key: "kb",
     mono: false,
     items: [
+      { id: "architecture-notes", def: false },
+      { id: "api-contracts", def: false },
+      { id: "deploy-runbooks", def: false },
       { id: "Viberr Core architecture", def: true },
       { id: "Coding standards", def: true },
       { id: "Review checklist", def: false },

@@ -9,6 +9,8 @@ import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
   CAP_MODES,
+  OPERATOR_CAP_CATALOG,
+  OPERATOR_CAP_DEFAULTS,
   RES_CATALOG,
   RES_DEFAULTS,
   type CapMode,
@@ -37,6 +39,8 @@ export interface ProfileFormPayload {
   model: string;
   effort: string;
   caps: Record<string, CapMode>;
+  /** Operator only: default autonomy the run uses. */
+  autonomy?: "supervised" | "full";
   resources: ResourceSelection;
 }
 
@@ -88,10 +92,13 @@ const selectStyle: CSSProperties = {
   outline: 0,
 };
 
-function seedCaps(initial: AgentProfileView | null): Record<string, CapMode> {
-  if (!initial) return { ...CAP_MODAL_DEFAULTS };
+function seedCaps(
+  initial: AgentProfileView | null,
+  defaults: Readonly<Record<string, CapMode>>,
+): Record<string, CapMode> {
+  if (!initial) return { ...defaults };
   const caps: Record<string, CapMode> = {};
-  for (const id of Object.keys(CAP_MODAL_DEFAULTS)) caps[id] = "off";
+  for (const id of Object.keys(defaults)) caps[id] = "off";
   for (const grant of initial.capabilities) {
     if (grant.capabilityId in caps) caps[grant.capabilityId] = grant.mode;
   }
@@ -118,12 +125,18 @@ export function CreateProfileModal({
   onSubmit: (payload: ProfileFormPayload) => void;
 }) {
   const editing = initial !== null;
+  const isOperator = initial?.kind === "operator";
+  const capCatalog = isOperator ? OPERATOR_CAP_CATALOG : CAP_MODAL_CATALOG;
+  const capDefaults = isOperator ? OPERATOR_CAP_DEFAULTS : CAP_MODAL_DEFAULTS;
   const dialogRef = useDialog(onClose);
   const [name, setName] = useState(initial ? initial.name : "");
   const [role, setRole] = useState(initial ? initial.role : "");
   const [stg, setStg] = useState<string[]>(initial ? [...initial.stages] : []);
   const [backend, setBackend] = useState<"codex" | "claude" | "">(
     initial ? (initial.backends[0] ?? "") : "",
+  );
+  const [autonomy, setAutonomy] = useState<"supervised" | "full">(
+    initial?.autonomy ?? "supervised",
   );
   const [definition, setDefinition] = useState(initial ? initial.desc : "");
   // Model + effort picks (seeded from the profile in edit mode). The catalog
@@ -132,10 +145,10 @@ export function CreateProfileModal({
   const [model, setModel] = useState(initial ? initial.model : "");
   const [effort, setEffort] = useState(initial ? initial.effort : "");
   const [caps, setCaps] = useState<Record<string, CapMode>>(() =>
-    seedCaps(initial),
+    seedCaps(initial, capDefaults),
   );
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    [CAP_MODAL_CATALOG[0]!.group]: true,
+    [capCatalog[0]!.group]: true,
   });
   const [res, setRes] = useState<ResourceSelection>(() =>
     initial
@@ -214,6 +227,7 @@ export function CreateProfileModal({
       model: model.trim(),
       effort: showEffort ? effort.trim() : "",
       caps,
+      ...(isOperator ? { autonomy } : {}),
       resources: res,
     });
   };
@@ -299,6 +313,36 @@ export function CreateProfileModal({
               ))}
             </div>
           </div>
+
+          {isOperator && (
+            <div className="field">
+              <label className="flabel">
+                Default autonomy
+                <span className="fhint">
+                  supervised recommends at governed boundaries · full performs
+                  them and may accept completion to Done
+                </span>
+              </label>
+              <div className="pick-chips">
+                {(
+                  [
+                    { id: "supervised", label: "Supervised" },
+                    { id: "full", label: "Full autonomy" },
+                  ] as const
+                ).map((a) => (
+                  <button
+                    type="button"
+                    key={a.id}
+                    className={"pick-chip" + (autonomy === a.id ? " on" : "")}
+                    onClick={() => setAutonomy(a.id)}
+                  >
+                    <Icon name={a.id === "full" ? "bolt" : "shield"} />
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="field-row">
             <div className="field">
@@ -410,7 +454,7 @@ export function CreateProfileModal({
               </span>
             </label>
             <div className="cap-matrix">
-              {CAP_MODAL_CATALOG.map((g) => {
+              {capCatalog.map((g) => {
                 const open = !!openGroups[g.group];
                 const c = { direct: 0, recommend: 0, human: 0, off: 0 };
                 g.caps.forEach((x) => {

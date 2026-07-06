@@ -17,12 +17,15 @@ import {
   getTaskSummary,
 } from "~/server/projections/task-query.server";
 import {
+  applyRecommendation,
   commentToAgent,
+  dismissRecommendation,
   releaseOwner,
   resolvePacket,
   setOwner,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -96,8 +99,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // the same targets the server resolves an @mention to when a comment posts.
   const mentionables = getMentionables(db, params.slug, params.key);
 
+  // Pending operator recommendations live in the task FILE (not the projection);
+  // read them here so the task-detail renders them as actionable cards. The
+  // loader revalidates on every SSE task change, so applied/dismissed ones drop.
+  const taskFile = readTaskFile({ projectSlug: params.slug, taskKey: params.key });
+  const recommendations = taskFile?.parsed.frontmatter.recommendations ?? [];
+
   return {
     task: { ...detail, timeline: slice.events },
+    recommendations,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
@@ -320,6 +330,32 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast: result.removed ? "Reviewer released" : "That reviewer wasn't engaged",
         };
       }
+      case "apply-recommendation": {
+        // A human accepts an operator recommendation card — executes the
+        // recommended assign/reviewer/transition through the governed mutation.
+        const result = await applyRecommendation(
+          db,
+          { projectSlug, taskKey, recId: String(formData.get("recId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `Applied · ${result.label}`,
+        };
+      }
+      case "dismiss-recommendation": {
+        const result = await dismissRecommendation(
+          db,
+          { projectSlug, taskKey, recId: String(formData.get("recId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: result.label ? `Dismissed · ${result.label}` : "Recommendation dismissed",
+        };
+      }
       case "run-operator": {
         // Run the operator agent to coordinate the task. Triggering runtime
         // work is admin|maintainer (contracts §3.2) — the operator's OWN
@@ -412,6 +448,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       me={{ id: layout.user.id, name: layout.user.name }}
       myRole={layout.myRole}
       mentionables={loaderData.mentionables}
+      recommendations={loaderData.recommendations}
     />
   );
 }

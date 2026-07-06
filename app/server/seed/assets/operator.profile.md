@@ -19,14 +19,10 @@ spanAll: true
 resources:
   skills:
     - viberr-app-expertise
-    - packet-authoring
-    - timeline-compression
-    - continuity-reanchor
   mcps:
-    - viberr-task-store
+    - viberr
   kb:
-    - Project workflow rules
-    - Agent capability matrix
+    - architecture-notes
 capabilities:
   - capabilityId: assign-primary-specialist
     mode: direct

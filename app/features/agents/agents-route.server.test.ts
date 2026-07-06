@@ -278,18 +278,19 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(result.profileId).toBe("migrations-2");
   });
 
-  it("edit preserves non-modal grants + extras and the operator's model/spanAll", async () => {
+  it("edit stores the operator's backend/model/autonomy + governs its caps", async () => {
     const result = (await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "operator",
       payload: JSON.stringify({
         name: "Operator",
         role: "Task coordinator",
-        backend: "claude",
+        backend: "codex",
         stages: ["triage", "ready", "impl", "review", "done"],
         definition: "Updated operator definition.",
-        caps: {},
-        resources: { skills: ["packet-authoring"], mcps: ["viberr-task-store"], kb: [] },
+        autonomy: "full",
+        caps: { "assign-primary-specialist": "recommend", "stage-transitions": "direct" },
+        resources: { skills: ["viberr-app-expertise"], mcps: ["viberr"], kb: ["architecture-notes"] },
       }),
     })) as { ok: boolean; toast: string };
     expect(result.ok).toBe(true);
@@ -297,14 +298,18 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const data = await runLoader(ids.arda);
     const operator = data.profiles.find((p) => p.id === "operator")!;
     expect(operator.kind).toBe("operator");
-    expect(operator.model).toBe("orchestration runtime"); // preserved
-    expect(operator.spanAll).toBe(true); // preserved (mock wart fixed)
+    // The operator now runs on a real backend + model (not a placeholder).
+    expect(operator.backends).toContain("codex");
+    expect(operator.model).not.toBe("orchestration runtime");
+    // Autonomy is stored on the deployment.
+    expect(operator.autonomy).toBe("full");
+    expect(operator.spanAll).toBe(true); // preserved
     expect(operator.desc).toBe("Updated operator definition.");
-    // Operator coordination grants live OUTSIDE the modal catalog — kept.
-    expect(operator.actions.direct).toContain("Assign the primary specialist");
-    expect(operator.capabilities.map((c) => c.capabilityId)).toContain(
-      "compress-timelines",
-    );
+    // Operator RBAC modes are editable (assign → recommend, transitions → direct).
+    const modeOf = (id: string) =>
+      operator.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(modeOf("assign-primary-specialist")).toBe("recommend");
+    expect(modeOf("stage-transitions")).toBe("direct");
   });
 
   it("delete removes the deployment; the org template file survives", async () => {

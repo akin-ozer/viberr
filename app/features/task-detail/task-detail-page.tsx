@@ -14,6 +14,10 @@ import {
   type TaskMemberView,
 } from "./execution-profile";
 import { ReleaseConfirm } from "./release-confirm";
+import {
+  OperatorRecommendations,
+  type RecommendationView,
+} from "./operator-recommendations";
 import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -247,6 +251,7 @@ export function TaskDetailPage({
   me,
   myRole,
   mentionables,
+  recommendations,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -265,6 +270,8 @@ export function TaskDetailPage({
   myRole: string | null;
   /** @-mention autocomplete directory for the comment composer (loader). */
   mentionables: Mentionables;
+  /** Pending operator recommendation cards (loader — from the task file). */
+  recommendations: RecommendationView[];
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [logSel, setLogSel] = useState<string | null>(null);
@@ -278,18 +285,21 @@ export function TaskDetailPage({
   const specialistFetcher = useFetcher<ActionResult>();
   const reviewerFetcher = useFetcher<ActionResult>();
   const operatorFetcher = useFetcher<ActionResult>();
+  const recFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
   useActionFeedback(runFetcher);
   useActionFeedback(specialistFetcher);
   useActionFeedback(reviewerFetcher);
   useActionFeedback(operatorFetcher);
+  useActionFeedback(recFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
   const specialistBusy = specialistFetcher.state !== "idle";
   const reviewerBusy = reviewerFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
+  const recBusy = recFetcher.state !== "idle";
 
   // Assign a deployed specialist / start a specialist run — admin|maintainer
   // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
@@ -343,13 +353,32 @@ export function TaskDetailPage({
   // coordinates the task under its capability policy; backend + autonomy are
   // chosen for this run (full autonomy lets it drive to Done).
   const onRunOperator = (backend: string, autonomy: string) => {
-    if (operatorBusy || runActive) return;
+    if (operatorBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "run-operator");
     fd.set("backend", backend);
     fd.set("autonomy", autonomy);
     operatorFetcher.submit(fd, { method: "post" });
+  };
+
+  // Apply / dismiss an operator recommendation card (apply is admin|maintainer;
+  // server re-checks). Apply executes the recommended assign/reviewer/transition.
+  const onApplyRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "apply-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
+  };
+  const onDismissRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "dismiss-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
   };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -488,6 +517,14 @@ export function TaskDetailPage({
             onAsk={() => setAsk((a) => a + 1)}
           />
         )}
+
+        <OperatorRecommendations
+          recommendations={recommendations}
+          canApply={canRunAgents}
+          busy={recBusy}
+          onApply={onApplyRec}
+          onDismiss={onDismissRec}
+        />
 
         <ExecutionProfile
           task={task}

@@ -1,9 +1,12 @@
 import type Database from "better-sqlite3";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import type {
+  Recommendation,
+  RecommendationKind,
   TaskFileEvent,
   TaskPacket,
 } from "~/schemas/task-file.schema";
+import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -63,6 +66,8 @@ export interface OperatorAuthority {
   effort: string;
   /** Display name of the deployed operator profile. */
   name: string;
+  /** The operator's declared skills (loaded into its system prompt at run). */
+  skills: string[];
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
 }
@@ -116,6 +121,7 @@ export function resolveOperatorAuthority(
       model: defaultModelFor(overrides.backend ?? "claude"),
       effort: "",
       name: "Operator",
+      skills: [],
       deployed: false,
     };
   }
@@ -125,19 +131,28 @@ export function resolveOperatorAuthority(
     deployment.capabilities.map((c) => [c.capabilityId, c.mode]),
   );
   const definition = (deployment as Record<string, unknown>).definition;
-  const backend: RealBackend =
-    overrides.backend ??
-    (view.backends.find((b) => b === "claude" || b === "codex") === "codex"
+  const deploymentBackend: RealBackend =
+    view.backends.find((b) => b === "claude" || b === "codex") === "codex"
       ? "codex"
-      : "claude");
+      : "claude";
+  const backend: RealBackend = overrides.backend ?? deploymentBackend;
+
+  // The deployment's model is specific to its own backend (e.g. a Claude model).
+  // When a run overrides to a DIFFERENT backend, the stored model is invalid for
+  // it (Codex rejects a Claude model id) — fall back to that backend's default.
+  const model =
+    backend === deploymentBackend
+      ? view.model || defaultModelFor(backend)
+      : defaultModelFor(backend);
 
   return {
     policy,
     autonomy: overrides.autonomy ?? readAutonomy(definition),
     backend,
-    model: view.model || defaultModelFor(backend),
-    effort: view.effort || "",
+    model,
+    effort: backend === deploymentBackend ? view.effort || "" : "",
     name: view.name || "Operator",
+    skills: view.resources.skills,
     deployed: true,
   };
 }
@@ -226,6 +241,72 @@ async function writeOperatorComment(
       details: {},
     });
   }
+}
+
+/**
+ * Append a structured, ACTIONABLE operator recommendation to the task (rendered
+ * as a one-click Apply/Dismiss card) AND post the operator's reasoning as a
+ * comment. Sets waiting=human. Idempotent per (kind, target). This is what a
+ * SUPERVISED operator does instead of performing a governed action itself.
+ */
+async function addRecommendation(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  rec: { kind: RecommendationKind; profileId?: string; toStageId?: string; label: string },
+  reasoning: string,
+): Promise<void> {
+  const recommendation: Recommendation = {
+    id: newId("rec"),
+    kind: rec.kind,
+    label: rec.label,
+    detail: reasoning,
+    ...(rec.profileId ? { profileId: rec.profileId } : {}),
+    ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
+  };
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    const dup = parsed.frontmatter.recommendations.some(
+      (r) =>
+        r.kind === rec.kind &&
+        r.profileId === rec.profileId &&
+        r.toStageId === rec.toStageId,
+    );
+    if (!dup) parsed.frontmatter.recommendations.push(recommendation);
+    parsed.frontmatter.waiting = "human";
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "comment",
+      actor: { kind: "operator" },
+      title: null,
+      text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, projectSlug, taskKey);
+  recordAudit(db, {
+    action: "task.operator.recommended",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: taskKey,
+    projectSlug,
+    taskKey,
+    details: { kind: rec.kind },
+  });
+}
+
+/** Resolve a deployed specialist's display name for a recommendation label. */
+function specialistName(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  profileId: string,
+): string {
+  const found = listDeployedSpecialists(db, projectSlug, ctx).find(
+    (s) => s.id === profileId,
+  );
+  return found?.name ?? profileId;
 }
 
 // ------------------------------------------------------------- snapshot
@@ -352,7 +433,7 @@ export async function operatorPostComment(
 export async function operatorAssignSpecialist(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string },
+  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "assign-primary-specialist");
@@ -363,15 +444,20 @@ export async function operatorAssignSpecialist(
     };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      `**Recommendation:** assign \`${input.profileId}\` as the primary specialist. Awaiting a maintainer to confirm.`,
-      "recommend",
+      {
+        kind: "assign_specialist",
+        profileId: input.profileId,
+        label: `Assign ${name} as the primary specialist`,
+      },
+      input.reason ?? `${name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: "Posted an assignment recommendation." };
+    return { outcome: "recommended", message: `Recommended assigning ${name} as the primary specialist.` };
   }
   const result = await assignSpecialist(
     db,
@@ -415,7 +501,7 @@ export async function operatorRunSpecialist(
 export async function operatorAssignReviewer(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string },
+  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "summon-reviewers");
@@ -423,15 +509,20 @@ export async function operatorAssignReviewer(
     return { outcome: "denied", message: "Summoning reviewers is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      `**Recommendation:** engage \`${input.profileId}\` as a reviewer. Awaiting a maintainer to confirm.`,
-      "recommend",
+      {
+        kind: "assign_reviewer",
+        profileId: input.profileId,
+        label: `Engage ${name} as a reviewer`,
+      },
+      input.reason ?? `${name} should review the work at this stage.`,
     );
-    return { outcome: "recommended", message: "Posted a reviewer recommendation." };
+    return { outcome: "recommended", message: `Recommended engaging ${name} as a reviewer.` };
   }
   const result = await assignReviewer(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
@@ -475,7 +566,7 @@ export async function operatorRunReviewer(
 export async function operatorTransitionStage(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; toStageId: string },
+  input: { projectSlug: string; taskKey: string; toStageId: string; reason?: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   const g = gate(authority, "stage-transitions");
@@ -483,23 +574,37 @@ export async function operatorTransitionStage(
     return { outcome: "denied", message: "Stage transitions are not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    const name = stageNameOf(db, ctx, input.projectSlug, input.toStageId);
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      `**Recommendation:** move ${input.taskKey} to \`${input.toStageId}\`. A maintainer approves stage transitions under supervised autonomy.`,
-      "recommend",
+      {
+        kind: "transition",
+        toStageId: input.toStageId,
+        label: `Move the task to ${name}`,
+      },
+      input.reason ?? `The work is ready to advance to ${name}.`,
     );
-    // Surface it as waiting on a human decision.
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.frontmatter.waiting = "human";
-    });
-    reproject(db, ctx, input.projectSlug, input.taskKey);
-    return { outcome: "recommended", message: "Posted a transition recommendation." };
+    return { outcome: "recommended", message: `Recommended moving the task to ${name}.` };
   }
   const task = await transitionStage(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
+}
+
+/** Resolve a stage's display name for a recommendation label. */
+function stageNameOf(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  stageId: string,
+): string {
+  const file = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
 }
 
 /**

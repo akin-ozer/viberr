@@ -254,6 +254,7 @@ export async function createTask(
     ownerUserId: null,
     specialist: null,
     reviewers: [],
+    recommendations: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
     operator:
       stageId === project.stages[0]?.id
@@ -1109,6 +1110,11 @@ export async function transitionStage(
     ) {
       parsed.frontmatter.operator = { assignedAtStageId: input.toStageId };
     }
+    // A stage move makes any pending transition recommendation stale — drop it
+    // so a Done task never shows a "move to <stage>" card.
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+      (r) => r.kind !== "transition",
+    );
     parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -1299,4 +1305,118 @@ export async function resolvePacket(
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
   };
+}
+
+// ---------------------------------------------------- operator recommendations
+
+/**
+ * Apply a pending operator recommendation: a human accepts the operator's
+ * recommended action (assign a specialist / engage a reviewer / move a stage),
+ * executing it through the SAME governed mutation the manual affordance uses
+ * (so RBAC + events are identical), then clearing the recommendation. RBAC is
+ * enforced by the underlying mutation (admin|maintainer). Idempotent — an
+ * already-resolved recommendation id is a friendly 409.
+ */
+export async function applyRecommendation(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; recId: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; label: string }> {
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const rec = existing.parsed.frontmatter.recommendations.find(
+    (r) => r.id === input.recId,
+  );
+  if (!rec) throw conflict("That recommendation was already resolved.");
+
+  // Execute the recommended action through the governed mutation (RBAC inside).
+  if (rec.kind === "assign_specialist" && rec.profileId) {
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      actor,
+      ctx,
+    );
+  } else if (rec.kind === "assign_reviewer" && rec.profileId) {
+    const { assignReviewer } = await import("./specialist-run.server");
+    await assignReviewer(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      actor,
+      ctx,
+    );
+  } else if (rec.kind === "transition" && rec.toStageId) {
+    await transitionStage(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: rec.toStageId },
+      actor,
+      ctx,
+    );
+  } else {
+    throw AppError.validation("This recommendation is malformed.");
+  }
+
+  // Clear the applied recommendation.
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+      (r) => r.id !== input.recId,
+    );
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.recommendation.applied",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { kind: rec.kind, label: rec.label },
+  });
+
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+}
+
+/**
+ * Dismiss a pending operator recommendation without acting on it (any member).
+ * Idempotent — a missing id is a no-op.
+ */
+export async function dismissRecommendation(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; recId: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; label: string | null }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(project, actor, "any-member", "dismiss recommendations");
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const rec = existing.parsed.frontmatter.recommendations.find(
+    (r) => r.id === input.recId,
+  );
+  if (!rec) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: null };
+  }
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+      (r) => r.id !== input.recId,
+    );
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.recommendation.dismissed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { kind: rec.kind, label: rec.label },
+  });
+
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
 }

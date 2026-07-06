@@ -207,6 +207,10 @@ export async function assignSpecialist(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
       parsed.frontmatter.specialist = ref;
+      // Clear any pending "assign specialist" recommendation — it's now done.
+      parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+        (r) => r.kind !== "assign_specialist",
+      );
       parsed.timeline.unshift(event);
     },
   );
@@ -300,6 +304,10 @@ export async function assignReviewer(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
       parsed.frontmatter.reviewers.push(ref);
+      // Clear a matching pending "engage reviewer" recommendation.
+      parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+        (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
+      );
       parsed.timeline.unshift(event);
     },
   );

@@ -158,6 +158,9 @@ export interface StartRunInput {
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];
+  /** JSON schema constraining the run's final output (Codex structured-output
+   *  operator — the caller parses + executes the emitted decision plan). */
+  outputSchema?: unknown;
   /** Force the simulated engine regardless of backend credential. The operator
    *  scripted-drive uses this to stream a narration run for a backend that has
    *  no in-process tools (Codex) or when Claude is unavailable — the real work
@@ -246,6 +249,7 @@ export async function startRun(
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+    ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
   };
 
   launch(db, spec, simulated);

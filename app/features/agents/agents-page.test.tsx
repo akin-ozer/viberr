@@ -154,7 +154,7 @@ describe("ProfileDetail", () => {
     expect(onOpen).toHaveBeenCalledWith("VIB-142");
   });
 
-  it("operator: no Delete button, orchestration runtime cell, lifecycle hint", () => {
+  it("operator: no Delete button, real backend + autonomy cells, lifecycle hint", () => {
     const { container, getByText, queryByText } = render(
       <ProfileDetail
         a={mkProfile({
@@ -164,7 +164,9 @@ describe("ProfileDetail", () => {
           role: "Task coordinator",
           icon: "shield",
           spanAll: true,
-          model: "orchestration runtime",
+          backends: ["claude", "codex"],
+          autonomy: "supervised",
+          model: "claude-sonnet-4-5",
         })}
         stages={STAGES}
         insts={[]}
@@ -178,7 +180,9 @@ describe("ProfileDetail", () => {
     expect(queryByText("Delete")).toBeNull();
     expect(getByText("Edit profile")).toBeTruthy();
     expect(getByText("active across the whole lifecycle")).toBeTruthy();
-    expect(getByText("Orchestration runtime")).toBeTruthy();
+    // The operator now shows its real backends + autonomy (not a placeholder).
+    expect(getByText("Claude Code")).toBeTruthy();
+    expect(getByText("Supervised")).toBeTruthy();
     expect(container.querySelector(".agent-glyph.op")).not.toBeNull();
     expect(getByText("idle · available")).toBeTruthy();
     expect(

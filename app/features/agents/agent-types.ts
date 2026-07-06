@@ -49,6 +49,8 @@ export interface AgentProfileView {
   desc: string;
   stages: string[];
   spanAll: boolean;
+  /** Operator only: default autonomy (supervised | full); undefined for specialists. */
+  autonomy?: "supervised" | "full";
   /** Display-label buckets (catalog labels + extras) — what CapColumns,
    * pcap counts and the matrix modal render. */
   actions: { direct: string[]; recommend: string[]; forbidden: string[] };

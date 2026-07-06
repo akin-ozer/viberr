@@ -16,7 +16,13 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { listAuditEvents } from "~/server/audit/audit-recorder.server";
-import { createTask } from "./task-actions.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import {
+  applyRecommendation,
+  createTask,
+  dismissRecommendation,
+  transitionStage,
+} from "./task-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   gate,
@@ -120,6 +126,27 @@ describe("resolveOperatorAuthority", () => {
   });
 });
 
+describe("resolveOperatorAuthority backend override", () => {
+  it("uses a backend-appropriate model when the run overrides the backend", () => {
+    deployRoster(DEFAULT_POLICY); // definition backends [claude], model sonnet
+    const claudeAuth = resolveOperatorAuthority(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      { backend: "claude" },
+    );
+    const codexAuth = resolveOperatorAuthority(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      { backend: "codex" },
+    );
+    expect(claudeAuth.model).toBe("sonnet"); // the deployment's own model
+    // Overriding to codex must NOT reuse the Claude model (codex would reject it).
+    expect(codexAuth.backend).toBe("codex");
+    expect(codexAuth.model).not.toBe("sonnet");
+    expect(codexAuth.model).toBe(defaultModelFor("codex"));
+  });
+});
+
 describe("gate", () => {
   it("maps modes to direct / recommend / deny by autonomy", () => {
     deployRoster(DEFAULT_POLICY);
@@ -146,18 +173,24 @@ describe("operatorAssignSpecialist", () => {
     expect(task().frontmatter.specialist?.profileId).toBe("developer");
   });
 
-  it("recommend mode posts a recommendation and does NOT assign", async () => {
+  it("recommend mode adds an actionable recommendation and does NOT assign", async () => {
     deployRoster([{ capabilityId: "assign-primary-specialist", mode: "recommend" }, { capabilityId: "append-typed-events", mode: "direct" }]);
     seedTask("impl");
     const r = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", reason: "Dev fits impl." },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
     expect(task().frontmatter.specialist).toBeNull();
-    // A recommendation comment landed on the timeline (operator-authored).
+    // A structured, ACTIONABLE recommendation is added to the task frontmatter…
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("assign_specialist");
+    expect(recs[0]!.profileId).toBe("developer");
+    expect(recs[0]!.detail).toBe("Dev fits impl.");
+    // …and the operator's reasoning is also commented to the timeline.
     expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
   });
 
@@ -251,6 +284,76 @@ describe("operatorAcceptCompletion", () => {
     // The deliberate override is audited distinctly.
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+});
+
+describe("applyRecommendation / dismissRecommendation", () => {
+  async function seedRecommendation() {
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    return task().frontmatter.recommendations[0]!.id;
+  }
+
+  it("applying a recommendation executes the action and clears it", async () => {
+    const recId = await seedRecommendation();
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const res = await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.label).toContain("Dev");
+    // The recommended assignment was performed…
+    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    // …and the recommendation card was cleared.
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    const audits = listAuditEvents(store.db, {}).map((a) => a.action);
+    expect(audits).toContain("task.recommendation.applied");
+  });
+
+  it("a stage transition clears stale transition recommendations", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("triage");
+    // Supervised operator recommends moving to ready (adds a transition card).
+    await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      authority("supervised"),
+    );
+    expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(true);
+    // A human then performs the transition — the stale card must clear.
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.stage).toBe("ready");
+    expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(false);
+  });
+
+  it("dismissing a recommendation clears it without acting", async () => {
+    const recId = await seedRecommendation();
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.specialist).toBeNull(); // NOT assigned
+    expect(task().frontmatter.recommendations).toHaveLength(0);
   });
 });
 

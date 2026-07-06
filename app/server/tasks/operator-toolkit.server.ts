@@ -104,11 +104,19 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "assign_specialist",
-        "Assign a deployed specialist as the task's PRIMARY specialist. Pass the specialist's profileId (from get_task's deployedSpecialists).",
-        { profileId: z.string().describe("The specialist profile id to assign.") },
+        "Assign a deployed specialist as the task's PRIMARY specialist. Pass the specialist's profileId (from get_task's deployedSpecialists) and a short reason. Under supervised autonomy this posts a recommendation card; under full autonomy it assigns directly.",
+        {
+          profileId: z.string().describe("The specialist profile id to assign."),
+          reason: z.string().optional().describe("Why this specialist fits — shown on the recommendation card."),
+        },
         async (args) =>
           resultText(
-            await operatorAssignSpecialist(db, ctx, { ...base, profileId: args.profileId }, authority),
+            await operatorAssignSpecialist(
+              db,
+              ctx,
+              { ...base, profileId: args.profileId, ...(args.reason ? { reason: args.reason } : {}) },
+              authority,
+            ),
           ),
       ),
       "assign_specialist",
@@ -129,11 +137,19 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "assign_reviewer",
-        "Engage a deployed specialist as a REVIEWER (advisory, non-primary). Pass its profileId.",
-        { profileId: z.string().describe("The specialist profile id to engage as reviewer.") },
+        "Engage a deployed specialist as a REVIEWER (advisory, non-primary). Pass its profileId and a short reason. Supervised → recommendation card; full autonomy → engages directly.",
+        {
+          profileId: z.string().describe("The specialist profile id to engage as reviewer."),
+          reason: z.string().optional().describe("Why engage this reviewer — shown on the recommendation card."),
+        },
         async (args) =>
           resultText(
-            await operatorAssignReviewer(db, ctx, { ...base, profileId: args.profileId }, authority),
+            await operatorAssignReviewer(
+              db,
+              ctx,
+              { ...base, profileId: args.profileId, ...(args.reason ? { reason: args.reason } : {}) },
+              authority,
+            ),
           ),
       ),
       "assign_reviewer",
@@ -156,11 +172,19 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "transition_stage",
-        "Move the task to an allowed next stage (see get_task's nextStages). Do NOT try to move to the final Done stage here — use accept_completion for that.",
-        { toStageId: z.string().describe("The target stage id (must be a declared next stage).") },
+        "Move the task to an allowed next stage (see get_task's nextStages) with a short reason. Do NOT move to the final Done stage here — use accept_completion. Supervised → recommendation card; full autonomy → moves directly.",
+        {
+          toStageId: z.string().describe("The target stage id (must be a declared next stage)."),
+          reason: z.string().optional().describe("Why advance now — shown on the recommendation card."),
+        },
         async (args) =>
           resultText(
-            await operatorTransitionStage(db, ctx, { ...base, toStageId: args.toStageId }, authority),
+            await operatorTransitionStage(
+              db,
+              ctx,
+              { ...base, toStageId: args.toStageId, ...(args.reason ? { reason: args.reason } : {}) },
+              authority,
+            ),
           ),
       ),
       "transition_stage",

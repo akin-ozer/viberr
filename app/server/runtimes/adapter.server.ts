@@ -44,6 +44,10 @@ export interface RunSpec {
   /** Allowlist confining which tools the run may call (e.g. the operator to
    *  only its `mcp__viberr__*` governance tools — it can never write code). */
   allowedTools?: string[];
+  /** JSON schema constraining the run's final output. Codex only — used by the
+   *  structured-output operator (it has no in-process tool channel), so the run
+   *  emits a decision plan the caller parses + executes. */
+  outputSchema?: unknown;
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

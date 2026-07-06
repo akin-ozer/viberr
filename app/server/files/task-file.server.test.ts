@@ -21,6 +21,7 @@ const FULL: ParsedTaskFile = {
     specialist: { profileId: "developer", backend: "codex", role: "Developer" },
     reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     operator: { assignedAtStageId: "triage" },
+    recommendations: [],
     urgent: true,
     validation: "changed",
     branch: "vib-142-attach-workspace",

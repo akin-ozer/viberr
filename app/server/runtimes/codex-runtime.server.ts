@@ -35,7 +35,10 @@ export interface CodexThreadEventsResult {
 
 export interface CodexThread {
   readonly id: string | null;
-  runStreamed(input: string, turnOptions?: { signal?: AbortSignal }): Promise<CodexThreadEventsResult>;
+  runStreamed(
+    input: string,
+    turnOptions?: { signal?: AbortSignal; outputSchema?: unknown },
+  ): Promise<CodexThreadEventsResult>;
 }
 
 export interface CodexClient {
@@ -111,7 +114,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
             });
 
         try {
-          const { events } = await thread.runStreamed(spec.prompt, { signal: abort.signal });
+          const { events } = await thread.runStreamed(spec.prompt, {
+            signal: abort.signal,
+            // Structured-output operator: constrain the final message to the
+            // decision-plan schema so the caller can parse + execute it.
+            ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
+          });
           for await (const event of events) {
             const occurredAt = new Date().toISOString();
             const { display, facts } = projectEnvelope("codex", event, occurredAt);

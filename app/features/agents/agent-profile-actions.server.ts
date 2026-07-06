@@ -19,7 +19,13 @@ import {
   effectiveProfileView,
   type AgentDeploymentDefinition,
 } from "./agents-query.server";
-import { CAP_MODAL_DEFAULTS, MODAL_CAP_IDS } from "./capability-catalog";
+import {
+  CAP_MODAL_DEFAULTS,
+  MODAL_CAP_IDS,
+  OPERATOR_CAP_DEFAULTS,
+  OPERATOR_CAP_IDS,
+  type CapMode,
+} from "./capability-catalog";
 
 /**
  * Agent-profile CRUD against project.md agent policy (phase-3 writers —
@@ -65,6 +71,8 @@ export const profileFormSchema = z.object({
   model: z.string().default(""),
   effort: z.string().default(""),
   caps: z.record(z.string(), modeSchema).default({}),
+  /** Operator only: default autonomy the run uses (supervised | full). */
+  autonomy: z.enum(["supervised", "full"]).optional(),
   resources: z
     .object({
       skills: z.array(z.string()).default([]),
@@ -125,18 +133,26 @@ function parseForm(raw: unknown): ProfileFormInput {
   return parsed.data;
 }
 
-/** Modal caps record → id-based grants (off = not granted). Only ids the
- * modal governs are accepted; anything else in the record is ignored. */
-function modalGrants(
-  caps: Record<string, "direct" | "recommend" | "human" | "off">,
+/** Caps record → id-based grants (off = not granted) against a defaults map
+ * (the specialist modal catalog OR the operator catalog). */
+function grantsFor(
+  caps: Record<string, CapMode>,
+  defaults: Readonly<Record<string, CapMode>>,
 ): { capabilityId: string; mode: CapabilityMode }[] {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
-  for (const [capabilityId, def] of Object.entries(CAP_MODAL_DEFAULTS)) {
+  for (const [capabilityId, def] of Object.entries(defaults)) {
     const mode = caps[capabilityId] ?? def;
     if (mode === "off") continue;
-    grants.push({ capabilityId, mode });
+    grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   return grants;
+}
+
+/** Specialist modal caps → grants. */
+function modalGrants(
+  caps: Record<string, CapMode>,
+): { capabilityId: string; mode: CapabilityMode }[] {
+  return grantsFor(caps, CAP_MODAL_DEFAULTS);
 }
 
 function slugifyProfileId(name: string): string {
@@ -245,39 +261,39 @@ export async function updateAgentProfile(
     const current = effectiveProfileView(deployment, ctx.dataRoot);
     const isOperator = current.kind === "operator";
 
-    // Grants: modal-governed ids from the form; everything OUTSIDE the
-    // modal catalog (operator coordination caps) is preserved untouched,
-    // as are display-only extras.
+    // Grants come from the form for the GOVERNED capability set of this kind
+    // (operator coordination caps vs specialist modal caps); everything outside
+    // that set is preserved untouched, as are display-only extras.
+    const governedIds = isOperator ? OPERATOR_CAP_IDS : MODAL_CAP_IDS;
+    const governedDefaults = isOperator ? OPERATOR_CAP_DEFAULTS : CAP_MODAL_DEFAULTS;
     const preserved = deployment.capabilities.filter(
-      (c) => !MODAL_CAP_IDS.has(c.capabilityId),
+      (c) => !governedIds.has(c.capabilityId),
     );
-    deployment.capabilities = [...modalGrants(form.caps), ...preserved];
+    deployment.capabilities = [...grantsFor(form.caps, governedDefaults), ...preserved];
 
-    // Full-definition override; kind/icon/scope stay, the operator keeps
-    // its model + spanAll (mock drops spanAll — deliberately fixed here,
-    // noted in the phase report).
+    // Full-definition override. Both kinds now store the picked backend + model
+    // + effort (the operator no longer keeps the "orchestration runtime"
+    // placeholder — it runs on a real backend/model). The operator additionally
+    // stores its default autonomy.
     const definition: AgentDeploymentDefinition = {
       kind: current.kind,
       name: form.name,
       role: form.role,
       icon: current.icon,
       backends: [form.backend],
-      // The operator keeps its own runtime label; specialists store the
-      // picked model + effort (falling back per-backend when omitted).
-      model: isOperator
-        ? current.model
-        : form.model.trim() || defaultModelFor(form.backend),
-      ...(isOperator
-        ? current.effort
-          ? { effort: current.effort }
-          : {}
-        : { effort: form.effort.trim() || defaultEffortFor(form.backend) }),
+      model: form.model.trim() || defaultModelFor(form.backend),
+      ...(form.effort.trim()
+        ? { effort: form.effort.trim() }
+        : isOperator
+          ? {}
+          : { effort: defaultEffortFor(form.backend) }),
       scope: current.scope,
       desc:
         form.definition.trim() ||
-        `${form.name} — a ${form.role.toLowerCase()} specialist.`,
+        (isOperator ? current.desc : `${form.name} — a ${form.role.toLowerCase()} specialist.`),
       stages: form.stages,
       spanAll: current.spanAll,
+      ...(isOperator ? { autonomy: form.autonomy ?? current.autonomy ?? "supervised" } : {}),
       resources: form.resources,
     };
     (deployment as Record<string, unknown>).definition = definition;

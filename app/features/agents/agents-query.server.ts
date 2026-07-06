@@ -37,6 +37,8 @@ export interface AgentDeploymentDefinition {
   desc?: string;
   stages?: string[];
   spanAll?: boolean;
+  /** Operator only: default autonomy (supervised | full). */
+  autonomy?: "supervised" | "full";
   resources?: { skills?: string[]; mcps?: string[]; kb?: string[] };
 }
 
@@ -71,6 +73,7 @@ export function parseDeploymentDefinition(
   const stages = stringArray(raw.stages);
   if (stages) def.stages = stages;
   if (typeof raw.spanAll === "boolean") def.spanAll = raw.spanAll;
+  if (raw.autonomy === "supervised" || raw.autonomy === "full") def.autonomy = raw.autonomy;
   if (isRecord(raw.resources)) {
     def.resources = {
       skills: stringArray(raw.resources.skills) ?? [],
@@ -176,6 +179,8 @@ export function effectiveProfileView(
     desc: def?.desc ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
+    // Operator only: default autonomy (supervised unless the deployment sets it).
+    autonomy: kind === "operator" ? (def?.autonomy ?? "supervised") : undefined,
     actions: capabilitiesToActionLabels(deployment.capabilities, deployment.extras),
     capabilities,
     extras,
