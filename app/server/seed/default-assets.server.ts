@@ -8,6 +8,7 @@ import path from "node:path";
 // writes them into the store's `skills/` + `agents/definitions/` on first run.
 import viberrSkillMd from "./assets/viberr-app-expertise.skill.md?raw";
 import operatorDefinitionMd from "./assets/operator.definition.md?raw";
+import operatorProfileMd from "./assets/operator.profile.md?raw";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 
@@ -30,6 +31,13 @@ const DEFAULT_ASSETS: { rel: string; content: string }[] = [
   {
     rel: path.join("agents", "definitions", "operator.md"),
     content: operatorDefinitionMd,
+  },
+  // The operator PROFILE template — so an operator deployment resolves (kind,
+  // backends, capabilities) in a store that was never demo-seeded, which is
+  // what makes the operator preinstalled everywhere.
+  {
+    rel: path.join("agents", "profiles", "operator.md"),
+    content: operatorProfileMd,
   },
 ];
 

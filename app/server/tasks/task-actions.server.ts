@@ -290,11 +290,50 @@ export async function createTask(
     details: { title, stage: stageId },
   });
 
+  // A dedicated operator coordinates every active task (ADR-002): auto-invoke
+  // it to pick up the new task. Fire-and-forget — it never blocks or fails the
+  // create, and it is a no-op when the project has no operator deployed.
+  void autoInvokeOperator(db, ctx, input.projectSlug, key);
+
   return {
     key,
     task: summaryOrThrow(db, input.projectSlug, key),
     stageName: stage.name,
   };
+}
+
+/**
+ * Auto-invoke the operator to start coordinating a freshly-created task under
+ * its deployed capability policy + autonomy (ADR-002 — one operator per active
+ * task). Best-effort and non-blocking:
+ *   - skipped when the project has no operator deployed (returns immediately,
+ *     so a project without an operator behaves exactly as before);
+ *   - a runtime failure is logged and never propagates to the create.
+ * Dynamically imported to avoid a module cycle (operator-run → operator-actions
+ * → task-actions).
+ */
+async function autoInvokeOperator(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const { resolveOperatorAuthority } = await import("./operator-actions.server");
+    const authority = resolveOperatorAuthority(ctx, projectSlug);
+    if (!authority.deployed) return; // no operator in this project — nothing to run
+    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    await runOperator(db, {
+      projectSlug,
+      taskKey,
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
+  } catch (error) {
+    logger.error("auto operator invocation on task create failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // ------------------------------------------------------------ appendComment

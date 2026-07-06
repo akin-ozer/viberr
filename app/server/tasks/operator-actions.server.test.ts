@@ -11,8 +11,12 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
+import {
+  configureRunServiceForTests,
+  listRunsForTask,
+} from "~/server/runtimes/run-service.server";
 import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { createTask } from "./task-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   gate,
@@ -247,6 +251,47 @@ describe("operatorAcceptCompletion", () => {
     // The deliberate override is audited distinctly.
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+});
+
+describe("auto-invoke on task creation", () => {
+  it("creating a task runs the operator, which picks it up", async () => {
+    deployRoster(DEFAULT_POLICY);
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Fresh task for the operator" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+
+    // The auto-invoke is fire-and-forget; poll until the operator run has both
+    // appeared AND finished (so its sink doesn't finalize after DB teardown).
+    const key = created.key;
+    let opDone = false;
+    for (let i = 0; i < 120 && !opDone; i++) {
+      const op = listRunsForTask(store.db, store.slug, key).find((r) => r.op);
+      opDone = !!op && op.lifecycle !== "running" && op.lifecycle !== "queued";
+      if (!opDone) await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(opDone).toBe(true); // an operator run streamed for the task and finished
+    // …and the operator assigned a primary specialist while coordinating it.
+    const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
+    expect(t.frontmatter.specialist).not.toBeNull();
+  });
+
+  it("is a no-op when no operator is deployed (project unchanged)", async () => {
+    // Default test store project has agents: [] — no operator deployed.
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "No operator here" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    await new Promise((r) => setTimeout(r, 60));
+    const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
+    expect(t.frontmatter.specialist).toBeNull();
+    expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
   });
 });
 

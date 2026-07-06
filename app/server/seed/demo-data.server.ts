@@ -295,6 +295,14 @@ export function defaultAgentDeployments(): AgentDeployment[] {
   return deployments();
 }
 
+/** Just the operator's deployment (profileId + its capability policy) — used to
+ *  backfill the operator into projects that predate it (ensureOperatorDeployed). */
+export function operatorDeployment(): AgentDeployment {
+  const op = deployments().find((d) => d.profileId === "operator");
+  if (!op) throw new Error("operator profile missing from SEED_AGENT_PROFILES");
+  return op;
+}
+
 function deployments(): AgentDeployment[] {
   return SEED_AGENT_PROFILES.map((p) => {
     const { capabilities, extras } = {

@@ -19,6 +19,7 @@ import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
 import { seedDefaultOperatorAssets } from "./seed/default-assets.server";
+import { ensureOperatorDeployed } from "./seed/ensure-operator.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -103,6 +104,18 @@ export function bootServer(): void {
     }
   } catch (error) {
     logger.error("boot rescan failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  // Preinstall the operator into every project that lacks it (ADR-002 — one
+  // operator per active task), so the create-time auto-invoke fires everywhere,
+  // including projects that predate the operator. Runs after the rescan (so the
+  // project list is populated) and before the watcher (no concurrent writer).
+  try {
+    ensureOperatorDeployed(db);
+  } catch (error) {
+    logger.error("operator backfill failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
