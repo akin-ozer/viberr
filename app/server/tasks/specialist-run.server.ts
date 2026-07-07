@@ -549,6 +549,18 @@ export async function startSpecialistRun(
     },
   });
 
+  // Every specialist run reports back: register the default reply hook so the
+  // agent posts its result as a comment even when started from the UI "Run"
+  // button. Richer callers (operator prompt / @mention) overwrite this.
+  const { registerAgentReply } = await import("./task-actions.server");
+  await registerAgentReply(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    runId,
+    backend,
+    role: sp.role,
+  });
+
   return { runId, backend, simulated, role: sp.role };
 }
 
@@ -678,6 +690,17 @@ export async function startReviewerRun(
       simulated,
       cloned: !!clone,
     },
+  });
+
+  // A reviewer reports back too: register the default reply hook so its verdict
+  // posts as a comment even when the run was started from the UI "Run" button.
+  const { registerAgentReply } = await import("./task-actions.server");
+  await registerAgentReply(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    runId,
+    backend,
+    role: rev.role,
   });
 
   return { runId, backend, simulated, role: rev.role };

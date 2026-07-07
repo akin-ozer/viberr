@@ -596,6 +596,29 @@ export async function commentToAgent(
     };
   }
 
+  // 3b. `@operator` → run the OPERATOR (a governed run), not a specialist. The
+  //     human's comment is already on the timeline (appended above), so the
+  //     operator reads it in its snapshot; it is also passed as the run's human
+  //     directive. The operator responds via its own comments during the run.
+  if (target.isOperator) {
+    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    const result = await runOperator(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      trigger: "manual",
+      humanComment: input.text.trim(),
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      actor: { userId: actor.userId, label: actor.label },
+    });
+    const logThreadId = resolveReplyLogThread(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      result.runId,
+    );
+    return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
+  }
+
   const commenterName = userName(db, actor.userId);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   const title = existing?.parsed.frontmatter.title ?? input.taskKey;
@@ -832,6 +855,48 @@ function postAgentReplyComment(
         err: error instanceof Error ? error : new Error(String(error)),
       });
     });
+}
+
+/**
+ * Register the DEFAULT completion hook for an agent run: when it finishes, post
+ * the agent's final text as an agent-authored reply comment. Every agent run
+ * (specialist or reviewer, however it was started — including the UI "Run"
+ * button) gets this, so an agent always reports back on the timeline.
+ *
+ * Registration is last-writer-wins per run id (run-service), so a richer caller
+ * (the operator prompt loop, or an @mention resume) may overwrite this with a
+ * callback that ALSO reacts/threads its own reply — no double post. Best-effort
+ * and non-blocking.
+ */
+export async function registerAgentReply(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    runId: string;
+    backend: RealBackend;
+    role: string;
+  },
+): Promise<void> {
+  const { registerRunCompletion } = await import(
+    "~/server/runtimes/run-service.server"
+  );
+  const { replyTextForRun } = await import("./agent-reply.server");
+  const actorRef: FileActorRef = {
+    kind: "agent",
+    backend: input.backend,
+    role: input.role,
+  };
+  registerRunCompletion(input.runId, (finished) => {
+    void postAgentReplyComment(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef,
+      replyText: replyTextForRun(db, finished.id),
+    });
+  });
 }
 
 // ------------------------------------------------------------ operatorPromptAgent

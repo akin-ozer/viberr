@@ -143,9 +143,35 @@ describe("resolveMentionedAgent", () => {
     expect(target).toMatchObject({ profileId: "dev", backend: "claude" });
   });
 
-  it("resolves the generic @agent / @operator to the primary specialist", () => {
-    expect(call("@agent status?")).toMatchObject({ profileId: "dev", backend: "claude" });
-    expect(call("@operator can you summarize")).toMatchObject({ profileId: "dev" });
+  it("resolves the generic @agent to the primary specialist", () => {
+    expect(call("@agent status?")).toMatchObject({ profileId: "dev", backend: "claude", isOperator: false });
+  });
+
+  it("resolves @operator to the OPERATOR (not the primary specialist) when one is deployed", () => {
+    // No operator deployed in the base setup → @operator resolves to nothing.
+    expect(call("@operator can you summarize")).toBeNull();
+
+    // Deploy an operator; now @operator targets the operator, NOT the dev.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [],
+          extras: [],
+          definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
+        },
+        ...file.parsed.frontmatter.agents,
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const target = call("@operator can you summarize");
+    expect(target).toMatchObject({ profileId: "operator", isOperator: true, isPrimary: false });
+    expect(target!.actorRef).toMatchObject({ kind: "operator" });
+    // A named @dev mention still resolves to the specialist, not the operator.
+    expect(call("@dev ping")).toMatchObject({ profileId: "dev", isOperator: false });
   });
 
   it("returns the identity with session: null when the agent has no prior run", () => {

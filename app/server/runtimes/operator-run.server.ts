@@ -67,6 +67,9 @@ export interface RunOperatorInput {
   trigger?: "create" | "transition" | "agent-reply" | "manual";
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
+  /** A human's `@operator …` comment to address in this run (when a person
+   *  talks to the operator directly). The operator reads it and responds. */
+  humanComment?: string;
   dataRoot?: string;
   actor?: AuditActor;
 }
@@ -184,6 +187,7 @@ async function startCodexOperatorRun(
     snapshot,
     input.trigger ?? "manual",
     input.dataRoot,
+    input.humanComment,
   );
 
   const { runId } = await startRun(db, {
@@ -348,7 +352,7 @@ async function startRealOperatorRun(
     taskKey: input.taskKey,
     authority,
   });
-  const prompt = buildOperatorTurnPrompt(snapshot, input.trigger ?? "manual");
+  const prompt = buildOperatorTurnPrompt(snapshot, input.trigger ?? "manual", input.humanComment);
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -474,6 +478,21 @@ async function runScriptedOperatorDrive(
       say(t.message);
       if (t.outcome === "done") await coordinate(); // full: performed → coordinate the new stage.
     };
+
+    // A human is talking to the operator directly (@operator) — acknowledge them
+    // first, then continue coordinating.
+    if (input.humanComment?.trim()) {
+      await operatorPostComment(
+        db,
+        ctx,
+        {
+          projectSlug,
+          taskKey,
+          text: `**Operator:** got your message — "${input.humanComment.trim()}". Reviewing ${taskKey} at “${snap.stageName}” and continuing to coordinate.`,
+        },
+        authority,
+      );
+    }
 
     if (isReact) {
       await operatorPostComment(
@@ -659,10 +678,12 @@ export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
   trigger: "create" | "transition" | "agent-reply" | "manual",
   dataRoot?: string,
+  humanComment?: string,
 ): string {
   const persona = buildOperatorSystemPrompt(authority, dataRoot);
-  const decision =
-    trigger === "agent-reply"
+  const decision = humanComment?.trim()
+    ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
+    : trigger === "agent-reply"
       ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
         "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
         "toward review if the implementation looks complete, or accept_completion if the review is clean. Only " +
@@ -700,11 +721,26 @@ export function buildCodexOperatorPrompt(
 export function buildOperatorTurnPrompt(
   snapshot: OperatorTaskSnapshot,
   trigger: "create" | "transition" | "agent-reply" | "manual",
+  humanComment?: string,
 ): string {
   const header =
     `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
     `Goal: ${snapshot.goal}\n\n` +
     `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+
+  // A human is talking to you directly (@operator). Answer them first, then take
+  // any coordination action that their message warrants.
+  if (humanComment?.trim()) {
+    return (
+      header +
+      `A human just addressed YOU directly with: "${humanComment.trim()}"\n\n` +
+      "Do this now:\n" +
+      "1. Call get_task to read the live state, your policy, and the allowed next stages.\n" +
+      "2. Post a `post_comment` that RESPONDS to the human's message — answer their question or acknowledge their instruction, grounded in the task's real state.\n" +
+      "3. If their message calls for a coordination action you're allowed to take (prompt an agent, engage a reviewer, recommend/perform a transition), do it and say so. If it does not, just respond.\n" +
+      "Respect your capability policy. Keep it concise and directly responsive."
+    );
+  }
 
   if (trigger === "agent-reply") {
     return (

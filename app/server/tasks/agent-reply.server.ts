@@ -13,6 +13,7 @@ import {
   listDeployedSpecialists,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
+import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -66,6 +67,9 @@ export interface MentionedAgent {
   /** True when this agent is the task's PRIMARY specialist (drives whether a
    *  fresh run engages it as primary vs. reviewer, and how its session matches). */
   isPrimary: boolean;
+  /** True when the mention targets the OPERATOR (not a specialist). The caller
+   *  routes this to a governed operator run, not a specialist/reviewer run. */
+  isOperator: boolean;
   /** The most-recent run row on this task that is THIS agent's OWN resumable
    *  session, or null when the agent has never run here as itself (→ the caller
    *  starts a FRESH run). Matched by agent identity, never merely by backend. */
@@ -143,8 +147,9 @@ function latestSessionRun(
  * the task, returns the identity with `session: null` (fresh-run fallback).
  *
  * Resolution precedence (first hit wins):
- *   1. `@agent` / `@operator` → the task's PRIMARY specialist (frontmatter).
- *   2. a deployed specialist by name / profile id / backend.
+ *   1. `@operator` → the OPERATOR (a governed operator run, not a specialist).
+ *   2. `@agent`    → the task's PRIMARY specialist (frontmatter).
+ *   3. a deployed specialist by name / profile id / backend.
  */
 export function resolveMentionedAgent(
   db: Database.Database,
@@ -166,11 +171,30 @@ export function resolveMentionedAgent(
   });
   const primaryRef = existing?.parsed.frontmatter.specialist ?? null;
 
-  // 1. Generic `@agent` / `@operator` → the primary specialist on the task.
-  if (
-    (handleSet.has("agent") || handleSet.has("operator")) &&
-    primaryRef
-  ) {
+  // 1. `@operator` → the OPERATOR itself (never the primary specialist). Only
+  //    resolves when an operator is actually deployed on the project; the caller
+  //    routes this target to a governed operator run.
+  if (handleSet.has("operator")) {
+    const authority = resolveOperatorAuthority(ctx, projectSlug);
+    if (authority.deployed) {
+      return {
+        profileId: "operator",
+        name: authority.name,
+        role: "coordinator",
+        backend: authority.backend,
+        model: authority.model,
+        effort: authority.effort,
+        actorRef: { kind: "operator" },
+        isPrimary: false,
+        isOperator: true,
+        session: null,
+      };
+    }
+    // No operator deployed — fall through (a bare `@operator` matches nothing).
+  }
+
+  // 2. Generic `@agent` → the primary specialist on the task.
+  if (handleSet.has("agent") && primaryRef) {
     const sp =
       specialists.find((s) => s.id === primaryRef.profileId) ?? null;
     const backend: RealBackend =
@@ -185,6 +209,7 @@ export function resolveMentionedAgent(
       effort: sp?.effort ?? "",
       actorRef: agentActorRef(backend, role),
       isPrimary: true,
+      isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: primaryRef.profileId,
         backend,
@@ -193,7 +218,7 @@ export function resolveMentionedAgent(
     };
   }
 
-  // 2. A deployed specialist by name / id / backend.
+  // 3. A deployed specialist by name / id / backend.
   const matched = specialists.find((s) => handleMatchesSpecialist(handleSet, s));
   if (matched) {
     const isPrimary = primaryRef?.profileId === matched.id;
@@ -206,6 +231,7 @@ export function resolveMentionedAgent(
       effort: matched.effort,
       actorRef: agentActorRef(matched.backend, matched.role),
       isPrimary,
+      isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
         backend: matched.backend,
@@ -229,6 +255,7 @@ export function resolveMentionedAgent(
         effort: "",
         actorRef: agentActorRef(backend, primaryRef.role),
         isPrimary: true,
+        isOperator: false,
         session: latestSessionRun(db, projectSlug, taskKey, {
           profileId: primaryRef.profileId,
           backend,

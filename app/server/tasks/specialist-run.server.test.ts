@@ -399,4 +399,34 @@ describe("startReviewerRun", () => {
       listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]?.taskKey,
     ).toBe("VIB-1");
   });
+
+  it("posts the reviewer's reply as a comment when the run finishes (Run-button path)", async () => {
+    await engage();
+    const result = await startReviewerRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Let it stream, then finish it — the default reply hook (registered by
+    // startReviewerRun itself, not an operator/@mention) posts the reviewer's
+    // reply as an agent-authored comment. This is the "reviewer didn't comment
+    // after a run" fix: the UI "Run" button path now reports back.
+    await waitForLines(result.runId, 2);
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda),
+    );
+    let replied = false;
+    for (let i = 0; i < 120 && !replied; i++) {
+      const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+      replied = !!file?.parsed.timeline.some(
+        (e) => e.type === "comment" && e.actor.kind === "agent",
+      );
+      if (!replied) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(replied).toBe(true);
+  });
 });
