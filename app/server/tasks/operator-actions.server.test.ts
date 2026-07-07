@@ -473,7 +473,7 @@ describe("auto-invoke on stage transition", () => {
 });
 
 describe("operatorAcceptCompletion", () => {
-  it("supervised opens a completion packet for a human (never moves to Done)", async () => {
+  it("supervised posts an actionable accept-completion → Done recommendation (never moves to Done)", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
     const r = await operatorAcceptCompletion(
@@ -484,7 +484,15 @@ describe("operatorAcceptCompletion", () => {
     );
     expect(r.outcome).toBe("recommended");
     expect(task().frontmatter.stage).toBe("review");
-    expect(task().packet?.options.some((o) => o.kind === "accept_completion")).toBe(true);
+    // The review→done boundary now surfaces as a clear, actionable recommendation
+    // card (symmetric with the other stage transitions), not a completion packet.
+    const rec = task().frontmatter.recommendations.find(
+      (x) => x.kind === "accept_completion",
+    );
+    expect(rec).toBeDefined();
+    expect(rec?.toStageId).toBe("done");
+    expect(rec?.label.toLowerCase()).toContain("done");
+    expect(task().frontmatter.waiting).toBe("human");
   });
 
   it("full autonomy accepts completion and moves the task to Done", async () => {
@@ -559,6 +567,32 @@ describe("applyRecommendation / dismissRecommendation", () => {
     );
     expect(task().frontmatter.stage).toBe("ready");
     expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(false);
+  });
+
+  it("applying an accept-completion recommendation moves the task to Done", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    // Supervised operator recommends acceptance (adds an accept_completion card).
+    await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    const rec = task().frontmatter.recommendations.find(
+      (r) => r.kind === "accept_completion",
+    )!;
+    expect(rec).toBeDefined();
+    // A maintainer applies it → the task is accepted into Done.
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: rec.id },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.stage).toBe("done");
+    expect(task().frontmatter.waiting).toBe("none");
+    expect(task().frontmatter.recommendations).toHaveLength(0);
   });
 
   it("dismissing a recommendation clears it without acting", async () => {

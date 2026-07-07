@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
@@ -17,7 +17,12 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import { taskDir } from "~/server/files/file-store-root.server";
+import {
+  agentProfilesDir,
+  skillDirPath,
+  taskDir,
+} from "~/server/files/file-store-root.server";
+import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -87,6 +92,8 @@ export interface ResolvedSpecialist {
   model: string;
   /** Reasoning/effort level threaded into the run (empty when unset). */
   effort: string;
+  /** The agent's declared skills — loaded into its run persona at run time. */
+  skills: string[];
 }
 
 /** First runnable backend for a profile (codex|claude), defaulting to claude
@@ -106,6 +113,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     model:
       view.model || (defaultModelFor(backend)),
     effort: view.effort || "",
+    skills: view.resources.skills,
   };
 }
 
@@ -451,14 +459,26 @@ export async function startSpecialistRun(
   // The agent's display name for the Agent-logs picker (grouped one-per-agent).
   // Falls back to the profile id when the deployment can't be resolved.
   let agentName = sp.profileId;
+  let skills: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
     model = resolved.model;
     effort = resolved.effort;
     agentName = resolved.name;
+    skills = resolved.skills;
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
+
+  // The agent's run persona: its detailed definition + declared skills. This is
+  // what makes the specialist behave as itself (the Developer implements + tests
+  // + reports back) rather than a generic analyzer. Claude takes it as a system
+  // prompt; Codex has no system-prompt channel, so it is folded into the prompt.
+  const persona = buildSpecialistPersona({
+    profileId: sp.profileId,
+    skills,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
@@ -478,7 +498,7 @@ export async function startSpecialistRun(
         })
       : null;
 
-  const prompt = buildAnalyzePrompt({
+  const analyzePrompt = buildAnalyzePrompt({
     role: sp.role,
     taskKey: input.taskKey,
     title,
@@ -487,12 +507,14 @@ export async function startSpecialistRun(
     cloned: !!clone,
     ...(input.directive ? { directive: input.directive } : {}),
   });
+  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt);
 
   const script = buildAnalyzeScript({
     backend,
     model,
     repo,
     cloned: !!clone,
+    role: sp.role,
     ...(input.directive ? { directive: input.directive } : {}),
   });
 
@@ -509,6 +531,7 @@ export async function startSpecialistRun(
     backend,
     model,
     ...(effort ? { effort } : {}),
+    ...(persona && backend === "claude" ? { systemPrompt: persona } : {}),
     // Persist the agent identity so the Agent-logs picker groups this run's
     // resumes into one entry labeled by the specialist's name (e.g. "dev").
     agentName,
@@ -602,14 +625,22 @@ export async function startReviewerRun(
   let model = defaultModelFor(backend);
   let effort = "";
   let agentName = rev.profileId;
+  let skills: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
     model = resolved.model;
     effort = resolved.effort;
     agentName = resolved.name;
+    skills = resolved.skills;
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
   }
+
+  const persona = buildSpecialistPersona({
+    profileId: rev.profileId,
+    skills,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
@@ -625,7 +656,7 @@ export async function startReviewerRun(
         })
       : null;
 
-  const prompt = buildAnalyzePrompt({
+  const analyzePrompt = buildAnalyzePrompt({
     role: rev.role,
     taskKey: input.taskKey,
     title,
@@ -634,12 +665,14 @@ export async function startReviewerRun(
     cloned: !!clone,
     ...(input.directive ? { directive: input.directive } : {}),
   });
+  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt);
 
   const script = buildAnalyzeScript({
     backend,
     model,
     repo,
     cloned: !!clone,
+    role: rev.role,
     ...(input.directive ? { directive: input.directive } : {}),
   });
 
@@ -654,6 +687,7 @@ export async function startReviewerRun(
     backend,
     model,
     ...(effort ? { effort } : {}),
+    ...(persona && backend === "claude" ? { systemPrompt: persona } : {}),
     agentName,
     agentProfileId: rev.profileId,
     prompt,
@@ -706,6 +740,83 @@ export async function startReviewerRun(
   return { runId, backend, simulated, role: rev.role };
 }
 
+// ----------------------------------------------------------------- persona
+
+/** Read the shipped agent DEFINITION body (persona) for a profile, or "" when
+ *  the store ships none. Definitions live next to the profiles in the store. */
+function readAgentDefinition(profileId: string, dataRoot?: string): string {
+  try {
+    const file = path.join(
+      agentProfilesDir(dataRoot),
+      "..",
+      "definitions",
+      `${profileId}.md`,
+    );
+    if (existsSync(file)) {
+      const { body } = splitFrontmatter(readFileSync(file, "utf8"));
+      return body.trim();
+    }
+  } catch {
+    // missing/unreadable definition — the run falls back to the analyze prompt
+  }
+  return "";
+}
+
+/** Read one skill's body from the store, or "" when absent. */
+function readSkillBody(name: string, dataRoot?: string): string {
+  try {
+    const file = path.join(skillDirPath(name, dataRoot), "SKILL.md");
+    if (existsSync(file)) {
+      const { body } = splitFrontmatter(readFileSync(file, "utf8"));
+      return body.trim();
+    }
+  } catch {
+    // missing/unreadable skill — skip it
+  }
+  return "";
+}
+
+/**
+ * Assemble a specialist's run PERSONA: its detailed definition (who it is + how
+ * it works) followed by each of its declared skill bodies (its craft). This is
+ * what makes a built-in agent behave as itself — the Developer implements and
+ * reports back, the Reviewer critiques, the Tester validates — rather than a
+ * generic "analyze the repo" agent. Returns "" when the store ships neither a
+ * definition nor any skill (the run still works on the analyze prompt alone).
+ *
+ * Threaded into the run as the system prompt for Claude, or folded into the turn
+ * prompt for Codex (which has no system-prompt channel). Exported for tests.
+ */
+export function buildSpecialistPersona(input: {
+  profileId: string;
+  skills: string[];
+  dataRoot?: string;
+}): string {
+  const parts: string[] = [];
+  const definition = readAgentDefinition(input.profileId, input.dataRoot);
+  if (definition) parts.push(definition);
+  for (const name of input.skills) {
+    const body = readSkillBody(name, input.dataRoot);
+    if (body) parts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
+  }
+  return parts.join("");
+}
+
+/**
+ * Fold the persona into the turn prompt for Codex (which has no system-prompt
+ * channel), or leave the prompt as-is for Claude (which receives the persona as
+ * a system prompt) and when there is no persona. Keeps both run paths honest:
+ * the agent always gets its persona, wherever the backend can accept it.
+ */
+function foldPersonaForCodex(
+  persona: string,
+  backend: RealBackend,
+  prompt: string,
+): string {
+  if (!persona || backend !== "codex") return prompt;
+  return `${persona}\n\n---\n# Your task\n\n${prompt}`;
+}
+
 // ----------------------------------------------------------------- prompt/script
 
 function buildAnalyzePrompt(input: {
@@ -734,23 +845,61 @@ function buildAnalyzePrompt(input: {
   return prompt;
 }
 
+/** Classify a specialist by its role label so the simulated report and persona
+ *  match what the agent actually does (developer implements, reviewer critiques,
+ *  tester validates). Anything unrecognized reports as a developer. */
+function classifyRole(role?: string): "developer" | "reviewer" | "tester" {
+  const r = (role ?? "").toLowerCase();
+  if (/review/.test(r)) return "reviewer";
+  if (/test|valid|qa/.test(r)) return "tester";
+  return "developer";
+}
+
 /**
- * The simulated agent's CLOSING report. When the operator engaged the agent with
- * a directive, this reports the work as DONE — otherwise the operator, reading
- * only a "findings" summary, keeps re-prompting the same canned reply and
- * spirals (the CTL-3 bug). The completion text is deterministic on purpose: if
- * the operator ever re-prompts a simulated agent, the identical repeat trips the
- * operator's no-progress guard and stops the loop instead of spiralling.
- * Exported for tests.
+ * The simulated agent's CLOSING report — ROLE-AWARE, so the operator reads a
+ * report that matches the agent it prompted: the Developer reports what it
+ * implemented, the Reviewer reports a review verdict, the Tester reports a
+ * validation verdict. When the operator engaged the agent with a directive this
+ * reports the work as DONE (otherwise the operator, reading only a "findings"
+ * summary, keeps re-prompting the same canned reply and spirals — the CTL-3
+ * bug). The text is deterministic on purpose: if the operator ever re-prompts a
+ * simulated agent, the identical repeat trips its no-progress guard and stops
+ * the loop instead of spiralling. Exported for tests.
  */
-export function simulatedFinalReport(backend: RealBackend, directive?: string): string {
+export function simulatedFinalReport(
+  backend: RealBackend,
+  directive?: string,
+  role?: string,
+): string {
+  const kind = classifyRole(role);
   if (directive?.trim()) {
+    if (kind === "reviewer") {
+      return (
+        `@operator — reviewed the change against the goal. Correctness: the logic ` +
+        `holds on the paths that matter. Security: input is validated and no ` +
+        `secrets leak. Tests: the new behavior is covered. No blocking findings ` +
+        `(one nit: a comment could be clearer). Verdict: **approve** — ready to accept.`
+      );
+    }
+    if (kind === "tester") {
+      return (
+        `@operator — validated the change. Exercised the happy path plus empty, ` +
+        `boundary, and error-path cases, and added a test for the empty-input case ` +
+        `that was previously uncovered. Full suite passes. Verdict: **pass** — no blockers.`
+      );
+    }
     const test = backend === "codex" ? "a test that exercises" : "a test covering";
     return (
-      `Done — implemented what the operator asked for, wired into the existing ` +
+      `@operator — done: implemented what you asked for, wired into the existing ` +
       `structure (matching the conventions under src/), and added ${test} the new ` +
       `behavior. Ran the suite and it passes. No blockers remaining — ready to advance.`
     );
+  }
+  if (kind === "reviewer") {
+    return "Review findings: the change is small and localized; no obvious correctness or security issues in the diff, and the existing tests still pass. Before acceptance I'd want a test that exercises the new path.";
+  }
+  if (kind === "tester") {
+    return "Validation findings: the existing suite passes, but coverage of the new path is thin — the empty and boundary cases are not exercised yet, which is the main gap for this goal.";
   }
   return backend === "codex"
     ? "Findings: a small Node/TypeScript service (Express). Entry at src/index.ts, HTTP layer under src/server. Dependencies are lean; no test suite is wired yet — the main gap for this goal."
@@ -767,6 +916,8 @@ function buildAnalyzeScript(input: {
   model: string;
   repo: string | null;
   cloned: boolean;
+  /** The agent's role — makes the simulated closing report role-appropriate. */
+  role?: string;
   /** When the operator engaged this agent, its directive (shown as the opener). */
   directive?: string;
 }): SimulatedScript {
@@ -777,8 +928,8 @@ function buildAnalyzeScript(input: {
   const opener = directive
     ? `The operator asked me to: ${directive} On it — scanning the repository first.`
     : "Scanning the repository layout to understand its structure.";
-  const finalCodex = simulatedFinalReport("codex", directive);
-  const finalClaude = simulatedFinalReport("claude", directive);
+  const finalCodex = simulatedFinalReport("codex", directive, input.role);
+  const finalClaude = simulatedFinalReport("claude", directive, input.role);
 
   const lines: LogLine[] =
     input.backend === "codex"

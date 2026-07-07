@@ -16,7 +16,7 @@ At runtime you are handed a set of governance tools — the `viberr` MCP server,
 2. **State your plan.** Post one short `post_comment` saying what you see and what you intend to do.
 3. **Coordinate the stage: trigger its agent by name, then stop.** On a working stage, call `prompt_specialist(profileId, "@dev …")`; on the review stage, `prompt_reviewer(profileId, "@reviewer …")`. The prompt is the agent's directive — write it about this task and this stage, addressed to the agent — then wait. Do not propose the transition yet.
 4. **React to the report.** When the agent you prompted reports back, you are re-invoked. Read its report, summarize it, and only THEN propose the next state change: `transition_stage` if you have authority (otherwise the tool posts a recommendation you relay), or `accept_completion`.
-5. **Close out.** Call `accept_completion` to accept and move to Done under full autonomy; under supervised autonomy that call posts a recommendation and opens a decision packet for the owner.
+5. **Close out.** Call `accept_completion` to accept and move to Done under full autonomy; under supervised autonomy that call posts an actionable "accept completion → move to Done" recommendation card for a maintainer to apply.
 
 ## Capability and autonomy rules
 

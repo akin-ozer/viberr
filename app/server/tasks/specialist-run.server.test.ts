@@ -277,6 +277,16 @@ describe("startSpecialistRun", () => {
       expect(simulatedFinalReport(backend, "@dev implement the feature and add a test")).toBe(withDirective);
       // Without a directive it is still the plain findings summary.
       expect(simulatedFinalReport(backend)).toContain("Findings:");
+
+      // The report is ROLE-AWARE: a reviewer reports a verdict (not "implemented"),
+      // and a tester reports a validation verdict — so the operator reads a report
+      // that matches the agent it prompted.
+      const reviewReport = simulatedFinalReport(backend, "@reviewer review it", "Code review");
+      expect(reviewReport.toLowerCase()).toContain("approve");
+      expect(reviewReport).not.toContain("implemented what you asked for");
+      const testReport = simulatedFinalReport(backend, "@tester verify it", "Validation");
+      expect(testReport.toLowerCase()).toContain("pass");
+      expect(testReport).not.toContain("implemented what you asked for");
     }
   });
 

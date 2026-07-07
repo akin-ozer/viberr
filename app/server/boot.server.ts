@@ -18,8 +18,8 @@ import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
-import { seedDefaultOperatorAssets } from "./seed/default-assets.server";
-import { ensureOperatorDeployed } from "./seed/ensure-operator.server";
+import { seedDefaultAgentAssets } from "./seed/default-assets.server";
+import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -74,10 +74,11 @@ export function bootServer(): void {
 
   const env = getEnv();
   ensureDataRootDirs();
-  // Ship the default operator assets (viberr-app-expertise skill + operator
-  // definition) into the store when a store lacks them — before anything reads
-  // them. Idempotent and best-effort (never blocks boot).
-  seedDefaultOperatorAssets();
+  // Ship the default agent assets (each agent's expertise skill + its detailed
+  // definition + the base profile templates) into the store when a store lacks
+  // them — before anything reads them. Idempotent and best-effort (never blocks
+  // boot).
+  seedDefaultAgentAssets();
   const db = getDb();
 
   seedInitialAdmin(db, {
@@ -108,14 +109,16 @@ export function bootServer(): void {
     });
   }
 
-  // Preinstall the operator into every project that lacks it (ADR-002 — one
-  // operator per active task), so the create-time auto-invoke fires everywhere,
-  // including projects that predate the operator. Runs after the rescan (so the
-  // project list is populated) and before the watcher (no concurrent writer).
+  // Preinstall the built-in agents — the operator (ADR-002, one per active task,
+  // so the create-time auto-invoke fires everywhere) plus the base specialists
+  // (Developer, Reviewer, Tester) — into every project that lacks any of them,
+  // so they are usable across all boards, including projects that predate them.
+  // Runs after the rescan (so the project list is populated) and before the
+  // watcher (no concurrent writer).
   try {
-    ensureOperatorDeployed(db);
+    ensureBaseAgentsDeployed(db);
   } catch (error) {
-    logger.error("operator backfill failed", {
+    logger.error("built-in agent backfill failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }

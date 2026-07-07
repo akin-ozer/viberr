@@ -12,7 +12,7 @@ import { Pill } from "~/ui/pill";
 
 export interface RecommendationView {
   id: string;
-  kind: "assign_specialist" | "assign_reviewer" | "transition";
+  kind: "assign_specialist" | "assign_reviewer" | "transition" | "accept_completion";
   profileId?: string;
   toStageId?: string;
   label: string;
@@ -23,12 +23,14 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
   assign_specialist: "branch",
   assign_reviewer: "check",
   transition: "board",
+  accept_completion: "check",
 };
 
 const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   assign_specialist: "Primary specialist",
   assign_reviewer: "Reviewer",
   transition: "Stage",
+  accept_completion: "Completion",
 };
 
 export function OperatorRecommendations({

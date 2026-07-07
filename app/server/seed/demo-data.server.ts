@@ -209,7 +209,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       scope: "Global base · customized for Viberr Core",
       stages: ["ready", "impl"],
       resources: {
-        skills: ["repo-write", "test-runner", "lint-autofix"],
+        skills: ["developer-expertise"],
         mcps: ["github", "filesystem"],
         kb: ["Viberr Core architecture", "Coding standards"],
       },
@@ -228,7 +228,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       scope: "Global base · customized for Viberr Core",
       stages: ["review"],
       resources: {
-        skills: ["diff-review", "security-scan"],
+        skills: ["reviewer-expertise"],
         mcps: ["github"],
         kb: ["Review checklist", "Security guidelines"],
       },
@@ -248,7 +248,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       scope: "Global base · default settings",
       stages: ["impl", "review"],
       resources: {
-        skills: ["test-author", "coverage-report"],
+        skills: ["tester-expertise"],
         mcps: ["github", "filesystem"],
         kb: ["Test strategy"],
       },
@@ -298,11 +298,29 @@ export function defaultAgentDeployments(): AgentDeployment[] {
 }
 
 /** Just the operator's deployment (profileId + its capability policy) — used to
- *  backfill the operator into projects that predate it (ensureOperatorDeployed). */
+ *  backfill the operator into projects that predate it (ensureBaseAgentsDeployed). */
 export function operatorDeployment(): AgentDeployment {
   const op = deployments().find((d) => d.profileId === "operator");
   if (!op) throw new Error("operator profile missing from SEED_AGENT_PROFILES");
   return op;
+}
+
+/** Profile ids of the built-in agents preinstalled on EVERY board: the operator
+ *  plus the base specialists a task actually needs (Developer, Reviewer, Tester).
+ *  The Advisor is offered to new projects (defaultAgentDeployments) but not
+ *  force-backfilled, so it never appears on a board that never wanted it. */
+export const BASE_AGENT_PROFILE_IDS = [
+  "operator",
+  "developer",
+  "reviewer",
+  "tester",
+] as const;
+
+/** The built-in agent deployments backfilled into every project so the operator
+ *  and its core specialists are usable across all boards (ensureBaseAgentsDeployed). */
+export function baseAgentDeployments(): AgentDeployment[] {
+  const wanted = new Set<string>(BASE_AGENT_PROFILE_IDS);
+  return deployments().filter((d) => wanted.has(d.profileId));
 }
 
 function deployments(): AgentDeployment[] {

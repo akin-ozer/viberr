@@ -4,7 +4,6 @@ import type {
   Recommendation,
   RecommendationKind,
   TaskFileEvent,
-  TaskPacket,
 } from "~/schemas/task-file.schema";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -840,24 +839,25 @@ export async function operatorAcceptCompletion(
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
-  // Supervised (or without the completion capability) → recommend only: open a
-  // completion packet for a human to accept (never move to Done ourselves).
+  // Supervised (or without the completion capability) → recommend only: post an
+  // actionable "accept completion → Done" recommendation card (symmetric with the
+  // other stage-transition cards, so the review→done boundary gets the same clear
+  // one-click prompt as impl→review) — never move to Done ourselves. A
+  // maintainer applies it to accept completion into Done.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
-    const packet = completionPacket(input.taskKey);
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.packet = packet;
-      parsed.frontmatter.waiting = "human";
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "completion",
-        actor: { kind: "operator" },
-        title: "Completion report",
-        text: "**Recommended:** accept completion. Opening a completion packet for human acceptance.",
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reproject(db, ctx, input.projectSlug, input.taskKey);
+    const doneName = stageNameOf(db, ctx, input.projectSlug, doneStageId);
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      {
+        kind: "accept_completion",
+        toStageId: doneStageId,
+        label: `Accept completion — move ${input.taskKey} to ${doneName}`,
+      },
+      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and marks the review PR merged (human acceptance).`,
+    );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
       actor: OPERATOR_AUDIT_ACTOR,
@@ -865,9 +865,12 @@ export async function operatorAcceptCompletion(
       subjectId: input.taskKey,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: {},
+      details: { toStage: doneStageId },
     });
-    return { outcome: "recommended", message: "Opened a completion packet for human acceptance." };
+    return {
+      outcome: "recommended",
+      message: `Recommended accepting completion — move ${input.taskKey} to ${doneName}.`,
+    };
   }
 
   // FULL autonomy: the operator accepts completion and moves the task to Done.
@@ -900,32 +903,4 @@ export async function operatorAcceptCompletion(
     details: { autonomy: "full", toStage: doneStageId },
   });
   return { outcome: "done", message: `Accepted completion — ${input.taskKey} moved to Done.` };
-}
-
-/** A minimal, schema-valid completion packet for human acceptance. */
-function completionPacket(taskKey: string): TaskPacket {
-  return {
-    type: "input",
-    kind: "Completion report",
-    from: "operator",
-    title: `${taskKey} ready for acceptance`,
-    body: "The operator drove the task to the review boundary and recommends acceptance.",
-    observations: [],
-    options: [
-      {
-        kind: "accept_completion",
-        t: "Accept completion",
-        d: "Move the task to Done and mark the review PR merged.",
-        rec: true,
-        accept: true,
-        ev: "Human acceptance recorded. Task transitioned to **Done**.",
-      },
-      {
-        kind: "request_edit",
-        t: "Request changes",
-        d: "Send the task back to the specialist for edits.",
-        rec: false,
-      },
-    ],
-  };
 }

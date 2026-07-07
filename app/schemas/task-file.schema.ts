@@ -91,6 +91,11 @@ export const RECOMMENDATION_KINDS = [
   "assign_specialist",
   "assign_reviewer",
   "transition",
+  // A clean review → the operator recommends accepting completion, which moves
+  // the task to Done (the review→done boundary). Rendered as an actionable card
+  // symmetric with the other stage transitions; applying it (admin|maintainer)
+  // accepts completion into Done.
+  "accept_completion",
 ] as const;
 export type RecommendationKind = (typeof RECOMMENDATION_KINDS)[number];
 

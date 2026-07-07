@@ -1626,6 +1626,72 @@ export async function resolvePacket(
  * enforced by the underlying mutation (admin|maintainer). Idempotent — an
  * already-resolved recommendation id is a friendly 409.
  */
+/**
+ * Human acceptance of the review→done boundary: move the task to Done, mark the
+ * review PR merged, clear any open packet, and record a `completion` event. RBAC:
+ * admin|maintainer (acceptance authority — the always-human Done invariant). This
+ * is the shared acceptance used by both the acceptance packet and the operator's
+ * `accept_completion` recommendation card, so both paths reach Done identically.
+ */
+async function acceptCompletion(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<void> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(
+    project,
+    actor,
+    ["admin", "maintainer"],
+    "accept completion into Done",
+  );
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  const doneStageId =
+    project.stages.find((s) => s.id === "done")?.id ??
+    project.stages[project.stages.length - 1]?.id ??
+    "done";
+
+  if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
+
+  const event: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "completion",
+    actor: humanActorRef(db, actor),
+    title: "Completion accepted",
+    text: `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR approved for merge.`,
+    toAgent: false,
+    evidence: null,
+  };
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.stage = doneStageId;
+    parsed.frontmatter.readiness = "ready";
+    parsed.frontmatter.waiting = "none";
+    if (parsed.frontmatter.pr) {
+      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "merged" };
+    }
+    // A Done task carries no pending transition/acceptance recommendations.
+    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
+      (r) => r.kind !== "transition" && r.kind !== "accept_completion",
+    );
+    parsed.packet = null;
+    parsed.timeline.unshift(event);
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: "task.transition",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { to: doneStageId, boundary: "human", via: "accept_completion" },
+  });
+}
+
 export async function applyRecommendation(
   db: Database.Database,
   input: { projectSlug: string; taskKey: string; recId: string },
@@ -1660,6 +1726,16 @@ export async function applyRecommendation(
     await transitionStage(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: rec.toStageId },
+      actor,
+      ctx,
+    );
+  } else if (rec.kind === "accept_completion") {
+    // The operator's "accept completion → Done" recommendation. Applying it is
+    // the human acceptance of the review→done boundary: same semantics as
+    // resolving an acceptance packet (Done, PR merged, completion event).
+    await acceptCompletion(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
       actor,
       ctx,
     );

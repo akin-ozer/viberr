@@ -247,7 +247,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "accept_completion",
-        "Accept the task's completion. Under FULL autonomy this moves the task to Done and marks the review PR merged. Under supervised autonomy it opens a completion packet for a human to accept. Only call this once the work has reached the review boundary.",
+        "Accept the task's completion. Under FULL autonomy this moves the task to Done and marks the review PR merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply. Only call this once the work has reached the review boundary and the review is clean.",
         {},
         async () =>
           resultText(await operatorAcceptCompletion(db, ctx, base, authority)),
