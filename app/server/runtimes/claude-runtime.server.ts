@@ -102,6 +102,28 @@ async function realQuery(): Promise<ClaudeQueryFn> {
   return cachedQuery;
 }
 
+/**
+ * Per-step usage from a Claude `assistant` message (`message.message.usage`), or
+ * null when the message is not an assistant message or carries no usage. Used to
+ * grow the live token counter during a run (the final `result` envelope supplies
+ * the authoritative totals).
+ */
+function assistantUsage(
+  message: unknown,
+): { input_tokens: number; output_tokens: number; cached_input_tokens: number } | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as { type?: unknown; message?: { usage?: Record<string, unknown> } };
+  if (m.type !== "assistant") return null;
+  const u = m.message?.usage;
+  if (!u || typeof u !== "object") return null;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const inTok = n(u.input_tokens);
+  const outTok = n(u.output_tokens);
+  const cached = n(u.cache_read_input_tokens);
+  if (inTok === 0 && outTok === 0 && cached === 0) return null;
+  return { input_tokens: inTok, output_tokens: outTok, cached_input_tokens: cached };
+}
+
 export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapter {
   return {
     backend: "claude",
@@ -151,6 +173,17 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
         queryHandle = q;
 
+        // Live usage accumulation so the run row GROWS during streaming instead
+        // of staying 0 until the final result. Claude assistant messages carry
+        // per-step usage (input = the growing context size, output = tokens for
+        // that step); we surface a cumulative view — max input, summed output,
+        // and a per-message turn count — which the sink folds and the result
+        // envelope then overwrites with the authoritative totals.
+        let liveTurns = 0;
+        let liveOut = 0;
+        let liveIn = 0;
+        let liveCached = 0;
+
         try {
           for await (const message of q) {
             const occurredAt = new Date().toISOString();
@@ -159,6 +192,20 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             if (facts.isResult) {
               sawResult = true;
               resultIsError = !!facts.isError;
+            } else {
+              const u = assistantUsage(message);
+              if (u) {
+                liveTurns += 1;
+                liveOut += u.output_tokens;
+                liveIn = Math.max(liveIn, u.input_tokens);
+                liveCached = Math.max(liveCached, u.cached_input_tokens);
+                facts.usage = {
+                  input_tokens: liveIn,
+                  cached_input_tokens: liveCached,
+                  output_tokens: liveOut,
+                };
+                facts.turns = liveTurns;
+              }
             }
             cb.onLine({ raw: JSON.stringify(message), display, facts, occurredAt });
           }

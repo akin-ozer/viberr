@@ -92,6 +92,31 @@ export function startSimulated(
   let i = 0;
   let interruptedByUser: string | null = null;
 
+  // The run's FINAL usage lives on the last (result) line. Precompute it so the
+  // live counter can GROW toward it across the preceding lines instead of
+  // staying 0 until the result lands. Presentational only — it converges to the
+  // same real total the result envelope reports (no numbers invented from thin
+  // air, just the known total spread over the timeline).
+  const target = (() => {
+    const last = s.lines[s.lines.length - 1];
+    if (!last) return null;
+    try {
+      const raw = rawLineFromDisplay(
+        { backend: s.backend, sid: s.sessionId, model: s.model, op: s.op },
+        last,
+        s.lines.length - 1,
+        s.lines,
+      );
+      const f = projectEnvelope(s.backend, JSON.parse(raw), "").facts;
+      if (!f.usage) return null;
+      return { usage: f.usage, turns: typeof f.turns === "number" ? f.turns : 0 };
+    } catch {
+      return null;
+    }
+  })();
+  const contentCount = Math.max(1, s.lines.length - 1);
+  let contentSeen = 0;
+
   const emit = (line: LogLine, idx: number, occurredAt: string) => {
     // Fabricate the wire envelope, then RE-PROJECT it through the real
     // normalizer so display_json is exactly what a real run would produce.
@@ -110,6 +135,22 @@ export function startSimulated(
       facts = projected.facts;
     } catch {
       // rawLineFromDisplay always emits valid JSON; defensive only.
+    }
+    // A CONTENT line (not the result) carries no usage of its own — attach a
+    // running fraction of the run's known total so the live token/turn counters
+    // climb during the stream. The result line keeps its authoritative totals.
+    if (target && !facts.usage) {
+      contentSeen += 1;
+      const frac = contentSeen / contentCount;
+      facts = {
+        ...facts,
+        usage: {
+          input_tokens: Math.round(target.usage.input_tokens * frac),
+          cached_input_tokens: Math.round(target.usage.cached_input_tokens * frac),
+          output_tokens: Math.round(target.usage.output_tokens * frac),
+        },
+        ...(target.turns > 0 ? { turns: Math.max(1, Math.round(target.turns * frac)) } : {}),
+      };
     }
     cb.onLine({ raw, display, facts, occurredAt });
   };

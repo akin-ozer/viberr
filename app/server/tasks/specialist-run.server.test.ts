@@ -263,6 +263,23 @@ describe("startSpecialistRun", () => {
     expect(startAudit.length).toBe(1); // not double-counted
   });
 
+  it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
+    const { simulatedFinalReport } = await import("./specialist-run.server");
+    for (const backend of ["claude", "codex"] as const) {
+      // With an operator directive, the simulated agent must report the work DONE —
+      // otherwise the operator (reading only a "findings" summary) keeps
+      // re-prompting the same canned reply and spirals (the CTL-3 bug).
+      const withDirective = simulatedFinalReport(backend, "@dev implement the feature and add a test");
+      expect(withDirective.toLowerCase()).toContain("done");
+      expect(withDirective.toLowerCase()).toContain("ready to advance");
+      expect(withDirective).not.toContain("Findings:");
+      // Deterministic, so a repeat trips the operator's no-progress guard.
+      expect(simulatedFinalReport(backend, "@dev implement the feature and add a test")).toBe(withDirective);
+      // Without a directive it is still the plain findings summary.
+      expect(simulatedFinalReport(backend)).toContain("Findings:");
+    }
+  });
+
   it("denies reviewer + viewer (admin|maintainer only)", async () => {
     await assign();
     for (const user of [store.users.selin, store.users.elif]) {

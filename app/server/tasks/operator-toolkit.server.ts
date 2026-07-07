@@ -12,6 +12,8 @@ import {
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorPostComment,
+  operatorPromptReviewer,
+  operatorPromptSpecialist,
   operatorRunReviewer,
   operatorRunSpecialist,
   operatorSnapshot,
@@ -131,6 +133,28 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "run_specialist",
     );
+    add(
+      tool(
+        "prompt_specialist",
+        "Hand the task to the primary specialist for the CURRENT stage: assign it (if needed), post a task-related prompt comment addressed to it, and start its run with that prompt as its directive. Use this when a task enters a new working stage — it triggers the agent WITH a prompt, not silently. Pass the specialist's profileId and a concrete `prompt` telling it what to do for this task at this stage.",
+        {
+          profileId: z.string().describe("The primary specialist profile id to prompt."),
+          prompt: z
+            .string()
+            .describe("The task-related directive to give the specialist (what to do now at this stage)."),
+        },
+        async (args) =>
+          resultText(
+            await operatorPromptSpecialist(
+              db,
+              ctx,
+              { ...base, profileId: args.profileId, directive: args.prompt },
+              authority,
+            ),
+          ),
+      ),
+      "prompt_specialist",
+    );
   }
 
   if (gate(authority, "summon-reviewers") !== "deny") {
@@ -165,6 +189,28 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "run_reviewer",
+    );
+    add(
+      tool(
+        "prompt_reviewer",
+        "Hand the task to a reviewer for the REVIEW stage: engage it (if needed), post a task-related prompt comment addressed to it, and start its reviewer run with that prompt as its directive. Use this when a task enters the review stage. Pass the reviewer's profileId and a concrete `prompt` telling it what to review for this task.",
+        {
+          profileId: z.string().describe("The reviewer profile id to prompt."),
+          prompt: z
+            .string()
+            .describe("The task-related directive to give the reviewer (what to review now)."),
+        },
+        async (args) =>
+          resultText(
+            await operatorPromptReviewer(
+              db,
+              ctx,
+              { ...base, profileId: args.profileId, directive: args.prompt },
+              authority,
+            ),
+          ),
+      ),
+      "prompt_reviewer",
     );
   }
 

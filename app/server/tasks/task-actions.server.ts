@@ -27,6 +27,7 @@ import {
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getRun } from "~/server/runtimes/run-store.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
@@ -60,6 +61,42 @@ export interface TaskMutationContext {
    * user. Never set from a route — only the in-process operator toolkit sets it.
    */
   operatorAuthorized?: boolean;
+  /**
+   * Set by the operator runtime for the duration of an operator run. Carries the
+   * run's backend + autonomy + react-depth so that when an operator-triggered
+   * agent replies, the reply-completion hook can RE-INVOKE the operator (trigger
+   * `agent-reply`) to read the reply and propose the next state change: the
+   * "prompt the agent, read its output, propose a state change" loop. The depth
+   * bounds that re-invocation chain so it can never run away.
+   */
+  operatorRun?: {
+    backend: RealBackend;
+    autonomy: "supervised" | "full";
+    reactDepth: number;
+  };
+}
+
+/** Hard cap on the operator's react re-invocation chain (runaway backstop). */
+const OPERATOR_REACT_DEPTH_CAP = 4;
+
+/**
+ * Whether an operator-triggered agent run should re-invoke the operator to
+ * REACT to its reply. False when the run did not finish cleanly, produced no
+ * report, merely REPEATED its previous reply (no progress — reacting again would
+ * only spiral, the CTL-3 bug), or the react-depth cap is reached (an undefined
+ * depth means there is no active operator run to continue). Pure — exported for
+ * tests.
+ */
+export function operatorShouldReactToReply(
+  finishedState: string,
+  replyText: string | null,
+  prevReply: string | null,
+  reactDepth: number | undefined,
+): boolean {
+  if (finishedState !== "finished" || !replyText) return false;
+  if (prevReply !== null && prevReply.trim() === replyText.trim()) return false;
+  if (reactDepth === undefined || reactDepth >= OPERATOR_REACT_DEPTH_CAP) return false;
+  return true;
 }
 
 /** Audit actor for operator-performed mutations (no human user id). */
@@ -294,7 +331,7 @@ export async function createTask(
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
   // it to pick up the new task. Fire-and-forget — it never blocks or fails the
   // create, and it is a no-op when the project has no operator deployed.
-  void autoInvokeOperator(db, ctx, input.projectSlug, key);
+  void autoInvokeOperator(db, ctx, input.projectSlug, key, "create");
 
   return {
     key,
@@ -318,6 +355,7 @@ async function autoInvokeOperator(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
+  trigger: "create" | "transition",
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -327,11 +365,13 @@ async function autoInvokeOperator(
     await runOperator(db, {
       projectSlug,
       taskKey,
+      trigger,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
   } catch (error) {
-    logger.error("auto operator invocation on task create failed", {
+    logger.error("auto operator invocation failed", {
       taskKey,
+      trigger,
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
@@ -749,55 +789,248 @@ function postAgentReplyComment(
     actorRef: FileActorRef;
     replyText: string | null;
   },
-): void {
+): Promise<void> {
   if (!input.replyText) {
     logger.info("agent reply run produced no text — no comment posted", {
       taskKey: input.taskKey,
       runId: input.runId,
     });
-    return;
+    return Promise.resolve();
   }
-  try {
-    const event: TaskFileEvent = {
-      occurredAt: new Date().toISOString(),
-      type: "comment",
-      actor: input.actorRef,
-      title: null,
-      text: input.replyText,
-      toAgent: false,
-      evidence: null,
-    };
-    // updateTaskFile is async; fire-and-forget with a catch — the completion
-    // callback is sync (fired from the run's onExit), so we cannot await.
-    void updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift(event);
-    })
-      .then(() => {
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-        recordAudit(db, {
-          action: "task.agent.replied",
-          actor: { userId: null, label: "operator" },
-          subjectKind: "task",
-          subjectId: input.taskKey,
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          details: { runId: input.runId },
-        });
-      })
-      .catch((error: unknown) => {
-        logger.error("agent reply comment write failed", {
-          taskKey: input.taskKey,
-          runId: input.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
+  const event: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "comment",
+    actor: input.actorRef,
+    title: null,
+    text: input.replyText,
+    toAgent: false,
+    evidence: null,
+  };
+  // Returns the write promise so a caller (the operator react loop) can await
+  // the reply landing before it re-reads the task; other callers ignore it
+  // (fire-and-forget). Errors are logged, never propagated — the run already
+  // finished and the transcript is in the logs.
+  return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.timeline.unshift(event);
+  })
+    .then(() => {
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      recordAudit(db, {
+        action: "task.agent.replied",
+        actor: { userId: null, label: "operator" },
+        subjectKind: "task",
+        subjectId: input.taskKey,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        details: { runId: input.runId },
       });
-  } catch (error) {
-    logger.error("agent reply comment failed", {
-      taskKey: input.taskKey,
-      runId: input.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+    })
+    .catch((error: unknown) => {
+      logger.error("agent reply comment write failed", {
+        taskKey: input.taskKey,
+        runId: input.runId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
     });
+}
+
+// ------------------------------------------------------------ operatorPromptAgent
+
+/**
+ * Operator engages + PROMPTS an agent for the current stage: posts an
+ * operator-authored comment that prompts the agent about the task (routed
+ * to-agent, so the humans see the hand-off), triggers the agent's run with that
+ * prompt woven in as its turn directive, and registers the agent's reply so its
+ * response posts back as a comment. This is the mechanism the operator uses to
+ * "hand the task to" the stage's specialist/reviewer when a task enters a new
+ * stage — the operator triggers agents with a task-related prompt, not silently.
+ *
+ * Operator-only: it stamps operator authority (skips the human runtime RBAC on
+ * the run) and attributes the prompt comment to the operator. The gating
+ * (assign-primary-specialist / summon-reviewers) is applied by the callers in
+ * operator-actions before they reach this direct-execution path.
+ */
+/**
+ * The agent's most-recent reply comment text on a task (matched by backend +
+ * role), or null when it has never replied. Used to detect a no-progress repeat
+ * before re-inviting the operator to react.
+ */
+function latestAgentReplyText(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  backend: RealBackend,
+  role: string,
+): string | null {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!file) return null;
+  for (const e of file.parsed.timeline) {
+    if (
+      e.type === "comment" &&
+      e.actor.kind === "agent" &&
+      e.actor.backend === backend &&
+      e.actor.role === role
+    ) {
+      return e.text;
+    }
   }
+  return null;
+}
+
+export async function operatorPromptAgent(
+  db: Database.Database,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    role: string;
+    backend: RealBackend;
+    directive: string;
+    kind: "primary" | "reviewer";
+    /** The agent's @mention handle (e.g. its name), prepended to the prompt so
+     *  the comment reads as directing the agent by name ("@dev implement …"). */
+    handle: string;
+    /** Required for a reviewer run (identifies which reviewer to run). */
+    profileId?: string;
+  },
+  ctx: TaskMutationContext = {},
+): Promise<{ runId: string }> {
+  const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
+  const directive = withMention(input.handle, input.directive);
+
+  // 1. Post the operator's prompting comment (routed to-agent) so the hand-off
+  //    is visible on the board before the agent starts streaming. The comment
+  //    @mentions the agent by handle, so it reads as the operator directing that
+  //    agent by name ("@dev implement …").
+  const comment: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "comment",
+    actor: { kind: "operator" },
+    title: null,
+    text: directive,
+    toAgent: true,
+    evidence: null,
+  };
+  await updateTaskFile(taskRef(opCtx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.timeline.unshift(comment);
+  });
+  reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
+
+  // 2. Trigger the agent's run with the operator's directive as its turn focus.
+  const { startSpecialistRun, startReviewerRun } = await import(
+    "./specialist-run.server"
+  );
+  let runId: string;
+  if (input.kind === "reviewer") {
+    if (!input.profileId) {
+      throw AppError.validation("A reviewer profile id is required to run a reviewer.");
+    }
+    const started = await startReviewerRun(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: input.profileId,
+        directive,
+      },
+      OPERATOR_TASK_ACTOR,
+      opCtx,
+    );
+    runId = started.runId;
+  } else {
+    const started = await startSpecialistRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
+      OPERATOR_TASK_ACTOR,
+      opCtx,
+    );
+    runId = started.runId;
+  }
+
+  // 3. When the agent finishes, post its reply as an agent-authored comment,
+  //    THEN re-invoke the operator so it READS that reply and proposes the next
+  //    state change (the "prompt → read output → propose" loop). The react
+  //    re-invocation is bounded by OPERATOR_REACT_DEPTH_CAP so it never runs away.
+  const { registerRunCompletion } = await import(
+    "~/server/runtimes/run-service.server"
+  );
+  const { replyTextForRun } = await import("./agent-reply.server");
+  const actorRef: FileActorRef = {
+    kind: "agent",
+    backend: input.backend,
+    role: input.role,
+  };
+  const opRun = ctx.operatorRun;
+  registerRunCompletion(runId, (finished) => {
+    void (async () => {
+      const replyText = replyTextForRun(db, finished.id);
+      // Capture the agent's PREVIOUS reply (before we post the new one) so we can
+      // detect a no-progress repeat.
+      const prevReply = latestAgentReplyText(
+        opCtx,
+        input.projectSlug,
+        input.taskKey,
+        input.backend,
+        input.role,
+      );
+      // Land the agent's reply on the timeline first, so the reacting operator
+      // reads it in its snapshot.
+      await postAgentReplyComment(db, opCtx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        runId: finished.id,
+        actorRef,
+        replyText,
+      });
+      // Decide whether to re-invoke the operator to react. Skips interrupted/
+      // empty runs, no-progress repeats (the CTL-3 spiral), and the depth cap.
+      if (!operatorShouldReactToReply(finished.state, replyText, prevReply, opRun?.reactDepth)) {
+        if (replyText && prevReply !== null && prevReply.trim() === replyText.trim()) {
+          logger.info("operator react skipped — agent made no progress (repeated its reply)", {
+            taskKey: input.taskKey,
+            runId: finished.id,
+          });
+        }
+        return;
+      }
+      if (!opRun) return; // the predicate already guarantees this; narrows the type
+      // Only re-invoke while an operator is still deployed on the project.
+      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
+        backend: opRun.backend,
+        autonomy: opRun.autonomy,
+      });
+      if (!authority.deployed) return;
+      const { runOperator } = await import("~/server/runtimes/operator-run.server");
+      await runOperator(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        trigger: "agent-reply",
+        reactDepth: opRun.reactDepth + 1,
+        backend: opRun.backend,
+        autonomy: opRun.autonomy,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      });
+    })().catch((error: unknown) => {
+      logger.error("operator react on agent reply failed", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  });
+
+  return { runId };
+}
+
+/** Prepend an `@handle` mention to a directive if it does not already lead with
+ *  one, so an operator prompt always reads as directing the agent by name. */
+function withMention(handle: string, directive: string): string {
+  const text = directive.trim();
+  const h = handle.trim();
+  if (!h) return text;
+  // Already leads with any @mention (custom directives may include their own).
+  if (/^@[A-Za-z]/.test(text)) return text;
+  return `@${h} ${text}`;
 }
 
 // --------------------------------------------------------------- ownership
@@ -1138,6 +1371,17 @@ export async function transitionStage(
 
   // Approving a requested transition resolves its approval notifications.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
+
+  // A stage transition is a coordination trigger: when a NON-operator moves a
+  // task onto a new (non-Done) stage, hand off to the operator so it picks the
+  // task up at that stage and prompts the stage's agent (ADR-002 — one operator
+  // per active task). Operator-authored transitions are excluded: the operator's
+  // own run already coordinates the stages it moves through, so re-invoking it
+  // here would be redundant and could recurse. Fire-and-forget — it never blocks
+  // or fails the transition, and it is a no-op when no operator is deployed.
+  if (!ctx.operatorAuthorized && input.toStageId !== lastStageId) {
+    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }

@@ -120,12 +120,19 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
             // decision-plan schema so the caller can parse + execute it.
             ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
           });
+          let turnCount = 0;
           for await (const event of events) {
             const occurredAt = new Date().toISOString();
             const { display, facts } = projectEnvelope("codex", event, occurredAt);
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = (event as { type?: string })?.type;
-            if (type === "turn.completed") sawTurnCompleted = true;
+            if (type === "turn.completed") {
+              sawTurnCompleted = true;
+              // Running turn count so the live Turns counter climbs across a
+              // multi-turn run (codex reports no cumulative num_turns).
+              turnCount += 1;
+              facts.turns = turnCount;
+            }
             if (type === "turn.failed" || type === "error" || facts.isError) sawError = true;
             cb.onLine({ raw: JSON.stringify(event), display, facts, occurredAt });
           }

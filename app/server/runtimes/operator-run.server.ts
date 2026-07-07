@@ -13,6 +13,8 @@ import {
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorPostComment,
+  operatorPromptReviewer,
+  operatorPromptSpecialist,
   operatorRunReviewer,
   operatorRunSpecialist,
   operatorSnapshot,
@@ -54,6 +56,17 @@ export interface RunOperatorInput {
   backend?: RealBackend;
   /** Autonomy for THIS run (supervised|full). Defaults to the deployment. */
   autonomy?: OperatorAutonomy;
+  /**
+   * Why this operator run fired, which shapes what it does:
+   *   create / transition / manual → COORDINATE: prompt the stage's agent with a
+   *     task-related "@handle …" directive, then stop and wait for it to report.
+   *   agent-reply → REACT: an agent the operator prompted just replied — read its
+   *     report and propose the next state change (recommend/perform the transition
+   *     or accept completion), rather than re-prompting.
+   */
+  trigger?: "create" | "transition" | "agent-reply" | "manual";
+  /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
+  reactDepth?: number;
   dataRoot?: string;
   actor?: AuditActor;
 }
@@ -78,6 +91,16 @@ export async function runOperator(
     ...(input.autonomy ? { autonomy: input.autonomy } : {}),
   });
   const backend = authority.backend;
+
+  // Carry the run's identity on the ctx so that when an agent this operator
+  // prompts replies, the reply-completion hook can re-invoke the operator to
+  // REACT (read the reply → propose a state change). The reactDepth bounds that
+  // chain (see OPERATOR_REACT_DEPTH_CAP).
+  ctx.operatorRun = {
+    backend,
+    autonomy: authority.autonomy,
+    reactDepth: input.reactDepth ?? 0,
+  };
 
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
@@ -121,15 +144,17 @@ const OPERATOR_PLAN_SCHEMA = {
               "post_comment",
               "assign_specialist",
               "run_specialist",
+              "prompt_specialist",
               "assign_reviewer",
               "run_reviewer",
+              "prompt_reviewer",
               "transition_stage",
               "accept_completion",
             ],
           },
-          profileId: { type: ["string", "null"], description: "For assign_/run_ actions, else null." },
+          profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
-          text: { type: ["string", "null"], description: "For post_comment, else null." },
+          text: { type: ["string", "null"], description: "For post_comment, and the prompt for prompt_specialist/prompt_reviewer; else null." },
           reason: { type: ["string", "null"], description: "Short why — shown on recommendation cards." },
         },
         required: ["tool", "profileId", "toStageId", "text", "reason"],
@@ -154,7 +179,12 @@ async function startCodexOperatorRun(
   authority: OperatorAuthority,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
-  const prompt = buildCodexOperatorPrompt(authority, snapshot, input.dataRoot);
+  const prompt = buildCodexOperatorPrompt(
+    authority,
+    snapshot,
+    input.trigger ?? "manual",
+    input.dataRoot,
+  );
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -248,6 +278,15 @@ async function executeCodexPlan(
         case "run_specialist":
           await operatorRunSpecialist(db, ctx, base, authority);
           break;
+        case "prompt_specialist":
+          if (a.profileId)
+            await operatorPromptSpecialist(
+              db,
+              ctx,
+              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
+              authority,
+            );
+          break;
         case "assign_reviewer":
           if (a.profileId)
             await operatorAssignReviewer(
@@ -259,6 +298,15 @@ async function executeCodexPlan(
           break;
         case "run_reviewer":
           if (a.profileId) await operatorRunReviewer(db, ctx, { ...base, profileId: a.profileId }, authority);
+          break;
+        case "prompt_reviewer":
+          if (a.profileId)
+            await operatorPromptReviewer(
+              db,
+              ctx,
+              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
+              authority,
+            );
           break;
         case "transition_stage":
           if (a.toStageId)
@@ -300,7 +348,7 @@ async function startRealOperatorRun(
     taskKey: input.taskKey,
     authority,
   });
-  const prompt = buildOperatorTurnPrompt(snapshot);
+  const prompt = buildOperatorTurnPrompt(snapshot, input.trigger ?? "manual");
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -357,74 +405,100 @@ async function runScriptedOperatorDrive(
   });
 
   try {
+    const isReact = (input.trigger ?? "manual") === "agent-reply";
     let snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-    say(
-      `Supervising ${taskKey} at stage “${snap.stageName}”. Autonomy: ${authority.autonomy}.`,
-    );
-    await operatorPostComment(
-      db,
-      ctx,
-      {
-        projectSlug,
-        taskKey,
-        text: `**Operator (${authority.autonomy}) engaged.** Plan: assign a specialist, drive toward the review boundary, then ${authority.autonomy === "full" ? "accept completion" : "recommend acceptance"}.`,
-      },
-      authority,
-    );
-
-    // Assign a primary specialist appropriate to the work, if none yet.
-    if (!snap.specialist && snap.deployedSpecialists.length) {
-      const pick = pickSpecialist(snap);
-      if (pick) {
-        const r = await operatorAssignSpecialist(
-          db,
-          ctx,
-          { projectSlug, taskKey, profileId: pick.id },
-          authority,
-        );
-        say(r.message);
-      }
-    }
-
     const doneStageId = snap.doneStageId;
-    // Bounded forward drive.
-    for (let step = 0; step < 8; step++) {
-      snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-      if (snap.stage === doneStageId) break;
+    // Classify stages from the ordered list: the review stage is the one before
+    // Done; the implementation ("work") stage is the one before review.
+    const reviewStageId = snap.stageIds[snap.stageIds.length - 2] ?? null;
+    const workStageId = snap.stageIds[snap.stageIds.length - 3] ?? null;
 
-      const toDone = snap.nextStages.find((n) => n.id === doneStageId);
-      if (toDone) {
-        // At the boundary before Done — engage a reviewer, then accept.
-        if (!snap.reviewers.length && gate(authority, "summon-reviewers") !== "deny") {
-          const rev = pickReviewer(snap);
-          if (rev) {
-            const rr = await operatorAssignReviewer(
-              db,
-              ctx,
-              { projectSlug, taskKey, profileId: rev.id },
-              authority,
+    say(
+      `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,
+    );
+
+    // COORDINATE the current stage: prompt its agent (reviewer at the review
+    // stage, specialist at the work stage), advancing through any pre-work
+    // stages first. Stops once it has prompted an agent (now waiting for that
+    // agent to report) or hit a recommend boundary under supervised autonomy.
+    const coordinate = async () => {
+      for (let step = 0; step < 8; step++) {
+        snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
+        if (snap.stage === doneStageId) return;
+        if (snap.stage === reviewStageId) {
+          const rev = snap.reviewers[0]?.profileId ?? pickReviewer(snap)?.id;
+          if (rev && gate(authority, "summon-reviewers") !== "deny") {
+            say(
+              (await operatorPromptReviewer(db, ctx, { projectSlug, taskKey, profileId: rev }, authority)).message,
             );
-            say(rr.message);
           }
+          return;
         }
-        const acc = await operatorAcceptCompletion(db, ctx, { projectSlug, taskKey }, authority);
-        say(acc.message);
-        break;
+        if (snap.stage === workStageId || !workStageId) {
+          const pick = snap.specialist
+            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId) ??
+              pickSpecialist(snap)
+            : pickSpecialist(snap);
+          if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
+            say(
+              (await operatorPromptSpecialist(db, ctx, { projectSlug, taskKey, profileId: pick.id }, authority)).message,
+            );
+          }
+          return;
+        }
+        // Pre-work stage — advance toward the work stage.
+        const nid = snap.nextStages[0]?.id;
+        if (!nid) return;
+        const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
+        say(t.message);
+        if (t.outcome !== "done") return; // recommended (supervised) → stop.
       }
+    };
 
-      const next = snap.nextStages[0];
-      if (!next) {
-        say("No further governed transition from here — handing back to humans.");
-        break;
+    // REACT to an agent's report: propose the NEXT state change. Under full
+    // autonomy the move is performed and the new stage is coordinated; under
+    // supervised it is only recommended (a human bridges to the next stage).
+    const react = async () => {
+      snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
+      if (snap.stage === doneStageId) return;
+      if (snap.stage === reviewStageId) {
+        say((await operatorAcceptCompletion(db, ctx, { projectSlug, taskKey }, authority)).message);
+        return;
       }
-      const t = await operatorTransitionStage(
+      const nid = snap.nextStages[0]?.id;
+      if (!nid) {
+        say("No further governed transition from here — handing back to humans.");
+        return;
+      }
+      const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
+      say(t.message);
+      if (t.outcome === "done") await coordinate(); // full: performed → coordinate the new stage.
+    };
+
+    if (isReact) {
+      await operatorPostComment(
         db,
         ctx,
-        { projectSlug, taskKey, toStageId: next.id },
+        {
+          projectSlug,
+          taskKey,
+          text: `**Read the agent's report on ${taskKey}.** Proposing the next state change based on what it reported.`,
+        },
         authority,
       );
-      say(t.message);
-      if (t.outcome !== "done") break; // recommended (supervised) → stop.
+      await react();
+    } else {
+      await operatorPostComment(
+        db,
+        ctx,
+        {
+          projectSlug,
+          taskKey,
+          text: `**Operator (${authority.autonomy}) engaged.** Plan: prompt the stage's agent with a task-related @mention directive, then read its report before proposing the next transition.`,
+        },
+        authority,
+      );
+      await coordinate();
     }
   } catch (error) {
     logger.error("operator scripted drive failed", {
@@ -566,6 +640,7 @@ export function buildOperatorSystemPrompt(
       "- `direct` capabilities: act via the matching tool.\n" +
       "- `recommend` capabilities: under supervised autonomy the tool posts a recommendation and you must stop; under FULL autonomy it acts directly.\n" +
       "- `human` / `off` / withheld: the tool is not offered — never attempt it.\n" +
+      "- When a task is at (or enters) a stage, TRIGGER its agent with a task-related prompt: prompt_specialist for a working stage, prompt_reviewer for the review stage. The prompt is the agent's directive — make it specific to this task and stage, never a bare 'proceed'.\n" +
       "- Reach Done ONLY via accept_completion, and only under full autonomy; otherwise recommend acceptance.\n" +
       "- Never write code, run shell commands, or touch the repository. You have only the `mcp__viberr__*` tools.",
   );
@@ -582,9 +657,21 @@ export function buildOperatorSystemPrompt(
 export function buildCodexOperatorPrompt(
   authority: OperatorAuthority,
   snapshot: OperatorTaskSnapshot,
+  trigger: "create" | "transition" | "agent-reply" | "manual",
   dataRoot?: string,
 ): string {
   const persona = buildOperatorSystemPrompt(authority, dataRoot);
+  const decision =
+    trigger === "agent-reply"
+      ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
+        "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
+        "toward review if the implementation looks complete, or accept_completion if the review is clean. Only " +
+        "re-prompt the same agent (prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not " +
+        "prompt just to repeat yourself."
+      : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
+        "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
+        "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
+        "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
   return (
     persona +
     "\n\n---\n# This task\n\n" +
@@ -593,29 +680,61 @@ export function buildCodexOperatorPrompt(
     "\n```\n\n" +
     "# Your decision\n\n" +
     "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
-    "Use the deployedSpecialists' profileId values for assign actions, and nextStages' ids for transitions. " +
-    "Respect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
+    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions.\n\n" +
+    decision +
+    "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
     "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
     "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "assign_specialist", "profileId": "…", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
+    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
     "Include a short reason on each governed action (it is shown on the recommendation card)."
   );
 }
 
-/** The operator's opening turn prompt (points it at get_task). */
-export function buildOperatorTurnPrompt(snapshot: OperatorTaskSnapshot): string {
-  return (
+/**
+ * The operator's opening turn prompt. It differs by WHY the run fired:
+ *   agent-reply → REACT: an agent the operator prompted just reported back; read
+ *     its report and propose the next state change (do not re-prompt).
+ *   otherwise  → COORDINATE: prompt the stage's agent with an "@handle …"
+ *     directive and stop; the reaction comes when the agent reports.
+ */
+export function buildOperatorTurnPrompt(
+  snapshot: OperatorTaskSnapshot,
+  trigger: "create" | "transition" | "agent-reply" | "manual",
+): string {
+  const header =
     `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
     `Goal: ${snapshot.goal}\n\n` +
-    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}). ` +
-    "Drive it toward its next boundary using your viberr tools.\n\n" +
+    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+
+  if (trigger === "agent-reply") {
+    return (
+      header +
+      "An agent you prompted has just REPORTED BACK (see the latest comment on the timeline).\n\n" +
+      "Do this now:\n" +
+      "1. Call get_task and read the agent's latest report in recentTimeline.\n" +
+      "2. Post a brief comment summarizing what the agent reported.\n" +
+      "3. Based on that report, PROPOSE THE NEXT STATE CHANGE:\n" +
+      "   · if the implementation looks complete → transition_stage toward review (or recommend it under supervised);\n" +
+      "   · if the review looks clean → accept_completion (or recommend acceptance under supervised);\n" +
+      "   · only if the work is clearly incomplete, re-prompt the SAME agent with prompt_specialist/prompt_reviewer, and say why.\n" +
+      "Do NOT prompt a fresh agent turn just to repeat yourself. React to the report, then act or recommend.\n\n" +
+      "Respect your capability policy at every step. Keep comments concise."
+    );
+  }
+
+  return (
+    header +
     "Do this now:\n" +
     "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
     "2. Post a brief plan comment.\n" +
-    "3. Assign an appropriate primary specialist (if none is assigned).\n" +
-    "4. Move the task forward through its allowed stage transitions.\n" +
-    "5. Engage a reviewer as it enters the review stage.\n" +
-    "6. Then accept completion (full autonomy) or recommend acceptance (supervised).\n\n" +
+    "3. TRIGGER the right agent for THIS stage with a concrete, task-related directive, addressed to it by name (\"@dev implement …\"):\n" +
+    "   · a working stage (before review) → prompt_specialist(profileId, prompt) — assigns the\n" +
+    "     specialist, posts your \"@name …\" prompt to it, and starts its run on your directive;\n" +
+    "   · the review stage → prompt_reviewer(profileId, prompt) — engages + prompts + runs a reviewer.\n" +
+    "   Write the prompt about THIS task (its goal and what to do at this stage), not a generic 'go'.\n" +
+    "4. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +
+    "   will be re-invoked to read its report and propose the next state change.\n" +
+    "   (Only advance a PRE-work stage, e.g. triage → ready, if no implementation is needed there yet.)\n\n" +
     "Respect your capability policy at every step. Keep comments concise."
   );
 }

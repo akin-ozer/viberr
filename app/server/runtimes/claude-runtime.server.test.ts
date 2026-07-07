@@ -83,6 +83,33 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "finished", simulated: false, effectiveBackend: "claude", sessionId: "sess-1" });
   });
 
+  it("accumulates live usage + turns from assistant messages so the counter grows during the run", async () => {
+    const messages = [
+      { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "assistant", message: { content: [{ type: "text", text: "step 1" }], usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0 } } },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: {} }], usage: { input_tokens: 1500, output_tokens: 50, cache_read_input_tokens: 200 } } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1500, output_tokens: 150 }, total_cost_usd: 0.05 },
+    ];
+    const { q } = fakeQuery(messages);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+
+    // System init: no usage yet.
+    expect(lines[0]!.facts.usage).toBeUndefined();
+    // 1st assistant: cumulative usage appears (turn 1).
+    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100 });
+    expect(lines[1]!.facts.turns).toBe(1);
+    // 2nd assistant (a tool_use): input grows (max 1500), output SUMS (150),
+    // cached grows (200), turn 2 — so the live counter climbs.
+    expect(lines[2]!.facts.usage).toEqual({ input_tokens: 1500, cached_input_tokens: 200, output_tokens: 150 });
+    expect(lines[2]!.facts.turns).toBe(2);
+    // Result: authoritative totals (untouched by the live accumulator).
+    expect(lines[3]!.facts.usage).toEqual({ input_tokens: 1500, cached_input_tokens: 0, output_tokens: 150 });
+    expect(lines[3]!.facts.turns).toBe(2);
+  });
+
   it("errors when the result envelope is is_error", async () => {
     const { q } = fakeQuery([
       { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 50, usage: {} },

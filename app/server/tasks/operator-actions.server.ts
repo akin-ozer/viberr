@@ -22,6 +22,7 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  operatorPromptAgent,
   transitionStage,
   type TaskMutationContext,
 } from "./task-actions.server";
@@ -140,9 +141,15 @@ export function resolveOperatorAuthority(
   // The deployment's model is specific to its own backend (e.g. a Claude model).
   // When a run overrides to a DIFFERENT backend, the stored model is invalid for
   // it (Codex rejects a Claude model id) — fall back to that backend's default.
+  // "orchestration runtime" is a display placeholder from the seed template, not
+  // a real model id, so treat it as unset (otherwise it leaks into the run and
+  // shows as the run's Runtime label).
+  const rawModel = view.model?.trim();
+  const deploymentModel =
+    rawModel && rawModel.toLowerCase() !== "orchestration runtime" ? rawModel : "";
   const model =
     backend === deploymentBackend
-      ? view.model || defaultModelFor(backend)
+      ? deploymentModel || defaultModelFor(backend)
       : defaultModelFor(backend);
 
   return {
@@ -324,6 +331,9 @@ export interface OperatorTaskSnapshot {
   reviewers: { profileId: string; role: string; backend: string }[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
+  /** All stage ids in workflow order (first → done). Lets a coordinator tell a
+   *  pre-work stage from the implementation stage from the review stage. */
+  stageIds: string[];
   /** The last stage id — reached only via accept_completion. */
   doneStageId: string | null;
   deployedSpecialists: DeployedSpecialistView[];
@@ -388,6 +398,7 @@ export function operatorSnapshot(
       backend: r.backend,
     })),
     nextStages,
+    stageIds: stages.map((s) => s.id),
     doneStageId,
     deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx),
     openPacket: !!file.parsed.packet,
@@ -560,6 +571,201 @@ export async function operatorRunReviewer(
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} reviewer.`,
   };
+}
+
+// --------------------------------------------------- prompt (engage + trigger)
+
+/** Resolve a deployed specialist's role + backend for a prompt/run. */
+function deployedAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  profileId: string,
+): DeployedSpecialistView | null {
+  return (
+    listDeployedSpecialists(db, projectSlug, ctx).find((s) => s.id === profileId) ??
+    null
+  );
+}
+
+/** Title / goal / current stage name for building a default prompt directive. */
+function taskContext(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): { title: string; goal: string; stageName: string } {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const project = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  const title = file?.parsed.frontmatter.title ?? taskKey;
+  const goal = file?.parsed.goal ?? "";
+  const stageId = file?.parsed.frontmatter.stage ?? "";
+  const stageName =
+    project?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+  return { title, goal, stageName };
+}
+
+/**
+ * Engage + PROMPT the primary specialist for the current stage (governed by
+ * `assign-primary-specialist`). Direct → assign it as primary (if it isn't
+ * already), post an operator prompt comment related to the task, and start its
+ * run with that prompt as the turn directive. Recommend (supervised with the
+ * assign capability set to recommend) → post a recommendation card and stop.
+ *
+ * This is how the operator "hands a task to" its specialist when the task enters
+ * a working stage: it triggers the agent with a task-related prompt, not a
+ * silent run. Pass `directive` to control the prompt text; when omitted a
+ * stage-aware default is generated from the task's goal.
+ */
+export async function operatorPromptSpecialist(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    directive?: string;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const g = gate(authority, "assign-primary-specialist");
+  if (g === "deny") {
+    return {
+      outcome: "denied",
+      message: "Prompting the primary specialist is not permitted for the operator here.",
+    };
+  }
+  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  if (!agent) {
+    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to prompt.` };
+  }
+
+  if (g === "recommend") {
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      {
+        kind: "assign_specialist",
+        profileId: input.profileId,
+        label: `Assign ${agent.name} as the primary specialist`,
+      },
+      input.reason ?? input.directive ?? `${agent.name} fits the current stage of work.`,
+    );
+    return { outcome: "recommended", message: `Recommended assigning ${agent.name} as the primary specialist.` };
+  }
+
+  // direct: assign as primary if it isn't already, then prompt + run.
+  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  const currentPrimary = file?.parsed.frontmatter.specialist?.profileId ?? null;
+  if (currentPrimary !== input.profileId) {
+    await assignSpecialist(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+      OPERATOR_TASK_ACTOR,
+      opCtx(ctx),
+    );
+  }
+  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
+  const directive =
+    (input.directive ?? "").trim() ||
+    `implement "${c.title}" (now in ${c.stageName}). ` +
+      `Goal: ${c.goal} Please pick it up and do the stage work, then report back.`;
+  await operatorPromptAgent(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      role: agent.role,
+      backend: agent.backend,
+      handle: agent.name,
+      directive,
+      kind: "primary",
+    },
+    ctx,
+  );
+  return { outcome: "done", message: `Prompted @${agent.name} and started its run.` };
+}
+
+/**
+ * Engage + PROMPT a reviewer for the current stage (governed by
+ * `summon-reviewers`). Direct → engage the reviewer (idempotent), post an
+ * operator prompt comment, and start its reviewer run with that prompt as its
+ * turn directive. Recommend → post an "engage reviewer" recommendation card and
+ * stop. Used when a task reaches the review stage.
+ */
+export async function operatorPromptReviewer(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    directive?: string;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const g = gate(authority, "summon-reviewers");
+  if (g === "deny") {
+    return {
+      outcome: "denied",
+      message: "Prompting a reviewer is not permitted for the operator here.",
+    };
+  }
+  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  if (!agent) {
+    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
+  }
+
+  if (g === "recommend") {
+    await addRecommendation(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      {
+        kind: "assign_reviewer",
+        profileId: input.profileId,
+        label: `Engage ${agent.name} as a reviewer`,
+      },
+      input.reason ?? input.directive ?? `${agent.name} should review the work at this stage.`,
+    );
+    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as a reviewer.` };
+  }
+
+  // direct: engage (idempotent) then prompt + run.
+  await assignReviewer(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
+  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
+  const directive =
+    (input.directive ?? "").trim() ||
+    `please review the work on "${c.title}" against the goal: ${c.goal} ` +
+      `Flag correctness, security, and gaps, then report back.`;
+  await operatorPromptAgent(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      role: agent.role,
+      backend: agent.backend,
+      handle: agent.name,
+      directive,
+      kind: "reviewer",
+      profileId: input.profileId,
+    },
+    ctx,
+  );
+  return { outcome: "done", message: `Prompted reviewer @${agent.name} and started its run.` };
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */

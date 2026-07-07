@@ -422,7 +422,7 @@ export interface StartSpecialistRunResult {
  */
 export async function startSpecialistRun(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string },
+  input: { projectSlug: string; taskKey: string; directive?: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
@@ -485,6 +485,7 @@ export async function startSpecialistRun(
     goal,
     repo,
     cloned: !!clone,
+    ...(input.directive ? { directive: input.directive } : {}),
   });
 
   const script = buildAnalyzeScript({
@@ -492,6 +493,7 @@ export async function startSpecialistRun(
     model,
     repo,
     cloned: !!clone,
+    ...(input.directive ? { directive: input.directive } : {}),
   });
 
   const { runId, simulated } = await startRun(db, {
@@ -561,7 +563,7 @@ export async function startSpecialistRun(
  */
 export async function startReviewerRun(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; profileId: string },
+  input: { projectSlug: string; taskKey: string; profileId: string; directive?: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
@@ -618,6 +620,7 @@ export async function startReviewerRun(
     goal,
     repo,
     cloned: !!clone,
+    ...(input.directive ? { directive: input.directive } : {}),
   });
 
   const script = buildAnalyzeScript({
@@ -625,6 +628,7 @@ export async function startReviewerRun(
     model,
     repo,
     cloned: !!clone,
+    ...(input.directive ? { directive: input.directive } : {}),
   });
 
   const { runId, simulated } = await startRun(db, {
@@ -688,6 +692,8 @@ function buildAnalyzePrompt(input: {
   goal: string;
   repo: string | null;
   cloned: boolean;
+  /** An operator directive that becomes the run's turn focus (when present). */
+  directive?: string;
 }): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
@@ -697,7 +703,35 @@ function buildAnalyzePrompt(input: {
   if (input.repo && !input.cloned) {
     prompt += ` Clone the repo yourself from https://github.com/${input.repo} if needed.`;
   }
+  if (input.directive?.trim()) {
+    prompt +=
+      `\n\nThe operator has engaged you and directs: "${input.directive.trim()}" ` +
+      `Address that directive as you work, then give a concise reply.`;
+  }
   return prompt;
+}
+
+/**
+ * The simulated agent's CLOSING report. When the operator engaged the agent with
+ * a directive, this reports the work as DONE — otherwise the operator, reading
+ * only a "findings" summary, keeps re-prompting the same canned reply and
+ * spirals (the CTL-3 bug). The completion text is deterministic on purpose: if
+ * the operator ever re-prompts a simulated agent, the identical repeat trips the
+ * operator's no-progress guard and stops the loop instead of spiralling.
+ * Exported for tests.
+ */
+export function simulatedFinalReport(backend: RealBackend, directive?: string): string {
+  if (directive?.trim()) {
+    const test = backend === "codex" ? "a test that exercises" : "a test covering";
+    return (
+      `Done — implemented what the operator asked for, wired into the existing ` +
+      `structure (matching the conventions under src/), and added ${test} the new ` +
+      `behavior. Ran the suite and it passes. No blockers remaining — ready to advance.`
+    );
+  }
+  return backend === "codex"
+    ? "Findings: a small Node/TypeScript service (Express). Entry at src/index.ts, HTTP layer under src/server. Dependencies are lean; no test suite is wired yet — the main gap for this goal."
+    : "Findings: a small Node/TypeScript service (Express). Entry point src/index.ts; the HTTP layer lives under src/server. Dependencies are lean. Notable gap: there is no test suite wired up yet, which is the main risk for this goal.";
 }
 
 /**
@@ -710,16 +744,24 @@ function buildAnalyzeScript(input: {
   model: string;
   repo: string | null;
   cloned: boolean;
+  /** When the operator engaged this agent, its directive (shown as the opener). */
+  directive?: string;
 }): SimulatedScript {
   const sid = newId("run").replace("run_", "");
   const now = () => new Date().toISOString();
   const repoName = input.repo ? input.repo.split("/").pop() ?? input.repo : "workspace";
+  const directive = input.directive?.trim();
+  const opener = directive
+    ? `The operator asked me to: ${directive} On it — scanning the repository first.`
+    : "Scanning the repository layout to understand its structure.";
+  const finalCodex = simulatedFinalReport("codex", directive);
+  const finalClaude = simulatedFinalReport("claude", directive);
 
   const lines: LogLine[] =
     input.backend === "codex"
       ? [
           { t: "", ev: "init", tag: "thread.started", text: `codex thread · analyzing ${repoName}` },
-          { t: "", ev: "text", tag: "agent_message", text: "Scanning the repository layout to understand its structure." },
+          { t: "", ev: "text", tag: "agent_message", text: opener },
           { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "ls -R", input: { command: "ls -R" } },
           { t: "", ev: "out", tag: "command_output", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
           { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "cat package.json", input: { command: "cat package.json" } },
@@ -728,8 +770,7 @@ function buildAnalyzeScript(input: {
             t: "",
             ev: "text",
             tag: "agent_message",
-            text:
-              "Findings: a small Node/TypeScript service (Express). Entry at src/index.ts, HTTP layer under src/server. Dependencies are lean; no test suite is wired yet — the main gap for this goal.",
+            text: finalCodex,
           },
           {
             t: "",
@@ -741,7 +782,7 @@ function buildAnalyzeScript(input: {
         ]
       : [
           { t: "", ev: "init", tag: "system·init", text: `analyzing ${repoName} · read-only pass` },
-          { t: "", ev: "text", tag: "assistant", text: "Scanning the repository layout to understand its structure and dependencies." },
+          { t: "", ev: "text", tag: "assistant", text: directive ? opener : "Scanning the repository layout to understand its structure and dependencies." },
           { t: "", ev: "tool", tag: "tool_use", name: "Bash", text: "ls -R", input: { command: "ls -R" } },
           { t: "", ev: "out", tag: "tool_result", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
           { t: "", ev: "tool", tag: "tool_use", name: "Read", text: "package.json", input: { file_path: "package.json" } },
@@ -750,8 +791,7 @@ function buildAnalyzeScript(input: {
             t: "",
             ev: "text",
             tag: "assistant",
-            text:
-              "Findings: a small Node/TypeScript service (Express). Entry point src/index.ts; the HTTP layer lives under src/server. Dependencies are lean. Notable gap: there is no test suite wired up yet, which is the main risk for this goal.",
+            text: finalClaude,
           },
           {
             t: "",

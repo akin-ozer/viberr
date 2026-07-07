@@ -386,7 +386,10 @@ function projectCodex(e: Json, type: string, t: string): ProjectedEnvelope {
         `in ${(inTok / 1000).toFixed(1)}k (cached ${(cached / 1000).toFixed(1)}k) · out ${(outTok / 1000).toFixed(1)}k tokens`;
       return {
         display: { t, ev: "result", tag: "turn.completed", text, usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
-        facts: { usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
+        // Each completed turn counts as one turn (codex has no cumulative
+        // num_turns); the adapter overrides this with a running count for a
+        // multi-turn run, so the live Turns counter isn't stuck at 0.
+        facts: { usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok }, turns: 1 },
       };
     }
     case "turn.failed": {
