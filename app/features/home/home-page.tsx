@@ -57,7 +57,26 @@ export function StageMeter({
   dist: Record<string, number>;
 }) {
   const total = stages.reduce((a, s) => a + (dist[s.id] || 0), 0);
-  if (!total) return <div className="pj-meter empty" title="No tasks yet"></div>;
+  if (!total) {
+    // Empty pipeline preview: a faint ghost of the project's OWN stages, so a
+    // fresh (0-task) card previews the workflow it will run instead of a dead
+    // block. NB: the modifier is `is-empty`, NOT the global `.empty` text
+    // utility (which carries 2rem padding and would inflate this 6px bar — the
+    // "weird task view" bug on freshly-created projects).
+    return (
+      <div className="pj-meter is-empty" title="No tasks yet — ready for its first">
+        {stages.map((s) => (
+          <span
+            key={s.id}
+            style={{
+              flex: 1,
+              background: `color-mix(in srgb, ${s.color}, transparent 82%)`,
+            }}
+          ></span>
+        ))}
+      </div>
+    );
+  }
   const label = stages
     .map((s) => (dist[s.id] || 0) + " " + s.name.toLowerCase())
     .join(" · ");
@@ -83,6 +102,15 @@ export function StageMeter({
 
 function ProjectStats({ p }: { p: HomeProjectCard }) {
   const total = p.total;
+  if (total === 0) {
+    // Fresh project: an inviting hint instead of a bare "0 tasks", so the card
+    // reads as ready-to-start rather than empty.
+    return (
+      <div className="pj-stats">
+        <span className="pj-empty-hint">No tasks yet · ready for its first</span>
+      </div>
+    );
+  }
   return (
     <div className="pj-stats">
       <span>{total + " task" + (total === 1 ? "" : "s")}</span>

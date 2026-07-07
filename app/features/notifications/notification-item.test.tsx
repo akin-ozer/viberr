@@ -79,10 +79,16 @@ describe("StageMeter (per-project stages, ruling 15)", () => {
     expect((segments[1] as HTMLElement).style.opacity).toBe("0.45");
   });
 
-  it("renders the empty bar for zero tasks", () => {
+  it("renders a ghost pipeline preview for zero tasks — one faint segment per stage", () => {
     const { container } = render(<StageMeter stages={stages} dist={{}} />);
-    const meter = container.querySelector(".pj-meter.empty")!;
+    const meter = container.querySelector(".pj-meter.is-empty")!;
     expect(meter).not.toBeNull();
-    expect(meter.getAttribute("title")).toBe("No tasks yet");
+    // A fresh card previews the workflow: one segment per stage, not a dead bar.
+    expect(meter.querySelectorAll("span").length).toBe(stages.length);
+    expect(meter.getAttribute("title")).toContain("No tasks yet");
+    // Regression guard: the empty meter must NOT reuse the global `.empty`
+    // text utility (padding: 2rem), which inflated the 6px bar into a dead
+    // block on freshly-created project cards.
+    expect(meter.classList.contains("empty")).toBe(false);
   });
 });

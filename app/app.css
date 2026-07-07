@@ -2418,6 +2418,9 @@ body:has(.login-wrap), body:has(.home) { overflow: auto; height: auto; min-heigh
   color: inherit; text-decoration: none;
   border-radius: inherit;
   outline: none;
+  /* Fill the (grid-stretched) card so the footer can pin to the bottom and
+   * every card's footer aligns — including short 0-task cards. */
+  height: 100%;
 }
 .pj-link:focus-visible { box-shadow: 0 0 0 2px var(--blue); border-radius: inherit; }
 
@@ -2456,7 +2459,11 @@ body:has(.login-wrap), body:has(.home) { overflow: auto; height: auto; min-heigh
   overflow: hidden;
 }
 .pj-meter span { border-radius: 2px; min-width: 6px; }
-.pj-meter.empty { background: color-mix(in srgb, var(--fg), transparent 94%); }
+/* Empty pipeline preview on a 0-task card: faint ghost stage segments over a
+ * barely-there track. Scoped modifier — must NOT reuse the global `.empty`
+ * utility (2rem padding) which would inflate this 6px bar. */
+.pj-meter.is-empty { background: color-mix(in srgb, var(--fg), transparent 96%); }
+.pj-meter.is-empty span { opacity: .9; }
 
 .pj-stats {
   display: flex; align-items: center; gap: .45rem;
@@ -2468,11 +2475,15 @@ body:has(.login-wrap), body:has(.home) { overflow: auto; height: auto; min-heigh
 .pj-stats .running { display: inline-flex; align-items: center; gap: .34rem; color: var(--agent-dark); font-weight: 600; }
 .pj-stats .running .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
 .pj-stats .pill { margin-left: auto; }
+/* Fresh-project hint (0-task card) — quiet, inviting, matches the stats row. */
+.pj-empty-hint { color: var(--faint); }
 
 .pj-foot {
   display: flex; align-items: center; gap: .5rem;
   padding-top: .6rem;
   border-top: 1px solid var(--hairline);
+  /* Pin to the bottom of the (stretched) card so footers align across a row. */
+  margin-top: auto;
 }
 .stack { display: flex; }
 .stack .avatar { width: 24px; height: 24px; font-size: .64rem; border: 2px solid var(--surface); }
