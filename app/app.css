@@ -1066,6 +1066,21 @@ h1, h2, h3, h4 {
 .runtime-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
 .rt-cell .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .rt-val { margin-top: .5rem; }
+/* Model cell: the resolved model name, plus a substitution flag when the saved
+ * profile model isn't a recognized id (runs fall back to the default). */
+.model-val { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+.model-sub {
+  display: inline-flex; align-items: center; gap: .25rem;
+  font-family: var(--font-sans);
+  font-size: .66rem; font-weight: 700; letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--yellow-dark);
+  background: var(--orange-light);
+  border: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 68%);
+  border-radius: 999px; padding: .1rem .4rem;
+  cursor: help;
+}
+.model-sub .ico { width: 11px; height: 11px; }
 .be-list { display: flex; gap: .4rem; flex-wrap: wrap; }
 .be-chip {
   display: inline-flex; align-items: center; gap: .4rem;

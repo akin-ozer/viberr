@@ -89,6 +89,8 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     icon: "branch",
     backends: ["codex", "claude"],
     model: "codex-large · claude-sonnet",
+    modelLabel: "GPT-5.5",
+    modelKnown: false,
     effort: "",
     scope: "Global base · customized for Viberr Core",
     desc: "Implements stage work on the task-key branch.",

@@ -170,6 +170,41 @@ export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
 
+/**
+ * Is `model` a real, valid model id for `backend`? Checked against the curated
+ * catalog (the codex list is authoritative — Codex has no live endpoint; the
+ * claude aliases sonnet/opus/haiku are always valid). Display labels from seed
+ * profiles ("codex-large · claude-sonnet", "claude-sonnet", "codex-large",
+ * "orchestration runtime") are NOT valid ids and return false.
+ */
+export function isKnownModel(backend: RealBackend, model: string): boolean {
+  const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
+  return cat.models.some((m) => m.value === model);
+}
+
+/**
+ * Resolve a stored profile model to a valid RUN model id for `backend`: the
+ * stored value when it is a real catalog id, else the backend default. This is
+ * the guard that stops a display-label placeholder (e.g. "codex-large ·
+ * claude-sonnet") from reaching the SDK, where it fails with "model not found"
+ * / "not supported when using Codex with a ChatGPT account". Every path that
+ * starts a real run resolves the model through here.
+ */
+export function resolveRunModel(
+  backend: RealBackend,
+  model: string | null | undefined,
+): string {
+  const m = (model ?? "").trim();
+  return m && isKnownModel(backend, m) ? m : defaultModelFor(backend);
+}
+
+/** The friendly display name for a model id (from the curated catalog), or the
+ *  id itself when it is not a curated model (e.g. a live-only or legacy value). */
+export function modelDisplayName(backend: RealBackend, model: string): string {
+  const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
+  return cat.models.find((m) => m.value === model)?.displayName ?? model;
+}
+
 // ------------------------------------------------------------ live (claude)
 
 /** One row of the Claude SDK's `supportedModels()` result (the subset we use). */

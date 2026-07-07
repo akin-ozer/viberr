@@ -10,11 +10,35 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { runDemoSeed } from "./demo-seed.server";
 import { seedDefaultAgentAssets } from "./default-assets.server";
 import { ensureBaseAgentsDeployed } from "./ensure-base-agents.server";
-import { baseAgentDeployments, BASE_AGENT_PROFILE_IDS } from "./demo-data.server";
+import {
+  baseAgentDeployments,
+  BASE_AGENT_PROFILE_IDS,
+  SEED_AGENT_PROFILES,
+} from "./demo-data.server";
 import { buildSpecialistPersona } from "~/server/tasks/specialist-run.server";
+import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+
+describe("seed profile models", () => {
+  it("every specialist ships a REAL model id (no display-label placeholders)", () => {
+    // Guards the "codex-large · claude-sonnet" class of bug: a seed model that
+    // isn't a valid catalog id reaches the SDK and 400s on a real backend.
+    for (const p of SEED_AGENT_PROFILES) {
+      if (p.frontmatter.kind !== "specialist") continue;
+      const backend =
+        p.frontmatter.backends.find((b) => b === "codex" || b === "claude") ===
+        "codex"
+          ? "codex"
+          : "claude";
+      expect(
+        isKnownModel(backend, p.frontmatter.model),
+        `${p.frontmatter.id} model "${p.frontmatter.model}" must be a valid ${backend} id`,
+      ).toBe(true);
+    }
+  });
+});
 
 describe("baseAgentDeployments", () => {
   it("is the operator plus Developer / Reviewer / Tester", () => {

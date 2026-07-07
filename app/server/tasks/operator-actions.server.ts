@@ -17,7 +17,10 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import {
+  defaultModelFor,
+  resolveRunModel,
+} from "~/server/runtimes/model-catalog.server";
 import {
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
@@ -140,15 +143,11 @@ export function resolveOperatorAuthority(
   // The deployment's model is specific to its own backend (e.g. a Claude model).
   // When a run overrides to a DIFFERENT backend, the stored model is invalid for
   // it (Codex rejects a Claude model id) — fall back to that backend's default.
-  // "orchestration runtime" is a display placeholder from the seed template, not
-  // a real model id, so treat it as unset (otherwise it leaks into the run and
-  // shows as the run's Runtime label).
-  const rawModel = view.model?.trim();
-  const deploymentModel =
-    rawModel && rawModel.toLowerCase() !== "orchestration runtime" ? rawModel : "";
+  // resolveRunModel also rejects display placeholders ("orchestration runtime")
+  // and any other non-catalog value, so nothing invalid leaks into the run.
   const model =
     backend === deploymentBackend
-      ? deploymentModel || defaultModelFor(backend)
+      ? resolveRunModel(backend, view.model)
       : defaultModelFor(backend);
 
   return {

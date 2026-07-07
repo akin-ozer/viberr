@@ -42,7 +42,16 @@ export interface AgentProfileView {
   role: string;
   icon: string;
   backends: ("codex" | "claude")[];
+  /** The RAW stored model value (may be a legacy display label) — seeds the edit
+   *  picker and is what the operator org-view shows verbatim. */
   model: string;
+  /** Friendly display name of the model that would actually RUN — the stored
+   *  model when it is a valid catalog id, else the backend default. */
+  modelLabel: string;
+  /** False when the stored `model` is not a real catalog id for the primary
+   *  backend (a legacy placeholder like "codex-large · claude-sonnet") — the run
+   *  substitutes the default and the UI flags it. */
+  modelKnown: boolean;
   /** Reasoning/effort level ("" when unset) — the picker's stored effort. */
   effort: string;
   scope: string;

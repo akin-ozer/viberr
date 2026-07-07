@@ -5,7 +5,10 @@ import {
   defaultEffortFor,
   defaultModelFor,
   getModelCatalog,
+  isKnownModel,
+  modelDisplayName,
   resetModelCatalogCache,
+  resolveRunModel,
   type SdkModelInfo,
 } from "./model-catalog.server";
 
@@ -17,6 +20,47 @@ import {
  */
 
 afterEach(() => resetModelCatalogCache());
+
+describe("resolveRunModel — the SDK-safety sanitizer", () => {
+  it("accepts a real catalog id and rejects legacy display-label placeholders", () => {
+    // Valid ids pass through untouched.
+    expect(resolveRunModel("codex", "gpt-5.5")).toBe("gpt-5.5");
+    expect(resolveRunModel("claude", "sonnet")).toBe("sonnet");
+    expect(resolveRunModel("claude", "opus")).toBe("opus");
+
+    // The seed/legacy display labels that caused the "model not supported when
+    // using Codex with a ChatGPT account" 400 all resolve to the backend default.
+    expect(isKnownModel("codex", "codex-large · claude-sonnet")).toBe(false);
+    expect(resolveRunModel("codex", "codex-large · claude-sonnet")).toBe(
+      defaultModelFor("codex"),
+    );
+    expect(resolveRunModel("codex", "codex-large")).toBe(defaultModelFor("codex"));
+    expect(resolveRunModel("claude", "claude-sonnet")).toBe(
+      defaultModelFor("claude"),
+    );
+    expect(resolveRunModel("claude", "orchestration runtime")).toBe(
+      defaultModelFor("claude"),
+    );
+
+    // Empty / missing → default (never an empty model id to the SDK).
+    expect(resolveRunModel("codex", "")).toBe(defaultModelFor("codex"));
+    expect(resolveRunModel("codex", null)).toBe(defaultModelFor("codex"));
+    expect(resolveRunModel("codex", undefined)).toBe(defaultModelFor("codex"));
+
+    // A codex id passed to claude (wrong backend) is rejected, and vice versa.
+    expect(resolveRunModel("claude", "gpt-5.5")).toBe(defaultModelFor("claude"));
+    expect(resolveRunModel("codex", "sonnet")).toBe(defaultModelFor("codex"));
+  });
+
+  it("modelDisplayName gives the friendly name for a known id, else the raw value", () => {
+    expect(modelDisplayName("codex", "gpt-5.5")).toBe("GPT-5.5");
+    expect(modelDisplayName("claude", "sonnet")).toBe("Claude Sonnet");
+    // Unknown → echoed back (the UI pairs this with a substitution flag).
+    expect(modelDisplayName("codex", "codex-large · claude-sonnet")).toBe(
+      "codex-large · claude-sonnet",
+    );
+  });
+});
 
 describe("curated catalog", () => {
   it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", () => {

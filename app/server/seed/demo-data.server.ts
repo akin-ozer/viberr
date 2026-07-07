@@ -205,7 +205,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
-      icon: "branch", backends: ["codex", "claude"], model: "codex-large · claude-sonnet",
+      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.5",
       scope: "Global base · customized for Viberr Core",
       stages: ["ready", "impl"],
       resources: {
@@ -224,7 +224,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "reviewer", kind: "specialist", name: "Reviewer", role: "Code review",
-      icon: "check", backends: ["claude"], model: "claude-sonnet",
+      icon: "check", backends: ["claude"], model: "sonnet",
       scope: "Global base · customized for Viberr Core",
       stages: ["review"],
       resources: {
@@ -244,7 +244,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "tester", kind: "specialist", name: "Tester", role: "Validation",
-      icon: "bolt", backends: ["codex"], model: "codex-large",
+      icon: "bolt", backends: ["codex"], model: "gpt-5.5",
       scope: "Global base · default settings",
       stages: ["impl", "review"],
       resources: {
@@ -264,7 +264,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "consultant", kind: "specialist", name: "Advisor", role: "Advisory",
-      icon: "message", backends: ["claude", "codex"], model: "claude-sonnet · codex-large",
+      icon: "message", backends: ["claude", "codex"], model: "sonnet",
       scope: "Global base · customized for Viberr Core",
       stages: ["triage", "ready", "impl", "review"],
       resources: {

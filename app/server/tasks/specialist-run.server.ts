@@ -33,7 +33,10 @@ import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { isBackendAvailable, type RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import {
+  defaultModelFor,
+  resolveRunModel,
+} from "~/server/runtimes/model-catalog.server";
 import {
   buildScript,
   type SimulatedScript,
@@ -110,8 +113,10 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     name: view.name,
     role: view.role || view.name,
     backend,
-    model:
-      view.model || (defaultModelFor(backend)),
+    // Resolve to a VALID run model id — a seed/legacy display label like
+    // "codex-large · claude-sonnet" must never reach the SDK (it 400s: "model
+    // not supported when using Codex with a ChatGPT account").
+    model: resolveRunModel(backend, view.model),
     effort: view.effort || "",
     skills: view.resources.skills,
   };

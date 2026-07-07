@@ -4,6 +4,12 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
 import { getProject } from "~/server/projections/board-query.server";
+import {
+  isKnownModel,
+  modelDisplayName,
+  resolveRunModel,
+} from "~/server/runtimes/model-catalog.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { capabilityById } from "~/shared/capabilities";
 import type { AgentProfileView } from "./agent-types";
 
@@ -166,14 +172,31 @@ export function effectiveProfileView(
     mode: c.mode,
   }));
   const extras = deployment.extras.map((e) => ({ label: e.label, mode: e.mode }));
+  const backends = def?.backends ?? template?.backends ?? [];
+  const model = def?.model ?? template?.model ?? "";
+  // The model that would actually RUN: the primary (first) backend's, resolved
+  // to a valid catalog id. `modelKnown` is false for a legacy display-label
+  // placeholder — the UI then flags the substitution instead of showing a value
+  // that would fail at the SDK.
+  const primaryBackend: RealBackend =
+    backends.find((b) => b === "codex" || b === "claude") === "codex"
+      ? "codex"
+      : "claude";
+  const modelKnown = isKnownModel(primaryBackend, model);
+  const modelLabel = modelDisplayName(
+    primaryBackend,
+    resolveRunModel(primaryBackend, model),
+  );
   return {
     id: deployment.profileId,
     kind,
     name: def?.name ?? template?.name ?? deployment.profileId,
     role: def?.role ?? template?.role ?? "Specialist",
     icon: def?.icon ?? template?.icon ?? "agents",
-    backends: def?.backends ?? template?.backends ?? [],
-    model: def?.model ?? template?.model ?? "",
+    backends,
+    model,
+    modelLabel,
+    modelKnown,
     effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
     desc: def?.desc ?? template?.description ?? "",

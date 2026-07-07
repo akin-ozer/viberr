@@ -378,8 +378,17 @@ export function ProfileDetail({
           ) : (
             <div className="rt-cell">
               <div className="lbl">Model</div>
-              <div className="rt-val mono" style={{ fontSize: ".82rem" }}>
-                {a.model}
+              <div className="rt-val mono model-val" style={{ fontSize: ".82rem" }}>
+                <span>{a.modelLabel}</span>
+                {!a.modelKnown && (
+                  <span
+                    className="model-sub"
+                    title={`The saved model “${a.model}” isn't a recognized model id — runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
+                  >
+                    <Icon name="alert" />
+                    default
+                  </span>
+                )}
               </div>
             </div>
           )}
