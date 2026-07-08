@@ -539,6 +539,98 @@ h1, h2, h3, h4 {
 
 .card.wait-human, .card.wait-human.urgent { box-shadow: var(--shadow-card); }
 
+/* ---- stage-move on a board card (wrapper + hover-revealed control) ---- */
+.card-wrap { position: relative; }
+/* Reserve the top-right corner so the move control never sits on the pill. */
+.card-wrap .card-top { padding-right: 1.7rem; }
+.card-stage-move {
+  position: absolute; top: .5rem; right: .5rem;
+  opacity: .5; transition: opacity .13s ease;
+}
+.card-wrap:hover .card-stage-move,
+.card-stage-move:focus-within { opacity: 1; }
+.card-wrap.is-moving { pointer-events: none; }
+.card-wrap.is-moving .card-stage-move { opacity: 0; }
+.card-wrap.is-moving .card {
+  opacity: .36; transform: scale(.975);
+  transition: opacity .22s ease, transform .22s ease;
+}
+/* Pulse a highlight ring when a moved card lands in its new column. */
+.card-wrap.just-arrived .card { animation: cardArrive 1.3s ease; }
+@keyframes cardArrive {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue), transparent 45%); transform: translateY(-3px); }
+  16%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 52%); transform: none; }
+  100% { box-shadow: var(--shadow-card); }
+}
+
+/* ---- StageMenu (shared: board card + task-detail current state) ---- */
+.stage-menu-btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--fg), transparent 96%);
+  border-radius: 8px; padding: .26rem .5rem;
+  color: var(--fg); font: inherit; font-size: .8rem; font-weight: 600;
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease;
+}
+.stage-menu-btn:hover { border-color: var(--border); background: color-mix(in srgb, var(--fg), transparent 92%); }
+.stage-menu-btn.open { border-color: var(--blue); }
+.stage-menu-btn:disabled { opacity: .6; cursor: default; }
+.stage-menu-btn .col-stage-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
+.stage-menu-btn .sm-current { display: inline-flex; align-items: center; gap: .4rem; transform-origin: left center; }
+.stage-menu-btn .sm-current.changed { animation: stagePulse .45s ease; }
+@keyframes stagePulse {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.13); }
+  100% { transform: scale(1); }
+}
+.stage-menu-btn .sm-caret { width: 13px; height: 13px; color: var(--faint); transition: transform .16s ease; }
+.stage-menu-btn.open .sm-caret { transform: rotate(180deg); }
+/* Compact card variant — a small floating chip. */
+.stage-menu-btn.card {
+  gap: .22rem; padding: .18rem .3rem; border-radius: 7px;
+  background: var(--surface); box-shadow: var(--shadow-card);
+}
+.stage-menu-btn.card .sm-caret { width: 12px; height: 12px; }
+
+.stage-menu-pop {
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--fg), transparent 82%);
+  padding: .4rem;
+  display: flex; flex-direction: column; gap: 1px;
+  animation: smPop .16s ease;
+}
+@keyframes smPop { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+.stage-menu-pop .sm-head {
+  font-size: .62rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--placeholder); padding: .3rem .5rem .35rem;
+}
+.stage-menu-pop .sm-item {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .42rem .5rem; border-radius: 7px;
+  background: none; border: none; cursor: pointer;
+  color: var(--fg); font: inherit; font-size: .82rem; text-align: left; width: 100%;
+  transition: background .12s ease;
+}
+.stage-menu-pop .sm-item:hover:not(:disabled) { background: color-mix(in srgb, var(--blue), transparent 88%); }
+.stage-menu-pop .sm-item .col-stage-dot { width: .55rem; height: .55rem; border-radius: 50%; flex: none; }
+.stage-menu-pop .sm-item-name { flex: 1; }
+.stage-menu-pop .sm-item.current { color: var(--faint); cursor: default; }
+.stage-menu-pop .sm-check { width: 14px; height: 14px; color: var(--blue); flex: none; }
+
+.stage-static { display: inline-flex; align-items: center; gap: .4rem; }
+.stage-static .col-stage-dot { border-radius: 50%; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-menu-pop,
+  .stage-menu-btn .sm-current.changed,
+  .card-wrap.just-arrived .card { animation: none; }
+  .card-wrap.is-moving .card { transition: opacity .1s ease; transform: none; }
+}
+
 .card-top { display: flex; align-items: center; gap: .5rem; }
 .card-top .key { font-family: var(--font-mono); font-size: .72rem; color: var(--faint); }
 .card-top .spacer { flex: 1; }

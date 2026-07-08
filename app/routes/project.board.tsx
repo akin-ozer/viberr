@@ -6,7 +6,8 @@ import { assertCsrf } from "~/server/auth/csrf.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
-import { createTask } from "~/server/tasks/task-actions.server";
+import { getProject } from "~/server/projections/board-query.server";
+import { createTask, transitionStage } from "~/server/tasks/task-actions.server";
 import { BoardPage } from "~/features/board/board-page";
 
 /**
@@ -43,6 +44,30 @@ export async function action({ request, params }: Route.ActionArgs) {
         stageName: result.stageName,
       };
     }
+    if (intent === "transition") {
+      // Manual stage move from a board card's stage dropdown (admin|maintainer;
+      // server re-checks). `manual` allows moving to any stage; the governed
+      // **Transition:** timeline comment + operator hand-off still fire.
+      const task = await transitionStage(
+        db,
+        {
+          projectSlug: params.slug,
+          taskKey: String(formData.get("taskKey") ?? ""),
+          toStageId: String(formData.get("to") ?? ""),
+          manual: true,
+        },
+        actor,
+      );
+      const proj = getProject(db, params.slug);
+      const toName =
+        proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+      return {
+        ok: true as const,
+        key: task.key,
+        stage: task.stage,
+        toast: `Moved ${task.key} to ${toName}`,
+      };
+    }
     if (intent === "rescan") {
       const summary = rescanProjections(db, { actor });
       return { ok: true as const, ...summary };
@@ -66,11 +91,14 @@ export default function Board() {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
   const canCreate = layout.myRole !== null && layout.myRole !== "viewer";
+  const canTransition =
+    layout.myRole === "admin" || layout.myRole === "maintainer";
   return (
     <BoardPage
       columns={layout.board.columns}
       orphanTasks={layout.board.orphanTasks}
       canCreate={canCreate}
+      canTransition={canTransition}
     />
   );
 }

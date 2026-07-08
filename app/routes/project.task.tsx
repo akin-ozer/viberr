@@ -38,7 +38,7 @@ import {
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
-import { listProjectMembers } from "~/server/projections/board-query.server";
+import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
@@ -239,15 +239,28 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "transition": {
-        // No mock affordance renders this on task detail yet (packets carry
-        // the governed decisions); the intent exists so future surfaces and
-        // automations hit the same server-enforced boundary rules.
+        // Manual stage change from the Current-state dropdown (admin|maintainer).
+        // `manual` lets the move cross any stage, not just a governed boundary;
+        // the same server rules still post the **Transition:** timeline comment.
         const task = await transitionStage(
           db,
-          { projectSlug, taskKey, toStageId: String(formData.get("to") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            toStageId: String(formData.get("to") ?? ""),
+            manual: true,
+          },
           actor,
         );
-        return { ok: true as const, intent, stage: task.stage };
+        const proj = getProject(db, projectSlug);
+        const toName =
+          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        return {
+          ok: true as const,
+          intent,
+          stage: task.stage,
+          toast: `Moved ${taskKey} to ${toName}`,
+        };
       }
       case "run-interrupt": {
         // Real governed action (runs spec §5.1): RBAC admin|maintainer,

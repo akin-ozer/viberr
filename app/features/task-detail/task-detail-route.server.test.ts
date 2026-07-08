@@ -479,21 +479,32 @@ describe("ownership actions", () => {
 
 /* ---------------------------------------------------- stage transitions */
 
-describe("transition action (server-enforced boundaries)", () => {
-  it("review → done is human-only: reviewers are rejected", async () => {
+describe("transition action (manual stage move — admin|maintainer)", () => {
+  it("the stage dropdown is admin|maintainer only: a reviewer is rejected", async () => {
     const result = (await postIntent("VIB-145", ids.selin, {
       intent: "transition", to: "done",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(403);
-    expect(result.data.error).toContain("accept completion into Done");
+    expect(result.data.error).toContain("change the task stage");
   });
 
-  it("undeclared boundaries are rejected as validation errors", async () => {
+  it("an admin can move across a non-boundary edge (manual override), with a toast", async () => {
+    // triage is not a declared boundary FROM VIB-145's stage — allowed only
+    // because the dropdown move is `manual`. (The transition comment it writes
+    // is covered by task-governance.server.test.ts against an isolated store.)
     const result = (await postIntent("VIB-145", ids.arda, {
       intent: "transition", to: "triage",
+    })) as { ok: true; intent: string; stage: string; toast: string };
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe("triage");
+    expect(result.toast).toContain("Moved VIB-145 to Triage");
+  });
+
+  it("rejects a move to a stage that isn't in the project", async () => {
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "transition", to: "nope",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(400);
-    expect(result.data.error).toContain("No governed boundary");
   });
 });
 

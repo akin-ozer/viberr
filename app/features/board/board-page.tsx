@@ -10,6 +10,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill } from "~/ui/pill";
+import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import {
@@ -108,60 +109,104 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
   );
 }
 
-function TaskCard({ task }: { task: TaskSummary }) {
+function TaskCard({
+  task,
+  stages,
+  canTransition,
+  onMove,
+  moving,
+  arrived,
+}: {
+  task: TaskSummary;
+  stages: BoardStage[];
+  canTransition: boolean;
+  onMove: (task: TaskSummary, toStageId: string) => void;
+  moving: boolean;
+  arrived: boolean;
+}) {
   const cls = ["card"];
   if (task.waiting === "human") cls.push("wait-human");
   if (task.urgent) cls.push("urgent");
+  const wrapCls = ["card-wrap"];
+  if (moving) wrapCls.push("is-moving");
+  if (arrived) wrapCls.push("just-arrived");
   return (
-    <Link
-      className={cls.join(" ")}
-      to={`/projects/${task.projectSlug}/tasks/${task.key}`}
-    >
-      <div className="card-top">
-        <span className="key">{task.key}</span>
-        <span className="spacer" />
-        <ReadinessPill value={task.displayReadiness} sm />
-      </div>
-      <h3>{task.title}</h3>
-      <div className="owner-row">
-        <OwnerLine task={task} />
-        <ReviewerStack task={task} />
-      </div>
-      <div className="card-foot">
-        {task.branch ? (
-          <span className="trace ok">
-            <Icon name="branch" />
-            {shortBranch(task.branch)}
-          </span>
-        ) : (
-          <span className="trace">
-            <Icon name="branch" />
-            no branch
-          </span>
-        )}
-        {task.pr && (
-          <span className="trace pr">
-            <Icon name="pr" />#{task.pr.number}
-          </span>
-        )}
-        <WaitTag task={task} />
-      </div>
-    </Link>
+    <div className={wrapCls.join(" ")}>
+      <Link
+        className={cls.join(" ")}
+        to={`/projects/${task.projectSlug}/tasks/${task.key}`}
+      >
+        <div className="card-top">
+          <span className="key">{task.key}</span>
+          <span className="spacer" />
+          <ReadinessPill value={task.displayReadiness} sm />
+        </div>
+        <h3>{task.title}</h3>
+        <div className="owner-row">
+          <OwnerLine task={task} />
+          <ReviewerStack task={task} />
+        </div>
+        <div className="card-foot">
+          {task.branch ? (
+            <span className="trace ok">
+              <Icon name="branch" />
+              {shortBranch(task.branch)}
+            </span>
+          ) : (
+            <span className="trace">
+              <Icon name="branch" />
+              no branch
+            </span>
+          )}
+          {task.pr && (
+            <span className="trace pr">
+              <Icon name="pr" />#{task.pr.number}
+            </span>
+          )}
+          <WaitTag task={task} />
+        </div>
+      </Link>
+      {canTransition && (
+        // Outside the <Link> (no nested interactives): a compact stage-move
+        // control the maintainer uses to move the card to another column.
+        <div className="card-stage-move">
+          <StageMenu
+            stages={stages}
+            currentStageId={task.stage}
+            onSelect={(to) => onMove(task, to)}
+            busy={moving}
+            variant="card"
+            align="right"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
 function Column({
   stage,
   tasks,
+  allStages,
   isDone,
   canCreate,
+  canTransition,
   onNew,
+  onMove,
+  movingKey,
+  arrivedKey,
 }: {
   stage: BoardStage;
   tasks: TaskSummary[];
+  /** All project stages — the stage-move menu offers these. */
+  allStages: BoardStage[];
   isDone: boolean;
   canCreate: boolean;
+  canTransition: boolean;
   onNew: () => void;
+  onMove: (task: TaskSummary, toStageId: string) => void;
+  movingKey: string | null;
+  arrivedKey: string | null;
 }) {
   return (
     <section className="column">
@@ -179,7 +224,17 @@ function Column({
         {tasks.length === 0 ? (
           <div className="empty">No tasks</div>
         ) : (
-          tasks.map((t) => <TaskCard key={t.key} task={t} />)
+          tasks.map((t) => (
+            <TaskCard
+              key={t.key}
+              task={t}
+              stages={allStages}
+              canTransition={canTransition}
+              onMove={onMove}
+              moving={movingKey === t.key}
+              arrived={arrivedKey === t.key}
+            />
+          ))
         )}
       </div>
     </section>
@@ -415,10 +470,13 @@ export function BoardPage({
   columns,
   orphanTasks,
   canCreate,
+  canTransition,
 }: {
   columns: BoardColumnData[];
   orphanTasks: TaskSummary[];
   canCreate: boolean;
+  /** admin|maintainer — enables the per-card stage-move dropdown. */
+  canTransition: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -429,6 +487,45 @@ export function BoardPage({
   const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
+
+  // Manual stage move (per-card dropdown). One fetcher for the board; the source
+  // card fades out (`movingKey`) while in flight, and the card pulses in its new
+  // column (`arrivedKey`) once revalidation lands it there.
+  const transitionFetcher = useFetcher<{
+    ok: boolean;
+    toast?: string;
+    error?: string;
+  }>();
+  const [movingKey, setMovingKey] = useState<string | null>(null);
+  const [arrivedKey, setArrivedKey] = useState<string | null>(null);
+  const moveDone = useRef<unknown>(null);
+  const onMove = (task: TaskSummary, toStageId: string) => {
+    if (task.stage === toStageId || transitionFetcher.state !== "idle") return;
+    setMovingKey(task.key);
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "transition");
+    fd.set("taskKey", task.key);
+    fd.set("to", toStageId);
+    transitionFetcher.submit(fd, { method: "post" });
+  };
+  useEffect(() => {
+    if (transitionFetcher.state !== "idle" || !transitionFetcher.data) return;
+    if (moveDone.current === transitionFetcher.data) return;
+    moveDone.current = transitionFetcher.data;
+    const d = transitionFetcher.data;
+    if (d.ok && d.toast) push(d.toast);
+    else if (!d.ok && d.error) push(d.error);
+    const k = movingKey;
+    setMovingKey(null);
+    if (d.ok && k) {
+      setArrivedKey(k);
+      window.setTimeout(
+        () => setArrivedKey((cur) => (cur === k ? null : cur)),
+        1500,
+      );
+    }
+  }, [transitionFetcher.state, transitionFetcher.data, movingKey, push]);
 
   const stages = columns.map((c) => c.stage);
   const doneStageId = stages[stages.length - 1]?.id;
@@ -542,9 +639,14 @@ export function BoardPage({
               key={c.stage.id}
               stage={c.stage}
               tasks={visible(c.tasks)}
+              allStages={stages}
               isDone={c.stage.id === doneStageId}
               canCreate={canCreate}
+              canTransition={canTransition}
               onNew={() => setCreating(c.stage.id)}
+              onMove={onMove}
+              movingKey={movingKey}
+              arrivedKey={arrivedKey}
             />
           ))}
         </div>

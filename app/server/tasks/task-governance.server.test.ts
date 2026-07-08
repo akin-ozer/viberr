@@ -172,6 +172,69 @@ describe("transitionStage boundary enforcement", () => {
   });
 });
 
+describe("transitionStage manual mode (board / task-detail dropdown)", () => {
+  it("moves across a NON-boundary edge (triage→impl) for a maintainer, forbidden for a reviewer", async () => {
+    const store = prepared();
+    withTask(store);
+    // triage→impl is not a declared boundary — rejected without `manual`.
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // A reviewer cannot manual-move (admin|maintainer only).
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    // An admin can — and it lands + posts a transition timeline comment.
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("impl");
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
+    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Triage to In Progress");
+  });
+
+  it("allows a BACKWARD manual move (review→ready) for a maintainer", async () => {
+    const store = prepared();
+    withTask(store, { stage: "review" });
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("ready");
+  });
+
+  it("rejects a manual move to an unknown stage", async () => {
+    const store = prepared();
+    withTask(store);
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "nope", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
 describe("resolvePacket kind matrix", () => {
   it("accept_completion is human-acceptance-gated (admin|maintainer only)", async () => {
     const store = prepared();

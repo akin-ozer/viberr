@@ -5,6 +5,7 @@ import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
+import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { DecisionPacket } from "./decision-packet";
 import {
@@ -286,6 +287,7 @@ export function TaskDetailPage({
   const reviewerFetcher = useFetcher<ActionResult>();
   const operatorFetcher = useFetcher<ActionResult>();
   const recFetcher = useFetcher<ActionResult>();
+  const transitionFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
   useActionFeedback(runFetcher);
@@ -293,6 +295,7 @@ export function TaskDetailPage({
   useActionFeedback(reviewerFetcher);
   useActionFeedback(operatorFetcher);
   useActionFeedback(recFetcher);
+  useActionFeedback(transitionFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
@@ -379,6 +382,21 @@ export function TaskDetailPage({
     fd.set("intent", "dismiss-recommendation");
     fd.set("recId", recId);
     recFetcher.submit(fd, { method: "post" });
+  };
+
+  // Manual stage change from the Current-state dropdown (admin|maintainer; the
+  // server re-checks). Goes through the same governed transition that an applied
+  // operator recommendation does, so it posts the **Transition:** timeline
+  // comment and hands the task to the operator at its new stage.
+  const canTransition = myRole === "admin" || myRole === "maintainer";
+  const transitionBusy = transitionFetcher.state !== "idle";
+  const onTransition = (toStageId: string) => {
+    if (transitionBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "transition");
+    fd.set("to", toStageId);
+    transitionFetcher.submit(fd, { method: "post" });
   };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -577,7 +595,29 @@ export function TaskDetailPage({
           <div className="kv">
             <div className="kv-row">
               <span className="k">Stage</span>
-              <span className="v">{stage?.name ?? ""}</span>
+              <span className="v">
+                {canTransition ? (
+                  <StageMenu
+                    stages={task.stages}
+                    currentStageId={task.stage}
+                    onSelect={onTransition}
+                    busy={transitionBusy}
+                    variant="panel"
+                  />
+                ) : (
+                  <span className="stage-static">
+                    <span
+                      className="col-stage-dot"
+                      style={{
+                        background: stage?.color,
+                        width: ".5rem",
+                        height: ".5rem",
+                      }}
+                    />
+                    {stage?.name ?? ""}
+                  </span>
+                )}
+              </span>
             </div>
             <div className="kv-row">
               <span className="k">Waiting on</span>

@@ -1328,7 +1328,17 @@ export async function releaseOwner(
  */
 export async function transitionStage(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; toStageId: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    toStageId: string;
+    /** Manual board-management move from the stage dropdown: allows moving to
+     *  ANY stage (not just a declared workflow boundary — the governed graph is
+     *  linear, so a boundary-only dropdown would offer nothing). Reserved for
+     *  admin|maintainer (the transition authority). Governed flows (packets,
+     *  recommendations, operator) never set this and keep boundary-only rules. */
+    manual?: boolean;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<TaskSummary> {
@@ -1343,10 +1353,18 @@ export async function transitionStage(
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
+  // Guard: the target must be a real stage of this project (manual moves skip
+  // the boundary graph, so validate the destination explicitly).
+  if (!project.stages.some((s) => s.id === input.toStageId)) {
+    throw AppError.validation(
+      `Unknown stage ${input.toStageId} for this project.`,
+    );
+  }
+
   const boundary = project.workflow.find(
     (w) => w.from === fromStageId && w.to === input.toStageId,
   );
-  if (!boundary) {
+  if (!boundary && !input.manual) {
     throw AppError.validation(
       `No governed boundary from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
     );
@@ -1365,9 +1383,18 @@ export async function transitionStage(
         "The operator reaches Done only by accepting completion, not a bare transition.",
       );
     }
-  } else if (boundary.boundary === "auto") {
+  } else if (input.manual) {
+    // Manual stage override (board/task dropdown) — a maintainer-level action,
+    // regardless of the boundary crossed (forward, backward, or off-graph).
+    requireMemberRole(
+      project,
+      actor,
+      ["admin", "maintainer"],
+      "change the task stage",
+    );
+  } else if (boundary!.boundary === "auto") {
     requireMemberRole(project, actor, "any-member", "move this task");
-  } else if (boundary.boundary === "approval") {
+  } else if (boundary!.boundary === "approval") {
     requireMemberRole(
       project,
       actor,
@@ -1429,7 +1456,8 @@ export async function transitionStage(
     details: {
       from: fromStageId,
       to: input.toStageId,
-      boundary: boundary.boundary,
+      boundary: boundary?.boundary ?? "manual",
+      ...(input.manual ? { manual: true } : {}),
       ...(ctx.operatorAuthorized ? { by: "operator" } : {}),
     },
   });
