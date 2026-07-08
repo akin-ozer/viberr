@@ -42,6 +42,7 @@ export interface TaskProjectionRow {
   diagnostic_count: number;
   created_at: string | null;
   updated_at: string | null;
+  board_rank: number | null;
   source_path: string;
   content_hash: string;
   parsed_at: string;
@@ -108,6 +109,8 @@ export interface TaskSummary {
   diagnosticCount: number;
   createdAt: string | null;
   updatedAt: string | null;
+  /** Sparse board-order rank (null → fall back to the task-key number). */
+  boardRank: number | null;
   /** Store-relative path — the UI renders this real path (ruling 3). */
   filePath: string;
 }
@@ -201,6 +204,7 @@ export function mapTaskProjectionRow(
     diagnosticCount: row.diagnostic_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    boardRank: row.board_rank,
     filePath: row.source_path,
   };
 }

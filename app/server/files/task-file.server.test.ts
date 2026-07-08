@@ -33,6 +33,7 @@ const FULL: ParsedTaskFile = {
     },
     createdAt: "2026-07-03T06:00:00.000Z",
     updatedAt: "2026-07-04T06:58:00.000Z",
+    boardRank: null,
   },
   unknownFrontmatter: { futureField: "preserved", nested: { a: [1, 2] } },
   goal: "Let the operator attach a single GitHub repo to a task, create the task-key branch, and reflect branch + PR state back into the canonical task file without treating GitHub as the source of truth.",

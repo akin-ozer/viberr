@@ -539,23 +539,39 @@ h1, h2, h3, h4 {
 
 .card.wait-human, .card.wait-human.urgent { box-shadow: var(--shadow-card); }
 
-/* ---- stage-move on a board card (wrapper + hover-revealed control) ---- */
+/* ---- drag-and-drop stage moves on the board ---- */
 .card-wrap { position: relative; }
-/* Reserve the top-right corner so the move control never sits on the pill. */
-.card-wrap .card-top { padding-right: 1.7rem; }
-.card-stage-move {
-  position: absolute; top: .5rem; right: .5rem;
-  opacity: .5; transition: opacity .13s ease;
+.card-wrap.draggable { cursor: grab; }
+.card-wrap.draggable:active { cursor: grabbing; }
+/* The card being dragged stays in the source column as a faded ghost. */
+.card-wrap.dragging .card {
+  opacity: .4;
+  border-style: dashed;
+  box-shadow: none;
+  transition: opacity .12s ease;
 }
-.card-wrap:hover .card-stage-move,
-.card-stage-move:focus-within { opacity: 1; }
-.card-wrap.is-moving { pointer-events: none; }
-.card-wrap.is-moving .card-stage-move { opacity: 0; }
-.card-wrap.is-moving .card {
-  opacity: .36; transform: scale(.975);
-  transition: opacity .22s ease, transform .22s ease;
+/* The column under the cursor lifts and outlines to invite the drop. */
+.column.drop-over {
+  background: color-mix(in srgb, var(--blue), transparent 94%);
+  border-radius: var(--radius-card);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--blue), transparent 55%);
 }
-/* Pulse a highlight ring when a moved card lands in its new column. */
+/* A preview card at the top of the target column showing where it will land. */
+.card-drop-preview {
+  border: 1.5px dashed color-mix(in srgb, var(--blue), transparent 40%);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--blue), transparent 92%);
+  padding: .8rem .85rem;
+  display: flex; flex-direction: column; gap: .3rem;
+  animation: dropPreviewIn .16s ease;
+}
+.card-drop-preview .key { font-family: var(--font-mono); font-size: .72rem; color: var(--blue-pressed); }
+.card-drop-preview .dp-title {
+  font-size: .95rem; line-height: 1.18; font-weight: 800;
+  color: color-mix(in srgb, var(--fg), transparent 15%);
+}
+@keyframes dropPreviewIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+/* Pulse a highlight ring when a dropped card lands in its new column. */
 .card-wrap.just-arrived .card { animation: cardArrive 1.3s ease; }
 @keyframes cardArrive {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue), transparent 45%); transform: translateY(-3px); }
@@ -627,8 +643,8 @@ h1, h2, h3, h4 {
 @media (prefers-reduced-motion: reduce) {
   .stage-menu-pop,
   .stage-menu-btn .sm-current.changed,
+  .card-drop-preview,
   .card-wrap.just-arrived .card { animation: none; }
-  .card-wrap.is-moving .card { transition: opacity .1s ease; transform: none; }
 }
 
 .card-top { display: flex; align-items: center; gap: .5rem; }

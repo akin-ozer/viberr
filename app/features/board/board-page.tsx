@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type DragEvent,
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Link,
   useFetcher,
@@ -10,7 +17,6 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill } from "~/ui/pill";
-import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import {
@@ -111,30 +117,51 @@ function ReviewerStack({ task, label }: { task: TaskSummary; label?: boolean }) 
 
 function TaskCard({
   task,
-  stages,
+  nextKey,
   canTransition,
-  onMove,
-  moving,
+  dragging,
   arrived,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
 }: {
   task: TaskSummary;
-  stages: BoardStage[];
+  /** The key of the card immediately below this one (null when last) — used to
+   *  resolve "drop below this card" into an insertion slot. */
+  nextKey: string | null;
+  /** admin|maintainer — makes the card draggable between stage columns. */
   canTransition: boolean;
-  onMove: (task: TaskSummary, toStageId: string) => void;
-  moving: boolean;
+  /** This card is the one being dragged (rendered as a faded ghost in place). */
+  dragging: boolean;
+  /** This card just landed here from a drop (plays the arrival pulse). */
   arrived: boolean;
+  onDragStart: (task: TaskSummary, e: DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
 }) {
   const cls = ["card"];
   if (task.waiting === "human") cls.push("wait-human");
   if (task.urgent) cls.push("urgent");
   const wrapCls = ["card-wrap"];
-  if (moving) wrapCls.push("is-moving");
+  if (canTransition) wrapCls.push("draggable");
+  if (dragging) wrapCls.push("dragging");
   if (arrived) wrapCls.push("just-arrived");
   return (
-    <div className={wrapCls.join(" ")}>
+    <div
+      className={wrapCls.join(" ")}
+      draggable={canTransition}
+      onDragStart={canTransition ? (e) => onDragStart(task, e) : undefined}
+      onDragEnd={canTransition ? onDragEnd : undefined}
+      onDragOver={
+        canTransition ? (e) => onDragOver(task, nextKey, e) : undefined
+      }
+    >
       <Link
         className={cls.join(" ")}
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
+        // The wrapper carries the drag; the anchor must not start its own
+        // (URL) drag, but a plain click still navigates.
+        draggable={false}
       >
         <div className="card-top">
           <span className="key">{task.key}</span>
@@ -166,20 +193,20 @@ function TaskCard({
           <WaitTag task={task} />
         </div>
       </Link>
-      {canTransition && (
-        // Outside the <Link> (no nested interactives): a compact stage-move
-        // control the maintainer uses to move the card to another column.
-        <div className="card-stage-move">
-          <StageMenu
-            stages={stages}
-            currentStageId={task.stage}
-            onSelect={(to) => onMove(task, to)}
-            busy={moving}
-            variant="card"
-            align="right"
-          />
-        </div>
-      )}
+    </div>
+  );
+}
+
+/**
+ * A ghost preview shown at the top of the column a card is being dragged over,
+ * so the drop destination reads clearly (mirrors GitHub's board): the source
+ * keeps a faded ghost, the target shows where the card will land.
+ */
+function DropPreview({ task }: { task: TaskSummary }) {
+  return (
+    <div className="card-drop-preview" aria-hidden="true">
+      <span className="key">{task.key}</span>
+      <span className="dp-title">{task.title}</span>
     </div>
   );
 }
@@ -187,33 +214,55 @@ function TaskCard({
 function Column({
   stage,
   tasks,
-  allStages,
+  count,
   isDone,
   canCreate,
   canTransition,
   onNew,
-  onMove,
-  movingKey,
+  draggingKey,
   arrivedKey,
+  dropTarget,
+  previewTask,
+  beforeKey,
+  onCardDragStart,
+  onCardDragEnd,
+  onCardDragOver,
+  onColumnDragOver,
+  onColumnDrop,
 }: {
   stage: BoardStage;
   tasks: TaskSummary[];
-  /** All project stages — the stage-move menu offers these. */
-  allStages: BoardStage[];
+  /** Header count — optimistically adjusted during a cross-column drag. */
+  count: number;
   isDone: boolean;
   canCreate: boolean;
   canTransition: boolean;
   onNew: () => void;
-  onMove: (task: TaskSummary, toStageId: string) => void;
-  movingKey: string | null;
+  draggingKey: string | null;
   arrivedKey: string | null;
+  /** This column is the current drop target (highlight + show the preview). */
+  dropTarget: boolean;
+  previewTask: TaskSummary | null;
+  /** Insertion slot: render the preview before this card (null = column end). */
+  beforeKey: string | null;
+  onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
+  onCardDragEnd: () => void;
+  onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
+  onColumnDragOver: (stageId: string, e: DragEvent) => void;
+  onColumnDrop: (stageId: string, e: DragEvent) => void;
 }) {
+  const showPreview = dropTarget && previewTask !== null;
+  const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   return (
-    <section className="column">
+    <section
+      className={"column" + (dropTarget ? " drop-over" : "")}
+      onDragOver={(e) => onColumnDragOver(stage.id, e)}
+      onDrop={(e) => onColumnDrop(stage.id, e)}
+    >
       <header className="col-head">
         <span className="col-stage-dot" style={{ background: stage.color }} />
         <span className="nm">{stage.name}</span>
-        <span className="ct">{tasks.length}</span>
+        <span className="ct">{count}</span>
         {!isDone && canCreate && (
           <button className="add" title="New task in this stage" onClick={onNew}>
             <Icon name="plus" />
@@ -222,19 +271,26 @@ function Column({
       </header>
       <div className="col-body">
         {tasks.length === 0 ? (
-          <div className="empty">No tasks</div>
+          showPreview ? preview : <div className="empty">No tasks</div>
         ) : (
-          tasks.map((t) => (
-            <TaskCard
-              key={t.key}
-              task={t}
-              stages={allStages}
-              canTransition={canTransition}
-              onMove={onMove}
-              moving={movingKey === t.key}
-              arrived={arrivedKey === t.key}
-            />
-          ))
+          <>
+            {tasks.map((t, i) => (
+              <Fragment key={t.key}>
+                {showPreview && beforeKey === t.key && preview}
+                <TaskCard
+                  task={t}
+                  nextKey={tasks[i + 1]?.key ?? null}
+                  canTransition={canTransition}
+                  dragging={draggingKey === t.key}
+                  arrived={arrivedKey === t.key}
+                  onDragStart={onCardDragStart}
+                  onDragEnd={onCardDragEnd}
+                  onDragOver={onCardDragOver}
+                />
+              </Fragment>
+            ))}
+            {showPreview && beforeKey === null && preview}
+          </>
         )}
       </div>
     </section>
@@ -488,44 +544,119 @@ export function BoardPage({
   const csrf = useCsrfToken();
   const push = useToast();
 
-  // Manual stage move (per-card dropdown). One fetcher for the board; the source
-  // card fades out (`movingKey`) while in flight, and the card pulses in its new
-  // column (`arrivedKey`) once revalidation lands it there.
+  // Drag-and-drop stage moves. `drag` is the card in flight; `overStage` is the
+  // column under the cursor. While a card is dragged across columns, the source
+  // shows a faded ghost (`dragging`) and the target shows a drop preview + a +1
+  // count; a drop fires the governed transition and the card pulses on arrival
+  // (`arrivedKey`). One fetcher per board.
   const transitionFetcher = useFetcher<{
     ok: boolean;
     toast?: string;
     error?: string;
   }>();
-  const [movingKey, setMovingKey] = useState<string | null>(null);
+  const [drag, setDrag] = useState<{ key: string; fromStage: string } | null>(
+    null,
+  );
+  const [overStage, setOverStage] = useState<string | null>(null);
+  // The card the dropped card should land immediately BEFORE (null = column end).
+  const [beforeKey, setBeforeKey] = useState<string | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
   const moveDone = useRef<unknown>(null);
-  const onMove = (task: TaskSummary, toStageId: string) => {
-    if (task.stage === toStageId || transitionFetcher.state !== "idle") return;
-    setMovingKey(task.key);
+
+  const onCardDragStart = (task: TaskSummary, e: DragEvent) => {
+    setDrag({ key: task.key, fromStage: task.stage });
+    setOverStage(task.stage);
+    setBeforeKey(null);
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      // Some browsers require data to be set for a drag to begin (Firefox).
+      e.dataTransfer.setData("text/plain", task.key);
+    } catch {
+      // dataTransfer unavailable — the drag still works via component state.
+    }
+  };
+  // Fires on both a successful drop and a cancel (drop outside any column) —
+  // clears the drag visuals, reverting the optimistic move on cancel.
+  const onCardDragEnd = () => {
+    setDrag(null);
+    setOverStage(null);
+    setBeforeKey(null);
+  };
+  // Per-card: the precise insertion slot from the pointer vs the card's vertical
+  // midpoint (top half → before this card; bottom half → before the next one).
+  const onCardDragOver = (
+    task: TaskSummary,
+    nextKey: string | null,
+    e: DragEvent,
+  ) => {
+    if (!drag) return;
+    e.preventDefault();
+    e.stopPropagation(); // keep the column handler from coarsening the slot
+    e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const before =
+      e.clientY < rect.top + rect.height / 2 ? task.key : nextKey;
+    if (overStage !== task.stage) setOverStage(task.stage);
+    if (beforeKey !== before) setBeforeKey(before);
+  };
+  // Column body / empty space: allow the drop; entering a NEW column defaults to
+  // the end until a card refines the slot.
+  const onColumnDragOver = (stageId: string, e: DragEvent) => {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (overStage !== stageId) {
+      setOverStage(stageId);
+      setBeforeKey(null);
+    }
+  };
+  const onColumnDrop = (stageId: string, e: DragEvent) => {
+    if (!drag) return;
+    e.preventDefault();
+    const { key, fromStage } = drag;
+    const target = beforeKey;
+    setDrag(null);
+    setOverStage(null);
+    setBeforeKey(null);
+    // Same-stage no-op: dropped exactly where it already sits (before itself, or
+    // before the card that already follows it).
+    if (stageId === fromStage) {
+      const orderedKeys = visible(
+        columns.find((c) => c.stage.id === fromStage)?.tasks ?? [],
+      ).map((t) => t.key);
+      const di = orderedKeys.indexOf(key);
+      const afterDragged = di >= 0 ? (orderedKeys[di + 1] ?? null) : null;
+      if (target === key || target === afterDragged) return;
+    }
+    setArrivedKey(key);
     const fd = new FormData();
     fd.set("_csrf", csrf);
-    fd.set("intent", "transition");
-    fd.set("taskKey", task.key);
-    fd.set("to", toStageId);
+    fd.set("intent", "reorder");
+    fd.set("taskKey", key);
+    fd.set("to", stageId);
+    fd.set("beforeKey", target ?? "");
     transitionFetcher.submit(fd, { method: "post" });
   };
+
+  // Toast on completion (and drop the pulse if the move was rejected).
   useEffect(() => {
     if (transitionFetcher.state !== "idle" || !transitionFetcher.data) return;
     if (moveDone.current === transitionFetcher.data) return;
     moveDone.current = transitionFetcher.data;
     const d = transitionFetcher.data;
     if (d.ok && d.toast) push(d.toast);
-    else if (!d.ok && d.error) push(d.error);
-    const k = movingKey;
-    setMovingKey(null);
-    if (d.ok && k) {
-      setArrivedKey(k);
-      window.setTimeout(
-        () => setArrivedKey((cur) => (cur === k ? null : cur)),
-        1500,
-      );
+    else if (!d.ok && d.error) {
+      push(d.error);
+      setArrivedKey(null);
     }
-  }, [transitionFetcher.state, transitionFetcher.data, movingKey, push]);
+  }, [transitionFetcher.state, transitionFetcher.data, push]);
+
+  // Retire the arrival pulse after it plays.
+  useEffect(() => {
+    if (!arrivedKey) return;
+    const t = window.setTimeout(() => setArrivedKey(null), 1500);
+    return () => window.clearTimeout(t);
+  }, [arrivedKey]);
 
   const stages = columns.map((c) => c.stage);
   const doneStageId = stages[stages.length - 1]?.id;
@@ -534,6 +665,10 @@ export function BoardPage({
     [columns, orphanTasks],
   );
   const waitingHuman = allTasks.filter((t) => t.waiting === "human").length;
+  // The card in flight (for the drop-preview shown in the hovered column).
+  const draggedTask = drag
+    ? (allTasks.find((t) => t.key === drag.key) ?? null)
+    : null;
 
   const visible = (tasks: TaskSummary[]) =>
     tasks.filter(
@@ -634,21 +769,39 @@ export function BoardPage({
 
       {group === "stage" ? (
         <div className="board">
-          {columns.map((c) => (
-            <Column
-              key={c.stage.id}
-              stage={c.stage}
-              tasks={visible(c.tasks)}
-              allStages={stages}
-              isDone={c.stage.id === doneStageId}
-              canCreate={canCreate}
-              canTransition={canTransition}
-              onNew={() => setCreating(c.stage.id)}
-              onMove={onMove}
-              movingKey={movingKey}
-              arrivedKey={arrivedKey}
-            />
-          ))}
+          {columns.map((c) => {
+            const base = visible(c.tasks);
+            // The hovered column is the drop target (same OR different stage).
+            // Cross-column also shifts the counts: source −1, target +1.
+            const hovered = !!drag && overStage === c.stage.id;
+            const crossDrag =
+              !!drag && overStage != null && overStage !== drag.fromStage;
+            const isSource = crossDrag && c.stage.id === drag!.fromStage;
+            const isTarget = crossDrag && c.stage.id === overStage;
+            const count = base.length + (isTarget ? 1 : 0) - (isSource ? 1 : 0);
+            return (
+              <Column
+                key={c.stage.id}
+                stage={c.stage}
+                tasks={base}
+                count={count}
+                isDone={c.stage.id === doneStageId}
+                canCreate={canCreate}
+                canTransition={canTransition}
+                onNew={() => setCreating(c.stage.id)}
+                draggingKey={drag?.key ?? null}
+                arrivedKey={arrivedKey}
+                dropTarget={hovered}
+                previewTask={hovered ? draggedTask : null}
+                beforeKey={beforeKey}
+                onCardDragStart={onCardDragStart}
+                onCardDragEnd={onCardDragEnd}
+                onCardDragOver={onCardDragOver}
+                onColumnDragOver={onColumnDragOver}
+                onColumnDrop={onColumnDrop}
+              />
+            );
+          })}
         </div>
       ) : (
         <ListView tasks={visible(allTasks)} stages={stages} />

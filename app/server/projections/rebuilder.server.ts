@@ -366,8 +366,8 @@ export function rebuildTaskFile(
         waiting, urgent, validation, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, event_count, comment_count, diagnostic_count,
-        created_at, updated_at, source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at, updated_at, board_rank, source_path, content_hash, parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -382,6 +382,7 @@ export function rebuildTaskFile(
        comment_count = excluded.comment_count,
        diagnostic_count = excluded.diagnostic_count,
        created_at = excluded.created_at, updated_at = excluded.updated_at,
+       board_rank = excluded.board_rank,
        source_path = excluded.source_path, content_hash = excluded.content_hash,
        parsed_at = excluded.parsed_at`,
   ).run(
@@ -409,6 +410,7 @@ export function rebuildTaskFile(
     allDiagnostics.length,
     fm.createdAt,
     fm.updatedAt,
+    fm.boardRank,
     sourcePath,
     contentHash,
     nowIso(),

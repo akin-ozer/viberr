@@ -458,6 +458,7 @@ function fm(input: {
     github: input.github ?? null,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
+    boardRank: null,
   };
 }
 

@@ -11,7 +11,12 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { resolvePacket, transitionStage } from "./task-actions.server";
+import { getBoard } from "~/server/projections/board-query.server";
+import {
+  reorderTask,
+  resolvePacket,
+  transitionStage,
+} from "./task-actions.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -52,6 +57,20 @@ function prepared(): TestStore {
   const store = setupTestStore(ctx);
   rebuildAll(store.db, { dataRoot: store.dataRoot });
   return store;
+}
+
+function seedTasks(store: TestStore, tasks: { key: string; stage: string }[]): void {
+  for (const t of tasks) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(t.key, { stage: t.stage }),
+    });
+  }
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+function stageOrder(store: TestStore, stageId: string): string[] {
+  const board = getBoard(store.db, store.slug)!;
+  return board.columns.find((c) => c.stage.id === stageId)!.tasks.map((t) => t.key);
 }
 
 describe("transitionStage boundary enforcement", () => {
@@ -232,6 +251,92 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("reorderTask (drag-to-reorder, persistent board order)", () => {
+  it("reorders WITHIN a stage via a midpoint boardRank — persists a rebuild, no comment", async () => {
+    const store = prepared();
+    seedTasks(store, [
+      { key: "VIB-1", stage: "impl" },
+      { key: "VIB-2", stage: "impl" },
+      { key: "VIB-3", stage: "impl" },
+    ]);
+    expect(stageOrder(store, "impl")).toEqual(["VIB-1", "VIB-2", "VIB-3"]);
+
+    // Move VIB-1 to the end of the column (beforeKey null → append).
+    await reorderTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-3", "VIB-1"]);
+
+    // The rank lives in the FILE, so it survives a full projection rebuild.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(typeof file.parsed.frontmatter.boardRank).toBe("number");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-3", "VIB-1"]);
+
+    // A same-stage reorder is quiet — no transition timeline comment.
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1")!;
+    expect(detail.timeline.some((e) => e.type === "transition")).toBe(false);
+  });
+
+  it("inserts a card immediately before another (beforeKey)", async () => {
+    const store = prepared();
+    seedTasks(store, [
+      { key: "VIB-1", stage: "impl" },
+      { key: "VIB-2", stage: "impl" },
+      { key: "VIB-3", stage: "impl" },
+    ]);
+    // Move VIB-3 before VIB-2 → VIB-1, VIB-3, VIB-2.
+    await reorderTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-3", toStageId: "impl", beforeKey: "VIB-2" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(stageOrder(store, "impl")).toEqual(["VIB-1", "VIB-3", "VIB-2"]);
+  });
+
+  it("a cross-stage drag moves the stage AND writes the transition comment", async () => {
+    const store = prepared();
+    seedTasks(store, [
+      { key: "VIB-1", stage: "triage" },
+      { key: "VIB-2", stage: "impl" },
+    ]);
+    const res = await reorderTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.movedStage).toBe(true);
+    expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-1"]);
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1")!;
+    expect(detail.timeline.some((e) => e.type === "transition")).toBe(true);
+  });
+
+  it("is admin|maintainer only — a reviewer is rejected", async () => {
+    const store = prepared();
+    seedTasks(store, [
+      { key: "VIB-1", stage: "impl" },
+      { key: "VIB-2", stage: "impl" },
+    ]);
+    await expect(
+      reorderTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: "VIB-2" },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
 

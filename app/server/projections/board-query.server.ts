@@ -20,6 +20,39 @@ import {
  * layer). Phase 4 loaders call these directly.
  */
 
+/**
+ * Sparse-rank base for board ordering. A task's DEFAULT rank is its key number
+ * scaled by BASE (so VIB-142 → 142_000_000), leaving ~6 digits of headroom for
+ * drag-to-reorder midpoints before any rebalance would be needed.
+ */
+export const BOARD_RANK_BASE = 1_000_000;
+
+/** Numeric suffix of a task key (VIB-142 → 142), 0 when unparseable. */
+export function taskKeyNumber(key: string): number {
+  const n = Number.parseInt(key.slice(key.indexOf("-") + 1), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * The value a task is ordered by within its stage column: its explicit
+ * `boardRank` when set (drag-reordered), else the task-key number scaled by
+ * BASE (the pre-reorder default order). Tiebreak on the raw key number.
+ */
+export function effectiveBoardRank(task: {
+  key: string;
+  boardRank: number | null;
+}): number {
+  return task.boardRank ?? taskKeyNumber(task.key) * BOARD_RANK_BASE;
+}
+
+/** Board column sort: by effective rank ascending, tiebreak by key number. */
+export function compareBoardOrder(a: TaskSummary, b: TaskSummary): number {
+  return (
+    effectiveBoardRank(a) - effectiveBoardRank(b) ||
+    taskKeyNumber(a.key) - taskKeyNumber(b.key)
+  );
+}
+
 export interface BoardColumn {
   stage: { id: string; name: string; color: string };
   tasks: TaskSummary[];
@@ -116,6 +149,8 @@ export function getBoard(db: Database.Database, slug: string): BoardData | null 
     if (bucket) bucket.push(task);
     else orphanTasks.push(task);
   }
+  // Order each column by the persistent drag-to-reorder rank.
+  for (const bucket of byStage.values()) bucket.sort(compareBoardOrder);
 
   return {
     project,

@@ -305,6 +305,7 @@ export async function createTask(
     github: null,
     createdAt: now,
     updatedAt: now,
+    boardRank: null,
   };
 
   await createTaskFile(taskRef(ctx, input.projectSlug, key), {
@@ -1477,6 +1478,86 @@ export async function transitionStage(
   }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
+}
+
+// ------------------------------------------------------------ reorderTask
+
+/**
+ * Drag-to-reorder a card on the board: set its persistent `boardRank` so it
+ * sits at the requested position within `toStageId`, and (when the stage
+ * actually changes) route through the governed manual transition first — which
+ * writes the **Transition:** timeline comment and hands the task to the operator
+ * at its new stage. A pure same-stage reorder writes NO comment (a quiet
+ * position change), only the rank.
+ *
+ * Position: `beforeKey` is the key of the card the moved card should land
+ * immediately BEFORE (null = end of the column). The new rank is the midpoint
+ * of that gap in the target column's current order (excluding the moved task),
+ * so only THIS task's file is rewritten. RBAC: admin|maintainer.
+ */
+export async function reorderTask(
+  db: Database.Database,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    toStageId: string;
+    /** Insert immediately before this task; null/absent → append to the end. */
+    beforeKey?: string | null;
+  },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; movedStage: boolean; toName: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(project, actor, ["admin", "maintainer"], "reorder the board");
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (!project.stages.some((s) => s.id === input.toStageId)) {
+    throw AppError.validation(`Unknown stage ${input.toStageId} for this project.`);
+  }
+
+  const movedStage = existing.parsed.frontmatter.stage !== input.toStageId;
+  // A stage change goes through the governed manual transition (comment +
+  // operator hand-off + reproject); the rank is set afterwards.
+  if (movedStage) {
+    await transitionStage(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: input.toStageId, manual: true },
+      actor,
+      ctx,
+    );
+  }
+
+  // Midpoint of the requested gap in the target column's CURRENT order.
+  const { listProjectTasks, effectiveBoardRank, compareBoardOrder, taskKeyNumber, BOARD_RANK_BASE } =
+    await import("~/server/projections/board-query.server");
+  const inStage = listProjectTasks(db, input.projectSlug)
+    .filter((t) => t.stage === input.toStageId && t.key !== input.taskKey)
+    .sort(compareBoardOrder);
+  const beforeKey = input.beforeKey ?? null;
+  const idx = beforeKey == null ? -1 : inStage.findIndex((t) => t.key === beforeKey);
+
+  let newRank: number;
+  if (inStage.length === 0) {
+    newRank = taskKeyNumber(input.taskKey) * BOARD_RANK_BASE;
+  } else if (idx < 0) {
+    // append to the end (beforeKey null or no longer present)
+    newRank = effectiveBoardRank(inStage[inStage.length - 1]!) + BOARD_RANK_BASE;
+  } else if (idx === 0) {
+    newRank = effectiveBoardRank(inStage[0]!) - BOARD_RANK_BASE;
+  } else {
+    newRank =
+      (effectiveBoardRank(inStage[idx - 1]!) + effectiveBoardRank(inStage[idx]!)) / 2;
+  }
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.boardRank = newRank;
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+
+  const toName =
+    project.stages.find((s) => s.id === input.toStageId)?.name ?? input.toStageId;
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), movedStage, toName };
 }
 
 // ------------------------------------------------------------ resolvePacket

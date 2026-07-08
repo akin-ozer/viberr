@@ -206,6 +206,9 @@ export const taskFrontmatterSchema = z.object({
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
+  /** Board position within a stage — a sparse rank for drag-to-reorder. Null
+   *  falls back to the task-key number (the pre-reorder default order). */
+  boardRank: z.number().nullable(),
 });
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 
@@ -228,6 +231,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "github",
   "createdAt",
   "updatedAt",
+  "boardRank",
 ];
 
 export interface TolerantTaskFrontmatterResult {
@@ -455,6 +459,13 @@ export function parseTaskFrontmatter(
       "updatedAt",
       data.updatedAt,
       taskFrontmatterSchema.shape.updatedAt,
+      null,
+    ),
+    boardRank: tolerant(
+      diagnostics,
+      "boardRank",
+      data.boardRank,
+      taskFrontmatterSchema.shape.boardRank,
       null,
     ),
   };
