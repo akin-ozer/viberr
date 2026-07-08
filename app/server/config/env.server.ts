@@ -24,6 +24,24 @@ const envSchema = z.object({
     .min(32, "must be at least 32 characters of random data"),
 
   /**
+   * better-auth cookie-signing secret. Optional — defaults to
+   * VIBERR_SESSION_SECRET so no new required config. Set it only to rotate the
+   * auth secret independently of the legacy session secret.
+   */
+  BETTER_AUTH_SECRET: z
+    .string()
+    .min(32, "must be at least 32 characters of random data")
+    .optional(),
+
+  /**
+   * Absolute public origin of the app, e.g. https://viberr.example.com. Used
+   * by better-auth to build OAuth callback + cookie URLs. Optional in dev
+   * (better-auth infers the origin from the request); REQUIRED behind a
+   * reverse proxy so redirects and cookies resolve to the public host.
+   */
+  BETTER_AUTH_URL: z.url("must be an absolute URL").optional(),
+
+  /**
    * AES-256-GCM key for encrypting stored secrets (e.g. GitHub PATs).
    * Must be base64 that decodes to exactly 32 bytes. Parsed into a Buffer.
    */

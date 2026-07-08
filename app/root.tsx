@@ -27,7 +27,6 @@ import type { Route } from "./+types/root";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { authenticate } from "./server/auth/require-user.server";
-import { sessionCookieHeader } from "./server/auth/session-cookie.server";
 import { getDb } from "./server/db/sqlite.server";
 import { getPref } from "./server/prefs/user-prefs.server";
 import {
@@ -39,11 +38,11 @@ export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
 ];
 
-export function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
   // Runs on every document request: identifies the signed-in user (for the
-  // shell + <CsrfInput />) and slides the 30-day rolling session forward.
-  const auth = authenticate(request);
+  // shell + <CsrfInput />). better-auth owns session cookie sliding.
+  const auth = await authenticate(request);
   // Reduce-motion preference (Phase 9C, ruling 13): user_prefs is the
   // truth; SSR renders <html data-motion> directly so the [data-motion]
   // CSS hook applies without a flash. Signed-out pages default to "full".
@@ -51,19 +50,12 @@ export function loader({ request }: Route.LoaderArgs) {
     auth && getPref<string>(getDb(), auth.user.id, "motion") === "reduce"
       ? "reduce"
       : "full";
-  const payload = {
+  return {
     theme,
     motion,
     user: auth?.user ?? null,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
-  if (auth?.sessionRenewed) {
-    // Re-issue the cookie so its Max-Age slides along with the DB expiry.
-    return data(payload, {
-      headers: { "Set-Cookie": sessionCookieHeader(auth.sessionToken) },
-    });
-  }
-  return payload;
 }
 
 // Surface loader headers (Set-Cookie renewal) on routes without their own

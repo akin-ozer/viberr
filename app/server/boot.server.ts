@@ -2,10 +2,6 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
-import {
-  startSessionSweeper,
-  sweepExpiredSessions,
-} from "./auth/session.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
 import { startEventPublisher } from "./events/event-publisher.server";
@@ -85,10 +81,6 @@ export function bootServer(): void {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
     password: env.VIBERR_SEED_ADMIN_PASSWORD,
   });
-
-  const swept = sweepExpiredSessions(db);
-  if (swept > 0) logger.info("expired sessions swept at boot", { swept });
-  startSessionSweeper(db);
 
   // SSE bridge FIRST (Phase 6): projection emitter → broker, so watcher
   // reprojects and every mutation reach connected clients from the start.

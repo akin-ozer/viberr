@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { setCredentialPassword } from "~/server/auth/identity.server";
 import {
   hashPassword,
   MIN_PASSWORD_LENGTH,
@@ -137,11 +138,12 @@ export function changeOwnPassword(
   if (input.next !== input.confirm) {
     throw AppError.validation("Passwords don't match.");
   }
-  updateUserFields(db, actor.userId, {
-    passwordHash: hashPassword(input.next),
-  });
+  const hash = hashPassword(input.next);
+  updateUserFields(db, actor.userId, { passwordHash: hash });
+  // better-auth holds the credential that sign-in verifies.
+  setCredentialPassword(db, actor.userId, hash);
   // Sign out every OTHER session; the one making this change survives.
-  db.prepare(`DELETE FROM sessions WHERE user_id = ? AND id != ?`).run(
+  db.prepare(`DELETE FROM session WHERE userId = ? AND id != ?`).run(
     actor.userId,
     actor.sessionId,
   );

@@ -18,7 +18,7 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const db = getDb();
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });

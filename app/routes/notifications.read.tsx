@@ -17,7 +17,7 @@ import {
  */
 
 export async function action({ request }: Route.ActionArgs) {
-  const ctx = requireAuth(request);
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

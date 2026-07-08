@@ -1,10 +1,11 @@
-import type Database from "better-sqlite3";
 import { redirect } from "react-router";
-import type { ThemePreference, UserRole } from "~/shared/mapping/user.server";
-import { getEnv } from "../config/env.server";
+import { getAuth } from "~/lib/auth.server";
+import type {
+  ThemePreference,
+  UserRecord,
+  UserRole,
+} from "~/shared/mapping/user.server";
 import { getDb } from "../db/sqlite.server";
-import { readSessionTokenWithSecret } from "./session-cookie.server";
-import { getSessionByToken } from "./session.server";
 import { findUserById } from "./user-store.server";
 
 /**
@@ -37,50 +38,50 @@ export interface AuthContext {
   user: SessionUser;
   /** Forced password reset pending — gate all routes until cleared. */
   pwresetRequired: boolean;
-  /** sessions.id (sha256 of the token) — safe to log, keys the CSRF token. */
+  /** better-auth session id — safe to log, keys the CSRF token. */
   sessionId: string;
-  /** Raw session token — only for cookie re-issue / logout. Never log. */
+  /** better-auth session token — logout only. Never log. */
   sessionToken: string;
-  /** True when the rolling expiry renewed → re-issue the cookie. */
-  sessionRenewed: boolean;
 }
 
-/** Core with explicit db+secret (tests). Deletes sessions of disabled users. */
-export function authenticateRequest(
-  db: Database.Database,
-  request: Request,
-  secret: string,
-): AuthContext | null {
-  const token = readSessionTokenWithSecret(request, secret);
-  if (!token) return null;
-  const found = getSessionByToken(db, token);
-  if (!found) return null;
-  const user = findUserById(db, found.session.userId);
-  if (!user || user.disabled) {
-    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(found.session.id);
-    return null;
-  }
+/** Shapes a `users` record into the SessionUser the app consumes. */
+function toSessionUser(user: UserRecord): SessionUser {
   return {
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      title: user.title,
-      role: user.role,
-      theme: user.theme,
-      idp: user.idp,
-      avatarTone: user.avatarTone ?? "",
-    },
-    pwresetRequired: user.pwresetRequired,
-    sessionId: found.session.id,
-    sessionToken: token,
-    sessionRenewed: found.renewed,
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    title: user.title,
+    role: user.role,
+    theme: user.theme,
+    idp: user.idp,
+    avatarTone: user.avatarTone ?? "",
   };
 }
 
-/** Authenticates a request against the app db. Null when not signed in. */
-export function authenticate(request: Request): AuthContext | null {
-  return authenticateRequest(getDb(), request, getEnv().VIBERR_SESSION_SECRET);
+/**
+ * Authenticates a request from its better-auth session. The identity invariant
+ * (better-auth `user.id` === `users.id`) lets us load the canonical `users` row
+ * for the profile/role. A disabled or vanished user has their better-auth
+ * session deleted and is treated as signed out. `sessionId` is better-auth's
+ * session id — it keys the double-submit CSRF token. Null when signed out.
+ */
+export async function authenticate(
+  request: Request,
+): Promise<AuthContext | null> {
+  const result = await getAuth().api.getSession({ headers: request.headers });
+  if (!result) return null;
+  const db = getDb();
+  const user = findUserById(db, result.user.id);
+  if (!user || user.disabled) {
+    db.prepare(`DELETE FROM session WHERE id = ?`).run(result.session.id);
+    return null;
+  }
+  return {
+    user: toSessionUser(user),
+    pwresetRequired: user.pwresetRequired,
+    sessionId: result.session.id,
+    sessionToken: result.session.token,
+  };
 }
 
 /** Sanitizes a post-login redirect target: same-app absolute paths only. */
@@ -107,11 +108,11 @@ export interface RequireUserOptions {
 }
 
 /** Full auth context or redirect to /login (throws). */
-export function requireAuth(
+export async function requireAuth(
   request: Request,
   options: RequireUserOptions = {},
-): AuthContext {
-  const ctx = authenticate(request);
+): Promise<AuthContext> {
+  const ctx = await authenticate(request);
   if (!ctx) throw loginRedirect(request);
   if (ctx.pwresetRequired && !options.allowPendingPasswordReset) {
     throw loginRedirect(request);
@@ -120,11 +121,11 @@ export function requireAuth(
 }
 
 /** The signed-in user or redirect to /login (throws). */
-export function requireUser(
+export async function requireUser(
   request: Request,
   options: RequireUserOptions = {},
-): SessionUser {
-  return requireAuth(request, options).user;
+): Promise<SessionUser> {
+  return (await requireAuth(request, options)).user;
 }
 
 const ROLE_ORDER: Record<UserRole, number> = {
@@ -139,8 +140,11 @@ export function roleSatisfies(role: UserRole, required: UserRole): boolean {
 }
 
 /** Signed-in user with at least `required` role, else 403 (throws). */
-export function requireRole(request: Request, required: UserRole): SessionUser {
-  const user = requireUser(request);
+export async function requireRole(
+  request: Request,
+  required: UserRole,
+): Promise<SessionUser> {
+  const user = await requireUser(request);
   if (!roleSatisfies(user.role, required)) {
     throw new Response(
       JSON.stringify({

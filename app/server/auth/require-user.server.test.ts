@@ -1,27 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { UserRole } from "~/shared/mapping/user.server";
-import { createTestDbContext } from "../../../test-support/test-db";
-import { authenticateRequest, roleSatisfies } from "./require-user.server";
-import { signSessionValue, SESSION_COOKIE_NAME } from "./session-cookie.server";
-import {
-  createSession,
-  SESSION_RENEW_INTERVAL_MS,
-  SESSION_TTL_MS,
-} from "./session.server";
+import { setupAppTest } from "../../../test-support/test-app";
+import { authenticate, roleSatisfies } from "./require-user.server";
 import { insertUser } from "./user-store.server";
-
-const ctx = createTestDbContext();
-afterEach(ctx.cleanup);
-
-const SECRET = "require-user-secret-require-user-secret";
-
-function requestWithSession(token: string): Request {
-  return new Request("http://localhost:5173/some/where", {
-    headers: {
-      Cookie: `${SESSION_COOKIE_NAME}=${signSessionValue(token, SECRET)}`,
-    },
-  });
-}
 
 describe("roleSatisfies (RBAC matrix)", () => {
   const matrix: Array<[UserRole, UserRole, boolean]> = [
@@ -42,23 +23,31 @@ describe("roleSatisfies (RBAC matrix)", () => {
   }
 });
 
-describe("authenticateRequest", () => {
-  function seed(db: ReturnType<typeof ctx.makeDb>) {
-    const user = insertUser(db, {
+/**
+ * authenticate() resolves a better-auth session into the app's AuthContext,
+ * bridged to the canonical `users` row. Exercised against real better-auth
+ * cookies minted by the app harness.
+ */
+describe("authenticate (better-auth session)", () => {
+  let app: Awaited<ReturnType<typeof setupAppTest>>;
+  afterEach(() => app?.cleanup());
+
+  async function seedUser(role: UserRole = "member") {
+    app = await setupAppTest();
+    const user = insertUser(app.db, {
       id: "u_auth",
       email: "auth@viberr.test",
       name: "Auth User",
       title: "QA",
-      role: "member",
+      role,
     });
-    const session = createSession(db, user.id);
-    return { user, session };
+    const { cookie, sessionId } = await app.cookieFor(user.id);
+    return { user, cookie, sessionId };
   }
 
-  it("resolves the SessionUser for a valid signed cookie", () => {
-    const db = ctx.makeDb();
-    const { user, session } = seed(db);
-    const auth = authenticateRequest(db, requestWithSession(session.token), SECRET);
+  it("resolves the SessionUser for a valid session cookie", async () => {
+    const { user, cookie, sessionId } = await seedUser();
+    const auth = await authenticate(app.request("/some/where", { cookie }));
     expect(auth).not.toBeNull();
     expect(auth!.user).toEqual({
       id: user.id,
@@ -68,82 +57,51 @@ describe("authenticateRequest", () => {
       role: "member",
       theme: "system",
       idp: "local",
-      // Phase 4: avatar tone rides the session for the shell avatars.
       avatarTone: "",
     });
     expect(auth!.pwresetRequired).toBe(false);
-    expect(auth!.sessionId).toBe(session.id);
-    expect(auth!.sessionToken).toBe(session.token);
+    expect(auth!.sessionId).toBe(sessionId);
   });
 
-  it("returns null without a cookie / with a forged signature", () => {
-    const db = ctx.makeDb();
-    const { session } = seed(db);
+  it("returns null without a cookie or with a garbage cookie", async () => {
+    await seedUser();
+    expect(await authenticate(app.request("/x"))).toBeNull();
     expect(
-      authenticateRequest(db, new Request("http://x/"), SECRET),
-    ).toBeNull();
-    const forged = new Request("http://x/", {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=${session.token}.forged` },
-    });
-    expect(authenticateRequest(db, forged, SECRET)).toBeNull();
-    // Signed with a different secret.
-    const wrongSecret = new Request("http://x/", {
-      headers: {
-        Cookie: `${SESSION_COOKIE_NAME}=${signSessionValue(session.token, "other-secret-other-secret-12345678")}`,
-      },
-    });
-    expect(authenticateRequest(db, wrongSecret, SECRET)).toBeNull();
-  });
-
-  it("returns null for an expired session", () => {
-    const db = ctx.makeDb();
-    const { session } = seed(db);
-    db.prepare(`UPDATE sessions SET expires_at = ? WHERE id = ?`).run(
-      new Date(Date.now() - 1000).toISOString(),
-      session.id,
-    );
-    expect(
-      authenticateRequest(db, requestWithSession(session.token), SECRET),
+      await authenticate(
+        app.request("/x", { cookie: "viberr.session_token=not-a-real-token" }),
+      ),
     ).toBeNull();
   });
 
-  it("returns null and kills the session when the user is disabled", () => {
-    const db = ctx.makeDb();
-    const { user, session } = seed(db);
-    db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
-    expect(
-      authenticateRequest(db, requestWithSession(session.token), SECRET),
-    ).toBeNull();
-    const count = db.prepare(`SELECT count(*) AS c FROM sessions`).get() as {
-      c: number;
-    };
+  it("returns null for an expired session", async () => {
+    const { user, cookie } = await seedUser();
+    app.db
+      .prepare(`UPDATE session SET expiresAt = ? WHERE userId = ?`)
+      .run(new Date(Date.now() - 1000).toISOString(), user.id);
+    expect(await authenticate(app.request("/x", { cookie }))).toBeNull();
+  });
+
+  it("returns null and revokes the session when the user is disabled", async () => {
+    const { user, cookie } = await seedUser();
+    app.db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
+    expect(await authenticate(app.request("/x", { cookie }))).toBeNull();
+    const count = app.db
+      .prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`)
+      .get(user.id) as { c: number };
     expect(count.c).toBe(0);
   });
 
-  it("flags sessionRenewed when the rolling expiry slides", () => {
-    const db = ctx.makeDb();
-    const { session } = seed(db);
-    db.prepare(`UPDATE sessions SET expires_at = ? WHERE id = ?`).run(
-      new Date(
-        Date.now() + SESSION_TTL_MS - SESSION_RENEW_INTERVAL_MS - 60_000,
-      ).toISOString(),
-      session.id,
-    );
-    const auth = authenticateRequest(db, requestWithSession(session.token), SECRET);
-    expect(auth?.sessionRenewed).toBe(true);
-  });
-
-  it("surfaces the pwreset_required gate", () => {
-    const db = ctx.makeDb();
-    const user = insertUser(db, {
+  it("surfaces the pwreset_required gate", async () => {
+    app = await setupAppTest();
+    const user = insertUser(app.db, {
       id: "u_reset",
       email: "reset@viberr.test",
       name: "Reset Me",
       role: "member",
       pwresetRequired: true,
     });
-    const session = createSession(db, user.id);
-    const auth = authenticateRequest(db, requestWithSession(session.token), SECRET);
+    const { cookie } = await app.cookieFor(user.id);
+    const auth = await authenticate(app.request("/x", { cookie }));
     expect(auth?.pwresetRequired).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
+import { provisionIdentity } from "~/server/auth/identity.server";
 import { hashPassword } from "~/server/auth/password.server";
 import {
   findUserByEmail,
@@ -90,10 +91,18 @@ function upsertUsers(
     const existing = findUserByEmail(db, person.email);
     if (existing) {
       // Keep credentials; align display fields with the mock dataset.
-      updateUserFields(db, existing.id, {
+      const updated = updateUserFields(db, existing.id, {
         name: person.name,
         role: person.orgRole,
         avatarTone: person.tone,
+      });
+      // Ensure the better-auth identity exists (idempotent).
+      provisionIdentity(db, {
+        id: existing.id,
+        email: existing.email,
+        name: person.name,
+        passwordHash: updated?.passwordHash ?? existing.passwordHash,
+        role: person.orgRole,
       });
       ids[person.handle] = existing.id;
       continue;
@@ -102,15 +111,24 @@ function upsertUsers(
       person.handle === "arda"
         ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
         : SEED_DEFAULT_PASSWORD;
+    const passwordHash = hashPassword(password);
     const created = insertUser(db, {
       id: newId("u"),
       email: person.email,
       name: person.name,
       role: person.orgRole,
-      passwordHash: hashPassword(password),
+      passwordHash,
       idp: "local",
       avatarTone: person.tone,
       createdBy: null,
+    });
+    // Provision the better-auth identity alongside the seeded user.
+    provisionIdentity(db, {
+      id: created.id,
+      email: created.email,
+      name: created.name,
+      passwordHash,
+      role: person.orgRole,
     });
     ids[person.handle] = created.id;
   }

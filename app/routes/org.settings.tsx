@@ -62,7 +62,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = requireRole(request, "admin");
+  const user = await requireRole(request, "admin");
   return { view: getOrgSettingsView(getDb()), meId: user.id };
 }
 
@@ -93,8 +93,8 @@ function parseJsonStringArray(raw: string): string[] {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const admin = requireRole(request, "admin");
-  const ctx = requireAuth(request);
+  const admin = await requireRole(request, "admin");
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

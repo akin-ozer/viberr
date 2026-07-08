@@ -32,7 +32,7 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const db = getDb();
   const project = getProject(db, params.slug);
   if (!project) {

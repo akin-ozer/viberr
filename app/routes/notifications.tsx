@@ -30,7 +30,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = requireUser(request);
+  const user = await requireUser(request);
   const db = getDb();
   return {
     notifications: listNotifications(db, user.id, { limit: 200 }),

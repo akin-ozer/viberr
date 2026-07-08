@@ -49,22 +49,45 @@ export async function setupAppTest(): Promise<AppTestContext> {
   closeDb();
   const db = getDb();
 
-  const { createSession } = await import("~/server/auth/session.server");
-  const { signSessionValue, SESSION_COOKIE_NAME } = await import(
-    "~/server/auth/session-cookie.server"
-  );
+  const { getAuth } = await import("~/lib/auth.server");
+  const { provisionIdentity } = await import("~/server/auth/identity.server");
+  const { hashPassword } = await import("~/server/auth/password.server");
+  const { findUserById } = await import("~/server/auth/user-store.server");
   const { csrfTokenForSession } = await import("~/server/auth/csrf.server");
+
+  // cookieFor signs the user in through better-auth, so it needs a known
+  // credential — provisioning overwrites the user's credential with this.
+  const HARNESS_PASSWORD = "test-harness-password-000";
 
   return {
     db,
     dataRoot,
     sessionSecret,
     async cookieFor(userId: string) {
-      const session = createSession(db, userId);
-      return {
-        cookie: `${SESSION_COOKIE_NAME}=${signSessionValue(session.token, sessionSecret)}`,
-        sessionId: session.id,
-      };
+      const user = findUserById(db, userId);
+      if (!user) throw new Error(`cookieFor: no user ${userId}`);
+      // Ensure a better-auth identity with a known password, then sign in.
+      provisionIdentity(db, {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        passwordHash: hashPassword(HARNESS_PASSWORD),
+        role: user.role,
+      });
+      const res = await getAuth().api.signInEmail({
+        body: { email: user.email, password: HARNESS_PASSWORD },
+        asResponse: true,
+      });
+      const setCookie = res.headers
+        .getSetCookie()
+        .find((c) => c.includes("viberr.session_token"));
+      if (!setCookie) throw new Error("cookieFor: no session cookie issued");
+      const session = db
+        .prepare(
+          `SELECT id FROM session WHERE userId = ? ORDER BY createdAt DESC LIMIT 1`,
+        )
+        .get(user.id) as { id: string };
+      return { cookie: setCookie.split(";")[0], sessionId: session.id };
     },
     async csrfFor(sessionId: string) {
       return csrfTokenForSession(sessionId, sessionSecret);

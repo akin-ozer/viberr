@@ -23,7 +23,7 @@ import { BoardPage } from "~/features/board/board-page";
  */
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = requireAuth(request);
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

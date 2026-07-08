@@ -4,14 +4,15 @@ export default [
   index("routes/_index.tsx"),
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
-  route("auth/github", "routes/auth.github.tsx"),
-  route("auth/github/callback", "routes/auth.github.callback.tsx"),
-  route("auth/google", "routes/auth.google.tsx"),
-  route("auth/google/callback", "routes/auth.google.callback.tsx"),
+  // OAuth is served by better-auth's own handler at /api/auth/callback/*.
   // TEMPORARY admin surface — replaced by the real org settings in phase 9.
   route("org/users", "routes/org.users.tsx"),
   // Placeholder until phase 9 ports the tabbed org-settings surface.
   route("org/settings", "routes/org.settings.tsx"),
+
+  // better-auth request handler (sign-in/out, social, .well-known, getSession).
+  // Splat so every /api/auth/* sub-path reaches better-auth's own router.
+  route("api/auth/*", "routes/api.auth.$.ts"),
 
   // URL-addressable PageOverlay routes (shell spec §4.6 / home spec §5.11).
   route("profile", "routes/profile.tsx"),

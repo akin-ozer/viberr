@@ -68,7 +68,7 @@ import { Icon } from "~/ui/icon";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const user = requireUser(request);
+  const user = await requireUser(request);
   const db = getDb();
   const detail = getTaskDetail(db, params.slug, params.key);
   if (!detail) {
@@ -121,7 +121,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = requireAuth(request);
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

@@ -5,8 +5,13 @@ import { USER_ROLES, type UserRecord, type UserRole } from "~/shared/mapping/use
 import { recordAudit, type AuditActor } from "../audit/audit-recorder.server";
 import { AppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
+import {
+  provisionIdentity,
+  revokeUserSessions,
+  setCredentialPassword,
+  setMemberRole,
+} from "./identity.server";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "./password.server";
-import { destroySessionsForUser } from "./session.server";
 import {
   countActiveAdmins,
   countUsers,
@@ -77,18 +82,28 @@ export function createUser(
     throw conflict(`A user with email ${normalizeEmail(email)} already exists.`);
   }
 
+  const passwordHash = tempPassword ? hashPassword(tempPassword) : null;
   const user = insertUser(db, {
     id: newId("u"),
     email,
     name,
     title: title || null,
     role,
-    passwordHash: tempPassword ? hashPassword(tempPassword) : null,
+    passwordHash,
     // A temp password must be replaced at first sign-in.
     pwresetRequired: Boolean(tempPassword),
     idp: "local",
     avatarTone: AVATAR_TONES[countUsers(db) % AVATAR_TONES.length],
     createdBy: actor.userId,
+  });
+  // Provision the better-auth identity (credential only when a password is set;
+  // OAuth-only invitees get user + membership, no credential).
+  provisionIdentity(db, {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    passwordHash,
+    role: user.role,
   });
 
   recordAudit(db, {
@@ -146,8 +161,13 @@ export function updateUser(
   });
   if (!updated) throw AppError.notFound("No such user.", { userId });
 
+  // Mirror an org-role change onto the better-auth membership.
+  if (patch.role !== undefined && patch.role !== existing.role) {
+    setMemberRole(db, userId, patch.role);
+  }
+
   if (patch.disabled === true && !existing.disabled) {
-    destroySessionsForUser(db, userId);
+    revokeUserSessions(db, userId);
     recordAudit(db, {
       action: "org.user.disabled",
       actor,
@@ -202,12 +222,15 @@ export function resetPassword(
     );
   }
 
+  const hash = hashPassword(tempPassword);
   const updated = updateUserFields(db, userId, {
-    passwordHash: hashPassword(tempPassword),
+    passwordHash: hash,
     pwresetRequired: true,
   });
   if (!updated) throw AppError.notFound("No such user.", { userId });
-  destroySessionsForUser(db, userId);
+  // Update the better-auth credential and kill existing sessions.
+  setCredentialPassword(db, userId, hash);
+  revokeUserSessions(db, userId);
 
   recordAudit(db, {
     action: "auth.password.reset",

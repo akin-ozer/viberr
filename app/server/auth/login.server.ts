@@ -1,22 +1,14 @@
 import type Database from "better-sqlite3";
+import type { ViberrAuth } from "~/lib/auth.server";
 import type { UserRecord } from "~/shared/mapping/user.server";
 import { recordAudit } from "../audit/audit-recorder.server";
 import { AppError } from "../errors/app-error.server";
-import {
-  hashPassword,
-  MIN_PASSWORD_LENGTH,
-  verifyPassword,
-} from "./password.server";
+import { setCredentialPassword } from "./identity.server";
+import { hashPassword, MIN_PASSWORD_LENGTH } from "./password.server";
 import {
   getLoginRateLimiter,
   type TokenBucketLimiter,
 } from "./rate-limit.server";
-import {
-  createSession,
-  destroySessionsForUser,
-  type CreatedSession,
-  type SessionMeta,
-} from "./session.server";
 import {
   findUserByEmail,
   normalizeEmail,
@@ -25,9 +17,11 @@ import {
 } from "./user-store.server";
 
 /**
- * Credentials login + forced-password-reset completion. Route modules map
- * failure reasons to the mock's copy; this layer owns the decisions and the
- * audit trail.
+ * Credentials login + forced-password-reset completion. Sessions are minted by
+ * better-auth; this layer keeps the nicer failure taxonomy, rate limiting, and
+ * audit trail, and enforces the whitelist checks (disabled / OAuth-only) that
+ * better-auth's generic sign-in does not distinguish. Route modules map the
+ * reasons to the login screen's copy.
  */
 
 export type LoginFailureReason =
@@ -40,7 +34,8 @@ export type LoginFailureReason =
 export interface LoginSuccess {
   ok: true;
   user: UserRecord;
-  session: CreatedSession;
+  /** Set-Cookie header values from better-auth's sign-in response. */
+  setCookies: string[];
   /** pwreset_required was set — gate everything until a new password is set. */
   mustResetPassword: boolean;
 }
@@ -57,11 +52,18 @@ export interface LoginAttempt {
   userAgent?: string | null;
 }
 
-export function loginWithCredentials(
+/**
+ * Verifies credentials and mints a better-auth session. Pre-checks the legacy
+ * `users` row for the specific failure reasons, syncs the better-auth
+ * credential to the current password hash (so an admin reset takes effect),
+ * then delegates password verification + session creation to better-auth.
+ */
+export async function loginWithCredentials(
   db: Database.Database,
+  auth: ViberrAuth,
   attempt: LoginAttempt,
-  deps: { limiter?: TokenBucketLimiter } = {},
-): LoginSuccess | LoginFailure {
+  deps: { limiter?: TokenBucketLimiter; requestHeaders?: Headers } = {},
+): Promise<LoginSuccess | LoginFailure> {
   const email = normalizeEmail(attempt.email);
   const ip = attempt.ip ?? "local";
   const limiter = deps.limiter ?? getLoginRateLimiter();
@@ -90,16 +92,22 @@ export function loginWithCredentials(
   if (!user) return fail("unknown_email");
   if (user.disabled) return fail("disabled");
   if (!user.passwordHash) return fail("no_password");
-  if (!verifyPassword(attempt.password, user.passwordHash)) {
+
+  let response: Response;
+  try {
+    response = await auth.api.signInEmail({
+      body: { email, password: attempt.password },
+      headers: deps.requestHeaders,
+      asResponse: true,
+    });
+  } catch {
     return fail("wrong_password");
   }
+  if (!response.ok) return fail("wrong_password");
 
   // Success: forgive earlier typos so users don't stay near the limit.
   limiter.reset(rateKey);
   recordUserLogin(db, user.id);
-  const meta: SessionMeta = { ip: attempt.ip, userAgent: attempt.userAgent };
-  // A brand-new session id on every login = session fixation protection.
-  const session = createSession(db, user.id, meta);
   recordAudit(db, {
     action: "auth.login.success",
     actor: { userId: user.id, label: user.email },
@@ -107,43 +115,45 @@ export function loginWithCredentials(
     subjectId: user.id,
     details: { idp: "local", pwresetPending: user.pwresetRequired },
   });
-  return { ok: true, user, session, mustResetPassword: user.pwresetRequired };
+  return {
+    ok: true,
+    user,
+    setCookies: response.headers.getSetCookie(),
+    mustResetPassword: user.pwresetRequired,
+  };
 }
 
 /**
- * Forced-reset gate completion: sets the new password, clears the flag,
- * revokes every other session and rotates the current one (fresh token).
+ * Forced-reset gate completion: sets the new password (legacy store + the
+ * better-auth credential account) and clears the flag. The current better-auth
+ * session stays valid — the user is already authenticated — so no re-issue is
+ * needed. Other sessions are left to expire (the reset flow is a first-login
+ * gate, not a credential-compromise recovery).
  */
 export function completeForcedPasswordReset(
   db: Database.Database,
   args: {
     user: Pick<UserRecord, "id" | "email">;
     newPassword: string;
-    /** Session meta carried into the replacement session. */
-    ip?: string | null;
-    userAgent?: string | null;
   },
-): { session: CreatedSession } {
+): void {
   if (args.newPassword.length < MIN_PASSWORD_LENGTH) {
     throw AppError.validation(
       `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
     );
   }
+  const hash = hashPassword(args.newPassword);
+  // `users` stays the canonical mirror; better-auth holds the credential that
+  // sign-in actually verifies.
   updateUserFields(db, args.user.id, {
-    passwordHash: hashPassword(args.newPassword),
+    passwordHash: hash,
     pwresetRequired: false,
   });
-  // Rotate: drop every session (including the current one) and mint a new one.
-  destroySessionsForUser(db, args.user.id);
-  const session = createSession(db, args.user.id, {
-    ip: args.ip,
-    userAgent: args.userAgent,
-  });
+  setCredentialPassword(db, args.user.id, hash);
   recordAudit(db, {
     action: "auth.password.forced_reset_completed",
     actor: { userId: args.user.id, label: args.user.email },
     subjectKind: "user",
     subjectId: args.user.id,
   });
-  return { session };
 }

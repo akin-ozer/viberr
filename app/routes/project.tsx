@@ -29,7 +29,7 @@ export function meta({ data }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const user = requireUser(request);
+  const user = await requireUser(request);
   const db = getDb();
   const board = getBoard(db, params.slug);
   if (!board) {

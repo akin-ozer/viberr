@@ -23,7 +23,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * provider that wrote no transcript).
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const db = getDb();
   const runId = new URL(request.url).searchParams.get("run");
   if (!runId) {

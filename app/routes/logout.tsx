@@ -1,30 +1,36 @@
 import { redirect } from "react-router";
 import type { Route } from "./+types/logout";
+import { getAuth } from "~/lib/auth.server";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { authenticate } from "~/server/auth/require-user.server";
-import { clearSessionCookieHeader } from "~/server/auth/session-cookie.server";
-import { destroySessionByToken } from "~/server/auth/session.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 
-/** POST /logout — destroys the session row + cookie. GET redirects home. */
+/** POST /logout — revokes the better-auth session + clears its cookie. */
 
 export async function action({ request }: Route.ActionArgs) {
   const db = getDb();
-  const auth = authenticate(request);
+  const auth = await authenticate(request);
   if (!auth) throw redirect("/login");
   await assertCsrf(request, auth.sessionId);
 
-  destroySessionByToken(db, auth.sessionToken);
   recordAudit(db, {
     action: "auth.logout",
     actor: { userId: auth.user.id, label: auth.user.email },
     subjectKind: "user",
     subjectId: auth.user.id,
   });
-  throw redirect("/login", {
-    headers: { "Set-Cookie": clearSessionCookieHeader() },
+
+  // Revoke the better-auth session and clear its cookie.
+  const res = await getAuth().api.signOut({
+    headers: request.headers,
+    asResponse: true,
   });
+  const headers = new Headers();
+  for (const cookie of res.headers.getSetCookie()) {
+    headers.append("Set-Cookie", cookie);
+  }
+  throw redirect("/login", { headers });
 }
 
 export function loader(_: Route.LoaderArgs) {

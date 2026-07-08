@@ -56,8 +56,11 @@ describe("runMigrations", () => {
 
     const tables = tableNames(db);
     expect(tables).toContain("users");
-    expect(tables).toContain("sessions");
     expect(tables).toContain("schema_migrations");
+    // better-auth owns sessions now; the legacy `sessions` table is dropped (0014).
+    expect(tables).not.toContain("sessions");
+    expect(tables).toContain("session");
+    expect(tables).toContain("account");
 
     const indexes = (
       db
@@ -65,8 +68,6 @@ describe("runMigrations", () => {
         .all() as Array<{ name: string }>
     ).map((row) => row.name);
     expect(indexes).toContain("idx_users__email");
-    expect(indexes).toContain("idx_sessions__user_id");
-    expect(indexes).toContain("idx_sessions__expires_at");
   });
 
   it("is idempotent", () => {
@@ -95,15 +96,16 @@ describe("runMigrations", () => {
       insertUser.run("u3", "a@viberr.test", "Dup", "member", now, now),
     ).toThrowError(/UNIQUE/);
 
+    // FK cascade: user_prefs.user_id → users(id) ON DELETE CASCADE.
     db.prepare(
-      `INSERT INTO sessions (id, user_id, created_at, expires_at)
-       VALUES ('s1', 'u1', ?, ?)`,
-    ).run(now, now);
+      `INSERT INTO user_prefs (user_id, key, value_json, updated_at)
+       VALUES ('u1', 'home', '{}', ?)`,
+    ).run(now);
     db.prepare(`DELETE FROM users WHERE id = 'u1'`).run();
-    const sessions = db.prepare(`SELECT count(*) AS c FROM sessions`).get() as {
+    const prefs = db.prepare(`SELECT count(*) AS c FROM user_prefs`).get() as {
       c: number;
     };
-    expect(sessions.c).toBe(0); // ON DELETE CASCADE
+    expect(prefs.c).toBe(0); // ON DELETE CASCADE
   });
 
   it("applies migrations in filename order", () => {

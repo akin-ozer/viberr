@@ -27,9 +27,8 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "auth.login.rate_limited": "auth",
   "auth.logout": "auth",
   "auth.oauth.login": "auth",
-  "auth.oauth.failure": "auth",
-  "auth.oauth.user_provisioned": "auth", // Phase 10: google domain allowlist
-  "auth.oauth.placeholder_claimed": "auth", // Phase 10: github handle claim
+  "auth.oauth.user_provisioned": "auth", // google domain allowlist provisioning
+  "auth.oauth.placeholder_claimed": "auth", // github handle placeholder claim
   "auth.password.changed": "auth",
   "auth.password.reset": "auth",
   "auth.password.forced_reset_completed": "auth",

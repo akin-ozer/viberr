@@ -42,7 +42,7 @@ import {
 const MAX_QUEUED_CHUNKS = 1024;
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const ctx = authenticate(request);
+  const ctx = await authenticate(request);
   if (!ctx || ctx.pwresetRequired) {
     return Response.json(
       { error: { code: "unauthorized", message: "Sign in to subscribe." } },

@@ -46,7 +46,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = requireUser(request);
+  const user = await requireUser(request);
   const db = getDb();
   const profile = getProfileView(db, user.id);
   if (!profile) throw data("Account not found.", { status: 404 });
@@ -54,7 +54,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const ctx = requireAuth(request);
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

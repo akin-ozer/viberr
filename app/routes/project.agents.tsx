@@ -28,7 +28,7 @@ import { AgentsPage } from "~/features/agents/agents-page";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const db = getDb();
   const project = getProject(db, params.slug);
   if (!project) {
@@ -47,7 +47,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = requireAuth(request);
+  const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);

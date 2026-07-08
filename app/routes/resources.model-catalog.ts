@@ -16,7 +16,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * unknown/missing backend defaults to claude so the modal always renders.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const url = new URL(request.url);
   const raw = url.searchParams.get("backend");
   const backend: RealBackend = raw === "codex" ? "codex" : "claude";

@@ -239,22 +239,30 @@ describe("/profile action", () => {
     const { loginWithCredentials } = await import(
       "~/server/auth/login.server"
     );
+    const { getAuth } = await import("~/lib/auth.server");
+    const auth = getAuth();
+    // changeOwnPassword writes the new hash to the better-auth credential, so
+    // the new password verifies through sign-in and the old one no longer does.
     expect(
-      loginWithCredentials(app.db, {
-        email: "murat@viberr.dev",
-        password: "murat-new-pw-9999",
-      }).ok,
+      (
+        await loginWithCredentials(app.db, auth, {
+          email: "murat@viberr.dev",
+          password: "murat-new-pw-9999",
+        })
+      ).ok,
     ).toBe(true);
     expect(
-      loginWithCredentials(app.db, {
-        email: "murat@viberr.dev",
-        password: "viberr-dev-2828",
-      }).ok,
+      (
+        await loginWithCredentials(app.db, auth, {
+          email: "murat@viberr.dev",
+          password: "viberr-dev-2828",
+        })
+      ).ok,
     ).toBe(false);
 
     // The acting session survives; the other one is gone.
     const sessions = app.db
-      .prepare(`SELECT id FROM sessions WHERE user_id = ?`)
+      .prepare(`SELECT id FROM session WHERE userId = ?`)
       .all(murId) as { id: string }[];
     const ids = sessions.map((s) => s.id);
     expect(ids).toContain(sessionId);

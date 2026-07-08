@@ -10,15 +10,13 @@ import {
   completeForcedPasswordReset,
   loginWithCredentials,
 } from "~/server/auth/login.server";
-import { isGithubOAuthEnabled } from "~/server/auth/oauth-github.server";
-import { isGoogleOAuthEnabled } from "~/server/auth/oauth-google.server";
 import { clientIpOf } from "~/server/auth/rate-limit.server";
 import {
   authenticate,
   requireAuth,
   safeReturnTo,
 } from "~/server/auth/require-user.server";
-import { sessionCookieHeader } from "~/server/auth/session-cookie.server";
+import { getAuth } from "~/lib/auth.server";
 import { getEnv } from "~/server/config/env.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { serializeThemePreference } from "~/server/theme/theme-cookie.server";
@@ -41,7 +39,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const env = getEnv();
   const url = new URL(request.url);
   const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
-  const auth = authenticate(request);
+  const auth = await authenticate(request);
 
   // Signed in and no reset pending → nothing to do here.
   if (auth && !auth.pwresetRequired) throw redirect(returnTo ?? "/");
@@ -52,8 +50,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     returnTo,
     flash,
     providers: {
-      github: isGithubOAuthEnabled(env),
-      google: isGoogleOAuthEnabled(env),
+      github: Boolean(
+        env.GITHUB_OAUTH_CLIENT_ID && env.GITHUB_OAUTH_CLIENT_SECRET,
+      ),
+      google: Boolean(
+        env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET,
+      ),
     },
   };
   return flash
@@ -75,7 +77,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "login") {
     // Already signed in (e.g. double submit / second tab)? Never create a
     // second session — just go where they were headed.
-    const existing = authenticate(request);
+    const existing = await authenticate(request);
     if (existing && !existing.pwresetRequired) {
       return redirect(returnTo ?? "/");
     }
@@ -84,12 +86,17 @@ export async function action({ request }: Route.ActionArgs) {
     const password = String(formData.get("password") ?? "");
     if (!email) return data({ error: "Enter your email." }, { status: 400 });
 
-    const result = loginWithCredentials(db, {
-      email,
-      password,
-      ip: clientIpOf(request),
-      userAgent: request.headers.get("User-Agent"),
-    });
+    const result = await loginWithCredentials(
+      db,
+      getAuth(),
+      {
+        email,
+        password,
+        ip: clientIpOf(request),
+        userAgent: request.headers.get("User-Agent"),
+      },
+      { requestHeaders: request.headers },
+    );
 
     if (!result.ok) {
       const error =
@@ -106,7 +113,10 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     const headers = new Headers();
-    headers.append("Set-Cookie", sessionCookieHeader(result.session.token));
+    // Forward better-auth's session Set-Cookie(s).
+    for (const cookie of result.setCookies) {
+      headers.append("Set-Cookie", cookie);
+    }
     // Sync the user's stored theme preference to the viberr_theme cookie.
     headers.append("Set-Cookie", serializeThemePreference(result.user.theme));
     if (result.mustResetPassword) {
@@ -120,7 +130,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "set-password") {
-    const auth = requireAuth(request, { allowPendingPasswordReset: true });
+    const auth = await requireAuth(request, { allowPendingPasswordReset: true });
     await assertCsrf(request, auth.sessionId, formData);
     if (!auth.pwresetRequired) return redirect(returnTo ?? "/");
 
@@ -138,15 +148,12 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Passwords don't match." }, { status: 400 });
     }
 
-    const { session } = completeForcedPasswordReset(db, {
+    completeForcedPasswordReset(db, {
       user: { id: auth.user.id, email: auth.user.email },
       newPassword: npw,
-      ip: clientIpOf(request),
-      userAgent: request.headers.get("User-Agent"),
     });
-    const headers = new Headers();
-    headers.append("Set-Cookie", sessionCookieHeader(session.token));
-    return redirect(returnTo ?? "/", { headers });
+    // The existing better-auth session stays valid; just clear the gate.
+    return redirect(returnTo ?? "/");
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -301,9 +308,28 @@ export default function Login({
       }, 900);
       return;
     }
-    window.location.href =
-      `/auth/${which}` +
-      (returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : "");
+    // Kick off better-auth's social sign-in and follow the provider URL.
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/sign-in/social", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: which, callbackURL: returnTo ?? "/" }),
+        });
+        const body = (await res.json()) as { url?: string };
+        if (body.url) {
+          window.location.href = body.url;
+          return;
+        }
+        throw new Error("no redirect url");
+      } catch {
+        setProviderBusy(null);
+        setInfo(
+          (which === "github" ? "GitHub" : "Google") +
+            " sign-in couldn't start — please try again.",
+        );
+      }
+    })();
   };
 
   return (

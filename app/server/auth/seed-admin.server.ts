@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit, SYSTEM_ACTOR } from "../audit/audit-recorder.server";
 import { logger } from "../logging/logger.server";
+import { provisionIdentity } from "./identity.server";
 import { hashPassword } from "./password.server";
 import { countUsers, insertUser } from "./user-store.server";
 
@@ -43,17 +44,26 @@ export function seedInitialAdmin(
   const generated = !options.password;
   const password = options.password ?? randomBytes(12).toString("base64url");
 
+  const passwordHash = hashPassword(password);
   const user = insertUser(db, {
     id: newId("u"),
     email,
     name: nameForEmail(email),
     role: "admin",
-    passwordHash: hashPassword(password),
+    passwordHash,
     // A generated password is unknown to the human — force a reset.
     pwresetRequired: generated,
     idp: "local",
     avatarTone: "",
     createdBy: null,
+  });
+  // Provision the better-auth identity so the bootstrap admin can sign in.
+  provisionIdentity(db, {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    passwordHash,
+    role: "admin",
   });
 
   recordAudit(db, {

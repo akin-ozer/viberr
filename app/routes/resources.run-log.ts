@@ -15,7 +15,7 @@ import { getRunLog } from "~/server/runtimes/run-service.server";
  * occurredAt, raw, display }] } }`.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  requireUser(request);
+  await requireUser(request);
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {

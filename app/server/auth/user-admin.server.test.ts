@@ -1,9 +1,10 @@
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { newId } from "~/shared/ids/new-id.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../audit/audit-recorder.server";
 import { isAppError } from "../errors/app-error.server";
 import { verifyPassword } from "./password.server";
-import { createSession, getSessionByToken } from "./session.server";
 import {
   createUser,
   disableUser,
@@ -17,6 +18,30 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@viberr.test" };
+
+/** Inserts a better-auth session row for a user (identity must exist). */
+function seedSession(db: Database.Database, userId: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    newId("sess"),
+    new Date(Date.now() + 1_000_000_000).toISOString(),
+    newId("tok"),
+    now,
+    now,
+    userId,
+  );
+}
+
+function sessionCount(db: Database.Database, userId: string): number {
+  return (
+    db.prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`).get(userId) as {
+      c: number;
+    }
+  ).c;
+}
 
 function seedAdmin(db: ReturnType<typeof ctx.makeDb>) {
   return insertUser(db, {
@@ -115,10 +140,10 @@ describe("updateUser", () => {
       { email: "d@viberr.test", name: "D", role: "member" },
       ACTOR,
     );
-    const session = createSession(db, user.id);
+    seedSession(db, user.id);
     disableUser(db, user.id, ACTOR);
     expect(findUserById(db, user.id)?.disabled).toBe(true);
-    expect(getSessionByToken(db, session.token)).toBeNull();
+    expect(sessionCount(db, user.id)).toBe(0);
     expect(listAuditEvents(db, { action: "org.user.disabled" })).toHaveLength(1);
     enableUser(db, user.id, ACTOR);
     expect(findUserById(db, user.id)?.disabled).toBe(false);
@@ -166,13 +191,13 @@ describe("resetPassword", () => {
       ACTOR,
     );
     db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(user.id);
-    const session = createSession(db, user.id);
+    seedSession(db, user.id);
 
     const updated = resetPassword(db, user.id, "new-temp-pass", ACTOR);
     expect(updated.pwresetRequired).toBe(true);
     expect(verifyPassword("new-temp-pass", updated.passwordHash)).toBe(true);
     expect(verifyPassword("first-password", updated.passwordHash)).toBe(false);
-    expect(getSessionByToken(db, session.token)).toBeNull();
+    expect(sessionCount(db, user.id)).toBe(0);
     expect(listAuditEvents(db, { action: "auth.password.reset" })).toHaveLength(1);
   });
 
