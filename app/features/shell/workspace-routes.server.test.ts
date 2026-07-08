@@ -370,4 +370,40 @@ describe("create-project action (home)", () => {
     expect(result.init?.status).toBe(409);
     expect(result.data.error).toContain("already exists");
   });
+
+  it("RBAC decision (pinned): any org MEMBER may create a project and is seeded its admin", async () => {
+    // Deniz is a plain org member (not an org admin) — creation is self-serve,
+    // no org-admin gate. This test pins the deliberate _index.tsx decision.
+    const { action } = await import("~/routes/_index");
+    const { cookie, sessionId } = await app.cookieFor(seedIds.deniz);
+    const csrf = await app.csrfFor(sessionId);
+    const result = (await action({
+      request: app.request("/", {
+        method: "POST",
+        cookie,
+        body: new URLSearchParams({
+          _csrf: csrf,
+          intent: "create-project",
+          name: "Member Made",
+          key: "MEM",
+          owner: "akin-ozer",
+          repoName: "member-made",
+          template: "light",
+          policy: "balanced",
+        }),
+      }),
+      params: {},
+      context: {},
+    } as never)) as { ok: boolean; slug: string };
+    expect(result.ok).toBe(true);
+    expect(result.slug).toBe("member-made");
+
+    // The creating member is seeded as the new project's admin.
+    const row = app.db
+      .prepare(
+        `SELECT role FROM project_members WHERE project_slug = 'member-made' AND user_id = ?`,
+      )
+      .get(seedIds.deniz) as { role: string } | undefined;
+    expect(row?.role).toBe("admin");
+  });
 });

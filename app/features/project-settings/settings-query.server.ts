@@ -23,6 +23,7 @@ export interface SettingsViewData {
     prefix: string;
     description: string;
     repo: string | null;
+    archived: boolean;
     /** Real store-relative task-file pattern (ruling 3). */
     taskFilePattern: string;
   };
@@ -61,6 +62,7 @@ export function getSettingsViewData(
       prefix: project.taskPrefix,
       description: project.description,
       repo: project.repo,
+      archived: project.archived,
       taskFilePattern: `projects/${project.slug}/tasks/<key>/task.md`,
     },
     stages: project.stages.map((s) => ({

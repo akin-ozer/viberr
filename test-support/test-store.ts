@@ -75,7 +75,7 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
   const users = {
     arda: mkUser("Arda", "admin", "admin"),
     murat: mkUser("Murat", "member", "maintainer"),
-    selin: mkUser("Selin", "member", "reviewer"),
+    selin: mkUser("Selin", "member", "contributor"),
     elif: mkUser("Elif", "member", "viewer"),
     deniz: mkUser("Deniz", "member", null),
   };

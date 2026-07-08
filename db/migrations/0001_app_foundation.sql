@@ -7,7 +7,7 @@ CREATE TABLE users (
   email TEXT NOT NULL,
   name TEXT NOT NULL,
   title TEXT,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
   password_hash TEXT,
   idp TEXT NOT NULL DEFAULT 'local',
   avatar_tone TEXT,

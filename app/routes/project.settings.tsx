@@ -10,6 +10,7 @@ import { runGrantScope } from "~/features/github/github-actions.server";
 import {
   addStage,
   deleteProject,
+  setProjectArchived,
   inviteMember,
   removeMember,
   removeStage,
@@ -146,6 +147,14 @@ export async function action({ request, params }: Route.ActionArgs) {
           );
         }
         return await runGrantScope(db, slug, actor);
+      }
+      case "archive-project": {
+        const result = await setProjectArchived(
+          db,
+          { projectSlug: slug, archived: field("archived") !== "false" },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast, archived: result.archived };
       }
       case "delete-project": {
         await deleteProject(

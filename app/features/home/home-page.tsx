@@ -683,17 +683,21 @@ export function HomePage({
     rebuildFetcher.submit(fd, { method: "post" });
   };
 
-  const filtered = projects.filter((p) => {
+  const matchesQuery = (p: HomeProjectCard) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return (p.name + " " + p.key + " " + (p.repo ?? "")).toLowerCase().includes(q);
-  });
+  };
+  // Archived projects are lifted out of the active grid into their own section.
+  const active = projects.filter((p) => !p.archived);
+  const archivedList = projects.filter((p) => p.archived).filter(matchesQuery);
+  const filtered = active.filter(matchesQuery);
   const pinned = filtered.filter((p) => stars[p.slug]);
   const rest = filtered.filter((p) => !stars[p.slug]);
 
-  const totalRunning = projects.reduce((a, p) => a + p.running, 0);
-  const totalWaiting = projects.reduce((a, p) => a + p.waiting, 0);
-  const activeIn = projects.filter((p) => p.running > 0).length;
+  const totalRunning = active.reduce((a, p) => a + p.running, 0);
+  const totalWaiting = active.reduce((a, p) => a + p.waiting, 0);
+  const activeIn = active.filter((p) => p.running > 0).length;
   const firstName = user.name.split(" ")[0];
 
   const renderGroup = (list: HomeProjectCard[]) =>
@@ -908,6 +912,29 @@ export function HomePage({
                 </>
               )}
             </section>
+            {archivedList.length > 0 && (
+              <section data-screen-label="Archived projects">
+                <div className="sec-h">
+                  <Icon name="board" />
+                  <h2>Archived</h2>
+                  <span className="ct">{archivedList.length}</span>
+                </div>
+                <p className="sub" style={{ margin: "0 0 .75rem" }}>
+                  Hidden from the active workspace. Open a project and use
+                  Settings → Danger zone to restore it.
+                </p>
+                <div className="pj-list">
+                  {archivedList.map((p) => (
+                    <ProjectRow
+                      key={p.slug}
+                      p={p}
+                      starred={!!stars[p.slug]}
+                      onStar={toggleStar}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
 

@@ -623,12 +623,16 @@ function DeleteProjectDialog({
 export function DangerZone({
   projectName,
   myRole,
+  archived,
   busy,
+  onArchive,
   onDelete,
 }: {
   projectName: string;
   myRole: string | null;
+  archived: boolean;
   busy: boolean;
+  onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
 }) {
   const push = useToast();
@@ -645,21 +649,23 @@ export function DangerZone({
       </div>
       <div className="dz-row">
         <span className="dz-main">
-          <div className="dn">Archive {projectName}</div>
+          <div className="dn">
+            {archived ? `Restore ${projectName}` : `Archive ${projectName}`}
+          </div>
           <div className="dd">
-            Board becomes read-only, running agents stop, timelines are
-            preserved.
+            {archived
+              ? "This project is archived — hidden from the workspace. Restore it to make it active again."
+              : "Hides the project from the workspace and moves it to the Home “Archived” section. Timelines are preserved and it can be restored anytime."}
           </div>
         </span>
         <button
           className="btn ghost sm"
+          disabled={busy}
           onClick={() =>
-            isAdmin
-              ? push("Archiving isn't available yet — projects stay active in V1")
-              : deny("Archiving")
+            isAdmin ? onArchive(!archived) : deny("Archiving")
           }
         >
-          Archive
+          {archived ? "Restore" : "Archive"}
         </button>
       </div>
       <div className="dz-row">
@@ -843,7 +849,14 @@ export function SettingsPage({
         <DangerZone
           projectName={data.project.name}
           myRole={myRole}
+          archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
+          onArchive={(archived) =>
+            dangerFetcher.submit(
+              { intent: "archive-project", _csrf: csrf, archived: String(archived) },
+              { method: "post" },
+            )
+          }
           onDelete={(confirmName) =>
             dangerFetcher.submit(
               { intent: "delete-project", _csrf: csrf, confirmName },

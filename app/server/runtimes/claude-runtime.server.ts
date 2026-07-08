@@ -45,6 +45,8 @@ export interface ClaudeQueryOptions {
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist — confines the run to the listed tools. */
   allowedTools?: string[];
+  /** Tool denylist — deny rules bind even under bypassPermissions. */
+  disallowedTools?: string[];
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -168,6 +170,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         if (spec.mcpServers) options.mcpServers = spec.mcpServers;
         if (spec.allowedTools && spec.allowedTools.length) {
           options.allowedTools = spec.allowedTools;
+        }
+        // Specialist capability confinement: deny the withheld repo commands.
+        // Deny rules override bypassPermissions, so this genuinely binds.
+        if (spec.disallowedTools && spec.disallowedTools.length) {
+          options.disallowedTools = spec.disallowedTools;
         }
 
         const q = queryFn({ prompt: singlePrompt(spec.prompt), options });

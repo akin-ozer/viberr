@@ -349,7 +349,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           { userId: ids.elif, role: "admin" },
           { userId: ids.arda, role: "admin" },
           { userId: ids.murat, role: "maintainer" },
-          { userId: ids.selin, role: "reviewer" },
+          { userId: ids.selin, role: "contributor" },
         ],
         agents: deployments(),
         credentialPolicy: {

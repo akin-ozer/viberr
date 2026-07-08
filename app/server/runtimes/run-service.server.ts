@@ -158,6 +158,8 @@ export interface StartRunInput {
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];
+  /** Tool denylist confining a specialist run to its granted capabilities. */
+  disallowedTools?: string[];
   /** JSON schema constraining the run's final output (Codex structured-output
    *  operator — the caller parses + executes the emitted decision plan). */
   outputSchema?: unknown;
@@ -249,6 +251,9 @@ export async function startRun(
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+    ...(input.disallowedTools && input.disallowedTools.length
+      ? { disallowedTools: input.disallowedTools }
+      : {}),
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
   };
 

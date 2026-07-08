@@ -3,8 +3,18 @@
  * (see CONVENTIONS "Data & naming"). Booleans are 0/1 in SQLite.
  */
 
-export type UserRole = "admin" | "member" | "viewer";
-export const USER_ROLES = ["admin", "member", "viewer"] as const;
+/** Org roles are a two-rung ladder: `admin` runs the instance, `member` is
+ * everyone else. (The old read-only `viewer` rung was retired — nothing ever
+ * gated behavior on it, so it only added dead vocabulary.) */
+export type UserRole = "admin" | "member";
+export const USER_ROLES = ["admin", "member"] as const;
+
+/** Coerce an arbitrary stored/legacy role string to a live UserRole. Anything
+ * that isn't exactly `admin` reads as `member` — this absorbs any stray legacy
+ * `viewer` row without a data migration. */
+export function coerceUserRole(raw: string | null | undefined): UserRole {
+  return raw === "admin" ? "admin" : "member";
+}
 
 export type ThemePreference = "light" | "dark" | "system";
 
@@ -53,7 +63,7 @@ export function mapUserRow(row: UserRow): UserRecord {
     email: row.email,
     name: row.name,
     title: row.title,
-    role: row.role,
+    role: coerceUserRole(row.role),
     passwordHash: row.password_hash,
     idp: row.idp,
     avatarTone: row.avatar_tone,

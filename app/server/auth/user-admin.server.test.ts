@@ -79,7 +79,7 @@ describe("createUser", () => {
     seedAdmin(db);
     const user = createUser(
       db,
-      { email: "oauth@viberr.test", name: "O Auth", role: "viewer" },
+      { email: "oauth@viberr.test", name: "O Auth", role: "member" },
       ACTOR,
     );
     expect(user.passwordHash).toBeNull();

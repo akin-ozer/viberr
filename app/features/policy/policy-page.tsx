@@ -71,7 +71,7 @@ export function HumanAccess({
   const counts: Record<RoleId, number> = {
     admin: 0,
     maintainer: 0,
-    reviewer: 0,
+    contributor: 0,
     viewer: 0,
   };
   for (const m of members) counts[m.role] += 1;

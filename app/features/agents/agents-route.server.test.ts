@@ -234,6 +234,42 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     });
   });
 
+  it("coerces always-human capabilities to human even when the form asks for direct", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Overreach",
+        role: "Tries to self-govern",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Attempts to grant itself governance powers.",
+        // A malformed/hostile form asking for actionable modes on human-only caps.
+        caps: {
+          "merge-pull-request": "direct",
+          "transition-to-done": "direct",
+          "change-project-policy": "recommend",
+          "commit-push-branch": "direct",
+        },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "overreach",
+    )!;
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
+    // The three always-human capabilities are forced to human by grantsFor…
+    expect(mode("merge-pull-request")).toBe("human");
+    expect(mode("transition-to-done")).toBe("human");
+    expect(mode("change-project-policy")).toBe("human");
+    // …but an ordinary repo capability keeps the requested actionable mode.
+    expect(mode("commit-push-branch")).toBe("direct");
+
+    await postAction(ids.arda, { intent: "delete-profile", profileId: "overreach" });
+  });
+
   it("stores the picked model + effort on the deployment definition", async () => {
     const result = (await postAction(ids.arda, {
       intent: "create-profile",

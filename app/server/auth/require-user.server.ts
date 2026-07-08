@@ -129,12 +129,11 @@ export async function requireUser(
 }
 
 const ROLE_ORDER: Record<UserRole, number> = {
-  viewer: 1,
-  member: 2,
-  admin: 3,
+  member: 1,
+  admin: 2,
 };
 
-/** Role hierarchy check: admin > member > viewer. */
+/** Role hierarchy check: admin > member. */
 export function roleSatisfies(role: UserRole, required: UserRole): boolean {
   return ROLE_ORDER[role] >= ROLE_ORDER[required];
 }

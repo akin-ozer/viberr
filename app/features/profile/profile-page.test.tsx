@@ -143,8 +143,9 @@ describe("ProfilePage", () => {
   it("Your access renders the shared RBAC table for the REAL role", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("Your access")).toBeTruthy();
-    // Maintainer: 6 grants, 3 denials (contracts §3.2).
-    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(6);
+    // Maintainer holds 7 of 10 rows (all but release-any-owner, manage
+    // members, and edit workflow/policy).
+    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(7);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(3);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();

@@ -44,6 +44,10 @@ export interface RunSpec {
   /** Allowlist confining which tools the run may call (e.g. the operator to
    *  only its `mcp__viberr__*` governance tools — it can never write code). */
   allowedTools?: string[];
+  /** Denylist confining a specialist run to its granted capabilities (e.g. a
+   *  specialist without push rights cannot run `git push`). Deny rules bind
+   *  even under bypassPermissions. Claude only. */
+  disallowedTools?: string[];
   /** JSON schema constraining the run's final output. Codex only — used by the
    *  structured-output operator (it has no in-process tool channel), so the run
    *  emits a decision plan the caller parses + executes. */

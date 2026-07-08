@@ -28,7 +28,7 @@ beforeAll(async () => {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
     elif: findUserByEmail(app.db, "elif@viberr.dev")!.id, // project admin
     murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // reviewer
+    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
   };
 });
 afterAll(() => app.cleanup());
@@ -57,25 +57,26 @@ async function postAction(userId: string, fields: Record<string, string>) {
   return action({ request, params: { slug: "viberr-core" }, context: {} } as never);
 }
 
-describe("RBAC grant table (contracts §3.2 — verbatim, display-only)", () => {
-  it("carries exactly the 9 canonical rows", () => {
+describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
+  it("carries the canonical rows in broadest→narrowest order", () => {
     expect(RBAC_ROWS.map((r) => r.action)).toEqual([
       "View board, tasks & timelines",
       "Comment on tasks (app-wide)",
-      "Take / release task ownership",
-      "Release any task owner",
+      "Take / release own task ownership",
+      "Create tasks",
       "Approve stage transitions",
       "Accept completion → Done",
-      "Open agent runtime sessions",
+      "Run agents & reorder the board",
+      "Release any task owner",
       "Manage members & roles",
       "Edit workflow & policy",
     ]);
-    expect(ROLE_IDS).toEqual(["admin", "maintainer", "reviewer", "viewer"]);
-    // Admin holds everything; viewer only the first three universal rows.
+    expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
+    // Admin holds everything; the contributor≠viewer line is "Create tasks".
     expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 0, 1, 1, 1, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.reviewer)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
   });
 });
 
@@ -87,7 +88,7 @@ describe("loader", () => {
       [ids.elif, "admin"],
       [ids.arda, "admin"],
       [ids.murat, "maintainer"],
-      [ids.selin, "reviewer"],
+      [ids.selin, "contributor"],
     ]);
     expect(view.transitions.map((t) => [t.from, t.to, t.boundary, t.locked])).toEqual([
       ["triage", "ready", "approval", false],
@@ -153,7 +154,7 @@ describe("set-role", () => {
       actorUserId: ids.arda,
       subjectId: ids.selin,
       projectSlug: "viberr-core",
-      details: { from: "reviewer", to: "viewer" },
+      details: { from: "contributor", to: "viewer" },
     });
     // …and the last-change chip now derives from it.
     const { view } = await runLoader(ids.arda);
@@ -163,7 +164,7 @@ describe("set-role", () => {
     await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.selin,
-      role: "reviewer",
+      role: "contributor",
     });
   });
 

@@ -272,7 +272,7 @@ const membersFixture: TaskMemberView[] = [
   { userId: "u-elif", role: "admin", user: { name: "Elif Demir", initials: "ED", tone: "rose" } },
   { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
   { userId: "u-murat", role: "maintainer", user: { name: "Murat Yıldız", initials: "MY", tone: "teal" } },
-  { userId: "u-selin", role: "reviewer", user: { name: "Selin Aksoy", initials: "SA", tone: "violet" } },
+  { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "violet" } },
 ];
 
 function taskFixture(ownerId: string, ownerName: string): TaskSummary {
@@ -512,7 +512,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
 
   it("non-privileged role: no assign/run affordances (RBAC-gated)", () => {
     const { container } = renderExec(execTask(), {
-      myRole: "reviewer",
+      myRole: "contributor",
       canRunAgents: false,
     });
     const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
@@ -577,7 +577,7 @@ describe("ExecutionProfile — reviewers", () => {
 
   it("non-privileged role: chips render read-only (no Run/remove/Add)", () => {
     const { container } = renderExec(reviewerTask(), {
-      myRole: "reviewer",
+      myRole: "contributor",
       canRunAgents: false,
     });
     expect(container.querySelector(".rev-agent")).not.toBeNull();

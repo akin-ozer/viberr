@@ -8,13 +8,8 @@ describe("roleSatisfies (RBAC matrix)", () => {
   const matrix: Array<[UserRole, UserRole, boolean]> = [
     ["admin", "admin", true],
     ["admin", "member", true],
-    ["admin", "viewer", true],
     ["member", "admin", false],
     ["member", "member", true],
-    ["member", "viewer", true],
-    ["viewer", "admin", false],
-    ["viewer", "member", false],
-    ["viewer", "viewer", true],
   ];
   for (const [role, required, expected] of matrix) {
     it(`${role} ${expected ? "satisfies" : "does not satisfy"} ${required}`, () => {

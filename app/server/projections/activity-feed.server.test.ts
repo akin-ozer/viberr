@@ -133,7 +133,7 @@ describe("listAuditLog", () => {
       action: "project.member.role_changed",
       actor: { userId: arda.id, label: arda.email },
       projectSlug: store.slug,
-      details: { from: "reviewer", to: "viewer", targetUserId: store.users.selin.id },
+      details: { from: "contributor", to: "viewer", targetUserId: store.users.selin.id },
     });
     recordAudit(store.db, {
       action: "github.pr.merge_refused",

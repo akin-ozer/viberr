@@ -16,9 +16,18 @@ import {
 // ---------------------------------------------------------------- enums
 
 /** Project membership roles — the 4-role system from contracts §3.2
- * (separate from org roles admin|member and from agent capability policy). */
-export const PROJECT_ROLES = ["admin", "maintainer", "reviewer", "viewer"] as const;
+ * (separate from org roles admin|member and from agent capability policy).
+ * `contributor` was formerly named `reviewer`; the rename dropped a misleading
+ * label (review authority actually rides per-task ownership, not the role) while
+ * keeping the tier's one real power — creating tasks — above read-only `viewer`. */
+export const PROJECT_ROLES = ["admin", "maintainer", "contributor", "viewer"] as const;
 export type ProjectRole = (typeof PROJECT_ROLES)[number];
+
+/** Legacy `reviewer` → `contributor` coercion for project.md files written
+ * before the rename. Applied at parse time so no data migration is needed. */
+function coerceProjectRole(value: unknown): unknown {
+  return value === "reviewer" ? "contributor" : value;
+}
 
 /** Workflow transition boundaries (contracts §2.5). review→done is locked
  * `human` in V1 — enforced server-side, not just data. */
@@ -59,7 +68,7 @@ export type WorkflowBoundary = z.infer<typeof workflowBoundarySchema>;
 export const memberSchema = z
   .object({
     userId: z.string().min(1),
-    role: z.enum(PROJECT_ROLES),
+    role: z.preprocess(coerceProjectRole, z.enum(PROJECT_ROLES)),
   })
   .loose();
 export type ProjectMember = z.infer<typeof memberSchema>;
@@ -149,6 +158,11 @@ export type Guardrail = z.infer<typeof guardrailSchema>;
 export const projectFrontmatterSchema = z.object({
   name: z.string().min(1),
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  /** Archived projects are hidden from the active workspace (restorable by an
+   * admin). Absent for active projects — only archived ones carry the key, so
+   * it stays optional in the frontmatter type; the tolerant parse fills a
+   * concrete `false` on read. */
+  archived: z.boolean().optional(),
   /** Project default GitHub repo ("owner/name"); tasks may override. */
   repo: z.string().nullable(),
   defaultBranch: z.string().min(1),
@@ -168,6 +182,7 @@ export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "name",
   "slug",
+  "archived",
   "repo",
   "defaultBranch",
   "taskPrefix",
@@ -300,6 +315,13 @@ export function parseProjectFrontmatter(
       true,
     ),
     slug,
+    archived: tolerant(
+      diagnostics,
+      "archived",
+      data.archived,
+      projectFrontmatterSchema.shape.archived,
+      false,
+    ),
     repo: tolerant(
       diagnostics,
       "repo",

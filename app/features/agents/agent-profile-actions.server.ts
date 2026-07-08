@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
+import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -133,16 +134,25 @@ function parseForm(raw: unknown): ProfileFormInput {
   return parsed.data;
 }
 
+const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
+
 /** Caps record → id-based grants (off = not granted) against a defaults map
- * (the specialist modal catalog OR the operator catalog). */
+ * (the specialist modal catalog OR the operator catalog).
+ *
+ * Server-side invariant: a capability in ALWAYS_HUMAN_CAPABILITY_IDS (merge PR,
+ * transition-to-done, change project policy) can NEVER be stored in an
+ * actionable mode — whatever the submitted form says, it is coerced to
+ * `human`. This is the enforcement point the catalog comment refers to; no
+ * write path can persist an always-human grant an agent could act on. */
 function grantsFor(
   caps: Record<string, CapMode>,
   defaults: Readonly<Record<string, CapMode>>,
 ): { capabilityId: string; mode: CapabilityMode }[] {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
-    const mode = caps[capabilityId] ?? def;
+    let mode = caps[capabilityId] ?? def;
     if (mode === "off") continue;
+    if (ALWAYS_HUMAN.has(capabilityId)) mode = "human";
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   return grants;

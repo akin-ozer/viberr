@@ -47,7 +47,7 @@ describe("seedInitialAdmin", () => {
       id: "u_existing",
       email: "someone@viberr.test",
       name: "Someone",
-      role: "viewer",
+      role: "member",
     });
     const result = seedInitialAdmin(db, { email: "boss@example.com" });
     expect(result.created).toBe(false);

@@ -92,6 +92,11 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: true as const, ...summary };
     }
     if (intent === "create-project") {
+      // RBAC decision (deliberate, pinned by test): project creation is
+      // self-serve for ANY signed-in org member — no org-admin gate. The
+      // creator is seeded as the new project's admin (project-create.server.ts).
+      // Org role is intentionally NOT consulted here; the only guard is the
+      // requireAuth at the top of this action.
       const result = await createProject(
         db,
         {

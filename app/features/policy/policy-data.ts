@@ -7,13 +7,13 @@ import { ALWAYS_HUMAN_CAPABILITY_IDS, capabilityById } from "~/shared/capabiliti
  * (contracts §2.5).
  */
 
-export const ROLE_IDS = ["admin", "maintainer", "reviewer", "viewer"] as const;
+export const ROLE_IDS = ["admin", "maintainer", "contributor", "viewer"] as const;
 export type RoleId = (typeof ROLE_IDS)[number];
 
 export const ROLE_LABEL: Record<RoleId, string> = {
   admin: "Admin",
   maintainer: "Maintainer",
-  reviewer: "Reviewer",
+  contributor: "Contributor",
   viewer: "Viewer",
 };
 
@@ -22,18 +22,40 @@ export interface RbacRow {
   grant: Record<RoleId, 0 | 1>;
 }
 
-/** The 9-row RBAC grant table — contracts §3.2, verbatim. Display-only. */
-export const RBAC_ROWS: readonly RbacRow[] = [
-  { action: "View board, tasks & timelines", grant: { admin: 1, maintainer: 1, reviewer: 1, viewer: 1 } },
-  { action: "Comment on tasks (app-wide)", grant: { admin: 1, maintainer: 1, reviewer: 1, viewer: 1 } },
-  { action: "Take / release task ownership", grant: { admin: 1, maintainer: 1, reviewer: 1, viewer: 1 } },
-  { action: "Release any task owner", grant: { admin: 1, maintainer: 0, reviewer: 0, viewer: 0 } },
-  { action: "Approve stage transitions", grant: { admin: 1, maintainer: 1, reviewer: 0, viewer: 0 } },
-  { action: "Accept completion → Done", grant: { admin: 1, maintainer: 1, reviewer: 0, viewer: 0 } },
-  { action: "Open agent runtime sessions", grant: { admin: 1, maintainer: 1, reviewer: 0, viewer: 0 } },
-  { action: "Manage members & roles", grant: { admin: 1, maintainer: 0, reviewer: 0, viewer: 0 } },
-  { action: "Edit workflow & policy", grant: { admin: 1, maintainer: 0, reviewer: 0, viewer: 0 } },
+/**
+ * PROJECT_CAP_MATRIX — the single source of truth for what each project role
+ * may do. Each row lists the roles that hold the capability; every entry maps
+ * to a real server gate (`requireMemberRole` / `requireRuntimeRole` /
+ * `requireProjectAdmin`). The displayed RBAC table below is derived from this,
+ * and `policy-rbac.server.test.ts` drives each guard per role to prove the
+ * table can't drift from enforcement. Order: broadest grant → narrowest.
+ *
+ * The one distinction the old table hid: `contributor` may create tasks,
+ * `viewer` may not (task-actions.server.ts createTask viewer gate).
+ */
+export const PROJECT_CAP_MATRIX: readonly {
+  action: string;
+  roles: readonly RoleId[];
+}[] = [
+  { action: "View board, tasks & timelines", roles: ["admin", "maintainer", "contributor", "viewer"] },
+  { action: "Comment on tasks (app-wide)", roles: ["admin", "maintainer", "contributor", "viewer"] },
+  { action: "Take / release own task ownership", roles: ["admin", "maintainer", "contributor", "viewer"] },
+  { action: "Create tasks", roles: ["admin", "maintainer", "contributor"] },
+  { action: "Approve stage transitions", roles: ["admin", "maintainer"] },
+  { action: "Accept completion → Done", roles: ["admin", "maintainer"] },
+  { action: "Run agents & reorder the board", roles: ["admin", "maintainer"] },
+  { action: "Release any task owner", roles: ["admin"] },
+  { action: "Manage members & roles", roles: ["admin"] },
+  { action: "Edit workflow & policy", roles: ["admin"] },
 ];
+
+/** RBAC grant table — derived from PROJECT_CAP_MATRIX (never hand-maintained). */
+export const RBAC_ROWS: readonly RbacRow[] = PROJECT_CAP_MATRIX.map((cap) => ({
+  action: cap.action,
+  grant: Object.fromEntries(
+    ROLE_IDS.map((r) => [r, cap.roles.includes(r) ? 1 : 0]),
+  ) as Record<RoleId, 0 | 1>,
+}));
 
 export type BoundaryId = "auto" | "approval" | "human";
 

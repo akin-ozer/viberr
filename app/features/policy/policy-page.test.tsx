@@ -11,7 +11,7 @@ const MEMBERS: MembershipView[] = [
   { userId: "u_elif", role: "admin", status: "active", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
   { userId: "u_arda", role: "admin", status: "active", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
   { userId: "u_murat", role: "maintainer", status: "active", name: "Murat Yıldız", email: "murat@viberr.dev", initials: "MY", tone: "teal" },
-  { userId: "u_selin", role: "reviewer", status: "active", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet" },
+  { userId: "u_selin", role: "contributor", status: "active", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet" },
 ];
 
 const STAGES = [
@@ -41,7 +41,7 @@ const PROFILES: PcapProfile[] = [
 ];
 
 describe("HumanAccess", () => {
-  it("renders member rows with role radios and the 9-row grant table with live counts", () => {
+  it("renders member rows with role radios and the derived grant table with live counts", () => {
     const onSetRole = vi.fn();
     const { container, getByText } = render(
       <HumanAccess
@@ -58,9 +58,10 @@ describe("HumanAccess", () => {
     // Header counts derive live from the same member array.
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
-    // 9 grant rows.
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(9);
+    // Grant rows (derived from PROJECT_CAP_MATRIX).
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(10);
     expect(getByText("Release any task owner")).toBeTruthy();
+    expect(getByText("Create tasks")).toBeTruthy();
 
     // Selecting a new role dispatches; re-selecting the current one no-ops.
     const selinSeg = container.querySelectorAll(".mini-seg")[3]!;

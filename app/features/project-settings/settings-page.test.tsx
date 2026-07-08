@@ -19,6 +19,7 @@ const PROJECT: SettingsViewData["project"] = {
   prefix: "VIB",
   description: "Core platform work.",
   repo: "akin-ozer/viberr",
+  archived: false,
   taskFilePattern: "projects/viberr-core/tasks/<key>/task.md",
 };
 
@@ -282,7 +283,14 @@ describe("DangerZone", () => {
   it("admin delete flows through the typed-name confirmation", () => {
     const onDelete = vi.fn();
     const { container, getByPlaceholderText } = render(
-      <DangerZone projectName="Viberr Core" myRole="admin" busy={false} onDelete={onDelete} />,
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="admin"
+        archived={false}
+        busy={false}
+        onArchive={() => {}}
+        onDelete={onDelete}
+      />,
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
@@ -302,7 +310,14 @@ describe("DangerZone", () => {
 
   it("non-admins only get the deny toast path (no dialog)", () => {
     const { container } = render(
-      <DangerZone projectName="Viberr Core" myRole="maintainer" busy={false} onDelete={() => {}} />,
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="maintainer"
+        archived={false}
+        busy={false}
+        onArchive={() => {}}
+        onDelete={() => {}}
+      />,
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();

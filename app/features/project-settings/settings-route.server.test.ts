@@ -34,7 +34,7 @@ beforeAll(async () => {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
     elif: findUserByEmail(app.db, "elif@viberr.dev")!.id, // project admin
     murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // reviewer
+    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // registered non-member
   };
 });
@@ -440,5 +440,57 @@ describe("danger zone", () => {
       "deploy-pipeline",
     )) as { init?: { status?: number } };
     expect(result.init?.status).toBe(403);
+  });
+});
+
+describe("archive-project", () => {
+  it("maintainer is rejected (admin-only)", async () => {
+    const result = (await postAction(ids.murat, {
+      intent: "archive-project",
+      archived: "true",
+    })) as { init?: { status?: number } };
+    expect(result.init?.status).toBe(403);
+  });
+
+  it("admin archives then restores — file + projection + audit follow", async () => {
+    // Archive: project.md flag set, projection column follows, loader reflects.
+    const archived = (await postAction(ids.arda, {
+      intent: "archive-project",
+      archived: "true",
+    })) as { ok: boolean; archived: boolean };
+    expect(archived).toMatchObject({ ok: true, archived: true });
+    expect(projectMd()).toMatch(/archived: true/);
+    expect(
+      (
+        app.db
+          .prepare(`SELECT archived FROM projects WHERE slug = 'viberr-core'`)
+          .get() as { archived: number }
+      ).archived,
+    ).toBe(1);
+    expect((await runLoader(ids.arda)).view.project.archived).toBe(true);
+
+    const { listAuditEvents } = await import(
+      "~/server/audit/audit-recorder.server"
+    );
+    expect(
+      listAuditEvents(app.db, { action: "project.archived" })[0],
+    ).toMatchObject({ subjectId: "viberr-core" });
+
+    // Restore: flag cleared, projection back to 0, so later tests see it active.
+    const restored = (await postAction(ids.arda, {
+      intent: "archive-project",
+      archived: "false",
+    })) as { ok: boolean; archived: boolean };
+    expect(restored).toMatchObject({ ok: true, archived: false });
+    expect(
+      (
+        app.db
+          .prepare(`SELECT archived FROM projects WHERE slug = 'viberr-core'`)
+          .get() as { archived: number }
+      ).archived,
+    ).toBe(0);
+    expect(
+      listAuditEvents(app.db, { action: "project.unarchived" })[0],
+    ).toMatchObject({ subjectId: "viberr-core" });
   });
 });

@@ -12,6 +12,7 @@
 CREATE TABLE projects (
   slug TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  archived INTEGER NOT NULL DEFAULT 0,
   repo TEXT,
   default_branch TEXT NOT NULL DEFAULT 'main',
   task_prefix TEXT NOT NULL,
@@ -29,7 +30,7 @@ CREATE TABLE projects (
 CREATE TABLE project_members (
   project_slug TEXT NOT NULL REFERENCES projects (slug) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'maintainer', 'reviewer', 'viewer')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'maintainer', 'contributor', 'viewer')),
   PRIMARY KEY (project_slug, user_id)
 );
 

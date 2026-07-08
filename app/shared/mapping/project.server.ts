@@ -15,6 +15,7 @@ import type {
 export interface ProjectRow {
   slug: string;
   name: string;
+  archived: 0 | 1;
   repo: string | null;
   default_branch: string;
   task_prefix: string;
@@ -32,6 +33,7 @@ export interface ProjectRow {
 export interface ProjectRecord {
   slug: string;
   name: string;
+  archived: boolean;
   repo: string | null;
   defaultBranch: string;
   taskPrefix: string;
@@ -51,6 +53,7 @@ export function mapProjectRow(row: ProjectRow): ProjectRecord {
   return {
     slug: row.slug,
     name: row.name,
+    archived: row.archived === 1,
     repo: row.repo,
     defaultBranch: row.default_branch,
     taskPrefix: row.task_prefix,

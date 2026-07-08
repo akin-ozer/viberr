@@ -193,12 +193,12 @@ export function rebuildProjectFile(
 
   db.prepare(
     `INSERT INTO projects
-       (slug, name, repo, default_branch, task_prefix, description,
+       (slug, name, archived, repo, default_branch, task_prefix, description,
         stages_json, workflow_json, agent_policy_json, credential_policy_json,
         guardrails_json, source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(slug) DO UPDATE SET
-       name = excluded.name, repo = excluded.repo,
+       name = excluded.name, archived = excluded.archived, repo = excluded.repo,
        default_branch = excluded.default_branch,
        task_prefix = excluded.task_prefix, description = excluded.description,
        stages_json = excluded.stages_json, workflow_json = excluded.workflow_json,
@@ -210,6 +210,7 @@ export function rebuildProjectFile(
   ).run(
     fm.slug,
     fm.name,
+    fm.archived ? 1 : 0,
     fm.repo,
     fm.defaultBranch,
     fm.taskPrefix,

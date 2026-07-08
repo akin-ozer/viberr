@@ -475,6 +475,46 @@ export async function setRepoOverride(
 // -------------------------------------------------------------- danger zone
 
 /**
+ * Archive / restore a project (admin-only). Archiving flips the `archived`
+ * frontmatter flag; the project is then hidden from the active workspace and
+ * moved to the home "Archived" section, restorable anytime. Canonical truth is
+ * the file, so the change persists via reproject like every other setting.
+ */
+export async function setProjectArchived(
+  db: Database.Database,
+  input: { projectSlug: string; archived: boolean },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; archived: boolean }> {
+  const { projectName } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+    input.archived ? "archive this project" : "restore this project",
+  );
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    parsed.frontmatter.archived = input.archived;
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: input.archived ? "project.archived" : "project.unarchived",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { name: projectName },
+  });
+  return {
+    toast: input.archived
+      ? `Project "${projectName}" archived — find it under Archived on Home`
+      : `Project "${projectName}" restored`,
+    archived: input.archived,
+  };
+}
+
+/**
  * Delete project (spec §5.6): destructive, typed-name confirmation
  * required, admin-only. Removes the project directory (project.md + every
  * task file), then a full rescan prunes all derived rows. Audit logs keep

@@ -50,6 +50,7 @@ export interface HomeMember {
 export interface HomeProjectCard {
   slug: string;
   name: string;
+  archived: boolean;
   /** Task key prefix ("VIB"). */
   key: string;
   repo: string | null;
@@ -90,6 +91,7 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     return {
       slug: project.slug,
       name: project.name,
+      archived: project.archived,
       key: project.taskPrefix,
       repo: project.repo,
       desc: project.description,

@@ -10,7 +10,11 @@
  *   - Reviewer "Push commits to the branch" (catalog: "Commit & push to the branch")
  *
  * ALWAYS_HUMAN_CAPABILITY_IDS is the server-side invariant list — these are
- * never grantable to agents regardless of stored policy.
+ * never grantable to an agent in an actionable mode. Enforced at grant-persist
+ * time: `grantsFor` (agent-profile-actions.server.ts) coerces any of these ids
+ * to `human` mode whatever the submitted form says. The Done boundary is
+ * additionally locked at the workflow layer (policy-actions.server.ts) and the
+ * operator completion path (operator-actions.server.ts).
  */
 
 export interface CapabilityDef {

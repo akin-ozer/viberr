@@ -70,6 +70,8 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // -- project governance (phases 4 + 9A) ---------------------------------
   "project.created": "project",
   "project.deleted": "project",
+  "project.archived": "project",
+  "project.unarchived": "project",
   "project.settings.updated": "project",
   "project.repo_override.changed": "project",
   "project.stage.added": "project",

@@ -58,7 +58,7 @@ export interface ProfileView {
 const ROLE_RANK: Record<RoleId, number> = {
   admin: 4,
   maintainer: 3,
-  reviewer: 2,
+  contributor: 2,
   viewer: 1,
 };
 

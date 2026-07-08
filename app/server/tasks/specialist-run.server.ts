@@ -7,7 +7,7 @@ import type {
   AgentRef,
   TaskFileEvent,
 } from "~/schemas/task-file.schema";
-import type { ProjectRole } from "~/schemas/project-file.schema";
+import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -43,6 +43,7 @@ import {
 } from "~/server/runtimes/simulated-runtime.server";
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -97,6 +98,9 @@ export interface ResolvedSpecialist {
   effort: string;
   /** The agent's declared skills — loaded into its run persona at run time. */
   skills: string[];
+  /** The deployment's stored capability grants — drive run-time tool
+   *  confinement (specialist-tool-policy). Empty for the list/display path. */
+  capabilities: CapabilityGrant[];
 }
 
 /** First runnable backend for a profile (codex|claude), defaulting to claude
@@ -119,6 +123,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     model: resolveRunModel(backend, view.model),
     effort: view.effort || "",
     skills: view.resources.skills,
+    capabilities: [],
   };
 }
 
@@ -154,7 +159,9 @@ export function resolveDeployedSpecialist(
       `Agent \`${profileId}\` is not a specialist and cannot be assigned as one.`,
     );
   }
-  return toResolved(view);
+  // Carry the deployment's stored capability grants so the run can confine its
+  // tools to them (specialist-tool-policy).
+  return { ...toResolved(view), capabilities: deployment.capabilities };
 }
 
 function agentEvent(text: string): TaskFileEvent {
@@ -465,12 +472,17 @@ export async function startSpecialistRun(
   // Falls back to the profile id when the deployment can't be resolved.
   let agentName = sp.profileId;
   let skills: string[] = [];
+  // Run-time tool confinement from the deployment's capability grants (a
+  // specialist without push/PR/merge rights literally cannot run those
+  // commands). Empty when nothing is withheld.
+  let disallowedTools: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
     model = resolved.model;
     effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
+    disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
@@ -544,6 +556,7 @@ export async function startSpecialistRun(
     prompt,
     script,
     actor: auditActor,
+    ...(disallowedTools.length ? { disallowedTools } : {}),
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -631,12 +644,14 @@ export async function startReviewerRun(
   let effort = "";
   let agentName = rev.profileId;
   let skills: string[] = [];
+  let disallowedTools: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
     model = resolved.model;
     effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
+    disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
   }
@@ -698,6 +713,7 @@ export async function startReviewerRun(
     prompt,
     script,
     actor: auditActor,
+    ...(disallowedTools.length ? { disallowedTools } : {}),
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
