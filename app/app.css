@@ -2388,9 +2388,10 @@ h1, h2, h3, h4 {
    (deduped against this block: login-*, .gmark, .idp-chip, .linkish and
    the spin keyframes live here only). The body override is scoped (home.css
    relaxes body overflow globally; the workspace shell in viberr.css expects
-   overflow:hidden) — phase 4 extends the scope to the Home page. */
+   overflow:hidden) — phase 4 extends the scope to the Home page, and
+   standalone .home-shell pages (org settings) scroll the body too. */
 
-body:has(.login-wrap), body:has(.home) { overflow: auto; height: auto; min-height: 100vh; }
+body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
 .login-card {
