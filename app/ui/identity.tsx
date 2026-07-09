@@ -50,7 +50,7 @@ export interface IdentityWho extends AvatarPerson {
  * `sub` is a string prop (the mock hardcoded "agent specialist" /
  * "human · maintainer" — callers pass real copy; spec §7.7).
  */
-export function Identity({
+function Identity({
   who,
   lg,
   sub,

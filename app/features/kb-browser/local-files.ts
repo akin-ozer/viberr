@@ -99,12 +99,15 @@ export async function entriesFromDataTransfer(
     if (entry) entries.push(entry);
   }
   if (entries.length > 0) {
-    const out: UploadEntry[] = [];
     try {
-      for (const entry of entries) {
-        await walkEntry(entry, "", out);
-      }
-      return out;
+      const collected = await Promise.all(
+        entries.map(async (entry) => {
+          const acc: UploadEntry[] = [];
+          await walkEntry(entry, "", acc);
+          return acc;
+        }),
+      );
+      return collected.flat();
     } catch {
       // fall through to the flat list
     }

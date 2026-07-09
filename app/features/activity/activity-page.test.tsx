@@ -2,14 +2,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
+import { ActivityPage } from "./activity-page";
 import {
-  ActivityPage,
   auditTimeLabel,
   groupStreamByDay,
   matchesActorFilter,
   type ActivityStreamRowView,
   type AuditLogEntryView,
-} from "./activity-page";
+} from "./feed-helpers";
 
 afterEach(cleanup);
 

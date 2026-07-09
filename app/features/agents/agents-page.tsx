@@ -39,7 +39,7 @@ export interface StageView {
 
 // ------------------------------------------------------------ small parts
 
-export function BackendChip({ b }: { b: string }) {
+function BackendChip({ b }: { b: string }) {
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} />
@@ -84,7 +84,7 @@ function ProfileItem({
   onClick: () => void;
 }) {
   return (
-    <button className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
+    <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>
@@ -110,8 +110,8 @@ function CapColumn({
         {m.label}
       </div>
       <div className="cap-list">
-        {items.map((x, i) => (
-          <div className="cap-item" key={i}>
+        {items.map((x) => (
+          <div className="cap-item" key={x}>
             <Icon name={m.icon} />
             <span>{x}</span>
           </div>
@@ -135,8 +135,8 @@ function ResGroup({
       <div className="lbl">{label}</div>
       <div className="res-chips">
         {items.length ? (
-          items.map((x, i) => (
-            <span className="res-chip" key={i}>
+          items.map((x) => (
+            <span className="res-chip" key={x}>
               <Icon name={icon} />
               {x}
             </span>
@@ -172,7 +172,9 @@ function DeleteConfirm({
   const dialogRef = useDialog(onCancel);
   return (
     <>
-      <div className="confirm-scrim" onClick={onCancel} />
+      {/* Decorative click-to-dismiss backdrop; keyboard users dismiss via
+          Escape (useDialog) or the Cancel button, so hide it from AT. */}
+      <div className="confirm-scrim" onClick={onCancel} aria-hidden="true" />
       <div
         className="confirm-card"
         role="alertdialog"
@@ -201,10 +203,10 @@ function DeleteConfirm({
           )}
         </p>
         <div className="confirm-actions">
-          <button className="btn ghost" onClick={onCancel}>
+          <button type="button" className="btn ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn danger" onClick={onConfirm}>
+          <button type="button" className="btn danger" onClick={onConfirm}>
             <Icon name="x" />
             Delete profile
           </button>
@@ -276,6 +278,7 @@ export function ProfileDetail({
         <div className="ag-hero-actions">
           {canDelete && (
             <button
+              type="button"
               className="btn ghost sm danger"
               onClick={() => setConfirm(true)}
             >
@@ -284,7 +287,7 @@ export function ProfileDetail({
             </button>
           )}
           {canManage && (
-            <button className="btn sm" onClick={() => onEdit(a)}>
+            <button type="button" className="btn sm" onClick={() => onEdit(a)}>
               <Icon name="user" />
               Edit profile
             </button>
@@ -354,7 +357,7 @@ export function ProfileDetail({
             <div className="rt-val">
               <div className="be-list">
                 {a.backends.length ? (
-                  a.backends.map((b, i) => <BackendChip key={i} b={b} />)
+                  a.backends.map((b) => <BackendChip key={b} b={b} />)
                 ) : (
                   <span className="be-chip">
                     <span className="agent-glyph op" style={{ width: 22, height: 22 }}>
@@ -422,10 +425,11 @@ export function ProfileDetail({
           </div>
         ) : (
           <div className="deploy-list">
-            {insts.map((d, i) => (
+            {insts.map((d) => (
               <button
+                type="button"
                 className="deploy-row"
-                key={i}
+                key={`${d.taskKey}:${d.engagement}`}
                 onClick={() => onOpen(d.taskKey)}
               >
                 <span className="deploy-eng">{d.engagement}</span>
@@ -479,10 +483,15 @@ export function LiveRoster({
             No agents are currently engaged.
           </div>
         )}
-        {sorted.map((d, i) => {
+        {sorted.map((d) => {
           const isOp = d.engagement === "operator";
           return (
-            <button className="live-row" key={i} onClick={() => onOpen(d.taskKey)}>
+            <button
+              type="button"
+              className="live-row"
+              key={`${d.profileId}:${d.taskKey}:${d.engagement}`}
+              onClick={() => onOpen(d.taskKey)}
+            >
               <span className="live-agent">
                 <span
                   className={
@@ -650,6 +659,7 @@ export function AgentsPage({
         <div className="board-tools">
           <div className="seg">
             <button
+              type="button"
               className={tab === "profiles" ? "on" : ""}
               onClick={() => setTab("profiles")}
             >
@@ -657,6 +667,7 @@ export function AgentsPage({
               Profiles
             </button>
             <button
+              type="button"
               className={tab === "live" ? "on" : ""}
               onClick={() => setTab("live")}
             >
@@ -664,12 +675,12 @@ export function AgentsPage({
               Live<span style={{ opacity: 0.6 }}>· {deployments.length}</span>
             </button>
           </div>
-          <button className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
+          <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
             <Icon name="shield" />
             Capability matrix
           </button>
           {canManage && (
-            <button className="btn primary sm" onClick={() => setCreating(true)}>
+            <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
               <Icon name="plus" />
               New profile
             </button>
@@ -716,8 +727,10 @@ export function AgentsPage({
               Specialist profiles
               {canManage && (
                 <button
+                  type="button"
                   className="ag-add"
                   title="New specialist profile"
+                  aria-label="New specialist profile"
                   onClick={() => setCreating(true)}
                 >
                   <Icon name="plus" />
@@ -734,7 +747,7 @@ export function AgentsPage({
               />
             ))}
             {canManage && (
-              <button className="ag-newbtn" onClick={() => setCreating(true)}>
+              <button type="button" className="ag-newbtn" onClick={() => setCreating(true)}>
                 <Icon name="plus" />
                 New specialist profile
               </button>

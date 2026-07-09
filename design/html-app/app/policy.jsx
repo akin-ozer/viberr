@@ -102,8 +102,8 @@ function AgentCapability({ profiles, onNav, onMatrix }) {
       </div>
 
       <div className="pol-actions">
-        <button className="btn ghost sm" onClick={onMatrix}><Icon name="shield" />Capability matrix</button>
-        <button className="btn sm" onClick={() => onNav("agents")}><Icon name="agents" />Manage profiles</button>
+        <button type="button" className="btn ghost sm" onClick={onMatrix}><Icon name="shield" />Capability matrix</button>
+        <button type="button" className="btn sm" onClick={() => onNav("agents")}><Icon name="agents" />Manage profiles</button>
       </div>
     </div>
   );
@@ -192,7 +192,7 @@ function Policy({ tasks, onNav, push }) {
         </div>
         <div className="board-tools">
           <span className="hero-file"><Icon name="clock" />last change · {P.edited.by} · {P.edited.t}</span>
-          <button className="btn ghost sm" onClick={() => setMatrixOpen(true)}><Icon name="shield" />Capability matrix</button>
+          <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}><Icon name="shield" />Capability matrix</button>
         </div>
       </div>
 

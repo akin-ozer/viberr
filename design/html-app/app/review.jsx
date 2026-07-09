@@ -9,7 +9,7 @@ function RQRow({ t, onOpen, ready }) {
       ? rqStripMd(t.timeline[0].text)
       : "Agent working — the packet arrives at the boundary.");
   return (
-    <button className="rq-row" onClick={() => onOpen(t.key)}>
+    <button type="button" className="rq-row" onClick={() => onOpen(t.key)}>
       <span className="rq-key">{t.key}</span>
       <span className="rq-main">
         <div className="ttl">{t.title}</div>

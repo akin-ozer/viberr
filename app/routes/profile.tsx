@@ -25,7 +25,7 @@ import {
   ProfilePage,
   type ProfileActionData,
 } from "~/features/profile/profile-page";
-import { applyThemePreference } from "~/features/shell/user-menu";
+import { applyThemePreference } from "~/features/shell/theme-preference";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";

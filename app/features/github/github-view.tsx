@@ -154,6 +154,7 @@ export function PullRequestsPanel({
           const pill = prStatePill(row.state);
           return (
             <button
+              type="button"
               className="rq-row"
               key={row.taskKey}
               onClick={() => onOpenTask(row.taskKey)}
@@ -222,6 +223,7 @@ export function BranchesPanel({
             const prPill = row.pr ? prStatePill(row.pr.state) : null;
             return (
               <button
+                type="button"
                 className="live-row"
                 key={row.taskKey}
                 onClick={() => onOpenTask(row.taskKey)}
@@ -238,12 +240,12 @@ export function BranchesPanel({
                     minWidth: 0,
                   }}
                 >
-                  <span className="trace ok" style={{ fontSize: ".74rem" }}>
+                  <span className="trace ok" style={{ fontSize: ".75rem" }}>
                     <Icon name="branch" />
                     {row.branch}
                   </span>
                   {row.commitCount > 0 && (
-                    <span style={{ color: "var(--faint)", fontSize: ".72rem" }}>
+                    <span style={{ color: "var(--faint)", fontSize: ".75rem" }}>
                       {row.commitCount}{" "}
                       {row.commitCount === 1 ? "commit" : "commits"}
                     </span>
@@ -336,6 +338,7 @@ export function GithubViewPage({
     >
       {canGrant && (
         <button
+          type="button"
           className="btn sm"
           onClick={grantScope}
           disabled={busy}
@@ -346,6 +349,7 @@ export function GithubViewPage({
         </button>
       )}
       <button
+        type="button"
         className="btn sm"
         onClick={() => navigate(`/projects/${slug}/settings`)}
       >
@@ -373,6 +377,7 @@ export function GithubViewPage({
         </div>
         <div className="board-tools">
           <button
+            type="button"
             className="btn ghost sm"
             onClick={reconcile}
             disabled={busy}

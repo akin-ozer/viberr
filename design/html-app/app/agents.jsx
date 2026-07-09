@@ -55,7 +55,7 @@ function ActiveBadge({ count }) {
 /* ---------- profile list ---------- */
 function ProfileItem({ a, count, on, onClick }) {
   return (
-    <button className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
+    <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>
@@ -123,8 +123,8 @@ function ProfileDetail({ a, tasks, onOpen, onDelete, onEdit }) {
                 : <React.Fragment> The global base definition is unaffected.</React.Fragment>}
             </p>
             <div className="confirm-actions">
-              <button className="btn ghost" onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="btn danger" onClick={() => { setConfirm(false); onDelete(a.id); }}><Icon name="x" />Delete profile</button>
+              <button type="button" className="btn ghost" onClick={() => setConfirm(false)}>Cancel</button>
+              <button type="button" className="btn danger" onClick={() => { setConfirm(false); onDelete(a.id); }}><Icon name="x" />Delete profile</button>
             </div>
           </div>
         </React.Fragment>
@@ -142,8 +142,8 @@ function ProfileDetail({ a, tasks, onOpen, onDelete, onEdit }) {
           <div className="ag-scope">{a.scope}</div>
         </div>
         <div className="ag-hero-actions">
-          {canDelete && <button className="btn ghost sm danger" onClick={() => setConfirm(true)}><Icon name="x" />Delete</button>}
-          <button className="btn sm" onClick={() => onEdit(a)}><Icon name="user" />Edit profile</button>
+          {canDelete && <button type="button" className="btn ghost sm danger" onClick={() => setConfirm(true)}><Icon name="x" />Delete</button>}
+          <button type="button" className="btn sm" onClick={() => onEdit(a)}><Icon name="user" />Edit profile</button>
         </div>
       </div>
 
@@ -212,7 +212,7 @@ function ProfileDetail({ a, tasks, onOpen, onDelete, onEdit }) {
           ? <div className="empty" style={{ padding: "1rem .5rem" }}>Not currently engaged on any task. This profile is approved and available for assignment.</div>
           : <div className="deploy-list">
               {insts.map((d, i) => (
-                <button className="deploy-row" key={i} onClick={() => onOpen(d.task.key)}>
+                <button type="button" className="deploy-row" key={i} onClick={() => onOpen(d.task.key)}>
                   <span className="deploy-eng">{d.engagement}</span>
                   <span className="deploy-task"><span className="key mono">{d.task.key}</span> {d.task.title}</span>
                   {d.backend && a.kind !== "operator" && <BackendChip b={d.backend} />}
@@ -239,7 +239,7 @@ function LiveRoster({ tasks, onOpen }) {
         {sorted.map((d, i) => {
           const isOp = d.engagement === "operator";
           return (
-            <button className="live-row" key={i} onClick={() => onOpen(d.task.key)}>
+            <button type="button" className="live-row" key={i} onClick={() => onOpen(d.task.key)}>
               <span className="live-agent">
                 <span className={"agent-glyph" + (isOp ? " op" : " " + (d.backend === "claude" ? "claude" : "codex"))}>
                   <Icon name={isOp ? "shield" : d.backend === "claude" ? "sparkle" : "cpu"} />
@@ -401,7 +401,7 @@ function CreateProfileModal({ initial, onClose, onSubmit }) {
             <h2>{editing ? "Edit " + initial.name : "New specialist profile"}</h2>
             <div className="mh-sub">{editing ? "Update this profile — changes apply to future assignments." : "A reusable agent the operator can assign to tasks."}</div>
           </div>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
 
         <div className="modal-body">
@@ -518,8 +518,8 @@ function CreateProfileModal({ initial, onClose, onSubmit }) {
         <div className="modal-foot">
           <span className={"foot-hint" + (valid ? "" : " err")}>{valid ? (editing ? "Ready to save changes." : "Ready to add to Viberr Core.") : "Name, role, one execution backend, and at least one stage are required."}</span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            <button className="btn primary" onClick={submit} disabled={!valid} style={!valid ? { opacity: .5, pointerEvents: "none" } : null}><Icon name="check" />{editing ? "Save changes" : "Create profile"}</button>
+            <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn primary" onClick={submit} disabled={!valid} style={!valid ? { opacity: .5, pointerEvents: "none" } : null}><Icon name="check" />{editing ? "Save changes" : "Create profile"}</button>
           </div>
         </div>
       </div>
@@ -552,7 +552,7 @@ function CapabilityMatrixModal({ profiles, onClose }) {
             <h2>Capability matrix</h2>
             <div className="mh-sub">Every profile's permissions for each action in Viberr Core.</div>
           </div>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="mx-legend">
           <span className="lg"><span className="d" style={{ background: "var(--teal-dark)" }} />Acts directly</span>
@@ -652,11 +652,11 @@ function Agents({ tasks, onOpen }) {
         </div>
         <div className="board-tools">
           <div className="seg">
-            <button className={tab === "profiles" ? "on" : ""} onClick={() => setTab("profiles")}><Icon name="agents" />Profiles</button>
-            <button className={tab === "live" ? "on" : ""} onClick={() => setTab("live")}><Icon name="activity" />Live<span style={{ opacity: .6 }}>· {all.length}</span></button>
+            <button type="button" className={tab === "profiles" ? "on" : ""} onClick={() => setTab("profiles")}><Icon name="agents" />Profiles</button>
+            <button type="button" className={tab === "live" ? "on" : ""} onClick={() => setTab("live")}><Icon name="activity" />Live<span style={{ opacity: .6 }}>· {all.length}</span></button>
           </div>
-          <button className="btn ghost sm" onClick={() => setMatrixOpen(true)}><Icon name="shield" />Capability matrix</button>
-          <button className="btn primary sm" onClick={() => setCreating(true)}><Icon name="plus" />New profile</button>
+          <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}><Icon name="shield" />Capability matrix</button>
+          <button type="button" className="btn primary sm" onClick={() => setCreating(true)}><Icon name="plus" />New profile</button>
         </div>
       </div>
 
@@ -673,12 +673,12 @@ function Agents({ tasks, onOpen }) {
             <div className="ag-group-label">Orchestration</div>
             <ProfileItem a={applyEdit(A.operator)} count={counts.operator || 0} on={sel === "operator"} onClick={() => setSel("operator")} />
             <div className="ag-group-label ag-group-row">Specialist profiles
-              <button className="ag-add" title="New specialist profile" onClick={() => setCreating(true)}><Icon name="plus" /></button>
+              <button type="button" className="ag-add" title="New specialist profile" onClick={() => setCreating(true)}><Icon name="plus" /></button>
             </div>
             {specialists.map((p) => (
               <ProfileItem key={p.id} a={p} count={counts[p.id] || 0} on={sel === p.id} onClick={() => setSel(p.id)} />
             ))}
-            <button className="ag-newbtn" onClick={() => setCreating(true)}><Icon name="plus" />New specialist profile</button>
+            <button type="button" className="ag-newbtn" onClick={() => setCreating(true)}><Icon name="plus" />New specialist profile</button>
           </aside>
           <ProfileDetail a={current} tasks={tasks} onOpen={onOpen} onDelete={onDelete} onEdit={setEditing} />
         </div>

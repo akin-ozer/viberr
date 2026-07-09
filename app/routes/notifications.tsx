@@ -11,10 +11,8 @@ import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
-import {
-  NotificationsPage,
-  type NotificationPageItem,
-} from "~/features/notifications/notifications-page";
+import { NotificationsPage } from "~/features/notifications/notifications-page";
+import type { NotificationPageItem } from "~/features/notifications/notifications-page-helpers";
 
 /**
  * /notifications — URL-addressable PageOverlay route (phase-4 shell

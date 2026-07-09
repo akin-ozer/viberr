@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
-import { Pill, ValidationPill, type ValidationValue } from "~/ui/pill";
-import { plainText } from "~/features/notifications/notification-meta";
+import { Pill, ValidationPill } from "~/ui/pill";
+import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 /**
  * Review queue — the human acceptance boundary as a read-only triage list
@@ -12,29 +12,10 @@ import { plainText } from "~/features/notifications/notification-meta";
  * split is project-wide per ruling 10 — labels unchanged. Rows leave the
  * queue live via the shell's SSE revalidation (Phase 6).
  *
- * The subline stripper is the shared `plainText` helper (same regexes as
- * the mock's `rqStripMd` — ruling 14, one stripper app-wide). The wait-tag
- * copy is deliberately different from the board ("your acceptance" vs
- * "waiting on you") — do not unify.
+ * The wait-tag copy is deliberately different from the board ("your
+ * acceptance" vs "waiting on you") — do not unify. The subline builder
+ * lives in review-helpers.ts (Fast Refresh: components-only module).
  */
-
-export interface ReviewRowView {
-  key: string;
-  title: string;
-  waiting: "human" | "agent" | "none";
-  packet: { kind: string; title: string } | null;
-  latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" } | null;
-  validation: ValidationValue;
-}
-
-export function reviewRowSub(t: ReviewRowView): string {
-  return t.packet
-    ? t.packet.kind + " — " + t.packet.title
-    : t.latestEventText
-      ? plainText(t.latestEventText)
-      : "Agent working — the packet arrives at the boundary.";
-}
 
 function RQRow({
   t,
@@ -47,7 +28,7 @@ function RQRow({
 }) {
   const sub = reviewRowSub(t);
   return (
-    <button className="rq-row" onClick={() => onOpen(t.key)}>
+    <button type="button" className="rq-row" onClick={() => onOpen(t.key)}>
       <span className="rq-key">{t.key}</span>
       <span className="rq-main">
         <div className="ttl">{t.title}</div>

@@ -29,7 +29,7 @@ import { keyFromName, slugifyProjectName } from "./project-name";
  */
 
 /* ---------- local icon (not in the shared set — mock keeps it local) ---- */
-export function StarIco({ on }: { on?: boolean }) {
+function StarIco({ on }: { on?: boolean }) {
   return (
     <svg
       className="ico"
@@ -141,8 +141,8 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
 function MemberStack({ members }: { members: HomeMember[] }) {
   return (
     <span className="stack" aria-label={members.map((m) => m.name).join(", ")}>
-      {members.map((m, i) => (
-        <Avatar key={i} person={m} />
+      {members.map((m) => (
+        <Avatar key={m.name} person={m} />
       ))}
     </span>
   );
@@ -195,6 +195,7 @@ function ProjectCard({
         </div>
       </Link>
       <button
+        type="button"
         className={"pj-star" + (starred ? " on" : "")}
         onClick={() => onStar(p.slug)}
         aria-label={(starred ? "Unpin " : "Pin ") + p.name}
@@ -246,6 +247,7 @@ function ProjectRow({
         </span>
       </Link>
       <button
+        type="button"
         className={"pj-star" + (starred ? " on" : "")}
         onClick={() => onStar(p.slug)}
         aria-label={(starred ? "Unpin " : "Pin ") + p.name}
@@ -333,7 +335,9 @@ function NewProjectModal({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose}></div>
+      {/* Pointer-only redundancy: Escape (useDialog) and the Close button are
+          the keyboard/AT paths, so the scrim stays hidden from screen readers. */}
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true"></div>
       <div
         className="modal-card"
         role="dialog"
@@ -359,6 +363,7 @@ function NewProjectModal({
             </div>
           </span>
           <button
+            type="button"
             className="icon-btn modal-close"
             onClick={onClose}
             aria-label="Close"
@@ -414,6 +419,7 @@ function NewProjectModal({
             <div className="pick-chips">
               {connections.map((owner) => (
                 <button
+                  type="button"
                   key={owner}
                   className={"pick-chip" + (connOwner === owner ? " on" : "")}
                   onClick={() => setConnOwner(owner)}
@@ -455,6 +461,7 @@ function NewProjectModal({
             <span className="flabel">Workflow template</span>
             <div className="pick-chips">
               <button
+                type="button"
                 className={"pick-chip" + (template === "governed" ? " on" : "")}
                 onClick={() => setTemplate("governed")}
               >
@@ -462,6 +469,7 @@ function NewProjectModal({
                 Governed default · 5 stages
               </button>
               <button
+                type="button"
                 className={"pick-chip" + (template === "light" ? " on" : "")}
                 onClick={() => setTemplate("light")}
               >
@@ -477,6 +485,7 @@ function NewProjectModal({
             <span className="flabel">Agent policy preset</span>
             <div className="pick-chips">
               <button
+                type="button"
                 className={"pick-chip" + (policy === "strict" ? " on" : "")}
                 onClick={() => setPolicy("strict")}
               >
@@ -484,6 +493,7 @@ function NewProjectModal({
                 Strict human-gate
               </button>
               <button
+                type="button"
                 className={"pick-chip" + (policy === "balanced" ? " on" : "")}
                 onClick={() => setPolicy("balanced")}
               >
@@ -491,6 +501,7 @@ function NewProjectModal({
                 Balanced · recommended
               </button>
               <button
+                type="button"
                 className={"pick-chip" + (policy === "auto" ? " on" : "")}
                 onClick={() => setPolicy("auto")}
               >
@@ -519,10 +530,11 @@ function NewProjectModal({
             creates {storeRoot}/projects/{slug || "…"}/
           </span>
           <span className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>
+            <button type="button" className="btn ghost" onClick={onClose}>
               Cancel
             </button>
             <button
+              type="button"
               className="btn primary"
               disabled={!ok || busy}
               style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
@@ -690,7 +702,7 @@ export function HomePage({
   };
   // Archived projects are lifted out of the active grid into their own section.
   const active = projects.filter((p) => !p.archived);
-  const archivedList = projects.filter((p) => p.archived).filter(matchesQuery);
+  const archivedList = projects.filter((p) => p.archived && matchesQuery(p));
   const filtered = active.filter(matchesQuery);
   const pinned = filtered.filter((p) => stars[p.slug]);
   const rest = filtered.filter((p) => !stars[p.slug]);
@@ -735,6 +747,7 @@ export function HomePage({
       <header className="home-top">
         <div className="home-top-in">
           <button
+            type="button"
             className="home-brand"
             onClick={() => window.scrollTo({ top: 0 })}
             title="Viberr"
@@ -792,6 +805,7 @@ export function HomePage({
           <div className="hero-actions">
             <div className="seg" role="group" aria-label="View">
               <button
+                type="button"
                 className={view === "grid" ? "on" : ""}
                 onClick={() => setView("grid")}
               >
@@ -799,6 +813,7 @@ export function HomePage({
                 Grid
               </button>
               <button
+                type="button"
                 className={view === "list" ? "on" : ""}
                 onClick={() => setView("list")}
               >
@@ -806,7 +821,7 @@ export function HomePage({
                 List
               </button>
             </div>
-            <button className="btn primary" onClick={() => setModal(true)}>
+            <button type="button" className="btn primary" onClick={() => setModal(true)}>
               <Icon name="plus" />
               New project
             </button>
@@ -834,7 +849,7 @@ export function HomePage({
                 <span className="n">3</span>Put agents under policy
               </span>
             </div>
-            <button className="btn primary" onClick={() => setModal(true)}>
+            <button type="button" className="btn primary" onClick={() => setModal(true)}>
               <Icon name="plus" />
               New project
             </button>
@@ -871,7 +886,7 @@ export function HomePage({
                     />
                   ))}
                   {!query && (
-                    <button className="pj-new" onClick={() => setModal(true)}>
+                    <button type="button" className="pj-new" onClick={() => setModal(true)}>
                       <span className="plus">
                         <Icon name="plus" />
                       </span>
@@ -893,6 +908,7 @@ export function HomePage({
                   </div>
                   {!query && (
                     <button
+                      type="button"
                       className="pj-new"
                       style={{ minHeight: 0, padding: ".7rem", marginTop: ".5rem" }}
                       onClick={() => setModal(true)}
@@ -1013,12 +1029,13 @@ export function HomePage({
         </section>
 
         <footer className="store-strip" data-screen-label="Store strip">
-          <button className="btn ghost sm" onClick={rescan}>
+          <button type="button" className="btn ghost sm" onClick={rescan}>
             <Icon name="refresh" className={scanning ? "spin" : ""} />
             {scanning ? "Scanning…" : "Re-scan"}
           </button>
           {user.role === "admin" && (
             <button
+              type="button"
               className="btn ghost sm"
               onClick={() => setRebuildConfirm(true)}
               title="Drop every projection row and re-project the whole store from files"
@@ -1059,17 +1076,20 @@ function RebuildConfirm({
   const ref = useDialog(onCancel);
   return (
     <>
-      <div className="confirm-scrim" onClick={onCancel}></div>
+      {/* Pointer-only redundancy: Escape (useDialog) and the Cancel button are
+          the keyboard/AT paths, so the scrim stays hidden from screen readers. */}
+      <div className="confirm-scrim" onClick={onCancel} aria-hidden="true"></div>
       <div
         ref={ref}
         className="confirm-card"
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby="rebuild-confirm-title"
       >
         <div className="confirm-icon">
           <Icon name="alert" />
         </div>
-        <h3>Rebuild all projections?</h3>
+        <h3 id="rebuild-confirm-title">Rebuild all projections?</h3>
         <p>
           Drops every derived board/task row and re-projects the whole store
           from the files on disk. Canonical task files are never touched.
@@ -1077,10 +1097,10 @@ function RebuildConfirm({
           wrong.
         </p>
         <div className="confirm-actions">
-          <button className="btn ghost" onClick={onCancel}>
+          <button type="button" className="btn ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn primary" onClick={onConfirm}>
+          <button type="button" className="btn primary" onClick={onConfirm}>
             Rebuild projections
           </button>
         </div>

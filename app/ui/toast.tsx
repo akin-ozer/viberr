@@ -48,7 +48,7 @@ export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
   return { toasts, push };
 }
 
-export function ToastHost({ toasts }: { toasts: Toast[] }) {
+function ToastHost({ toasts }: { toasts: Toast[] }) {
   return (
     <div className="toast-wrap" role="status" aria-live="polite">
       {toasts.map((t) => (

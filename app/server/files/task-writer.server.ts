@@ -123,29 +123,6 @@ export async function appendTimelineEvent(
   });
 }
 
-/** Sets (replaces) the active decision packet. */
-export async function setTaskPacket(
-  ref: TaskFileRef,
-  packet: TaskPacket,
-  patch?: Partial<TaskFrontmatter>,
-): Promise<ParsedTaskFile> {
-  return updateTaskFile(ref, (parsed) => {
-    parsed.packet = packet;
-    if (patch) Object.assign(parsed.frontmatter, patch);
-  });
-}
-
-/** Clears the active decision packet (the `## Packet` section disappears). */
-export async function clearTaskPacket(
-  ref: TaskFileRef,
-  patch?: Partial<TaskFrontmatter>,
-): Promise<ParsedTaskFile> {
-  return updateTaskFile(ref, (parsed) => {
-    parsed.packet = null;
-    if (patch) Object.assign(parsed.frontmatter, patch);
-  });
-}
-
 /** Frontmatter-only patch (ownership, stage, readiness...). */
 export async function patchTaskFrontmatter(
   ref: TaskFileRef,

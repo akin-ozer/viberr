@@ -3,7 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import type { ActivityStreamRowView, AuditLogEntryView } from "./activity-page";
+import type { ActivityStreamRowView, AuditLogEntryView } from "./feed-helpers";
 
 /**
  * Route-level tests for /projects/:slug/activity against the seeded demo

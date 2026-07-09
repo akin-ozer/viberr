@@ -4,7 +4,7 @@ import type { RunView } from "./runtime-types";
 
 /**
  * Client helpers ported from runs.jsx (the file-local functions): RUN_STATE,
- * runLabel, roleShort, fmtClock, fmtTok, useTicker, useElapsed. Elapsed
+ * runLabel, roleShort, fmtClock, fmtTok, useElapsed. Elapsed
  * derives from startedAt (client clock) — NO fabricated token growth (the
  * mock's `tick*42` is banned; tokens come from real usage on the RunView).
  */
@@ -54,17 +54,6 @@ export function fmtClock(s: number): string {
 
 export function fmtTok(n: number): string {
   return n >= 100000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
-}
-
-/** A 1-second ticker (int, +1 per second) while `active`. */
-export function useTicker(active: boolean): number {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setN((x) => x + 1), 1000);
-    return () => clearInterval(id);
-  }, [active]);
-  return n;
 }
 
 /**

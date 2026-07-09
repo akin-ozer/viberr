@@ -105,7 +105,7 @@ function Notifications({ items, onRead, onReadAll, onOpen, onNav }) {
             ))}
           </div>
           {unread > 0 && (
-            <button className="btn ghost sm" onClick={onReadAll}><Icon name="check" />Mark all read</button>
+            <button type="button" className="btn ghost sm" onClick={onReadAll}><Icon name="check" />Mark all read</button>
           )}
         </div>
       </div>

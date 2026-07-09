@@ -310,14 +310,12 @@ export async function action({ request }: Route.ActionArgs) {
           .getAll("files")
           .filter((f): f is File => f instanceof File);
         const relPaths = formData.getAll("filePaths").map(String);
-        const files: UploadFileInput[] = [];
-        for (let i = 0; i < rawFiles.length; i++) {
-          const file = rawFiles[i]!;
-          files.push({
+        const files: UploadFileInput[] = await Promise.all(
+          rawFiles.map(async (file, i) => ({
             relPath: relPaths[i] || file.name,
             data: Buffer.from(await file.arrayBuffer()),
-          });
-        }
+          })),
+        );
         const result = writeStoreFiles(db, target, dirPath, files, actor);
         if (result.added === 0) return ok();
         const atPath = [target.rootUri, ...dirPath].join("/") + "/";

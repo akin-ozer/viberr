@@ -130,7 +130,7 @@ function StageSettings({ tasks, stages, setStages, onNav, push }) {
           );
         })}
       </div>
-      <button className="btn ghost sm" style={{ width: "100%", marginTop: ".8rem" }} onClick={addStage}><Icon name="plus" />Add stage</button>
+      <button type="button" className="btn ghost sm" style={{ width: "100%", marginTop: ".8rem" }} onClick={addStage}><Icon name="plus" />Add stage</button>
       <div className="pol-note" style={{ marginBottom: 0, marginTop: ".8rem" }}>
         <Icon name="shield" />
         <span>Drag to reorder · click a name to rename. Who may move tasks between stages is set in <button type="button" className="keybtn" onClick={() => onNav("policy")}>Policy → Workflow rules</button></span>
@@ -190,7 +190,7 @@ function MembersPanel({ members, setMembers, onNav, push }) {
       <div className="invite-row">
         <input type="text" placeholder="Full name" value={nm} onChange={(e) => setNm(e.target.value)} />
         <input type="text" placeholder="email@company.dev" value={em} onChange={(e) => setEm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") invite(); }} />
-        <button className="btn sm" onClick={invite}><Icon name="send" />Invite</button>
+        <button type="button" className="btn sm" onClick={invite}><Icon name="send" />Invite</button>
       </div>
       <div className="pol-note" style={{ marginBottom: 0, marginTop: ".8rem" }}>
         <Icon name="shield" />
@@ -239,7 +239,7 @@ function RepoSettings({ P, override, onOverride, scopeGranted, onGrantScope, onO
             <Icon name="alert" />
             <span>Missing <code className="mono">{missing.id}</code> — PR status can't auto-sync after merge. Flagged on</span>
             <button type="button" className="keybtn" onClick={() => onOpen(missing.task)}>{missing.task}</button>
-            <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onGrantScope}><Icon name="check" />Grant scope</button>
+            <button type="button" className="btn sm" style={{ marginLeft: "auto" }} onClick={onGrantScope}><Icon name="check" />Grant scope</button>
           </div>
         ) : (
           <div className="cred-ok"><Icon name="check" />All required scopes granted. Secrets stay isolated from task records and timelines.</div>
@@ -260,14 +260,14 @@ function DangerZone({ push }) {
           <div className="dn">Archive Viberr Core</div>
           <div className="dd">Board becomes read-only, running agents stop, timelines are preserved.</div>
         </span>
-        <button className="btn ghost sm" onClick={() => deny("Archiving")}>Archive</button>
+        <button type="button" className="btn ghost sm" onClick={() => deny("Archiving")}>Archive</button>
       </div>
       <div className="dz-row">
         <span className="dz-main">
           <div className="dn">Delete project</div>
           <div className="dd">Removes tasks, timelines, and audit logs. This cannot be undone.</div>
         </span>
-        <button className="btn danger sm" onClick={() => deny("Deletion")}>Delete project</button>
+        <button type="button" className="btn danger sm" onClick={() => deny("Deletion")}>Delete project</button>
       </div>
     </div>
   );

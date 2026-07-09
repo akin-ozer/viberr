@@ -28,23 +28,6 @@ export interface NotifChannelPrefs {
 
 export type NotifPrefs = Record<NotifPrefCategory, NotifChannelPrefs>;
 
-/** Plural pref ids → singular notification kinds (contracts §4). */
-export const NOTIF_PREF_KIND: Record<NotifPrefCategory, string> = {
-  packets: "packet",
-  approvals: "approval",
-  mentions: "mention",
-  policy: "policy",
-  quality: "quality",
-};
-
-/** Singular notification kinds → plural pref ids (reverse map). */
-export const NOTIF_KIND_PREF: Record<string, NotifPrefCategory> =
-  Object.fromEntries(
-    (Object.entries(NOTIF_PREF_KIND) as [NotifPrefCategory, string][]).map(
-      ([pref, kind]) => [kind, pref],
-    ),
-  ) as Record<string, NotifPrefCategory>;
-
 /** Mock `initPrefs` defaults, verbatim (ui.jsx). */
 export const DEFAULT_NOTIF_PREFS: NotifPrefs = {
   packets: { app: true, email: true },

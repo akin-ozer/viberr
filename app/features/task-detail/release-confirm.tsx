@@ -46,7 +46,9 @@ export function ReleaseConfirm({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onCancel}></div>
+      {/* Pointer-only dismiss affordance; keyboard users close via Escape
+          (useDialog) or the labeled Close button, so hide it from AT. */}
+      <div className="confirm-scrim" aria-hidden="true" onClick={onCancel}></div>
       <div
         className="modal-card release-card"
         role="alertdialog"
@@ -66,6 +68,7 @@ export function ReleaseConfirm({
             </div>
           </div>
           <button
+            type="button"
             className="icon-btn modal-close"
             onClick={onCancel}
             aria-label="Close"
@@ -151,10 +154,10 @@ export function ReleaseConfirm({
               : "Admin release — recorded as a typed event and in the audit trail."}
           </span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onCancel}>
+            <button type="button" className="btn ghost" onClick={onCancel}>
               {mine ? "Keep ownership" : "Cancel"}
             </button>
-            <button className="btn danger" disabled={busy} onClick={onConfirm}>
+            <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
               <Icon name="x" />
               {mine ? "Release" : "Release " + o.name.split(" ")[0]}
             </button>

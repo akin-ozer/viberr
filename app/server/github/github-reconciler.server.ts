@@ -312,18 +312,15 @@ export async function reconcileProject(
     )
     .all(projectSlug) as { task_key: string }[];
 
-  const results: TaskReconcileResult[] = [];
+  const results: TaskReconcileResult[] = await Promise.all(
+    rows.map((row) =>
+      reconcileTask(db, { projectSlug, taskKey: row.task_key }, actor, ctx),
+    ),
+  );
   let reconciled = 0;
   let changed = 0;
   let failed = 0;
-  for (const row of rows) {
-    const result = await reconcileTask(
-      db,
-      { projectSlug, taskKey: row.task_key },
-      actor,
-      ctx,
-    );
-    results.push(result);
+  for (const result of results) {
     if (result.status === "reconciled") {
       reconciled += 1;
       if (result.changed) changed += 1;

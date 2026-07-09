@@ -297,14 +297,6 @@ export function defaultAgentDeployments(): AgentDeployment[] {
   return deployments();
 }
 
-/** Just the operator's deployment (profileId + its capability policy) — used to
- *  backfill the operator into projects that predate it (ensureBaseAgentsDeployed). */
-export function operatorDeployment(): AgentDeployment {
-  const op = deployments().find((d) => d.profileId === "operator");
-  if (!op) throw new Error("operator profile missing from SEED_AGENT_PROFILES");
-  return op;
-}
-
 /** Profile ids of the built-in agents preinstalled on EVERY board: the operator
  *  plus the base specialists a task actually needs (Developer, Reviewer, Tester).
  *  The Advisor is offered to new projects (defaultAgentDeployments) but not

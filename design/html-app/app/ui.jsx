@@ -142,7 +142,7 @@ function PageOverlay({ label, onClose, children }) {
     <React.Fragment>
       <div className="confirm-scrim" onClick={onClose}></div>
       <div className="page-overlay" role="dialog" aria-modal="true" aria-label={label} data-screen-label={label + " — overlay"}>
-        <button className="icon-btn overlay-x" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        <button type="button" className="icon-btn overlay-x" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         <div className="page-overlay-body">{children}</div>
       </div>
     </React.Fragment>

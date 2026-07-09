@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { data, Form, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/login";
 import { assertCsrf, assertTrustedOrigin } from "~/server/auth/csrf.server";
@@ -170,8 +170,13 @@ function SetNewPassword({
   const [npw, setNpw] = useState("");
   const [npw2, setNpw2] = useState("");
   const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErrHidden, setServerErrHidden] = useState(false);
-  useEffect(() => setServerErrHidden(false), [actionError]);
+  // Store which server error the user dismissed (by typing); a new
+  // actionError no longer matches, so it un-hides itself — no effect needed.
+  const [dismissedServerErr, setDismissedServerErr] = useState<
+    string | null | undefined
+  >(undefined);
+  const serverErrHidden =
+    dismissedServerErr !== undefined && dismissedServerErr === actionError;
   const err = clientErr ?? (serverErrHidden ? null : actionError);
 
   return (
@@ -218,11 +223,10 @@ function SetNewPassword({
               type="password"
               autoComplete="new-password"
               value={npw}
-              autoFocus
               onChange={(e) => {
                 setNpw(e.target.value);
                 setClientErr(null);
-                setServerErrHidden(true);
+                setDismissedServerErr(actionError);
               }}
             />
           </div>
@@ -239,7 +243,7 @@ function SetNewPassword({
               onChange={(e) => {
                 setNpw2(e.target.value);
                 setClientErr(null);
-                setServerErrHidden(true);
+                setDismissedServerErr(actionError);
               }}
             />
           </div>
@@ -269,15 +273,19 @@ export default function Login({
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErrHidden, setServerErrHidden] = useState(false);
+  // Store which server error the user dismissed (by typing); a new
+  // actionError no longer matches, so it un-hides itself — no effect needed.
+  const [dismissedServerErr, setDismissedServerErr] = useState<
+    string | null | undefined
+  >(undefined);
+  const serverErrHidden =
+    dismissedServerErr !== undefined && dismissedServerErr === actionError;
   const [info, setInfo] = useState<string | null>(
     flash?.kind === "info" ? flash.message : null,
   );
   const [providerBusy, setProviderBusy] = useState<
     "github" | "google" | null
   >(null);
-
-  useEffect(() => setServerErrHidden(false), [actionError]);
 
   if (mode === "reset") {
     return <SetNewPassword returnTo={returnTo} actionError={actionError} />;
@@ -295,7 +303,7 @@ export default function Login({
   const provider = (which: "github" | "google") => {
     if (busy) return;
     setClientErr(null);
-    setServerErrHidden(true);
+    setDismissedServerErr(actionError);
     setInfo(null);
     setProviderBusy(which);
     if (!providers[which]) {
@@ -425,7 +433,7 @@ export default function Login({
               onChange={(e) => {
                 setEmail(e.target.value);
                 setClientErr(null);
-                setServerErrHidden(true);
+                setDismissedServerErr(actionError);
               }}
             />
           </div>
@@ -443,7 +451,7 @@ export default function Login({
               onChange={(e) => {
                 setPw(e.target.value);
                 setClientErr(null);
-                setServerErrHidden(true);
+                setDismissedServerErr(actionError);
               }}
             />
           </div>
@@ -472,7 +480,7 @@ export default function Login({
               style={{ fontSize: ".78rem", color: "var(--faint)" }}
               onClick={() => {
                 setClientErr(null);
-                setServerErrHidden(true);
+                setDismissedServerErr(actionError);
                 setInfo(
                   "Ask an admin to reset your password — you'll be prompted to set a new one at your next sign-in.",
                 );

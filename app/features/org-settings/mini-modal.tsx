@@ -36,7 +36,7 @@ export function MiniModal({
   const ref = useDialog(onClose);
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose}></div>
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true"></div>
       <div
         ref={ref}
         className="modal-card"
@@ -53,7 +53,7 @@ export function MiniModal({
             <h2>{title}</h2>
             {sub && <div className="mh-sub">{sub}</div>}
           </span>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" />
           </button>
         </div>
@@ -61,10 +61,11 @@ export function MiniModal({
         <div className="modal-foot">
           {footHint && <span className="foot-hint mono">{footHint}</span>}
           <span className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>
+            <button type="button" className="btn ghost" onClick={onClose}>
               Cancel
             </button>
             <button
+              type="button"
               className="btn primary"
               onClick={onSave}
               disabled={!canSave}
@@ -94,18 +95,18 @@ export function ConfirmDelete({
   const ref = useDialog(onCancel);
   return (
     <>
-      <div className="confirm-scrim" onClick={onCancel}></div>
-      <div ref={ref} className="confirm-card" role="alertdialog" aria-modal="true">
+      <div className="confirm-scrim" onClick={onCancel} aria-hidden="true"></div>
+      <div ref={ref} className="confirm-card" role="alertdialog" aria-modal="true" aria-label={`Remove ${what}?`}>
         <div className="confirm-icon">
           <Icon name="alert" />
         </div>
         <h3>Remove {what}?</h3>
         <p>{detail}</p>
         <div className="confirm-actions">
-          <button className="btn ghost" onClick={onCancel}>
+          <button type="button" className="btn ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn danger" onClick={onConfirm}>
+          <button type="button" className="btn danger" onClick={onConfirm}>
             Remove
           </button>
         </div>

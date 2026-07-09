@@ -67,7 +67,11 @@ export function TopBell({
     <div className="home-user-wrap">
       {open && (
         <>
-          <div className="menu-scrim" onClick={() => setOpen(false)} />
+          <div
+            className="menu-scrim"
+            aria-hidden="true"
+            onClick={() => setOpen(false)}
+          />
           <div
             className="ntf-pop"
             role="dialog"
@@ -80,7 +84,7 @@ export function TopBell({
                 {unread > 0 ? unread + " unread" : "caught up"}
               </span>
               {unread > 0 && (
-                <button className="btn ghost sm" onClick={markAllRead}>
+                <button type="button" className="btn ghost sm" onClick={markAllRead}>
                   Mark all read
                 </button>
               )}
@@ -95,6 +99,7 @@ export function TopBell({
             </div>
             <div className="ntf-pop-foot">
               <button
+                type="button"
                 className="btn ghost sm"
                 onClick={() => {
                   setOpen(false);

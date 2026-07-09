@@ -95,13 +95,3 @@ export function isFileWatcherAlive(): boolean {
   const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
   return cache[WATCHER_KEY] !== undefined;
 }
-
-/** Stops the running watcher (tests / graceful shutdown). */
-export async function stopFileWatcher(): Promise<void> {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
-  const handle = cache[WATCHER_KEY];
-  if (!handle) return;
-  handle.debouncer.cancelAll();
-  await handle.watcher.close();
-  cache[WATCHER_KEY] = undefined;
-}

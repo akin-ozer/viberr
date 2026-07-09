@@ -26,7 +26,10 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "read-all") {
     return { ok: true as const, changed: markAllNotificationsRead(db, ctx.user.id) };
   }
-  const ids = formData.getAll("id").map(String).filter(Boolean);
+  const ids = formData.getAll("id").flatMap((value) => {
+    const id = String(value);
+    return id ? [id] : [];
+  });
   if (ids.length === 0) {
     return data({ ok: false as const, error: "No notification ids." }, { status: 400 });
   }

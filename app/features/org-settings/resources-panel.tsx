@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FolderIco } from "~/features/kb-browser/icons";
 import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
@@ -96,7 +96,7 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
         <span className="flabel">Re-index</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
           {(["manual", "on change", "nightly"] as const).map((r) => (
-            <button key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>
+            <button type="button" key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>
               {r}
             </button>
           ))}
@@ -177,10 +177,10 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
         <div className="field">
           <span className="flabel">Transport</span>
           <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-            <button className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>
+            <button type="button" className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>
               HTTP
             </button>
-            <button className={transport === "stdio" ? "on" : ""} onClick={() => setTransport("stdio")}>
+            <button type="button" className={transport === "stdio" ? "on" : ""} onClick={() => setTransport("stdio")}>
               stdio
             </button>
           </span>
@@ -323,6 +323,17 @@ function SkillModal({
   );
 }
 
+const match = (list: string[], names: string[]) => {
+  const set = new Set(names);
+  return list.filter((x) => set.has(x));
+};
+const unmatched = (list: string[], names: string[]) => {
+  const set = new Set(names);
+  return list.filter((x) => !set.has(x));
+};
+const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
+  set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
 function AgentModal({
   initial,
   stages,
@@ -341,8 +352,6 @@ function AgentModal({
   const skillNames = skills.map((s) => s.name);
   const mcpNames = mcps.map((m) => m.name);
   const kbNames = kbs.map((k) => k.name);
-  const match = (list: string[], names: string[]) => list.filter((x) => names.includes(x));
-  const unmatched = (list: string[], names: string[]) => list.filter((x) => !names.includes(x));
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
@@ -369,9 +378,11 @@ function AgentModal({
   const { action, err, setErr } = useModalAction(() => onClose());
 
   const stageOpts = stages.filter((s) => s.id !== "done");
-  const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
-    set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   const canSave = !action.busy && name.trim().length > 1 && selStages.length > 0;
+  const selStageSet = new Set(selStages);
+  const selSkillSet = new Set(selSkills);
+  const selMcpSet = new Set(selMcps);
+  const selKbSet = new Set(selKbs);
 
   return (
     <MiniModal
@@ -471,8 +482,9 @@ function AgentModal({
         <div className="pick-chips">
           {stageOpts.map((s) => (
             <button
+              type="button"
               key={s.id}
-              className={"pick-chip" + (selStages.includes(s.id) ? " on" : "")}
+              className={"pick-chip" + (selStageSet.has(s.id) ? " on" : "")}
               onClick={() => toggle(selStages, setSelStages, s.id)}
             >
               <span className="sdot" style={{ background: s.color }}></span>
@@ -491,8 +503,9 @@ function AgentModal({
             <div className="pick-chips">
               {skills.map((s) => (
                 <button
+                  type="button"
                   key={s.id}
-                  className={"pick-chip mono" + (selSkills.includes(s.name) ? " on" : "")}
+                  className={"pick-chip mono" + (selSkillSet.has(s.name) ? " on" : "")}
                   onClick={() => toggle(selSkills, setSelSkills, s.name)}
                 >
                   {s.name}
@@ -506,8 +519,9 @@ function AgentModal({
             <div className="pick-chips">
               {mcps.map((m) => (
                 <button
+                  type="button"
                   key={m.id}
-                  className={"pick-chip mono" + (selMcps.includes(m.name) ? " on" : "")}
+                  className={"pick-chip mono" + (selMcpSet.has(m.name) ? " on" : "")}
                   onClick={() => toggle(selMcps, setSelMcps, m.name)}
                 >
                   {m.name}
@@ -521,8 +535,9 @@ function AgentModal({
             <div className="pick-chips">
               {kbs.map((k) => (
                 <button
+                  type="button"
                   key={k.id}
-                  className={"pick-chip" + (selKbs.includes(k.name) ? " on" : "")}
+                  className={"pick-chip" + (selKbSet.has(k.name) ? " on" : "")}
                   onClick={() => toggle(selKbs, setSelKbs, k.name)}
                 >
                   {k.name}
@@ -560,10 +575,8 @@ type ResourceModal =
 /** Busy-row tracking for spin icons (re-index / test connection). */
 function useBusyRow(action: OrgAction): [string | null, (id: string) => void] {
   const [busyId, setBusyId] = useState<string | null>(null);
-  useEffect(() => {
-    if (action.fetcher.state === "idle" && action.fetcher.data) setBusyId(null);
-  }, [action.fetcher.state, action.fetcher.data]);
-  return [busyId, setBusyId];
+  const settled = action.fetcher.state === "idle" && Boolean(action.fetcher.data);
+  return [settled ? null : busyId, setBusyId];
 }
 
 export function ResourcesPanel({
@@ -614,7 +627,7 @@ export function ResourcesPanel({
             <Icon name="memory" />
             <h2>Knowledge bases</h2>
             <span className="right">
-              <button className="btn sm" onClick={() => setModal({ kind: "kb", item: null })}>
+              <button type="button" className="btn sm" onClick={() => setModal({ kind: "kb", item: null })}>
                 <Icon name="plus" />
                 New
               </button>
@@ -625,7 +638,7 @@ export function ResourcesPanel({
               <div className="rsrc-row" key={kb.id}>
                 <span className="rsrc-main">
                   <b>
-                    <button className="linkish" onClick={() => setBrowsing({ kind: "kb", id: kb.id })}>
+                    <button type="button" className="linkish" onClick={() => setBrowsing({ kind: "kb", id: kb.id })}>
                       {kb.name}
                     </button>
                   </b>
@@ -641,6 +654,7 @@ export function ResourcesPanel({
                 </span>
                 <span className="rsrc-acts">
                   <button
+                    type="button"
                     className="stg-x"
                     title="Browse files"
                     aria-label={"Browse files in " + kb.name}
@@ -649,6 +663,7 @@ export function ResourcesPanel({
                     <FolderIco />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Re-index now"
                     aria-label={"Re-index " + kb.name}
@@ -660,6 +675,7 @@ export function ResourcesPanel({
                     <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Edit"
                     aria-label={"Edit " + kb.name}
@@ -668,6 +684,7 @@ export function ResourcesPanel({
                     <EditIco />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Delete"
                     aria-label={"Delete " + kb.name}
@@ -687,7 +704,7 @@ export function ResourcesPanel({
             <Icon name="cpu" />
             <h2>MCP servers</h2>
             <span className="right">
-              <button className="btn sm" onClick={() => setModal({ kind: "mcp", item: null })}>
+              <button type="button" className="btn sm" onClick={() => setModal({ kind: "mcp", item: null })}>
                 <Icon name="plus" />
                 Add
               </button>
@@ -717,6 +734,7 @@ export function ResourcesPanel({
                 </span>
                 <span className="rsrc-acts">
                   <button
+                    type="button"
                     className="stg-x"
                     title="Test connection"
                     aria-label={"Test " + m.name}
@@ -728,6 +746,7 @@ export function ResourcesPanel({
                     <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Edit"
                     aria-label={"Edit " + m.name}
@@ -736,6 +755,7 @@ export function ResourcesPanel({
                     <EditIco />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Remove"
                     aria-label={"Remove " + m.name}
@@ -755,7 +775,7 @@ export function ResourcesPanel({
             <Icon name="bolt" />
             <h2>Skills</h2>
             <span className="right">
-              <button className="btn sm" onClick={() => setModal({ kind: "skill", item: null })}>
+              <button type="button" className="btn sm" onClick={() => setModal({ kind: "skill", item: null })}>
                 <Icon name="plus" />
                 New
               </button>
@@ -767,6 +787,7 @@ export function ResourcesPanel({
                 <span className="rsrc-main">
                   <b className="mono-b">
                     <button
+                      type="button"
                       className="linkish"
                       onClick={() => setBrowsing({ kind: "skill", id: s.id })}
                     >
@@ -784,6 +805,7 @@ export function ResourcesPanel({
                 </span>
                 <span className="rsrc-acts">
                   <button
+                    type="button"
                     className="stg-x"
                     title="Browse files"
                     aria-label={"Browse files in " + s.name}
@@ -792,6 +814,7 @@ export function ResourcesPanel({
                     <FolderIco />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Edit"
                     aria-label={"Edit " + s.name}
@@ -800,6 +823,7 @@ export function ResourcesPanel({
                     <EditIco />
                   </button>
                   <button
+                    type="button"
                     className="stg-x"
                     title="Delete"
                     aria-label={"Delete " + s.name}
@@ -819,7 +843,7 @@ export function ResourcesPanel({
             <Icon name="agents" />
             <h2>Global agent profiles</h2>
             <span className="right">
-              <button className="btn sm" onClick={() => setModal({ kind: "agent", item: null })}>
+              <button type="button" className="btn sm" onClick={() => setModal({ kind: "agent", item: null })}>
                 <Icon name="plus" />
                 New
               </button>
@@ -847,6 +871,7 @@ export function ResourcesPanel({
                   </span>
                   <span className="rsrc-acts">
                     <button
+                      type="button"
                       className="stg-x"
                       title="Edit"
                       aria-label={"Edit " + a.name}
@@ -855,6 +880,7 @@ export function ResourcesPanel({
                       <EditIco />
                     </button>
                     <button
+                      type="button"
                       className="stg-x"
                       title="Delete"
                       aria-label={"Delete " + a.name}

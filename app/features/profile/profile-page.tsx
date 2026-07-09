@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar, initialsOf } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
@@ -78,6 +78,10 @@ function actionError(fetcher: ProfileFetcher): string | null {
 
 // ------------------------------------------------------------ Identity
 
+const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === "Enter") e.currentTarget.blur();
+};
+
 function ProfileIdentity({
   data,
   fetcher,
@@ -97,9 +101,6 @@ function ProfileIdentity({
   const commit = () => {
     if (dirty) submit({ intent: "identity", name, title });
   };
-  const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") e.currentTarget.blur();
-  };
 
   const signsInVia =
     user.idp === "local" ? "local account" : `${user.idp} oauth`;
@@ -118,8 +119,11 @@ function ProfileIdentity({
         <div className="profile-fields">
           <div className="field-row">
             <div className="field">
-              <label className="flabel">Display name</label>
+              <label className="flabel" htmlFor="profile-name">
+                Display name
+              </label>
               <input
+                id="profile-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -128,8 +132,11 @@ function ProfileIdentity({
               />
             </div>
             <div className="field">
-              <label className="flabel">Title</label>
+              <label className="flabel" htmlFor="profile-title">
+                Title
+              </label>
               <input
+                id="profile-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -139,11 +146,11 @@ function ProfileIdentity({
             </div>
           </div>
           <div className="field">
-            <label className="flabel">
+            <label className="flabel" htmlFor="profile-email">
               Email{" "}
               <span className="fhint">{signsInVia} · admins can edit</span>
             </label>
-            <input type="text" value={user.email} disabled />
+            <input id="profile-email" type="text" value={user.email} disabled />
           </div>
           {error && (
             <div className="login-err" role="alert">
@@ -490,6 +497,7 @@ function ProfileGithub({
               in audit records.
             </span>
             <button
+              type="button"
               className="btn ghost sm"
               style={{ marginLeft: "auto" }}
               onClick={() => submit({ intent: "github-disconnect" })}
@@ -547,6 +555,36 @@ function ProfileGithub({
 
 // -------------------------------------------------------- Change password
 
+type PwFormState = {
+  current: string;
+  next: string;
+  confirm: string;
+  clientErr: string | null;
+};
+
+const PW_FORM_INITIAL: PwFormState = {
+  current: "",
+  next: "",
+  confirm: "",
+  clientErr: null,
+};
+
+type PwFormAction =
+  | { type: "edit"; field: "current" | "next" | "confirm"; value: string }
+  | { type: "client-err"; error: string | null }
+  | { type: "reset" };
+
+function pwFormReducer(state: PwFormState, action: PwFormAction): PwFormState {
+  switch (action.type) {
+    case "edit":
+      return { ...state, [action.field]: action.value, clientErr: null };
+    case "client-err":
+      return { ...state, clientErr: action.error };
+    case "reset":
+      return PW_FORM_INITIAL;
+  }
+}
+
 function ProfilePassword({
   fetcher,
   submit,
@@ -554,10 +592,10 @@ function ProfilePassword({
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
 }) {
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [clientErr, setClientErr] = useState<string | null>(null);
+  const [{ current, next, confirm, clientErr }, dispatch] = useReducer(
+    pwFormReducer,
+    PW_FORM_INITIAL,
+  );
   useServerToast(fetcher);
 
   // Clear the fields after a successful change.
@@ -567,10 +605,7 @@ function ProfilePassword({
     if (doneRef.current === fetcher.data) return;
     doneRef.current = fetcher.data;
     if (fetcher.data.ok) {
-      setCurrent("");
-      setNext("");
-      setConfirm("");
-      setClientErr(null);
+      dispatch({ type: "reset" });
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -579,16 +614,17 @@ function ProfilePassword({
 
   const onSubmit = () => {
     if (next.length < MIN_PASSWORD_LENGTH) {
-      setClientErr(
-        `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
-      );
+      dispatch({
+        type: "client-err",
+        error: `New password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
+      });
       return;
     }
     if (next !== confirm) {
-      setClientErr("Passwords don't match.");
+      dispatch({ type: "client-err", error: "Passwords don't match." });
       return;
     }
-    setClientErr(null);
+    dispatch({ type: "client-err", error: null });
     submit({
       intent: "change-password",
       current,
@@ -605,45 +641,53 @@ function ProfilePassword({
       </div>
       <div className="profile-fields">
         <div className="field">
-          <label className="flabel">Current password</label>
+          <label className="flabel" htmlFor="profile-pw-current">
+            Current password
+          </label>
           <input
+            id="profile-pw-current"
             type="password"
             autoComplete="current-password"
             value={current}
-            onChange={(e) => {
-              setCurrent(e.target.value);
-              setClientErr(null);
-            }}
+            onChange={(e) =>
+              dispatch({ type: "edit", field: "current", value: e.target.value })
+            }
           />
         </div>
         <div className="field-row">
           <div className="field">
-            <label className="flabel">
+            <label className="flabel" htmlFor="profile-pw-next">
               New password{" "}
               <span className="fhint">
                 at least {MIN_PASSWORD_LENGTH} characters
               </span>
             </label>
             <input
+              id="profile-pw-next"
               type="password"
               autoComplete="new-password"
               value={next}
-              onChange={(e) => {
-                setNext(e.target.value);
-                setClientErr(null);
-              }}
+              onChange={(e) =>
+                dispatch({ type: "edit", field: "next", value: e.target.value })
+              }
             />
           </div>
           <div className="field">
-            <label className="flabel">Confirm new password</label>
+            <label className="flabel" htmlFor="profile-pw-confirm">
+              Confirm new password
+            </label>
             <input
+              id="profile-pw-confirm"
               type="password"
               autoComplete="new-password"
               value={confirm}
-              onChange={(e) => {
-                setConfirm(e.target.value);
-                setClientErr(null);
-              }}
+              onChange={(e) =>
+                dispatch({
+                  type: "edit",
+                  field: "confirm",
+                  value: e.target.value,
+                })
+              }
             />
           </div>
         </div>

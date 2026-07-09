@@ -95,7 +95,7 @@ function LoginApp() {
                 onKeyDown={(e) => { if (e.key === "Enter") saveNew(); }} />
             </div>
             {err && <div className="login-err"><Icon name="alert" />{err}</div>}
-            <button className="btn primary provider" onClick={saveNew}>Save &amp; continue</button>
+            <button type="button" className="btn primary provider" onClick={saveNew}>Save &amp; continue</button>
           </div>
         </div>
       </div>
@@ -114,11 +114,11 @@ function LoginApp() {
         </div>
 
         <div className="login-providers">
-          <button className="btn provider github" onClick={() => provider("github")} style={busy === "github" ? { opacity: .7, pointerEvents: "none" } : null}>
+          <button type="button" className="btn provider github" onClick={() => provider("github")} style={busy === "github" ? { opacity: .7, pointerEvents: "none" } : null}>
             <Icon name={busy === "github" ? "refresh" : "github"} className={busy === "github" ? "spin" : ""} />
             {busy === "github" ? "Checking whitelist…" : "Continue with GitHub"}
           </button>
-          <button className="btn provider" onClick={() => provider("google")} style={busy === "google" ? { opacity: .7, pointerEvents: "none" } : null}>
+          <button type="button" className="btn provider" onClick={() => provider("google")} style={busy === "google" ? { opacity: .7, pointerEvents: "none" } : null}>
             {busy === "google" ? <Icon name="refresh" className="spin" /> : <span className="gmark lg">G</span>}
             {busy === "google" ? "Checking whitelist…" : "Continue with Google"}
           </button>
@@ -141,11 +141,11 @@ function LoginApp() {
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
           </div>
           {err && <div className="login-err"><Icon name="alert" />{err}</div>}
-          <button className="btn primary provider" onClick={submit} style={busy === "local" ? { opacity: .7, pointerEvents: "none" } : null}>
+          <button type="button" className="btn primary provider" onClick={submit} style={busy === "local" ? { opacity: .7, pointerEvents: "none" } : null}>
             {busy === "local" ? "Signing in…" : "Sign in"}
           </button>
           <div className="login-foot">
-            <button className="linkish" style={{ fontSize: ".78rem", color: "var(--faint)" }}
+            <button type="button" className="linkish" style={{ fontSize: ".78rem", color: "var(--faint)" }}
               onClick={() => { setErr(null); setInfo("Ask an admin to reset your password — you'll be prompted to set a new one at your next sign-in."); }}>
               Forgot password?
             </button>

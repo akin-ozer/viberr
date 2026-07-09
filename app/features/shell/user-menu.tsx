@@ -3,6 +3,7 @@ import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar, initialsOf } from "~/ui/avatar";
 import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
+import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 
@@ -44,16 +45,6 @@ function themeToast(theme: ThemePreference): string {
         ? "Dark"
         : "Light")
   );
-}
-
-/** Applies the preference to <html data-theme> immediately (personal UI
- * state — optimistic apply is sanctioned; the cookie/user row follow). */
-export function applyThemePreference(theme: ThemePreference): void {
-  const dark =
-    theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 
 export function UserMenu({
@@ -98,7 +89,13 @@ export function UserMenu({
     <div className="home-user-wrap">
       {menu && (
         <>
-          <div className="menu-scrim" onClick={() => setMenu(false)} />
+          {/* Mouse-only dismiss affordance; keyboard users close via the
+              window-level Escape handler above, so hide from the a11y tree. */}
+          <div
+            className="menu-scrim"
+            aria-hidden="true"
+            onClick={() => setMenu(false)}
+          />
           <div className="user-menu from-top" role="menu">
             <div className="user-menu-head">
               <Avatar person={person} lg />
@@ -108,6 +105,7 @@ export function UserMenu({
               </span>
             </div>
             <button
+              type="button"
               className="menu-item"
               role="menuitem"
               onClick={() => {
@@ -131,7 +129,12 @@ export function UserMenu({
                 Switch project
               </Link>
             )}
-            <button className="menu-item" role="menuitem" onClick={cycleTheme}>
+            <button
+              type="button"
+              className="menu-item"
+              role="menuitem"
+              onClick={cycleTheme}
+            >
               <Icon name="sparkle" />
               Theme ·{" "}
               <span style={{ color: "var(--faint)" }}>{themeLabel(theme)}</span>
@@ -159,6 +162,7 @@ export function UserMenu({
         </>
       )}
       <button
+        type="button"
         className={"home-user" + (menu ? " open" : "")}
         onClick={() => setMenu((m) => !m)}
         aria-haspopup="menu"

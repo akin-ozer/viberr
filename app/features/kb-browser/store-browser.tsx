@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useReducer,
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
@@ -47,6 +48,36 @@ export interface StoreBrowserResource {
   id: string;
 }
 
+const hasFiles = (e: ReactDragEvent) =>
+  Boolean(e.dataTransfer) &&
+  Array.from(e.dataTransfer.types ?? []).includes("Files");
+
+type GhImportState = { open: boolean; url: string; err: string | null };
+
+type GhImportAction =
+  | { type: "toggle" }
+  | { type: "url"; url: string }
+  | { type: "err"; err: string | null }
+  | { type: "reset" };
+
+const ghImportInitial: GhImportState = { open: false, url: "", err: null };
+
+function ghImportReducer(
+  state: GhImportState,
+  action: GhImportAction,
+): GhImportState {
+  switch (action.type) {
+    case "toggle":
+      return { ...state, open: !state.open, err: null };
+    case "url":
+      return { ...state, url: action.url, err: null };
+    case "err":
+      return { ...state, err: action.err };
+    case "reset":
+      return ghImportInitial;
+  }
+}
+
 export function StoreBrowser({
   title,
   subMono,
@@ -75,13 +106,11 @@ export function StoreBrowser({
   const [expanded, setExpanded] = useState<Set<string>>(
     () =>
       new Set(
-        tree.filter((n) => n.type === "dir").map((n) => n.name),
+        tree.flatMap((n) => (n.type === "dir" ? [n.name] : [])),
       ),
   );
   const [newIn, setNewIn] = useState<string[] | null>(null);
-  const [ghOpen, setGhOpen] = useState(false);
-  const [ghUrl, setGhUrl] = useState("");
-  const [ghErr, setGhErr] = useState<string | null>(null);
+  const [gh, dispatchGh] = useReducer(ghImportReducer, ghImportInitial);
   const [confirm, setConfirm] = useState<{
     path: string[];
     node: StoreNode;
@@ -176,11 +205,9 @@ export function StoreBrowser({
       if (d.folder) {
         setExpanded((s) => new Set([...s, d.folder!]));
       }
-      setGhOpen(false);
-      setGhUrl("");
-      setGhErr(null);
+      dispatchGh({ type: "reset" });
     } else if (d.error) {
-      setGhErr(d.error);
+      dispatchGh({ type: "err", err: d.error });
     }
   }, [ghFetcher.state, ghFetcher.data, push]);
 
@@ -265,9 +292,6 @@ export function StoreBrowser({
     e.target.value = "";
   };
 
-  const hasFiles = (e: ReactDragEvent) =>
-    Boolean(e.dataTransfer) &&
-    Array.from(e.dataTransfer.types ?? []).includes("Files");
   const overDir = (e: ReactDragEvent, key: string) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
@@ -296,10 +320,10 @@ export function StoreBrowser({
     submitFields({ intent: "store-mkdir", path: JSON.stringify(path), name: trimmed });
     expand([
       ...path,
-      ...trimmed
-        .split("/")
-        .map((s) => s.trim().replace(/\\/g, "-"))
-        .filter(Boolean),
+      ...trimmed.split("/").flatMap((s) => {
+        const part = s.trim().replace(/\\/g, "-");
+        return part ? [part] : [];
+      }),
     ]);
   };
 
@@ -313,20 +337,21 @@ export function StoreBrowser({
 
   const ghImport = () => {
     if (importing) return;
-    if (!ghUrl.trim()) {
-      setGhErr(
-        "Paste a GitHub link — a repo, or a folder like github.com/owner/repo/tree/main/docs.",
-      );
+    if (!gh.url.trim()) {
+      dispatchGh({
+        type: "err",
+        err: "Paste a GitHub link — a repo, or a folder like github.com/owner/repo/tree/main/docs.",
+      });
       return;
     }
-    setGhErr(null);
+    dispatchGh({ type: "err", err: null });
     ghFetcher.submit(
       {
         _csrf: csrf,
         intent: "store-import-github",
         kind: resource.kind,
         id: resource.id,
-        url: ghUrl.trim(),
+        url: gh.url.trim(),
       },
       { method: "post", action },
     );
@@ -362,7 +387,7 @@ export function StoreBrowser({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose}></div>
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true"></div>
       <div
         ref={cardRef}
         className="modal-card modal-wide"
@@ -380,53 +405,49 @@ export function StoreBrowser({
             <h2>{title}</h2>
             <div className="mh-sub mono">{subMono}</div>
           </span>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" />
           </button>
         </div>
         <div className="modal-body">
           <div className="fm-toolbar">
-            <button className="btn sm" onClick={() => startUpload([])}>
+            <button type="button" className="btn sm" onClick={() => startUpload([])}>
               <UploadIco />
               Upload files
             </button>
-            <button className="btn sm" onClick={() => startDirUpload([])}>
+            <button type="button" className="btn sm" onClick={() => startDirUpload([])}>
               <FolderUpIco />
               Upload folder
             </button>
             <button
+              type="button"
               className="btn sm"
-              onClick={() => {
-                setGhOpen((v) => !v);
-                setGhErr(null);
-              }}
+              onClick={() => dispatchGh({ type: "toggle" })}
             >
               <Icon name="github" />
               Add from GitHub
             </button>
-            <button className="btn ghost sm" onClick={() => setNewIn([])}>
+            <button type="button" className="btn ghost sm" onClick={() => setNewIn([])}>
               <FolderIco />
               New folder
             </button>
             <span className="fm-hint">drag files or folders onto a folder to upload there</span>
           </div>
-          {ghOpen && (
+          {gh.open && (
             <div className="fm-gh">
               <input
                 type="text"
                 className="mono"
-                value={ghUrl}
+                value={gh.url}
                 placeholder="https://github.com/owner/repo/tree/main/docs"
-                onChange={(e) => {
-                  setGhUrl(e.target.value);
-                  setGhErr(null);
-                }}
+                onChange={(e) => dispatchGh({ type: "url", url: e.target.value })}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") ghImport();
                 }}
                 autoFocus
               />
               <button
+                type="button"
                 className="btn sm"
                 onClick={ghImport}
                 disabled={importing}
@@ -441,10 +462,10 @@ export function StoreBrowser({
               </button>
             </div>
           )}
-          {ghErr && (
+          {gh.err && (
             <div className="cred-warn">
               <Icon name="alert" />
-              {ghErr}
+              {gh.err}
             </div>
           )}
 
@@ -472,7 +493,21 @@ export function StoreBrowser({
                       : "")
                   }
                   style={{ paddingLeft: `${0.6 + r.depth * 1.3}rem` }}
+                  role={r.node.type === "dir" ? "button" : undefined}
+                  tabIndex={r.node.type === "dir" ? 0 : undefined}
+                  aria-expanded={r.node.type === "dir" ? r.open : undefined}
                   onClick={r.node.type === "dir" ? () => toggle(r.key) : undefined}
+                  onKeyDown={
+                    r.node.type === "dir"
+                      ? (e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggle(r.key);
+                          }
+                        }
+                      : undefined
+                  }
                   onDragOver={(e) =>
                     overDir(e, r.node.type === "dir" ? r.key : r.path.join("/"))
                   }
@@ -510,6 +545,7 @@ export function StoreBrowser({
                     {r.node.type === "dir" && (
                       <>
                         <button
+                          type="button"
                           className="fm-act"
                           title="Upload here"
                           aria-label={"Upload into " + r.node.name}
@@ -518,6 +554,7 @@ export function StoreBrowser({
                           <UploadIco />
                         </button>
                         <button
+                          type="button"
                           className="fm-act"
                           title="New subfolder"
                           aria-label={"New folder in " + r.node.name}
@@ -531,6 +568,7 @@ export function StoreBrowser({
                       </>
                     )}
                     <button
+                      type="button"
                       className="fm-act del"
                       title="Delete"
                       aria-label={"Delete " + r.node.name}
@@ -566,7 +604,7 @@ export function StoreBrowser({
             {metaTail ? " · " + metaTail : ""}
           </span>
           <span className="foot-actions">
-            <button className="btn primary" onClick={onClose}>
+            <button type="button" className="btn primary" onClick={onClose}>
               Done
             </button>
           </span>
@@ -599,17 +637,20 @@ export function StoreBrowser({
             className="confirm-scrim"
             style={{ zIndex: 70 }}
             onClick={() => setConfirm(null)}
+            aria-hidden="true"
           ></div>
           <div
             className="confirm-card"
             style={{ zIndex: 71 }}
             role="alertdialog"
             aria-modal="true"
+            aria-labelledby="store-confirm-title"
+            aria-describedby="store-confirm-desc"
           >
             <div className="confirm-icon">
               <Icon name="alert" />
             </div>
-            <h3>
+            <h3 id="store-confirm-title">
               Delete “{confirm.node.name}”
               {confirm.node.type === "dir" &&
               countKbFiles(confirm.node.children) > 0
@@ -628,10 +669,11 @@ export function StoreBrowser({
                 : "The file is removed from the store. Agents lose it on their next context load."}
             </p>
             <div className="confirm-actions">
-              <button className="btn ghost" onClick={() => setConfirm(null)}>
+              <button type="button" className="btn ghost" onClick={() => setConfirm(null)}>
                 Cancel
               </button>
               <button
+                type="button"
                 className="btn danger"
                 onClick={() => removeNode(confirm.path, confirm.node)}
               >

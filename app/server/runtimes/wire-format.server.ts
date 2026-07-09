@@ -274,7 +274,10 @@ function projectClaude(e: Json, type: string, t: string): ProjectedEnvelope {
       const subtype = str(e.subtype);
       if (subtype === "init") {
         const mcp = Array.isArray(e.mcp_servers)
-          ? (e.mcp_servers as Json[]).map((m) => str(m.name)).filter(Boolean)
+          ? (e.mcp_servers as Json[]).flatMap((m) => {
+              const name = str(m.name);
+              return name ? [name] : [];
+            })
           : [];
         const tools = Array.isArray(e.tools) ? e.tools.length : 0;
         const sid = str(e.session_id);

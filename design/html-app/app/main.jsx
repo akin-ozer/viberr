@@ -18,7 +18,7 @@ function Rail({ view, onNav, tasks, violations, membersCount }) {
   };
   return (
     <nav className="rail" aria-label="Primary">
-      <button className="project-switch" onClick={() => { location.href = "Viberr Home.html"; }} title="All projects">
+      <button type="button" className="project-switch" onClick={() => { location.href = "Viberr Home.html"; }} title="All projects">
         <span>
           <div className="pj-name">Viberr Core</div>
           <div className="pj-meta">akin-ozer/viberr · {membersCount} members</div>
@@ -28,7 +28,7 @@ function Rail({ view, onNav, tasks, violations, membersCount }) {
 
       <div className="rail-label">Workspace</div>
       {NAV.map((n) => (
-        <button key={n.id} className={"nav-item" + (view === n.id ? " active" : "")} onClick={() => onNav(n.id)}>
+        <button type="button" key={n.id} className={"nav-item" + (view === n.id ? " active" : "")} onClick={() => onNav(n.id)}>
           <Icon name={n.icon} className="ico" />
           {n.label}
           {n.id === "board" && <span className="count">{counts.board}</span>}
@@ -57,15 +57,15 @@ function TopUser({ me, theme, onTheme, onNav, onProfile, unread }) {
                 <div className="role">arda@viberr.dev</div>
               </span>
             </div>
-            <button className="menu-item" role="menuitem" onClick={() => { setMenu(false); onProfile(); }}><Icon name="user" />Profile &amp; preferences</button>
-            <button className="menu-item" role="menuitem" onClick={() => { setMenu(false); location.href = "Viberr Home.html"; }}><Icon name="board" />Switch project</button>
-            <button className="menu-item" role="menuitem" onClick={() => onTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")}><Icon name="sparkle" />Theme · <span style={{ color: "var(--faint)" }}>{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}</span></button>
+            <button type="button" className="menu-item" role="menuitem" onClick={() => { setMenu(false); onProfile(); }}><Icon name="user" />Profile &amp; preferences</button>
+            <button type="button" className="menu-item" role="menuitem" onClick={() => { setMenu(false); location.href = "Viberr Home.html"; }}><Icon name="board" />Switch project</button>
+            <button type="button" className="menu-item" role="menuitem" onClick={() => onTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")}><Icon name="sparkle" />Theme · <span style={{ color: "var(--faint)" }}>{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}</span></button>
             <div className="menu-sep" />
-            <button className="menu-item danger" role="menuitem" onClick={() => { window.VIBERR.session.clear(); location.href = "Viberr Login.html"; }}><Icon name="ext" />Sign out</button>
+            <button type="button" className="menu-item danger" role="menuitem" onClick={() => { window.VIBERR.session.clear(); location.href = "Viberr Login.html"; }}><Icon name="ext" />Sign out</button>
           </div>
         </React.Fragment>
       )}
-      <button className={"home-user" + (menu ? " open" : "")} onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu} aria-label="Account menu">
+      <button type="button" className={"home-user" + (menu ? " open" : "")} onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu} aria-label="Account menu">
         <Avatar person={{ ...window.VIBERR.people.ARDA, initials: initialsOf(me.name) }} lg />
       </button>
     </div>
@@ -90,7 +90,7 @@ function TopBell({ notifs, unread, onRead, onReadAll, onOpenTask, onSeeAll, push
             <div className="ntf-pop-head">
               <h3>Notifications</h3>
               <span className="ct mono">{unread > 0 ? unread + " unread" : "caught up"}</span>
-              {unread > 0 && <button className="btn ghost sm" onClick={onReadAll}>Mark all read</button>}
+              {unread > 0 && <button type="button" className="btn ghost sm" onClick={onReadAll}>Mark all read</button>}
             </div>
             <div className="ntf-pop-list">
               {notifs.map((n) => {
@@ -114,7 +114,7 @@ function TopBell({ notifs, unread, onRead, onReadAll, onOpenTask, onSeeAll, push
               })}
             </div>
             <div className="ntf-pop-foot">
-              <button className="btn ghost sm" onClick={() => { setOpen(false); onSeeAll(); }}>See all<Icon name="arrow" /></button>
+              <button type="button" className="btn ghost sm" onClick={() => { setOpen(false); onSeeAll(); }}>See all<Icon name="arrow" /></button>
             </div>
           </div>
         </React.Fragment>
@@ -262,15 +262,15 @@ function App() {
       <Rail view={view} onNav={goView} tasks={tasks} violations={scopeGranted ? 0 : 1} membersCount={members.length} />
       <div className="main">
         <div className="topbar">
-          <button className="home-brand" onClick={() => { location.href = "Viberr Home.html"; }} title="Home — all projects">
+          <button type="button" className="home-brand" onClick={() => { location.href = "Viberr Home.html"; }} title="Home — all projects">
             <span className="mark">V</span>
             <b>Viberr</b>
           </button>
           <div className="crumbs">
-            <button className="crumb-root" onClick={goBoard}>Viberr Core</button>
+            <button type="button" className="crumb-root" onClick={goBoard}>Viberr Core</button>
             <span className="sep sep-root"><Icon name="chevron" /></span>
             {open
-              ? <React.Fragment><button className="crumb-mid" onClick={goBoard}>Board</button><span className="sep sep-mid"><Icon name="chevron" /></span><span className="cur" title={open.key + " · " + open.title}>{open.key} · {open.title}</span></React.Fragment>
+              ? <React.Fragment><button type="button" className="crumb-mid" onClick={goBoard}>Board</button><span className="sep sep-mid"><Icon name="chevron" /></span><span className="cur" title={open.key + " · " + open.title}>{open.key} · {open.title}</span></React.Fragment>
               : <span className="cur">{view === "notifications" ? "Notifications" : (NAV.find((n) => n.id === view) || {}).label}</span>}
           </div>
           <div className="top-search">

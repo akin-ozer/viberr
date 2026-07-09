@@ -364,9 +364,11 @@ export function operatorSnapshot(
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   const doneStageId = stages[stages.length - 1]?.id ?? null;
 
-  const nextStages = workflow
-    .filter((w) => w.from === fm.stage)
-    .map((w) => ({ id: w.to, name: stageName(w.to), boundary: w.boundary }));
+  const nextStages = workflow.flatMap((w) =>
+    w.from === fm.stage
+      ? [{ id: w.to, name: stageName(w.to), boundary: w.boundary }]
+      : [],
+  );
 
   const ownerName = fm.ownerUserId
     ? ((db

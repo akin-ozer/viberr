@@ -199,7 +199,7 @@ export function ConnectionsPanel({
         <Icon name="github" />
         <h2>GitHub connections</h2>
         <span className="right">
-          <button className="btn sm" onClick={() => setModal({ item: null })}>
+          <button type="button" className="btn sm" onClick={() => setModal({ item: null })}>
             <Icon name="plus" />
             Add connection
           </button>
@@ -264,15 +264,16 @@ export function ConnectionsPanel({
                   default
                 </Pill>
               )}
-              <button className="btn ghost sm" onClick={() => setModal({ item: c })}>
+              <button type="button" className="btn ghost sm" onClick={() => setModal({ item: c })}>
                 Update token
               </button>
               {!c.def && (
-                <button className="btn ghost sm" onClick={() => setDefault(c.id)}>
+                <button type="button" className="btn ghost sm" onClick={() => setDefault(c.id)}>
                   Set default
                 </button>
               )}
               <button
+                type="button"
                 className="stg-x"
                 aria-label={"Remove " + c.owner}
                 onClick={() => remove(c)}

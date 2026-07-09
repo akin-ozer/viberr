@@ -3,8 +3,16 @@ import { useNavigate, useSearchParams } from "react-router";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
-import { formatClock, formatDayBucket } from "~/shared/dates/format";
+import { formatClock } from "~/shared/dates/format";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
+import {
+  auditTimeLabel,
+  groupStreamByDay,
+  matchesActorFilter,
+  type ActivityStreamRowView,
+  type ActorFilter,
+  type AuditLogEntryView,
+} from "./feed-helpers";
 
 /**
  * Activity view — project-wide cross-task stream + audit logs
@@ -18,29 +26,8 @@ import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
  * The actor filter does NOT touch the audit panel (mock behavior, kept).
  */
 
-export interface ActivityStreamRowView {
-  id: number;
-  taskKey: string;
-  type: string;
-  actor: { kind: string; name: string } | null;
-  occurredAt: string;
-  text: string;
-}
-
-export interface AuditLogEntryView {
-  id: string;
-  kind: "violation" | "blockedact" | "change" | "audit";
-  text: string;
-  taskKey: string | null;
-  occurredAt: string;
-  status: "open" | "resolved" | null;
-  /** Violations only — resolve context surfaced on the pill (Phase 10). */
-  resolvedAt: string | null;
-  resolvedBy: string | null;
-}
-
 /** Stream event type → icon (mock ACT_ICON; unknown → dot). */
-export const ACT_ICON: Record<string, IconName> = {
+const ACT_ICON: Record<string, IconName> = {
   comment: "message",
   completion: "check",
   github: "github",
@@ -53,46 +40,12 @@ export const ACT_ICON: Record<string, IconName> = {
 };
 
 /** Audit kind → icon + pev-ico tint class (mock PEV_META; unknown → change). */
-export const PEV_META: Record<string, { icon: IconName; cls: string }> = {
+const PEV_META: Record<string, { icon: IconName; cls: string }> = {
   violation: { icon: "alert", cls: "violation" },
   blockedact: { icon: "lock", cls: "blockedact" },
   change: { icon: "shield", cls: "change" },
   audit: { icon: "user", cls: "audit" },
 };
-
-export type ActorFilter = "all" | "human" | "agent" | "system";
-
-export function matchesActorFilter(
-  row: ActivityStreamRowView,
-  filter: ActorFilter,
-): boolean {
-  return filter === "all" || (row.actor !== null && row.actor.kind === filter);
-}
-
-/** Day-bucket grouping: rows arrive occurred_at DESC, buckets keep that
- * order (Today first, then Yesterday, then dated days). */
-export function groupStreamByDay(
-  rows: ActivityStreamRowView[],
-  now: Date = new Date(),
-): { day: string; rows: ActivityStreamRowView[] }[] {
-  const groups: { day: string; rows: ActivityStreamRowView[] }[] = [];
-  for (const row of rows) {
-    const day = formatDayBucket(row.occurredAt, now);
-    const last = groups[groups.length - 1];
-    if (last && last.day === day) last.rows.push(row);
-    else groups.push({ day, rows: [row] });
-  }
-  return groups;
-}
-
-/** Audit panel time form (mock freeform strings, generated from real
- * timestamps): "today 9:38" / "yesterday 16:04" / "Mar 30". */
-export function auditTimeLabel(iso: string, now: Date = new Date()): string {
-  const bucket = formatDayBucket(iso, now);
-  if (bucket === "Today") return "today " + formatClock(iso);
-  if (bucket === "Yesterday") return "yesterday " + formatClock(iso);
-  return bucket;
-}
 
 function AuditLogs({
   entries,

@@ -87,10 +87,3 @@ export const LIGHTWEIGHT_TEMPLATE: WorkflowTemplate = {
     },
   ],
 };
-
-export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
-  GOVERNED_TEMPLATE,
-  LIGHTWEIGHT_TEMPLATE,
-];
-
-export const DEFAULT_WORKFLOW_TEMPLATE_ID = GOVERNED_TEMPLATE.id;

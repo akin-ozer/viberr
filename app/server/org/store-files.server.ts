@@ -252,8 +252,10 @@ export function createStoreFolder(
   const base = sanitizeDirPath(dirPath);
   const segs = name
     .split("/")
-    .map((s) => s.trim().replace(/\\/g, "-"))
-    .filter(Boolean)
+    .flatMap((s) => {
+      const cleaned = s.trim().replace(/\\/g, "-");
+      return cleaned ? [cleaned] : [];
+    })
     .map((s) => {
       if (s.includes("..")) throw AppError.validation("Invalid folder name.");
       return s.slice(0, 200);
@@ -443,27 +445,29 @@ export async function importGithubSnapshot(
     folder = `${baseName}-${i++}`;
   }
 
-  let written = 0;
-  for (const blob of selected) {
-    const rel = subPath ? blob.path.slice(prefix.length) : blob.path;
-    const parts = cleanRelPath(rel);
-    if (!parts) continue;
-    const blobRes = await client.request<{
-      content?: string;
-      encoding?: string;
-    }>("GET", `/repos/${owner}/${repo}/git/blobs/${blob.sha}`);
-    if (!blobRes.ok) continue;
-    const content = blobRes.data.content ?? "";
-    const data =
-      blobRes.data.encoding === "base64"
-        ? Buffer.from(content.replace(/\n/g, ""), "base64")
-        : Buffer.from(content, "utf8");
-    const abs = path.join(target.rootAbs, folder, ...parts);
-    assertInsideRoot(target.rootAbs, abs);
-    mkdirSync(path.dirname(abs), { recursive: true });
-    writeFileSync(abs, data);
-    written += 1;
-  }
+  const writeResults = await Promise.all(
+    selected.map(async (blob) => {
+      const rel = subPath ? blob.path.slice(prefix.length) : blob.path;
+      const parts = cleanRelPath(rel);
+      if (!parts) return 0;
+      const blobRes = await client.request<{
+        content?: string;
+        encoding?: string;
+      }>("GET", `/repos/${owner}/${repo}/git/blobs/${blob.sha}`);
+      if (!blobRes.ok) return 0;
+      const content = blobRes.data.content ?? "";
+      const data =
+        blobRes.data.encoding === "base64"
+          ? Buffer.from(content.replace(/\n/g, ""), "base64")
+          : Buffer.from(content, "utf8");
+      const abs = path.join(target.rootAbs, folder, ...parts);
+      assertInsideRoot(target.rootAbs, abs);
+      mkdirSync(path.dirname(abs), { recursive: true });
+      writeFileSync(abs, data);
+      return 1;
+    }),
+  );
+  const written = writeResults.reduce((sum: number, n) => sum + n, 0);
   if (written === 0) {
     return {
       status: "failed",

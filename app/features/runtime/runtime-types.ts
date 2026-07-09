@@ -119,24 +119,3 @@ export interface RunView {
   /** Total lines available (== lines.length; the loader sends the full tail). */
   lineCount: number;
 }
-
-/**
- * The mock render state the console/pills use, mapped from the real
- * lifecycle (ruling 11): queued/running → the mock's four; interrupted is a
- * neutral "idle"-shaped display but the footer/pill say "interrupted".
- */
-export function toRenderState(
-  lifecycle: RunState,
-): "running" | "idle" | "done" | "error" {
-  switch (lifecycle) {
-    case "running":
-      return "running";
-    case "finished":
-      return "done";
-    case "error":
-      return "error";
-    case "queued":
-    case "interrupted":
-      return "idle";
-  }
-}

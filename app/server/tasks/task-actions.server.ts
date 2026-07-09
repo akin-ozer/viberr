@@ -880,10 +880,10 @@ export async function registerAgentReply(
     role: string;
   },
 ): Promise<void> {
-  const { registerRunCompletion } = await import(
-    "~/server/runtimes/run-service.server"
-  );
-  const { replyTextForRun } = await import("./agent-reply.server");
+  const [{ registerRunCompletion }, { replyTextForRun }] = await Promise.all([
+    import("~/server/runtimes/run-service.server"),
+    import("./agent-reply.server"),
+  ]);
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -1016,10 +1016,10 @@ export async function operatorPromptAgent(
   //    THEN re-invoke the operator so it READS that reply and proposes the next
   //    state change (the "prompt → read output → propose" loop). The react
   //    re-invocation is bounded by OPERATOR_REACT_DEPTH_CAP so it never runs away.
-  const { registerRunCompletion } = await import(
-    "~/server/runtimes/run-service.server"
-  );
-  const { replyTextForRun } = await import("./agent-reply.server");
+  const [{ registerRunCompletion }, { replyTextForRun }] = await Promise.all([
+    import("~/server/runtimes/run-service.server"),
+    import("./agent-reply.server"),
+  ]);
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,

@@ -259,11 +259,11 @@ export function AgentCapability({
       </div>
 
       <div className="pol-actions">
-        <button className="btn ghost sm" onClick={onMatrix}>
+        <button type="button" className="btn ghost sm" onClick={onMatrix}>
           <Icon name="shield" />
           Capability matrix
         </button>
-        <button className="btn sm" onClick={onManageProfiles}>
+        <button type="button" className="btn sm" onClick={onManageProfiles}>
           <Icon name="agents" />
           Manage profiles
         </button>
@@ -436,7 +436,7 @@ export function PolicyPage({
               last change · {data.edited.by} · {data.edited.t}
             </span>
           )}
-          <button className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
+          <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
             <Icon name="shield" />
             Capability matrix
           </button>

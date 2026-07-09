@@ -1,6 +1,3 @@
-import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES, type ErrorCode } from "~/server/errors/error-codes";
-
 /**
  * Thin typed fetch wrapper for api.github.com (Phase 7).
  *
@@ -212,53 +209,4 @@ export function tokenExpirationFrom(headers: Headers): string | null {
   if (!raw) return null;
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? raw : date.toISOString();
-}
-
-/** Maps a typed GitHub failure to an AppError (route-boundary use). */
-export function githubFailureToAppError(
-  failure: GithubFailure,
-  context: string,
-): AppError {
-  if (failure.kind === "network") {
-    return new AppError({
-      code: ERROR_CODES.GITHUB_UNAVAILABLE,
-      status: 502,
-      message: `${context}: network failure (${failure.message})`,
-      userMessage: "GitHub is unreachable right now.",
-      kind: "infrastructure",
-    });
-  }
-  if (failure.kind === "not_modified") {
-    return new AppError({
-      code: ERROR_CODES.GITHUB_API_ERROR,
-      status: 500,
-      message: `${context}: unexpected 304 treated as failure`,
-      kind: "infrastructure",
-    });
-  }
-  const map: Record<number, { code: ErrorCode; userMessage: string }> = {
-    401: {
-      code: ERROR_CODES.GITHUB_AUTH_FAILED,
-      userMessage: "The GitHub credential was rejected.",
-    },
-    403: {
-      code: ERROR_CODES.GITHUB_FORBIDDEN,
-      userMessage: "The GitHub credential is not allowed to do that.",
-    },
-    404: {
-      code: ERROR_CODES.GITHUB_NOT_FOUND,
-      userMessage: "GitHub couldn't find that resource.",
-    },
-  };
-  const mapped = map[failure.status] ?? {
-    code: ERROR_CODES.GITHUB_API_ERROR,
-    userMessage: "GitHub returned an unexpected error.",
-  };
-  return new AppError({
-    code: mapped.code,
-    status: 502,
-    message: `${context}: GitHub ${failure.status} ${failure.message}`,
-    userMessage: mapped.userMessage,
-    kind: "infrastructure",
-  });
 }

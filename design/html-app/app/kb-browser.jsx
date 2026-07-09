@@ -275,14 +275,14 @@ function StoreBrowser({ title, subMono, root, metaTail, tree, onChange, onClose,
             <h2>{title}</h2>
             <div className="mh-sub mono">{subMono}</div>
           </span>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body">
           <div className="fm-toolbar">
-            <button className="btn sm" onClick={() => startUpload([])}><UploadIco />Upload files</button>
-            <button className="btn sm" onClick={() => startDirUpload([])}><FolderUpIco />Upload folder</button>
-            <button className="btn sm" onClick={() => { setGhOpen((v) => !v); setGhErr(null); }}><Icon name="github" />Add from GitHub</button>
-            <button className="btn ghost sm" onClick={() => setNewIn([])}><FolderIco />New folder</button>
+            <button type="button" className="btn sm" onClick={() => startUpload([])}><UploadIco />Upload files</button>
+            <button type="button" className="btn sm" onClick={() => startDirUpload([])}><FolderUpIco />Upload folder</button>
+            <button type="button" className="btn sm" onClick={() => { setGhOpen((v) => !v); setGhErr(null); }}><Icon name="github" />Add from GitHub</button>
+            <button type="button" className="btn ghost sm" onClick={() => setNewIn([])}><FolderIco />New folder</button>
             <span className="fm-hint">drag files or folders onto a folder to upload there</span>
           </div>
           {ghOpen && (
@@ -290,7 +290,7 @@ function StoreBrowser({ title, subMono, root, metaTail, tree, onChange, onClose,
               <input type="text" className="mono" value={ghUrl} placeholder="https://github.com/owner/repo/tree/main/docs"
                 onChange={(e) => { setGhUrl(e.target.value); setGhErr(null); }}
                 onKeyDown={(e) => { if (e.key === "Enter") ghImport(); }} autoFocus />
-              <button className="btn sm" onClick={ghImport} style={importing ? { opacity: .6, pointerEvents: "none" } : null}>
+              <button type="button" className="btn sm" onClick={ghImport} style={importing ? { opacity: .6, pointerEvents: "none" } : null}>
                 <Icon name={importing ? "refresh" : "arrow"} className={importing ? "spin" : ""} />{importing ? "Importing…" : "Import"}
               </button>
             </div>
@@ -327,13 +327,13 @@ function StoreBrowser({ title, subMono, root, metaTail, tree, onChange, onClose,
                   <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
                     {r.node.type === "dir" && (
                       <React.Fragment>
-                        <button className="fm-act" title="Upload here" aria-label={"Upload into " + r.node.name}
+                        <button type="button" className="fm-act" title="Upload here" aria-label={"Upload into " + r.node.name}
                           onClick={() => startUpload([...r.path, r.node.name])}><UploadIco /></button>
-                        <button className="fm-act" title="New subfolder" aria-label={"New folder in " + r.node.name}
+                        <button type="button" className="fm-act" title="New subfolder" aria-label={"New folder in " + r.node.name}
                           onClick={() => { expand([...r.path, r.node.name]); setNewIn([...r.path, r.node.name]); }}><Icon name="plus" /></button>
                       </React.Fragment>
                     )}
-                    <button className="fm-act del" title="Delete" aria-label={"Delete " + r.node.name}
+                    <button type="button" className="fm-act del" title="Delete" aria-label={"Delete " + r.node.name}
                       onClick={() => askRemove(r.path, r.node)}><Icon name="x" /></button>
                   </span>
                 </div>
@@ -359,7 +359,7 @@ function StoreBrowser({ title, subMono, root, metaTail, tree, onChange, onClose,
         <div className="modal-foot">
           <span className="foot-hint mono">{nDirs + " folder" + (nDirs === 1 ? "" : "s") + " · " + nFiles + " file" + (nFiles === 1 ? "" : "s")}{metaTail ? " · " + metaTail : ""}</span>
           <span className="foot-actions">
-            <button className="btn primary" onClick={onClose}>Done</button>
+            <button type="button" className="btn primary" onClick={onClose}>Done</button>
           </span>
         </div>
         <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={onFiles} aria-hidden="true" tabIndex={-1} />
@@ -377,8 +377,8 @@ function StoreBrowser({ title, subMono, root, metaTail, tree, onChange, onClose,
                   : "The empty folder is removed from the store.")
               : "The file is removed from the store. Agents lose it on their next context load."}</p>
             <div className="confirm-actions">
-              <button className="btn ghost" onClick={() => setConfirm(null)}>Cancel</button>
-              <button className="btn danger" onClick={() => removeNode(confirm.path, confirm.node)}>{confirm.node.type === "dir" ? "Delete folder" : "Delete file"}</button>
+              <button type="button" className="btn ghost" onClick={() => setConfirm(null)}>Cancel</button>
+              <button type="button" className="btn danger" onClick={() => removeNode(confirm.path, confirm.node)}>{confirm.node.type === "dir" ? "Delete folder" : "Delete file"}</button>
             </div>
           </div>
         </React.Fragment>

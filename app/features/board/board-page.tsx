@@ -264,7 +264,13 @@ function Column({
         <span className="nm">{stage.name}</span>
         <span className="ct">{count}</span>
         {!isDone && canCreate && (
-          <button className="add" title="New task in this stage" onClick={onNew}>
+          <button
+            type="button"
+            className="add"
+            title="New task in this stage"
+            aria-label="New task in this stage"
+            onClick={onNew}
+          >
             <Icon name="plus" />
           </button>
         )}
@@ -405,7 +411,9 @@ function NewTaskModal({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose} />
+      {/* Pointer-only shortcut — Escape (useDialog) and the Close button are
+          the accessible paths, so the scrim stays out of the a11y tree. */}
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true" />
       <div
         className="modal-card"
         role="dialog"
@@ -426,6 +434,7 @@ function NewTaskModal({
             </div>
           </div>
           <button
+            type="button"
             className="icon-btn modal-close"
             onClick={onClose}
             aria-label="Close"
@@ -435,10 +444,11 @@ function NewTaskModal({
         </div>
         <div className="modal-body">
           <div className="field">
-            <label className="flabel">
+            <label className="flabel" htmlFor="new-task-title">
               Title<span className="req">*</span>
             </label>
             <input
+              id="new-task-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -450,8 +460,16 @@ function NewTaskModal({
             />
           </div>
           <div className="field">
-            <label className="flabel">Stage</label>
-            <div className="pick-chips">
+            {/* A chip-button group has no labelable control for htmlFor, so the
+                name is attached via role=group (span.flabel per home-page.tsx). */}
+            <span className="flabel" id="new-task-stage-label">
+              Stage
+            </span>
+            <div
+              className="pick-chips"
+              role="group"
+              aria-labelledby="new-task-stage-label"
+            >
               {stages.map((s) => (
                 <button
                   type="button"
@@ -469,13 +487,14 @@ function NewTaskModal({
             </div>
           </div>
           <div className="field">
-            <label className="flabel">
+            <label className="flabel" htmlFor="new-task-goal">
               Goal
               <span className="fhint">
                 what done means — the operator and specialists anchor on this
               </span>
             </label>
             <textarea
+              id="new-task-goal"
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               placeholder="One or two sentences. Underspecified goals get flagged at the triage quality gate."
@@ -491,10 +510,11 @@ function NewTaskModal({
                 : "A title is required."}
           </span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>
+            <button type="button" className="btn ghost" onClick={onClose}>
               Cancel
             </button>
             <button
+              type="button"
               className="btn primary"
               onClick={submit}
               disabled={!valid || busy}
@@ -716,6 +736,7 @@ export function BoardPage({
         <div className="board-tools">
           <div className="seg">
             <button
+              type="button"
               className={group === "stage" ? "on" : ""}
               onClick={() => setParam("view", null)}
             >
@@ -723,6 +744,7 @@ export function BoardPage({
               Board
             </button>
             <button
+              type="button"
               className={group === "list" ? "on" : ""}
               onClick={() => setParam("view", "list")}
             >
@@ -731,6 +753,7 @@ export function BoardPage({
             </button>
           </div>
           <button
+            type="button"
             className="btn ghost sm"
             onClick={rescan}
             title="Reconcile the board with the file-native store"
@@ -740,6 +763,7 @@ export function BoardPage({
           </button>
           {canCreate && (
             <button
+              type="button"
               className="btn primary sm"
               onClick={() => setCreating(stages[0]?.id ?? "triage")}
             >
@@ -753,6 +777,7 @@ export function BoardPage({
       <div className="filter-bar">
         {FILTERS.map((f) => (
           <button
+            type="button"
             key={f.id}
             className={"fchip" + (filter === f.id ? " on" : "")}
             aria-pressed={filter === f.id}

@@ -23,8 +23,8 @@ function GithubView({ tasks, onOpen, onNav, push, scopeGranted }) {
           <div className="sub">Execution surface for Viberr Core — branches, pull requests, and credential health</div>
         </div>
         <div className="board-tools">
-          <button className="btn ghost sm" onClick={rescan} title="Reconcile task state with GitHub"><Icon name="refresh" />Reconcile</button>
-          <button className="btn ghost sm" onClick={() => push("External links are stubbed in this prototype")}><Icon name="ext" />Open on GitHub</button>
+          <button type="button" className="btn ghost sm" onClick={rescan} title="Reconcile task state with GitHub"><Icon name="refresh" />Reconcile</button>
+          <button type="button" className="btn ghost sm" onClick={() => push("External links are stubbed in this prototype")}><Icon name="ext" />Open on GitHub</button>
         </div>
       </div>
 
@@ -56,7 +56,7 @@ function GithubView({ tasks, onOpen, onNav, push, scopeGranted }) {
                     <Icon name="alert" />
                     <span>Missing <code className="mono">{missing.id}</code> — PR status can't auto-sync after merge. Flagged on</span>
                     <button type="button" className="keybtn" onClick={() => onOpen(missing.task)}>{missing.task}</button>
-                    <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => onNav("settings")}><Icon name="sliders" />Fix in Settings</button>
+                    <button type="button" className="btn sm" style={{ marginLeft: "auto" }} onClick={() => onNav("settings")}><Icon name="sliders" />Fix in Settings</button>
                   </div>
                 : <div className="cred-ok"><Icon name="check" />All required scopes granted. Secrets stay isolated from task records and timelines.</div>}
             </div>
@@ -68,7 +68,7 @@ function GithubView({ tasks, onOpen, onNav, push, scopeGranted }) {
             </div>
             <div className="rq-list">
               {prs.map((t) => (
-                <button className="rq-row" key={t.key} onClick={() => onOpen(t.key)}>
+                <button type="button" className="rq-row" key={t.key} onClick={() => onOpen(t.key)}>
                   <span className="rq-key">#{t.pr.number}</span>
                   <span className="rq-main">
                     <div className="ttl">{t.pr.title}</div>
@@ -96,7 +96,7 @@ function GithubView({ tasks, onOpen, onNav, push, scopeGranted }) {
               {branches.map((t) => {
                 const s = ghSync(t);
                 return (
-                  <button className="live-row" key={t.key} onClick={() => onOpen(t.key)}>
+                  <button type="button" className="live-row" key={t.key} onClick={() => onOpen(t.key)}>
                     <span className="live-task"><span className="key mono">{t.key}</span> <span className="ttl">{t.title}</span></span>
                     <span className="trace ok" style={{ fontSize: ".74rem" }}><Icon name="branch" />{t.branch}</span>
                     <span>{t.pr

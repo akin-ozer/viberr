@@ -275,9 +275,9 @@ export function rebuildProjectFile(
 function listTaskDirs(slug: string, dataRoot?: string): string[] {
   const dir = path.join(projectsDir(dataRoot), slug, "tasks");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-    .map((e) => e.name);
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() && !e.name.startsWith(".") ? [e.name] : [],
+  );
 }
 
 export function rebuildTaskFile(
@@ -550,9 +550,9 @@ export function rebuildAll(
   const seenTasks = new Set<string>();
 
   const slugs = existsSync(projRoot)
-    ? readdirSync(projRoot, { withFileTypes: true })
-        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-        .map((e) => e.name)
+    ? readdirSync(projRoot, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() && !e.name.startsWith(".") ? [e.name] : [],
+      )
     : [];
 
   const track = (result: RebuildFileResult) => {

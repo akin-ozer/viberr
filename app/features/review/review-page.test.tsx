@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
-import { ReviewQueuePage, type ReviewRowView } from "./review-page";
+import { ReviewQueuePage } from "./review-page";
+import type { ReviewRowView } from "./review-helpers";
 
 afterEach(cleanup);
 

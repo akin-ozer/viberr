@@ -50,7 +50,7 @@ export type ReadinessValue =
 /** Readiness plus the derived "accepted" display state (done + accepted). */
 export type ReadinessDisplayValue = ReadinessValue | "accepted";
 
-export const READINESS_DISPLAY: Record<
+const READINESS_DISPLAY: Record<
   ReadinessDisplayValue,
   { kind: PillKind; label: string }
 > = {
@@ -81,7 +81,7 @@ export function ReadinessPill({
 
 export type ValidationValue = "healthy" | "changed" | "failing" | "none";
 
-export const VALIDATION_DISPLAY: Record<
+const VALIDATION_DISPLAY: Record<
   ValidationValue,
   { kind: PillKind; label: string }
 > = {

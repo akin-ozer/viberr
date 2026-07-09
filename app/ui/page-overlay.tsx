@@ -68,7 +68,13 @@ export function PageOverlay({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={() => onCloseRef.current()} />
+      {/* Pointer-only dismiss affordance; keyboard users close via Escape or
+          the labeled Close button, so the scrim is hidden from the a11y tree. */}
+      <div
+        className="confirm-scrim"
+        aria-hidden="true"
+        onClick={() => onCloseRef.current()}
+      />
       <div
         className="page-overlay"
         role="dialog"
@@ -78,6 +84,7 @@ export function PageOverlay({
         ref={panelRef}
       >
         <button
+          type="button"
           className="icon-btn overlay-x"
           onClick={() => onCloseRef.current()}
           aria-label="Close"

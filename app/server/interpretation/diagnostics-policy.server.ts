@@ -1,7 +1,4 @@
-import type {
-  DiagnosticSeverity,
-  FileDiagnostic,
-} from "~/schemas/file-diagnostics";
+import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import type { Readiness } from "~/schemas/task-file.schema";
 
 /**
@@ -53,33 +50,6 @@ export function worstReadinessEffect(
   }
   return worst;
 }
-
-/** User-facing severity framing (diagnostics console copy). */
-export const SEVERITY_COPY: Record<
-  DiagnosticSeverity,
-  { label: string; blurb: string }
-> = {
-  info: {
-    label: "Heads-up",
-    blurb: "Noted while reading the file — no effect on readiness.",
-  },
-  warning: {
-    label: "Needs input",
-    blurb:
-      "The file could be read, but something is off — readiness is held at input required until it's fixed.",
-  },
-  error: {
-    label: "Inconsistency risk",
-    blurb:
-      "The canonical file disagrees with itself or with the project — readiness is held at inconsistency risk.",
-  },
-};
-
-export const HARD_STOP_COPY = {
-  label: "Blocked",
-  blurb:
-    "The file could not be trusted at all — the task is blocked until the file is repaired.",
-} as const;
 
 /**
  * Reference checks that need project context (not just the file):

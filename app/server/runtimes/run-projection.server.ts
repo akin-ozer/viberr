@@ -195,14 +195,3 @@ export function projectRunsForTask(
     );
   });
 }
-
-/** Project a single run row (used by getRunLog after a state change). */
-export function projectSingleRun(db: Database.Database, row: AgentRunRow): RunView {
-  const stored = listRunLines(db, row.id);
-  return projectRow(
-    db,
-    row,
-    stored.map((l) => l.display),
-    stored.map((l) => l.raw),
-  );
-}

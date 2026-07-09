@@ -17,15 +17,6 @@ function secure(): boolean {
   return getEnv().NODE_ENV === "production";
 }
 
-export function serializeLoginFlash(flash: LoginFlash): string {
-  const value = encodeURIComponent(JSON.stringify(flash));
-  return (
-    `${LOGIN_FLASH_COOKIE_NAME}=${value}; Path=/login; Max-Age=60; ` +
-    `HttpOnly; SameSite=Lax` +
-    (secure() ? "; Secure" : "")
-  );
-}
-
 export function clearLoginFlash(): string {
   return (
     `${LOGIN_FLASH_COOKIE_NAME}=; Path=/login; Max-Age=0; HttpOnly; SameSite=Lax` +

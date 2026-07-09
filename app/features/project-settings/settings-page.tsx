@@ -62,16 +62,12 @@ export function ProjectPanel({
   canManage: boolean;
   onSave: (fields: { name: string; prefix: string; description: string }) => void;
 }) {
+  // Revalidation resync (a save or an SSE-driven reload brings new values)
+  // happens by remount: the render site keys this panel on the identity
+  // fields, so state re-seeds from the loader instead of a sync effect.
   const [name, setName] = useState(project.name);
   const [prefix, setPrefix] = useState(project.prefix);
   const [desc, setDesc] = useState(project.description);
-
-  // Revalidation resync (a save or an SSE-driven reload brings new values).
-  useEffect(() => {
-    setName(project.name);
-    setPrefix(project.prefix);
-    setDesc(project.description);
-  }, [project.name, project.prefix, project.description]);
 
   const saveIfDirty = () => {
     if (
@@ -93,8 +89,11 @@ export function ProjectPanel({
       <div className="set-fields">
         <div className="field-row" style={{ gridTemplateColumns: "1fr 120px" }}>
           <div className="field">
-            <label className="flabel">Project name</label>
+            <label className="flabel" htmlFor="set-project-name">
+              Project name
+            </label>
             <input
+              id="set-project-name"
               type="text"
               value={name}
               disabled={!canManage}
@@ -103,8 +102,11 @@ export function ProjectPanel({
             />
           </div>
           <div className="field">
-            <label className="flabel">Task prefix</label>
+            <label className="flabel" htmlFor="set-project-prefix">
+              Task prefix
+            </label>
             <input
+              id="set-project-prefix"
               type="text"
               className="mono"
               value={prefix}
@@ -115,8 +117,11 @@ export function ProjectPanel({
           </div>
         </div>
         <div className="field">
-          <label className="flabel">Description</label>
+          <label className="flabel" htmlFor="set-project-desc">
+            Description
+          </label>
           <textarea
+            id="set-project-desc"
             rows={2}
             value={desc}
             disabled={!canManage}
@@ -264,6 +269,7 @@ export function StagesPanel({
                 <input
                   type="text"
                   className="stg-input"
+                  aria-label={"Rename " + s.name}
                   defaultValue={s.name}
                   autoFocus
                   onFocus={(e) => e.target.select()}
@@ -303,6 +309,7 @@ export function StagesPanel({
       </div>
       {canManage && (
         <button
+          type="button"
           className="btn ghost sm"
           style={{ width: "100%", marginTop: ".8rem" }}
           onClick={onAdd}
@@ -440,7 +447,7 @@ export function MembersPanel({
               if (e.key === "Enter") invite();
             }}
           />
-          <button className="btn sm" onClick={invite} disabled={busy}>
+          <button type="button" className="btn sm" onClick={invite} disabled={busy}>
             <Icon name="send" />
             Invite
           </button>
@@ -542,6 +549,7 @@ export function RepoPanel({
         warnActions={
           canGrant ? (
             <button
+              type="button"
               className="btn sm"
               style={{ marginLeft: "auto" }}
               onClick={onGrantScope}
@@ -576,7 +584,9 @@ function DeleteProjectDialog({
   const matches = confirmName.trim() === projectName;
   return (
     <>
-      <div className="confirm-scrim" onClick={onCancel} />
+      {/* Pointer-only light-dismiss; keyboard users get Escape (useDialog)
+          and the Cancel button, so the scrim stays out of the a11y tree. */}
+      <div className="confirm-scrim" aria-hidden="true" onClick={onCancel} />
       <div
         className="confirm-card"
         role="alertdialog"
@@ -602,10 +612,11 @@ function DeleteProjectDialog({
           />
         </div>
         <div className="confirm-actions">
-          <button className="btn ghost" onClick={onCancel}>
+          <button type="button" className="btn ghost" onClick={onCancel}>
             Cancel
           </button>
           <button
+            type="button"
             className="btn danger"
             disabled={!matches || busy}
             style={!matches ? { opacity: 0.5, pointerEvents: "none" } : undefined}
@@ -659,6 +670,7 @@ export function DangerZone({
           </div>
         </span>
         <button
+          type="button"
           className="btn ghost sm"
           disabled={busy}
           onClick={() =>
@@ -676,6 +688,7 @@ export function DangerZone({
           </div>
         </span>
         <button
+          type="button"
           className="btn danger sm"
           onClick={() => (isAdmin ? setConfirming(true) : deny("Deletion"))}
         >
@@ -753,6 +766,9 @@ export function SettingsPage({
       <div className="policy-wrap">
         <div className="policy-cols">
           <ProjectPanel
+            // Remount (resetting the edit fields) whenever the loader's
+            // identity fields change — replaces the old resync effect.
+            key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
             project={data.project}
             canManage={isAdmin}
             onSave={(fields) =>

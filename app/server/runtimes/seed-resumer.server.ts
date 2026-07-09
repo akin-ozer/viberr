@@ -106,14 +106,6 @@ function seedRunId(taskKey: string, threadId: string): string {
   return `run_seed_${taskKey}_${threadId}`.toLowerCase().replace(/[^a-z0-9_]/g, "");
 }
 
-/** Test-only. */
-export function resetSeedResumerForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, ResumerState | undefined>;
-  const state = cache[RESUMER_KEY];
-  if (state) for (const t of state.timers) clearTimeout(t);
-  cache[RESUMER_KEY] = undefined;
-}
-
 /**
  * On the first subscribe to a task, kick a live drip for each seeded running
  * run on that task that still has pending live lines. Safe to call on every

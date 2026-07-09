@@ -29,7 +29,7 @@ function DecisionPacket({ task, onResolve, onAsk }) {
 
         <div className="options" role="radiogroup" aria-label="Decision options">
           {p.options.map((o, i) => (
-            <button key={i} role="radio" aria-checked={sel === i} className={"opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")} onClick={() => setSel(i)}>
+            <button type="button" key={i} role="radio" aria-checked={sel === i} className={"opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")} onClick={() => setSel(i)}>
               <span className="radio" />
               <span>
                 <div className="ot">{o.t}</div>
@@ -41,10 +41,10 @@ function DecisionPacket({ task, onResolve, onAsk }) {
         </div>
 
         <div className="packet-actions">
-          <button className="btn primary" onClick={() => onResolve({ option: p.options[sel], packet: p })}>
+          <button type="button" className="btn primary" onClick={() => onResolve({ option: p.options[sel], packet: p })}>
             <Icon name="check" />{p.options[sel] ? p.options[sel].t : "Confirm"}
           </button>
-          <button className="btn ghost" onClick={onAsk}>
+          <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />Ask operator
           </button>
         </div>
@@ -136,7 +136,7 @@ function ReleaseConfirm({ task, me, myRole, onCancel, onConfirm, onOwner }) {
             <h2>Release ownership?</h2>
             <div className="mh-sub"><span className="mono">{task.key}</span> · {task.title}</div>
           </div>
-          <button className="icon-btn modal-close" onClick={onCancel} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onCancel} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body" style={{ gap: "1.05rem" }}>
           <div className="packet-obs" style={{ margin: 0 }}>
@@ -167,8 +167,8 @@ function ReleaseConfirm({ task, me, myRole, onCancel, onConfirm, onOwner }) {
         <div className="modal-foot">
           <span className="foot-hint">{mine ? "Recorded as a typed ownership event on the timeline." : "Admin release — recorded as a typed event and in the audit trail."}</span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onCancel}>{mine ? "Keep ownership" : "Cancel"}</button>
-            <button className="btn danger" onClick={onConfirm}><Icon name="x" />{mine ? "Release" : "Release " + o.name.split(" ")[0]}</button>
+            <button type="button" className="btn ghost" onClick={onCancel}>{mine ? "Keep ownership" : "Cancel"}</button>
+            <button type="button" className="btn danger" onClick={onConfirm}><Icon name="x" />{mine ? "Release" : "Release " + o.name.split(" ")[0]}</button>
           </div>
         </div>
       </div>
@@ -350,7 +350,7 @@ function Timeline({ task, extra, onComment, ask }) {
         <h2>Timeline</h2>
         <span className="right tl-filter">
           {TL_FILTERS.map((x) => (
-            <button key={x.id} className={f === x.id ? "on" : ""} onClick={() => setF(x.id)}>{x.label}</button>
+            <button type="button" key={x.id} className={f === x.id ? "on" : ""} onClick={() => setF(x.id)}>{x.label}</button>
           ))}
         </span>
       </div>
@@ -363,7 +363,7 @@ function Timeline({ task, extra, onComment, ask }) {
           <div className="composer-foot">
             <span style={{ fontSize: ".72rem", color: "var(--placeholder)" }}>Open to every registered user · @mentions route to agents</span>
             <span style={{ marginLeft: "auto", fontSize: ".72rem", color: "var(--placeholder)" }} className="mono">⌘↵ to send</span>
-            <button className="btn primary sm" onClick={send}><Icon name="send" />Comment</button>
+            <button type="button" className="btn primary sm" onClick={send}><Icon name="send" />Comment</button>
           </div>
         </div>
       </div>
@@ -407,7 +407,7 @@ function GithubTrace({ task, push }) {
             ))}
           </div>
         )}
-        <button className="btn ghost sm" style={{ marginTop: ".8rem", width: "100%" }} onClick={() => push && push("External links are stubbed in this prototype")}><Icon name="ext" />Open on GitHub</button>
+        <button type="button" className="btn ghost sm" style={{ marginTop: ".8rem", width: "100%" }} onClick={() => push && push("External links are stubbed in this prototype")}><Icon name="ext" />Open on GitHub</button>
       </div>
     </div>
   );
@@ -432,7 +432,7 @@ function PolicyPanel({ task, myRole, onPolicy }) {
           <span className="v">{r.v}</span>
         </div>
       ))}
-      <button className="btn ghost sm" style={{ width: "100%", marginTop: ".8rem" }} onClick={onPolicy}><Icon name="shield" />View project policy</button>
+      <button type="button" className="btn ghost sm" style={{ width: "100%", marginTop: ".8rem" }} onClick={onPolicy}><Icon name="shield" />View project policy</button>
     </div>
   );
 }

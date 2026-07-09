@@ -136,7 +136,7 @@ function ProjectCard({ p, starred, onStar, showDesc }) {
           <span className="upd">updated {p.updated}</span>
         </div>
       </a>
-      <button className={"pj-star" + (starred ? " on" : "")} onClick={() => onStar(p.id)}
+      <button type="button" className={"pj-star" + (starred ? " on" : "")} onClick={() => onStar(p.id)}
         aria-label={(starred ? "Unpin " : "Pin ") + p.name} title={starred ? "Unpin" : "Pin"}>
         <StarIco on={starred} />
       </button>
@@ -158,7 +158,7 @@ function ProjectRow({ p, starred, onStar }) {
         <MemberStack members={p.members} />
         <span className="go"><Icon name="chevron" /></span>
       </a>
-      <button className={"pj-star" + (starred ? " on" : "")} onClick={() => onStar(p.id)}
+      <button type="button" className={"pj-star" + (starred ? " on" : "")} onClick={() => onStar(p.id)}
         aria-label={(starred ? "Unpin " : "Pin ") + p.name} title={starred ? "Unpin" : "Pin"}>
         <StarIco on={starred} />
       </button>
@@ -205,7 +205,7 @@ function NewProjectModal({ connections, onClose, onCreate }) {
             <h2>New governed project</h2>
             <div className="mh-sub">One board, one repo, agents under policy from day one</div>
           </span>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body">
           <div className="key-row">
@@ -225,7 +225,7 @@ function NewProjectModal({ connections, onClose, onCreate }) {
             <span className="flabel">GitHub connection <span className="fhint">sets the repository root</span></span>
             <div className="pick-chips">
               {connections.map((c) => (
-                <button key={c.id} className={"pick-chip" + (connId === c.id ? " on" : "")} onClick={() => setConnId(c.id)}>
+                <button type="button" key={c.id} className={"pick-chip" + (connId === c.id ? " on" : "")} onClick={() => setConnId(c.id)}>
                   <Icon name="github" />{c.owner}/
                 </button>
               ))}
@@ -244,10 +244,10 @@ function NewProjectModal({ connections, onClose, onCreate }) {
           <div className="field">
             <span className="flabel">Workflow template</span>
             <div className="pick-chips">
-              <button className={"pick-chip" + (template === "governed" ? " on" : "")} onClick={() => setTemplate("governed")}>
+              <button type="button" className={"pick-chip" + (template === "governed" ? " on" : "")} onClick={() => setTemplate("governed")}>
                 <span className="sdot" style={{ background: "var(--blue)" }}></span>Governed default · 5 stages
               </button>
-              <button className={"pick-chip" + (template === "light" ? " on" : "")} onClick={() => setTemplate("light")}>
+              <button type="button" className={"pick-chip" + (template === "light" ? " on" : "")} onClick={() => setTemplate("light")}>
                 <span className="sdot" style={{ background: "var(--teal-dark)" }}></span>Lightweight · 3 stages
               </button>
             </div>
@@ -255,9 +255,9 @@ function NewProjectModal({ connections, onClose, onCreate }) {
           <div className="field">
             <span className="flabel">Agent policy preset</span>
             <div className="pick-chips">
-              <button className={"pick-chip" + (policy === "strict" ? " on" : "")} onClick={() => setPolicy("strict")}><Icon name="lock" />Strict human-gate</button>
-              <button className={"pick-chip" + (policy === "balanced" ? " on" : "")} onClick={() => setPolicy("balanced")}><Icon name="shield" />Balanced · recommended</button>
-              <button className={"pick-chip" + (policy === "auto" ? " on" : "")} onClick={() => setPolicy("auto")}><Icon name="bolt" />Autonomous within policy</button>
+              <button type="button" className={"pick-chip" + (policy === "strict" ? " on" : "")} onClick={() => setPolicy("strict")}><Icon name="lock" />Strict human-gate</button>
+              <button type="button" className={"pick-chip" + (policy === "balanced" ? " on" : "")} onClick={() => setPolicy("balanced")}><Icon name="shield" />Balanced · recommended</button>
+              <button type="button" className={"pick-chip" + (policy === "auto" ? " on" : "")} onClick={() => setPolicy("auto")}><Icon name="bolt" />Autonomous within policy</button>
             </div>
             <div className="def-note">
               <Icon name="shield" />
@@ -268,8 +268,8 @@ function NewProjectModal({ connections, onClose, onCreate }) {
         <div className="modal-foot">
           <span className="foot-hint mono">creates ~/viberr/projects/{effKey || "KEY"}/</span>
           <span className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            <button className="btn primary" disabled={!ok} style={!ok ? { opacity: 0.55, pointerEvents: "none" } : null} onClick={submit}>
+            <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn primary" disabled={!ok} style={!ok ? { opacity: 0.55, pointerEvents: "none" } : null} onClick={submit}>
               <Icon name="plus" />Create project
             </button>
           </span>
@@ -409,7 +409,7 @@ function HomeApp() {
     <div className="home" data-density={t.density} data-screen-label="Home — project selection">
       <header className="home-top">
         <div className="home-top-in">
-          <button className="home-brand" onClick={() => { goProjects(); window.scrollTo({ top: 0 }); }} title="Viberr">
+          <button type="button" className="home-brand" onClick={() => { goProjects(); window.scrollTo({ top: 0 }); }} title="Viberr">
             <span className="mark">V</span>
             <b>Viberr</b>
           </button>
@@ -427,7 +427,7 @@ function HomeApp() {
                   <div className="ntf-pop-head">
                     <h3>Notifications</h3>
                     <span className="ct mono">{unread > 0 ? unread + " unread" : "caught up"}</span>
-                    {unread > 0 && <button className="btn ghost sm" onClick={() => { markRead(notifs.map((n) => n.id)); push("All notifications marked read"); }}>Mark all read</button>}
+                    {unread > 0 && <button type="button" className="btn ghost sm" onClick={() => { markRead(notifs.map((n) => n.id)); push("All notifications marked read"); }}>Mark all read</button>}
                   </div>
                   <div className="ntf-pop-list">
                     {notifs.map((n) => {
@@ -446,7 +446,7 @@ function HomeApp() {
                     })}
                   </div>
                   <div className="ntf-pop-foot">
-                    <button className="btn ghost sm" onClick={() => { setBell(false); setOverlay("notifications"); }}>See all<Icon name="arrow" /></button>
+                    <button type="button" className="btn ghost sm" onClick={() => { setBell(false); setOverlay("notifications"); }}>See all<Icon name="arrow" /></button>
                   </div>
                 </div>
               </React.Fragment>
@@ -469,18 +469,18 @@ function HomeApp() {
                       <div className="role">arda@viberr.dev</div>
                     </span>
                   </div>
-                  <button className="menu-item" role="menuitem" onClick={() => { setMenu(false); setOverlay("profile"); }}>
+                  <button type="button" className="menu-item" role="menuitem" onClick={() => { setMenu(false); setOverlay("profile"); }}>
                     <Icon name="user" />Profile &amp; preferences
                   </button>
-                  <button className="menu-item" role="menuitem" onClick={() => { setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light"); }}>
+                  <button type="button" className="menu-item" role="menuitem" onClick={() => { setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light"); }}>
                     <Icon name="sparkle" />Theme · <span style={{ color: "var(--faint)" }}>{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}</span>
                   </button>
                   <div className="menu-sep"></div>
-                  <button className="menu-item danger" role="menuitem" onClick={() => { window.VIBERR.session.clear(); location.href = "Viberr Login.html"; }}><Icon name="ext" />Sign out</button>
+                  <button type="button" className="menu-item danger" role="menuitem" onClick={() => { window.VIBERR.session.clear(); location.href = "Viberr Login.html"; }}><Icon name="ext" />Sign out</button>
                 </div>
               </React.Fragment>
             )}
-            <button className={"home-user" + (menu ? " open" : "")} onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu} aria-label="Account menu">
+            <button type="button" className={"home-user" + (menu ? " open" : "")} onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu} aria-label="Account menu">
               <Avatar person={me} lg />
             </button>
           </div>
@@ -505,10 +505,10 @@ function HomeApp() {
           </div>
           <div className="hero-actions">
             <div className="seg" role="group" aria-label="View">
-              <button className={view === "grid" ? "on" : ""} onClick={() => setView("grid")}><Icon name="board" />Grid</button>
-              <button className={view === "list" ? "on" : ""} onClick={() => setView("list")}><Icon name="review" />List</button>
+              <button type="button" className={view === "grid" ? "on" : ""} onClick={() => setView("grid")}><Icon name="board" />Grid</button>
+              <button type="button" className={view === "list" ? "on" : ""} onClick={() => setView("list")}><Icon name="review" />List</button>
             </div>
-            <button className="btn primary" onClick={() => setModal(true)}><Icon name="plus" />New project</button>
+            <button type="button" className="btn primary" onClick={() => setModal(true)}><Icon name="plus" />New project</button>
           </div>
         </div>
 
@@ -522,7 +522,7 @@ function HomeApp() {
               <span className="st"><span className="n">2</span>Define workflow stages</span>
               <span className="st"><span className="n">3</span>Put agents under policy</span>
             </div>
-            <button className="btn primary" onClick={() => setModal(true)}><Icon name="plus" />New project</button>
+            <button type="button" className="btn primary" onClick={() => setModal(true)}><Icon name="plus" />New project</button>
           </div>
         ) : (
           <React.Fragment>
@@ -543,7 +543,7 @@ function HomeApp() {
                     ? <div className="pj-grid">
                         {rest.map((p) => <ProjectCard key={p.id} p={p} starred={!!stars[p.id]} onStar={toggleStar} showDesc={t.descriptions} />)}
                         {!query && (
-                          <button className="pj-new" onClick={() => setModal(true)}>
+                          <button type="button" className="pj-new" onClick={() => setModal(true)}>
                             <span className="plus"><Icon name="plus" /></span>
                             New project
                           </button>
@@ -552,7 +552,7 @@ function HomeApp() {
                     : <React.Fragment>
                         <div className="pj-list">{rest.map((p) => <ProjectRow key={p.id} p={p} starred={!!stars[p.id]} onStar={toggleStar} />)}</div>
                         {!query && (
-                          <button className="pj-new" style={{ minHeight: 0, padding: ".7rem", marginTop: ".5rem" }} onClick={() => setModal(true)}>
+                          <button type="button" className="pj-new" style={{ minHeight: 0, padding: ".7rem", marginTop: ".5rem" }} onClick={() => setModal(true)}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: ".45rem" }}><Icon name="plus" />New project</span>
                           </button>
                         )}
@@ -568,7 +568,7 @@ function HomeApp() {
             <h2>Settings</h2>
           </div>
           <div className="org-tiles">
-            <button className="org-tile go" onClick={() => goSettings("connections")}>
+            <button type="button" className="org-tile go" onClick={() => goSettings("connections")}>
               <span className="lbl"><Icon name="github" />GitHub connections</span>
               <span className="val">
                 <span>
@@ -578,7 +578,7 @@ function HomeApp() {
               </span>
               <span className="foot go-hint">Manage<Icon name="arrow" /></span>
             </button>
-            <button className="org-tile go" onClick={() => goSettings("users")}>
+            <button type="button" className="org-tile go" onClick={() => goSettings("users")}>
               <span className="lbl"><Icon name="user" />Users &amp; access</span>
               <span className="val">
                 <MemberStack members={org.users.slice(0, 5)} />
@@ -589,7 +589,7 @@ function HomeApp() {
               </span>
               <span className="foot go-hint">Manage<Icon name="arrow" /></span>
             </button>
-            <button className="org-tile go" onClick={() => goSettings("resources")}>
+            <button type="button" className="org-tile go" onClick={() => goSettings("resources")}>
               <span className="lbl"><Icon name="memory" />Agent resources</span>
               <span className="val">
                 <span className="glyphs"><AgentGlyph backend="codex" /><AgentGlyph backend="claude" /></span>
@@ -604,7 +604,7 @@ function HomeApp() {
         </section>
 
         <footer className="store-strip" data-screen-label="Store strip">
-          <button className="btn ghost sm" onClick={rescan}>
+          <button type="button" className="btn ghost sm" onClick={rescan}>
             <Icon name="refresh" className={scanning ? "spin" : ""} />{scanning ? "Scanning…" : "Re-scan"}
           </button>
         </footer>

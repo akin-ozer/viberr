@@ -20,7 +20,7 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   { id: "resources", label: "Agent resources", icon: "memory" },
 ];
 
-export function resolveOrgTab(raw: string | null): OrgSettingsTab {
+function resolveOrgTab(raw: string | null): OrgSettingsTab {
   return raw === "users" || raw === "resources" ? raw : "connections";
 }
 
@@ -44,7 +44,7 @@ export function OrgSettingsPage({
   return (
     <main className="home-shell" data-screen-label="Viberr settings">
       <div className="set-head">
-        <button className="btn ghost sm" onClick={() => navigate("/")}>
+        <button type="button" className="btn ghost sm" onClick={() => navigate("/")}>
           <Icon name="arrow" className="r180" />
           Projects
         </button>
@@ -60,6 +60,7 @@ export function OrgSettingsPage({
         <nav className="set-nav" aria-label="Settings sections">
           {SETTINGS_TABS.map((t) => (
             <button
+              type="button"
               key={t.id}
               className={"nav-item" + (tab === t.id ? " active" : "")}
               aria-current={tab === t.id ? "true" : undefined}

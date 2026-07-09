@@ -24,7 +24,7 @@ import type { StreamedLine } from "./use-run-log-stream";
 
 // --------------------------------------------------------------- RunGlyph
 
-export function RunGlyph({ run }: { run: RunView }) {
+function RunGlyph({ run }: { run: RunView }) {
   if (run.op) return <AgentGlyph op />;
   return <AgentGlyph backend={run.backend} />;
 }
@@ -35,7 +35,7 @@ export function RunGlyph({ run }: { run: RunView }) {
  * Shared listbox dropdown. Adds Escape-close + arrow-key navigation over the
  * mock (which only had outside-mousedown close); keeps the exact ARIA.
  */
-export function AgentPicker({
+function AgentPicker({
   items,
   value,
   onChange,
@@ -201,12 +201,13 @@ export function LiveRunPanel({
           </div>
         </div>
         <div className="run-actions">
-          <button className="btn ghost sm" onClick={() => onViewLogs(run.id)}>
+          <button type="button" className="btn ghost sm" onClick={() => onViewLogs(run.id)}>
             <Icon name="term" />
             View logs
           </button>
           {canInterrupt && (
             <button
+              type="button"
               className="btn ghost sm"
               disabled={interrupting}
               onClick={() => onInterrupt(run.id)}

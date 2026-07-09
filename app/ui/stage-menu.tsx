@@ -48,15 +48,15 @@ export function StageMenu({
   // Pop the trigger when the stage actually CHANGES (not on first mount), so a
   // move made from this menu animates in place. Board cards remount into the new
   // column instead, so this is a no-op there (the card handles its own motion).
-  const prevStage = useRef(currentStageId);
-  const [changed, setChanged] = useState(false);
+  // `changed` derives from which stage the animation last settled on, so it
+  // flips true in the same render as the stage change (no flag-resetting effect).
+  const [settledStageId, setSettledStageId] = useState(currentStageId);
+  const changed = settledStageId !== currentStageId;
   useEffect(() => {
-    if (prevStage.current === currentStageId) return;
-    prevStage.current = currentStageId;
-    setChanged(true);
-    const t = setTimeout(() => setChanged(false), 450);
+    if (settledStageId === currentStageId) return;
+    const t = setTimeout(() => setSettledStageId(currentStageId), 450);
     return () => clearTimeout(t);
-  }, [currentStageId]);
+  }, [settledStageId, currentStageId]);
 
   const place = () => {
     const el = btnRef.current;

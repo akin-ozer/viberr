@@ -51,7 +51,7 @@ function TaskCard({ task, onOpen }) {
   if (task.waiting === "human") cls.push("wait-human");
   if (task.urgent) cls.push("urgent");
   return (
-    <button className={cls.join(" ")} onClick={() => onOpen(task.key)}>
+    <button type="button" className={cls.join(" ")} onClick={() => onOpen(task.key)}>
       <div className="card-top">
         <span className="key">{task.key}</span>
         <span className="spacer" />
@@ -84,7 +84,7 @@ function Column({ stage, tasks, onOpen, onNew }) {
         <span className="col-stage-dot" style={{ background: stage.color }} />
         <span className="nm">{stage.name}</span>
         <span className="ct">{tasks.length}</span>
-        {stage.id !== "done" && <button className="add" title="New task in this stage" onClick={onNew}><Icon name="plus" /></button>}
+        {stage.id !== "done" && <button type="button" className="add" title="New task in this stage" onClick={onNew}><Icon name="plus" /></button>}
       </header>
       <div className="col-body">
         {tasks.length === 0
@@ -117,7 +117,7 @@ function NewTaskModal({ initialStage, onClose, onCreate }) {
             <h2>New task</h2>
             <div className="mh-sub">Creates a canonical task file in the store — agents anchor on it from the first event.</div>
           </div>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body">
           <div className="field">
@@ -143,8 +143,8 @@ function NewTaskModal({ initialStage, onClose, onCreate }) {
         <div className="modal-foot">
           <span className={"foot-hint" + (valid ? "" : " err")}>{valid ? "The task key is assigned on create." : "A title is required."}</span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            <button className="btn primary" onClick={submit} disabled={!valid} style={!valid ? { opacity: .5, pointerEvents: "none" } : null}><Icon name="plus" />Create task</button>
+            <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn primary" onClick={submit} disabled={!valid} style={!valid ? { opacity: .5, pointerEvents: "none" } : null}><Icon name="plus" />Create task</button>
           </div>
         </div>
       </div>
@@ -190,17 +190,17 @@ function Board({ tasks, onOpen, onCreate, push }) {
         </div>
         <div className="board-tools">
           <div className="seg">
-            <button className={group === "stage" ? "on" : ""} onClick={() => setGroup("stage")}><Icon name="board" />Board</button>
-            <button className={group === "list" ? "on" : ""} onClick={() => setGroup("list")}><Icon name="review" />List</button>
+            <button type="button" className={group === "stage" ? "on" : ""} onClick={() => setGroup("stage")}><Icon name="board" />Board</button>
+            <button type="button" className={group === "list" ? "on" : ""} onClick={() => setGroup("list")}><Icon name="review" />List</button>
           </div>
-          <button className="btn ghost sm" onClick={rescan} title="Reconcile the board with the file-native store"><Icon name="refresh" />Re-scan</button>
-          <button className="btn primary sm" onClick={() => setCreating("triage")}><Icon name="plus" />New task</button>
+          <button type="button" className="btn ghost sm" onClick={rescan} title="Reconcile the board with the file-native store"><Icon name="refresh" />Re-scan</button>
+          <button type="button" className="btn primary sm" onClick={() => setCreating("triage")}><Icon name="plus" />New task</button>
         </div>
       </div>
 
       <div className="filter-bar">
         {FILTERS.map((f) => (
-          <button key={f.id} className={"fchip" + (filter === f.id ? " on" : "")} onClick={() => setFilter(f.id)}>
+          <button type="button" key={f.id} className={"fchip" + (filter === f.id ? " on" : "")} onClick={() => setFilter(f.id)}>
             <Icon name={f.icon} />{f.label}
             {f.id === "human" && waitingHuman > 0 && <span style={{ opacity: .7 }}>· {waitingHuman}</span>}
           </button>
@@ -229,7 +229,7 @@ function ListView({ tasks, onOpen }) {
     <div className="board" style={{ gridAutoFlow: "row", gridAutoColumns: "auto", display: "block", padding: "0 1.4rem 1.4rem" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: ".6rem", maxWidth: 920 }}>
         {tasks.map((t) => (
-          <button key={t.key} className="card" style={{ flexDirection: "row", alignItems: "center", gap: "1rem" }} onClick={() => onOpen(t.key)}>
+          <button type="button" key={t.key} className="card" style={{ flexDirection: "row", alignItems: "center", gap: "1rem" }} onClick={() => onOpen(t.key)}>
             <span className="key" style={{ width: 64 }}>{t.key}</span>
             <h3 style={{ flex: 1 }}>{t.title}</h3>
             <span className="pill neutral sm">{stageName(t.stage)}</span>

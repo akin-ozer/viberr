@@ -209,16 +209,3 @@ function safeFacts(backend: "claude" | "codex", raw: string, occurredAt: string)
     return {};
   }
 }
-
-/** For finished/error runs the mock shows a `finished` display label
- *  ("9:41", "Mar 30 · 17:26"). We store it separately so the footer renders
- *  the mock string verbatim rather than deriving from finished_at. */
-export function seededFinishedLabels(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const runs of Object.values(RUNTIME_SEED)) {
-    for (const run of runs) {
-      if (run.finished) out[run.sid] = run.finished;
-    }
-  }
-  return out;
-}

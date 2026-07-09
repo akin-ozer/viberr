@@ -22,7 +22,7 @@ import { useOrgAction, type OrgActionData } from "./use-org-action";
  * server-enforced; the last-admin guard is server-side (phase-2).
  */
 
-export function IdpChip({ idp }: { idp: string }) {
+function IdpChip({ idp }: { idp: string }) {
   if (idp === "github") {
     return (
       <span className="idp-chip">
@@ -269,10 +269,10 @@ function InviteModal({
           {isDomain ? "Role for everyone joining via this domain" : "Instance role"}
         </span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-          <button className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
+          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
             Admin
           </button>
-          <button className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
+          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
             Member
           </button>
         </span>
@@ -401,10 +401,10 @@ function EditUserModal({
       <div className="field">
         <span className="flabel">Instance role</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-          <button className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
+          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>
             Admin
           </button>
-          <button className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
+          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>
             Member
           </button>
         </span>
@@ -431,6 +431,7 @@ function EditUserModal({
           ) : (
             <div>
               <button
+                type="button"
                 className="btn ghost sm"
                 onClick={() =>
                   resetAction.submit({ intent: "user-reset-password", userId: user.id })
@@ -498,7 +499,7 @@ export function UsersPanel({
         <Icon name="user" />
         <h2>Users &amp; access</h2>
         <span className="right">
-          <button className="btn sm" onClick={() => setInviting(true)}>
+          <button type="button" className="btn sm" onClick={() => setInviting(true)}>
             <Icon name="plus" />
             Allow access
           </button>
@@ -521,6 +522,7 @@ export function UsersPanel({
             (shown once, hand it over out-of-band).
           </span>
           <button
+            type="button"
             className="stg-x"
             aria-label="Dismiss"
             style={{ marginLeft: "auto" }}
@@ -547,6 +549,7 @@ export function UsersPanel({
                 domain allowlist
               </Pill>
               <button
+                type="button"
                 className="stg-x"
                 aria-label={"Remove " + d.domain}
                 onClick={() => setConfirm({ kind: "domain", item: d })}
@@ -588,12 +591,14 @@ export function UsersPanel({
               )}
               <span className="mini-seg">
                 <button
+                  type="button"
                   className={u.role === "admin" ? "on" : ""}
                   onClick={() => setRole(u, "admin")}
                 >
                   Admin
                 </button>
                 <button
+                  type="button"
                   className={u.role === "member" ? "on" : ""}
                   onClick={() => setRole(u, "member")}
                 >
@@ -601,6 +606,7 @@ export function UsersPanel({
                 </button>
               </span>
               <button
+                type="button"
                 className="stg-x"
                 title="Edit user"
                 aria-label={"Edit " + u.name}
@@ -609,6 +615,7 @@ export function UsersPanel({
                 <EditIco />
               </button>
               <button
+                type="button"
                 className={"stg-x" + (you ? " off" : "")}
                 aria-label={"Remove " + u.name}
                 onClick={() => {

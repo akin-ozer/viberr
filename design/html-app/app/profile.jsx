@@ -181,13 +181,13 @@ function ProfileGithub({ onNav, push }) {
           <div className="cred-ok">
             <Icon name="check" />
             <span>Connected — your approvals, acceptances, and runtime-session opens are attributed to <strong>arda-kaya</strong> in audit records.</span>
-            <button className="btn ghost sm" style={{ marginLeft: "auto" }} onClick={() => flip(false, "GitHub disconnected — audit falls back to your workspace identity")}>Disconnect</button>
+            <button type="button" className="btn ghost sm" style={{ marginLeft: "auto" }} onClick={() => flip(false, "GitHub disconnected — audit falls back to your workspace identity")}>Disconnect</button>
           </div>
         ) : (
           <div className="cred-warn">
             <Icon name="alert" />
             <span>Not connected — governance actions record under your workspace identity only, and your GitHub review approvals can't be matched back to you.</span>
-            <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => flip(true, "GitHub connected as arda-kaya")}><Icon name="github" />Connect</button>
+            <button type="button" className="btn sm" style={{ marginLeft: "auto" }} onClick={() => flip(true, "GitHub connected as arda-kaya")}><Icon name="github" />Connect</button>
           </div>
         )}
       </div>

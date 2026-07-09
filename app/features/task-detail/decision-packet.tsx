@@ -30,7 +30,7 @@ export function DecisionPacket({
   onAsk: () => void;
 }) {
   const p = packet;
-  const [sel, setSel] = useState(
+  const [sel, setSel] = useState(() =>
     Math.max(0, p.options.findIndex((o) => o.rec)),
   );
   const isBlocked = p.type === "blocked";
@@ -119,6 +119,7 @@ export function DecisionPacket({
 
         <div className="packet-actions">
           <button
+            type="button"
             className="btn primary"
             disabled={busy || p.options.length === 0}
             aria-busy={busy}
@@ -127,7 +128,7 @@ export function DecisionPacket({
             <Icon name="check" />
             {p.options[sel] ? p.options[sel].t : "Confirm"}
           </button>
-          <button className="btn ghost" onClick={onAsk}>
+          <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />
             Ask operator
           </button>

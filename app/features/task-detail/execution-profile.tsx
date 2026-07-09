@@ -37,7 +37,7 @@ export interface TaskMemberView {
   user: { name: string; initials?: string | null; tone?: string | null };
 }
 
-export function OwnerControl({
+function OwnerControl({
   task,
   meId,
   myRole,
@@ -190,7 +190,7 @@ export function OwnerControl({
  * When the project has zero deployed specialists, a hint links to the Agents
  * page. Only rendered for admin|maintainer (the caller gates on canRunAgents).
  */
-export function SpecialistControl({
+function SpecialistControl({
   projectSlug,
   specialists,
   busy,
@@ -275,7 +275,7 @@ export function SpecialistControl({
  * is already a reviewer the menu says so; when none are deployed it links to
  * the Agents page. Only rendered for admin|maintainer (caller gates).
  */
-export function ReviewerControl({
+function ReviewerControl({
   projectSlug,
   specialists,
   hasAnyDeployed,
@@ -369,7 +369,7 @@ export function ReviewerControl({
  * Full autonomy lets the operator drive stages and accept completion itself;
  * supervised has it recommend at governed boundaries. Server re-checks RBAC.
  */
-export function OperatorRunControl({
+function OperatorRunControl({
   busy,
   onRun,
 }: {

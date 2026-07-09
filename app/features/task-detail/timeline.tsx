@@ -339,6 +339,7 @@ export function Timeline({
         <span className="right tl-filter">
           {TL_FILTERS.map((x) => (
             <button
+              type="button"
               key={x.id}
               className={f === x.id ? "on" : ""}
               onClick={() => setF(x.id)}
@@ -419,6 +420,7 @@ export function Timeline({
               ⌘↵ to send
             </span>
             <button
+              type="button"
               className="btn primary sm"
               onClick={send}
               disabled={busy}

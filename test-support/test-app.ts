@@ -41,19 +41,27 @@ export async function setupAppTest(): Promise<AppTestContext> {
   delete process.env.VIBERR_SEED_ADMIN_EMAIL;
   delete process.env.VIBERR_SEED_ADMIN_PASSWORD;
 
-  const { resetEnvCacheForTests } = await import(
-    "~/server/config/env.server"
-  );
-  const { closeDb, getDb } = await import("~/server/db/sqlite.server");
+  const [{ resetEnvCacheForTests }, { closeDb, getDb }] = await Promise.all([
+    import("~/server/config/env.server"),
+    import("~/server/db/sqlite.server"),
+  ]);
   resetEnvCacheForTests();
   closeDb();
   const db = getDb();
 
-  const { getAuth } = await import("~/lib/auth.server");
-  const { provisionIdentity } = await import("~/server/auth/identity.server");
-  const { hashPassword } = await import("~/server/auth/password.server");
-  const { findUserById } = await import("~/server/auth/user-store.server");
-  const { csrfTokenForSession } = await import("~/server/auth/csrf.server");
+  const [
+    { getAuth },
+    { provisionIdentity },
+    { hashPassword },
+    { findUserById },
+    { csrfTokenForSession },
+  ] = await Promise.all([
+    import("~/lib/auth.server"),
+    import("~/server/auth/identity.server"),
+    import("~/server/auth/password.server"),
+    import("~/server/auth/user-store.server"),
+    import("~/server/auth/csrf.server"),
+  ]);
 
   // cookieFor signs the user in through better-auth, so it needs a known
   // credential — provisioning overwrites the user's credential with this.

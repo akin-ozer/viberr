@@ -125,8 +125,8 @@ function ConfirmDelete({ what, detail, onCancel, onConfirm }) {
         <h3>Remove {what}?</h3>
         <p>{detail}</p>
         <div className="confirm-actions">
-          <button className="btn ghost" onClick={onCancel}>Cancel</button>
-          <button className="btn danger" onClick={onConfirm}>Remove</button>
+          <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn danger" onClick={onConfirm}>Remove</button>
         </div>
       </div>
     </React.Fragment>
@@ -149,14 +149,14 @@ function MiniModal({ icon, title, sub, onClose, canSave, saveLabel, onSave, foot
             <h2>{title}</h2>
             {sub && <div className="mh-sub">{sub}</div>}
           </span>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body">{children}</div>
         <div className="modal-foot">
           {footHint && <span className="foot-hint mono">{footHint}</span>}
           <span className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            <button className="btn primary" onClick={onSave} style={!canSave ? { opacity: .55, pointerEvents: "none" } : null}>{saveLabel}</button>
+            <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn primary" onClick={onSave} style={!canSave ? { opacity: .55, pointerEvents: "none" } : null}>{saveLabel}</button>
           </span>
         </div>
       </div>
@@ -253,7 +253,7 @@ function ConnectionsPanel({ org, patchOrg, push }) {
     <section className="panel" data-screen-label="Settings — GitHub connections">
       <div className="panel-head">
         <Icon name="github" /><h2>GitHub connections</h2>
-        <span className="right"><button className="btn sm" onClick={() => setModal({ item: null })}><Icon name="plus" />Add connection</button></span>
+        <span className="right"><button type="button" className="btn sm" onClick={() => setModal({ item: null })}><Icon name="plus" />Add connection</button></span>
       </div>
       <div className="pol-note">
         <Icon name="shield" />
@@ -274,9 +274,9 @@ function ConnectionsPanel({ org, patchOrg, push }) {
             </span>
             {c.daysLeft != null && c.daysLeft <= 30 && <Pill kind="input" sm>expires in {c.daysLeft} days</Pill>}
             {c.def && <Pill kind="info" sm>default</Pill>}
-            <button className="btn ghost sm" onClick={() => setModal({ item: c })}>Update token</button>
-            {!c.def && <button className="btn ghost sm" onClick={() => setDefault(c.id)}>Set default</button>}
-            <button className="stg-x" aria-label={"Remove " + c.owner} onClick={() => remove(c)}><Icon name="x" /></button>
+            <button type="button" className="btn ghost sm" onClick={() => setModal({ item: c })}>Update token</button>
+            {!c.def && <button type="button" className="btn ghost sm" onClick={() => setDefault(c.id)}>Set default</button>}
+            <button type="button" className="stg-x" aria-label={"Remove " + c.owner} onClick={() => remove(c)}><Icon name="x" /></button>
           </div>
         ))}
       </div>
@@ -366,8 +366,8 @@ function InviteModal({ onClose, onInvite }) {
       <div className="field">
         <span className="flabel">{isDomain ? "Role for everyone joining via this domain" : "Instance role"}</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-          <button className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>Admin</button>
-          <button className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>Member</button>
+          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>Admin</button>
+          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>Member</button>
         </span>
       </div>
     </MiniModal>
@@ -405,8 +405,8 @@ function EditUserModal({ user, onClose, onSave, onReset }) {
       <div className="field">
         <span className="flabel">Instance role</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-          <button className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>Admin</button>
-          <button className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>Member</button>
+          <button type="button" className={role === "admin" ? "on" : ""} onClick={() => setRole("admin")}>Admin</button>
+          <button type="button" className={role === "member" ? "on" : ""} onClick={() => setRole("member")}>Member</button>
         </span>
       </div>
       {isLocal && (
@@ -415,7 +415,7 @@ function EditUserModal({ user, onClose, onSave, onReset }) {
           {user.pwreset
             ? <div className="cred-ok"><Icon name="check" /><span>Reset pending — {user.name} will be prompted to set a new password at next sign-in.</span></div>
             : <div>
-                <button className="btn ghost sm" onClick={() => onReset(user)}><Icon name="lock" />Reset password</button>
+                <button type="button" className="btn ghost sm" onClick={() => onReset(user)}><Icon name="lock" />Reset password</button>
                 <div className="def-note" style={{ marginTop: ".55rem" }}>
                   <Icon name="lock" />
                   <span>No email is sent — they're prompted to set a new password at their next sign-in.</span>
@@ -473,7 +473,7 @@ function UsersPanel({ org, patchOrg, push }) {
     <section className="panel" data-screen-label="Settings — Users & access">
       <div className="panel-head">
         <Icon name="user" /><h2>Users &amp; access</h2>
-        <span className="right"><button className="btn sm" onClick={() => setInviting(true)}><Icon name="plus" />Allow access</button></span>
+        <span className="right"><button type="button" className="btn sm" onClick={() => setInviting(true)}><Icon name="plus" />Allow access</button></span>
       </div>
       <div className="pol-note">
         <Icon name="shield" />
@@ -489,7 +489,7 @@ function UsersPanel({ org, patchOrg, push }) {
                 <div className="em">any Google account with this domain · joins as {d.role}</div>
               </span>
               <Pill kind="ready" sm>domain allowlist</Pill>
-              <button className="stg-x" aria-label={"Remove " + d.domain}
+              <button type="button" className="stg-x" aria-label={"Remove " + d.domain}
                 onClick={() => setConfirm({ kind: "domain", item: d })}>
                 <Icon name="x" />
               </button>
@@ -510,11 +510,11 @@ function UsersPanel({ org, patchOrg, push }) {
             {u.status === "whitelisted" && <Pill kind="neutral" sm>whitelisted</Pill>}
             {u.pwreset && <Pill kind="input" sm>password reset pending</Pill>}
             <span className="mini-seg">
-              <button className={u.role === "admin" ? "on" : ""} onClick={() => setRole(u.id, "admin")}>Admin</button>
-              <button className={u.role === "member" ? "on" : ""} onClick={() => setRole(u.id, "member")}>Member</button>
+              <button type="button" className={u.role === "admin" ? "on" : ""} onClick={() => setRole(u.id, "admin")}>Admin</button>
+              <button type="button" className={u.role === "member" ? "on" : ""} onClick={() => setRole(u.id, "member")}>Member</button>
             </span>
-            <button className="stg-x" title="Edit user" aria-label={"Edit " + u.name} onClick={() => setEditing(u)}><EditIco /></button>
-            <button className={"stg-x" + (u.you ? " off" : "")} aria-label={"Remove " + u.name}
+            <button type="button" className="stg-x" title="Edit user" aria-label={"Edit " + u.name} onClick={() => setEditing(u)}><EditIco /></button>
+            <button type="button" className={"stg-x" + (u.you ? " off" : "")} aria-label={"Remove " + u.name}
               onClick={() => { if (u.you) { push("You can't remove your own account"); return; } setConfirm({ kind: "user", item: u }); }}>
               <Icon name="x" />
             </button>
@@ -559,7 +559,7 @@ function KBModal({ initial, onClose, onSave }) {
         <span className="flabel">Re-index</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
           {["manual", "on change", "nightly"].map((r) => (
-            <button key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>{r}</button>
+            <button type="button" key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>{r}</button>
           ))}
         </span>
         <div className="def-note">
@@ -591,8 +591,8 @@ function McpModal({ initial, onClose, onSave }) {
         <div className="field">
           <span className="flabel">Transport</span>
           <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-            <button className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>HTTP</button>
-            <button className={transport === "stdio" ? "on" : ""} onClick={() => setTransport("stdio")}>stdio</button>
+            <button type="button" className={transport === "HTTP" ? "on" : ""} onClick={() => setTransport("HTTP")}>HTTP</button>
+            <button type="button" className={transport === "stdio" ? "on" : ""} onClick={() => setTransport("stdio")}>stdio</button>
           </span>
         </div>
       </div>
@@ -689,7 +689,7 @@ function AgentModal({ initial, org, onClose, onSave }) {
         <span className="flabel">Default eligible stages<span className="req">*</span> <span className="fhint">Done is human-only, always</span></span>
         <div className="pick-chips">
           {stageOpts.map((s) => (
-            <button key={s.id} className={"pick-chip" + (stages.includes(s.id) ? " on" : "")} onClick={() => toggle(stages, setStages, s.id)}>
+            <button type="button" key={s.id} className={"pick-chip" + (stages.includes(s.id) ? " on" : "")} onClick={() => toggle(stages, setStages, s.id)}>
               <span className="sdot" style={{ background: s.color }}></span>{s.name}
             </button>
           ))}
@@ -702,7 +702,7 @@ function AgentModal({ initial, org, onClose, onSave }) {
             <span className="ctx-lbl">Skills</span>
             <div className="pick-chips">
               {org.skills.map((s) => (
-                <button key={s.id} className={"pick-chip mono" + (skills.includes(s.id) ? " on" : "")} onClick={() => toggle(skills, setSkills, s.id)}>{s.name}</button>
+                <button type="button" key={s.id} className={"pick-chip mono" + (skills.includes(s.id) ? " on" : "")} onClick={() => toggle(skills, setSkills, s.id)}>{s.name}</button>
               ))}
               {org.skills.length === 0 && <span className="ctx-none">none defined</span>}
             </div>
@@ -711,7 +711,7 @@ function AgentModal({ initial, org, onClose, onSave }) {
             <span className="ctx-lbl">MCP servers</span>
             <div className="pick-chips">
               {org.mcps.map((m) => (
-                <button key={m.id} className={"pick-chip mono" + (mcps.includes(m.id) ? " on" : "")} onClick={() => toggle(mcps, setMcps, m.id)}>{m.name}</button>
+                <button type="button" key={m.id} className={"pick-chip mono" + (mcps.includes(m.id) ? " on" : "")} onClick={() => toggle(mcps, setMcps, m.id)}>{m.name}</button>
               ))}
               {org.mcps.length === 0 && <span className="ctx-none">none defined</span>}
             </div>
@@ -720,7 +720,7 @@ function AgentModal({ initial, org, onClose, onSave }) {
             <span className="ctx-lbl">Knowledge bases</span>
             <div className="pick-chips">
               {org.kbs.map((k) => (
-                <button key={k.id} className={"pick-chip" + (kbs.includes(k.id) ? " on" : "")} onClick={() => toggle(kbs, setKbs, k.id)}>{k.name}</button>
+                <button type="button" key={k.id} className={"pick-chip" + (kbs.includes(k.id) ? " on" : "")} onClick={() => toggle(kbs, setKbs, k.id)}>{k.name}</button>
               ))}
               {org.kbs.length === 0 && <span className="ctx-none">none defined</span>}
             </div>
@@ -818,23 +818,23 @@ function ResourcesPanel({ org, patchOrg, push }) {
         <section className="panel">
           <div className="panel-head">
             <Icon name="memory" /><h2>Knowledge bases</h2>
-            <span className="right"><button className="btn sm" onClick={() => setModal({ kind: "kb", item: null })}><Icon name="plus" />New</button></span>
+            <span className="right"><button type="button" className="btn sm" onClick={() => setModal({ kind: "kb", item: null })}><Icon name="plus" />New</button></span>
           </div>
           <div className="rsrc-list">
             {org.kbs.map((kb) => (
               <div className="rsrc-row" key={kb.id}>
                 <span className="rsrc-main">
-                  <b><button className="linkish" onClick={() => setBrowsing({ kind: "kb", id: kb.id })}>{kb.name}</button></b>
+                  <b><button type="button" className="linkish" onClick={() => setBrowsing({ kind: "kb", id: kb.id })}>{kb.name}</button></b>
                   <span className="sub mono">store://kb/{kb.dir || slugify(kb.name)}/ · {countKbFiles(kb.tree || [])} docs</span>
                   <span className="sub">re-index {kb.refresh} · indexed {kb.last}{usedBy("kbs", kb.id) > 0 ? " · " + usedBy("kbs", kb.id) + " profiles" : ""}</span>
                 </span>
                 <span className="rsrc-acts">
-                  <button className="stg-x" title="Browse files" aria-label={"Browse files in " + kb.name} onClick={() => setBrowsing({ kind: "kb", id: kb.id })}><FolderIco /></button>
-                  <button className="stg-x" title="Re-index now" aria-label={"Re-index " + kb.name} onClick={() => reindex(kb)}>
+                  <button type="button" className="stg-x" title="Browse files" aria-label={"Browse files in " + kb.name} onClick={() => setBrowsing({ kind: "kb", id: kb.id })}><FolderIco /></button>
+                  <button type="button" className="stg-x" title="Re-index now" aria-label={"Re-index " + kb.name} onClick={() => reindex(kb)}>
                     <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
                   </button>
-                  <button className="stg-x" title="Edit" aria-label={"Edit " + kb.name} onClick={() => setModal({ kind: "kb", item: kb })}><EditIco /></button>
-                  <button className="stg-x" title="Delete" aria-label={"Delete " + kb.name} onClick={() => setConfirm({ kind: "kb", item: kb })}><Icon name="x" /></button>
+                  <button type="button" className="stg-x" title="Edit" aria-label={"Edit " + kb.name} onClick={() => setModal({ kind: "kb", item: kb })}><EditIco /></button>
+                  <button type="button" className="stg-x" title="Delete" aria-label={"Delete " + kb.name} onClick={() => setConfirm({ kind: "kb", item: kb })}><Icon name="x" /></button>
                 </span>
               </div>
             ))}
@@ -845,7 +845,7 @@ function ResourcesPanel({ org, patchOrg, push }) {
         <section className="panel">
           <div className="panel-head">
             <Icon name="cpu" /><h2>MCP servers</h2>
-            <span className="right"><button className="btn sm" onClick={() => setModal({ kind: "mcp", item: null })}><Icon name="plus" />Add</button></span>
+            <span className="right"><button type="button" className="btn sm" onClick={() => setModal({ kind: "mcp", item: null })}><Icon name="plus" />Add</button></span>
           </div>
           <div className="rsrc-list">
             {org.mcps.map((m) => (
@@ -857,11 +857,11 @@ function ResourcesPanel({ org, patchOrg, push }) {
                   <span className="sub">{m.up ? m.tools + " tools · checked " + m.last : "unreachable · " + m.last}{m.cred ? " · auth: " + m.cred : ""}</span>
                 </span>
                 <span className="rsrc-acts">
-                  <button className="stg-x" title="Test connection" aria-label={"Test " + m.name} onClick={() => testMcp(m)}>
+                  <button type="button" className="stg-x" title="Test connection" aria-label={"Test " + m.name} onClick={() => testMcp(m)}>
                     <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
                   </button>
-                  <button className="stg-x" title="Edit" aria-label={"Edit " + m.name} onClick={() => setModal({ kind: "mcp", item: m })}><EditIco /></button>
-                  <button className="stg-x" title="Remove" aria-label={"Remove " + m.name} onClick={() => setConfirm({ kind: "mcp", item: m })}><Icon name="x" /></button>
+                  <button type="button" className="stg-x" title="Edit" aria-label={"Edit " + m.name} onClick={() => setModal({ kind: "mcp", item: m })}><EditIco /></button>
+                  <button type="button" className="stg-x" title="Remove" aria-label={"Remove " + m.name} onClick={() => setConfirm({ kind: "mcp", item: m })}><Icon name="x" /></button>
                 </span>
               </div>
             ))}
@@ -872,20 +872,20 @@ function ResourcesPanel({ org, patchOrg, push }) {
         <section className="panel">
           <div className="panel-head">
             <Icon name="bolt" /><h2>Skills</h2>
-            <span className="right"><button className="btn sm" onClick={() => setModal({ kind: "skill", item: null })}><Icon name="plus" />New</button></span>
+            <span className="right"><button type="button" className="btn sm" onClick={() => setModal({ kind: "skill", item: null })}><Icon name="plus" />New</button></span>
           </div>
           <div className="rsrc-list">
             {org.skills.map((s) => (
               <div className="rsrc-row" key={s.id}>
                 <span className="rsrc-main">
-                  <b className="mono-b"><button className="linkish" onClick={() => setBrowsing({ kind: "skill", id: s.id })}>{s.name}</button></b>
+                  <b className="mono-b"><button type="button" className="linkish" onClick={() => setBrowsing({ kind: "skill", id: s.id })}>{s.name}</button></b>
                   <span className="sub">{s.summary}</span>
                   <span className="sub mono">store://skills/{s.name}/ · {countKbFiles(s.tree || [])} file{countKbFiles(s.tree || []) === 1 ? "" : "s"} · updated {s.upd}{usedBy("skills", s.id) > 0 ? " · " + usedBy("skills", s.id) + " profiles" : ""}</span>
                 </span>
                 <span className="rsrc-acts">
-                  <button className="stg-x" title="Browse files" aria-label={"Browse files in " + s.name} onClick={() => setBrowsing({ kind: "skill", id: s.id })}><FolderIco /></button>
-                  <button className="stg-x" title="Edit" aria-label={"Edit " + s.name} onClick={() => setModal({ kind: "skill", item: s })}><EditIco /></button>
-                  <button className="stg-x" title="Delete" aria-label={"Delete " + s.name} onClick={() => setConfirm({ kind: "skill", item: s })}><Icon name="x" /></button>
+                  <button type="button" className="stg-x" title="Browse files" aria-label={"Browse files in " + s.name} onClick={() => setBrowsing({ kind: "skill", id: s.id })}><FolderIco /></button>
+                  <button type="button" className="stg-x" title="Edit" aria-label={"Edit " + s.name} onClick={() => setModal({ kind: "skill", item: s })}><EditIco /></button>
+                  <button type="button" className="stg-x" title="Delete" aria-label={"Delete " + s.name} onClick={() => setConfirm({ kind: "skill", item: s })}><Icon name="x" /></button>
                 </span>
               </div>
             ))}
@@ -896,7 +896,7 @@ function ResourcesPanel({ org, patchOrg, push }) {
         <section className="panel">
           <div className="panel-head">
             <Icon name="agents" /><h2>Global agent profiles</h2>
-            <span className="right"><button className="btn sm" onClick={() => setModal({ kind: "agent", item: null })}><Icon name="plus" />New</button></span>
+            <span className="right"><button type="button" className="btn sm" onClick={() => setModal({ kind: "agent", item: null })}><Icon name="plus" />New</button></span>
           </div>
           <div className="rsrc-list">
             {org.gagents.map((a) => {
@@ -911,8 +911,8 @@ function ResourcesPanel({ org, patchOrg, push }) {
                     <span className="sub mono">{a.backend === "claude" ? "Claude Code" : "Codex"} · {stageNames || "no stages"} · {res} context resources · {a.used > 0 ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s") : "not deployed"}</span>
                   </span>
                   <span className="rsrc-acts">
-                    <button className="stg-x" title="Edit" aria-label={"Edit " + a.name} onClick={() => setModal({ kind: "agent", item: a })}><EditIco /></button>
-                    <button className="stg-x" title="Delete" aria-label={"Delete " + a.name}
+                    <button type="button" className="stg-x" title="Edit" aria-label={"Edit " + a.name} onClick={() => setModal({ kind: "agent", item: a })}><EditIco /></button>
+                    <button type="button" className="stg-x" title="Delete" aria-label={"Delete " + a.name}
                       onClick={() => { if (a.used > 0) { push("Detach " + a.name + " from its " + a.used + " projects first"); return; } setConfirm({ kind: "agent", item: a }); }}>
                       <Icon name="x" />
                     </button>
@@ -987,7 +987,7 @@ function OrgSettings({ tab, onTab, onBack, org, patchOrg, push }) {
   return (
     <main className="home-shell" data-screen-label="Viberr settings">
       <div className="set-head">
-        <button className="btn ghost sm" onClick={onBack}><Icon name="arrow" className="r180" />Projects</button>
+        <button type="button" className="btn ghost sm" onClick={onBack}><Icon name="arrow" className="r180" />Projects</button>
         <div>
           <h1>Viberr settings</h1>
           <p className="sub">Instance level — shared by every project and board. Board-level workflow &amp; policy live inside each project.</p>
@@ -996,7 +996,7 @@ function OrgSettings({ tab, onTab, onBack, org, patchOrg, push }) {
       <div className="set-layout">
         <nav className="set-nav" aria-label="Settings sections">
           {SETTINGS_TABS.map((t) => (
-            <button key={t.id} className={"nav-item" + (tab === t.id ? " active" : "")} onClick={() => onTab(t.id)}>
+            <button type="button" key={t.id} className={"nav-item" + (tab === t.id ? " active" : "")} onClick={() => onTab(t.id)}>
               <Icon name={t.icon} className="ico" />
               {t.label}
               <span className="count">{counts[t.id]}</span>

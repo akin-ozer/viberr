@@ -4,7 +4,12 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { formatClock, formatDayBucket } from "~/shared/dates/format";
 import { ntfMeta, ntfPill } from "./notification-meta";
-import type { NotificationView } from "./notification-item";
+import {
+  needsYouTime,
+  splitNotifications,
+  type NotificationFilter,
+  type NotificationPageItem,
+} from "./notifications-page-helpers";
 
 /**
  * The full /notifications page (Phase 9C, notifications.md — ported from
@@ -19,36 +24,6 @@ import type { NotificationView } from "./notification-item";
  * hard-coded "Viberr Core" workspace, a literal the porting notes say must
  * not survive.
  */
-
-/** Page rows additionally render the producing actor (stream lines). */
-export interface NotificationPageItem extends NotificationView {
-  from: { name: string } | null;
-}
-
-export type NotificationFilter = "all" | "unread";
-
-export function splitNotifications(
-  items: NotificationPageItem[],
-  f: NotificationFilter,
-): { needs: NotificationPageItem[]; rest: NotificationPageItem[] } {
-  const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
-  return {
-    needs: items.filter(
-      (n) => (n.kind === "packet" || n.kind === "approval") && match(n),
-    ),
-    rest: items.filter(
-      (n) => n.kind !== "packet" && n.kind !== "approval" && match(n),
-    ),
-  };
-}
-
-/** Needs-you card time: today → "10:31", else lowercased day + time
- * ("yesterday 16:04", "mar 30 14:00" — the mock lowercases the day). */
-export function needsYouTime(iso: string, now: Date = new Date()): string {
-  const bucket = formatDayBucket(iso, now);
-  const clock = formatClock(iso);
-  return bucket === "Today" ? clock : bucket.toLowerCase() + " " + clock;
-}
 
 function keybtnLabel(n: NotificationPageItem): string {
   return (n.projectName ? n.projectName + " · " : "") + (n.taskKey ?? "");
@@ -144,43 +119,50 @@ function NtfStream({
       {days.map((day) => (
         <div key={day}>
           <div className="act-day">{day}</div>
-          {items
-            .filter((n) => formatDayBucket(n.occurredAt, now) === day)
-            .map((n) => {
-              const m = ntfMeta(n);
-              return (
-                <div
-                  className={"pol-ev ntf-ev" + (n.unread ? " unread" : "")}
-                  key={n.id}
-                  onClick={() => onRead(n.id)}
-                  title={n.unread ? "Click to mark read" : undefined}
-                >
-                  <span className={"pev-ico " + m.cls}>
-                    <Icon name={m.icon} />
-                  </span>
-                  <span className="pev-main">
-                    <strong className="act-actor">
-                      {n.from ? n.from.name : "—"}
-                    </strong>
-                    <span className="act-sep">·</span>
-                    <RichText text={n.text} mentions={false} />{" "}
-                    <button
-                      type="button"
-                      className="keybtn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRead(n.id);
-                        onOpen(n);
-                      }}
-                    >
-                      {keybtnLabel(n)}
-                    </button>
-                  </span>
-                  {n.unread && <span className="unread-dot" />}
-                  <span className="pev-t">{formatClock(n.occurredAt)}</span>
-                </div>
-              );
-            })}
+          {items.flatMap((n) => {
+            if (formatDayBucket(n.occurredAt, now) !== day) return [];
+            const m = ntfMeta(n);
+            return (
+              <div
+                className={"pol-ev ntf-ev" + (n.unread ? " unread" : "")}
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onRead(n.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onRead(n.id);
+                  }
+                }}
+                title={n.unread ? "Click to mark read" : undefined}
+              >
+                <span className={"pev-ico " + m.cls}>
+                  <Icon name={m.icon} />
+                </span>
+                <span className="pev-main">
+                  <strong className="act-actor">
+                    {n.from ? n.from.name : "—"}
+                  </strong>
+                  <span className="act-sep">·</span>
+                  <RichText text={n.text} mentions={false} />{" "}
+                  <button
+                    type="button"
+                    className="keybtn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRead(n.id);
+                      onOpen(n);
+                    }}
+                  >
+                    {keybtnLabel(n)}
+                  </button>
+                </span>
+                {n.unread && <span className="unread-dot" />}
+                <span className="pev-t">{formatClock(n.occurredAt)}</span>
+              </div>
+            );
+          })}
         </div>
       ))}
       {!items.length && <div className="empty">You're caught up.</div>}
@@ -237,7 +219,7 @@ export function NotificationsPage({
             ))}
           </div>
           {unread > 0 && (
-            <button className="btn ghost sm" onClick={onReadAll}>
+            <button type="button" className="btn ghost sm" onClick={onReadAll}>
               <Icon name="check" />
               Mark all read
             </button>

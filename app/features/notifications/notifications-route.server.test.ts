@@ -6,7 +6,7 @@ import {
 import {
   splitNotifications,
   type NotificationPageItem,
-} from "./notifications-page";
+} from "./notifications-page-helpers";
 
 /**
  * Route-level tests for the /notifications page (Phase 9C): per-user rows

@@ -3,7 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { reviewRowSub, type ReviewRowView } from "./review-page";
+import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 /**
  * Route-level tests for /projects/:slug/review against the seeded demo

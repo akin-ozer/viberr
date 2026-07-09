@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -129,6 +129,7 @@ export function CreateProfileModal({
   const capCatalog = isOperator ? OPERATOR_CAP_CATALOG : CAP_MODAL_CATALOG;
   const capDefaults = isOperator ? OPERATOR_CAP_DEFAULTS : CAP_MODAL_DEFAULTS;
   const dialogRef = useDialog(onClose);
+  const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
   const [role, setRole] = useState(initial ? initial.role : "");
   const [stg, setStg] = useState<string[]>(initial ? [...initial.stages] : []);
@@ -242,7 +243,9 @@ export function CreateProfileModal({
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose} />
+      {/* Pointer-only close affordance — keyboard users have Escape (useDialog)
+          and the Close button, so the scrim is hidden from assistive tech. */}
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true" />
       <div
         className="modal-card"
         role="dialog"
@@ -262,7 +265,7 @@ export function CreateProfileModal({
                 : "A reusable agent the operator can assign to tasks."}
             </div>
           </div>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" />
           </button>
         </div>
@@ -270,10 +273,11 @@ export function CreateProfileModal({
         <div className="modal-body">
           <div className="field-row">
             <div className="field">
-              <label className="flabel">
+              <label className="flabel" htmlFor={`${uid}-name`}>
                 Name<span className="req">*</span>
               </label>
               <input
+                id={`${uid}-name`}
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -282,10 +286,11 @@ export function CreateProfileModal({
               />
             </div>
             <div className="field">
-              <label className="flabel">
+              <label className="flabel" htmlFor={`${uid}-role`}>
                 Role<span className="req">*</span>
               </label>
               <input
+                id={`${uid}-role`}
                 type="text"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
@@ -346,7 +351,7 @@ export function CreateProfileModal({
 
           <div className="field-row">
             <div className="field">
-              <label className="flabel">
+              <label className="flabel" htmlFor={`${uid}-model`}>
                 Model
                 <span className="fhint">
                   {catalogLoading
@@ -355,6 +360,7 @@ export function CreateProfileModal({
                 </span>
               </label>
               <select
+                id={`${uid}-model`}
                 aria-label="Model"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
@@ -383,11 +389,12 @@ export function CreateProfileModal({
             </div>
             {showEffort && (
               <div className="field">
-                <label className="flabel">
+                <label className="flabel" htmlFor={`${uid}-effort`}>
                   Effort
                   <span className="fhint">reasoning level per turn</span>
                 </label>
                 <select
+                  id={`${uid}-effort`}
                   aria-label="Effort"
                   value={effort}
                   onChange={(e) => setEffort(e.target.value)}
@@ -432,13 +439,14 @@ export function CreateProfileModal({
           </div>
 
           <div className="field">
-            <label className="flabel">
+            <label className="flabel" htmlFor={`${uid}-definition`}>
               Definition
               <span className="fhint">
                 what this agent is for, in your words — markdown ok
               </span>
             </label>
             <textarea
+              id={`${uid}-definition`}
               value={definition}
               onChange={(e) => setDefinition(e.target.value)}
               style={{ minHeight: "96px" }}
@@ -540,6 +548,7 @@ export function CreateProfileModal({
               {RES_CATALOG.map((g) => {
                 const open = !!openRes[g.group];
                 const sel = res[g.key];
+                const selSet = new Set(sel);
                 return (
                   <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
                     <button
@@ -568,11 +577,11 @@ export function CreateProfileModal({
                               className={
                                 "pick-chip" +
                                 (g.mono ? " mono" : "") +
-                                (sel.includes(it.id) ? " on" : "")
+                                (selSet.has(it.id) ? " on" : "")
                               }
                               onClick={() => toggleRes(g.key, it.id)}
                             >
-                              {sel.includes(it.id) && <Icon name="check" />}
+                              {selSet.has(it.id) && <Icon name="check" />}
                               {it.id}
                             </button>
                           ))}
@@ -589,10 +598,11 @@ export function CreateProfileModal({
         <div className="modal-foot">
           <span className={"foot-hint" + (valid && !error ? "" : " err")}>{hint}</span>
           <div className="foot-actions">
-            <button className="btn ghost" onClick={onClose}>
+            <button type="button" className="btn ghost" onClick={onClose}>
               Cancel
             </button>
             <button
+              type="button"
               className="btn primary"
               onClick={submit}
               disabled={!valid || busy}

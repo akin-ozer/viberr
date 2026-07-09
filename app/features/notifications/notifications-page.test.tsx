@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { NotificationsPage } from "./notifications-page";
 import {
   needsYouTime,
-  NotificationsPage,
   splitNotifications,
   type NotificationPageItem,
-} from "./notifications-page";
+} from "./notifications-page-helpers";
 
 afterEach(cleanup);
 

@@ -130,8 +130,8 @@ function GithubTrace({ task }: { task: TaskDetail }) {
             >
               Commits
             </div>
-            {task.commits.map((c, i) => (
-              <div className="commit" key={i}>
+            {task.commits.map((c) => (
+              <div className="commit" key={c.sha}>
                 <span className="sha">{c.sha}</span>
                 <span className="msg">{c.msg}</span>
               </div>
@@ -182,8 +182,8 @@ function PolicyPanel({
         <Icon name="shield" />
         <h2>Permissions</h2>
       </div>
-      {rows.map((r, i) => (
-        <div className="policy-line" key={i}>
+      {rows.map((r) => (
+        <div className="policy-line" key={r.k}>
           <span className="k">
             <Icon name={r.icon} />
             {r.k}
@@ -203,13 +203,15 @@ function PolicyPanel({
   );
 }
 
+/** Diagnostic severity → pill kind (pure; module scope so it isn't rebuilt per render). */
+const kind = (severity: string) =>
+  severity === "error" ? "blocked" : severity === "warning" ? "input" : "neutral";
+
 /** Parse/inconsistency findings from the projection (tolerant-parsing
  * contract) — compact list, only when the projection carries any. The full
  * diagnostics console arrives in Phase 10. */
 function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) {
   if (diagnostics.length === 0) return null;
-  const kind = (severity: string) =>
-    severity === "error" ? "blocked" : severity === "warning" ? "input" : "neutral";
   return (
     <div className="panel">
       <div className="panel-head">
@@ -425,16 +427,6 @@ export function TaskDetailPage({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
-  const onViewLogs = (id: string) => {
-    setLogSel(id);
-    // Scroll the logs panel into view (spec §5.2 addition).
-    requestAnimationFrame(() => {
-      document
-        .querySelector('[data-comment-anchor="agent-logs"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
-
   // BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
   // scrolls the Agent-logs panel into view. The reply run is the group
   // representative → selecting its id shows its live output (streamed by the
@@ -442,6 +434,26 @@ export function TaskDetailPage({
   // brings the run into `runtime`; the pending id is kept until it appears so
   // the selection lands after revalidation, not before it.
   const [pendingLogSel, setPendingLogSel] = useState<string | null>(null);
+  // Derived selection (no confirm-effect): once revalidation lands the pending
+  // reply run in `runtime` it wins over `logSel`; until then the user's own
+  // selection shows. A manual pick made after the pending run landed evicts
+  // the pending marker so it can't snap the selection back later.
+  const pendingLogReady =
+    pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
+  const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
+  const selectLog = (id: string | null) => {
+    if (pendingLogReady) setPendingLogSel(null);
+    setLogSel(id);
+  };
+  const onViewLogs = (id: string) => {
+    selectLog(id);
+    // Scroll the logs panel into view (spec §5.2 addition).
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
   const onAgentLog = (threadId: string) => {
     setPendingLogSel(threadId);
     setLogSel(threadId);
@@ -451,16 +463,6 @@ export function TaskDetailPage({
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
-  // Once revalidation lands the reply run in `runtime`, confirm the selection
-  // (guards against a race where logSel was cleared or the id only just
-  // appeared), then clear the pending marker.
-  useEffect(() => {
-    if (!pendingLogSel) return;
-    if (runtime.some((r) => r.id === pendingLogSel)) {
-      setLogSel(pendingLogSel);
-      setPendingLogSel(null);
-    }
-  }, [pendingLogSel, runtime]);
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;
@@ -568,8 +570,8 @@ export function TaskDetailPage({
 
         <AgentLogsSlot
           runtime={runtime}
-          logSel={logSel}
-          onLogSel={setLogSel}
+          logSel={shownLogSel}
+          onLogSel={selectLog}
           linesByThread={linesByThread}
         />
 

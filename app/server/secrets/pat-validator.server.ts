@@ -203,10 +203,10 @@ export async function validatePatToken(
   if (scopesHeader !== null && scopesHeader !== "") {
     // Classic token: the header is authoritative.
     const granted = new Set(
-      scopesHeader
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      scopesHeader.split(",").flatMap((s) => {
+        const scope = s.trim();
+        return scope ? [scope] : [];
+      }),
     );
     for (const id of requiredScopes) {
       scopes.push(classicScopeCheck(id, granted));
@@ -264,7 +264,7 @@ export async function validatePatToken(
     }
   }
 
-  const missingScopes = scopes.filter((s) => !s.ok).map((s) => s.id);
+  const missingScopes = scopes.flatMap((s) => (s.ok ? [] : [s.id]));
   if (missingScopes.length > 0) {
     return {
       ...withIdentity,
@@ -395,7 +395,7 @@ export async function revalidateProjectCredential(
   }
 
   const grantedScopes = new Set(
-    validation.scopes.filter((s) => s.ok).map((s) => s.id),
+    validation.scopes.flatMap((s) => (s.ok ? [s.id] : [])),
   );
   const resolvedViolations: ScopeViolationRecord[] = [];
   for (const violation of listScopeViolations(db, projectSlug, {

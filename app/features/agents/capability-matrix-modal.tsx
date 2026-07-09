@@ -51,7 +51,7 @@ export function CapabilityMatrixModal({
   const groups: { group: string; labels: string[] }[] = CAP_MODAL_CATALOG.map(
     (g) => ({ group: g.group, labels: g.caps.map((c) => c.label) }),
   );
-  const extras: string[] = [];
+  const extras = new Set<string>();
   for (const p of profiles) {
     for (const bucket of [
       p.actions.direct,
@@ -59,15 +59,16 @@ export function CapabilityMatrixModal({
       p.actions.forbidden,
     ]) {
       for (const label of bucket) {
-        if (!known.has(label) && !extras.includes(label)) extras.push(label);
+        if (!known.has(label)) extras.add(label);
       }
     }
   }
-  if (extras.length) groups.push({ group: "Other actions", labels: extras });
+  if (extras.size)
+    groups.push({ group: "Other actions", labels: [...extras] });
 
   return (
     <>
-      <div className="confirm-scrim" onClick={onClose} />
+      <div className="confirm-scrim" onClick={onClose} aria-hidden="true" />
       <div
         className="modal-card modal-wide"
         role="dialog"
@@ -85,7 +86,7 @@ export function CapabilityMatrixModal({
               Every profile's permissions for each action in {projectName}.
             </div>
           </div>
-          <button className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" />
           </button>
         </div>

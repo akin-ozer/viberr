@@ -110,8 +110,8 @@ function LiveRunPanel({ runtime, onViewLogs, push }) {
           <div className="run-cell"><div className="lbl">Runtime</div><div className="val mono">{run.model}</div></div>
         </div>
         <div className="run-actions">
-          <button className="btn ghost sm" onClick={() => onViewLogs(run.id)}><Icon name="term" />View logs</button>
-          <button className="btn ghost sm" onClick={() => push && push("Interrupt is a governed action — stubbed in this prototype")}><Icon name="hand" />Interrupt</button>
+          <button type="button" className="btn ghost sm" onClick={() => onViewLogs(run.id)}><Icon name="term" />View logs</button>
+          <button type="button" className="btn ghost sm" onClick={() => push && push("Interrupt is a governed action — stubbed in this prototype")}><Icon name="hand" />Interrupt</button>
         </div>
       </div>
     </div>
