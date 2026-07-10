@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { Link, useFetcher } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
@@ -334,220 +340,215 @@ function NewProjectModal({
   };
 
   return (
-    <>
-      {/* Pointer-only redundancy: Escape (useDialog) and the Close button are
-          the keyboard/AT paths, so the scrim stays hidden from screen readers. */}
-      <div className="confirm-scrim" onClick={onClose} aria-hidden="true"></div>
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="New project"
-        data-screen-label="New project modal"
-        ref={panelRef}
-      >
-        <div className="modal-head">
-          <span
-            className="pj-mark"
-            style={{
-              boxShadow:
-                "inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 55%)",
-            }}
-          >
-            {(name.trim()[0] || "•").toUpperCase()}
-          </span>
-          <span className="mh-main">
-            <h2>New governed project</h2>
-            <div className="mh-sub">
-              One board, one repo, agents under policy from day one
-            </div>
-          </span>
-          <button
-            type="button"
-            className="icon-btn modal-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <Icon name="x" />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="key-row">
-            <div className="field">
-              <label className="flabel" htmlFor="np-name">
-                Project name<span className="req">*</span>
-              </label>
-              <input
-                id="np-name"
-                type="text"
-                ref={nameRef}
-                value={name}
-                placeholder="e.g. Payments Gateway"
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit();
-                }}
-              />
-            </div>
-            <div className="field">
-              <label className="flabel" htmlFor="np-key">
-                Task key
-              </label>
-              <input
-                id="np-key"
-                type="text"
-                className="mono"
-                value={effKey}
-                placeholder="PAY"
-                onChange={(e) => {
-                  setKeyTouched(true);
-                  setKey(
-                    e.target.value
-                      .toUpperCase()
-                      .replace(/[^A-Z]/g, "")
-                      .slice(0, 4),
-                  );
-                }}
-              />
-            </div>
+    // Native <dialog> via useDialog: Escape, backdrop-click close and the
+    // ::backdrop scrim all come from showModal() + the hook.
+    <dialog
+      className="modal-card"
+      aria-label="New project"
+      data-screen-label="New project modal"
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span
+          className="pj-mark"
+          style={{
+            boxShadow:
+              "inset 0 -8px 0 color-mix(in srgb, var(--blue), transparent 55%)",
+          }}
+        >
+          {(name.trim()[0] || "•").toUpperCase()}
+        </span>
+        <span className="mh-main">
+          <h2>New governed project</h2>
+          <div className="mh-sub">
+            One board, one repo, agents under policy from day one
           </div>
+        </span>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body">
+        <div className="key-row">
           <div className="field">
-            <span className="flabel">
-              GitHub connection{" "}
-              <span className="fhint">sets the repository root</span>
-            </span>
-            <div className="pick-chips">
-              {connections.map((owner) => (
-                <button
-                  type="button"
-                  key={owner}
-                  className={"pick-chip" + (connOwner === owner ? " on" : "")}
-                  onClick={() => setConnOwner(owner)}
-                >
-                  <Icon name="github" />
-                  {owner}/
-                </button>
-              ))}
-            </div>
-            {connections.length === 0 && (
-              <div className="def-note">
-                <Icon name="alert" />
-                <span>
-                  No GitHub connections. Add one in{" "}
-                  <b>Viberr settings → GitHub connections</b> first.
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="np-repo">
-              GitHub repository{" "}
-              <span className="fhint">
-                project default · task-level override later
-              </span>
+            <label className="flabel" htmlFor="np-name">
+              Project name<span className="req">*</span>
             </label>
-            <div className="repo-input">
-              <span className="pre">{(connOwner || "github") + "/"}</span>
-              <input
-                id="np-repo"
-                type="text"
-                value={repo}
-                placeholder={effRepo || "repo-name"}
-                onChange={(e) => setRepo(e.target.value)}
-              />
-            </div>
+            <input
+              id="np-name"
+              type="text"
+              ref={nameRef}
+              value={name}
+              placeholder="e.g. Payments Gateway"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
           </div>
           <div className="field">
-            <span className="flabel">Workflow template</span>
-            <div className="pick-chips">
-              <button
-                type="button"
-                className={"pick-chip" + (template === "governed" ? " on" : "")}
-                onClick={() => setTemplate("governed")}
-              >
-                <span className="sdot" style={{ background: "var(--blue)" }}></span>
-                Governed default · 5 stages
-              </button>
-              <button
-                type="button"
-                className={"pick-chip" + (template === "light" ? " on" : "")}
-                onClick={() => setTemplate("light")}
-              >
-                <span
-                  className="sdot"
-                  style={{ background: "var(--teal-dark)" }}
-                ></span>
-                Lightweight · 3 stages
-              </button>
-            </div>
+            <label className="flabel" htmlFor="np-key">
+              Task key
+            </label>
+            <input
+              id="np-key"
+              type="text"
+              className="mono"
+              value={effKey}
+              placeholder="PAY"
+              onChange={(e) => {
+                setKeyTouched(true);
+                setKey(
+                  e.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z]/g, "")
+                    .slice(0, 4),
+                );
+              }}
+            />
           </div>
-          <div className="field">
-            <span className="flabel">Agent policy preset</span>
-            <div className="pick-chips">
+        </div>
+        <div className="field">
+          <span className="flabel">
+            GitHub connection{" "}
+            <span className="fhint">sets the repository root</span>
+          </span>
+          <div className="pick-chips">
+            {connections.map((owner) => (
               <button
                 type="button"
-                className={"pick-chip" + (policy === "strict" ? " on" : "")}
-                onClick={() => setPolicy("strict")}
+                key={owner}
+                className={"pick-chip" + (connOwner === owner ? " on" : "")}
+                onClick={() => setConnOwner(owner)}
               >
-                <Icon name="lock" />
-                Strict human-gate
+                <Icon name="github" />
+                {owner}/
               </button>
-              <button
-                type="button"
-                className={"pick-chip" + (policy === "balanced" ? " on" : "")}
-                onClick={() => setPolicy("balanced")}
-              >
-                <Icon name="shield" />
-                Balanced · recommended
-              </button>
-              <button
-                type="button"
-                className={"pick-chip" + (policy === "auto" ? " on" : "")}
-                onClick={() => setPolicy("auto")}
-              >
-                <Icon name="bolt" />
-                Autonomous within policy
-              </button>
-            </div>
-            <div className="def-note">
-              <Icon name="shield" />
-              <span>
-                Completion stays human-authorized in every preset. Stages, RBAC
-                and the agent capability matrix can be refined in project
-                settings.
-              </span>
-            </div>
+            ))}
           </div>
-          {serverError && (
+          {connections.length === 0 && (
             <div className="def-note">
               <Icon name="alert" />
-              <span>{serverError}</span>
+              <span>
+                No GitHub connections. Add one in{" "}
+                <b>Viberr settings → GitHub connections</b> first.
+              </span>
             </div>
           )}
         </div>
-        <div className="modal-foot">
-          <span className="foot-hint mono">
-            creates {storeRoot}/projects/{slug || "…"}/
-          </span>
-          <span className="foot-actions">
-            <button type="button" className="btn ghost" onClick={onClose}>
-              Cancel
+        <div className="field">
+          <label className="flabel" htmlFor="np-repo">
+            GitHub repository{" "}
+            <span className="fhint">
+              project default · task-level override later
+            </span>
+          </label>
+          <div className="repo-input">
+            <span className="pre">{(connOwner || "github") + "/"}</span>
+            <input
+              id="np-repo"
+              type="text"
+              value={repo}
+              placeholder={effRepo || "repo-name"}
+              onChange={(e) => setRepo(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <span className="flabel">Workflow template</span>
+          <div className="pick-chips">
+            <button
+              type="button"
+              className={"pick-chip" + (template === "governed" ? " on" : "")}
+              onClick={() => setTemplate("governed")}
+            >
+              <span className="sdot" style={{ background: "var(--blue)" }}></span>
+              Governed default · 5 stages
             </button>
             <button
               type="button"
-              className="btn primary"
-              disabled={!ok || busy}
-              style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
-              onClick={submit}
-              aria-busy={busy}
+              className={"pick-chip" + (template === "light" ? " on" : "")}
+              onClick={() => setTemplate("light")}
             >
-              <Icon name="plus" />
-              Create project
+              <span
+                className="sdot"
+                style={{ background: "var(--teal-dark)" }}
+              ></span>
+              Lightweight · 3 stages
             </button>
-          </span>
+          </div>
         </div>
+        <div className="field">
+          <span className="flabel">Agent policy preset</span>
+          <div className="pick-chips">
+            <button
+              type="button"
+              className={"pick-chip" + (policy === "strict" ? " on" : "")}
+              onClick={() => setPolicy("strict")}
+            >
+              <Icon name="lock" />
+              Strict human-gate
+            </button>
+            <button
+              type="button"
+              className={"pick-chip" + (policy === "balanced" ? " on" : "")}
+              onClick={() => setPolicy("balanced")}
+            >
+              <Icon name="shield" />
+              Balanced · recommended
+            </button>
+            <button
+              type="button"
+              className={"pick-chip" + (policy === "auto" ? " on" : "")}
+              onClick={() => setPolicy("auto")}
+            >
+              <Icon name="bolt" />
+              Autonomous within policy
+            </button>
+          </div>
+          <div className="def-note">
+            <Icon name="shield" />
+            <span>
+              Completion stays human-authorized in every preset. Stages, RBAC
+              and the agent capability matrix can be refined in project
+              settings.
+            </span>
+          </div>
+        </div>
+        {serverError && (
+          <div className="def-note">
+            <Icon name="alert" />
+            <span>{serverError}</span>
+          </div>
+        )}
       </div>
-    </>
+      <div className="modal-foot">
+        <span className="foot-hint mono">
+          creates {storeRoot}/projects/{slug || "…"}/
+        </span>
+        <span className="foot-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!ok || busy}
+            style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
+            onClick={submit}
+            aria-busy={busy}
+          >
+            <Icon name="plus" />
+            Create project
+          </button>
+        </span>
+      </div>
+    </dialog>
   );
 }
 
@@ -562,6 +563,424 @@ export interface HomePageData {
   notifications: NotificationView[];
   unread: number;
   storeRoot: string;
+}
+
+/* Focused sections of HomePage — same-file extraction, state stays in
+   HomePage and flows down via explicit props. Rendered DOM is unchanged. */
+
+function HomeTopBar({
+  searchRef,
+  query,
+  onQuery,
+  notifications,
+  unread,
+  user,
+  theme,
+}: {
+  searchRef: RefObject<HTMLInputElement | null>;
+  query: string;
+  onQuery: (q: string) => void;
+  notifications: NotificationView[];
+  unread: number;
+  user: SessionUser;
+  theme: ThemePreference;
+}) {
+  return (
+    <header className="home-top">
+      <div className="home-top-in">
+        <button
+          type="button"
+          className="home-brand"
+          onClick={() => window.scrollTo({ top: 0 })}
+          title="Viberr"
+        >
+          <span className="mark">V</span>
+          <b>Viberr</b>
+        </button>
+        <div className="top-search" style={{ marginLeft: "auto" }}>
+          <Icon name="search" />
+          <input
+            ref={searchRef}
+            placeholder="Find a project…"
+            aria-label="Find a project"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+          />
+          <span className="kbd">⌘K</span>
+        </div>
+        <TopBell notifications={notifications} unread={unread} />
+        <UserMenu
+          user={{
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            avatarTone: user.avatarTone,
+          }}
+          theme={theme}
+        />
+      </div>
+    </header>
+  );
+}
+
+function HomeHero({
+  greet,
+  firstName,
+  projectCount,
+  totalRunning,
+  activeIn,
+  totalWaiting,
+  view,
+  onView,
+  onNew,
+}: {
+  greet: string;
+  firstName: string;
+  projectCount: number;
+  totalRunning: number;
+  activeIn: number;
+  totalWaiting: number;
+  view: "grid" | "list";
+  onView: (v: "grid" | "list") => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="home-hero">
+      <div>
+        <h1 suppressHydrationWarning>
+          {greet}, {firstName}
+        </h1>
+        <p className="sub">
+          {projectCount === 0 ? (
+            "No projects yet — create your first governed project below."
+          ) : (
+            <>
+              Your agents kept working —{" "}
+              <b>
+                <span className="working"></span>
+                {totalRunning} runs active
+              </b>{" "}
+              across {activeIn} projects, <b>{totalWaiting} decisions</b>{" "}
+              waiting on you.
+            </>
+          )}
+        </p>
+      </div>
+      <div className="hero-actions">
+        <div className="seg" role="group" aria-label="View">
+          <button
+            type="button"
+            className={view === "grid" ? "on" : ""}
+            onClick={() => onView("grid")}
+          >
+            <Icon name="board" />
+            Grid
+          </button>
+          <button
+            type="button"
+            className={view === "list" ? "on" : ""}
+            onClick={() => onView("list")}
+          >
+            <Icon name="review" />
+            List
+          </button>
+        </div>
+        <button type="button" className="btn primary" onClick={onNew}>
+          <Icon name="plus" />
+          New project
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EmptyHero({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="empty-hero" data-screen-label="Empty state">
+      <span className="plus">
+        <Icon name="plus" />
+      </span>
+      <h2>Create your first governed project</h2>
+      <p>
+        A project is one board, one repo, and a policy that decides what
+        agents may do on their own — and what waits for you.
+      </p>
+      <div className="empty-steps">
+        <span className="st">
+          <span className="n">1</span>Connect a repository
+        </span>
+        <span className="st">
+          <span className="n">2</span>Define workflow stages
+        </span>
+        <span className="st">
+          <span className="n">3</span>Put agents under policy
+        </span>
+      </div>
+      <button type="button" className="btn primary" onClick={onNew}>
+        <Icon name="plus" />
+        New project
+      </button>
+    </div>
+  );
+}
+
+function ProjectSections({
+  view,
+  stars,
+  onStar,
+  pinned,
+  rest,
+  archivedList,
+  query,
+  onNew,
+}: {
+  view: "grid" | "list";
+  stars: Record<string, boolean>;
+  onStar: (slug: string) => void;
+  pinned: HomeProjectCard[];
+  rest: HomeProjectCard[];
+  archivedList: HomeProjectCard[];
+  query: string;
+  onNew: () => void;
+}) {
+  const renderGroup = (list: HomeProjectCard[]) =>
+    view === "grid" ? (
+      <div className="pj-grid">
+        {list.map((p) => (
+          <ProjectCard
+            key={p.slug}
+            p={p}
+            starred={!!stars[p.slug]}
+            onStar={onStar}
+            showDesc
+          />
+        ))}
+      </div>
+    ) : (
+      <div className="pj-list">
+        {list.map((p) => (
+          <ProjectRow
+            key={p.slug}
+            p={p}
+            starred={!!stars[p.slug]}
+            onStar={onStar}
+          />
+        ))}
+      </div>
+    );
+
+  return (
+    <>
+      {pinned.length > 0 && (
+        <section data-screen-label="Pinned projects">
+          <div className="sec-h">
+            <StarIco on />
+            <h2>Pinned</h2>
+            <span className="ct">{pinned.length}</span>
+          </div>
+          {renderGroup(pinned)}
+        </section>
+      )}
+      <section data-screen-label="All projects">
+        <div className="sec-h">
+          <Icon name="board" />
+          <h2>{pinned.length > 0 ? "Everything else" : "All projects"}</h2>
+          <span className="ct">{rest.length}</span>
+        </div>
+        {rest.length === 0 && query ? (
+          <div className="empty">No project matches “{query}”.</div>
+        ) : view === "grid" ? (
+          <div className="pj-grid">
+            {rest.map((p) => (
+              <ProjectCard
+                key={p.slug}
+                p={p}
+                starred={!!stars[p.slug]}
+                onStar={onStar}
+                showDesc
+              />
+            ))}
+            {!query && (
+              <button type="button" className="pj-new" onClick={onNew}>
+                <span className="plus">
+                  <Icon name="plus" />
+                </span>
+                New project
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="pj-list">
+              {rest.map((p) => (
+                <ProjectRow
+                  key={p.slug}
+                  p={p}
+                  starred={!!stars[p.slug]}
+                  onStar={onStar}
+                />
+              ))}
+            </div>
+            {!query && (
+              <button
+                type="button"
+                className="pj-new"
+                style={{ minHeight: 0, padding: ".7rem", marginTop: ".5rem" }}
+                onClick={onNew}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: ".45rem",
+                  }}
+                >
+                  <Icon name="plus" />
+                  New project
+                </span>
+              </button>
+            )}
+          </>
+        )}
+      </section>
+      {archivedList.length > 0 && (
+        <section data-screen-label="Archived projects">
+          <div className="sec-h">
+            <Icon name="board" />
+            <h2>Archived</h2>
+            <span className="ct">{archivedList.length}</span>
+          </div>
+          <p className="sub" style={{ margin: "0 0 .75rem" }}>
+            Hidden from the active workspace. Open a project and use
+            Settings → Danger zone to restore it.
+          </p>
+          <div className="pj-list">
+            {archivedList.map((p) => (
+              <ProjectRow
+                key={p.slug}
+                p={p}
+                starred={!!stars[p.slug]}
+                onStar={onStar}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function SettingsPanel({ org }: { org: HomeOrgSummary }) {
+  return (
+    <section className="panel" data-screen-label="Settings">
+      <div className="panel-head">
+        <Icon name="sliders" />
+        <h2>Settings</h2>
+      </div>
+      <div className="org-tiles">
+        <Link className="org-tile go" to="/org/settings?tab=connections">
+          <span className="lbl">
+            <Icon name="github" />
+            GitHub connections
+          </span>
+          <span className="val">
+            <span>
+              <span className="nm">
+                {org.connectionOwners.length} connection
+                {org.connectionOwners.length === 1 ? "" : "s"}
+              </span>
+              <div className="sub">
+                {org.connectionOwners.join(" · ") || "none connected"}
+              </div>
+            </span>
+          </span>
+          <span className="foot go-hint">
+            Manage
+            <Icon name="arrow" />
+          </span>
+        </Link>
+        <Link className="org-tile go" to="/org/settings?tab=users">
+          <span className="lbl">
+            <Icon name="user" />
+            Users &amp; access
+          </span>
+          <span className="val">
+            <MemberStack members={org.users.first} />
+            <span>
+              <span className="nm">
+                {org.users.total} user{org.users.total === 1 ? "" : "s"}
+              </span>
+              <div className="sub">
+                {org.users.admins} admins · {org.users.members} members
+              </div>
+            </span>
+          </span>
+          <span className="foot go-hint">
+            Manage
+            <Icon name="arrow" />
+          </span>
+        </Link>
+        <Link className="org-tile go" to="/org/settings?tab=resources">
+          <span className="lbl">
+            <Icon name="memory" />
+            Agent resources
+          </span>
+          <span className="val">
+            <span className="glyphs">
+              <AgentGlyph backend="codex" />
+              <AgentGlyph backend="claude" />
+            </span>
+            <span>
+              <span className="nm">{org.globalAgents} global agents</span>
+              <div className="sub">
+                {org.knowledgeBases} knowledge bases · {org.mcpServers} MCP ·{" "}
+                {org.skills} skills
+              </div>
+            </span>
+          </span>
+          <span className="foot go-hint">
+            Manage
+            <Icon name="arrow" />
+          </span>
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function StoreStrip({
+  scanning,
+  onRescan,
+  isAdmin,
+  rebuilding,
+  onRebuild,
+}: {
+  scanning: boolean;
+  onRescan: () => void;
+  isAdmin: boolean;
+  rebuilding: boolean;
+  onRebuild: () => void;
+}) {
+  return (
+    <footer className="store-strip" data-screen-label="Store strip">
+      <button type="button" className="btn ghost sm" onClick={onRescan}>
+        <Icon name="refresh" className={scanning ? "spin" : ""} />
+        {scanning ? "Scanning…" : "Re-scan"}
+      </button>
+      {isAdmin && (
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={onRebuild}
+          title="Drop every projection row and re-project the whole store from files"
+        >
+          <Icon name="memory" className={rebuilding ? "spin" : ""} />
+          {rebuilding ? "Rebuilding…" : "Rebuild projections"}
+        </button>
+      )}
+    </footer>
+  );
 }
 
 export function HomePage({
@@ -712,339 +1131,59 @@ export function HomePage({
   const activeIn = active.filter((p) => p.running > 0).length;
   const firstName = user.name.split(" ")[0];
 
-  const renderGroup = (list: HomeProjectCard[]) =>
-    view === "grid" ? (
-      <div className="pj-grid">
-        {list.map((p) => (
-          <ProjectCard
-            key={p.slug}
-            p={p}
-            starred={!!stars[p.slug]}
-            onStar={toggleStar}
-            showDesc
-          />
-        ))}
-      </div>
-    ) : (
-      <div className="pj-list">
-        {list.map((p) => (
-          <ProjectRow
-            key={p.slug}
-            p={p}
-            starred={!!stars[p.slug]}
-            onStar={toggleStar}
-          />
-        ))}
-      </div>
-    );
-
   return (
     <div
       className="home"
       data-density="comfortable"
       data-screen-label="Home — project selection"
     >
-      <header className="home-top">
-        <div className="home-top-in">
-          <button
-            type="button"
-            className="home-brand"
-            onClick={() => window.scrollTo({ top: 0 })}
-            title="Viberr"
-          >
-            <span className="mark">V</span>
-            <b>Viberr</b>
-          </button>
-          <div className="top-search" style={{ marginLeft: "auto" }}>
-            <Icon name="search" />
-            <input
-              ref={searchRef}
-              placeholder="Find a project…"
-              aria-label="Find a project"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <span className="kbd">⌘K</span>
-          </div>
-          <TopBell notifications={data.notifications} unread={data.unread} />
-          <UserMenu
-            user={{
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              role: user.role,
-              avatarTone: user.avatarTone,
-            }}
-            theme={theme}
-          />
-        </div>
-      </header>
+      <HomeTopBar
+        searchRef={searchRef}
+        query={query}
+        onQuery={setQuery}
+        notifications={data.notifications}
+        unread={data.unread}
+        user={user}
+        theme={theme}
+      />
 
       <main className="home-shell">
-        <div className="home-hero">
-          <div>
-            <h1 suppressHydrationWarning>
-              {data.greet}, {firstName}
-            </h1>
-            <p className="sub">
-              {projects.length === 0 ? (
-                "No projects yet — create your first governed project below."
-              ) : (
-                <>
-                  Your agents kept working —{" "}
-                  <b>
-                    <span className="working"></span>
-                    {totalRunning} runs active
-                  </b>{" "}
-                  across {activeIn} projects, <b>{totalWaiting} decisions</b>{" "}
-                  waiting on you.
-                </>
-              )}
-            </p>
-          </div>
-          <div className="hero-actions">
-            <div className="seg" role="group" aria-label="View">
-              <button
-                type="button"
-                className={view === "grid" ? "on" : ""}
-                onClick={() => setView("grid")}
-              >
-                <Icon name="board" />
-                Grid
-              </button>
-              <button
-                type="button"
-                className={view === "list" ? "on" : ""}
-                onClick={() => setView("list")}
-              >
-                <Icon name="review" />
-                List
-              </button>
-            </div>
-            <button type="button" className="btn primary" onClick={() => setModal(true)}>
-              <Icon name="plus" />
-              New project
-            </button>
-          </div>
-        </div>
+        <HomeHero
+          greet={data.greet}
+          firstName={firstName}
+          projectCount={projects.length}
+          totalRunning={totalRunning}
+          activeIn={activeIn}
+          totalWaiting={totalWaiting}
+          view={view}
+          onView={setView}
+          onNew={() => setModal(true)}
+        />
 
         {projects.length === 0 ? (
-          <div className="empty-hero" data-screen-label="Empty state">
-            <span className="plus">
-              <Icon name="plus" />
-            </span>
-            <h2>Create your first governed project</h2>
-            <p>
-              A project is one board, one repo, and a policy that decides what
-              agents may do on their own — and what waits for you.
-            </p>
-            <div className="empty-steps">
-              <span className="st">
-                <span className="n">1</span>Connect a repository
-              </span>
-              <span className="st">
-                <span className="n">2</span>Define workflow stages
-              </span>
-              <span className="st">
-                <span className="n">3</span>Put agents under policy
-              </span>
-            </div>
-            <button type="button" className="btn primary" onClick={() => setModal(true)}>
-              <Icon name="plus" />
-              New project
-            </button>
-          </div>
+          <EmptyHero onNew={() => setModal(true)} />
         ) : (
-          <>
-            {pinned.length > 0 && (
-              <section data-screen-label="Pinned projects">
-                <div className="sec-h">
-                  <StarIco on />
-                  <h2>Pinned</h2>
-                  <span className="ct">{pinned.length}</span>
-                </div>
-                {renderGroup(pinned)}
-              </section>
-            )}
-            <section data-screen-label="All projects">
-              <div className="sec-h">
-                <Icon name="board" />
-                <h2>{pinned.length > 0 ? "Everything else" : "All projects"}</h2>
-                <span className="ct">{rest.length}</span>
-              </div>
-              {rest.length === 0 && query ? (
-                <div className="empty">No project matches “{query}”.</div>
-              ) : view === "grid" ? (
-                <div className="pj-grid">
-                  {rest.map((p) => (
-                    <ProjectCard
-                      key={p.slug}
-                      p={p}
-                      starred={!!stars[p.slug]}
-                      onStar={toggleStar}
-                      showDesc
-                    />
-                  ))}
-                  {!query && (
-                    <button type="button" className="pj-new" onClick={() => setModal(true)}>
-                      <span className="plus">
-                        <Icon name="plus" />
-                      </span>
-                      New project
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div className="pj-list">
-                    {rest.map((p) => (
-                      <ProjectRow
-                        key={p.slug}
-                        p={p}
-                        starred={!!stars[p.slug]}
-                        onStar={toggleStar}
-                      />
-                    ))}
-                  </div>
-                  {!query && (
-                    <button
-                      type="button"
-                      className="pj-new"
-                      style={{ minHeight: 0, padding: ".7rem", marginTop: ".5rem" }}
-                      onClick={() => setModal(true)}
-                    >
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: ".45rem",
-                        }}
-                      >
-                        <Icon name="plus" />
-                        New project
-                      </span>
-                    </button>
-                  )}
-                </>
-              )}
-            </section>
-            {archivedList.length > 0 && (
-              <section data-screen-label="Archived projects">
-                <div className="sec-h">
-                  <Icon name="board" />
-                  <h2>Archived</h2>
-                  <span className="ct">{archivedList.length}</span>
-                </div>
-                <p className="sub" style={{ margin: "0 0 .75rem" }}>
-                  Hidden from the active workspace. Open a project and use
-                  Settings → Danger zone to restore it.
-                </p>
-                <div className="pj-list">
-                  {archivedList.map((p) => (
-                    <ProjectRow
-                      key={p.slug}
-                      p={p}
-                      starred={!!stars[p.slug]}
-                      onStar={toggleStar}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
+          <ProjectSections
+            view={view}
+            stars={stars}
+            onStar={toggleStar}
+            pinned={pinned}
+            rest={rest}
+            archivedList={archivedList}
+            query={query}
+            onNew={() => setModal(true)}
+          />
         )}
 
-        <section className="panel" data-screen-label="Settings">
-          <div className="panel-head">
-            <Icon name="sliders" />
-            <h2>Settings</h2>
-          </div>
-          <div className="org-tiles">
-            <Link className="org-tile go" to="/org/settings?tab=connections">
-              <span className="lbl">
-                <Icon name="github" />
-                GitHub connections
-              </span>
-              <span className="val">
-                <span>
-                  <span className="nm">
-                    {org.connectionOwners.length} connection
-                    {org.connectionOwners.length === 1 ? "" : "s"}
-                  </span>
-                  <div className="sub">
-                    {org.connectionOwners.join(" · ") || "none connected"}
-                  </div>
-                </span>
-              </span>
-              <span className="foot go-hint">
-                Manage
-                <Icon name="arrow" />
-              </span>
-            </Link>
-            <Link className="org-tile go" to="/org/settings?tab=users">
-              <span className="lbl">
-                <Icon name="user" />
-                Users &amp; access
-              </span>
-              <span className="val">
-                <MemberStack members={org.users.first} />
-                <span>
-                  <span className="nm">
-                    {org.users.total} user{org.users.total === 1 ? "" : "s"}
-                  </span>
-                  <div className="sub">
-                    {org.users.admins} admins · {org.users.members} members
-                  </div>
-                </span>
-              </span>
-              <span className="foot go-hint">
-                Manage
-                <Icon name="arrow" />
-              </span>
-            </Link>
-            <Link className="org-tile go" to="/org/settings?tab=resources">
-              <span className="lbl">
-                <Icon name="memory" />
-                Agent resources
-              </span>
-              <span className="val">
-                <span className="glyphs">
-                  <AgentGlyph backend="codex" />
-                  <AgentGlyph backend="claude" />
-                </span>
-                <span>
-                  <span className="nm">{org.globalAgents} global agents</span>
-                  <div className="sub">
-                    {org.knowledgeBases} knowledge bases · {org.mcpServers} MCP ·{" "}
-                    {org.skills} skills
-                  </div>
-                </span>
-              </span>
-              <span className="foot go-hint">
-                Manage
-                <Icon name="arrow" />
-              </span>
-            </Link>
-          </div>
-        </section>
+        <SettingsPanel org={org} />
 
-        <footer className="store-strip" data-screen-label="Store strip">
-          <button type="button" className="btn ghost sm" onClick={rescan}>
-            <Icon name="refresh" className={scanning ? "spin" : ""} />
-            {scanning ? "Scanning…" : "Re-scan"}
-          </button>
-          {user.role === "admin" && (
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() => setRebuildConfirm(true)}
-              title="Drop every projection row and re-project the whole store from files"
-            >
-              <Icon name="memory" className={rebuilding ? "spin" : ""} />
-              {rebuilding ? "Rebuilding…" : "Rebuild projections"}
-            </button>
-          )}
-        </footer>
+        <StoreStrip
+          scanning={scanning}
+          onRescan={rescan}
+          isAdmin={user.role === "admin"}
+          rebuilding={rebuilding}
+          onRebuild={() => setRebuildConfirm(true)}
+        />
       </main>
 
       {rebuildConfirm && (
@@ -1075,36 +1214,32 @@ function RebuildConfirm({
 }) {
   const ref = useDialog(onCancel);
   return (
-    <>
-      {/* Pointer-only redundancy: Escape (useDialog) and the Cancel button are
-          the keyboard/AT paths, so the scrim stays hidden from screen readers. */}
-      <div className="confirm-scrim" onClick={onCancel} aria-hidden="true"></div>
-      <div
-        ref={ref}
-        className="confirm-card"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="rebuild-confirm-title"
-      >
-        <div className="confirm-icon">
-          <Icon name="alert" />
-        </div>
-        <h3 id="rebuild-confirm-title">Rebuild all projections?</h3>
-        <p>
-          Drops every derived board/task row and re-projects the whole store
-          from the files on disk. Canonical task files are never touched.
-          Day-to-day drift only needs Re-scan — rebuild when projections look
-          wrong.
-        </p>
-        <div className="confirm-actions">
-          <button type="button" className="btn ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" className="btn primary" onClick={onConfirm}>
-            Rebuild projections
-          </button>
-        </div>
+    // Native <dialog>; role="alertdialog" kept for the stronger semantics.
+    // Escape + backdrop-click close come from showModal() + useDialog.
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      role="alertdialog"
+      aria-labelledby="rebuild-confirm-title"
+    >
+      <div className="confirm-icon">
+        <Icon name="alert" />
       </div>
-    </>
+      <h3 id="rebuild-confirm-title">Rebuild all projections?</h3>
+      <p>
+        Drops every derived board/task row and re-projects the whole store
+        from the files on disk. Canonical task files are never touched.
+        Day-to-day drift only needs Re-scan — rebuild when projections look
+        wrong.
+      </p>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn primary" onClick={onConfirm}>
+          Rebuild projections
+        </button>
+      </div>
+    </dialog>
   );
 }

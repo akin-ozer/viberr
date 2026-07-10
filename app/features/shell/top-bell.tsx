@@ -72,9 +72,12 @@ export function TopBell({
             aria-hidden="true"
             onClick={() => setOpen(false)}
           />
-          <div
+          {/* Declarative non-modal <dialog open>: native dialog semantics
+              without showModal()'s top-layer centering — the popover stays
+              anchored to the bell via .ntf-pop's absolute positioning. */}
+          <dialog
+            open
             className="ntf-pop"
-            role="dialog"
             aria-label="Notifications"
             data-screen-label="Notifications popover"
           >
@@ -112,7 +115,7 @@ export function TopBell({
                 <Icon name="arrow" />
               </button>
             </div>
-          </div>
+          </dialog>
         </>
       )}
       <button

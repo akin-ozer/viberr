@@ -241,75 +241,123 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
   );
 }
 
-export function TaskDetailPage({
+/** Hero header — task key, title, stage/readiness/validation meta, goal. */
+function TaskHero({
   task,
-  runtime,
-  deployedSpecialists,
-  runActive,
-  timelineHasMore,
-  timelineRemaining,
-  timelineNextLimit,
-  tlDefault,
-  members,
-  me,
-  myRole,
-  mentionables,
-  recommendations,
+  stage,
 }: {
-  /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
-  /** Per-task run projection (Phase 8). */
-  runtime: RunView[];
-  /** Deployed specialists the assign menu offers (loader). */
-  deployedSpecialists: DeployedSpecialistView[];
-  /** A run for this task is currently running — disables the Run button. */
-  runActive: boolean;
-  timelineHasMore: boolean;
-  timelineRemaining: number;
-  timelineNextLimit: number;
-  tlDefault: TimelineFilterId;
-  members: TaskMemberView[];
-  me: { id: string; name: string };
-  myRole: string | null;
-  /** @-mention autocomplete directory for the comment composer (loader). */
-  mentionables: Mentionables;
-  /** Pending operator recommendation cards (loader — from the task file). */
-  recommendations: RecommendationView[];
+  stage: TaskDetail["stages"][number] | undefined;
 }) {
-  const stage = task.stages.find((s) => s.id === task.stage);
-  const [logSel, setLogSel] = useState<string | null>(null);
-  const [releasing, setReleasing] = useState(false);
-  const [ask, setAsk] = useState(0);
-  const csrf = useCsrfToken();
+  return (
+    <div className="task-hero">
+      <span className="key">{task.key}</span>
+      <h1>{task.title}</h1>
+      <div className="hero-meta">
+        <Pill kind="neutral">
+          <span
+            className="col-stage-dot"
+            style={{
+              background: stage?.color,
+              width: ".5rem",
+              height: ".5rem",
+            }}
+          />
+          {stage?.name ?? ""}
+        </Pill>
+        <ReadinessPill value={task.displayReadiness} />
+        <ValidationPill value={task.validation} />
+        <span className="hero-file">
+          <Icon name="file" />
+          <span>{task.filePath}</span>
+        </span>
+      </div>
+      <p className="goal">{task.goal}</p>
+    </div>
+  );
+}
 
-  const ownerFetcher = useFetcher<ActionResult>();
-  const resolveFetcher = useFetcher<ActionResult>();
-  const runFetcher = useFetcher<ActionResult>();
+/** Operator recommendation cards plus their apply/dismiss mutations. */
+function RecommendationsSection({
+  recommendations,
+  canApply,
+}: {
+  recommendations: RecommendationView[];
+  canApply: boolean;
+}) {
+  const csrf = useCsrfToken();
+  const recFetcher = useFetcher<ActionResult>();
+  useActionFeedback(recFetcher);
+  const recBusy = recFetcher.state !== "idle";
+
+  // Apply / dismiss an operator recommendation card (apply is admin|maintainer;
+  // server re-checks). Apply executes the recommended assign/reviewer/transition.
+  const onApplyRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "apply-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
+  };
+  const onDismissRec = (recId: string) => {
+    if (recBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "dismiss-recommendation");
+    fd.set("recId", recId);
+    recFetcher.submit(fd, { method: "post" });
+  };
+
+  return (
+    <OperatorRecommendations
+      recommendations={recommendations}
+      canApply={canApply}
+      busy={recBusy}
+      onApply={onApplyRec}
+      onDismiss={onDismissRec}
+    />
+  );
+}
+
+/** Execution profile plus the specialist / reviewer / operator mutations it drives. */
+function ExecutionSection({
+  task,
+  meId,
+  myRole,
+  members,
+  ownerBusy,
+  onOwner,
+  onRelease,
+  deployedSpecialists,
+  canRunAgents,
+  runActive,
+}: {
+  task: TaskDetail;
+  meId: string;
+  myRole: string | null;
+  members: TaskMemberView[];
+  ownerBusy: boolean;
+  onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
+  onRelease: () => void;
+  deployedSpecialists: DeployedSpecialistView[];
+  canRunAgents: boolean;
+  runActive: boolean;
+}) {
+  const csrf = useCsrfToken();
   const specialistFetcher = useFetcher<ActionResult>();
   const reviewerFetcher = useFetcher<ActionResult>();
   const operatorFetcher = useFetcher<ActionResult>();
-  const recFetcher = useFetcher<ActionResult>();
-  const transitionFetcher = useFetcher<ActionResult>();
-  useActionFeedback(ownerFetcher);
-  useActionFeedback(resolveFetcher);
-  useActionFeedback(runFetcher);
   useActionFeedback(specialistFetcher);
   useActionFeedback(reviewerFetcher);
   useActionFeedback(operatorFetcher);
-  useActionFeedback(recFetcher);
-  useActionFeedback(transitionFetcher);
-  const ownerBusy = ownerFetcher.state !== "idle";
-  const resolveBusy = resolveFetcher.state !== "idle";
-  const runBusy = runFetcher.state !== "idle";
   const specialistBusy = specialistFetcher.state !== "idle";
   const reviewerBusy = reviewerFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
-  const recBusy = recFetcher.state !== "idle";
 
   // Assign a deployed specialist / start a specialist run — admin|maintainer
   // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
   // these affordances when canRunAgents.
-  const canRunAgents = myRole === "admin" || myRole === "maintainer";
   const onAssignSpecialist = (profileId: string) => {
     if (specialistBusy) return;
     const fd = new FormData();
@@ -367,24 +415,53 @@ export function TaskDetailPage({
     operatorFetcher.submit(fd, { method: "post" });
   };
 
-  // Apply / dismiss an operator recommendation card (apply is admin|maintainer;
-  // server re-checks). Apply executes the recommended assign/reviewer/transition.
-  const onApplyRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "apply-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
-  const onDismissRec = (recId: string) => {
-    if (recBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "dismiss-recommendation");
-    fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
-  };
+  return (
+    <ExecutionProfile
+      task={task}
+      meId={meId}
+      myRole={myRole}
+      members={members}
+      busy={ownerBusy}
+      onOwner={onOwner}
+      onRelease={onRelease}
+      deployedSpecialists={deployedSpecialists}
+      canRunAgents={canRunAgents}
+      runActive={runActive}
+      runBusy={specialistBusy}
+      onAssignSpecialist={onAssignSpecialist}
+      onRunSpecialist={onRunSpecialist}
+      reviewerBusy={reviewerBusy}
+      onAssignReviewer={onAssignReviewer}
+      onRunReviewer={onRunReviewer}
+      onRemoveReviewer={onRemoveReviewer}
+      operatorBusy={operatorBusy}
+      onRunOperator={onRunOperator}
+    />
+  );
+}
+
+/** Sidebar "Current state" panel — stage (with governed transition menu),
+ * waiting-on, owner controls, repo. */
+function CurrentStatePanel({
+  task,
+  stage,
+  meId,
+  myRole,
+  ownerBusy,
+  onOwner,
+  onRelease,
+}: {
+  task: TaskDetail;
+  stage: TaskDetail["stages"][number] | undefined;
+  meId: string;
+  myRole: string | null;
+  ownerBusy: boolean;
+  onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
+  onRelease: () => void;
+}) {
+  const csrf = useCsrfToken();
+  const transitionFetcher = useFetcher<ActionResult>();
+  useActionFeedback(transitionFetcher);
 
   // Manual stage change from the Current-state dropdown (admin|maintainer; the
   // server re-checks). Goes through the same governed transition that an applied
@@ -400,6 +477,162 @@ export function TaskDetailPage({
     fd.set("to", toStageId);
     transitionFetcher.submit(fd, { method: "post" });
   };
+
+  const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
+  const ownerMine = !!(owner && owner.userId === meId);
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="bolt" />
+        <h2>Current state</h2>
+      </div>
+      <div className="kv">
+        <div className="kv-row">
+          <span className="k">Stage</span>
+          <span className="v">
+            {canTransition ? (
+              <StageMenu
+                stages={task.stages}
+                currentStageId={task.stage}
+                onSelect={onTransition}
+                busy={transitionBusy}
+                variant="panel"
+              />
+            ) : (
+              <span className="stage-static">
+                <span
+                  className="col-stage-dot"
+                  style={{
+                    background: stage?.color,
+                    width: ".5rem",
+                    height: ".5rem",
+                  }}
+                />
+                {stage?.name ?? ""}
+              </span>
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Waiting on</span>
+          <span className="v">
+            {task.waiting === "human" ? (
+              <span style={{ color: "var(--blue-pressed)" }}>Human decision</span>
+            ) : task.waiting === "agent" ? (
+              <span style={{ color: "var(--agent-dark)" }}>Agent work</span>
+            ) : (
+              "Nothing"
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Owner</span>
+          <span className="v">
+            {owner ? (
+              <span
+                className="rev-stack"
+                title="Human owner — reviews & accepts, this task only"
+              >
+                <Avatar person={owner} />
+                <span className="rs-names">
+                  {owner.name.split(" ")[0]}
+                  {ownerMine ? " (you)" : ""}
+                </span>
+                {(ownerMine || myRole === "admin") && (
+                  <button
+                    type="button"
+                    className="own-x"
+                    title={
+                      ownerMine
+                        ? "Release ownership"
+                        : "Release " + owner.name.split(" ")[0] + " (admin)"
+                    }
+                    aria-label="Release owner"
+                    onClick={onRelease}
+                  >
+                    <Icon name="x" />
+                  </button>
+                )}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="rev-add sm"
+                disabled={ownerBusy}
+                onClick={() => onOwner("take")}
+              >
+                <Icon name="plus" />
+                Assign me
+              </button>
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
+          <span className="k">Repo</span>
+          <span className="v mono">{task.repo}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function TaskDetailPage({
+  task,
+  runtime,
+  deployedSpecialists,
+  runActive,
+  timelineHasMore,
+  timelineRemaining,
+  timelineNextLimit,
+  tlDefault,
+  members,
+  me,
+  myRole,
+  mentionables,
+  recommendations,
+}: {
+  /** Loader detail — `task.timeline` is the bounded newest-first slice. */
+  task: TaskDetail;
+  /** Per-task run projection (Phase 8). */
+  runtime: RunView[];
+  /** Deployed specialists the assign menu offers (loader). */
+  deployedSpecialists: DeployedSpecialistView[];
+  /** A run for this task is currently running — disables the Run button. */
+  runActive: boolean;
+  timelineHasMore: boolean;
+  timelineRemaining: number;
+  timelineNextLimit: number;
+  tlDefault: TimelineFilterId;
+  members: TaskMemberView[];
+  me: { id: string; name: string };
+  myRole: string | null;
+  /** @-mention autocomplete directory for the comment composer (loader). */
+  mentionables: Mentionables;
+  /** Pending operator recommendation cards (loader — from the task file). */
+  recommendations: RecommendationView[];
+}) {
+  const stage = task.stages.find((s) => s.id === task.stage);
+  const [logSel, setLogSel] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
+  const [ask, setAsk] = useState(0);
+  const csrf = useCsrfToken();
+
+  const ownerFetcher = useFetcher<ActionResult>();
+  const resolveFetcher = useFetcher<ActionResult>();
+  const runFetcher = useFetcher<ActionResult>();
+  useActionFeedback(ownerFetcher);
+  useActionFeedback(resolveFetcher);
+  useActionFeedback(runFetcher);
+  const ownerBusy = ownerFetcher.state !== "idle";
+  const resolveBusy = resolveFetcher.state !== "idle";
+  const runBusy = runFetcher.state !== "idle";
+
+  // Agent affordances (assign/run specialist, reviewers, operator, apply
+  // recommendation) are admin|maintainer (contracts §3.2); server re-checks
+  // RBAC. The mutations themselves live in ExecutionSection /
+  // RecommendationsSection below.
+  const canRunAgents = myRole === "admin" || myRole === "maintainer";
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -488,36 +721,10 @@ export function TaskDetailPage({
     resolveFetcher.submit(fd, { method: "post" });
   };
 
-  const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
-  const ownerMine = !!(owner && owner.userId === me.id);
-
   return (
     <div className="detail" data-screen-label={"Task " + task.key}>
       <div className="detail-main">
-        <div className="task-hero">
-          <span className="key">{task.key}</span>
-          <h1>{task.title}</h1>
-          <div className="hero-meta">
-            <Pill kind="neutral">
-              <span
-                className="col-stage-dot"
-                style={{
-                  background: stage?.color,
-                  width: ".5rem",
-                  height: ".5rem",
-                }}
-              />
-              {stage?.name ?? ""}
-            </Pill>
-            <ReadinessPill value={task.displayReadiness} />
-            <ValidationPill value={task.validation} />
-            <span className="hero-file">
-              <Icon name="file" />
-              <span>{task.filePath}</span>
-            </span>
-          </div>
-          <p className="goal">{task.goal}</p>
-        </div>
+        <TaskHero task={task} stage={stage} />
 
         <LiveRunSlot
           runtime={runtime}
@@ -538,34 +745,22 @@ export function TaskDetailPage({
           />
         )}
 
-        <OperatorRecommendations
+        <RecommendationsSection
           recommendations={recommendations}
           canApply={canRunAgents}
-          busy={recBusy}
-          onApply={onApplyRec}
-          onDismiss={onDismissRec}
         />
 
-        <ExecutionProfile
+        <ExecutionSection
           task={task}
           meId={me.id}
           myRole={myRole}
           members={members}
-          busy={ownerBusy}
+          ownerBusy={ownerBusy}
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           canRunAgents={canRunAgents}
           runActive={runActive}
-          runBusy={specialistBusy}
-          onAssignSpecialist={onAssignSpecialist}
-          onRunSpecialist={onRunSpecialist}
-          reviewerBusy={reviewerBusy}
-          onAssignReviewer={onAssignReviewer}
-          onRunReviewer={onRunReviewer}
-          onRemoveReviewer={onRemoveReviewer}
-          operatorBusy={operatorBusy}
-          onRunOperator={onRunOperator}
         />
 
         <AgentLogsSlot
@@ -589,98 +784,15 @@ export function TaskDetailPage({
 
       <div className="detail-side">
         <GithubTrace task={task} />
-        <div className="panel">
-          <div className="panel-head">
-            <Icon name="bolt" />
-            <h2>Current state</h2>
-          </div>
-          <div className="kv">
-            <div className="kv-row">
-              <span className="k">Stage</span>
-              <span className="v">
-                {canTransition ? (
-                  <StageMenu
-                    stages={task.stages}
-                    currentStageId={task.stage}
-                    onSelect={onTransition}
-                    busy={transitionBusy}
-                    variant="panel"
-                  />
-                ) : (
-                  <span className="stage-static">
-                    <span
-                      className="col-stage-dot"
-                      style={{
-                        background: stage?.color,
-                        width: ".5rem",
-                        height: ".5rem",
-                      }}
-                    />
-                    {stage?.name ?? ""}
-                  </span>
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Waiting on</span>
-              <span className="v">
-                {task.waiting === "human" ? (
-                  <span style={{ color: "var(--blue-pressed)" }}>Human decision</span>
-                ) : task.waiting === "agent" ? (
-                  <span style={{ color: "var(--agent-dark)" }}>Agent work</span>
-                ) : (
-                  "Nothing"
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Owner</span>
-              <span className="v">
-                {owner ? (
-                  <span
-                    className="rev-stack"
-                    title="Human owner — reviews & accepts, this task only"
-                  >
-                    <Avatar person={owner} />
-                    <span className="rs-names">
-                      {owner.name.split(" ")[0]}
-                      {ownerMine ? " (you)" : ""}
-                    </span>
-                    {(ownerMine || myRole === "admin") && (
-                      <button
-                        type="button"
-                        className="own-x"
-                        title={
-                          ownerMine
-                            ? "Release ownership"
-                            : "Release " + owner.name.split(" ")[0] + " (admin)"
-                        }
-                        aria-label="Release owner"
-                        onClick={() => setReleasing(true)}
-                      >
-                        <Icon name="x" />
-                      </button>
-                    )}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="rev-add sm"
-                    disabled={ownerBusy}
-                    onClick={() => onOwner("take")}
-                  >
-                    <Icon name="plus" />
-                    Assign me
-                  </button>
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Repo</span>
-              <span className="v mono">{task.repo}</span>
-            </div>
-          </div>
-        </div>
+        <CurrentStatePanel
+          task={task}
+          stage={stage}
+          meId={me.id}
+          myRole={myRole}
+          ownerBusy={ownerBusy}
+          onOwner={onOwner}
+          onRelease={() => setReleasing(true)}
+        />
         <PolicyPanel projectSlug={task.projectSlug} myRole={myRole} />
       </div>
 

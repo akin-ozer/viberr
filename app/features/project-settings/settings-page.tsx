@@ -583,51 +583,48 @@ function DeleteProjectDialog({
   const [confirmName, setConfirmName] = useState("");
   const matches = confirmName.trim() === projectName;
   return (
-    <>
-      {/* Pointer-only light-dismiss; keyboard users get Escape (useDialog)
-          and the Cancel button, so the scrim stays out of the a11y tree. */}
-      <div className="confirm-scrim" aria-hidden="true" onClick={onCancel} />
-      <div
-        className="confirm-card"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Delete project"
-        ref={dialogRef}
-      >
-        <div className="confirm-icon">
-          <Icon name="alert" />
-        </div>
-        <h3>Delete {projectName}?</h3>
-        <p>
-          Removes tasks, timelines, and audit logs. This cannot be undone.
-          Type <strong>{projectName}</strong> to confirm.
-        </p>
-        <div className="field" style={{ marginTop: ".6rem" }}>
-          <input
-            type="text"
-            value={confirmName}
-            autoFocus
-            placeholder={projectName}
-            onChange={(e) => setConfirmName(e.target.value)}
-          />
-        </div>
-        <div className="confirm-actions">
-          <button type="button" className="btn ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn danger"
-            disabled={!matches || busy}
-            style={!matches ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-            onClick={() => onConfirm(confirmName)}
-          >
-            <Icon name="x" />
-            Delete project
-          </button>
-        </div>
+    // Native <dialog>: Escape, backdrop-click light-dismiss, scroll lock, and
+    // focus restore come from useDialog + showModal(); role="alertdialog"
+    // keeps the stronger semantics.
+    <dialog
+      className="confirm-card"
+      role="alertdialog"
+      aria-label="Delete project"
+      ref={dialogRef}
+    >
+      <div className="confirm-icon">
+        <Icon name="alert" />
       </div>
-    </>
+      <h3>Delete {projectName}?</h3>
+      <p>
+        Removes tasks, timelines, and audit logs. This cannot be undone.
+        Type <strong>{projectName}</strong> to confirm.
+      </p>
+      <div className="field" style={{ marginTop: ".6rem" }}>
+        <input
+          type="text"
+          value={confirmName}
+          autoFocus
+          placeholder={projectName}
+          onChange={(e) => setConfirmName(e.target.value)}
+        />
+      </div>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn danger"
+          disabled={!matches || busy}
+          style={!matches ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+          onClick={() => onConfirm(confirmName)}
+        >
+          <Icon name="x" />
+          Delete project
+        </button>
+      </div>
+    </dialog>
   );
 }
 

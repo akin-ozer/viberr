@@ -364,7 +364,7 @@ describe("ReleaseConfirm", () => {
     );
   });
 
-  it("open packet renders the packet-kind row and Escape closes", () => {
+  it("open packet renders the packet-kind row and cancel (Escape) closes", () => {
     const onCancel = vi.fn();
     const task = {
       ...taskFixture("u-arda", "Arda Kaya"),
@@ -388,7 +388,12 @@ describe("ReleaseConfirm", () => {
     expect(container.querySelector(".rel-open")!.textContent).toContain(
       "waiting on the owner",
     );
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Native <dialog>: Escape fires the `cancel` event, which useDialog
+    // intercepts and routes to onCancel.
+    fireEvent(
+      container.querySelector("dialog")!,
+      new Event("cancel", { cancelable: true }),
+    );
     expect(onCancel).toHaveBeenCalled();
   });
 });

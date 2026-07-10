@@ -170,49 +170,45 @@ function DeleteConfirm({
   onConfirm: () => void;
 }) {
   const dialogRef = useDialog(onCancel);
+  // Native <dialog>: backdrop click and Escape dismiss are handled by
+  // useDialog; the ::backdrop pseudo-element renders the scrim.
   return (
-    <>
-      {/* Decorative click-to-dismiss backdrop; keyboard users dismiss via
-          Escape (useDialog) or the Cancel button, so hide it from AT. */}
-      <div className="confirm-scrim" onClick={onCancel} aria-hidden="true" />
-      <div
-        className="confirm-card"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Delete profile"
-        ref={dialogRef}
-      >
-        <div className="confirm-icon">
-          <Icon name="alert" />
-        </div>
-        <h3>Delete the {a.name} profile?</h3>
-        <p>
-          This removes <strong>{a.name}</strong> from {projectName}'s approved
-          profiles. It can't be assigned to new tasks.
-          {activeCount > 0 ? (
-            <>
-              {" "}
-              It is currently engaged on{" "}
-              <strong>
-                {activeCount} active task{activeCount > 1 ? "s" : ""}
-              </strong>{" "}
-              — those threads keep running until the operator reassigns them.
-            </>
-          ) : (
-            <> The global base definition is unaffected.</>
-          )}
-        </p>
-        <div className="confirm-actions">
-          <button type="button" className="btn ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" className="btn danger" onClick={onConfirm}>
-            <Icon name="x" />
-            Delete profile
-          </button>
-        </div>
+    <dialog
+      className="confirm-card"
+      role="alertdialog"
+      aria-label="Delete profile"
+      ref={dialogRef}
+    >
+      <div className="confirm-icon">
+        <Icon name="alert" />
       </div>
-    </>
+      <h3>Delete the {a.name} profile?</h3>
+      <p>
+        This removes <strong>{a.name}</strong> from {projectName}'s approved
+        profiles. It can't be assigned to new tasks.
+        {activeCount > 0 ? (
+          <>
+            {" "}
+            It is currently engaged on{" "}
+            <strong>
+              {activeCount} active task{activeCount > 1 ? "s" : ""}
+            </strong>{" "}
+            — those threads keep running until the operator reassigns them.
+          </>
+        ) : (
+          <> The global base definition is unaffected.</>
+        )}
+      </p>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onConfirm}>
+          <Icon name="x" />
+          Delete profile
+        </button>
+      </div>
+    </dialog>
   );
 }
 

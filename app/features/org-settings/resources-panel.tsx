@@ -579,6 +579,348 @@ function useBusyRow(action: OrgAction): [string | null, (id: string) => void] {
   return [settled ? null : busyId, setBusyId];
 }
 
+function KbPanel({
+  kbs,
+  usedBy,
+  reindexing,
+  onNew,
+  onBrowse,
+  onReindex,
+  onEdit,
+  onDelete,
+}: {
+  kbs: KbView[];
+  usedBy: (id: string, name: string) => number;
+  reindexing: string | null;
+  onNew: () => void;
+  onBrowse: (kb: KbView) => void;
+  onReindex: (kb: KbView) => void;
+  onEdit: (kb: KbView) => void;
+  onDelete: (kb: KbView) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Icon name="memory" />
+        <h2>Knowledge bases</h2>
+        <span className="right">
+          <button type="button" className="btn sm" onClick={onNew}>
+            <Icon name="plus" />
+            New
+          </button>
+        </span>
+      </div>
+      <div className="rsrc-list">
+        {kbs.map((kb) => (
+          <div className="rsrc-row" key={kb.id}>
+            <span className="rsrc-main">
+              <b>
+                <button type="button" className="linkish" onClick={() => onBrowse(kb)}>
+                  {kb.name}
+                </button>
+              </b>
+              <span className="sub mono">
+                store://kb/{kb.dir}/ · {kb.fileCount} docs
+              </span>
+              <span className="sub">
+                re-index {kb.refresh} · indexed {rel(kb.lastIndexedAt)}
+                {usedBy(kb.id, kb.name) > 0
+                  ? " · " + usedBy(kb.id, kb.name) + " profiles"
+                  : ""}
+              </span>
+            </span>
+            <span className="rsrc-acts">
+              <button
+                type="button"
+                className="stg-x"
+                title="Browse files"
+                aria-label={"Browse files in " + kb.name}
+                onClick={() => onBrowse(kb)}
+              >
+                <FolderIco />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Re-index now"
+                aria-label={"Re-index " + kb.name}
+                onClick={() => onReindex(kb)}
+              >
+                <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Edit"
+                aria-label={"Edit " + kb.name}
+                onClick={() => onEdit(kb)}
+              >
+                <EditIco />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Delete"
+                aria-label={"Delete " + kb.name}
+                onClick={() => onDelete(kb)}
+              >
+                <Icon name="x" />
+              </button>
+            </span>
+          </div>
+        ))}
+        {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
+      </div>
+    </section>
+  );
+}
+
+function McpPanel({
+  mcps,
+  testing,
+  onNew,
+  onTest,
+  onEdit,
+  onDelete,
+}: {
+  mcps: McpView[];
+  testing: string | null;
+  onNew: () => void;
+  onTest: (m: McpView) => void;
+  onEdit: (m: McpView) => void;
+  onDelete: (m: McpView) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Icon name="cpu" />
+        <h2>MCP servers</h2>
+        <span className="right">
+          <button type="button" className="btn sm" onClick={onNew}>
+            <Icon name="plus" />
+            Add
+          </button>
+        </span>
+      </div>
+      <div className="rsrc-list">
+        {mcps.map((m) => (
+          <div className="rsrc-row" key={m.id}>
+            <span
+              className={"stat-dot" + (m.up === true ? " up" : m.up === false ? " down" : "")}
+              title={m.up === true ? "connected" : m.up === false ? "unreachable" : "not health-checked"}
+            ></span>
+            <span className="rsrc-main">
+              <b className="mono-b">{m.name}</b>
+              <span className="sub mono">
+                {m.transport} · {m.target}
+              </span>
+              <span className="sub">
+                {m.up === true
+                  ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
+                    "checked " + rel(m.lastCheckedAt)
+                  : m.up === false
+                    ? "unreachable · checked " + rel(m.lastCheckedAt)
+                    : "not health-checked yet"}
+                {m.cred ? " · auth: " + m.cred : ""}
+              </span>
+            </span>
+            <span className="rsrc-acts">
+              <button
+                type="button"
+                className="stg-x"
+                title="Test connection"
+                aria-label={"Test " + m.name}
+                onClick={() => onTest(m)}
+              >
+                <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Edit"
+                aria-label={"Edit " + m.name}
+                onClick={() => onEdit(m)}
+              >
+                <EditIco />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Remove"
+                aria-label={"Remove " + m.name}
+                onClick={() => onDelete(m)}
+              >
+                <Icon name="x" />
+              </button>
+            </span>
+          </div>
+        ))}
+        {mcps.length === 0 && <div className="empty">No MCP servers yet.</div>}
+      </div>
+    </section>
+  );
+}
+
+function SkillPanel({
+  skills,
+  usedBy,
+  onNew,
+  onBrowse,
+  onEdit,
+  onDelete,
+}: {
+  skills: SkillView[];
+  usedBy: (id: string, name: string) => number;
+  onNew: () => void;
+  onBrowse: (s: SkillView) => void;
+  onEdit: (s: SkillView) => void;
+  onDelete: (s: SkillView) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Icon name="bolt" />
+        <h2>Skills</h2>
+        <span className="right">
+          <button type="button" className="btn sm" onClick={onNew}>
+            <Icon name="plus" />
+            New
+          </button>
+        </span>
+      </div>
+      <div className="rsrc-list">
+        {skills.map((s) => (
+          <div className="rsrc-row" key={s.id}>
+            <span className="rsrc-main">
+              <b className="mono-b">
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => onBrowse(s)}
+                >
+                  {s.name}
+                </button>
+              </b>
+              <span className="sub">{s.summary}</span>
+              <span className="sub mono">
+                store://skills/{s.name}/ · {s.fileCount} file
+                {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
+                {usedBy(s.id, s.name) > 0
+                  ? " · " + usedBy(s.id, s.name) + " profiles"
+                  : ""}
+              </span>
+            </span>
+            <span className="rsrc-acts">
+              <button
+                type="button"
+                className="stg-x"
+                title="Browse files"
+                aria-label={"Browse files in " + s.name}
+                onClick={() => onBrowse(s)}
+              >
+                <FolderIco />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Edit"
+                aria-label={"Edit " + s.name}
+                onClick={() => onEdit(s)}
+              >
+                <EditIco />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Delete"
+                aria-label={"Delete " + s.name}
+                onClick={() => onDelete(s)}
+              >
+                <Icon name="x" />
+              </button>
+            </span>
+          </div>
+        ))}
+        {skills.length === 0 && <div className="empty">No skills yet.</div>}
+      </div>
+    </section>
+  );
+}
+
+function AgentPanel({
+  gagents,
+  stages,
+  onNew,
+  onEdit,
+  onDelete,
+}: {
+  gagents: GagentView[];
+  stages: StageDef[];
+  onNew: () => void;
+  onEdit: (a: GagentView) => void;
+  onDelete: (a: GagentView) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Icon name="agents" />
+        <h2>Global agent profiles</h2>
+        <span className="right">
+          <button type="button" className="btn sm" onClick={onNew}>
+            <Icon name="plus" />
+            New
+          </button>
+        </span>
+      </div>
+      <div className="rsrc-list">
+        {gagents.map((a) => {
+          const res = a.skills.length + a.mcps.length + a.kbs.length;
+          const stageNames = a.stages
+            .map((id) => stages.find((s) => s.id === id)?.name || id)
+            .join(" · ");
+          return (
+            <div className="rsrc-row" key={a.id}>
+              <AgentGlyph backend={a.backend} />
+              <span className="rsrc-main">
+                <b>{a.name}</b>
+                <span className="sub">{a.summary}</span>
+                <span className="sub mono">
+                  {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
+                  {stageNames || "no stages"} · {res} context resources ·{" "}
+                  {a.used > 0
+                    ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
+                    : "not deployed"}
+                </span>
+              </span>
+              <span className="rsrc-acts">
+                <button
+                  type="button"
+                  className="stg-x"
+                  title="Edit"
+                  aria-label={"Edit " + a.name}
+                  onClick={() => onEdit(a)}
+                >
+                  <EditIco />
+                </button>
+                <button
+                  type="button"
+                  className="stg-x"
+                  title="Delete"
+                  aria-label={"Delete " + a.name}
+                  onClick={() => onDelete(a)}
+                >
+                  <Icon name="x" />
+                </button>
+              </span>
+            </div>
+          );
+        })}
+        {gagents.length === 0 && <div className="empty">No global agent profiles yet.</div>}
+      </div>
+    </section>
+  );
+}
+
 export function ResourcesPanel({
   kbs,
   mcps,
@@ -622,288 +964,57 @@ export function ResourcesPanel({
   return (
     <div className="rsrc-wrap" data-screen-label="Settings — Agent resources">
       <div className="rsrc-grid">
-        <section className="panel">
-          <div className="panel-head">
-            <Icon name="memory" />
-            <h2>Knowledge bases</h2>
-            <span className="right">
-              <button type="button" className="btn sm" onClick={() => setModal({ kind: "kb", item: null })}>
-                <Icon name="plus" />
-                New
-              </button>
-            </span>
-          </div>
-          <div className="rsrc-list">
-            {kbs.map((kb) => (
-              <div className="rsrc-row" key={kb.id}>
-                <span className="rsrc-main">
-                  <b>
-                    <button type="button" className="linkish" onClick={() => setBrowsing({ kind: "kb", id: kb.id })}>
-                      {kb.name}
-                    </button>
-                  </b>
-                  <span className="sub mono">
-                    store://kb/{kb.dir}/ · {kb.fileCount} docs
-                  </span>
-                  <span className="sub">
-                    re-index {kb.refresh} · indexed {rel(kb.lastIndexedAt)}
-                    {usedBy("kbs", kb.id, kb.name) > 0
-                      ? " · " + usedBy("kbs", kb.id, kb.name) + " profiles"
-                      : ""}
-                  </span>
-                </span>
-                <span className="rsrc-acts">
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Browse files"
-                    aria-label={"Browse files in " + kb.name}
-                    onClick={() => setBrowsing({ kind: "kb", id: kb.id })}
-                  >
-                    <FolderIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Re-index now"
-                    aria-label={"Re-index " + kb.name}
-                    onClick={() => {
-                      setReindexing(kb.id);
-                      reindexAction.submit({ intent: "kb-reindex", kbId: kb.id });
-                    }}
-                  >
-                    <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Edit"
-                    aria-label={"Edit " + kb.name}
-                    onClick={() => setModal({ kind: "kb", item: kb })}
-                  >
-                    <EditIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Delete"
-                    aria-label={"Delete " + kb.name}
-                    onClick={() => setConfirm({ kind: "kb", item: kb })}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </span>
-              </div>
-            ))}
-            {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
-          </div>
-        </section>
+        <KbPanel
+          kbs={kbs}
+          usedBy={(id, name) => usedBy("kbs", id, name)}
+          reindexing={reindexing}
+          onNew={() => setModal({ kind: "kb", item: null })}
+          onBrowse={(kb) => setBrowsing({ kind: "kb", id: kb.id })}
+          onReindex={(kb) => {
+            setReindexing(kb.id);
+            reindexAction.submit({ intent: "kb-reindex", kbId: kb.id });
+          }}
+          onEdit={(kb) => setModal({ kind: "kb", item: kb })}
+          onDelete={(kb) => setConfirm({ kind: "kb", item: kb })}
+        />
 
-        <section className="panel">
-          <div className="panel-head">
-            <Icon name="cpu" />
-            <h2>MCP servers</h2>
-            <span className="right">
-              <button type="button" className="btn sm" onClick={() => setModal({ kind: "mcp", item: null })}>
-                <Icon name="plus" />
-                Add
-              </button>
-            </span>
-          </div>
-          <div className="rsrc-list">
-            {mcps.map((m) => (
-              <div className="rsrc-row" key={m.id}>
-                <span
-                  className={"stat-dot" + (m.up === true ? " up" : m.up === false ? " down" : "")}
-                  title={m.up === true ? "connected" : m.up === false ? "unreachable" : "not health-checked"}
-                ></span>
-                <span className="rsrc-main">
-                  <b className="mono-b">{m.name}</b>
-                  <span className="sub mono">
-                    {m.transport} · {m.target}
-                  </span>
-                  <span className="sub">
-                    {m.up === true
-                      ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
-                        "checked " + rel(m.lastCheckedAt)
-                      : m.up === false
-                        ? "unreachable · checked " + rel(m.lastCheckedAt)
-                        : "not health-checked yet"}
-                    {m.cred ? " · auth: " + m.cred : ""}
-                  </span>
-                </span>
-                <span className="rsrc-acts">
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Test connection"
-                    aria-label={"Test " + m.name}
-                    onClick={() => {
-                      setTesting(m.id);
-                      testAction.submit({ intent: "mcp-test", mcpId: m.id });
-                    }}
-                  >
-                    <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Edit"
-                    aria-label={"Edit " + m.name}
-                    onClick={() => setModal({ kind: "mcp", item: m })}
-                  >
-                    <EditIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Remove"
-                    aria-label={"Remove " + m.name}
-                    onClick={() => setConfirm({ kind: "mcp", item: m })}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </span>
-              </div>
-            ))}
-            {mcps.length === 0 && <div className="empty">No MCP servers yet.</div>}
-          </div>
-        </section>
+        <McpPanel
+          mcps={mcps}
+          testing={testing}
+          onNew={() => setModal({ kind: "mcp", item: null })}
+          onTest={(m) => {
+            setTesting(m.id);
+            testAction.submit({ intent: "mcp-test", mcpId: m.id });
+          }}
+          onEdit={(m) => setModal({ kind: "mcp", item: m })}
+          onDelete={(m) => setConfirm({ kind: "mcp", item: m })}
+        />
 
-        <section className="panel">
-          <div className="panel-head">
-            <Icon name="bolt" />
-            <h2>Skills</h2>
-            <span className="right">
-              <button type="button" className="btn sm" onClick={() => setModal({ kind: "skill", item: null })}>
-                <Icon name="plus" />
-                New
-              </button>
-            </span>
-          </div>
-          <div className="rsrc-list">
-            {skills.map((s) => (
-              <div className="rsrc-row" key={s.id}>
-                <span className="rsrc-main">
-                  <b className="mono-b">
-                    <button
-                      type="button"
-                      className="linkish"
-                      onClick={() => setBrowsing({ kind: "skill", id: s.id })}
-                    >
-                      {s.name}
-                    </button>
-                  </b>
-                  <span className="sub">{s.summary}</span>
-                  <span className="sub mono">
-                    store://skills/{s.name}/ · {s.fileCount} file
-                    {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
-                    {usedBy("skills", s.id, s.name) > 0
-                      ? " · " + usedBy("skills", s.id, s.name) + " profiles"
-                      : ""}
-                  </span>
-                </span>
-                <span className="rsrc-acts">
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Browse files"
-                    aria-label={"Browse files in " + s.name}
-                    onClick={() => setBrowsing({ kind: "skill", id: s.id })}
-                  >
-                    <FolderIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Edit"
-                    aria-label={"Edit " + s.name}
-                    onClick={() => setModal({ kind: "skill", item: s })}
-                  >
-                    <EditIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="stg-x"
-                    title="Delete"
-                    aria-label={"Delete " + s.name}
-                    onClick={() => setConfirm({ kind: "skill", item: s })}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </span>
-              </div>
-            ))}
-            {skills.length === 0 && <div className="empty">No skills yet.</div>}
-          </div>
-        </section>
+        <SkillPanel
+          skills={skills}
+          usedBy={(id, name) => usedBy("skills", id, name)}
+          onNew={() => setModal({ kind: "skill", item: null })}
+          onBrowse={(s) => setBrowsing({ kind: "skill", id: s.id })}
+          onEdit={(s) => setModal({ kind: "skill", item: s })}
+          onDelete={(s) => setConfirm({ kind: "skill", item: s })}
+        />
 
-        <section className="panel">
-          <div className="panel-head">
-            <Icon name="agents" />
-            <h2>Global agent profiles</h2>
-            <span className="right">
-              <button type="button" className="btn sm" onClick={() => setModal({ kind: "agent", item: null })}>
-                <Icon name="plus" />
-                New
-              </button>
-            </span>
-          </div>
-          <div className="rsrc-list">
-            {gagents.map((a) => {
-              const res = a.skills.length + a.mcps.length + a.kbs.length;
-              const stageNames = a.stages
-                .map((id) => stages.find((s) => s.id === id)?.name || id)
-                .join(" · ");
-              return (
-                <div className="rsrc-row" key={a.id}>
-                  <AgentGlyph backend={a.backend} />
-                  <span className="rsrc-main">
-                    <b>{a.name}</b>
-                    <span className="sub">{a.summary}</span>
-                    <span className="sub mono">
-                      {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
-                      {stageNames || "no stages"} · {res} context resources ·{" "}
-                      {a.used > 0
-                        ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
-                        : "not deployed"}
-                    </span>
-                  </span>
-                  <span className="rsrc-acts">
-                    <button
-                      type="button"
-                      className="stg-x"
-                      title="Edit"
-                      aria-label={"Edit " + a.name}
-                      onClick={() => setModal({ kind: "agent", item: a })}
-                    >
-                      <EditIco />
-                    </button>
-                    <button
-                      type="button"
-                      className="stg-x"
-                      title="Delete"
-                      aria-label={"Delete " + a.name}
-                      onClick={() => {
-                        if (a.used > 0) {
-                          push(
-                            "Detach " + a.name + " from its " + a.used + " project" +
-                              (a.used === 1 ? "" : "s") + " first",
-                          );
-                          return;
-                        }
-                        setConfirm({ kind: "agent", item: a });
-                      }}
-                    >
-                      <Icon name="x" />
-                    </button>
-                  </span>
-                </div>
+        <AgentPanel
+          gagents={gagents}
+          stages={stages}
+          onNew={() => setModal({ kind: "agent", item: null })}
+          onEdit={(a) => setModal({ kind: "agent", item: a })}
+          onDelete={(a) => {
+            if (a.used > 0) {
+              push(
+                "Detach " + a.name + " from its " + a.used + " project" +
+                  (a.used === 1 ? "" : "s") + " first",
               );
-            })}
-            {gagents.length === 0 && <div className="empty">No global agent profiles yet.</div>}
-          </div>
-        </section>
+              return;
+            }
+            setConfirm({ kind: "agent", item: a });
+          }}
+        />
       </div>
       <div className="def-note" style={{ marginTop: ".8rem" }}>
         <Icon name="shield" />

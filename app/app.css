@@ -1240,6 +1240,12 @@ h1, h2, h3, h4 {
 
 /* delete confirmation */
 .confirm-scrim { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--fg), transparent 70%); animation: rise .14s ease; }
+/* Native <dialog> cards: element-level reset (loses to any card class) so the
+   UA styles — inset:0, margin:auto, border, padding, background, max-w/h,
+   fit-content sizing — never fight the card classes' own box. The scrim look
+   moves from the old `.confirm-scrim` div to the top-layer ::backdrop. */
+dialog { margin: 0; padding: 0; border: 0; background: none; color: inherit; inset: auto; width: auto; height: auto; max-width: none; max-height: none; }
+dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); animation: rise .14s ease; }
 .confirm-card {
   position: fixed; z-index: 61;
   top: 50%; left: 50%;
@@ -1926,6 +1932,7 @@ h1, h2, h3, h4 {
 :root[data-theme="dark"] .pill.done { color: #74e8b8; }
 :root[data-theme="dark"] .tl-node.completion { color: #74e8b8; }
 :root[data-theme="dark"] .confirm-scrim { background: rgba(5, 6, 10, .65); }
+:root[data-theme="dark"] dialog::backdrop { background: rgba(5, 6, 10, .65); }
 :root[data-theme="dark"] .btn.primary:hover { background: #4a5fe0; border-color: #4a5fe0; }
 :root[data-theme="dark"] .agent-glyph.codex { background: #2b2450; }
 :root[data-theme="dark"] .agent-glyph.claude { background: #40261a; color: #ffb98a; border-color: rgba(255, 185, 138, .35); }

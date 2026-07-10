@@ -410,126 +410,119 @@ function NewTaskModal({
   };
 
   return (
-    <>
-      {/* Pointer-only shortcut — Escape (useDialog) and the Close button are
-          the accessible paths, so the scrim stays out of the a11y tree. */}
-      <div className="confirm-scrim" onClick={onClose} aria-hidden="true" />
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="New task"
-        style={{ width: "min(560px, calc(100vw - 2rem))" }}
-        ref={panelRef}
-      >
-        <div className="modal-head">
-          <span className="agent-glyph lg">
-            <Icon name="plus" />
-          </span>
-          <div className="mh-main">
-            <h2>New task</h2>
-            <div className="mh-sub">
-              Creates a canonical task file in the store — agents anchor on it
-              from the first event.
-            </div>
+    <dialog
+      className="modal-card"
+      aria-label="New task"
+      style={{ width: "min(560px, calc(100vw - 2rem))" }}
+      ref={panelRef}
+    >
+      <div className="modal-head">
+        <span className="agent-glyph lg">
+          <Icon name="plus" />
+        </span>
+        <div className="mh-main">
+          <h2>New task</h2>
+          <div className="mh-sub">
+            Creates a canonical task file in the store — agents anchor on it
+            from the first event.
           </div>
-          <button
-            type="button"
-            className="icon-btn modal-close"
-            onClick={onClose}
-            aria-label="Close"
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body">
+        <div className="field">
+          <label className="flabel" htmlFor="new-task-title">
+            Title<span className="req">*</span>
+          </label>
+          <input
+            id="new-task-title"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Reconcile PR state after force-push"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
+          />
+        </div>
+        <div className="field">
+          {/* A chip-button group has no labelable control for htmlFor, so the
+              name is attached via role=group (span.flabel per home-page.tsx). */}
+          <span className="flabel" id="new-task-stage-label">
+            Stage
+          </span>
+          <div
+            className="pick-chips"
+            role="group"
+            aria-labelledby="new-task-stage-label"
           >
-            <Icon name="x" />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="field">
-            <label className="flabel" htmlFor="new-task-title">
-              Title<span className="req">*</span>
-            </label>
-            <input
-              id="new-task-title"
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Reconcile PR state after force-push"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-              }}
-            />
+            {stages.map((s) => (
+              <button
+                type="button"
+                key={s.id}
+                className={"pick-chip" + (stg === s.id ? " on" : "")}
+                onClick={() => setStg(s.id)}
+              >
+                <span
+                  className="sdot"
+                  style={stg === s.id ? { background: s.color } : undefined}
+                />
+                {s.name}
+              </button>
+            ))}
           </div>
-          <div className="field">
-            {/* A chip-button group has no labelable control for htmlFor, so the
-                name is attached via role=group (span.flabel per home-page.tsx). */}
-            <span className="flabel" id="new-task-stage-label">
-              Stage
+        </div>
+        <div className="field">
+          <label className="flabel" htmlFor="new-task-goal">
+            Goal
+            <span className="fhint">
+              what done means — the operator and specialists anchor on this
             </span>
-            <div
-              className="pick-chips"
-              role="group"
-              aria-labelledby="new-task-stage-label"
-            >
-              {stages.map((s) => (
-                <button
-                  type="button"
-                  key={s.id}
-                  className={"pick-chip" + (stg === s.id ? " on" : "")}
-                  onClick={() => setStg(s.id)}
-                >
-                  <span
-                    className="sdot"
-                    style={stg === s.id ? { background: s.color } : undefined}
-                  />
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="new-task-goal">
-              Goal
-              <span className="fhint">
-                what done means — the operator and specialists anchor on this
-              </span>
-            </label>
-            <textarea
-              id="new-task-goal"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="One or two sentences. Underspecified goals get flagged at the triage quality gate."
-            />
-          </div>
-        </div>
-        <div className="modal-foot">
-          <span className={"foot-hint" + (valid && !serverError ? "" : " err")}>
-            {serverError
-              ? serverError
-              : valid
-                ? "The task key is assigned on create."
-                : "A title is required."}
-          </span>
-          <div className="foot-actions">
-            <button type="button" className="btn ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={submit}
-              disabled={!valid || busy}
-              style={
-                !valid ? { opacity: 0.5, pointerEvents: "none" } : undefined
-              }
-              aria-busy={busy}
-            >
-              <Icon name="plus" />
-              Create task
-            </button>
-          </div>
+          </label>
+          <textarea
+            id="new-task-goal"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="One or two sentences. Underspecified goals get flagged at the triage quality gate."
+          />
         </div>
       </div>
-    </>
+      <div className="modal-foot">
+        <span className={"foot-hint" + (valid && !serverError ? "" : " err")}>
+          {serverError
+            ? serverError
+            : valid
+              ? "The task key is assigned on create."
+              : "A title is required."}
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={submit}
+            disabled={!valid || busy}
+            style={
+              !valid ? { opacity: 0.5, pointerEvents: "none" } : undefined
+            }
+            aria-busy={busy}
+          >
+            <Icon name="plus" />
+            Create task
+          </button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 

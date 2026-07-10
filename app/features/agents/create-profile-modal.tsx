@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
 import { Icon } from "~/ui/icon";
@@ -14,6 +14,7 @@ import {
   RES_CATALOG,
   RES_DEFAULTS,
   type CapMode,
+  type ModalCapGroup,
   type ResCatalogGroup,
   type ResourceSelection,
 } from "./capability-catalog";
@@ -104,6 +105,515 @@ function seedCaps(
     if (grant.capabilityId in caps) caps[grant.capabilityId] = grant.mode;
   }
   return caps;
+}
+
+function ModalHead({
+  editing,
+  initialName,
+  onClose,
+}: {
+  editing: boolean;
+  initialName: string | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-head">
+      <span className="agent-glyph lg">
+        <Icon name="agents" />
+      </span>
+      <div className="mh-main">
+        <h2>{editing ? "Edit " + initialName : "New specialist profile"}</h2>
+        <div className="mh-sub">
+          {editing
+            ? "Update this profile — changes apply to future assignments."
+            : "A reusable agent the operator can assign to tasks."}
+        </div>
+      </div>
+      <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+        <Icon name="x" />
+      </button>
+    </div>
+  );
+}
+
+function IdentityFields({
+  uid,
+  name,
+  setName,
+  role,
+  setRole,
+}: {
+  uid: string;
+  name: string;
+  setName: (v: string) => void;
+  role: string;
+  setRole: (v: string) => void;
+}) {
+  return (
+    <div className="field-row">
+      <div className="field">
+        <label className="flabel" htmlFor={`${uid}-name`}>
+          Name<span className="req">*</span>
+        </label>
+        <input
+          id={`${uid}-name`}
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Migrations"
+          autoFocus
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor={`${uid}-role`}>
+          Role<span className="req">*</span>
+        </label>
+        <input
+          id={`${uid}-role`}
+          type="text"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          placeholder="e.g. Schema changes"
+        />
+      </div>
+    </div>
+  );
+}
+
+function BackendField({
+  backend,
+  setBackend,
+}: {
+  backend: "codex" | "claude" | "";
+  setBackend: (v: "codex" | "claude") => void;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel">
+        Execution backend<span className="req">*</span>
+        <span className="fhint">pick exactly one</span>
+      </label>
+      <div className="pick-chips">
+        {BACKENDS.map((b) => (
+          <button
+            type="button"
+            key={b.id}
+            className={"pick-chip" + (backend === b.id ? " on" : "")}
+            onClick={() => setBackend(b.id)}
+          >
+            <AgentGlyph backend={b.id} />
+            {b.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AutonomyField({
+  autonomy,
+  setAutonomy,
+}: {
+  autonomy: "supervised" | "full";
+  setAutonomy: (v: "supervised" | "full") => void;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel">
+        Default autonomy
+        <span className="fhint">
+          supervised recommends at governed boundaries · full performs
+          them and may accept completion to Done
+        </span>
+      </label>
+      <div className="pick-chips">
+        {(
+          [
+            { id: "supervised", label: "Supervised" },
+            { id: "full", label: "Full autonomy" },
+          ] as const
+        ).map((a) => (
+          <button
+            type="button"
+            key={a.id}
+            className={"pick-chip" + (autonomy === a.id ? " on" : "")}
+            onClick={() => setAutonomy(a.id)}
+          >
+            <Icon name={a.id === "full" ? "bolt" : "shield"} />
+            {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModelEffortFields({
+  uid,
+  backend,
+  model,
+  setModel,
+  effort,
+  setEffort,
+  catalog,
+  catalogLoading,
+  selectedModel,
+  showEffort,
+  effortOptions,
+}: {
+  uid: string;
+  backend: "codex" | "claude" | "";
+  model: string;
+  setModel: (v: string) => void;
+  effort: string;
+  setEffort: (v: string) => void;
+  catalog: ModelCatalog | null;
+  catalogLoading: boolean;
+  selectedModel: CatalogModel | null;
+  showEffort: boolean;
+  effortOptions: string[];
+}) {
+  return (
+    <div className="field-row">
+      <div className="field">
+        <label className="flabel" htmlFor={`${uid}-model`}>
+          Model
+          <span className="fhint">
+            {catalogLoading
+              ? "loading available models…"
+              : "the model this profile runs on"}
+          </span>
+        </label>
+        <select
+          id={`${uid}-model`}
+          aria-label="Model"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          disabled={!backend || catalogLoading}
+          style={selectStyle}
+        >
+          {!backend && <option value="">Pick a backend first</option>}
+          {/* Preserve a seeded value that is not in the catalog. */}
+          {backend &&
+            model &&
+            catalog &&
+            !catalog.models.some((m) => m.value === model) && (
+              <option value={model}>{model}</option>
+            )}
+          {(catalog?.models ?? []).map((m) => (
+            <option key={m.value} value={m.value} title={m.description}>
+              {m.displayName}
+            </option>
+          ))}
+        </select>
+        {selectedModel?.description && (
+          <span className="fhint" style={{ marginLeft: 0 }}>
+            {selectedModel.description}
+          </span>
+        )}
+      </div>
+      {showEffort && (
+        <div className="field">
+          <label className="flabel" htmlFor={`${uid}-effort`}>
+            Effort
+            <span className="fhint">reasoning level per turn</span>
+          </label>
+          <select
+            id={`${uid}-effort`}
+            aria-label="Effort"
+            value={effort}
+            onChange={(e) => setEffort(e.target.value)}
+            disabled={!backend || catalogLoading}
+            style={selectStyle}
+          >
+            {!backend && <option value="">—</option>}
+            {effort && !effortOptions.includes(effort) && (
+              <option value={effort}>{effortLabel(effort)}</option>
+            )}
+            {effortOptions.map((e) => (
+              <option key={e} value={e}>
+                {effortLabel(e)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StagesField({
+  stages,
+  stg,
+  toggleStage,
+}: {
+  stages: { id: string; name: string; color: string }[];
+  stg: string[];
+  toggleStage: (id: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel">
+        Eligible stages<span className="req">*</span>
+        <span className="fhint">stages this profile may work in</span>
+      </label>
+      <div className="pick-chips">
+        {stages.map((s) => (
+          <button
+            type="button"
+            key={s.id}
+            className={"pick-chip" + (stg.includes(s.id) ? " on" : "")}
+            onClick={() => toggleStage(s.id)}
+          >
+            <span
+              className="sdot"
+              style={stg.includes(s.id) ? { background: s.color } : undefined}
+            />
+            {s.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DefinitionField({
+  uid,
+  definition,
+  setDefinition,
+}: {
+  uid: string;
+  definition: string;
+  setDefinition: (v: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel" htmlFor={`${uid}-definition`}>
+        Definition
+        <span className="fhint">
+          what this agent is for, in your words — markdown ok
+        </span>
+      </label>
+      <textarea
+        id={`${uid}-definition`}
+        value={definition}
+        onChange={(e) => setDefinition(e.target.value)}
+        style={{ minHeight: "96px" }}
+        placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
+      />
+    </div>
+  );
+}
+
+function CapabilityGrants({
+  capCatalog,
+  caps,
+  setCaps,
+  openGroups,
+  setOpenGroups,
+}: {
+  capCatalog: readonly ModalCapGroup[];
+  caps: Record<string, CapMode>;
+  setCaps: Dispatch<SetStateAction<Record<string, CapMode>>>;
+  openGroups: Record<string, boolean>;
+  setOpenGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel">
+        Capability policy
+        <span className="fhint">
+          how each action is enforced — adjust the defaults
+        </span>
+      </label>
+      <div className="cap-matrix">
+        {capCatalog.map((g) => {
+          const open = !!openGroups[g.group];
+          const c = { direct: 0, recommend: 0, human: 0, off: 0 };
+          g.caps.forEach((x) => {
+            c[caps[x.id] ?? "off"] += 1;
+          });
+          return (
+            <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              <button
+                type="button"
+                className={"cap-mghead" + (open ? " open" : "")}
+                onClick={() =>
+                  setOpenGroups((p) => ({ ...p, [g.group]: !p[g.group] }))
+                }
+              >
+                <Icon name="chevron" className="cap-chev" />
+                <span className="cap-mglabel">{g.group}</span>
+                <span className="cap-msum">
+                  {c.direct > 0 && (
+                    <span className="cs">
+                      <span className="d" style={{ background: "var(--teal-dark)" }} />
+                      {c.direct}
+                    </span>
+                  )}
+                  {c.recommend > 0 && (
+                    <span className="cs">
+                      <span className="d" style={{ background: "var(--blue)" }} />
+                      {c.recommend}
+                    </span>
+                  )}
+                  {c.human > 0 && (
+                    <span className="cs">
+                      <span className="d" style={{ background: "var(--coral-dark)" }} />
+                      {c.human}
+                    </span>
+                  )}
+                  {c.off > 0 && (
+                    <span className="cs">
+                      <span className="d" style={{ background: "var(--placeholder)" }} />
+                      {c.off}
+                    </span>
+                  )}
+                </span>
+              </button>
+              {open && (
+                <div className="cap-mbody">
+                  {g.caps.map((capDef) => (
+                    <div className="cap-mrow" key={capDef.id}>
+                      <span className="cap-mname">{capDef.label}</span>
+                      <div className="cap-seg">
+                        {CAP_MODES.map((m) => (
+                          <button
+                            type="button"
+                            key={m.id}
+                            className={
+                              m.id + (caps[capDef.id] === m.id ? " on" : "")
+                            }
+                            onClick={() =>
+                              setCaps((p) => ({ ...p, [capDef.id]: m.id }))
+                            }
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ResourcePicker({
+  resCatalog,
+  res,
+  toggleRes,
+  openRes,
+  setOpenRes,
+}: {
+  resCatalog: readonly ResCatalogGroup[];
+  res: ResourceSelection;
+  toggleRes: (key: keyof ResourceSelection, item: string) => void;
+  openRes: Record<string, boolean>;
+  setOpenRes: Dispatch<SetStateAction<Record<string, boolean>>>;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel">
+        Context resources
+        <span className="fhint">
+          skills, MCP servers, knowledge bases this profile may load
+        </span>
+      </label>
+      <div className="cap-matrix">
+        {resCatalog.map((g) => {
+          const open = !!openRes[g.group];
+          const sel = res[g.key];
+          const selSet = new Set(sel);
+          return (
+            <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
+              <button
+                type="button"
+                className={"cap-mghead" + (open ? " open" : "")}
+                onClick={() =>
+                  setOpenRes((p) => ({ ...p, [g.group]: !p[g.group] }))
+                }
+              >
+                <Icon name="chevron" className="cap-chev" />
+                <span className="cap-mglabel">{g.group}</span>
+                <span className="cap-msum">
+                  <span className="cs">
+                    <span className="d" style={{ background: "var(--blue)" }} />
+                    {sel.length} of {g.items.length}
+                  </span>
+                </span>
+              </button>
+              {open && (
+                <div className="cap-mbody">
+                  <div className="pick-chips">
+                    {g.items.map((it) => (
+                      <button
+                        type="button"
+                        key={it.id}
+                        className={
+                          "pick-chip" +
+                          (g.mono ? " mono" : "") +
+                          (selSet.has(it.id) ? " on" : "")
+                        }
+                        onClick={() => toggleRes(g.key, it.id)}
+                      >
+                        {selSet.has(it.id) && <Icon name="check" />}
+                        {it.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ModalFooter({
+  hint,
+  valid,
+  error,
+  busy,
+  editing,
+  onClose,
+  onSubmitClick,
+}: {
+  hint: string;
+  valid: boolean;
+  error: string | null;
+  busy: boolean;
+  editing: boolean;
+  onClose: () => void;
+  onSubmitClick: () => void;
+}) {
+  return (
+    <div className="modal-foot">
+      <span className={"foot-hint" + (valid && !error ? "" : " err")}>{hint}</span>
+      <div className="foot-actions">
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={onSubmitClick}
+          disabled={!valid || busy}
+          style={!valid ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+        >
+          <Icon name="check" />
+          {editing ? "Save changes" : "Create profile"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function CreateProfileModal({
@@ -249,378 +759,78 @@ export function CreateProfileModal({
       : "Name, role, one execution backend, and at least one stage are required.";
 
   return (
-    <>
-      {/* Pointer-only close affordance — keyboard users have Escape (useDialog)
-          and the Close button, so the scrim is hidden from assistive tech. */}
-      <div className="confirm-scrim" onClick={onClose} aria-hidden="true" />
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={editing ? "Edit profile" : "New specialist profile"}
-        ref={dialogRef}
-      >
-        <div className="modal-head">
-          <span className="agent-glyph lg">
-            <Icon name="agents" />
-          </span>
-          <div className="mh-main">
-            <h2>{editing ? "Edit " + initial.name : "New specialist profile"}</h2>
-            <div className="mh-sub">
-              {editing
-                ? "Update this profile — changes apply to future assignments."
-                : "A reusable agent the operator can assign to tasks."}
-            </div>
-          </div>
-          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
-            <Icon name="x" />
-          </button>
-        </div>
+    // Native <dialog> — Escape, backdrop-click close, focus trap/restore and
+    // the ::backdrop scrim all come from showModal() + useDialog.
+    <dialog
+      className="modal-card"
+      aria-label={editing ? "Edit profile" : "New specialist profile"}
+      ref={dialogRef}
+    >
+      <ModalHead editing={editing} initialName={initial?.name} onClose={onClose} />
 
-        <div className="modal-body">
-          <div className="field-row">
-            <div className="field">
-              <label className="flabel" htmlFor={`${uid}-name`}>
-                Name<span className="req">*</span>
-              </label>
-              <input
-                id={`${uid}-name`}
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Migrations"
-                autoFocus
-              />
-            </div>
-            <div className="field">
-              <label className="flabel" htmlFor={`${uid}-role`}>
-                Role<span className="req">*</span>
-              </label>
-              <input
-                id={`${uid}-role`}
-                type="text"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                placeholder="e.g. Schema changes"
-              />
-            </div>
-          </div>
+      <div className="modal-body">
+        <IdentityFields
+          uid={uid}
+          name={name}
+          setName={setName}
+          role={role}
+          setRole={setRole}
+        />
 
-          <div className="field">
-            <label className="flabel">
-              Execution backend<span className="req">*</span>
-              <span className="fhint">pick exactly one</span>
-            </label>
-            <div className="pick-chips">
-              {BACKENDS.map((b) => (
-                <button
-                  type="button"
-                  key={b.id}
-                  className={"pick-chip" + (backend === b.id ? " on" : "")}
-                  onClick={() => setBackend(b.id)}
-                >
-                  <AgentGlyph backend={b.id} />
-                  {b.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        <BackendField backend={backend} setBackend={setBackend} />
 
-          {isOperator && (
-            <div className="field">
-              <label className="flabel">
-                Default autonomy
-                <span className="fhint">
-                  supervised recommends at governed boundaries · full performs
-                  them and may accept completion to Done
-                </span>
-              </label>
-              <div className="pick-chips">
-                {(
-                  [
-                    { id: "supervised", label: "Supervised" },
-                    { id: "full", label: "Full autonomy" },
-                  ] as const
-                ).map((a) => (
-                  <button
-                    type="button"
-                    key={a.id}
-                    className={"pick-chip" + (autonomy === a.id ? " on" : "")}
-                    onClick={() => setAutonomy(a.id)}
-                  >
-                    <Icon name={a.id === "full" ? "bolt" : "shield"} />
-                    {a.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+        {isOperator && (
+          <AutonomyField autonomy={autonomy} setAutonomy={setAutonomy} />
+        )}
 
-          <div className="field-row">
-            <div className="field">
-              <label className="flabel" htmlFor={`${uid}-model`}>
-                Model
-                <span className="fhint">
-                  {catalogLoading
-                    ? "loading available models…"
-                    : "the model this profile runs on"}
-                </span>
-              </label>
-              <select
-                id={`${uid}-model`}
-                aria-label="Model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                disabled={!backend || catalogLoading}
-                style={selectStyle}
-              >
-                {!backend && <option value="">Pick a backend first</option>}
-                {/* Preserve a seeded value that is not in the catalog. */}
-                {backend &&
-                  model &&
-                  catalog &&
-                  !catalog.models.some((m) => m.value === model) && (
-                    <option value={model}>{model}</option>
-                  )}
-                {(catalog?.models ?? []).map((m) => (
-                  <option key={m.value} value={m.value} title={m.description}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-              {selectedModel?.description && (
-                <span className="fhint" style={{ marginLeft: 0 }}>
-                  {selectedModel.description}
-                </span>
-              )}
-            </div>
-            {showEffort && (
-              <div className="field">
-                <label className="flabel" htmlFor={`${uid}-effort`}>
-                  Effort
-                  <span className="fhint">reasoning level per turn</span>
-                </label>
-                <select
-                  id={`${uid}-effort`}
-                  aria-label="Effort"
-                  value={effort}
-                  onChange={(e) => setEffort(e.target.value)}
-                  disabled={!backend || catalogLoading}
-                  style={selectStyle}
-                >
-                  {!backend && <option value="">—</option>}
-                  {effort && !effortOptions.includes(effort) && (
-                    <option value={effort}>{effortLabel(effort)}</option>
-                  )}
-                  {effortOptions.map((e) => (
-                    <option key={e} value={e}>
-                      {effortLabel(e)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+        <ModelEffortFields
+          uid={uid}
+          backend={backend}
+          model={model}
+          setModel={setModel}
+          effort={effort}
+          setEffort={setEffort}
+          catalog={catalog}
+          catalogLoading={catalogLoading}
+          selectedModel={selectedModel}
+          showEffort={showEffort}
+          effortOptions={effortOptions}
+        />
 
-          <div className="field">
-            <label className="flabel">
-              Eligible stages<span className="req">*</span>
-              <span className="fhint">stages this profile may work in</span>
-            </label>
-            <div className="pick-chips">
-              {stages.map((s) => (
-                <button
-                  type="button"
-                  key={s.id}
-                  className={"pick-chip" + (stg.includes(s.id) ? " on" : "")}
-                  onClick={() => toggleStage(s.id)}
-                >
-                  <span
-                    className="sdot"
-                    style={stg.includes(s.id) ? { background: s.color } : undefined}
-                  />
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          </div>
+        <StagesField stages={stages} stg={stg} toggleStage={toggleStage} />
 
-          <div className="field">
-            <label className="flabel" htmlFor={`${uid}-definition`}>
-              Definition
-              <span className="fhint">
-                what this agent is for, in your words — markdown ok
-              </span>
-            </label>
-            <textarea
-              id={`${uid}-definition`}
-              value={definition}
-              onChange={(e) => setDefinition(e.target.value)}
-              style={{ minHeight: "96px" }}
-              placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
-            />
-          </div>
+        <DefinitionField
+          uid={uid}
+          definition={definition}
+          setDefinition={setDefinition}
+        />
 
-          <div className="field">
-            <label className="flabel">
-              Capability policy
-              <span className="fhint">
-                how each action is enforced — adjust the defaults
-              </span>
-            </label>
-            <div className="cap-matrix">
-              {capCatalog.map((g) => {
-                const open = !!openGroups[g.group];
-                const c = { direct: 0, recommend: 0, human: 0, off: 0 };
-                g.caps.forEach((x) => {
-                  c[caps[x.id] ?? "off"] += 1;
-                });
-                return (
-                  <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
-                    <button
-                      type="button"
-                      className={"cap-mghead" + (open ? " open" : "")}
-                      onClick={() =>
-                        setOpenGroups((p) => ({ ...p, [g.group]: !p[g.group] }))
-                      }
-                    >
-                      <Icon name="chevron" className="cap-chev" />
-                      <span className="cap-mglabel">{g.group}</span>
-                      <span className="cap-msum">
-                        {c.direct > 0 && (
-                          <span className="cs">
-                            <span className="d" style={{ background: "var(--teal-dark)" }} />
-                            {c.direct}
-                          </span>
-                        )}
-                        {c.recommend > 0 && (
-                          <span className="cs">
-                            <span className="d" style={{ background: "var(--blue)" }} />
-                            {c.recommend}
-                          </span>
-                        )}
-                        {c.human > 0 && (
-                          <span className="cs">
-                            <span className="d" style={{ background: "var(--coral-dark)" }} />
-                            {c.human}
-                          </span>
-                        )}
-                        {c.off > 0 && (
-                          <span className="cs">
-                            <span className="d" style={{ background: "var(--placeholder)" }} />
-                            {c.off}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                    {open && (
-                      <div className="cap-mbody">
-                        {g.caps.map((capDef) => (
-                          <div className="cap-mrow" key={capDef.id}>
-                            <span className="cap-mname">{capDef.label}</span>
-                            <div className="cap-seg">
-                              {CAP_MODES.map((m) => (
-                                <button
-                                  type="button"
-                                  key={m.id}
-                                  className={
-                                    m.id + (caps[capDef.id] === m.id ? " on" : "")
-                                  }
-                                  onClick={() =>
-                                    setCaps((p) => ({ ...p, [capDef.id]: m.id }))
-                                  }
-                                >
-                                  {m.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        <CapabilityGrants
+          capCatalog={capCatalog}
+          caps={caps}
+          setCaps={setCaps}
+          openGroups={openGroups}
+          setOpenGroups={setOpenGroups}
+        />
 
-          <div className="field">
-            <label className="flabel">
-              Context resources
-              <span className="fhint">
-                skills, MCP servers, knowledge bases this profile may load
-              </span>
-            </label>
-            <div className="cap-matrix">
-              {resCatalog.map((g) => {
-                const open = !!openRes[g.group];
-                const sel = res[g.key];
-                const selSet = new Set(sel);
-                return (
-                  <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
-                    <button
-                      type="button"
-                      className={"cap-mghead" + (open ? " open" : "")}
-                      onClick={() =>
-                        setOpenRes((p) => ({ ...p, [g.group]: !p[g.group] }))
-                      }
-                    >
-                      <Icon name="chevron" className="cap-chev" />
-                      <span className="cap-mglabel">{g.group}</span>
-                      <span className="cap-msum">
-                        <span className="cs">
-                          <span className="d" style={{ background: "var(--blue)" }} />
-                          {sel.length} of {g.items.length}
-                        </span>
-                      </span>
-                    </button>
-                    {open && (
-                      <div className="cap-mbody">
-                        <div className="pick-chips">
-                          {g.items.map((it) => (
-                            <button
-                              type="button"
-                              key={it.id}
-                              className={
-                                "pick-chip" +
-                                (g.mono ? " mono" : "") +
-                                (selSet.has(it.id) ? " on" : "")
-                              }
-                              onClick={() => toggleRes(g.key, it.id)}
-                            >
-                              {selSet.has(it.id) && <Icon name="check" />}
-                              {it.id}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="modal-foot">
-          <span className={"foot-hint" + (valid && !error ? "" : " err")}>{hint}</span>
-          <div className="foot-actions">
-            <button type="button" className="btn ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={submit}
-              disabled={!valid || busy}
-              style={!valid ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-            >
-              <Icon name="check" />
-              {editing ? "Save changes" : "Create profile"}
-            </button>
-          </div>
-        </div>
+        <ResourcePicker
+          resCatalog={resCatalog}
+          res={res}
+          toggleRes={toggleRes}
+          openRes={openRes}
+          setOpenRes={setOpenRes}
+        />
       </div>
-    </>
+
+      <ModalFooter
+        hint={hint}
+        valid={valid}
+        error={error}
+        busy={busy}
+        editing={editing}
+        onClose={onClose}
+        onSubmitClick={submit}
+      />
+    </dialog>
   );
 }

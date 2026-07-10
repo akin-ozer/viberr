@@ -296,7 +296,12 @@ describe("CapabilityMatrixModal", () => {
     expect(container.querySelectorAll(".mx-cell.human").length).toBeGreaterThan(0);
     expect(container.querySelectorAll(".mx-cell.off").length).toBeGreaterThan(0);
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Escape on a native modal <dialog> fires the `cancel` event, which
+    // useDialog turns into onClose.
+    fireEvent(
+      container.querySelector("dialog")!,
+      new Event("cancel", { bubbles: false, cancelable: true }),
+    );
     expect(onClose).toHaveBeenCalled();
   });
 });

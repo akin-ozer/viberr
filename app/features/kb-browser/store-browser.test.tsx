@@ -9,8 +9,8 @@ import type { StoreNode } from "./tree";
 /**
  * jsdom smokes for the StoreBrowser popup: tree rendering (dirs first,
  * top-level expanded), toolbar, inline new-folder flow, layered delete
- * confirm (Escape closes the TOPMOST layer only), GitHub bar validation,
- * and the intents posted to the org-settings action.
+ * confirm (native <dialog> `cancel` closes the TOPMOST layer only),
+ * GitHub bar validation, and the intents posted to the org-settings action.
  */
 
 afterEach(cleanup);
@@ -110,8 +110,13 @@ describe("StoreBrowser", () => {
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
 
-    // Escape: confirm closes, the browser itself stays open.
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Escape on the topmost native <dialog> (the nested confirm) fires its
+    // `cancel` event, which useDialog turns into onCancel — the confirm
+    // closes, the browser itself stays open.
+    fireEvent(
+      document.querySelector("dialog.confirm-card")!,
+      new Event("cancel", { bubbles: false, cancelable: true }),
+    );
     await waitFor(() => expect(queryByRole("alertdialog")).toBeNull());
     expect(closed).toBe(0);
 
@@ -126,8 +131,11 @@ describe("StoreBrowser", () => {
       }),
     );
 
-    // Escape with no layers → the browser closes.
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Escape with no layers → `cancel` lands on the browser card → closes.
+    fireEvent(
+      document.querySelector("dialog.modal-wide")!,
+      new Event("cancel", { bubbles: false, cancelable: true }),
+    );
     expect(closed).toBe(1);
   });
 
