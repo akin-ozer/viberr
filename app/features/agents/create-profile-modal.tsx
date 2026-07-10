@@ -14,6 +14,7 @@ import {
   RES_CATALOG,
   RES_DEFAULTS,
   type CapMode,
+  type ResCatalogGroup,
   type ResourceSelection,
 } from "./capability-catalog";
 
@@ -113,6 +114,7 @@ export function CreateProfileModal({
   error,
   onClose,
   onSubmit,
+  resourceCatalog,
 }: {
   /** Edit mode when set. */
   initial: AgentProfileView | null;
@@ -123,6 +125,9 @@ export function CreateProfileModal({
   error: string | null;
   onClose: () => void;
   onSubmit: (payload: ProfileFormPayload) => void;
+  /** Live store resources for the context-resource picker. Falls back to the
+   *  built-in defaults when omitted (e.g. in isolated component tests). */
+  resourceCatalog?: readonly ResCatalogGroup[];
 }) {
   const editing = initial !== null;
   const isOperator = initial?.kind === "operator";
@@ -164,8 +169,10 @@ export function CreateProfileModal({
           kb: [...RES_DEFAULTS.kb],
         },
   );
+  // Live store resources drive the picker; fall back to the built-in defaults.
+  const resCatalog = resourceCatalog ?? RES_CATALOG;
   const [openRes, setOpenRes] = useState<Record<string, boolean>>({
-    [RES_CATALOG[0]!.group]: true,
+    [(resCatalog[0] ?? RES_CATALOG[0]!).group]: true,
   });
 
   const toggleStage = (id: string) =>
@@ -545,7 +552,7 @@ export function CreateProfileModal({
               </span>
             </label>
             <div className="cap-matrix">
-              {RES_CATALOG.map((g) => {
+              {resCatalog.map((g) => {
                 const open = !!openRes[g.group];
                 const sel = res[g.key];
                 const selSet = new Set(sel);

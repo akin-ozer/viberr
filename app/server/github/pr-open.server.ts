@@ -1,0 +1,253 @@
+import type Database from "better-sqlite3";
+import type { AuditActor } from "~/server/audit/audit-recorder.server";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  appendTimelineEvent,
+  patchTaskFrontmatter,
+  readTaskFile,
+  resolveTaskFilePath,
+} from "~/server/files/task-writer.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { getEnv } from "~/server/config/env.server";
+import { taskBranchName } from "./branch-sync.server";
+import {
+  getProjectGithubContext,
+  type GithubContextFailure,
+} from "./github-context.server";
+import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
+
+/**
+ * Compose the review PR body from the task contract (FR31/FR32). This is the
+ * governed hand-off the PRD promises: a reviewer opening the PR on GitHub can
+ * see the task's goal, a change summary, evidence, and — critically — a link
+ * back to the canonical Viberr task, so task ↔ branch ↔ PR stays traceable
+ * without asking. Pure + exported so its exact contents are unit-tested.
+ */
+export function composePrBody(input: {
+  taskKey: string;
+  title: string;
+  goal: string;
+  taskUrl: string;
+  changeSummary?: string | null;
+  evidence?: string[] | null;
+}): string {
+  const lines: string[] = [];
+  lines.push(`**Viberr task:** [${input.taskKey} — ${input.title}](${input.taskUrl})`);
+  lines.push("");
+  lines.push("## Goal");
+  lines.push(input.goal.trim() || "_No goal recorded on the task._");
+  if (input.changeSummary && input.changeSummary.trim()) {
+    lines.push("");
+    lines.push("## Change summary");
+    lines.push(input.changeSummary.trim());
+  }
+  if (input.evidence && input.evidence.length > 0) {
+    lines.push("");
+    lines.push("## Evidence");
+    for (const e of input.evidence) lines.push(`- ${e}`);
+  }
+  lines.push("");
+  lines.push(
+    `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR._`,
+  );
+  return lines.join("\n");
+}
+
+/** Absolute Viberr URL for a task, from BETTER_AUTH_URL when configured. */
+export function taskUrl(
+  projectSlug: string,
+  taskKey: string,
+  appOrigin?: string,
+): string {
+  const origin = (appOrigin ?? getEnv().BETTER_AUTH_URL ?? "").replace(/\/+$/, "");
+  const path = `/projects/${projectSlug}/tasks/${taskKey}`;
+  return origin ? `${origin}${path}` : path;
+}
+
+export interface OpenTaskPrContext {
+  dataRoot?: string;
+  fetchImpl?: typeof fetch;
+  /** App origin for the task back-link when BETTER_AUTH_URL is unset (dev). */
+  appOrigin?: string;
+}
+
+export type OpenTaskPrResult =
+  | {
+      status: "ok";
+      prNumber: number;
+      /** True when this call CREATED the PR; false when an open PR was reused. */
+      created: boolean;
+      url: string;
+    }
+  | GithubContextFailure
+  | { status: "task_not_found" }
+  | { status: "no_branch" }
+  | { status: "scope_violation"; scope: string; violationId: string }
+  | { status: "auth_failed"; message: string }
+  | { status: "network_unavailable"; message: string };
+
+interface GhPull {
+  number: number;
+  html_url: string;
+  title: string;
+  state: string;
+}
+
+/**
+ * Open (or reuse) the review pull request for a task's execution branch
+ * (FR31). Idempotent: if an open PR already exists for `head`, it is adopted
+ * rather than duplicated (NFR16). Writes `frontmatter.pr` from the real GitHub
+ * response, appends a `github` timeline event, and audits. A 403 opens a
+ * `pull_request:write` scope violation carried by the task (NFR14) instead of
+ * throwing. Never fabricates a PR: on any non-ok GitHub result the task's `pr`
+ * cache is left untouched.
+ */
+export async function openTaskPr(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor & { userId?: string },
+  ctx: OpenTaskPrContext = {},
+): Promise<OpenTaskPrResult> {
+  const ref = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  };
+  const file = readTaskFile(ref);
+  if (!file) return { status: "task_not_found" };
+  const fm = file.parsed.frontmatter;
+
+  const gh = getProjectGithubContext(db, input.projectSlug, {
+    repoOverride: fm.repo,
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
+  if (gh.status !== "ok") return gh;
+
+  const branch = fm.branch ?? taskBranchName(input.taskKey, fm.title);
+  if (!branch) return { status: "no_branch" };
+
+  const owner = gh.repo.split("/")[0] ?? "";
+
+  // 1. Idempotency: reuse an existing open PR for this head branch.
+  const existing = await gh.client.request<GhPull[]>(
+    "GET",
+    `/repos/${gh.repo}/pulls`,
+    { searchParams: { head: `${owner}:${branch}`, state: "open", per_page: 1 } },
+  );
+  if (existing.ok && existing.data.length > 0) {
+    const pr = existing.data[0]!;
+    await writePrToTask(db, ref, input, gh, pr, actor, false, ctx);
+    return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
+  }
+  if (!existing.ok && existing.kind === "network") {
+    return { status: "network_unavailable", message: existing.message };
+  }
+  if (!existing.ok && existing.kind === "http" && existing.status === 401) {
+    return { status: "auth_failed", message: existing.message };
+  }
+
+  // 2. Create the PR.
+  const body = composePrBody({
+    taskKey: input.taskKey,
+    title: fm.title,
+    goal: file.parsed.goal,
+    taskUrl: taskUrl(input.projectSlug, input.taskKey, ctx.appOrigin),
+    changeSummary: fm.github?.changed
+      ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
+      : null,
+  });
+  const created = await gh.client.request<GhPull>("POST", `/repos/${gh.repo}/pulls`, {
+    body: {
+      title: `[${input.taskKey}] ${fm.title}`,
+      head: branch,
+      base: gh.defaultBranch,
+      body,
+    },
+  });
+
+  if (created.ok) {
+    await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx);
+    return {
+      status: "ok",
+      prNumber: created.data.number,
+      created: true,
+      url: created.data.html_url,
+    };
+  }
+  if (created.kind === "network") {
+    return { status: "network_unavailable", message: created.message };
+  }
+  if (created.kind === "http" && created.status === 401) {
+    return { status: "auth_failed", message: created.message };
+  }
+  if (created.kind === "http" && created.status === 403) {
+    const { violation } = await flagScopeViolation(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        scope: "pull_request:write",
+        detail: policyViolationText(
+          "pull_request:write",
+          "opening the review pull request",
+        ),
+        ...(actor ? { actor } : {}),
+      },
+      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    );
+    return {
+      status: "scope_violation",
+      scope: "pull_request:write",
+      violationId: violation.id,
+    };
+  }
+  return {
+    status: "network_unavailable",
+    message: created.kind === "http" ? created.message : "unknown",
+  };
+}
+
+async function writePrToTask(
+  db: Database.Database,
+  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+  input: { projectSlug: string; taskKey: string },
+  gh: { repo: string },
+  pr: GhPull,
+  actor: AuditActor & { userId?: string },
+  created: boolean,
+  ctx: OpenTaskPrContext,
+): Promise<void> {
+  await patchTaskFrontmatter(ref, {
+    pr: { number: pr.number, state: pr.state || "open", title: pr.title },
+  });
+  if (created) {
+    const nameHint = actor.userId
+      ? ((db.prepare(`SELECT name FROM users WHERE id = ?`).get(actor.userId) as
+          | { name: string }
+          | undefined)?.name ?? null)
+      : null;
+    await appendTimelineEvent(ref, {
+      occurredAt: new Date().toISOString(),
+      type: "github",
+      actor: actor.userId
+        ? { kind: "human", userId: actor.userId, nameHint }
+        : { kind: "agent", backend: "claude", role: "Implementation" },
+      title: null,
+      text: `Opened **PR #${pr.number}** for review.`,
+      toAgent: false,
+      evidence: null,
+    });
+  }
+  rebuildPath(db, resolveTaskFilePath(ref), {
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  recordAudit(db, {
+    action: "github.pr.opened",
+    actor,
+    subjectKind: "pull_request",
+    subjectId: `${gh.repo}#${pr.number}`,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { repo: gh.repo, prNumber: pr.number, created },
+  });
+}

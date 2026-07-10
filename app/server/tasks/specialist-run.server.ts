@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
@@ -19,6 +19,7 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   agentProfilesDir,
+  kbDirPath,
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -44,6 +45,7 @@ import {
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
+import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -98,6 +100,10 @@ export interface ResolvedSpecialist {
   effort: string;
   /** The agent's declared skills — loaded into its run persona at run time. */
   skills: string[];
+  /** The agent's declared knowledge bases — docs injected into its run context. */
+  kb: string[];
+  /** The agent's declared MCP servers — wired into a Claude run's mcpServers. */
+  mcps: string[];
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
   capabilities: CapabilityGrant[];
@@ -123,8 +129,19 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     model: resolveRunModel(backend, view.model),
     effort: view.effort || "",
     skills: view.resources.skills,
+    kb: view.resources.kb ?? [],
+    mcps: view.resources.mcps ?? [],
     capabilities: [],
   };
+}
+
+/** Resolve declared MCP names to a Claude `mcpServers` option, or `{}`. */
+function mcpServersFor(
+  db: Database.Database,
+  names: string[],
+): { mcpServers?: Record<string, unknown> } {
+  const servers = resolveSpecialistMcpServers(db, names);
+  return Object.keys(servers).length ? { mcpServers: servers } : {};
 }
 
 /**
@@ -472,6 +489,8 @@ export async function startSpecialistRun(
   // Falls back to the profile id when the deployment can't be resolved.
   let agentName = sp.profileId;
   let skills: string[] = [];
+  let kb: string[] = [];
+  let mcpNames: string[] = [];
   // Run-time tool confinement from the deployment's capability grants (a
   // specialist without push/PR/merge rights literally cannot run those
   // commands). Empty when nothing is withheld.
@@ -482,18 +501,22 @@ export async function startSpecialistRun(
     effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
+    kb = resolved.kb;
+    mcpNames = resolved.mcps;
     disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
 
-  // The agent's run persona: its detailed definition + declared skills. This is
-  // what makes the specialist behave as itself (the Developer implements + tests
-  // + reports back) rather than a generic analyzer. Claude takes it as a system
-  // prompt; Codex has no system-prompt channel, so it is folded into the prompt.
+  // The agent's run persona: its detailed definition + declared skills + KB docs.
+  // This is what makes the specialist behave as itself (the Developer implements
+  // + tests + reports back) rather than a generic analyzer. Claude takes it as a
+  // system prompt; Codex has no system-prompt channel, so it is folded into the
+  // prompt.
   const persona = buildSpecialistPersona({
     profileId: sp.profileId,
     skills,
+    kb,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
@@ -557,6 +580,9 @@ export async function startSpecialistRun(
     script,
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
+    // Wire the profile's declared MCP servers into the run (item-1/FR9): a
+    // profile that declares an org MCP now actually gets it (Claude only).
+    ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -644,6 +670,8 @@ export async function startReviewerRun(
   let effort = "";
   let agentName = rev.profileId;
   let skills: string[] = [];
+  let kb: string[] = [];
+  let mcpNames: string[] = [];
   let disallowedTools: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
@@ -651,6 +679,8 @@ export async function startReviewerRun(
     effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
+    kb = resolved.kb;
+    mcpNames = resolved.mcps;
     disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
@@ -659,6 +689,7 @@ export async function startReviewerRun(
   const persona = buildSpecialistPersona({
     profileId: rev.profileId,
     skills,
+    kb,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
@@ -714,6 +745,7 @@ export async function startReviewerRun(
     script,
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
+    ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
     ...(clone ? { workdir: clone } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -811,6 +843,7 @@ function readSkillBody(name: string, dataRoot?: string): string {
 export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
+  kb?: string[];
   dataRoot?: string;
 }): string {
   const parts: string[] = [];
@@ -820,7 +853,39 @@ export function buildSpecialistPersona(input: {
     const body = readSkillBody(name, input.dataRoot);
     if (body) parts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
   }
+  // Inject declared knowledge-base docs (F6, FR9): the KB leg was decorative for
+  // specialists — no run received KB content. Load each declared KB folder that
+  // exists in the store, same as skills.
+  for (const name of input.kb ?? []) {
+    const body = readKbBody(name, input.dataRoot);
+    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+  }
   return parts.join("");
+}
+
+/** Read a knowledge base's docs from the store (every `.md` under
+ *  `data/kb/<dir>/`), bounded so a large KB can't blow the context window.
+ *  Returns "" when the folder is absent. */
+function readKbBody(name: string, dataRoot?: string): string {
+  try {
+    const dir = kbDirPath(name, dataRoot);
+    if (!existsSync(dir)) return "";
+    const docs: string[] = [];
+    let budget = 24_000;
+    for (const entry of readdirSync(dir).sort()) {
+      if (!entry.endsWith(".md") || budget <= 0) continue;
+      try {
+        const slice = readFileSync(path.join(dir, entry), "utf8").trim().slice(0, budget);
+        budget -= slice.length;
+        docs.push(`### ${entry}\n\n${slice}`);
+      } catch {
+        // unreadable doc — skip
+      }
+    }
+    return docs.join("\n\n");
+  } catch {
+    return "";
+  }
 }
 
 /**

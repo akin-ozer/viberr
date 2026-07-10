@@ -29,6 +29,8 @@ import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { ActorRender } from "~/shared/mapping/actor.server";
+import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
 
@@ -165,6 +167,96 @@ function loadProjectContext(
 
 function stageName(project: ProjectContext, stageId: string): string {
   return project.stages.find((s) => s.id === stageId)?.name ?? stageId;
+}
+
+/** The review stage id — the one with a governed edge into the final stage. */
+function reviewStageIdOf(project: ProjectContext): string | null {
+  const lastStageId = project.stages[project.stages.length - 1]?.id;
+  return project.workflow.find((w) => w.to === lastStageId)?.from ?? null;
+}
+
+/**
+ * Route-level project-membership guard. Use in loaders/actions of project-scoped
+ * config surfaces (policy / agents / settings / github) and instance-wide
+ * triggers reached from a project (board rescan). Throws 404 for an unknown
+ * project and 403 when the actor isn't a member (or lacks the required role).
+ * Returns the actor's role. Reads the canonical project.md fresh every call
+ * (no session caching), consistent with every other governed mutation.
+ */
+export function requireProjectRole(
+  projectSlug: string,
+  actor: TaskActor,
+  allowed: ProjectRole[] | "any-member",
+  what: string,
+  ctx: TaskMutationContext = {},
+): ProjectRole {
+  return requireMemberRole(loadProjectContext(ctx, projectSlug), actor, allowed, what);
+}
+
+/** The operator's canonical notification actor. */
+const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operator" };
+
+export interface TaskWatcherNotice {
+  projectSlug: string;
+  taskKey: string;
+  kind: NotificationKind;
+  ptype?: "input" | "blocked" | null;
+  title?: string | null;
+  text: string;
+  from?: ActorRender | null;
+  occurredAt?: string;
+  /** Skip this user (e.g. the human who triggered the event). */
+  exceptUserId?: string;
+}
+
+/**
+ * Fan a governance event out to the humans who supervise a task: its owner (if
+ * any) plus the project's admins and maintainers — the people entitled to act
+ * on it. This is what turns a waiting-on-human task into a real "Waiting on you"
+ * inbox item + bell increment, instead of a state a supervisor must discover by
+ * scanning the board (FR26, Journey 2, and the "blocked tasks reach a human
+ * decision quickly" success metric). Recipients are deduped and the triggering
+ * user is skipped. Returns the notified user ids. Never throws on a missing
+ * task/project — a notification failure must not fail the governed mutation.
+ */
+export function notifyTaskWatchers(
+  db: Database.Database,
+  notice: TaskWatcherNotice,
+  ctx: TaskMutationContext = {},
+): string[] {
+  let recipients: Set<string>;
+  try {
+    const project = loadProjectContext(ctx, notice.projectSlug);
+    recipients = new Set(
+      [...project.memberRoles.entries()]
+        .filter(([, role]) => role === "admin" || role === "maintainer")
+        .map(([userId]) => userId),
+    );
+    const owner = readTaskFile(
+      taskRef(ctx, notice.projectSlug, notice.taskKey),
+    )?.parsed.frontmatter.ownerUserId;
+    if (owner) recipients.add(owner);
+  } catch {
+    return [];
+  }
+  if (notice.exceptUserId) recipients.delete(notice.exceptUserId);
+
+  const notified: string[] = [];
+  for (const userId of recipients) {
+    createNotification(db, {
+      userId,
+      kind: notice.kind,
+      ptype: notice.ptype ?? null,
+      title: notice.title ?? null,
+      text: notice.text,
+      from: notice.from ?? OPERATOR_NOTIFY_FROM,
+      projectSlug: notice.projectSlug,
+      taskKey: notice.taskKey,
+      ...(notice.occurredAt ? { occurredAt: notice.occurredAt } : {}),
+    });
+    notified.push(userId);
+  }
+  return notified;
 }
 
 function requireMemberRole(
@@ -376,6 +468,21 @@ async function autoInvokeOperator(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+}
+
+/**
+ * Re-invoke the operator to react after a boot-recovered agent reply (NFR17,
+ * B9). A thin wrapper over autoInvokeOperator so the run-recovery reconciler can
+ * restart the coordination chain without importing the private helper. Uses the
+ * `transition` coordination trigger (a fresh react chain, reactDepth 0).
+ */
+export async function autoInvokeOperatorForRecovery(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  await autoInvokeOperator(db, ctx, projectSlug, taskKey, "transition");
 }
 
 // ------------------------------------------------------------ appendComment
@@ -803,7 +910,7 @@ function projectRepoFor(
  * never propagated (the run already finished; the transcript is in the logs).
  * When the run produced no usable text, we skip posting a comment.
  */
-function postAgentReplyComment(
+export function postAgentReplyComment(
   db: Database.Database,
   ctx: TaskMutationContext,
   input: {
@@ -821,12 +928,26 @@ function postAgentReplyComment(
     });
     return Promise.resolve();
   }
+  // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
+  // fabricated (canned "done: implemented…" text with no real work). Mark it as
+  // such in the canonical timeline — the run row already carries simulated=1, but
+  // the timeline is the source of truth agents and humans re-anchor on, and an
+  // unmarked fabricated "tests pass" is exactly the theater the PRD warns about.
+  const simulated =
+    (
+      db
+        .prepare(`SELECT simulated FROM agent_runs WHERE id = ?`)
+        .get(input.runId) as { simulated: number } | undefined
+    )?.simulated === 1;
+  const replyText = simulated
+    ? `_(simulated run — no real repository work was performed)_\n\n${input.replyText}`
+    : input.replyText;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
     actor: input.actorRef,
     title: null,
-    text: input.replyText,
+    text: replyText,
     toAgent: false,
     evidence: null,
   };
@@ -943,6 +1064,167 @@ function latestAgentReplyText(
   return null;
 }
 
+/**
+ * Deterministic stuck-loop escalation (E1): the react guard stopped the
+ * prompt↔react chain (no-progress repeat or depth cap), so raise a BLOCKED
+ * recovery packet with concrete options instead of leaving a silent stall.
+ * Idempotent: a task with an open packet is left alone (the human already has
+ * a decision in front of them). Falls back through the operator's own
+ * capability gate — when generate-packets is withheld, no packet opens and the
+ * stall stays visible only via waiting=human (the pre-existing behavior).
+ */
+async function openStuckLoopPacket(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    agentHandle: string;
+    reason: string;
+  },
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    if (!existing || existing.parsed.packet) return; // already escalated
+    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
+      "./operator-actions.server"
+    );
+    const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
+    const result = await operatorOpenPacket(
+      db,
+      ctx,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        packetType: "blocked",
+        title: `Work stalled — pick a recovery path`,
+        body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
+        observations: [
+          { k: "Agent", v: `@${input.agentHandle}` },
+          { k: "Signal", v: input.reason },
+        ],
+        options: [
+          {
+            kind: "redirect",
+            title: "Redirect with sharper guidance",
+            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            recommended: true,
+          },
+          {
+            kind: "request_edit",
+            title: "Send back for another attempt",
+            detail: "Ask the same specialist to try again from its last report.",
+          },
+          {
+            kind: "hold_runtime_debug",
+            title: "Hold for runtime debugging",
+            detail: "Freeze coordination while the provider-native session is inspected.",
+          },
+        ],
+      },
+      authority,
+    );
+    if (result.outcome !== "done") {
+      logger.info("stuck-loop packet not opened", {
+        taskKey: input.taskKey,
+        reason: result.message,
+      });
+    }
+  } catch (error) {
+    logger.warn("stuck-loop packet escalation failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Classify a reviewer's reply into a verdict (FR15/FR35). Conservative: returns
+ * a verdict only on a clear signal, else null (no validation change). Pure —
+ * exported for tests.
+ */
+export function classifyReviewerVerdict(
+  text: string | null,
+): "request_changes" | "approve" | null {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  // Strong negative signals win (a "request changes" that also says "looks good
+  // in places" is still a request for changes).
+  if (
+    /request(ing)?\s+changes?/.test(t) ||
+    /\bnothing (was )?implemented\b/.test(t) ||
+    /\bno-?op\b/.test(t) ||
+    /\bchanges? (are )?(required|needed)\b/.test(t) ||
+    /\bnot (yet )?(implemented|done|complete)\b/.test(t) ||
+    /\bfail(ed|ing|s)?\b/.test(t) ||
+    /\bblocker\b/.test(t)
+  ) {
+    return "request_changes";
+  }
+  if (
+    /\bapprove(d|s)?\b/.test(t) ||
+    /\blgtm\b/.test(t) ||
+    /\blooks good to merge\b/.test(t) ||
+    /\bready (to|for) (merge|accept)/.test(t) ||
+    /\bno (blocking )?issues\b/.test(t)
+  ) {
+    return "approve";
+  }
+  return null;
+}
+
+/**
+ * Emit a typed `quality` event from a reviewer's verdict and set the task's
+ * validation health accordingly (FR15/FR24/FR35). request_changes → failing;
+ * approve → healthy. Silent when the verdict is unclear. Idempotent-friendly:
+ * writes one typed event per reviewer run.
+ */
+async function recordReviewerVerdict(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  replyText: string | null,
+): Promise<void> {
+  const verdict = classifyReviewerVerdict(replyText);
+  if (!verdict) return;
+  const validation: "failing" | "healthy" =
+    verdict === "request_changes" ? "failing" : "healthy";
+  const summary =
+    verdict === "request_changes"
+      ? "Reviewer requested changes."
+      : "Reviewer approved the work.";
+  try {
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.frontmatter.validation = validation;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "quality",
+        actor: { kind: "operator" },
+        title: verdict === "request_changes" ? "Changes requested" : "Review passed",
+        text: `**Validation:** ${validation}. ${summary}`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.quality.flagged",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { verdict, validation },
+    });
+  } catch (error) {
+    logger.warn("reviewer verdict recording failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 export async function operatorPromptAgent(
   db: Database.Database,
   input: {
@@ -1047,13 +1329,50 @@ export async function operatorPromptAgent(
         actorRef,
         replyText,
       });
+      // A REVIEWER's verdict is a first-class quality signal (FR15/FR35): emit a
+      // typed `quality` event and drive the board's validation health (FR24) so
+      // a task that keeps failing review reads "failing", not "none". Conservative
+      // heuristic — only a clear verdict flips validation.
+      if (input.kind === "reviewer" && finished.state === "finished") {
+        await recordReviewerVerdict(
+          db,
+          opCtx,
+          input.projectSlug,
+          input.taskKey,
+          replyText,
+        );
+      }
       // Decide whether to re-invoke the operator to react. Skips interrupted/
       // empty runs, no-progress repeats (the CTL-3 spiral), and the depth cap.
       if (!operatorShouldReactToReply(finished.state, replyText, prevReply, opRun?.reactDepth)) {
-        if (replyText && prevReply !== null && prevReply.trim() === replyText.trim()) {
+        const noProgress =
+          !!replyText && prevReply !== null && prevReply.trim() === replyText.trim();
+        const depthCapped =
+          !!replyText &&
+          !noProgress &&
+          finished.state === "finished" &&
+          opRun !== undefined &&
+          opRun.reactDepth >= OPERATOR_REACT_DEPTH_CAP;
+        if (noProgress) {
           logger.info("operator react skipped — agent made no progress (repeated its reply)", {
             taskKey: input.taskKey,
             runId: finished.id,
+          });
+        }
+        // Stuck-loop escalation (Journey 2: failure must be governable and
+        // recoverable, not a silent stall). The guard just killed the react
+        // chain — without this, the task sits at waiting=human with no packet,
+        // no card, and no notification, and the human must archaeology the
+        // timeline. Open a BLOCKED recovery packet instead so the supervisors
+        // are pinged with concrete options.
+        if (noProgress || depthCapped) {
+          await openStuckLoopPacket(db, opCtx, {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            agentHandle: input.handle,
+            reason: noProgress
+              ? "The agent repeated its previous report verbatim — no forward progress."
+              : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
           });
         }
         return;
@@ -1436,6 +1755,30 @@ export async function transitionStage(
     ) {
       parsed.frontmatter.operator = { assignedAtStageId: input.toStageId };
     }
+    // Leaving the first (triage) stage means the task was accepted into the
+    // workflow, so the triage-time `input_required` gate is cleared — otherwise
+    // a task with agents actively working would keep showing "input required"
+    // on the board forever. `blocked` / `inconsistency_risk_detected` are real
+    // states set elsewhere and must survive a transition, so only clear the
+    // triage default.
+    if (
+      fromStageId === firstStageId &&
+      input.toStageId !== firstStageId &&
+      parsed.frontmatter.readiness === "input_required"
+    ) {
+      parsed.frontmatter.readiness = "ready";
+    }
+    // Live validation-health (FR24, B7): the board's validation signal was
+    // seed-only, so a real task always read "none". Derive it from governance
+    // state — entering review means the work is up for review ("changed").
+    // A failing verdict ("failing") and acceptance ("healthy") are set on the
+    // packet/accept paths. Don't stomp a "failing" flag on a re-review.
+    if (
+      input.toStageId === reviewStageIdOf(project) &&
+      parsed.frontmatter.validation === "none"
+    ) {
+      parsed.frontmatter.validation = "changed";
+    }
     // A stage move makes any pending transition recommendation stale — drop it
     // so a Done task never shows a "move to <stage>" card.
     parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
@@ -1477,7 +1820,82 @@ export async function transitionStage(
     void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
   }
 
+  // Delivery spine (FR31): entering the REVIEW stage is the point a PR is
+  // opened for review — the developer's branch is put up for human-authorized
+  // review, carrying a link back to this task. Best-effort + fire-and-forget:
+  // it degrades cleanly (no throw) when the repo/PAT isn't configured, so a
+  // transition never fails on GitHub state. The review stage is the one with a
+  // governed edge into the final (Done) stage.
+  const reviewStageId = project.workflow.find((w) => w.to === lastStageId)?.from;
+  if (reviewStageId && input.toStageId === reviewStageId) {
+    void openReviewPrBestEffort(db, ctx, input.projectSlug, input.taskKey, actor);
+  }
+
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
+}
+
+/**
+ * Best-effort review-PR open on entering the review stage. Isolated so a
+ * GitHub failure (or an unconfigured repo) can never fail the governed
+ * transition — every non-ok result is swallowed after logging.
+ */
+async function openReviewPrBestEffort(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+): Promise<void> {
+  try {
+    const { openTaskPr } = await import("~/server/github/pr-open.server");
+    const result = await openTaskPr(
+      db,
+      { projectSlug, taskKey },
+      { userId: actor.userId, label: actor.label },
+      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    );
+    if (result.status !== "ok") {
+      logger.info("review PR not opened", { taskKey, reason: result.status });
+    }
+  } catch (error) {
+    logger.warn("review PR open failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Attempt a REAL GitHub merge of the task's review PR (FR31, human-authorized).
+ * Returns true only when GitHub actually merged (mergeTaskPr wrote state=merged
+ * + a github event). Returns false — never throws — when there is no PR, no
+ * repo/PAT, or GitHub is unreachable, so the caller falls back to the cache
+ * flip for the offline/seed case. Only meaningful for a human actor.
+ */
+async function mergeTaskPrIfPossible(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+): Promise<boolean> {
+  if (!actor.userId) return false;
+  try {
+    const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+    const result = await mergeTaskPr(
+      db,
+      { projectSlug, taskKey },
+      { userId: actor.userId, label: actor.label },
+      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    );
+    return result.status === "merged";
+  } catch (error) {
+    logger.warn("PR merge on acceptance failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
 }
 
 // ------------------------------------------------------------ reorderTask
@@ -1587,7 +2005,17 @@ export async function resolvePacket(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(project, actor, "any-member", "resolve decision packets");
+  // Resolving a decision packet steers agent work and can advance/redirect the
+  // task — a consequential governance action (FR27), so it is admin|maintainer,
+  // matching the "Approve stage transitions" row. The accept_completion option
+  // is additionally re-gated below; other options (redirect/hold/request_edit)
+  // are covered by this base gate.
+  requireMemberRole(
+    project,
+    actor,
+    ["admin", "maintainer"],
+    "resolve decision packets",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -1634,6 +2062,7 @@ export async function resolvePacket(
         fm.stage = doneStageId;
         fm.readiness = "ready";
         fm.waiting = "none";
+        fm.validation = "healthy"; // accepted work is validated (FR24)
         if (fm.pr) fm.pr = { ...fm.pr, state: "merged" };
       };
       clearPacket = true;
@@ -1652,6 +2081,7 @@ export async function resolvePacket(
       mutate = (fm) => {
         fm.readiness = "blocked";
         fm.waiting = "human";
+        fm.validation = "failing"; // a policy block is an unhealthy state (FR24)
       };
       break;
     }
@@ -1719,6 +2149,19 @@ export async function resolvePacket(
 
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
 
+  // When a human sends work back to the agent side (request_edit / redirect /
+  // custom), the packet event PROMISES "the operator re-engages the specialist"
+  // — so actually do it. Re-invoke the operator to coordinate the next move
+  // instead of leaving the task at waiting=agent with nothing running. Fire-and-
+  // forget, non-blocking, a no-op when no operator is deployed.
+  const sentBackToAgent =
+    option.kind === "request_edit" ||
+    option.kind === "redirect" ||
+    option.kind === "custom";
+  if (sentBackToAgent) {
+    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  }
+
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
@@ -1765,6 +2208,13 @@ async function acceptCompletion(
 
   if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
 
+  // Human acceptance merges the review PR (FR31: "accepting a completion merges
+  // its PR"). Attempt the REAL merge first when a PR + reachable GitHub exist —
+  // mergeTaskPr writes state=merged + a `github` event + audit on success. The
+  // cache flip below is the honest fallback for the no-GitHub / no-PR case, so
+  // the seeded demo and offline dev stay coherent without a live merge.
+  await mergeTaskPrIfPossible(db, ctx, input.projectSlug, input.taskKey, actor);
+
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "completion",
@@ -1778,6 +2228,7 @@ async function acceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
+    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24)
     if (parsed.frontmatter.pr) {
       parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "merged" };
     }
@@ -1859,6 +2310,9 @@ export async function applyRecommendation(
     );
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // Resolving the recommendation clears its "Waiting on you" bell (transition
+  // recs already clear it inside transitionStage; this covers assign/accept).
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
   recordAudit(db, {
     action: "task.recommendation.applied",
@@ -1884,7 +2338,15 @@ export async function dismissRecommendation(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; label: string | null }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(project, actor, "any-member", "dismiss recommendations");
+  // Dismissing an operator recommendation resolves a pending governance decision
+  // (the non-packet equivalent of resolving a packet) — admin|maintainer only,
+  // symmetric with resolvePacket.
+  requireMemberRole(
+    project,
+    actor,
+    ["admin", "maintainer"],
+    "dismiss recommendations",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -1901,6 +2363,8 @@ export async function dismissRecommendation(
     );
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // Resolving the recommendation (either way) clears its "Waiting on you" bell.
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
   recordAudit(db, {
     action: "task.recommendation.dismissed",

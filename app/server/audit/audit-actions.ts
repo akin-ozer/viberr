@@ -101,11 +101,13 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.reviewer.removed": "task",
   "task.reviewer.run_started": "task",
   "task.agent.replied": "task",
+  "task.quality.flagged": "task",
   // Operator-authored governance actions (operator-actions.server).
   "task.operator.commented": "task",
   "task.operator.recommended": "task",
   "task.operator.recommended_completion": "task",
   "task.operator.accepted_completion": "task",
+  "task.operator.packet_opened": "task",
   // Human resolution of operator recommendation cards.
   "task.recommendation.applied": "task",
   "task.recommendation.dismissed": "task",
@@ -120,6 +122,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "github.branch.created": "task",
   "github.reconcile.task": "task",
   "github.reconcile.project": "project",
+  "github.pr.opened": "task",
   "github.pr.merged": "task",
   "github.pr.merge_refused": "task",
   // scope-violation rows may be project-wide (taskKey nullable).

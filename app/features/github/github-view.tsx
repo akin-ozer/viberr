@@ -116,6 +116,11 @@ export function RepositoryPanel({
         credential={data.credential}
         onOpenTask={onOpenTask}
         warnActions={warnActions}
+        connectionAuth={
+          data.connection.status === "auth_failed"
+            ? data.connection.reason
+            : "ok"
+        }
       />
     </div>
   );

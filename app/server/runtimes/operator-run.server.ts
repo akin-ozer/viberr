@@ -1,8 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
-import { getDataRoot, agentProfilesDir, skillDirPath } from "~/server/files/file-store-root.server";
+import {
+  getDataRoot,
+  agentProfilesDir,
+  skillDirPath,
+  kbDirPath,
+} from "~/server/files/file-store-root.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -12,6 +17,7 @@ import {
   operatorAcceptCompletion,
   operatorAssignReviewer,
   operatorAssignSpecialist,
+  operatorOpenPacket,
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
@@ -24,6 +30,7 @@ import {
   type OperatorAutonomy,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
+import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { replyTextForRun } from "~/server/tasks/agent-reply.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
@@ -82,6 +89,23 @@ export interface RunOperatorResult {
   autonomy: OperatorAutonomy;
 }
 
+/** A queued/running operator run for the same task, if one is already in flight. */
+function inFlightOperatorRun(
+  db: Database.Database,
+  projectSlug: string,
+  taskKey: string,
+): { id: string; backend: RealBackend } | null {
+  const row = db
+    .prepare(
+      `SELECT id, backend FROM agent_runs
+       WHERE project_slug = ? AND task_key = ? AND kind = 'operator'
+         AND state IN ('queued', 'running')
+       ORDER BY rowid DESC LIMIT 1`,
+    )
+    .get(projectSlug, taskKey) as { id: string; backend: string } | undefined;
+  return row ? { id: row.id, backend: row.backend as RealBackend } : null;
+}
+
 export async function runOperator(
   db: Database.Database,
   input: RunOperatorInput,
@@ -94,6 +118,28 @@ export async function runOperator(
     ...(input.autonomy ? { autonomy: input.autonomy } : {}),
   });
   const backend = authority.backend;
+
+  // Single-flight per task (NFR16, B6): one operator coordinates a task at a
+  // time. Concurrent triggers — e.g. create-time auto-invoke racing an
+  // "@operator …" comment, or two drag-transitions — must not start overlapping
+  // operator runs that double-assign or lose writes. If a run is already
+  // queued/running for this task, coalesce onto it instead of starting another.
+  // (The react loop is unaffected: it re-invokes only AFTER the prompting run
+  // has finished, so no run is in flight at that point.)
+  const inflight = inFlightOperatorRun(db, input.projectSlug, input.taskKey);
+  if (inflight) {
+    logger.info("operator run coalesced — one already in flight", {
+      taskKey: input.taskKey,
+      runId: inflight.id,
+      trigger: input.trigger ?? "manual",
+    });
+    return {
+      runId: inflight.id,
+      backend: inflight.backend,
+      mode: inflight.backend === "claude" && isBackendAvailable("claude") ? "real" : "scripted",
+      autonomy: authority.autonomy,
+    };
+  }
 
   // Carry the run's identity on the ctx so that when an agent this operator
   // prompts replies, the reply-completion hook can re-invoke the operator to
@@ -145,6 +191,7 @@ const OPERATOR_PLAN_SCHEMA = {
             type: "string",
             enum: [
               "post_comment",
+              "open_packet",
               "assign_specialist",
               "run_specialist",
               "prompt_specialist",
@@ -157,10 +204,11 @@ const OPERATOR_PLAN_SCHEMA = {
           },
           profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
-          text: { type: ["string", "null"], description: "For post_comment, and the prompt for prompt_specialist/prompt_reviewer; else null." },
-          reason: { type: ["string", "null"], description: "Short why — shown on recommendation cards." },
+          packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
+          text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
+          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
         },
-        required: ["tool", "profileId", "toStageId", "text", "reason"],
+        required: ["tool", "profileId", "toStageId", "packetType", "text", "reason"],
       },
     },
   },
@@ -171,8 +219,30 @@ interface OperatorPlanAction {
   tool: string;
   profileId?: string;
   toStageId?: string;
+  packetType?: "input" | "blocked";
   text?: string;
   reason?: string;
+}
+
+/**
+ * The Codex plan schema is flat, so it can't author rich per-option packets the
+ * way Claude's `open_decision_packet` tool does. We give the Codex operator a
+ * usable default option set keyed to the packet type instead — the human still
+ * gets a real, resolvable FR26 packet rather than a comment wall.
+ */
+function defaultPacketOptions(
+  packetType: "input" | "blocked",
+): { kind: PacketOptionKind; title: string; recommended?: boolean }[] {
+  return packetType === "blocked"
+    ? [
+        { kind: "block_on_policy", title: "Update the policy / credential and unblock", recommended: true },
+        { kind: "redirect", title: "Redirect the specialist with new guidance" },
+        { kind: "hold_runtime_debug", title: "Hold for runtime debugging" },
+      ]
+    : [
+        { kind: "request_edit", title: "Send back to the specialist for changes", recommended: true },
+        { kind: "redirect", title: "Reassign or redirect the work" },
+      ];
 }
 
 async function startCodexOperatorRun(
@@ -270,6 +340,23 @@ async function executeCodexPlan(
         case "post_comment":
           if (a.text) await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
           break;
+        case "open_packet": {
+          const packetType = a.packetType === "blocked" ? "blocked" : "input";
+          if (a.text)
+            await operatorOpenPacket(
+              db,
+              ctx,
+              {
+                ...base,
+                packetType,
+                title: a.text,
+                ...(a.reason ? { body: a.reason } : {}),
+                options: defaultPacketOptions(packetType),
+              },
+              authority,
+            );
+          break;
+        }
         case "assign_specialist":
           if (a.profileId)
             await operatorAssignSpecialist(
@@ -632,6 +719,35 @@ function readSkillBody(name: string, dataRoot?: string): string {
   return "";
 }
 
+/**
+ * Read a knowledge base's documents from the store (F6): every `.md` under
+ * `data/kb/<dir>/`, concatenated (bounded so a large KB can't blow the context
+ * window). Returns "" when the KB folder is absent — profile KB references that
+ * don't resolve to a real store folder inject nothing, exactly as skills do.
+ */
+function readKbBody(name: string, dataRoot?: string): string {
+  try {
+    const dir = kbDirPath(name, dataRoot);
+    if (!existsSync(dir)) return "";
+    const docs: string[] = [];
+    let budget = 24_000; // cap total KB text per run
+    for (const entry of readdirSync(dir).sort()) {
+      if (!entry.endsWith(".md") || budget <= 0) continue;
+      try {
+        const raw = readFileSync(path.join(dir, entry), "utf8").trim();
+        const slice = raw.slice(0, budget);
+        budget -= slice.length;
+        docs.push(`### ${entry}\n\n${slice}`);
+      } catch {
+        // unreadable doc — skip
+      }
+    }
+    return docs.join("\n\n");
+  } catch {
+    return "";
+  }
+}
+
 /** Assemble the operator's system prompt: persona + expertise + live policy. */
 export function buildOperatorSystemPrompt(
   authority: OperatorAuthority,
@@ -649,6 +765,13 @@ export function buildOperatorSystemPrompt(
   for (const name of skills) {
     const body = readSkillBody(name, dataRoot);
     if (body) parts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
+  }
+  // Inject declared knowledge-base docs into context (F6, FR9): the KB leg was
+  // decorative — no run ever received KB content. Load every declared KB folder
+  // that exists in the store, same as skills.
+  for (const name of authority.kb) {
+    const body = readKbBody(name, dataRoot);
+    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
   }
   parts.push(
     "\n\n---\n# Your authority for this task\n\n" +

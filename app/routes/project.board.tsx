@@ -10,6 +10,7 @@ import { getProject } from "~/server/projections/board-query.server";
 import {
   createTask,
   reorderTask,
+  requireProjectRole,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
 import { BoardPage } from "~/features/board/board-page";
@@ -97,6 +98,16 @@ export async function action({ request, params }: Route.ActionArgs) {
       };
     }
     if (intent === "rescan") {
+      // Re-scan rebuilds projections instance-wide — a maintenance action, not a
+      // read. Gate it to this project's admins|maintainers (matrix "Run agents &
+      // reorder the board" tier) so a viewer or non-member can't trigger a full
+      // rebuild.
+      requireProjectRole(
+        params.slug,
+        actor,
+        ["admin", "maintainer"],
+        "re-scan the project",
+      );
       const summary = rescanProjections(db, { actor });
       return { ok: true as const, ...summary };
     }

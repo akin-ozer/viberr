@@ -2,7 +2,8 @@ import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
 import type { loader as projectLoader } from "./project";
 import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
@@ -36,7 +37,7 @@ import { SettingsPage } from "~/features/project-settings/settings-page";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
+  await requireProjectMember(request, params.slug, "view this project's settings");
   const db = getDb();
   const view = getSettingsViewData(db, params.slug);
   if (!view) {

@@ -1,0 +1,168 @@
+import { randomBytes } from "node:crypto";
+import { afterEach, describe, expect, it } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { composePrBody, openTaskPr, taskUrl } from "./pr-open.server";
+
+process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
+process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
+
+const ctx = createTestDbContext();
+afterEach(ctx.cleanup);
+
+const REPO_PATH = "/repos/akin-ozer/viberr";
+const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
+const BRANCH = "vib-201-attach-execution-workspace-to";
+
+function setupWithBranch(taskKey = "VIB-201") {
+  const store = setupTestStore(ctx);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter(taskKey, {
+      title: "Attach execution workspace to task runtime",
+      stage: "review",
+      branch: BRANCH,
+    }),
+    goal: "Wire the runtime workspace to the canonical task so runs anchor on it.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000001" },
+    ACTOR,
+  );
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+  return store;
+}
+
+describe("composePrBody", () => {
+  it("carries the Viberr task back-link, goal, and change summary", () => {
+    const body = composePrBody({
+      taskKey: "VIB-201",
+      title: "Attach workspace",
+      goal: "Wire the workspace.",
+      taskUrl: "https://viberr.example/projects/core/tasks/VIB-201",
+      changeSummary: "3 files changed.",
+      evidence: ["unit tests pass"],
+    });
+    expect(body).toContain(
+      "[VIB-201 — Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
+    );
+    expect(body).toContain("## Goal");
+    expect(body).toContain("Wire the workspace.");
+    expect(body).toContain("## Change summary");
+    expect(body).toContain("## Evidence");
+    expect(body).toContain("unit tests pass");
+  });
+
+  it("taskUrl falls back to a relative path when no origin is configured", () => {
+    expect(taskUrl("core", "VIB-1")).toBe("/projects/core/tasks/VIB-1");
+    expect(taskUrl("core", "VIB-1", "https://v.example/")).toBe(
+      "https://v.example/projects/core/tasks/VIB-1",
+    );
+  });
+});
+
+describe("openTaskPr", () => {
+  it("creates a PR whose body embeds the task link + title, writes fm.pr, audits", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      // No existing open PR for the branch…
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      // …so it creates one.
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+    );
+    expect(res.status).toBe("ok");
+    if (res.status !== "ok") throw new Error("expected ok");
+    expect(res.created).toBe(true);
+    expect(res.prNumber).toBe(42);
+
+    // The PR request body carries the composed description with the task link.
+    const post = gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!;
+    const sent = post.body as { title: string; head: string; base: string; body: string };
+    expect(sent.title).toBe("[VIB-201] Attach execution workspace to task runtime");
+    expect(sent.head).toBe(BRANCH);
+    expect(sent.body).toContain("https://viberr.example/projects/");
+    expect(sent.body).toContain("VIB-201");
+
+    // fm.pr is written from the real response (not fabricated).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 42, state: "open" });
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
+  });
+
+  it("is idempotent — reuses an existing open PR instead of creating a duplicate", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open" }],
+      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    if (res.status !== "ok") throw new Error("expected ok");
+    expect(res.created).toBe(false);
+    expect(res.prNumber).toBe(7);
+    // Never attempted to create a second PR.
+    expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
+  });
+
+  it("a 403 opens a pull_request:write scope violation, does not fabricate a PR", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: { status: 403, body: { message: "Resource not accessible by personal access token" } },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("scope_violation");
+    // No fabricated PR on the task.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+    expect(findOpenScopeViolation(store.db, store.slug, "pull_request:write", "VIB-201")).not.toBeNull();
+  });
+
+  it("degrades cleanly when no repo/PAT is configured (no throw, typed result)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review", branch: "vib-9-x" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // No credential set → no_pat_configured.
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-9" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    );
+    expect(["no_pat_configured", "no_repo_configured"]).toContain(res.status);
+  });
+});

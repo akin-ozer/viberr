@@ -82,6 +82,15 @@ describe("loader", () => {
     expect((thrown as Response).status).toBe(302);
   });
 
+  it("blocks a non-member from the agents config surface (view-side RBAC)", async () => {
+    // deniz is a registered user but NOT a member of viberr-core. The agent
+    // capability config is a config surface (not board/tasks), so it is
+    // member-only — a non-member gets a clean 403, not the roster.
+    const thrown = await runLoader(ids.deniz).catch((e) => e);
+    // requireProjectMember throws react-router `data(msg, { status: 403 })`.
+    expect((thrown as { init?: { status?: number } }).init?.status).toBe(403);
+  });
+
   it("assembles the seeded roster: operator first, template fields + id-based actions", async () => {
     const data = await runLoader(ids.arda);
     expect(data.projectName).toBe("Viberr Core");
@@ -268,6 +277,34 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(mode("commit-push-branch")).toBe("direct");
 
     await postAction(ids.arda, { intent: "delete-profile", profileId: "overreach" });
+  });
+
+  it("persists an explicitly withheld (off) capability so runtime enforcement can see it", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Locked Dev",
+        role: "Implementation, PR withheld",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "A developer whose PR-opening is explicitly withheld.",
+        caps: { "open-review-pr": "off" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "locked-dev",
+    )!;
+    const grant = created.capabilities.find(
+      (c) => c.capabilityId === "open-review-pr",
+    );
+    // Previously `off` grants were dropped at persist, making the runtime deny a
+    // silent no-op. They must now round-trip so specialist-tool-policy denies.
+    expect(grant?.mode).toBe("off");
+
+    await postAction(ids.arda, { intent: "delete-profile", profileId: "locked-dev" });
   });
 
   it("stores the picked model + effort on the deployment definition", async () => {

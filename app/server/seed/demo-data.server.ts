@@ -210,8 +210,9 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["ready", "impl"],
       resources: {
         skills: ["developer-expertise"],
-        mcps: ["github", "filesystem"],
-        kb: ["Viberr Core architecture", "Coding standards"],
+        mcps: ["github-mcp"],
+        // Real KB folders on disk (data/kb/<dir>) so they inject into runs (F6).
+        kb: ["architecture-notes", "api-contracts"],
       },
     },
     {
@@ -229,8 +230,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["review"],
       resources: {
         skills: ["reviewer-expertise"],
-        mcps: ["github"],
-        kb: ["Review checklist", "Security guidelines"],
+        mcps: ["github-mcp"],
+        kb: ["api-contracts"],
       },
     },
     {
@@ -249,8 +250,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["impl", "review"],
       resources: {
         skills: ["tester-expertise"],
-        mcps: ["github", "filesystem"],
-        kb: ["Test strategy"],
+        mcps: ["github-mcp"],
+        kb: ["deploy-runbooks"],
       },
     },
     {
@@ -269,8 +270,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["triage", "ready", "impl", "review"],
       resources: {
         skills: ["domain-advisor"],
-        mcps: ["github"],
-        kb: ["Product brief", "Domain glossary", "Prior decisions"],
+        mcps: ["github-mcp"],
+        kb: ["architecture-notes"],
       },
     },
     {

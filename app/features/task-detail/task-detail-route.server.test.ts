@@ -273,12 +273,15 @@ describe("comment action — @agent routing detection", () => {
 /* ------------------------------------------------------- resolvePacket */
 
 describe("resolve-packet action — kind dispatch + RBAC", () => {
-  it("rejects non-privileged members on accept_completion (human-only boundary)", async () => {
+  it("rejects non-privileged members on packet resolution (admin|maintainer only)", async () => {
+    // Resolving a decision packet — including accepting completion — steers the
+    // task and is admin|maintainer only; a contributor is rejected at the base
+    // gate before the option-specific accept-completion re-gate.
     const result = (await postIntent("VIB-142", ids.selin, {
       intent: "resolve-packet", option: "0",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(403);
-    expect(result.data.error).toContain("cannot accept completion");
+    expect(result.data.error).toContain("cannot resolve decision packets");
   });
 
   it("rejects non-members entirely", async () => {
@@ -319,8 +322,11 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(after.task.packet).toBeNull();
     expect(after.task.waiting).toBe("agent");
     expect(after.task.readiness).toBe("ready");
-    expect(after.task.timeline[0]).toMatchObject({ type: "transition" });
-    expect(after.task.timeline[0]!.text).toBe(
+    // Sending work back re-invokes the operator (which may post its own events),
+    // so locate the decision transition by type rather than assuming position.
+    const decision = after.task.timeline.find((e) => e.type === "transition");
+    expect(decision).toBeDefined();
+    expect(decision!.text).toBe(
       "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance.",
     );
   });

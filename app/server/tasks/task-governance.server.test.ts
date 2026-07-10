@@ -13,6 +13,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard } from "~/server/projections/board-query.server";
 import {
+  classifyReviewerVerdict,
   reorderTask,
   resolvePacket,
   transitionStage,
@@ -130,6 +131,47 @@ describe("transitionStage boundary enforcement", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("impl");
+  });
+
+  it("leaving triage clears the input_required gate (readiness→ready)", async () => {
+    const store = prepared();
+    // Default readiness is input_required (the triage quality gate).
+    withTask(store, { stage: "triage", readiness: "input_required" });
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      actor(store.users.murat), // maintainer clears the approval boundary
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("ready");
+    // The board must not keep showing "input required" once agents can work.
+    expect(task.readiness).toBe("ready");
+  });
+
+  it("a blocked task keeps its readiness across a transition (only input_required clears)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "triage", readiness: "blocked" });
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("ready");
+    expect(task.readiness).toBe("blocked");
+  });
+
+  it("entering the review stage sets validation to 'changed' (FR24 live signal)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", validation: "none" });
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      actor(store.users.murat), // maintainer clears the approval boundary
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("review");
+    expect(task.validation).toBe("changed");
   });
 
   it("human boundary (review→done locked): reviewer forbidden, admin ok, waiting→none", async () => {
@@ -362,6 +404,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.stage).toBe("done");
     expect(task.waiting).toBe("none");
     expect(task.displayReadiness).toBe("accepted");
+    expect(task.validation).toBe("healthy"); // accepted work is validated (FR24)
     expect(task.pr).toMatchObject({ state: "merged" });
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -372,13 +415,23 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("request_edit: waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {
+  it("request_edit: contributor forbidden, maintainer ok — waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {
     const store = prepared();
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
+    // Resolving a decision packet steers agent work — admin|maintainer only.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.selin), // contributor — cannot resolve
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.selin), // any member may send back
+      actor(store.users.murat), // maintainer may send back
       { dataRoot: store.dataRoot },
     );
     expect(task.waiting).toBe("agent");
@@ -402,6 +455,7 @@ describe("resolvePacket kind matrix", () => {
     );
     expect(task.readiness).toBe("blocked");
     expect(task.waiting).toBe("human");
+    expect(task.validation).toBe("failing"); // a policy block is unhealthy (FR24)
     expect(task.packet).not.toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
@@ -504,5 +558,24 @@ describe("resolvePacket kind matrix", () => {
     expect(file?.parsed.packet).toBeNull();
     expect(file?.parsed.frontmatter.waiting).toBe("agent");
     expect(file?.parsed.timeline[0]?.type).toBe("transition");
+  });
+});
+
+describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)", () => {
+  it("detects request-changes / failing signals", () => {
+    expect(classifyReviewerVerdict("Requesting changes: the tests fail.")).toBe("request_changes");
+    expect(classifyReviewerVerdict("This is a no-op — nothing was implemented.")).toBe("request_changes");
+    expect(classifyReviewerVerdict("Found a blocker in the migration.")).toBe("request_changes");
+  });
+
+  it("detects approve / pass signals", () => {
+    expect(classifyReviewerVerdict("LGTM — approved.")).toBe("approve");
+    expect(classifyReviewerVerdict("No blocking issues, ready to accept.")).toBe("approve");
+  });
+
+  it("returns null on an unclear verdict", () => {
+    expect(classifyReviewerVerdict("I looked at the diff.")).toBeNull();
+    expect(classifyReviewerVerdict(null)).toBeNull();
+    expect(classifyReviewerVerdict("")).toBeNull();
   });
 });

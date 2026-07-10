@@ -12,7 +12,7 @@ import {
   type AgentDeploymentView,
   type AgentProfileView,
 } from "./agent-types";
-import { CAP_META } from "./capability-catalog";
+import { CAP_META, type ResCatalogGroup } from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
@@ -556,6 +556,7 @@ export function AgentsPage({
   projectSlug,
   projectName,
   myRole,
+  resourceCatalog,
 }: {
   profiles: AgentProfileView[];
   deployments: AgentDeploymentView[];
@@ -563,6 +564,8 @@ export function AgentsPage({
   projectSlug: string;
   projectName: string;
   myRole: string | null;
+  /** Live store resources for the profile-editor picker (F6/item-2). */
+  resourceCatalog?: readonly ResCatalogGroup[];
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -777,6 +780,7 @@ export function AgentsPage({
           projectName={projectName}
           busy={fetcher.state !== "idle"}
           error={formError}
+          {...(resourceCatalog ? { resourceCatalog } : {})}
           onClose={() => {
             setCreating(false);
             setFormError(null);
@@ -792,6 +796,7 @@ export function AgentsPage({
           projectName={projectName}
           busy={fetcher.state !== "idle"}
           error={formError}
+          {...(resourceCatalog ? { resourceCatalog } : {})}
           onClose={() => {
             setEditing(null);
             setFormError(null);

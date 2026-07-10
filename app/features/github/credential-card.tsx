@@ -29,12 +29,18 @@ export function CredentialCard({
   credential,
   onOpenTask,
   warnActions,
+  connectionAuth,
 }: {
   credential: CredentialCardData;
   /** Opens the flagged task (the cred-warn `.keybtn`). */
   onOpenTask: (taskKey: string) => void;
   /** Right-aligned footer action slot (Fix in Settings / Grant scope). */
   warnActions?: ReactNode;
+  /** Live token auth health from the connection probe. When the token is
+   * revoked/expired, the "all scopes granted" affirmation is suppressed — the
+   * scopes a dead token was granted are moot, and showing both was
+   * contradictory ("token revoked" pill next to "all scopes granted"). */
+  connectionAuth?: "ok" | "revoked" | "expired";
 }) {
   if (credential.source === "none") {
     return (
@@ -73,7 +79,17 @@ export function CredentialCard({
           </span>
         ))}
       </div>
-      {missing ? (
+      {connectionAuth === "revoked" || connectionAuth === "expired" ? (
+        <div className="cred-warn">
+          <Icon name="alert" />
+          <span>
+            Token {connectionAuth} — re-authenticate this connection to
+            resume branch and PR sync. Its granted scopes don't apply while
+            the token is invalid.
+          </span>
+          {warnActions}
+        </div>
+      ) : missing ? (
         <div className="cred-warn">
           <Icon name="alert" />
           <span>

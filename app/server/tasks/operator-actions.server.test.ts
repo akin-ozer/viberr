@@ -17,6 +17,7 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   applyRecommendation,
@@ -30,6 +31,7 @@ import {
   operatorAcceptCompletion,
   operatorAssignReviewer,
   operatorAssignSpecialist,
+  operatorOpenPacket,
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
@@ -513,6 +515,118 @@ describe("operatorAcceptCompletion", () => {
   });
 });
 
+describe("operatorOpenPacket (decision/blocking packet generator)", () => {
+  const OPTIONS = [
+    { kind: "redirect" as const, title: "Reassign to another developer", recommended: true },
+    { kind: "hold_runtime_debug" as const, title: "Hold for runtime debugging" },
+  ];
+
+  it("opens a round-trippable input packet, sets waiting=human, notifies supervisors", async () => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const res = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Implementation stalled — pick a recovery path",
+        body: "The developer has reported no forward progress for three cycles.",
+        observations: [{ k: "Branch", v: "vib-1-impl", code: true }],
+        options: OPTIONS,
+      },
+      authority("supervised"),
+    );
+    expect(res.outcome).toBe("done");
+
+    const p = task().packet!;
+    expect(p).not.toBeNull();
+    expect(p.type).toBe("input");
+    expect(p.title).toBe("Implementation stalled — pick a recovery path");
+    expect(p.options).toHaveLength(2);
+    // Exactly one recommended option (the parser requires it).
+    expect(p.options.filter((o) => o.rec)).toHaveLength(1);
+    expect(p.options[0]!.kind).toBe("redirect");
+    expect(task().frontmatter.waiting).toBe("human");
+    // Supervisors (owner arda + maintainer murat) get a `packet` notification.
+    const packets = (userId: string) =>
+      listNotifications(store.db, userId).filter((n) => n.kind === "packet");
+    expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
+    expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    // The audit trail records it.
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
+      "task.operator.packet_opened",
+    );
+  });
+
+  it("a blocked packet also marks the task blocked", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Blocked on a missing credential",
+        options: [{ kind: "block_on_policy", title: "Update the credential policy" }],
+      },
+      authority("supervised"),
+    );
+    expect(task().frontmatter.readiness).toBe("blocked");
+    expect(task().frontmatter.waiting).toBe("human");
+    expect(task().packet!.type).toBe("blocked");
+    // A missing `recommended` flag defaults to the first option.
+    expect(task().packet!.options[0]!.rec).toBe(true);
+    // Emits a typed `blocked` timeline event, not a plain comment.
+    expect(task().timeline[0]!.type).toBe("blocked");
+  });
+
+  it("is withheld when generate-packets is off (capability gate)", async () => {
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    seedTask("impl");
+    const res = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Should not open",
+        options: OPTIONS,
+      },
+      authority("supervised"),
+    );
+    expect(res.outcome).toBe("denied");
+    expect(task().packet).toBeNull();
+  });
+
+  it("rejects an unknown option kind", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    const res = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Bad option",
+        // @ts-expect-error deliberately invalid kind
+        options: [{ kind: "not_a_real_kind", title: "x" }],
+      },
+      authority("supervised"),
+    );
+    expect(res.outcome).toBe("denied");
+    expect(task().packet).toBeNull();
+  });
+});
+
 describe("applyRecommendation / dismissRecommendation", () => {
   async function seedRecommendation() {
     deployRoster([
@@ -606,6 +720,48 @@ describe("applyRecommendation / dismissRecommendation", () => {
     );
     expect(task().frontmatter.specialist).toBeNull(); // NOT assigned
     expect(task().frontmatter.recommendations).toHaveLength(0);
+  });
+
+  it("a supervised recommendation notifies the owner + maintainers, not other members", async () => {
+    await seedRecommendation(); // seedTask owner = arda (admin); murat = maintainer
+    const approvals = (userId: string) =>
+      listNotifications(store.db, userId).filter((n) => n.kind === "approval");
+    // Owner/admin and the maintainer get a "Waiting on you" ping…
+    expect(approvals(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
+    expect(approvals(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    // …a contributor and a viewer do not (not task supervisors).
+    expect(approvals(store.users.selin.id)).toHaveLength(0);
+    expect(approvals(store.users.elif.id)).toHaveLength(0);
+  });
+
+  it("a re-running operator does not re-notify the same pending recommendation", async () => {
+    await seedRecommendation();
+    const before = listNotifications(store.db, store.users.murat.id).filter(
+      (n) => n.kind === "approval",
+    ).length;
+    // Re-issue the identical recommendation (idempotent card → no new ping).
+    await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    const after = listNotifications(store.db, store.users.murat.id).filter(
+      (n) => n.kind === "approval",
+    ).length;
+    expect(after).toBe(before);
+  });
+
+  it("only admin|maintainer may dismiss a recommendation", async () => {
+    const recId = await seedRecommendation();
+    await expect(
+      dismissRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId },
+        { userId: store.users.selin.id, label: store.users.selin.email }, // contributor
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
 

@@ -11,6 +11,7 @@ import {
   operatorAcceptCompletion,
   operatorAssignReviewer,
   operatorAssignSpecialist,
+  operatorOpenPacket,
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
@@ -21,6 +22,7 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "./operator-actions.server";
+import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -99,6 +101,66 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "post_comment",
+    );
+  }
+
+  if (gate(authority, "generate-packets") !== "deny") {
+    add(
+      tool(
+        "open_decision_packet",
+        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. The human resolves it from the task page.",
+        {
+          packetType: z
+            .enum(["input", "blocked"])
+            .describe("'blocked' when work is stuck (marks the task blocked); 'input' for a decision the human should make."),
+          title: z.string().describe("Short packet title, e.g. 'Implementation stalled — pick a recovery path'."),
+          body: z.string().optional().describe("One or two sentences of context (no raw logs/secrets)."),
+          observations: z
+            .array(
+              z.object({
+                k: z.string().describe("Label, e.g. 'Branch' or 'Reviewer verdict'."),
+                v: z.string().describe("Value."),
+                code: z.boolean().optional().describe("Render the value as code."),
+              }),
+            )
+            .optional()
+            .describe("Typed observed facts shown above the options."),
+          options: z
+            .array(
+              z.object({
+                kind: z
+                  .enum(PACKET_OPTION_KINDS as unknown as [string, ...string[]])
+                  .describe("Stable option kind the resolver dispatches on."),
+                title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
+                detail: z.string().optional().describe("Short explanation under the option."),
+                recommended: z.boolean().optional().describe("Mark exactly ONE option recommended."),
+              }),
+            )
+            .describe("The 2-4 resolvable options; exactly one recommended."),
+        },
+        async (args) =>
+          resultText(
+            await operatorOpenPacket(
+              db,
+              ctx,
+              {
+                ...base,
+                packetType: args.packetType,
+                title: args.title,
+                ...(args.body ? { body: args.body } : {}),
+                ...(args.observations ? { observations: args.observations } : {}),
+                options: args.options.map((o) => ({
+                  kind: o.kind as (typeof PACKET_OPTION_KINDS)[number],
+                  title: o.title,
+                  ...(o.detail ? { detail: o.detail } : {}),
+                  ...(o.recommended !== undefined ? { recommended: o.recommended } : {}),
+                })),
+              },
+              authority,
+            ),
+          ),
+      ),
+      "open_decision_packet",
     );
   }
 

@@ -14,6 +14,7 @@ import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
+import { recoverUnreactedAgentRuns } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 
@@ -123,6 +124,17 @@ export function bootServer(): void {
   // runs' live lines in THIS process so the first client subscribe drips
   // them over SSE (the seed's own registration ran in a separate process).
   registerSeededLiveFromData(db);
+
+  // Recover dropped agent-reply reactions (NFR17, B9): if the server restarted
+  // after a specialist/reviewer run finished but before its in-process reply
+  // callback fired, the task stalled at waiting=agent with no error. Post the
+  // missing reply + re-invoke the operator. Idempotent; failures never block
+  // boot. Fire-and-forget — the reconciler awaits its own runs internally.
+  void recoverUnreactedAgentRuns(db).catch((error) => {
+    logger.error("agent-reply recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
 
   logBootIntegrity(db);
 

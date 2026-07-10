@@ -2,11 +2,13 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
 import type { loader as projectLoader } from "./project";
 import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
+import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
@@ -28,7 +30,7 @@ import { AgentsPage } from "~/features/agents/agents-page";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
+  await requireProjectMember(request, params.slug, "view this project's agents");
   const db = getDb();
   const project = getProject(db, params.slug);
   if (!project) {
@@ -43,6 +45,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       color: s.color,
     })),
     projectName: project.name,
+    // Live store resources for the profile-editor picker (item-2): a skill/MCP/
+    // KB created in org settings is now grantable to an agent, replacing the
+    // hardcoded mock catalog whose items resolved to nothing.
+    resourceCatalog: buildResourceCatalog(db),
   };
 }
 
@@ -131,6 +137,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       projectSlug={layout?.board.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
+      resourceCatalog={loaderData.resourceCatalog}
     />
   );
 }

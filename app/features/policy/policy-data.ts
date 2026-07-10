@@ -42,6 +42,7 @@ export const PROJECT_CAP_MATRIX: readonly {
   { action: "Take / release own task ownership", roles: ["admin", "maintainer", "contributor", "viewer"] },
   { action: "Create tasks", roles: ["admin", "maintainer", "contributor"] },
   { action: "Approve stage transitions", roles: ["admin", "maintainer"] },
+  { action: "Resolve decision packets", roles: ["admin", "maintainer"] },
   { action: "Accept completion → Done", roles: ["admin", "maintainer"] },
   { action: "Run agents & reorder the board", roles: ["admin", "maintainer"] },
   { action: "Release any task owner", roles: ["admin"] },

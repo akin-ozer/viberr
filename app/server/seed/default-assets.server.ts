@@ -10,10 +10,12 @@ import viberrSkillMd from "./assets/viberr-app-expertise.skill.md?raw";
 import developerSkillMd from "./assets/developer-expertise.skill.md?raw";
 import reviewerSkillMd from "./assets/reviewer-expertise.skill.md?raw";
 import testerSkillMd from "./assets/tester-expertise.skill.md?raw";
+import domainAdvisorSkillMd from "./assets/domain-advisor.skill.md?raw";
 import operatorDefinitionMd from "./assets/operator.definition.md?raw";
 import developerDefinitionMd from "./assets/developer.definition.md?raw";
 import reviewerDefinitionMd from "./assets/reviewer.definition.md?raw";
 import testerDefinitionMd from "./assets/tester.definition.md?raw";
+import consultantDefinitionMd from "./assets/consultant.definition.md?raw";
 import operatorProfileMd from "./assets/operator.profile.md?raw";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
@@ -44,11 +46,13 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
   { rel: path.join("skills", "tester-expertise", "SKILL.md"), content: testerSkillMd },
+  { rel: path.join("skills", "domain-advisor", "SKILL.md"), content: domainAdvisorSkillMd },
   // Definitions — the detailed persona + personality each run loads.
   { rel: path.join("agents", "definitions", "operator.md"), content: operatorDefinitionMd },
   { rel: path.join("agents", "definitions", "developer.md"), content: developerDefinitionMd },
   { rel: path.join("agents", "definitions", "reviewer.md"), content: reviewerDefinitionMd },
   { rel: path.join("agents", "definitions", "tester.md"), content: testerDefinitionMd },
+  { rel: path.join("agents", "definitions", "consultant.md"), content: consultantDefinitionMd },
   // The operator PROFILE template — so an operator deployment resolves (kind,
   // backends, capabilities) in a store that was never demo-seeded, which is what
   // makes the operator preinstalled everywhere.

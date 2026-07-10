@@ -1,10 +1,15 @@
 import type Database from "better-sqlite3";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import type {
+  PacketOption,
+  PacketOptionKind,
   Recommendation,
   RecommendationKind,
   TaskFileEvent,
+  TaskPacket,
 } from "~/schemas/task-file.schema";
+import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { compactTimelineEvents } from "./timeline-compaction.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -24,6 +29,7 @@ import {
 import {
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  notifyTaskWatchers,
   operatorPromptAgent,
   transitionStage,
   type TaskMutationContext,
@@ -71,6 +77,8 @@ export interface OperatorAuthority {
   name: string;
   /** The operator's declared skills (loaded into its system prompt at run). */
   skills: string[];
+  /** The operator's declared knowledge bases (docs injected into its context). */
+  kb: string[];
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
 }
@@ -125,6 +133,7 @@ export function resolveOperatorAuthority(
       effort: "",
       name: "Operator",
       skills: [],
+      kb: [],
       deployed: false,
     };
   }
@@ -158,6 +167,7 @@ export function resolveOperatorAuthority(
     effort: backend === deploymentBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
+    kb: view.resources.kb ?? [],
     deployed: true,
   };
 }
@@ -198,6 +208,23 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
   return { ...ctx, operatorAuthorized: true };
 }
 
+/** Whether a project anti-noise guardrail is enabled (F5). Reads project.md
+ *  fresh; a missing guardrail (older/other projects) is treated as off. */
+function guardrailOn(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  id: string,
+): boolean {
+  const project = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  return (
+    project?.parsed.frontmatter.guardrails?.some((g) => g.id === id && g.on === true) ??
+    false
+  );
+}
+
 /**
  * Append an operator-authored `comment` timeline event, reproject, audit.
  * `variant` distinguishes a plain narration comment from a recommendation
@@ -221,9 +248,34 @@ async function writeOperatorComment(
     toAgent: false,
     evidence: null,
   };
+  // Anti-noise guardrail (F5, FR: "operator brevity" / "no-duplicate-summary"):
+  // when the project enables no-duplicate-summary, drop an operator comment that
+  // exactly restates the operator's most recent comment instead of appending it
+  // — otherwise a re-running operator accretes duplicate narration and the
+  // canonical contract grows noisier over time (a named PRD adoption risk).
+  const dedupeOn = guardrailOn(ctx, projectSlug, "no-duplicate-summary");
+  const compactOn = guardrailOn(ctx, projectSlug, "compression-threshold");
+  let suppressed = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    if (dedupeOn) {
+      const lastOperator = parsed.timeline.find(
+        (e) => e.type === "comment" && e.actor.kind === "operator",
+      );
+      if (lastOperator && lastOperator.text.trim() === text.trim()) {
+        suppressed = true;
+        return;
+      }
+    }
     parsed.timeline.unshift(event);
+    // Timeline compaction (F5/FR17): once a long-running task crosses the
+    // compression threshold, collapse OLD routine comments into a marker while
+    // keeping every typed governance event, so the canonical file the agents
+    // re-anchor on stays readable. Typed events + the recent window survive.
+    if (compactOn) {
+      parsed.timeline = compactTimelineEvents(parsed.timeline);
+    }
   });
+  if (suppressed) return;
   reproject(db, ctx, projectSlug, taskKey);
   if (variant === "recommend") {
     recordAudit(db, {
@@ -270,6 +322,7 @@ async function addRecommendation(
     ...(rec.profileId ? { profileId: rec.profileId } : {}),
     ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
   };
+  let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const dup = parsed.frontmatter.recommendations.some(
       (r) =>
@@ -277,7 +330,10 @@ async function addRecommendation(
         r.profileId === rec.profileId &&
         r.toStageId === rec.toStageId,
     );
-    if (!dup) parsed.frontmatter.recommendations.push(recommendation);
+    if (!dup) {
+      parsed.frontmatter.recommendations.push(recommendation);
+      wasNew = true;
+    }
     parsed.frontmatter.waiting = "human";
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
@@ -299,6 +355,172 @@ async function addRecommendation(
     taskKey,
     details: { kind: rec.kind },
   });
+  // Ping the supervisors: a supervised operator recommendation is a decision
+  // waiting on a human. Without this, the recommendation card only appears if
+  // someone happens to open the task — the bell and "Waiting on you" inbox stay
+  // dark. (Journey 2: blocked tasks must reach a human decision quickly.) Only
+  // on a NEW recommendation, so a re-running operator doesn't re-notify the same
+  // pending decision every cycle.
+  if (wasNew) {
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "approval",
+        ptype: "input",
+        title: `Operator recommends: ${rec.label}`,
+        text: reasoning,
+      },
+      ctx,
+    );
+  }
+}
+
+/** One option the operator offers on a decision/blocking packet. */
+export interface OperatorPacketOptionInput {
+  kind: PacketOptionKind;
+  title: string;
+  detail?: string;
+  recommended?: boolean;
+  /** Pre-authored timeline text written when a human chooses this option. */
+  ev?: string;
+}
+
+export interface OperatorOpenPacketInput {
+  projectSlug: string;
+  taskKey: string;
+  /** input = a decision the human should make; blocked = work is stuck. */
+  packetType: "input" | "blocked";
+  title: string;
+  body?: string;
+  observations?: { k: string; v: string; code?: boolean }[];
+  options: OperatorPacketOptionInput[];
+}
+
+const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
+
+/**
+ * Open a structured decision/blocking PACKET on the task (FR26, Journey 2) —
+ * the artifact the whole product is built around. This is what an operator
+ * produces at a genuine decision point or when it hits the limit of its
+ * authority, instead of leaving a comment wall and a bare `waiting:human`.
+ *
+ * Governed by `generate-packets`. The packet carries typed observations and a
+ * set of resolvable options (each a stable {@link PacketOptionKind}); exactly
+ * one is marked recommended. Writing it sets `waiting=human` (and, for a
+ * `blocked` packet, `readiness=blocked`), then fans a `packet` notification out
+ * to the task's supervisors. The human resolves it through the existing
+ * DecisionPacket UI → `resolvePacket`, so no new resolution path is needed.
+ */
+export async function operatorOpenPacket(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: OperatorOpenPacketInput,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "generate-packets") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot open decision packets in this project.",
+    };
+  }
+  const title = input.title.trim();
+  if (!title) {
+    return { outcome: "noop", message: "A packet needs a title." };
+  }
+  const rawOptions = input.options ?? [];
+  if (rawOptions.length === 0) {
+    return { outcome: "noop", message: "A packet needs at least one option." };
+  }
+  for (const o of rawOptions) {
+    if (!PACKET_KIND_SET.has(o.kind)) {
+      return {
+        outcome: "denied",
+        message: `Unknown packet option kind "${o.kind}". Valid kinds: ${PACKET_OPTION_KINDS.join(", ")}.`,
+      };
+    }
+  }
+
+  // Exactly one recommended option (the parser expects this): honour the first
+  // one the operator marked, else default to the first option.
+  let recSeen = false;
+  const options: PacketOption[] = rawOptions.map((o) => {
+    const rec = !recSeen && o.recommended === true;
+    if (rec) recSeen = true;
+    return {
+      kind: o.kind,
+      t: o.title.trim() || o.kind,
+      d: (o.detail ?? "").trim(),
+      rec,
+      ...(o.ev ? { ev: o.ev } : {}),
+    };
+  });
+  if (!recSeen && options[0]) options[0].rec = true;
+
+  const packet: TaskPacket = {
+    type: input.packetType,
+    kind: input.packetType === "blocked" ? "Blocked decision" : "Decision required",
+    from: "operator",
+    title,
+    body: (input.body ?? "").trim(),
+    observations: (input.observations ?? []).map((o) => ({
+      k: o.k,
+      v: o.v,
+      code: o.code ?? false,
+    })),
+    options,
+  };
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.packet = packet;
+    parsed.frontmatter.waiting = "human";
+    if (input.packetType === "blocked") {
+      parsed.frontmatter.readiness = "blocked";
+      parsed.frontmatter.validation = "failing"; // blocked work is unhealthy (FR24)
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: input.packetType === "blocked" ? "blocked" : "comment",
+      actor: { kind: "operator" },
+      title,
+      text:
+        input.packetType === "blocked"
+          ? `**Blocked:** ${title}. Opened a decision packet for the owner to resolve.`
+          : `**Decision packet:** ${title}. Awaiting a human decision.`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.packet_opened",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { type: input.packetType },
+  });
+  notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "packet",
+      ptype: input.packetType,
+      title:
+        input.packetType === "blocked"
+          ? `Blocked — decision needed: ${title}`
+          : `Decision needed: ${title}`,
+      text: packet.body || title,
+    },
+    ctx,
+  );
+  return {
+    outcome: "done",
+    message: `Opened a ${input.packetType === "blocked" ? "blocking" : "decision"} packet with ${options.length} option(s).`,
+  };
 }
 
 /** Resolve a deployed specialist's display name for a recommendation label. */
@@ -588,6 +810,31 @@ function deployedAgent(
   );
 }
 
+/**
+ * Best-effort task-key branch creation on GitHub when a specialist is about to
+ * work. Isolated + swallowing so a GitHub failure (or unconfigured repo) can
+ * never fail the operator's coordination — ensureTaskBranch already returns
+ * typed results and writes the branch name into task.md on success.
+ */
+async function ensureTaskBranchBestEffort(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const { ensureTaskBranch } = await import("~/server/github/branch-sync.server");
+    await ensureTaskBranch(
+      db,
+      { projectSlug, taskKey },
+      OPERATOR_AUDIT_ACTOR,
+      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    );
+  } catch {
+    // Non-fatal: coordination proceeds without a branch when GitHub is absent.
+  }
+}
+
 /** Title / goal / current stage name for building a default prompt directive. */
 function taskContext(
   db: Database.Database,
@@ -671,6 +918,11 @@ export async function operatorPromptSpecialist(
       opCtx(ctx),
     );
   }
+  // Delivery spine (FR31): the developer is about to work, so ensure the
+  // task-key branch exists on GitHub. Best-effort — degrades cleanly (no throw)
+  // when the repo/PAT isn't configured, and writes the branch name into task.md
+  // so the PR/commit/branch chain stays traceable to this task.
+  await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
   const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
   const directive =
     (input.directive ?? "").trim() ||

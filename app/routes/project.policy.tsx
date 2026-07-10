@@ -2,7 +2,8 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
 import type { loader as projectLoader } from "./project";
 import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import { requireAuth } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
@@ -23,7 +24,7 @@ import { PolicyPage } from "~/features/policy/policy-page";
  */
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
+  await requireProjectMember(request, params.slug, "view this project's policy");
   const db = getDb();
   const view = getPolicyViewData(db, params.slug);
   if (!view) {

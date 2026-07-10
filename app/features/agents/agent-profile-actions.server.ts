@@ -151,8 +151,13 @@ function grantsFor(
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
     let mode = caps[capabilityId] ?? def;
-    if (mode === "off") continue;
+    // Always-human caps are coerced to `human` whatever the form says.
     if (ALWAYS_HUMAN.has(capabilityId)) mode = "human";
+    // Persist EVERY grant, including `off` (withheld). Dropping `off` here made
+    // it a silent no-op: the specialist tool policy denies a repo-mutating tool
+    // only when it SEES an explicit `off`/`human` grant, so a dropped `off` read
+    // back as "unspecified" and left the tool available. Storing it makes the
+    // withholding real (the operator gate already treats stored-off = deny).
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   return grants;
