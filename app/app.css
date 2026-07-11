@@ -720,6 +720,10 @@ h1, h2, h3, h4 {
   flex: 1;
   min-height: 0;
 }
+/* `.detail` is programmatically focused (tabIndex=-1) so keyboard scrolling
+   works; it isn't an interactive control, so suppress the focus ring. */
+.detail:focus,
+.detail:focus-visible { outline: none; }
 .detail-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
 .detail-side { display: flex; flex-direction: column; gap: 1.1rem; }
 

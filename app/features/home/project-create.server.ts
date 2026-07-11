@@ -115,12 +115,14 @@ async function fetchRemoteDefaultBranch(
 }
 
 /**
- * "New governed project" action (home spec §5.9/§5.10, §6.1): writes
+ * "New project" action (home spec §5.9/§5.10, §6.1): writes
  * projects/<slug>/project.md from the workflow template (ruling 15),
  * projects it, audits. The creator joins as project admin.
  *
- * The mock's policy preset only feeds the synthesized description — kept
- * exactly that way (agent capability presets arrive with Phase 8/9).
+ * The policy preset shapes REAL governance (S1): `strict` human-gates the
+ * pre-work boundaries, `auto` runs the operator at full autonomy + grants it
+ * completion-for-acceptance — see presetWorkflow / presetAgents. review→done
+ * stays human-locked in every preset.
  */
 
 export interface CreateProjectInput {
@@ -199,7 +201,7 @@ export async function createProject(
   const desc =
     (input.template === "light"
       ? "Lightweight 3-stage workflow"
-      : "Governed 5-stage workflow") +
+      : "Standard 5-stage workflow") +
     " · " +
     (input.policy === "strict"
       ? "strict human-gate policy."

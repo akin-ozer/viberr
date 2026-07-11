@@ -399,8 +399,8 @@ function ProfileAccess({
       <div className="pol-note" style={{ margin: ".9rem 0 0" }}>
         <Icon name="lock" />
         <span>
-          Your role is assigned by an admin and enforced on every governed
-          action. Changes go through{" "}
+          Your role is assigned by an admin and enforced on every action.
+          Changes go through{" "}
           {hasMembership ? (
             <button
               type="button"
@@ -509,9 +509,9 @@ function ProfileGithub({
           <div className="cred-warn">
             <Icon name="alert" />
             <span>
-              Not connected — governance actions record under your workspace
-              identity only, and your GitHub review approvals can't be matched
-              back to you.
+              Not connected — actions record under your workspace identity
+              only, and your GitHub review approvals can't be matched back to
+              you.
             </span>
             <a
               className="btn sm"

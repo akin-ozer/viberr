@@ -27,7 +27,7 @@ import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 export function meta(_: Route.MetaArgs) {
   return [
     { title: "Viberr" },
-    { name: "description", content: "Governed AI software delivery." },
+    { name: "description", content: "Collaborative AI software delivery." },
   ];
 }
 

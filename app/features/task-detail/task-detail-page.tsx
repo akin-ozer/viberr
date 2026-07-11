@@ -212,7 +212,24 @@ function PolicyPanel({
       <div className="panel-head">
         <Icon name="shield" />
         <h2>Permissions</h2>
+        <span
+          className="right sub"
+          style={{ fontSize: ".72rem", color: "var(--faint)" }}
+        >
+          V1 rules
+        </span>
       </div>
+      <p
+        style={{
+          margin: "0 0 .55rem",
+          fontSize: ".74rem",
+          lineHeight: 1.4,
+          color: "var(--faint)",
+        }}
+      >
+        Fixed platform rules — identical for every task. This task's live stage,
+        owner and waiting-on are in <b>Current state</b> above.
+      </p>
       {rows.map((r) => (
         <div className="policy-line" key={r.k}>
           <span className="k">
@@ -721,6 +738,15 @@ export function TaskDetailPage({
   const [ask, setAsk] = useState(0);
   const csrf = useCsrfToken();
 
+  // G7: the page body is overflow:hidden and `.detail` is the actual scroll
+  // container, so keyboard scrolling (Space / PageDown / arrows) is dead until
+  // `.detail` holds focus. It's kept out of the tab order (tabIndex=-1) and
+  // focused on mount so the workspace is keyboard-scrollable immediately.
+  const detailRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    detailRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
   const runFetcher = useFetcher<ActionResult>();
@@ -857,7 +883,12 @@ export function TaskDetailPage({
   };
 
   return (
-    <div className="detail" data-screen-label={"Task " + task.key}>
+    <div
+      className="detail"
+      ref={detailRef}
+      tabIndex={-1}
+      data-screen-label={"Task " + task.key}
+    >
       <div className="detail-main">
         <TaskHero task={task} stage={stage} canEditGoal={canRunAgents} />
 

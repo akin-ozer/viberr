@@ -103,7 +103,7 @@ export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] = [
     ],
   },
   {
-    group: "Governance",
+    group: "Permissions",
     caps: [
       cap("stage-transitions", "recommend"),
       cap("completion-for-acceptance", "recommend"),

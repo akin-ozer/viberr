@@ -382,9 +382,11 @@ export async function inviteMember(
     if (parsed.frontmatter.members.some((m) => m.userId === userId)) {
       throw conflict(`${email} is already a member`);
     }
-    const member = { userId, role: "viewer" as const };
-    (member as Record<string, unknown>).status = "invited";
-    parsed.frontmatter.members.push(member);
+    // An invite IS the membership (X15): viberr uses a whitelist auth model with
+    // no separate accept-invite step, so the member gets access immediately and
+    // we no longer stamp a decorative `status: invited` that never gated
+    // anything. The member joins as a viewer, editable in Policy afterwards.
+    parsed.frontmatter.members.push({ userId, role: "viewer" as const });
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -421,7 +423,6 @@ export async function removeMember(
     .get(input.targetUserId) as { name: string; email: string } | undefined;
   const displayName = userRow?.name ?? input.targetUserId;
 
-  let wasInvited = false;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const member = parsed.frontmatter.members.find(
       (m) => m.userId === input.targetUserId,
@@ -439,7 +440,6 @@ export async function removeMember(
         );
       }
     }
-    wasInvited = (member as Record<string, unknown>).status === "invited";
     parsed.frontmatter.members = parsed.frontmatter.members.filter(
       (m) => m.userId !== input.targetUserId,
     );
@@ -452,12 +452,10 @@ export async function removeMember(
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
-    details: { invited: wasInvited },
+    details: {},
   });
   return {
-    toast: wasInvited
-      ? `Invite revoked · ${userRow?.email ?? input.targetUserId}`
-      : `${displayName} removed from ${projectName}`,
+    toast: `${displayName} removed from ${projectName}`,
   };
 }
 
