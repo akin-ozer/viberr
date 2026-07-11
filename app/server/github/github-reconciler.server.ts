@@ -199,11 +199,18 @@ export async function reconcileTask(
   // be repo visibility).
   const pr: PrFacts | null = prResult.status === "found" ? prResult.pr : null;
 
-  // 3. Build the new frontmatter cache.
+  // 3. Build the new frontmatter cache. A human-set "accepted" (merge-pending,
+  // D3/S2) must NOT be downgraded to "review" just because the PR is still open
+  // on GitHub — that would silently hide the "Complete merge" affordance. Keep
+  // "accepted" until GitHub reports a real terminal state (merged/closed).
+  const liveState =
+    fm.pr?.state === "accepted" && pr && pr.state === "review"
+      ? "accepted"
+      : pr?.state;
   const newPr: PrRef | null = pr
     ? {
         number: pr.number,
-        state: pr.state,
+        state: liveState ?? pr.state,
         title: pr.title,
         ...(pr.checks ? { checks: pr.checks } : {}),
       }

@@ -1222,15 +1222,25 @@ export async function recordReviewerVerdict(
 ): Promise<void> {
   const verdict = classifyReviewerVerdict(replyText);
   if (!verdict) return;
-  const validation: "failing" | "healthy" =
-    verdict === "request_changes" ? "failing" : "healthy";
   const summary =
     verdict === "request_changes"
       ? "Reviewer requested changes."
       : "Reviewer approved the work.";
   const title = verdict === "request_changes" ? "Changes requested" : "Review passed";
+  let validation: "failing" | "healthy" = "healthy";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // A request_changes always fails. But an APPROVE must NOT clear a
+      // `failing` set by ANOTHER reviewer in the same round (multiple engaged
+      // reviewers) — one rejection blocks acceptance until the developer
+      // reworks (impl→review resets validation to "changed", not "failing").
+      // Otherwise a later approve silently masks an earlier request_changes.
+      validation =
+        verdict === "request_changes"
+          ? "failing"
+          : parsed.frontmatter.validation === "failing"
+            ? "failing"
+            : "healthy";
       parsed.frontmatter.validation = validation;
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -1753,6 +1763,25 @@ export async function transitionStage(
 
   const firstStageId = project.stages[0]?.id;
   const lastStageId = project.stages[project.stages.length - 1]?.id;
+
+  // A HUMAN manually moving a task INTO the final stage IS accepting completion
+  // — route it through the full acceptance contract (real merge attempt,
+  // `completion` event, validation → healthy, packet/recs cleared) rather than a
+  // bare `transition` that would leave a Done task with an unmerged PR and no
+  // completion record. RBAC (admin|maintainer) is re-checked inside.
+  if (
+    !ctx.operatorAuthorized &&
+    input.toStageId === lastStageId &&
+    lastStageId !== undefined
+  ) {
+    await acceptCompletion(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+    return summaryOrThrow(db, input.projectSlug, input.taskKey);
+  }
 
   if (ctx.operatorAuthorized) {
     // Operator authority is gated upstream by its capability policy; skip the

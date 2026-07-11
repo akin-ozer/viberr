@@ -1119,6 +1119,18 @@ export async function operatorAcceptCompletion(
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
+  // Never accept a task a reviewer FLAGGED (validation "failing"): a
+  // request-changes verdict blocks acceptance until the developer reworks it
+  // (which resets validation off "failing"). This stops the operator from
+  // auto-accepting flagged work — e.g. when one of several reviewers rejected
+  // it — under full autonomy.
+  if (file.parsed.frontmatter.validation === "failing") {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} has an open "changes requested" verdict — not accepting until it's resolved.`,
+    };
+  }
+
   // Supervised (or without the completion capability) → recommend only: post an
   // actionable "accept completion → Done" recommendation card (symmetric with the
   // other stage-transition cards, so the review→done boundary gets the same clear

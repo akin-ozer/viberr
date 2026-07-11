@@ -57,6 +57,28 @@ limitation (owner deprioritized security).
 - ✅ `classifyReviewerVerdict` negation-blindness — bare `fail`/`blocker` flipped clean APPROVEs to
   request-changes. Fixed (explicit-verdict priority + negation-aware scan); 2 regression tests.
 
+## Exhaustive adversarial hunt (2026-07-11) — 5 NEW confirmed defects, all fixed
+A 4-dimension find→verify sweep over the areas the backlog didn't cover surfaced 5 real defects
+(none overlapping the 37). All fixed + tested; 1029 suite green.
+- **H1 (bug)** — `reconcileTask` clobbered a human-set `"accepted"` (merge-pending) PR state back to
+  `"review"`, silently disabling the new S2 "Complete merge" button. Fixed: reconcile PRESERVES
+  "accepted" while the PR is still open; only a real terminal state (merged/closed) overrides it.
+  2 tests.
+- **H2 (bug)** — the reviewer verdict (validation flip + typed `quality` event + owner notification)
+  only fired on the operator-PROMPT path; the UI "Run reviewer" button, @mention reviewer, and the
+  operator's own `run_reviewer` all dropped it (backlog #6 only covered one path). Fixed:
+  `registerReplyAndReconcile` records the verdict for EVERY reviewer run.
+- **H3 (poor-impl)** — multi-reviewer coordination: the scripted operator only prompted `reviewers[0]`,
+  accepted on the first report, and `approve` masked an earlier `request_changes` (last-writer-wins).
+  Fixed: scripted drive prompts EVERY engaged reviewer; `approve` never clears a `failing` (a rejection
+  sticks until the developer reworks); the operator refuses to accept a `failing` task.
+- **H4 (bug)** — a manual stage move INTO Done bypassed the acceptance contract (no merge attempt, no
+  `completion` event, no validation=healthy) — a Done task could sit with an unmerged PR and no
+  completion record. Fixed: a human transition into the final stage routes through `acceptCompletion`.
+  Tests updated.
+- **H5** = duplicate of H2 (a second hunter found the same defect from the call-site angle).
+
 ## Net
-37/37 findings resolved (35 fixed, 1 by-design #18, 1 documented-limitation #33) + 9/9 decisions +
-1 sweep bug. No deferrals.
+37/37 backlog findings resolved (35 fixed, 1 by-design #18, 1 documented-limitation #33) + 9/9
+decisions + 1 sweep bug + 3 shipped-build gaps (S1/S2/S3) + 5 exhaustive-hunt defects (H1–H4). No
+deferrals. Every fix carries a regression test; 1029 suite green, typecheck clean.

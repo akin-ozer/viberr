@@ -485,9 +485,19 @@ describe("ownership actions", () => {
 /* ---------------------------------------------------- stage transitions */
 
 describe("transition action (manual stage move — admin|maintainer)", () => {
-  it("the stage dropdown is admin|maintainer only: a reviewer is rejected", async () => {
+  it("moving to Done routes through acceptance: a contributor is rejected", async () => {
+    // A manual move INTO the final stage IS accepting completion — the RBAC
+    // message reflects the acceptance authority, still admin|maintainer.
     const result = (await postIntent("VIB-145", ids.selin, {
       intent: "transition", to: "done",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(403);
+    expect(result.data.error).toContain("accept completion into Done");
+  });
+
+  it("a non-final manual move is admin|maintainer only: a contributor is rejected", async () => {
+    const result = (await postIntent("VIB-145", ids.selin, {
+      intent: "transition", to: "triage",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(403);
     expect(result.data.error).toContain("change the task stage");
