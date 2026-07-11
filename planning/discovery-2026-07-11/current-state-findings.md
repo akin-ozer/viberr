@@ -32,10 +32,25 @@ LOW finding too. Both runtimes now call it; the private copies are gone. 8 new u
 ([kb-injection.server.test.ts](../../app/server/files/kb-injection.server.test.ts)) cover nesting,
 non-`.md`, dotfile/`.git` skipping, budget+marker, absent folder.
 
-## MED — seed-fabrication cluster + one dead-end (documented, NOT yet fixed)
+## MED — seed-fabrication cluster — FIXED (owner ruling: "honest empty slate")
 
-These are honest-on-probe but present a fresh instance as production-ready while credentialed features
-silently no-op. Deferred pending an owner call on **seed policy** (see Questions):
+The owner chose to **ship an honest empty slate**: the seed layer no longer fabricates credentials or
+health. Landed changes:
+- **org-seed**: removed the three fake MCP rows (`mcp.internal`, `@mcp/server-postgres`) and the
+  placeholder default-connection PAT (`ghp_placeholder_seed_…`). A fresh instance seeds **0 MCP
+  servers, 0 GitHub connections, 0 PATs** (verified on a fresh seed + in the browser: Org→Resources
+  shows "No MCP servers yet", GitHub connections 0).
+- **demo-data**: dropped the fake `masked` token from Viberr Core (kept `requiredScopes` as honest
+  policy); removed `github-mcp` from the developer/reviewer profiles (no dead-endpoint injection).
+- **pat-store**: removed the `policy_display` source entirely — a `credentialPolicy` with no bound PAT
+  now reports `source: "none"` (honest "No credential configured" card), never a green "All required
+  scopes granted" for a token that doesn't exist. `requiredScopes` still flow through for the
+  pre-flight scope check; an open violation still surfaces.
+- Tests updated to the honest contract across 8 files; a new test asserts the unconfigured card.
+
+Findings addressed by this ruling (1, 3, 4, 5 below fully; 2 by removing the dead-endpoint ref):
+
+Original detail (for the record):
 
 1. **Fabricated MCP health** — `MCP_SEEDS` ([org-seed.server.ts:259](../../app/server/org/org-seed.server.ts))
    writes `github-mcp → https://mcp.internal:7801/sse` up=1/tools=14 and a non-existent
@@ -60,11 +75,12 @@ silently no-op. Deferred pending an owner call on **seed policy** (see Questions
    `GITHUB/GOOGLE_OAUTH_CLIENT_ID` env is set; this instance has neither, so the row is unclaimable.
    (The OAuth-claim *logic* IS built and unit-tested — the stale "documented later wiring" comment at
    [users-panel.tsx:19](../../app/features/org-settings/users-panel.tsx) is itself a LOW finding.)
+**Still open (not part of the seed ruling):**
 6. **`run_specialist`/`run_reviewer` "recommend" branch is a dead-end**
    ([operator-actions.server.ts:758](../../app/server/tasks/operator-actions.server.ts)) — under supervised
    autonomy it posts a "*Recommendation: … Awaiting a maintainer to confirm*" comment with **no card and
    no apply button**, unlike the sibling assign/transition/accept paths. A supervised operator strands the
-   task. This is a real UX gap, fixable independently of seed policy.
+   task. A real UX gap, independent of seed policy — documented for a follow-up pass.
 
 ## LOW — honesty/cosmetic (documented)
 

@@ -5,7 +5,6 @@ import {
   recordAudit,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
-import { findUserByEmail } from "~/server/auth/user-store.server";
 import {
   kbDirPath,
   kbRootDir,
@@ -13,7 +12,6 @@ import {
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
-import { createPat } from "~/server/secrets/pat-store.server";
 import { ensureOrgStoreDirs } from "./resources.server";
 
 /**
@@ -256,41 +254,13 @@ const SKILL_SEEDS: {
   },
 ];
 
-const MCP_SEEDS = [
-  {
-    id: "mcp_seed_gh",
-    name: "github-mcp",
-    transport: "HTTP",
-    target: "https://mcp.internal:7801/sse",
-    cred: "secret://mcp/github",
-    tools: 14,
-    up: 1,
-    checkedAgoMs: 30_000,
-  },
-  {
-    id: "mcp_seed_pg",
-    name: "postgres-readonly",
-    transport: "stdio",
-    target: "npx -y @mcp/server-postgres",
-    cred: "secret://mcp/postgres-ro",
-    tools: 6,
-    up: 1,
-    checkedAgoMs: 60_000,
-  },
-  {
-    id: "mcp_seed_bb",
-    name: "browserbase",
-    transport: "HTTP",
-    target: "https://mcp.internal:7809/sse",
-    cred: "secret://mcp/browserbase",
-    tools: 0,
-    up: 0,
-    checkedAgoMs: 8 * 60_000,
-  },
-] as const;
-
-/** Placeholder token — deliberately NOT a working credential. */
-const PLACEHOLDER_TOKEN = "ghp_placeholder_seed_akin_ozer_0000";
+// Honest empty slate (owner ruling): a fresh instance ships NO MCP servers and
+// NO GitHub connection. The old seed inserted fabricated MCP health (github-mcp
+// → the non-resolvable mcp.internal with up=1/tools=14, a non-existent
+// @mcp/server-postgres) and a placeholder default-connection PAT that 401s on
+// every call — all rendering green until an admin probed them. An admin now
+// adds real MCP servers and a real GitHub token; nothing fabricated is
+// presented as configured.
 
 function backdate(spec: [number, number, number?], now: Date): Date {
   const [month, day, hour] = spec;
@@ -386,27 +356,8 @@ export function seedOrgResources(
     for (const file of skill.extraFiles) writeSeedFile(root, file, now);
   }
 
-  // MCP servers — config rows with demo health/tool facts.
-  for (const [i, mcp] of MCP_SEEDS.entries()) {
-    const checkedAt = new Date(now.getTime() - mcp.checkedAgoMs).toISOString();
-    db.prepare(
-      `INSERT OR REPLACE INTO org_mcp_servers
-         (id, name, transport, target, cred_ref, tools_count, up,
-          last_checked_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      mcp.id,
-      mcp.name,
-      mcp.transport,
-      mcp.target,
-      mcp.cred,
-      mcp.tools,
-      mcp.up,
-      checkedAt,
-      `2000-01-01T00:00:0${i}.000Z`,
-      nowIso,
-    );
-  }
+  // No MCP servers and no GitHub connection are seeded — see the honest-empty-
+  // slate note above. Any connection an admin already installed is left intact.
 
   // Google domain allowlist — @viberr.dev joins as member.
   db.prepare(
@@ -415,39 +366,11 @@ export function seedOrgResources(
      VALUES ('dom_seed_viberr', '@viberr.dev', 'member', ?)`,
   ).run(nowIso);
 
-  // Placeholder akin-ozer connection — INSERT-IF-MISSING (survives --reset
-  // and never clobbers a real token an admin may have installed).
-  const existing = db
-    .prepare(`SELECT id FROM github_connections WHERE id = 'akin-ozer'`)
-    .get();
-  if (!existing) {
-    const arda = findUserByEmail(db, "arda@viberr.dev");
-    if (arda) {
-      const pat = createPat(
-        db,
-        {
-          userId: arda.id,
-          label: "connection · akin-ozer",
-          token: PLACEHOLDER_TOKEN,
-        },
-        SYSTEM_ACTOR,
-      );
-      db.prepare(
-        `INSERT INTO github_connections
-           (id, owner, pat_id, is_default, repos_count, expires_at,
-            created_at, updated_at)
-         VALUES ('akin-ozer', 'akin-ozer', ?, 1, NULL, NULL, ?, ?)`,
-      ).run(pat.id, nowIso, nowIso);
-    } else {
-      logger.warn("org seed: arda@viberr.dev missing — connection skipped");
-    }
-  }
-
   const summary: OrgSeedSummary = {
     kbs: KB_SEEDS.length,
     kbFiles,
     skills: SKILL_SEEDS.length,
-    mcps: MCP_SEEDS.length,
+    mcps: 0,
     domains: 1,
     connections: (
       db.prepare(`SELECT count(*) AS c FROM github_connections`).get() as {

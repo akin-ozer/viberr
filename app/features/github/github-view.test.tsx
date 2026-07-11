@@ -14,19 +14,21 @@ afterEach(cleanup);
 
 /* ----------------------------------------------------------- fixtures */
 
-const seededCredential: ProjectCredentialHealth = {
-  configured: false,
-  source: "policy_display",
-  patId: null,
+// A REAL bound PAT that carries an open scope violation — the honest case the
+// card must render (the removed `policy_display` fabrication no longer exists).
+const violationCredential: ProjectCredentialHealth = {
+  configured: true,
+  source: "pat",
+  patId: "pat_seed_1",
   label: "viberr-bot · fine-grained PAT",
   masked: "github_pat_••••42af",
-  lastValidatedAt: null,
+  lastValidatedAt: "2026-07-10T00:00:00.000Z",
   validation: null,
   requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
   scopes: [
-    { id: "repo", ok: true, source: "unchecked" },
-    { id: "workflow", ok: true, source: "unchecked" },
-    { id: "read:org", ok: true, source: "unchecked" },
+    { id: "repo", ok: true, source: "header" },
+    { id: "workflow", ok: true, source: "header" },
+    { id: "read:org", ok: true, source: "header" },
     {
       id: "pull_request:write",
       ok: false,
@@ -38,10 +40,8 @@ const seededCredential: ProjectCredentialHealth = {
 };
 
 const healthyCredential: ProjectCredentialHealth = {
-  ...seededCredential,
-  configured: true,
-  source: "pat",
-  scopes: seededCredential.scopes.map((s) => ({
+  ...violationCredential,
+  scopes: violationCredential.scopes.map((s) => ({
     ...s,
     ok: true,
     source: "header" as const,
@@ -49,8 +49,10 @@ const healthyCredential: ProjectCredentialHealth = {
 };
 
 const noneCredential: ProjectCredentialHealth = {
-  ...seededCredential,
+  ...violationCredential,
+  configured: false,
   source: "none",
+  patId: null,
   label: null,
   masked: null,
   scopes: [],
@@ -113,7 +115,7 @@ describe("CredentialCard states", () => {
   it("open violation → cred-warn with the missing scope, flagged task keybtn", () => {
     const onOpenTask = vi.fn();
     const { container } = render(
-      <CredentialCard credential={seededCredential} onOpenTask={onOpenTask} />,
+      <CredentialCard credential={violationCredential} onOpenTask={onOpenTask} />,
     );
     expect(container.querySelector(".cred-name")!.textContent).toBe(
       "viberr-bot · fine-grained PAT",
@@ -161,7 +163,7 @@ describe("CredentialCard states", () => {
   it("renders the warnActions slot inside the banner", () => {
     const { container } = render(
       <CredentialCard
-        credential={seededCredential}
+        credential={violationCredential}
         onOpenTask={() => {}}
         warnActions={<button className="btn sm">Grant scope</button>}
       />,
@@ -260,7 +262,7 @@ describe("RepositoryPanel", () => {
             defaultBranch: "main",
           },
           connection: { status: "no_pat_configured", repo: "akin-ozer/viberr" },
-          credential: seededCredential,
+          credential: noneCredential,
         }}
         onOpenTask={() => {}}
       />,

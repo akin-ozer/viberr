@@ -211,7 +211,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["ready", "impl"],
       resources: {
         skills: ["developer-expertise"],
-        mcps: ["github-mcp"],
+        // No MCP is seeded (honest empty slate — the old "github-mcp" ref
+        // pointed at a non-resolvable, unauthenticated endpoint). An admin
+        // attaches a real MCP server and references it here.
+        mcps: [],
         // Real KB folders on disk (data/kb/<dir>) so they inject into runs (F6).
         kb: ["architecture-notes", "api-contracts"],
       },
@@ -231,7 +234,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["impl", "review"],
       resources: {
         skills: ["reviewer-expertise"],
-        mcps: ["github-mcp"],
+        mcps: [],
         kb: ["api-contracts"],
       },
     },
@@ -311,9 +314,13 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           { userId: ids.selin, role: "contributor" },
         ],
         agents: deployments(),
+        // Honest empty slate: the project declares the scopes it REQUIRES (used
+        // by the pre-flight scope check), but no fabricated masked token — a
+        // policy is not a credential, and no PAT is bound until an admin adds a
+        // real one, so the credential card reads "no credential configured".
         credentialPolicy: {
           credentialLabel: "viberr-bot · fine-grained PAT",
-          masked: "github_pat_••••42af",
+          masked: "",
           requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
         },
         guardrails: [

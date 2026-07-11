@@ -100,9 +100,10 @@ describe("loader", () => {
     expect(view.stageCounts.review).toBe(2);
     expect(view.members).toHaveLength(4);
     expect(view.members.every((m) => m.status === "active")).toBe(true);
-    // Credential health = the ruling-5 single fact (policy_display fallback
-    // + the seeded VIB-142 violation).
-    expect(view.credential.source).toBe("policy_display");
+    // Credential health (honest empty slate): a credentialPolicy with no bound
+    // PAT reports source 'none' (no fabricated card), while the seeded VIB-142
+    // violation still surfaces on the chip.
+    expect(view.credential.source).toBe("none");
     expect(view.credential.scopes.find((s) => !s.ok)).toMatchObject({
       id: "pull_request:write",
       flaggedTaskKey: "VIB-142",

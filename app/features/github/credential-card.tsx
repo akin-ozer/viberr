@@ -14,11 +14,13 @@ import { useDialog } from "~/ui/use-dialog";
  * in Settings — this page currently renders both, see the phase report).
  *
  * States:
- * - source "pat" | "policy_display" → cred-top + scope chips + warn/ok
- *   footer (chips render the server verdicts directly — the mock's
- *   `s.ok || scopeGranted` hack is deleted per spec §7.2).
+ * - source "pat" → cred-top + scope chips + warn/ok footer (chips render the
+ *   server verdicts directly — the mock's `s.ok || scopeGranted` hack is
+ *   deleted per spec §7.2).
  * - source "none" → the settings-spec §7.11 degraded mode: a "connect
- *   credential" affordance instead of scope chips (reuses cred-warn).
+ *   credential" affordance instead of scope chips (reuses cred-warn). A project
+ *   with a credentialPolicy but no bound PAT also lands here — a policy is not
+ *   a credential (honest empty slate), so no fabricated card is shown.
  */
 
 export type CredentialCardData = Pick<
