@@ -537,11 +537,17 @@ async function runScriptedOperatorDrive(
         snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
         if (snap.stage === doneStageId) return;
         if (snap.stage === reviewStageId) {
-          const rev = snap.reviewers[0]?.profileId ?? pickReviewer(snap)?.id;
-          if (rev && gate(authority, "summon-reviewers") !== "deny") {
-            say(
-              (await operatorPromptReviewer(db, ctx, { projectSlug, taskKey, profileId: rev }, authority)).message,
-            );
+          // Prompt EVERY engaged reviewer (not just the first) so each records a
+          // verdict; a single engaged/picked reviewer keeps the common case.
+          const revIds = snap.reviewers.length
+            ? snap.reviewers.map((r) => r.profileId)
+            : [pickReviewer(snap)?.id].filter((x): x is string => !!x);
+          if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
+            for (const rev of revIds) {
+              say(
+                (await operatorPromptReviewer(db, ctx, { projectSlug, taskKey, profileId: rev }, authority)).message,
+              );
+            }
           }
           return;
         }

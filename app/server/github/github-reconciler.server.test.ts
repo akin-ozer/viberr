@@ -220,6 +220,82 @@ describe("reconcileTask", () => {
     expect(result).toMatchObject({ status: "reconciled", sync: "merged" });
   });
 
+  it("preserves a human-set 'accepted' (merge-pending) state while the PR is still open", async () => {
+    // D3/S2: a task accepted "merge pending" must NOT be downgraded to "review"
+    // by a reconcile, or the "Complete merge" affordance silently disappears.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "done",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.state).toBe("accepted"); // still open on GitHub → stays accepted
+  });
+
+  it("advances 'accepted' → 'merged' once GitHub reports the PR merged", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "done",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 412, deletions: 87, changed_files: 9,
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.state).toBe("merged"); // real terminal state overrides "accepted"
+  });
+
   it("degrades typed: no branch, no PAT, network down; 403 opens a repo violation", async () => {
     const { store, actor } = setup();
     // Task without a branch.

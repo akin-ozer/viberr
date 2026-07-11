@@ -1,8 +1,31 @@
-# Viberr app reference — architecture, data model, routes (2026-07-10)
+# Viberr app reference — architecture, data model, routes (2026-07-11, post-implementation)
 
-Self-contained reference for implementation agents. Verified against the live codebase on 2026-07-10.
-Stack: React Router 7 SSR · Node 20+ · TS · better-sqlite3 (WAL) · Zod v4 · SSE (no websockets) ·
-ported `viberr.css` design system (**no Tailwind — use `--viberr-*`/design tokens only**).
+Self-contained reference for implementation agents. Verified against the live codebase on 2026-07-11
+AFTER the D1–D4 decisions + 37-finding + hunt-defect implementation (1029 tests green). Stack:
+React Router 7 SSR · Node 20+ · TS · better-sqlite3 (WAL) · Zod v4 · SSE (no websockets) · ported
+`viberr.css` design system (**no Tailwind — use `--viberr-*`/design tokens only**).
+
+> **What changed since discovery (read this first):**
+> - **Agent roster = operator + developer + reviewer only.** The Advisor/consultant (decision A) and
+>   the Tester (decision D1) profiles were REMOVED; the Reviewer ("Review & validation") both reviews
+>   the diff AND authors/runs tests. `reviewers[]` still parses a legacy `consultants` key for
+>   back-compat, but no consultant/tester profile ships.
+> - **`triage→ready` is an `auto` boundary** in GOVERNED_TEMPLATE (D2) — the operator auto-advances
+>   well-scoped tasks (vague → packet). The **policy preset** (strict/balanced/auto) now shapes REAL
+>   governance (S1): strict makes the pre-work boundaries `approval`; auto sets operator autonomy full.
+> - **`pr.state` vocabulary = `review | merged | closed | accepted`** — "accepted" (D3) = human-accepted,
+>   merge pending (no server merge ran). Never a false "merged". A "Complete merge" action
+>   (`completeTaskMerge`, S2) finishes it later; `reconcileTask` PRESERVES "accepted" while the PR is
+>   still open (H1).
+> - **Runtime isolation:** Claude runs pass `settingSources:[]` + `skills:[]` (no host `~/.claude`
+>   skills/plugins leak) and resolve one config dir via `resolveClaudeConfigDir`; operator runs deny
+>   Bash/Edit/Write built-ins (`OPERATOR_DENIED_BUILTINS`). Codex runs remain prompt-only enforced (📎
+>   S3, role-bindings phase).
+> - **Reviewer verdict fires on EVERY reviewer completion path** (H2), not just the operator prompt.
+> - **Agent-side delivery is captured** into task.md by `reconcileWorkspaceDelivery` (branch/PR an
+>   agent opened with its own creds). **`backendOverride`** on specialist/reviewer runs powers D4 retry.
+> - The single-flight operator lease is atomic in this single-process/synchronous-sqlite runtime (the
+>   old "known race" note is retracted).
 
 ## 1. Big picture
 
@@ -38,8 +61,8 @@ hardStop→blocked) via `app/server/interpretation/readiness-policy.server.ts` (
 `reviewers[]` (same shape; legacy `consultants` key coerced), `operator` ({assignedAtStageId}|null),
 `recommendations[]` ({id,kind∈assign_specialist|assign_reviewer|transition|accept_completion,profileId?,
 toStageId?,label,detail}), `urgent`, `validation` (healthy|changed|failing|none), `branch`, `repo`
-(override|null), `pr` ({number,state,title}|null), `github` (commits+changed cache), `createdAt`,
-`updatedAt`, `boardRank`.
+(override|null), `pr` ({number,state∈review|merged|closed|accepted,title}|null; "accepted" = human-
+accepted, merge pending — D3), `github` (commits+changed cache), `createdAt`, `updatedAt`, `boardRank`.
 
 Packet (`## Packet` fenced yaml): `type` (input|blocked), `kind` label, `from`, `title`, `body`,
 `observations[]` {k,v,code}, `options[]` {kind∈accept_completion|request_edit|block_on_policy|
@@ -82,7 +105,8 @@ content on disk), `notifications` (kind∈packet|approval|mention|quality|policy
 ## 4. Route table (path → module → notes)
 
 - `/` `_index.tsx` — Home. Intents: pin, view, rescan, rebuild-projections (admin), create-project
-  (any member).
+  (any member; the strict/balanced/auto policy preset shapes real governance — S1, `presetWorkflow`/
+  `presetAgents` in `project-create.server.ts`).
 - `/login` `login.tsx` — credentials + set-password (forced reset); OAuth buttons env-gated.
 - `/logout`, `/org/users` (redirect), `/org/settings` (admin; tabs connections/users/resources; huge
   action switch incl. store-upload/mkdir/delete/import-github, kb/mcp/skill/agent-save/delete).
@@ -103,8 +127,9 @@ content on disk), `notifications` (kind∈packet|approval|mention|quality|policy
     grant-scope, archive-project, delete-project.
   - `tasks/:key` `project.task.tsx` — THE task workspace. Intents: comment (mention→agent run),
     resolve-packet, owner-take/assign/release, transition, run-interrupt, assign-specialist,
-    run-specialist, assign-reviewer, run-reviewer, remove-reviewer, apply-recommendation,
-    dismiss-recommendation, run-operator (admin|maintainer; backend+autonomy choice).
+    run-specialist (+optional `backend` override — D4 retry), assign-reviewer, run-reviewer,
+    remove-reviewer, apply-recommendation, dismiss-recommendation, complete-merge (finish an
+    "accepted" PR merge — S2), run-operator (admin|maintainer; backend+autonomy choice).
 
 Feature dirs under `app/features/*` map 1:1 to these pages; shared primitives in `app/ui/*`.
 
@@ -120,7 +145,8 @@ dropped reactions. `resumeRun` = new row, same provider session.
 
 **Operator** (`operator-run.server.ts` `runOperator`): triggers = task create / non-operator
 transition / packet resolve (request_edit|redirect|custom) / @operator comment / Run operator button /
-boot recovery. Single-flight via `inFlightOperatorRun` (**known race — check-then-insert**).
+boot recovery. Single-flight via `inFlightOperatorRun` (atomic — check-then-insert has no await gap in
+this single-process/synchronous-better-sqlite3 runtime; concurrent triggers coalesce, verified live).
 Three modes: real Claude (in-proc `viberr` MCP toolkit via `buildOperatorToolkit`, gated per
 capability: get_task always; post_comment=append-typed-events; open_decision_packet=generate-packets;
 assign/run/prompt_specialist=assign-primary-specialist; assign/run/prompt_reviewer=summon-reviewers;
@@ -132,31 +158,42 @@ reactDepth ≥ 4) → re-invoke or `openStuckLoopPacket`. Prompt = definition bo
 authority block.
 
 **Specialists** (`specialist-run.server.ts`): assign/start via admin|maintainer or
-operator-authorized. Persona = definition + skills + KB; Claude gets systemPrompt/mcpServers
+operator-authorized; `startSpecialistRun`/`startReviewerRun` accept an optional `backendOverride`
+(D4 retry-on-other-backend). Persona = definition + skills + KB; Claude gets systemPrompt/mcpServers
 (`resolveSpecialistMcpServers` — org registry, no cred injection) / disallowedTools
-(`specialist-tool-policy.ts`: withheld caps → git/gh deny specifiers); Codex gets everything folded
-into the prompt. Reviewer replies → `classifyReviewerVerdict` (approve/request_changes) → typed
-quality event + validation health. Simulated replies prefixed "(simulated run …)".
+(`specialist-tool-policy.ts`: withheld caps → git/gh deny specifiers) + `settingSources:[]` + `skills:[]`
+(host-skill isolation); Codex gets everything folded into the prompt (no tool confinement — 📎 S3).
+Every completion runs `registerReplyAndReconcile`: posts the reply, `reconcileWorkspaceDelivery`
+(captures agent-side branch/PR — H1/#31), and for REVIEWER runs `recordReviewerVerdict`
+(`classifyReviewerVerdict` → typed quality event + validation health + owner/supervisor notification —
+fires on EVERY reviewer path now, H2). `classifyReviewerVerdict` is negation-aware (a "no blockers"
+APPROVE isn't misread). Simulated replies prefixed "(simulated run …)".
 
 **GitHub** (`app/server/github/`): `ensureTaskBranch` (idempotent, on work start),
 `openTaskPr` (idempotent, on review entry, task back-link body), `mergeTaskPr` (on accept; typed
-failures), `reconcileTask/Project`, `flagScopeViolation` on 403s. All best-effort — degrade cleanly
+failures), `reconcileTask/Project` (PRESERVES a human-set "accepted" while the PR is still open — H1),
+`workspace-delivery.server.ts` `reconcileWorkspaceDelivery` (captures agent-side branch/PR into
+task.md, canonical PR-state mapping), `flagScopeViolation` on 403s. All best-effort — degrade cleanly
 without credentials.
 
-**Task lifecycle** (`task-actions.server.ts`, 2380 lines): `transitionStage` (boundary RBAC:
-auto=member, approval/human=admin|maintainer; operator skips human RBAC but NEVER to last stage;
-review entry → validation=changed + PR open; leaving triage → operator attach + clear input_required),
-`setOwner`/`releaseOwner` (self-service member take; admin release-any), `acceptCompletion`
-(admin|maintainer; merge+done+healthy+completion event; also operator under full autonomy via
-`operatorAcceptCompletion`), `resolvePacket` (accept_completion re-gated; block_on_policy→blocked;
-hold_runtime_debug→blocked; request_edit/redirect/custom→waiting=agent+ready+re-invoke operator),
-`applyRecommendation`/`dismissRecommendation` (admin|maintainer), `notifyTaskWatchers` (owner +
-admins + maintainers, dedup, on packets + new recommendations), timeline compaction
-(`compactTimelineEvents` gated by compression-threshold guardrail).
+**Task lifecycle** (`task-actions.server.ts`): `transitionStage` (boundary RBAC: auto=member,
+approval/human=admin|maintainer; operator skips human RBAC but NEVER to last stage; a HUMAN transition
+INTO the last stage routes through `acceptCompletion` — the full acceptance contract, not a bare move
+(H4); review entry → validation=changed + PR open; leaving triage → operator attach + clear
+input_required), `setOwner`/`releaseOwner` (self-service member take; admin release-any),
+`acceptCompletion` (admin|maintainer; attempts the real merge and writes `pr.state="merged"` ONLY if it
+truly merged, else `"accepted"` merge-pending — never a fake merge, D3; done+healthy+completion event;
+operator under full autonomy via `operatorAcceptCompletion`, which REFUSES a `failing`-validation task
+— H3), `completeTaskMerge` (admin|maintainer; finishes the real merge of an "accepted" PR later — S2),
+`resolvePacket` (accept_completion re-gated; block_on_policy→blocked; hold_runtime_debug→blocked;
+request_edit/redirect/custom→waiting=agent+ready+re-invoke operator), `applyRecommendation`/
+`dismissRecommendation` (admin|maintainer), `notifyTaskWatchers` (owner + admins + maintainers, dedup,
+routing-pref-honored, on packets + new recommendations + reviewer quality verdicts), timeline
+compaction (`compactTimelineEvents` gated by compression-threshold guardrail).
 
 ## 6. Dev workflow
 
-`npm run dev` (5173) · `npm test` (~960 vitest) · `npm run typecheck` · `npm run e2e` (Playwright,
+`npm run dev` (5173) · `npm test` (1029 vitest) · `npm run typecheck` · `npm run e2e` (Playwright,
 isolated data root) · `npm run seed -- --reset` (restore demo) · `npm run rescan`.
 Demo login: `arda@viberr.dev` / `viberr-dev-2828` (admin); elif/murat/selin/deniz same password.
 Health: `GET /resources/health` → backends real vs simulated. Claude real via `CLAUDE_CODE_OAUTH_TOKEN`

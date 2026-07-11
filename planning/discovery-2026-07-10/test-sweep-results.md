@@ -1,5 +1,10 @@
 # Test Harbor — 20+ task live sweep (2026-07-11)
 
+> **⚠️ PARTIALLY SUPERSEDED (pre-D1–D4).** This 22-task sweep ran on the 37-finding build BEFORE the
+> D1–D4 decisions, so its Advisor/Tester, triage→ready "recommend", and accept→"merged" rows are
+> superseded — corrections are in `test-sweep-committed-2026-07-11.md` and the consolidated
+> `test-catalog.md`. The RBAC / file-tolerance / MCP / skill-isolation rows still hold.
+
 A dedicated hands-on validation sweep on the FIXED codebase (real Claude + Codex). Project
 **test-harbor** (repo cc-devops-skills), members: arda=admin, elif=maintainer, murat=contributor,
 selin=viewer, deniz=non-member. Multi-user auth via better-auth cookie jars + per-user CSRF.

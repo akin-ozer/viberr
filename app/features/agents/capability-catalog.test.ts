@@ -7,8 +7,6 @@ import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
   MODAL_CAP_IDS,
-  RES_CATALOG,
-  RES_DEFAULTS,
 } from "./capability-catalog";
 import { capabilitiesToActionLabels } from "./agents-query.server";
 
@@ -42,22 +40,6 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
       expect(MODAL_CAP_IDS.has(id)).toBe(true);
       expect(CAP_MODAL_DEFAULTS[id]).toBe("human");
     }
-  });
-});
-
-describe("RES_CATALOG", () => {
-  it("a new profile pre-grants NO resources — the creator picks from the real catalog", () => {
-    // The legacy mock defaults (repo-write / test-runner / "Coding standards")
-    // resolved to nothing; a fresh profile now starts empty and safe-by-default.
-    expect(RES_DEFAULTS.skills).toEqual([]);
-    expect(RES_DEFAULTS.mcps).toEqual([]);
-    expect(RES_DEFAULTS.kb).toEqual([]);
-    expect(RES_CATALOG.map((g) => g.key)).toEqual(["skills", "mcps", "kb"]);
-  });
-
-  it("the advisory-only domain-advisor skill is gone from the catalog", () => {
-    const skills = RES_CATALOG.find((g) => g.key === "skills")!.items.map((i) => i.id);
-    expect(skills).not.toContain("domain-advisor");
   });
 });
 

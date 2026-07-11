@@ -14,6 +14,7 @@ import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
+  completeTaskMerge,
   reorderTask,
   resolvePacket,
   transitionStage,
@@ -617,5 +618,75 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict("I looked at the diff.")).toBeNull();
     expect(classifyReviewerVerdict(null)).toBeNull();
     expect(classifyReviewerVerdict("")).toBeNull();
+  });
+});
+
+describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
+  it("rejects a task with no PR", async () => {
+    const store = prepared();
+    withTask(store, { stage: "done" });
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("rejects a PR that is not accepted/merge-pending", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "review",
+      pr: { number: 7, state: "review", title: "PR" },
+    });
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("is admin|maintainer only (contributor forbidden)", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "done",
+      pr: { number: 7, state: "accepted", title: "PR" },
+    });
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.selin), // contributor
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("reports an honest failure (not a fake merge) when no credential is configured", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "done",
+      pr: { number: 7, state: "accepted", title: "PR" },
+    });
+    const result = await completeTaskMerge(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.merged).toBe(false);
+    expect(result.message).toMatch(/credential|scope|merge/i);
+    // The PR stays "accepted" — never silently flipped to "merged".
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.state).toBe("accepted");
   });
 });

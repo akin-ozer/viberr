@@ -638,6 +638,7 @@ export async function startSpecialistRun(
     runId,
     backend,
     role: sp.role,
+    kind: "primary",
     workdir: clone,
   });
 
@@ -809,6 +810,7 @@ export async function startReviewerRun(
     runId,
     backend,
     role: rev.role,
+    kind: "reviewer",
     workdir: clone,
   });
 
@@ -1183,13 +1185,18 @@ async function registerReplyAndReconcile(
     runId: string;
     backend: RealBackend;
     role: string;
+    /** "reviewer" runs additionally record a verdict (validation + quality
+     *  event + notification) so it fires on EVERY reviewer path, not only when
+     *  the operator prompts one (the operator-prompt path installs its own
+     *  richer callback that already does this). */
+    kind?: "primary" | "reviewer";
     /** The run's workspace clone dir (null when no real clone happened). */
     workdir: string | null;
   },
 ): Promise<void> {
   const [
     { registerRunCompletion },
-    { postAgentReplyComment },
+    { postAgentReplyComment, recordReviewerVerdict },
     { replyTextForRun },
     { reconcileWorkspaceDelivery },
   ] = await Promise.all([
@@ -1204,14 +1211,30 @@ async function registerReplyAndReconcile(
     role: input.role,
   };
   registerRunCompletion(input.runId, (finished) => {
-    // 1. Default reply (unchanged behavior).
-    void postAgentReplyComment(db, ctx, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      runId: finished.id,
-      actorRef,
-      replyText: replyTextForRun(db, finished.id),
-    });
+    void (async () => {
+      // 1. Default reply (unchanged behavior). Await so the reply lands before
+      //    the verdict's quality event, keeping the timeline ordered.
+      await postAgentReplyComment(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        runId: finished.id,
+        actorRef,
+        replyText: replyTextForRun(db, finished.id),
+      });
+      // 1b. A REVIEWER's verdict drives the board's validation health + a typed
+      //     quality event + an owner/supervisor notification — on ALL reviewer
+      //     paths (UI "Run reviewer", @mention, operator run_reviewer), not just
+      //     the operator-prompt loop (FIX: hunt finding).
+      if (input.kind === "reviewer" && finished.state === "finished") {
+        await recordReviewerVerdict(
+          db,
+          ctx,
+          input.projectSlug,
+          input.taskKey,
+          replyTextForRun(db, finished.id),
+        );
+      }
+    })();
     // 2. Reconcile agent-side delivery — best-effort, never blocks the run.
     //    Skipped for simulated runs (no real git work was done).
     void reconcileWorkspaceDelivery({

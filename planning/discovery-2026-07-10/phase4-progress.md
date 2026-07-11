@@ -1,5 +1,10 @@
 # Phase 4 implementation progress — 2026-07-10/11
 
+> **Status:** this is the phase-4 (37-finding + D1–D4) implementation LOG. Work continued past it —
+> S1/S2/S3 (shipped-build critical pass) and H1–H4 + the verdict classifier (adversarial hunt). The
+> single authoritative "everything, final" map is `completeness-ledger.md`; the test→finding map is
+> `test-catalog.md`. Final gates: 1029 tests green, typecheck clean.
+
 ## Landed (code + targeted tests green)
 
 ### Wave 1 (small isolated) — all DONE

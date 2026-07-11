@@ -11,8 +11,6 @@ import {
   CAP_MODES,
   OPERATOR_CAP_CATALOG,
   OPERATOR_CAP_DEFAULTS,
-  RES_CATALOG,
-  RES_DEFAULTS,
   type CapMode,
   type ModalCapGroup,
   type ResCatalogGroup,
@@ -673,17 +671,18 @@ export function CreateProfileModal({
           mcps: [...initial.resources.mcps],
           kb: [...initial.resources.kb],
         }
-      : {
-          skills: [...RES_DEFAULTS.skills],
-          mcps: [...RES_DEFAULTS.mcps],
-          kb: [...RES_DEFAULTS.kb],
-        },
+      : // A NEW profile starts with NOTHING pre-selected — the user grants real
+        // resources from the live catalog. (Pre-checking mock ids like
+        // `repo-write` / "Coding standards" seeded grants for resources that
+        // don't exist — finding #5.)
+        { skills: [], mcps: [], kb: [] },
   );
-  // Live store resources drive the picker; fall back to the built-in defaults.
-  const resCatalog = resourceCatalog ?? RES_CATALOG;
-  const [openRes, setOpenRes] = useState<Record<string, boolean>>({
-    [(resCatalog[0] ?? RES_CATALOG[0]!).group]: true,
-  });
+  // The live store catalog (buildResourceCatalog) drives the picker; an empty
+  // store means an empty picker — never a mock fallback.
+  const resCatalog: readonly ResCatalogGroup[] = resourceCatalog ?? [];
+  const [openRes, setOpenRes] = useState<Record<string, boolean>>(() =>
+    resCatalog[0] ? { [resCatalog[0].group]: true } : {},
+  );
 
   const toggleStage = (id: string) =>
     setStg((arr) =>

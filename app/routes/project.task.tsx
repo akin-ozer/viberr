@@ -19,6 +19,7 @@ import {
 import {
   applyRecommendation,
   commentToAgent,
+  completeTaskMerge,
   dismissRecommendation,
   releaseOwner,
   resolvePacket,
@@ -197,6 +198,18 @@ export async function action({ request, params }: Route.ActionArgs) {
           ...(option.kind === "block_on_policy"
             ? { navigateTo: `/projects/${projectSlug}/settings` }
             : {}),
+        };
+      }
+      case "complete-merge": {
+        // Run the REAL merge for a PR accepted "merge pending" (D3/S2).
+        // admin|maintainer; server re-checks. Reports honestly if still blocked.
+        const result = await completeTaskMerge(db, { projectSlug, taskKey }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toast: result.merged
+            ? result.message
+            : `Not merged — ${result.message}`,
         };
       }
       case "owner-take": {

@@ -1,11 +1,18 @@
 # Viberr findings backlog — 2026-07-10 discovery pass
 
-> **Implementation status (updated during phase 4).** Runtime isolation cluster (#32/#34/#35/#36),
-> Advisor removal (decision A), operator behavior (E, #15, #24, codex dup), default guardrails (#29),
-> seed hygiene (#17), notification-prefs (#4/#6), org disk-truth (#7), and the wave-1 small fixes are
-> landed; see the status column and the per-finding notes. The lease "residual" (#1/#30) was
-> re-examined: in this single-process/synchronous-better-sqlite3 runtime the inflight-check→row-insert
-> path has NO await between it, so it is already atomic (live-verified) — no lock added.
+> **✅ ALL RESOLVED (final, 2026-07-11).** Every P0–P3 finding below is fixed, by-design (#18 honest
+> placeholder), or a documented deferral (#33 codex tool confinement → role-bindings phase). The
+> per-finding status cells reflect the DISCOVERY-time state; the authoritative finding→fix map is
+> `completeness-ledger.md`. Summary of what landed: runtime isolation cluster (#32/#34/#35/#36),
+> Advisor removal (A) + Tester→Reviewer merge (D1), triage→ready auto (D2), accept-never-fakes-merge
+> (D3), backend retry (D4), operator behavior (E/#15/#24), default guardrails (#29), seed hygiene
+> (#17/#18/#22), notification-prefs + quality (#4/#6), org disk-truth (#7), dead-code/binary-byte
+> cleanup (#8/#10/#14), RES_CATALOG mock removal (#5/#14), 403 message (#26), honest fallback stage
+> (#27), and the wave-1 small fixes. The lease "residual" (#1/#30) is atomic in this
+> single-process/synchronous-better-sqlite3 runtime (live-verified) — no lock needed. Beyond this
+> backlog, a shipped-build critical pass added S1 (real policy presets), S2 (Complete-merge), S3
+> (codex-enforcement doc), and an adversarial hunt fixed H1–H4 + the reviewer-verdict classifier —
+> all in `completeness-ledger.md` + `test-catalog.md`. 1029 tests green.
 
 Ranked implementation backlog. Severity: **P0** breaks a product promise on real runs · **P1**
 functional gap/bug · **P2** poorly implemented / drift risk · **P3** cosmetic. Status column filled

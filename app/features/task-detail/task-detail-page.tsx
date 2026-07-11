@@ -59,7 +59,16 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
 
-function GithubTrace({ task }: { task: TaskDetail }) {
+function GithubTrace({
+  task,
+  onCompleteMerge,
+  merging,
+}: {
+  task: TaskDetail;
+  /** Run the real merge for an accepted (merge-pending) PR (S2). */
+  onCompleteMerge?: () => void;
+  merging?: boolean;
+}) {
   if (!task.branch && !task.pr) {
     return (
       <div className="panel">
@@ -89,7 +98,11 @@ function GithubTrace({ task }: { task: TaskDetail }) {
         <span className="repo">{task.repo}</span>
         {task.pr ? (
           <Pill kind={task.pr.state === "merged" ? "done" : "info"} sm>
-            {task.pr.state === "merged" ? "merged" : "PR #" + task.pr.number}
+            {task.pr.state === "merged"
+              ? "merged"
+              : task.pr.state === "accepted"
+                ? `PR #${task.pr.number} · merge pending`
+                : "PR #" + task.pr.number}
           </Pill>
         ) : (
           <Pill kind="neutral" sm>
@@ -137,6 +150,19 @@ function GithubTrace({ task }: { task: TaskDetail }) {
               </div>
             ))}
           </div>
+        )}
+        {task.pr?.state === "accepted" && onCompleteMerge && (
+          <button
+            type="button"
+            className="btn primary sm"
+            style={{ marginTop: ".8rem", width: "100%" }}
+            disabled={merging}
+            onClick={onCompleteMerge}
+            title="Run the real GitHub merge for this accepted PR (needs a valid project credential)"
+          >
+            <Icon name="check" />
+            Complete merge
+          </button>
         )}
         {ghHref && (
           <a
@@ -673,6 +699,18 @@ export function TaskDetailPage({
           runFetcher.submit(fd, { method: "post" });
         }
       : undefined;
+  // Complete the real merge of an accepted (merge-pending) PR (S2).
+  // admin|maintainer only; server re-checks.
+  const canMerge = myRole === "admin" || myRole === "maintainer";
+  const onCompleteMerge = canMerge
+    ? () => {
+        if (runBusy) return;
+        const fd = new FormData();
+        fd.set("_csrf", csrf);
+        fd.set("intent", "complete-merge");
+        runFetcher.submit(fd, { method: "post" });
+      }
+    : undefined;
   // BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
   // scrolls the Agent-logs panel into view. The reply run is the group
   // representative → selecting its id shows its live output (streamed by the
@@ -798,7 +836,11 @@ export function TaskDetailPage({
       </div>
 
       <div className="detail-side">
-        <GithubTrace task={task} />
+        <GithubTrace
+          task={task}
+          {...(onCompleteMerge ? { onCompleteMerge } : {})}
+          merging={runBusy}
+        />
         <CurrentStatePanel
           task={task}
           stage={stage}
