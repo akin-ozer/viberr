@@ -744,6 +744,12 @@ h1, h2, h3, h4 {
 .task-hero .key { font-family: var(--font-mono); font-size: .78rem; color: var(--faint); }
 .task-hero h1 { font-size: 1.7rem; line-height: 1.08; }
 .task-hero .goal { color: var(--muted); font-size: .95rem; line-height: 1.5; max-width: 70ch; }
+.goal-edit-btn { margin-left: .5rem; padding: .05rem .4rem; font-size: .75rem; color: var(--blue); background: transparent; border: 1px solid var(--border); border-radius: .35rem; cursor: pointer; vertical-align: middle; }
+.goal-edit-btn:hover { border-color: var(--blue); }
+.goal-edit { max-width: 70ch; display: flex; flex-direction: column; gap: .5rem; margin-top: .25rem; }
+.goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: .95rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; padding: .5rem .6rem; }
+.goal-textarea:focus { outline: none; border-color: var(--blue); }
+.goal-edit-actions { display: flex; gap: .5rem; }
 .hero-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hero-file {
   display: inline-flex; align-items: center; gap: .4rem;

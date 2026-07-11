@@ -175,8 +175,11 @@ export async function createProject(
   }
   const template =
     input.template === "light" ? LIGHTWEIGHT_TEMPLATE : GOVERNED_TEMPLATE;
-  const repoName = input.repoName.trim() || "new-project";
-  const repo = `${owner}/${repoName}`;
+  // An empty repo field creates a repo-LESS project (repo: null) — a supported
+  // state — instead of fabricating a nonexistent `<owner>/<slug>` that every
+  // GitHub surface would then render as a dead configured repo (X12).
+  const repoName = input.repoName.trim();
+  const repo = repoName ? `${owner}/${repoName}` : null;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
@@ -184,7 +187,7 @@ export async function createProject(
   // credential health need the credential bound (project_github_credentials).
   const connection = getConnection(db, owner);
   let defaultBranch = "main";
-  if (connection) {
+  if (repo && connection) {
     const token = getPatToken(db, connection.patId);
     if (token) {
       const remote = await fetchRemoteDefaultBranch(token, repo);
@@ -239,8 +242,9 @@ export async function createProject(
   });
 
   // Bind the selected connection's PAT to the project so credential health,
-  // branch creation, and PR sync work against the real repo.
-  if (connection) {
+  // branch creation, and PR sync work against the real repo. Skip for a
+  // repo-less project — there's nothing to sync against.
+  if (repo && connection) {
     setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
   }
 

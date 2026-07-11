@@ -25,6 +25,7 @@ import {
   resolvePacket,
   setOwner,
   transitionStage,
+  updateTaskGoal,
 } from "~/server/tasks/task-actions.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
@@ -176,6 +177,14 @@ export async function action({ request, params }: Route.ActionArgs) {
           logThreadId: result.logThreadId,
           toast,
         };
+      }
+      case "update-goal": {
+        await updateTaskGoal(
+          db,
+          { projectSlug, taskKey, goal: String(formData.get("goal") ?? "") },
+          actor,
+        );
+        return { ok: true as const, intent, toast: "Goal updated" };
       }
       case "resolve-packet": {
         const raw = Number(formData.get("option"));

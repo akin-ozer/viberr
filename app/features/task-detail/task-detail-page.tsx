@@ -276,10 +276,22 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 function TaskHero({
   task,
   stage,
+  canEditGoal,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
+  canEditGoal: boolean;
 }) {
+  const goalFetcher = useFetcher<ActionResult>();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.goal);
+  // Close the editor once a save round-trips successfully.
+  useEffect(() => {
+    if (goalFetcher.state === "idle" && goalFetcher.data?.ok && editing) {
+      setEditing(false);
+    }
+  }, [goalFetcher.state, goalFetcher.data, editing]);
+
   return (
     <div className="task-hero">
       <span className="key">{task.key}</span>
@@ -303,7 +315,59 @@ function TaskHero({
           <span>{task.filePath}</span>
         </span>
       </div>
-      <p className="goal">{task.goal}</p>
+      {editing ? (
+        <goalFetcher.Form
+          method="post"
+          className="goal-edit"
+          onSubmit={() => setEditing(true)}
+        >
+          <input type="hidden" name="intent" value="update-goal" />
+          <textarea
+            name="goal"
+            className="goal-textarea"
+            defaultValue={draft}
+            onChange={(e) => setDraft(e.currentTarget.value)}
+            rows={4}
+            aria-label="Task goal and acceptance criteria"
+          />
+          <div className="goal-edit-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={goalFetcher.state !== "idle" || draft.trim().length < 3}
+            >
+              Save goal
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setDraft(task.goal);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </goalFetcher.Form>
+      ) : (
+        <p className="goal">
+          {task.goal}
+          {canEditGoal && (
+            <button
+              type="button"
+              className="goal-edit-btn"
+              onClick={() => {
+                setDraft(task.goal);
+                setEditing(true);
+              }}
+              title="Edit the goal / acceptance criteria"
+            >
+              Edit
+            </button>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -783,7 +847,7 @@ export function TaskDetailPage({
   return (
     <div className="detail" data-screen-label={"Task " + task.key}>
       <div className="detail-main">
-        <TaskHero task={task} stage={stage} />
+        <TaskHero task={task} stage={stage} canEditGoal={canRunAgents} />
 
         <LiveRunSlot
           runtime={runtime}

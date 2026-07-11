@@ -458,6 +458,66 @@ export async function createTask(
 }
 
 /**
+ * Edit a task's Goal / acceptance criteria (X11) — the canonical `## Goal`
+ * body every agent re-anchors on. Previously nothing in the app could change
+ * the goal after creation, so an @mention couldn't add acceptance criteria (the
+ * agent re-reads the canonical goal and ignores comment-only criteria). RBAC:
+ * admin|maintainer (it steers all downstream agent work). A `policy` timeline
+ * event records the change so the edit is auditable on the task itself; the
+ * operator is re-engaged so it re-reads the new goal.
+ */
+export async function updateTaskGoal(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; goal: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(
+    project,
+    actor,
+    ["admin", "maintainer"],
+    "edit the task goal",
+  );
+  const goal = input.goal.trim();
+  if (goal.length < 3) {
+    throw AppError.validation("A goal of at least 3 characters is required.");
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (existing.parsed.goal.trim() === goal) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  }
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.goal = goal;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "policy",
+      actor: humanActorRef(db, actor),
+      title: "Goal updated",
+      text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.goal.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {},
+  });
+  // Re-engage the operator so it reads the amended goal on its next turn.
+  void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+}
+
+/**
  * Auto-invoke the operator to start coordinating a freshly-created task under
  * its deployed capability policy + autonomy (ADR-002 — one operator per active
  * task). Best-effort and non-blocking:
@@ -2196,7 +2256,12 @@ export async function reorderTask(
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ task: TaskSummary; movedStage: boolean; toName: string }> {
+): Promise<{
+  task: TaskSummary;
+  movedStage: boolean;
+  toName: string;
+  acceptedIntoDone: boolean;
+}> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireMemberRole(project, actor, ["admin", "maintainer"], "reorder the board");
 
@@ -2247,7 +2312,17 @@ export async function reorderTask(
 
   const toName =
     project.stages.find((s) => s.id === input.toStageId)?.name ?? input.toStageId;
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), movedStage, toName };
+  // Dragging INTO the terminal stage runs the full acceptance contract (merge
+  // attempt + completion event) via the H4 redirect — surface that honestly so
+  // the toast isn't a bare "Moved" for what is actually an acceptance + merge.
+  const acceptedIntoDone =
+    movedStage && isTerminalStage(input.toStageId, project.stages);
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    movedStage,
+    toName,
+    acceptedIntoDone,
+  };
 }
 
 // ------------------------------------------------------------ resolvePacket
@@ -2277,18 +2352,6 @@ export async function resolvePacket(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  // Resolving a decision packet steers agent work and can advance/redirect the
-  // task — a consequential governance action (FR27), so it is admin|maintainer,
-  // matching the "Approve stage transitions" row. The accept_completion option
-  // is additionally re-gated below; other options (redirect/hold/request_edit)
-  // are covered by this base gate.
-  requireMemberRole(
-    project,
-    actor,
-    ["admin", "maintainer"],
-    "resolve decision packets",
-  );
-
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const packet = existing.parsed.packet;
@@ -2298,6 +2361,28 @@ export async function resolvePacket(
   const option = packet.options[input.optionIndex];
   if (!option) {
     throw AppError.validation("Unknown packet option.");
+  }
+
+  // Packet-resolution authority (owner ruling Q2, 2026-07-11): a decision packet
+  // is addressed to the task OWNER, so the owner (whatever their project role)
+  // OR an admin|maintainer may resolve it — a contributor who took ownership is
+  // no longer told "decision needed" and then handed a 403. The
+  // `accept_completion` option is the one exception: merging + moving to Done
+  // stays admin|maintainer (re-gated below), preserving the human-only-Done
+  // authority split.
+  const isOwner =
+    !ctx.operatorAuthorized &&
+    !!actor.userId &&
+    existing.parsed.frontmatter.ownerUserId === actor.userId;
+  if (option.kind !== "accept_completion" && isOwner) {
+    // owner is allowed — skip the maintainer gate
+  } else {
+    requireMemberRole(
+      project,
+      actor,
+      ["admin", "maintainer"],
+      "resolve decision packets",
+    );
   }
 
   const now = new Date().toISOString();
@@ -2317,6 +2402,14 @@ export async function resolvePacket(
         ["admin", "maintainer"],
         "accept completion into Done",
       );
+      // Refuse a standing `failing` validation (C2) — same stance as the human
+      // acceptCompletion + operator (H3): a stale acceptance packet must not
+      // merge work the last review rejected.
+      if (existing.parsed.frontmatter.validation === "failing") {
+        throw conflict(
+          "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+        );
+      }
       const doneStageId =
         terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
@@ -2477,7 +2570,7 @@ export async function resolvePacket(
  */
 async function acceptCompletion(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string },
+  input: { projectSlug: string; taskKey: string; force?: boolean },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<void> {
@@ -2490,6 +2583,16 @@ async function acceptCompletion(
   );
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+
+  // Refuse to accept a task with a standing `failing` validation (C2) — a stale
+  // "accept completion" recommendation created before a reviewer rejected must
+  // not merge broken work. Same stance as the operator's H3 refusal. The
+  // developer reworks + a reviewer re-approves (which clears failing, A3) first.
+  if (!input.force && existing.parsed.frontmatter.validation === "failing") {
+    throw conflict(
+      "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+    );
+  }
 
   const doneStageId =
     terminalStageIdOf(project) ??
@@ -2700,8 +2803,9 @@ export async function applyRecommendation(
 }
 
 /**
- * Dismiss a pending operator recommendation without acting on it (any member).
- * Idempotent — a missing id is a no-op.
+ * Dismiss a pending operator recommendation without acting on it (admin|
+ * maintainer — symmetric with resolvePacket; the UI hides the control from
+ * lower roles). Idempotent — a missing id is a no-op.
  */
 export async function dismissRecommendation(
   db: Database.Database,
