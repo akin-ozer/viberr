@@ -6,7 +6,8 @@ each reader answered: on the tree as it stands **now**, what is still mock / unw
 decorative / poorly-implemented that a real user would hit? Benign UI `placeholder=` attributes
 were excluded by instruction.
 
-**19 findings: 1 HIGH, 7 MED, 11 LOW.** Subsystem wiring verdicts:
+**19 findings: 1 HIGH, 7 MED, 11 LOW.** Status: **all functional findings (the HIGH + all 7 MED)
+are fixed** — see sections below. Only LOW honesty/cosmetic nits remain open. Subsystem wiring verdicts:
 `notifications = fully-wired`; `guardrails-mcp / github-delivery / operator-packets / kb-skills /
 store-projection = mostly-wired`. Net read: **not mock — "demo-coherent"**. The engines
 (guardrail enforcement, operator packets/recommendations, audit, PR/branch, OAuth-claim) are real
