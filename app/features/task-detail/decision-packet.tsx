@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -14,10 +14,26 @@ import { Pill } from "~/ui/pill";
  * (spec §7 accessibility inventory), busy-disable while the resolve action
  * is in flight (no optimistic governed state).
  *
- * NOTE (spec §8.2): packet body + observation values render as PLAIN text —
- * mock behavior kept verbatim (backticked code like `pull_request:write`
- * shows literally).
+ * The packet body renders inline `code` spans (a real operator writes branch
+ * names / scopes like `pull_request:write` inline) — the mock's plain-text-with-
+ * visible-backticks was corrected so the model's markdown reads as intended.
  */
+
+/** Render a string with `inline code` spans; everything else stays plain text. */
+function renderInlineCode(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /`([^`]+)`/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(<code key={i++}>{m[1]}</code>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 export function DecisionPacket({
   packet,
   busy,
@@ -75,7 +91,7 @@ export function DecisionPacket({
             margin: 0,
           }}
         >
-          {p.body}
+          {renderInlineCode(p.body)}
         </p>
 
         <div className="packet-obs">

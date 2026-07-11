@@ -258,7 +258,16 @@ export function notifyTaskWatchers(
       taskRef(ctx, notice.projectSlug, notice.taskKey),
     )?.parsed.frontmatter.ownerUserId;
     if (owner) recipients.add(owner);
-  } catch {
+  } catch (error) {
+    // A corrupt project/task file (or context load failure) must NOT silently
+    // notify nobody of a real governance event — log it so the blind spot is
+    // diagnosable instead of an undiagnosable "no one got the alert".
+    logger.error("notifyTaskWatchers: recipient resolution failed", {
+      projectSlug: notice.projectSlug,
+      taskKey: notice.taskKey,
+      kind: notice.kind,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
     return [];
   }
   if (notice.exceptUserId) recipients.delete(notice.exceptUserId);

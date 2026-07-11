@@ -160,6 +160,27 @@ describe("CredentialCard states", () => {
     );
   });
 
+  it("a bound-but-unvalidated PAT is NOT claimed 'granted' — shows an honest 'not yet verified' warn", () => {
+    // Every scope at source "unchecked" = a PAT attached but never probed. The
+    // card must not affirm "All required scopes granted" without evidence.
+    const unverified: ProjectCredentialHealth = {
+      ...healthyCredential,
+      lastValidatedAt: null,
+      scopes: healthyCredential.scopes.map((s) => ({
+        ...s,
+        ok: true,
+        source: "unchecked" as const,
+      })),
+    };
+    const { container } = render(
+      <CredentialCard credential={unverified} onOpenTask={() => {}} />,
+    );
+    expect(container.querySelector(".cred-ok")).toBeNull();
+    expect(container.querySelector(".cred-warn")!.textContent).toContain(
+      "scopes not yet verified",
+    );
+  });
+
   it("renders the warnActions slot inside the banner", () => {
     const { container } = render(
       <CredentialCard

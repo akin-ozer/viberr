@@ -125,6 +125,10 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.agent_profile.updated": "change",
   "project.agent_profile.deleted": "change",
   "project.created": "change",
+  "project.archived": "change",
+  "project.unarchived": "change",
+  "project.deleted": "change",
+  "github.reconcile.project": "audit",
   "github.credential.assigned": "change",
   "github.credential.cleared": "change",
   "github.credential.revalidated": "change",
@@ -209,6 +213,14 @@ function auditText(
       return `${actor} deleted agent profile **${str(d.name) ?? "?"}**.`;
     case "project.created":
       return `${actor} created the project.`;
+    case "project.archived":
+      return `${actor} archived the project.`;
+    case "project.unarchived":
+      return `${actor} restored the project from the archive.`;
+    case "project.deleted":
+      return `${actor} deleted the project.`;
+    case "github.reconcile.project":
+      return `${actor} reconciled the project against GitHub — recorded per audit policy on`;
     case "github.credential.assigned":
       return `${actor} assigned the project GitHub credential.`;
     case "github.credential.cleared":

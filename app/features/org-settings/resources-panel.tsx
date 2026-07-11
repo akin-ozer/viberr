@@ -105,7 +105,8 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
           <Icon name="file" />
           <span>
             Content is plain files inside the folder — inspectable and editable outside
-            Viberr. Indexing just makes it retrievable for agents.
+            Viberr. Agents always read the live folder at run time; this only sets how
+            often the browsed doc count is re-scanned.
           </span>
         </div>
       </div>
@@ -623,7 +624,7 @@ function KbPanel({
                 store://kb/{kb.dir}/ · {kb.fileCount} docs
               </span>
               <span className="sub">
-                re-index {kb.refresh} · indexed {rel(kb.lastIndexedAt)}
+                read live · re-scanned {rel(kb.lastIndexedAt)}
                 {usedBy(kb.id, kb.name) > 0
                   ? " · " + usedBy(kb.id, kb.name) + " profiles"
                   : ""}
@@ -642,8 +643,8 @@ function KbPanel({
               <button
                 type="button"
                 className="stg-x"
-                title="Re-index now"
-                aria-label={"Re-index " + kb.name}
+                title="Re-scan folder — refresh the doc count"
+                aria-label={"Re-scan " + kb.name}
                 onClick={() => onReindex(kb)}
               >
                 <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
@@ -1050,8 +1051,8 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingKb.name}
           root={browsingKb.uri}
-          subMono={browsingKb.uri + "/ · re-index " + browsingKb.refresh}
-          metaTail={"indexed " + rel(browsingKb.lastIndexedAt)}
+          subMono={browsingKb.uri + "/ · read live"}
+          metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt)}
           tree={browsingKb.tree}
           resource={{ kind: "kb", id: browsingKb.id }}
           onClose={() => setBrowsing(null)}

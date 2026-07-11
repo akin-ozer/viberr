@@ -120,7 +120,7 @@ describe("knowledge bases", () => {
     expect(fresh.tree[0]).toMatchObject({ type: "dir", name: "decisions" });
 
     const reindexed = reindexKnowledgeBase(db, kb.id, ACTOR, ctx);
-    expect(reindexed.toast).toBe("Architecture notes re-indexed — 1 docs");
+    expect(reindexed.toast).toBe("Architecture notes re-scanned — 1 docs");
   });
 
   it("rename moves the folder; collisions are refused", () => {

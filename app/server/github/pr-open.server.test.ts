@@ -151,6 +151,27 @@ describe("openTaskPr", () => {
     expect(findOpenScopeViolation(store.db, store.slug, "pull_request:write", "VIB-201")).not.toBeNull();
   });
 
+  it("a 422 'No commits between' is an honest nothing_to_review, NOT network_unavailable", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 422,
+        body: { message: "Validation Failed: No commits between main and vib-201" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("nothing_to_review");
+    // No fabricated PR, and the reason is honest (was mislabeled network before).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toBeNull();
+  });
+
   it("skips creation when the task already carries a live PR (agent-side capture) — reconciles instead (B5)", async () => {
     const store = setupTestStore(ctx);
     // The agent delivered on ITS OWN branch and the PR was captured into

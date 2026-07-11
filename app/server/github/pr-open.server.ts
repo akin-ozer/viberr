@@ -86,6 +86,10 @@ export type OpenTaskPrResult =
   | { status: "no_branch" }
   | { status: "scope_violation"; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
+  /** GitHub 422 on POST /pulls — the branch has no commits ahead of base, so
+   *  there is nothing to review. An honest "nothing to review", NOT a network
+   *  failure (which is how it used to be mislabeled). */
+  | { status: "nothing_to_review"; message: string }
   | { status: "network_unavailable"; message: string };
 
 interface GhPull {
@@ -236,6 +240,12 @@ export async function openTaskPr(
       scope: "pull_request:write",
       violationId: violation.id,
     };
+  }
+  // GitHub 422 on create = "No commits between <base> and <head>" — the branch
+  // carries no diff, so there is nothing to open a review PR for. That's an
+  // honest empty-diff state, not a network failure.
+  if (created.kind === "http" && created.status === 422) {
+    return { status: "nothing_to_review", message: created.message };
   }
   return {
     status: "network_unavailable",

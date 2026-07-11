@@ -364,7 +364,7 @@ export function reindexKnowledgeBase(
   });
   return {
     docCount: kb.fileCount,
-    toast: `${kb.name} re-indexed — ${kb.fileCount} docs`,
+    toast: `${kb.name} re-scanned — ${kb.fileCount} docs`,
   };
 }
 

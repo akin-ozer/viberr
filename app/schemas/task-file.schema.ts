@@ -176,7 +176,10 @@ export const packetOptionSchema = z
     t: z.string().min(1),
     d: z.string().default(""),
     rec: z.boolean().default(false),
-    accept: z.boolean().optional(),
+    // (No `accept` flag — acceptance is gated solely on kind === "accept_completion"
+    // + the admin|maintainer re-check in resolvePacket. A separate `accept` field
+    // implied an authority that nothing consumed; removed. `.loose()` keeps any
+    // legacy `accept:` key in an existing task.md parseable, just ignored.)
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
   })

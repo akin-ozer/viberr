@@ -310,7 +310,7 @@ describe("ResourcesPanel", () => {
   it("renders the four panels with store paths, health and usage lines", () => {
     const { getByText } = renderResources();
     expect(getByText("store://kb/architecture-notes/ · 2 docs")).toBeTruthy();
-    expect(getByText(/re-index on change · indexed just now/)).toBeTruthy();
+    expect(getByText(/read live · re-scanned just now/)).toBeTruthy();
     expect(getByText(/14 tools · checked just now · auth: secret:\/\/mcp\/github/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(

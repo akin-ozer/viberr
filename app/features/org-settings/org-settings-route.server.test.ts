@@ -239,7 +239,7 @@ describe("resource + store intents", () => {
     });
     expect(result).toMatchObject({
       ok: true,
-      toast: "Architecture notes re-indexed — 6 docs",
+      toast: "Architecture notes re-scanned — 6 docs",
     });
   });
 

@@ -476,7 +476,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
           { k: "Flag", v: "PAT scope missing pull_request:write", code: false },
         ],
         options: [
-          { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
+          { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true },
           { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope before acceptance.", rec: false, ev: "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance." },
           { kind: "block_on_policy", t: "Block on policy", d: "Hold until Elif updates the project credential policy.", rec: false },
         ],
@@ -830,7 +830,7 @@ export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
           { k: "Branch", v: "dep-31-staging-promotion · PR #74 open", code: true },
         ],
         options: [
-          { kind: "accept_completion", t: "Accept & promote to staging", d: "Merge PR #74 and move DEP-31 to Done.", rec: true, accept: true },
+          { kind: "accept_completion", t: "Accept & promote to staging", d: "Merge PR #74 and move DEP-31 to Done.", rec: true },
           { kind: "request_edit", t: "Request one change first", d: "Send back to the Developer before promotion.", rec: false },
         ],
       },

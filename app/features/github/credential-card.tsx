@@ -69,6 +69,14 @@ export function CredentialCard({
   }
 
   const missing = credential.scopes.find((s) => !s.ok);
+  // A freshly-attached PAT that has never been validated has every scope chip
+  // at source "unchecked" (ok by absence-of-violation, not by evidence). Don't
+  // claim "All required scopes granted" for a credential no GitHub probe has
+  // confirmed — say it's unverified and point at Grant scope, which runs the
+  // real check.
+  const unverified =
+    credential.scopes.length > 0 &&
+    credential.scopes.every((s) => s.source === "unchecked");
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -113,6 +121,15 @@ export function CredentialCard({
               {missing.flaggedTaskKey}
             </button>
           )}
+          {warnActions}
+        </div>
+      ) : unverified ? (
+        <div className="cred-warn">
+          <Icon name="alert" />
+          <span>
+            Credential attached — scopes not yet verified against GitHub. Run
+            Grant scope to validate.
+          </span>
           {warnActions}
         </div>
       ) : (

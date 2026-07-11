@@ -16,8 +16,11 @@ import { useOrgAction, type OrgActionData } from "./use-org-action";
  * - local create / password reset surface the generated TEMP password once
  *   (no mailer, no magic "setup link" — spec open question §8.8 resolved
  *   as an inline cred-ok notice);
- * - github-handle rows are placeholder identities (mock contract) — the
- *   OAuth-callback claim at first sign-in is a documented later wiring.
+ * - a github-handle row is an UNCLAIMED identity until that user first signs
+ *   in with GitHub: the OAuth-callback claim IS built + wired (applyOAuthUser /
+ *   isOAuthWhitelisted in oauth-provision.server, hooked into better-auth in
+ *   auth.server) and unit-tested. It stays unclaimed only when no GitHub OAuth
+ *   provider is configured for the instance (GITHUB_OAUTH_CLIENT_ID unset).
  *
  * Self-demote/self-remove guards are client toasts (mock parity) AND
  * server-enforced; the last-admin guard is server-side (phase-2).
