@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
@@ -6,8 +6,8 @@ import {
   getDataRoot,
   agentProfilesDir,
   skillDirPath,
-  kbDirPath,
 } from "~/server/files/file-store-root.server";
+import { readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -917,34 +917,9 @@ function readSkillBody(name: string, dataRoot?: string): string {
   return "";
 }
 
-/**
- * Read a knowledge base's documents from the store (F6): every `.md` under
- * `data/kb/<dir>/`, concatenated (bounded so a large KB can't blow the context
- * window). Returns "" when the KB folder is absent — profile KB references that
- * don't resolve to a real store folder inject nothing, exactly as skills do.
- */
-function readKbBody(name: string, dataRoot?: string): string {
-  try {
-    const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir)) return "";
-    const docs: string[] = [];
-    let budget = 24_000; // cap total KB text per run
-    for (const entry of readdirSync(dir).sort()) {
-      if (!entry.endsWith(".md") || budget <= 0) continue;
-      try {
-        const raw = readFileSync(path.join(dir, entry), "utf8").trim();
-        const slice = raw.slice(0, budget);
-        budget -= slice.length;
-        docs.push(`### ${entry}\n\n${slice}`);
-      } catch {
-        // unreadable doc — skip
-      }
-    }
-    return docs.join("\n\n");
-  } catch {
-    return "";
-  }
-}
+// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
+// specialist runtime): recursive tree walk + all text-doc extensions, so
+// imported/nested/non-.md KB docs actually reach the operator's context.
 
 /** Assemble the operator's system prompt: persona + expertise + live policy. */
 export function buildOperatorSystemPrompt(

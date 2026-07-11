@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
@@ -20,10 +20,10 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   agentProfilesDir,
-  kbDirPath,
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
+import { readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -949,30 +949,10 @@ export function buildSpecialistPersona(input: {
   return parts.join("");
 }
 
-/** Read a knowledge base's docs from the store (every `.md` under
- *  `data/kb/<dir>/`), bounded so a large KB can't blow the context window.
- *  Returns "" when the folder is absent. */
-function readKbBody(name: string, dataRoot?: string): string {
-  try {
-    const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir)) return "";
-    const docs: string[] = [];
-    let budget = 24_000;
-    for (const entry of readdirSync(dir).sort()) {
-      if (!entry.endsWith(".md") || budget <= 0) continue;
-      try {
-        const slice = readFileSync(path.join(dir, entry), "utf8").trim().slice(0, budget);
-        budget -= slice.length;
-        docs.push(`### ${entry}\n\n${slice}`);
-      } catch {
-        // unreadable doc — skip
-      }
-    }
-    return docs.join("\n\n");
-  } catch {
-    return "";
-  }
-}
+// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
+// operator runtime): it walks the KB tree recursively and matches every text-doc
+// extension, so GitHub-imported / folder-uploaded / non-.md docs actually reach
+// the agent instead of being silently dropped.
 
 /**
  * Fold the persona into the turn prompt for Codex (which has no system-prompt
