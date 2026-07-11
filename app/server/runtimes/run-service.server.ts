@@ -372,11 +372,33 @@ function launch(
   // Mark running immediately (queued → running).
   sink.markRunning();
 
+  // Every adapter callback fires asynchronously (timers, SDK streams), so all
+  // persistence inside them must be caught-and-logged — a throw here has no
+  // request context and would surface as an unhandled exception on a timer
+  // (crashing the process in prod, failing the suite when a test's DB closes
+  // before an in-flight run settles). sink.line self-catches; guard the
+  // phase/finalize paths the same way.
   const handle = adapter.start(spec, {
     onLine: (line) => sink.line(line),
-    onPhase: (phase, step) => sink.phase(phase, step),
+    onPhase: (phase, step) => {
+      try {
+        sink.phase(phase, step);
+      } catch (error) {
+        logger.error("run phase persist failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    },
     onExit: (exit) => {
-      sink.finalize(exit);
+      try {
+        sink.finalize(exit);
+      } catch (error) {
+        logger.error("run finalize persist failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
       state.handles.delete(spec.runId);
       // Fire a one-shot completion callback (opaque to run-service — the
       // reply-comment wiring lives in task-actions). Reads the finalized row

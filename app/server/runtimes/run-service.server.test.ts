@@ -87,6 +87,33 @@ describe("run-service lifecycle (simulated)", () => {
     expect(run.output_tokens).toBe(3);
   });
 
+  it("a run settling after the DB closed logs instead of throwing (teardown race)", async () => {
+    const script = instantScript([
+      { t: "1", ev: "init", tag: "system·init", text: "session x" },
+      { t: "2", ev: "text", tag: "assistant", text: "hello" },
+      { t: "3", ev: "result", tag: "result", text: "done" },
+    ]);
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      script,
+      dataRoot: store.dataRoot,
+    });
+    // The CI teardown race: a test's DB closes while the adapter's timers are
+    // still driving lines + the exit. Every sink write inside an adapter
+    // callback must be caught-and-logged — an uncaught throw on a timer is an
+    // unhandled error that fails the whole suite (vitest "Errors: 1 error")
+    // even with every test green. (cleanup() tolerates the early close.)
+    store.db.close();
+    await settle();
+    expect(runId).toMatch(/^run_/);
+  });
+
   it("derives NO tokens/cost when no usage envelope is produced (no fabrication)", async () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "s" },
