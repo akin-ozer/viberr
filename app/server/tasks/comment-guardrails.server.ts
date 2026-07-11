@@ -40,9 +40,15 @@ export function enforceOperatorBrevity(
   maxChars: number = OPERATOR_BREVITY_MAX_CHARS,
 ): string {
   if (text.length <= maxChars) return text;
+  let head = text.slice(0, maxChars - 1).trimEnd();
+  // If the truncation cut through an open ``` fence (odd number of fences),
+  // close it so the appended marker + rest of the timeline don't render as code
+  // (adversarial-review #12 — markdown-aware truncation).
+  const fenceCount = (head.match(/^```/gm) ?? []).length;
+  if (fenceCount % 2 === 1) head += "\n```";
   return (
-    text.slice(0, maxChars - 1).trimEnd() +
-    "…\n\n_(trimmed by the operator-brevity guardrail — the full narration is in the agent logs)_"
+    head +
+    "\n\n_(trimmed by the operator-brevity guardrail — the full narration is in the agent logs)_"
   );
 }
 
@@ -58,8 +64,11 @@ export function separateEvidence(
   text: string,
   maxLines: number = EVIDENCE_MAX_FENCE_LINES,
 ): string {
+  // Anchor BOTH fences to line starts (adversarial-review #12) so an inline
+  // ``` inside the body (e.g. prose about backticks) isn't mistaken for the
+  // closing fence, which would truncate at the wrong place and corrupt the doc.
   return text.replace(
-    /```([^\n]*)\n([\s\S]*?)```/g,
+    /^```([^\n]*)\n([\s\S]*?)^```/gm,
     (whole, lang: string, body: string) => {
       const lines = body.replace(/\n$/, "").split("\n");
       if (lines.length <= maxLines) return whole;

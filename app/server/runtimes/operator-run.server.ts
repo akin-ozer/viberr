@@ -146,9 +146,24 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
   return `${projectSlug}/${taskKey}`;
 }
 
-/** Release the task's lease and fire the newest queued trigger, if any. */
-function releaseOperatorLease(db: Database.Database, key: string): void {
+/**
+ * Release the task's lease and fire the newest queued trigger, if any.
+ * IDEMPOTENT per acquisition (adversarial-review #5/#7): `token` is the exact
+ * lease-entry object captured when this drive acquired the lease. We only
+ * delete/queue-fire when the currently-held entry IS that token — so a
+ * second/late release (e.g. the scripted path's inner finally AND the outer
+ * catch both firing) can never evict a SUCCESSOR's freshly-acquired lease or
+ * double-fire the queued run. A release whose token no longer matches is a
+ * no-op.
+ */
+function releaseOperatorLease(
+  db: Database.Database,
+  key: string,
+  token?: object,
+): void {
   const state = leaseState();
+  const current = state.held.get(key);
+  if (token !== undefined && current !== token) return; // stale release — ignore
   state.held.delete(key);
   const queued = state.pending.get(key);
   if (!queued) return;
@@ -231,11 +246,15 @@ export async function runOperator(
     };
   }
 
-  lease.held.set(leaseKey, {
-    runId: null,
+  // The lease-entry OBJECT is this drive's release token — every release for
+  // this drive passes it, so a stale/duplicate release can never evict a
+  // successor's lease (releaseOperatorLease is idempotent per token).
+  const leaseToken = {
+    runId: null as string | null,
     backend,
     autonomy: authority.autonomy,
-  });
+  };
+  lease.held.set(leaseKey, leaseToken);
 
   // Carry the run's identity on the ctx so that when an agent this operator
   // prompts replies, the reply-completion hook can re-invoke the operator to
@@ -250,24 +269,27 @@ export async function runOperator(
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
   // model emits a decision plan we execute through the same capability-gated
-  // actions). Neither available → deterministic scripted drive. Each mode
-  // releases the lease when its coordination truly ends; a synchronous throw
-  // releases immediately so the task can never leak a held lease.
+  // actions). Neither available → deterministic scripted drive. The real/codex
+  // paths release the lease on run COMPLETION (chained callback); only a
+  // SYNCHRONOUS throw before that reaches the outer catch. The scripted path is
+  // synchronous, so it releases in its own finally — the outer catch must NOT
+  // also release it (that double-release is the bug). Idempotent-per-token
+  // release makes even an accidental double-release safe.
   try {
     if (backend === "claude" && isBackendAvailable("claude")) {
-      return await startRealOperatorRun(db, ctx, input, authority, leaseKey);
+      return await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
     }
     if (backend === "codex" && isBackendAvailable("codex")) {
-      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey);
+      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
     }
     try {
       return await runScriptedOperatorDrive(db, ctx, input, authority);
     } finally {
       // Scripted coordination is fully synchronous with this call.
-      releaseOperatorLease(db, leaseKey);
+      releaseOperatorLease(db, leaseKey, leaseToken);
     }
   } catch (error) {
-    releaseOperatorLease(db, leaseKey);
+    releaseOperatorLease(db, leaseKey, leaseToken);
     throw error;
   }
 }
@@ -359,6 +381,7 @@ async function startCodexOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
+  leaseToken: object,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
   const prompt = buildCodexOperatorPrompt(
@@ -402,7 +425,7 @@ async function startCodexOperatorRun(
           err: error instanceof Error ? error : new Error(String(error)),
         });
       })
-      .finally(() => releaseOperatorLease(db, leaseKey));
+      .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
   });
 
   logger.info("operator run started (codex structured output)", {
@@ -604,6 +627,7 @@ async function startRealOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
+  leaseToken: object,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
   const systemPrompt = buildOperatorSystemPrompt(authority, input.dataRoot);
@@ -642,7 +666,7 @@ async function startRealOperatorRun(
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
   const { chainRunCompletion } = await import("./run-service.server");
-  chainRunCompletion(runId, () => releaseOperatorLease(db, leaseKey));
+  chainRunCompletion(runId, () => releaseOperatorLease(db, leaseKey, leaseToken));
 
   logger.info("operator run started (real)", {
     taskKey: input.taskKey,

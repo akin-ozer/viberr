@@ -158,9 +158,11 @@ export function startFileWatcher(
   watcher.on("error", (error) => {
     // E8: the handle can no longer be trusted to deliver events — clear it so
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
-    // of a zombie watcher. The next boot (or test restart) re-creates it.
+    // of a zombie watcher.
+    const code = (error as { code?: string } | null)?.code;
     logger.error("file watcher error — clearing watcher handle", {
       err: error instanceof Error ? error : new Error(String(error)),
+      code,
     });
     const current = cache[WATCHER_KEY];
     if (current && current.watcher === watcher) {
@@ -169,6 +171,25 @@ export function startFileWatcher(
       cache[WATCHER_KEY] = undefined;
     }
     void watcher.close();
+    // Self-heal (adversarial-review #16): transient FS-pressure errors
+    // (EMFILE / ENFILE / ENOSPC / EPERM / EACCES) should not permanently kill
+    // watching — re-arm after a short backoff instead of requiring a full
+    // server restart. Only re-arm when no other watcher has taken over.
+    const TRANSIENT = new Set(["EMFILE", "ENFILE", "ENOSPC", "EPERM", "EACCES"]);
+    if (code && TRANSIENT.has(code)) {
+      setTimeout(() => {
+        if (cache[WATCHER_KEY] === undefined) {
+          logger.info("file watcher re-arming after a transient error", { code });
+          try {
+            startFileWatcher(options);
+          } catch (reErr) {
+            logger.error("file watcher re-arm failed", {
+              err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+            });
+          }
+        }
+      }, 2_000).unref?.();
+    }
   });
 
   cache[WATCHER_KEY] = { watcher, debouncer, dirDebouncer, root };

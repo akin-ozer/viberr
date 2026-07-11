@@ -134,12 +134,25 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
 
       const run = async () => {
         const factory = deps.codexFactory ?? (await realFactory());
-        // The SDK replaces the child env wholesale, so start from the base spawn
-        // env and overlay any per-run env (e.g. the specialist's
-        // GIT_CEILING_DIRECTORIES workspace confinement).
+        // The Codex SDK REPLACES the child env wholesale, so any per-run env
+        // (e.g. the specialist's GIT_CEILING_DIRECTORIES) must be overlaid on a
+        // COMPLETE env — not `{}`. `deps.env` is the full spawn env, but it is
+        // only set when CODEX_HOME is configured; with API-key auth it's
+        // undefined, so we fall back to a snapshot of process.env. Overlaying
+        // spec.env on `{}` would strip PATH/HOME and break the spawned `codex`
+        // binary (adversarial-review HIGH #3).
+        const baseEnv =
+          deps.env ??
+          (spec.env
+            ? (Object.fromEntries(
+                Object.entries(process.env).filter(
+                  ([, v]) => typeof v === "string",
+                ),
+              ) as Record<string, string>)
+            : undefined);
         const mergedEnv =
-          deps.env || spec.env
-            ? { ...(deps.env ?? {}), ...(spec.env ?? {}) }
+          baseEnv || spec.env
+            ? { ...(baseEnv ?? {}), ...(spec.env ?? {}) }
             : undefined;
         const codex = factory(
           deps.apiKey || mergedEnv

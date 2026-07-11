@@ -909,6 +909,7 @@ export function TaskDetailPage({
             packet={task.packet}
             busy={resolveBusy}
             canResolve={canResolvePacket}
+            canResolveCompletion={canRunAgents}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />

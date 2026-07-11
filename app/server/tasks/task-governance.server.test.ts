@@ -125,6 +125,40 @@ describe("P3.7 governance & lifecycle fixes", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
+    const store = prepared();
+    // failing, at impl, with NO rework since the rejection.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        validation: "failing",
+      }),
+      timeline: [
+        {
+          occurredAt: new Date().toISOString(),
+          type: "quality",
+          actor: { kind: "operator" },
+          title: "Changes requested",
+          text: "**Validation:** failing. Reviewer requested changes.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // No rework → failing must survive the re-entry (not laundered to changed).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+  });
+
   it("acceptCompletion (via packet) refuses a failing-validation task (C2)", async () => {
     const store = prepared();
     withTask(

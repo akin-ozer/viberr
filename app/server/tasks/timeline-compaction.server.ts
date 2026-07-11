@@ -83,7 +83,11 @@ export function compactTimelineEvents(
       // never fold an existing marker into another marker (idempotent)
       e.title !== COMPACTION_TITLE &&
       // a to-agent prompt is a governance hand-off, not routine chatter
-      !e.toAgent;
+      !e.toAgent &&
+      // NEVER fold an AGENT-authored reply (adversarial-review #13): a
+      // specialist's reply is the rework evidence hasReworkSinceLastRejection
+      // scans for, so compacting it away could re-strand a task at "failing".
+      e.actor.kind !== "agent";
     if (isRoutineComment) {
       run.push(e);
     } else {

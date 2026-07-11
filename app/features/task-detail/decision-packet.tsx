@@ -22,6 +22,7 @@ export function DecisionPacket({
   packet,
   busy,
   canResolve,
+  canResolveCompletion,
   onResolve,
   onAsk,
 }: {
@@ -31,6 +32,11 @@ export function DecisionPacket({
    *  owner for non-completion options — M2). "Ask operator" stays open to all
    *  (commenting is app-wide). */
   canResolve: boolean;
+  /** Whether the viewer may resolve the ACCEPT_COMPLETION option specifically —
+   *  admin|maintainer only (the always-human Done authority). An owner-only
+   *  viewer has canResolve but not this, so the button is blocked while that
+   *  option is selected rather than 403ing on click (adversarial-review #15). */
+  canResolveCompletion: boolean;
   onResolve: (optionIndex: number) => void;
   onAsk: () => void;
 }) {
@@ -123,18 +129,32 @@ export function DecisionPacket({
         </div>
 
         <div className="packet-actions">
-          {canResolve && (
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy || p.options.length === 0}
-              aria-busy={busy}
-              onClick={() => onResolve(sel)}
-            >
-              <Icon name="check" />
-              {p.options[sel] ? p.options[sel].t : "Confirm"}
-            </button>
-          )}
+          {(() => {
+            const selected = p.options[sel];
+            // The accept_completion option is admin|maintainer only; an
+            // owner-only viewer can't resolve it (the server 403s), so block the
+            // button while it's selected rather than let them click into a 403.
+            const completionBlocked =
+              selected?.kind === "accept_completion" && !canResolveCompletion;
+            if (!canResolve) return null;
+            return (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || p.options.length === 0 || completionBlocked}
+                aria-busy={busy}
+                title={
+                  completionBlocked
+                    ? "Accepting completion is reserved for maintainers"
+                    : undefined
+                }
+                onClick={() => onResolve(sel)}
+              >
+                <Icon name="check" />
+                {selected ? selected.t : "Confirm"}
+              </button>
+            );
+          })()}
           <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />
             Ask operator

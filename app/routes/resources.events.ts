@@ -1,10 +1,19 @@
 import type { Route } from "./+types/resources.events";
 import { authenticate } from "~/server/auth/require-user.server";
+import { getDb } from "~/server/db/sqlite.server";
 import {
   connectSseClient,
   parseSseScope,
   type SseScope,
 } from "~/server/events/sse-broker.server";
+
+/** Project slugs the user is a member of (for scoping the `projects` firehose). */
+function memberProjectSlugs(userId: string): string[] {
+  const rows = getDb()
+    .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
+    .all(userId) as { project_slug: string }[];
+  return rows.map((r) => r.project_slug);
+}
 
 /**
  * GET /resources/events — the SSE stream (Phase 6).
@@ -82,6 +91,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
 
+  // The `projects` firehose (Home landing) delivers every project's compact
+  // task/project facts. For a NON-org-admin that leaks the existence + state of
+  // projects they aren't a member of (adversarial-review #10), so we expand it
+  // to per-project scopes for ONLY their member projects. Org admins keep the
+  // firehose (they can already see every project, mirroring the Home filter).
+  const effectiveScopes: SseScope[] =
+    ctx.user.role === "admin"
+      ? scopes
+      : scopes.flatMap((s): SseScope[] =>
+          s.kind === "projects"
+            ? memberProjectSlugs(ctx.user.id).map((slug) => ({
+                kind: "project",
+                slug,
+              }))
+            : [s],
+        );
+
   const lastRaw =
     url.searchParams.get("lastEventId") ?? request.headers.get("last-event-id");
   const lastEventId =
@@ -101,7 +127,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       };
       handle = connectSseClient({
         userId: ctx.user.id,
-        scopes,
+        scopes: effectiveScopes,
         lastEventId,
         write,
         onClose: () => {

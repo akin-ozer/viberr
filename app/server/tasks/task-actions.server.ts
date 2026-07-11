@@ -1044,6 +1044,19 @@ export async function postAgentReplyComment(
       taskKey: input.taskKey,
       runId: input.runId,
     });
+    // Record the reply audit EVEN when dropping the comment (adversarial-review
+    // #11) — boot recovery keys idempotency on the `task.agent.replied` audit
+    // row, so without this a dropped-by-guardrail run would be reprocessed on
+    // every restart (re-triggering the operator forever).
+    recordAudit(db, {
+      action: "task.agent.replied",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { runId: input.runId, droppedByGuardrail: "meaningful-comment" },
+    });
     return Promise.resolve();
   }
   const separated = guardrailOn(ctx, input.projectSlug, "evidence-separation")
@@ -1299,9 +1312,17 @@ export function classifyReviewerVerdict(
  * count — a reviewer talking is not the developer fixing.) Used to decide
  * whether an approve may clear a standing `failing` validation. Pure — exported
  * for tests.
+ *
+ * `primary` (the task's assigned specialist {backend, role}) lets us match the
+ * developer's reply by IDENTITY rather than a role-name regex (adversarial-
+ * review #6/#14): a reviewer whose role string dodges the review/qa/test regex
+ * would otherwise have its own reply counted as developer rework. When `primary`
+ * is absent (or a reply's actor doesn't carry a backend to compare) we fall
+ * back to the regex heuristic.
  */
 export function hasReworkSinceLastRejection(
   timeline: readonly TaskFileEvent[],
+  primary?: { backend: string; role: string } | null,
 ): boolean {
   for (const e of timeline) {
     // Newest-first walk: everything seen BEFORE the failing quality event is
@@ -1310,12 +1331,11 @@ export function hasReworkSinceLastRejection(
       return false; // reached the rejection without seeing rework first
     }
     if (e.type === "transition") return true;
-    if (
-      e.type === "comment" &&
-      e.actor.kind === "agent" &&
-      !/review|valid|qa|test/i.test(e.actor.role)
-    ) {
-      return true; // a primary-specialist reply landed after the rejection
+    if (e.type === "comment" && e.actor.kind === "agent") {
+      const isPrimary = primary
+        ? e.actor.backend === primary.backend && e.actor.role === primary.role
+        : !/review|valid|qa|test/i.test(e.actor.role);
+      if (isPrimary) return true; // a primary-specialist reply landed after the rejection
     }
   }
   // No failing quality event found at all — nothing to hold against the approve.
@@ -1353,7 +1373,10 @@ export async function recordReviewerVerdict(
         verdict === "request_changes"
           ? "failing"
           : parsed.frontmatter.validation === "failing" &&
-              !hasReworkSinceLastRejection(parsed.timeline)
+              !hasReworkSinceLastRejection(
+                parsed.timeline,
+                parsed.frontmatter.specialist,
+              )
             ? "failing"
             : "healthy";
       parsed.frontmatter.validation = validation;
@@ -1547,17 +1570,23 @@ export async function applyAgentCompletionEffects(
     reactAutonomy = authority.autonomy;
     currentDepth = 0;
   }
+  // No-progress detection compares the TRUNCATED comment forms (adversarial-
+  // review #4): `prevReply` is the prior reply's stored (truncated) timeline
+  // comment, so comparing it against the current UNtruncated `fullText` could
+  // never match for a >1200-char reply, defeating the CTL-3 spiral guard. Use
+  // `commentText` (same truncated form) for the react/no-progress decision;
+  // `fullText` stays reserved for the reviewer verdict above.
   const shouldReact = operatorShouldReactToReply(
     finished.state,
-    fullText,
+    commentText,
     prevReply,
     currentDepth,
   );
   if (!shouldReact) {
     const noProgress =
-      !!fullText && prevReply !== null && prevReply.trim() === fullText.trim();
+      !!commentText && prevReply !== null && prevReply.trim() === commentText.trim();
     const depthCapped =
-      !!fullText &&
+      !!commentText &&
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
@@ -1576,12 +1605,14 @@ export async function applyAgentCompletionEffects(
           ? "The agent repeated its previous report verbatim — no forward progress."
           : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
       });
-    } else {
-      // Clean finish, no chain to continue (e.g. no operator deployed): the
-      // agent's turn is done and a human/operator needs to look — reflect
-      // that on the board so it never reads "agent working" forever.
-      await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     }
+    // ALWAYS flip waiting off `agent` when the chain terminates (adversarial-
+    // review HIGH #1). markWaitingAgent set it at run start; openStuckLoopPacket
+    // only clears it when a packet actually opens — it silently no-ops when the
+    // operator lacks generate-packets, a packet is already open, or it throws.
+    // Without this fallback the board would read "agent working" forever with no
+    // agent running. Idempotent (no-op once a packet flipped waiting to human).
+    await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
   // Re-invoke only while an operator is still deployed on the project.
@@ -2106,10 +2137,23 @@ export async function transitionStage(
     // ANY stale verdict is reset: a `healthy` from a prior round no longer
     // describes the new evidence, and a `failing` from a prior round starts a
     // NEW review cycle (the fix that ends "failing forever" — the reviewer
-    // re-verdicts the fresh evidence; a standing rejection within the SAME
-    // round is protected separately by hasReworkSinceLastRejection).
+    // re-verdicts the fresh evidence). BUT a bare re-entry must NOT launder a
+    // standing `failing` (adversarial-review #9): only reset failing→changed
+    // when there is genuine rework since the rejection — otherwise a maintainer
+    // could bounce a rejected task out of and back into review to clear the
+    // flag and accept without a re-review. A non-failing validation always
+    // resets to `changed` on review entry.
     if (input.toStageId === reviewStageIdOf(project)) {
-      parsed.frontmatter.validation = "changed";
+      const stale = parsed.frontmatter.validation;
+      if (
+        stale !== "failing" ||
+        hasReworkSinceLastRejection(
+          parsed.timeline,
+          parsed.frontmatter.specialist,
+        )
+      ) {
+        parsed.frontmatter.validation = "changed";
+      }
     }
     // A stage move makes any pending transition recommendation stale — drop it
     // so a Done task never shows a "move to <stage>" card.
@@ -2370,10 +2414,15 @@ export async function resolvePacket(
   // `accept_completion` option is the one exception: merging + moving to Done
   // stays admin|maintainer (re-gated below), preserving the human-only-Done
   // authority split.
+  // The owner path additionally requires CURRENT project membership
+  // (adversarial-review #8) — a user removed from the project who still holds a
+  // stale ownerUserId must not resolve packets. `memberRoles.has` is the live
+  // membership check.
   const isOwner =
     !ctx.operatorAuthorized &&
     !!actor.userId &&
-    existing.parsed.frontmatter.ownerUserId === actor.userId;
+    existing.parsed.frontmatter.ownerUserId === actor.userId &&
+    project.memberRoles.has(actor.userId);
   if (option.kind !== "accept_completion" && isOwner) {
     // owner is allowed — skip the maintainer gate
   } else {

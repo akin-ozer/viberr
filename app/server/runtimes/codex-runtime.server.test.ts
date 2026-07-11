@@ -98,6 +98,81 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(noEffort.startOptions()?.modelReasoningEffort).toBeUndefined();
   });
 
+  it("overlays spec.env on a COMPLETE base env, never on {} (#3)", async () => {
+    // The Codex SDK replaces the child env wholesale. Per-run env (e.g.
+    // GIT_CEILING_DIRECTORIES) must land on top of a full process.env snapshot
+    // so PATH/HOME survive — overlaying onto {} would break the spawned binary.
+    const events = [{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }];
+    let factoryOpts: { env?: Record<string, string> } | undefined;
+    const client: CodexClient = {
+      startThread: (o) => {
+        void o;
+        return {
+          id: "t",
+          async runStreamed() {
+            return {
+              events: (async function* () {
+                for (const e of events) yield e;
+              })(),
+            };
+          },
+        };
+      },
+      resumeThread: () => ({
+        id: "t",
+        async runStreamed() {
+          return { events: (async function* () {})() };
+        },
+      }),
+    };
+    const factory = (opts?: unknown) => {
+      factoryOpts = opts as { env?: Record<string, string> } | undefined;
+      return client;
+    };
+    createCodexAdapter({ codexFactory: factory }).start(
+      { ...SPEC, env: { GIT_CEILING_DIRECTORIES: "/ceil" } },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(factoryOpts?.env?.GIT_CEILING_DIRECTORIES).toBe("/ceil");
+    // PATH from the real process.env must have survived the overlay.
+    expect(factoryOpts?.env?.PATH).toBe(process.env.PATH);
+  });
+
+  it("passes NO env to the factory when neither deps.env nor spec.env is set (#3)", async () => {
+    const events = [{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }];
+    let factoryOpts: { env?: Record<string, string> } | undefined | "unset" = "unset";
+    const client: CodexClient = {
+      startThread: () => ({
+        id: "t",
+        async runStreamed() {
+          return {
+            events: (async function* () {
+              for (const e of events) yield e;
+            })(),
+          };
+        },
+      }),
+      resumeThread: () => ({
+        id: "t",
+        async runStreamed() {
+          return { events: (async function* () {})() };
+        },
+      }),
+    };
+    const factory = (opts?: unknown) => {
+      factoryOpts = opts as { env?: Record<string, string> } | undefined;
+      return client;
+    };
+    createCodexAdapter({ codexFactory: factory }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    // No api key, no env → factory called with undefined (not { env: {} }).
+    expect(factoryOpts).toBeUndefined();
+  });
+
   it("errors on turn.failed", async () => {
     const { factory } = fakeCodex([
       { type: "turn.started" },

@@ -63,4 +63,23 @@ describe("evidence-separation guardrail", () => {
     expect(out).toContain("Intro paragraph.");
     expect(out).toContain("Closing note.");
   });
+
+  it("does NOT treat an inline ``` inside prose as the closing fence (#12)", () => {
+    // An inline triple-backtick mid-line must not be mistaken for the closing
+    // fence — the regex is anchored to line starts.
+    const body = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    const text = `Note: use \`\`\`lang for fences.\nThen the dump:\n\`\`\`\n${body}\n\`\`\`\nDone.`;
+    const out = separateEvidence(text);
+    expect(out).toContain("Done.");
+    expect(out).toContain("Note: use");
+  });
+
+  it("brevity truncation closes an open fence so the marker isn't code (#12)", () => {
+    const long = "before\n```\n" + "x".repeat(OPERATOR_BREVITY_MAX_CHARS) + "\nmore";
+    const out = enforceOperatorBrevity(long);
+    // The number of ``` fences in the output must be even (balanced).
+    const fences = (out.match(/^```/gm) ?? []).length;
+    expect(fences % 2).toBe(0);
+    expect(out).toContain("operator-brevity guardrail");
+  });
 });

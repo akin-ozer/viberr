@@ -1221,12 +1221,17 @@ function workspaceRunEnv(
   taskKey: string,
   dataRoot?: string,
 ): Record<string, string> {
-  const root = taskWorkspaceRoot(projectSlug, taskKey, dataRoot);
+  // The ceiling must be a STRICT ANCESTOR of the run cwd — `GIT_CEILING` only
+  // blocks git from ascending INTO a listed dir, so a ceiling EQUAL to cwd is a
+  // no-op (git's first step up lands in the ceiling's unblocked parent). The
+  // empty-workspace run has cwd == the workspace root, so we pin the ceiling to
+  // the TASK dir (its parent). That stops git-repo discovery for BOTH cwd
+  // shapes — `<taskDir>/workspace` (empty) and `<taskDir>/workspace/<repo>`
+  // (cloned) — before it can reach a host `.git` above the data root
+  // (adversarial-review HIGH #2).
+  const ceiling = taskDir(projectSlug, taskKey, dataRoot);
   return {
-    // git stops searching for a repo at this boundary — it cannot discover a
-    // parent .git above the workspace (GIT_CEILING is colon-separated; the
-    // workspace parent IS the ceiling).
-    GIT_CEILING_DIRECTORIES: root,
+    GIT_CEILING_DIRECTORIES: ceiling,
   };
 }
 
