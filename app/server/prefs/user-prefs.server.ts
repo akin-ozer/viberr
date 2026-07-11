@@ -17,8 +17,6 @@ export interface HomePrefs {
   stars: Record<string, boolean>;
 }
 
-export const DEFAULT_HOME_PREFS: HomePrefs = { view: "grid", stars: {} };
-
 export function getPref<T>(
   db: Database.Database,
   userId: string,

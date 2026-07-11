@@ -163,11 +163,26 @@ function grantsFor(
   return grants;
 }
 
-/** Specialist modal caps → grants. */
-function modalGrants(
+/** CREATE-path grants: persist EXACTLY the modal caps the form submitted, with
+ * the ALWAYS_HUMAN coercion — and nothing else.
+ *
+ * Unlike `grantsFor` (the edit path), this deliberately does NOT seed the
+ * unspecified caps from the permissive catalog defaults. Merging defaults on
+ * create was a safe-by-default violation: a form that submitted 2 caps
+ * persisted ~12, silently granting repo-mutating power (create-task-branch,
+ * commit-push-branch, open-review-pr) the creator never chose. A capability the
+ * form omits now stays ABSENT — off, not direct. Only governed modal-catalog
+ * ids are persisted; anything outside the curated set is ignored. */
+function createModalGrants(
   caps: Record<string, CapMode>,
 ): { capabilityId: string; mode: CapabilityMode }[] {
-  return grantsFor(caps, CAP_MODAL_DEFAULTS);
+  const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
+  for (const [capabilityId, submitted] of Object.entries(caps)) {
+    if (!MODAL_CAP_IDS.has(capabilityId)) continue;
+    const mode = ALWAYS_HUMAN.has(capabilityId) ? "human" : submitted;
+    grants.push({ capabilityId, mode: mode as CapabilityMode });
+  }
+  return grants;
 }
 
 function slugifyProfileId(name: string): string {
@@ -231,7 +246,7 @@ export async function createAgentProfile(
     };
     const deployment: AgentDeployment = {
       profileId,
-      capabilities: modalGrants(form.caps),
+      capabilities: createModalGrants(form.caps),
       extras: [],
     };
     (deployment as Record<string, unknown>).definition = definition;
@@ -303,9 +318,11 @@ export async function updateAgentProfile(
           ? {}
           : { effort: defaultEffortFor(form.backend) }),
       scope: current.scope,
-      desc:
-        form.definition.trim() ||
-        (isOperator ? current.desc : `${form.name} — a ${form.role.toLowerCase()} specialist.`),
+      // Empty definition → keep the existing/template prose (current.desc);
+      // never persist a generated placeholder that would permanently shadow the
+      // org template's real description (and its ungrammatical "a implementation
+      // specialist" wording). Same for operator and specialist.
+      desc: form.definition.trim() || current.desc,
       stages: form.stages,
       spanAll: current.spanAll,
       ...(isOperator ? { autonomy: form.autonomy ?? current.autonomy ?? "supervised" } : {}),

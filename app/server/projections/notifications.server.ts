@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
+import { isNotifKindEnabled } from "~/features/profile/profile-query.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import {
   mapNotificationRow,
@@ -29,12 +30,37 @@ export interface CreateNotificationInput {
   taskKey?: string | null;
   occurredAt?: string;
   readAt?: string | null;
+  /** Skip the recipient's routing-pref filter. For FIXTURE inserts (the demo
+   *  seed) only — a fixture must be deterministic and not vary with whatever
+   *  prefs a prior session left, or `seed --reset` stops being pristine. */
+  bypassPrefs?: boolean;
 }
 
+/**
+ * Insert a per-user notification — UNLESS the recipient has silenced its
+ * routing category (FR26 / profile notification routing). This is the single
+ * insert point every creation path funnels through (task watcher fan-out,
+ * @mention, policy engine, seed), so gating here is what makes the profile
+ * toggles govern real delivery instead of being decorative. Opt-out model: a
+ * user with no stored pref receives everything (default ON), and a prefs-read
+ * failure defaults to delivering — a routing lookup must never silently drop a
+ * governance notification. Returns the row id, or null when the category was
+ * off and nothing was written.
+ */
 export function createNotification(
   db: Database.Database,
   input: CreateNotificationInput,
-): string {
+): string | null {
+  let deliver = true;
+  if (!input.bypassPrefs) {
+    try {
+      deliver = isNotifKindEnabled(db, input.userId, input.kind);
+    } catch {
+      deliver = true; // never drop a notification on a prefs-lookup error
+    }
+  }
+  if (!deliver) return null;
+
   const id = input.id ?? newId("ntf");
   const now = new Date().toISOString();
   db.prepare(

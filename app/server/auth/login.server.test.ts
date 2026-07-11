@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
-import { listAuditEvents } from "../audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   completeForcedPasswordReset,
   loginWithCredentials,

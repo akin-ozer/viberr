@@ -10,6 +10,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { capabilityByLabel } from "~/shared/capabilities";
 import {
+  DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
@@ -224,10 +225,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   ),
   profile(
     {
-      id: "reviewer", kind: "specialist", name: "Reviewer", role: "Code review",
+      id: "reviewer", kind: "specialist", name: "Reviewer", role: "Review & validation",
       icon: "check", backends: ["claude"], model: "sonnet",
       scope: "Global base · customized for Viberr Core",
-      stages: ["review"],
+      stages: ["impl", "review"],
       resources: {
         skills: ["reviewer-expertise"],
         mcps: ["github-mcp"],
@@ -235,51 +236,14 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Read the repository & diff", "Run validation suites", "Post quality-flag events", "Comment on the task"],
+      // The single quality specialist: reviews the diff AND authors/runs the
+      // validation suite (the former Tester role is folded in here).
+      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task"],
       recommend: ["Approve the review", "Request changes"],
       // "Push commits to the branch" is a known near-miss → stays an extra.
       forbidden: ["Merge a pull request", "Transition a task to Done", "Push commits to the branch"],
     },
-    "Reviews the diff at the review boundary, raises typed quality flags, and recommends approve or request-changes. Re-anchors on the canonical task file before each review.",
-  ),
-  profile(
-    {
-      id: "tester", kind: "specialist", name: "Tester", role: "Validation",
-      icon: "bolt", backends: ["codex"], model: "gpt-5.5",
-      scope: "Global base · default settings",
-      stages: ["impl", "review"],
-      resources: {
-        skills: ["tester-expertise"],
-        mcps: ["github-mcp"],
-        kb: ["deploy-runbooks"],
-      },
-    },
-    {
-      // "Run the validation suite" is a known near-miss → stays an extra.
-      direct: ["Author test cases", "Run the validation suite", "Attach evidence references"],
-      recommend: ["Validation verdict", "Hold the task on failing checks"],
-      forbidden: ["Merge a pull request", "Transition a task to Done"],
-    },
-    "Authors and runs the validation suite, attaches evidence to the task, and reports a clear pass/fail verdict — keeping raw validation output out of the timeline.",
-  ),
-  profile(
-    {
-      id: "consultant", kind: "specialist", name: "Advisor", role: "Advisory",
-      icon: "message", backends: ["claude", "codex"], model: "sonnet",
-      scope: "Global base · customized for Viberr Core",
-      stages: ["triage", "ready", "impl", "review"],
-      resources: {
-        skills: ["domain-advisor"],
-        mcps: ["github-mcp"],
-        kb: ["architecture-notes"],
-      },
-    },
-    {
-      direct: ["Read the task & repository", "Comment with guidance"],
-      recommend: ["Flag underspecified tasks"],
-      forbidden: ["Write to the repository", "Open or merge a PR", "Any stage transition"],
-    },
-    "Persistent expert memory the operator can re-engage across stages. Reads and advises only — never writes to the repository or moves the task.",
+    "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary — raising typed quality flags and recommending approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
   ),
 ];
 
@@ -299,14 +263,14 @@ export function defaultAgentDeployments(): AgentDeployment[] {
 }
 
 /** Profile ids of the built-in agents preinstalled on EVERY board: the operator
- *  plus the base specialists a task actually needs (Developer, Reviewer, Tester).
- *  The Advisor is offered to new projects (defaultAgentDeployments) but not
- *  force-backfilled, so it never appears on a board that never wanted it. */
+ *  plus the base specialists a task actually needs (Developer, Reviewer). The
+ *  operator absorbs advisory duties (scope clarification, decision packets), and
+ *  the Reviewer is the single quality specialist (it reviews AND tests), so there
+ *  is no separate Advisor or Tester profile. */
 export const BASE_AGENT_PROFILE_IDS = [
   "operator",
   "developer",
   "reviewer",
-  "tester",
 ] as const;
 
 /** The built-in agent deployments backfilled into every project so the operator
@@ -375,12 +339,12 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           { userId: ids.arda, role: "admin" },
           { userId: ids.elif, role: "maintainer" },
         ],
-        agents: [],
+        agents: baseAgentDeployments(),
         credentialPolicy: null,
-        guardrails: [],
+        guardrails: DEFAULT_GUARDRAILS,
       },
       description:
-        "Continuous delivery pipeline for the Viberr platform. Stub project seeded so cross-project notifications navigate for real.",
+        "Continuous delivery pipeline for the Viberr platform. A stub project with one live task so cross-project notifications navigate for real.",
     },
     {
       frontmatter: {
@@ -393,12 +357,12 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         stages: LIGHTWEIGHT_TEMPLATE.stages,
         workflow: LIGHTWEIGHT_TEMPLATE.workflow,
         members: [{ userId: ids.arda, role: "admin" }],
-        agents: [],
+        agents: baseAgentDeployments(),
         credentialPolicy: null,
-        guardrails: [],
+        guardrails: DEFAULT_GUARDRAILS,
       },
       description:
-        "Strict human-gate billing service. Stub project seeded so cross-project notifications navigate for real (Lightweight · 3 stages template).",
+        "Strict human-gate billing service. A stub project with one live task so cross-project notifications navigate for real (Lightweight · 3 stages template).",
     },
   ];
 }
@@ -459,8 +423,6 @@ const dev = (backend: "codex" | "claude") =>
   ({ profileId: "developer", backend, role: "Developer" }) as const;
 const reviewer = (backend: "codex" | "claude") =>
   ({ profileId: "reviewer", backend, role: "Reviewer" }) as const;
-const consultant = (backend: "codex" | "claude") =>
-  ({ profileId: "consultant", backend, role: "Advisory" }) as const;
 
 export function seedTasks(ids: SeedUserIds): SeedTask[] {
   return [
@@ -573,7 +535,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "agent",
         owner: ids.selin,
         specialist: dev("claude"),
-        reviewers: [consultant("codex")],
+        reviewers: [reviewer("codex")],
         operator: { assignedAtStageId: "ready" },
         urgent: false,
         validation: "healthy",
@@ -588,7 +550,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(10, 24), type: "comment", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Threshold sweep running against the 40-event fixture. Typed events survive every compression pass so far." },
         { occurredAt: todayAt(9, 47), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
-          text: "Re-anchored **Codex (Advisor)** on `task.md` for a second opinion on threshold defaults." },
+          text: "Re-anchored **Codex (Reviewer)** on `task.md` for a second opinion on threshold defaults." },
         { occurredAt: todayAt(9, 31), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed 2 commits to `vib-151-timeline-compression` — compaction map and threshold config." },
         { occurredAt: yesterdayAt(14, 20), type: "assign", actor: humanRef(ids, "selin"), title: null, toAgent: false, evidence: null,
@@ -637,7 +599,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         waiting: "human",
         owner: ids.murat,
         specialist: dev("claude"),
-        reviewers: [consultant("codex")],
+        reviewers: [reviewer("codex")],
         operator: { assignedAtStageId: "impl" },
         urgent: false,
         validation: "failing",
@@ -668,13 +630,13 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(10, 31), type: "blocked", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Blocked decision:** provider history unavailable and two rehydrate checks failing — recovery packet raised for human review." },
-        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("Advisor"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("Reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag:** the rehydrate path drops evidence references recorded before the continuity break." },
         { occurredAt: todayAt(10, 5), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Continuity warning:** runtime history unavailable — re-anchored **Claude Code (Developer)** on the canonical task file." },
         { occurredAt: todayAt(9, 52), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed `vib-160-rehydrate` — recovery shim and continuity marker." },
-        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("Advisor"), title: null, toAgent: false, evidence: null,
+        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("Reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Validation failing** on the rehydrate path — evidence attached, re-run requested." },
         { occurredAt: yesterdayAt(11, 20), type: "comment", actor: humanRef(ids, "murat"), title: null, toAgent: false, evidence: null,
           text: "Opened the Developer runtime session to debug continuity — session recorded per audit policy." },
@@ -815,6 +777,92 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
   ];
 }
 
+/** A seed task that lives in a stub project (deploy-pipeline / billing-service),
+ *  so the cross-project notifications pointing at it navigate to a real record
+ *  instead of a "task not found" page. */
+export interface SeedStubTask extends SeedTask {
+  projectSlug: string;
+}
+
+/** The two stub-project tasks the cross-project inbox rows reference — DEP-31
+ *  (a completion report awaiting acceptance) and BIL-9 (a transition request at
+ *  the strict human gate). Minimal but real: opening either notification lands
+ *  on a genuine task with the state the notification promises. */
+export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
+  return [
+    {
+      projectSlug: "deploy-pipeline",
+      frontmatter: fm({
+        key: "DEP-31",
+        title: "Promote pipeline rework to staging",
+        stage: "review",
+        readiness: "ready",
+        waiting: "human",
+        owner: ids.arda,
+        specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+        reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+        operator: { assignedAtStageId: "impl" },
+        urgent: false,
+        validation: "healthy",
+        branch: "dep-31-staging-promotion",
+        pr: { number: 74, state: "review", title: "Pipeline rework → staging" },
+        createdAt: yesterdayAt(15, 0),
+        updatedAt: todayAt(10, 12),
+      }),
+      goal: "Promote the reworked deploy pipeline to staging after a green dry run; a human accepts the completion before it merges.",
+      packet: {
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Staging promotion ready — accept the completion?",
+        body: "Pipeline stage rework validated on a dry run; the review PR is open and checks are green. Acceptance merges it and moves DEP-31 to Done.",
+        observations: [
+          { k: "Validation", v: "dry run green across build + deploy stages", code: false },
+          { k: "Branch", v: "dep-31-staging-promotion · PR #74 open", code: true },
+        ],
+        options: [
+          { kind: "accept_completion", t: "Accept & promote to staging", d: "Merge PR #74 and move DEP-31 to Done.", rec: true, accept: true },
+          { kind: "request_edit", t: "Request one change first", d: "Send back to the Developer before promotion.", rec: false },
+        ],
+      },
+      timeline: [
+        { occurredAt: todayAt(10, 12), type: "comment", actor: OP, title: null, toAgent: false, evidence: null,
+          text: "**Completion report:** staging promotion ready — dry run green, PR #74 open. Awaiting a human's acceptance." },
+        { occurredAt: yesterdayAt(15, 0), type: "assign", actor: humanRef(ids, "arda"), title: null, toAgent: false, evidence: null,
+          text: "Took task ownership — owner is the human reviewer and acceptance authority for this task." },
+      ],
+    },
+    {
+      projectSlug: "billing-service",
+      frontmatter: fm({
+        key: "BIL-9",
+        title: "Add proration to mid-cycle plan changes",
+        stage: "todo",
+        readiness: "ready",
+        waiting: "human",
+        owner: null,
+        specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+        reviewers: [],
+        operator: { assignedAtStageId: "todo" },
+        urgent: false,
+        validation: "none",
+        branch: null,
+        pr: null,
+        createdAt: yesterdayAt(8, 30),
+        updatedAt: todayAt(8, 47),
+      }),
+      goal: "Prorate charges when a customer changes plan mid-cycle; execution can't start until a maintainer approves the strict human gate.",
+      packet: null,
+      timeline: [
+        { occurredAt: todayAt(8, 47), type: "transition", actor: OP, title: null, toAgent: false, evidence: null,
+          text: "**Transition request:** To do → In progress. Strict human-gate project — execution can't start without a maintainer approval." },
+        { occurredAt: yesterdayAt(8, 30), type: "comment", actor: OP, title: null, toAgent: false, evidence: null,
+          text: "Scope reads as executable. Recommending advance once a maintainer approves the gate." },
+      ],
+    },
+  ];
+}
+
 // ------------------------------------------------------------ notifications
 
 export interface SeedNotification {
@@ -845,7 +893,7 @@ export function seedNotifications(ids: SeedUserIds): SeedNotification[] {
       title: "Completion report — waiting on your acceptance",
       text: "Workspace attach implemented, **PR #318** open, validation green. Only a human can move it to Done." },
     { id: "n-bil-9", kind: "approval", unread: true, occurredAt: todayAt(8, 47), from: OPERATOR_RENDER, projectSlug: "billing-service", taskKey: "BIL-9",
-      title: "Transition request — Ready → In Progress",
+      title: "Transition request — To do → In progress",
       text: "Strict human-gate project: execution can't start without a maintainer approval." },
     { id: "n-145-approval", kind: "approval", unread: true, occurredAt: todayAt(9, 12), from: OPERATOR_RENDER, projectSlug: "viberr-core", taskKey: "VIB-145",
       title: "Transition request — In Progress → Review",

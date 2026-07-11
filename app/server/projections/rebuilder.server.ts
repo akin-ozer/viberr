@@ -584,7 +584,7 @@ export function rebuildAll(
     for (const key of listTaskDirs(slug, options.dataRoot)) {
       if (!existsSync(taskFilePath(slug, key, options.dataRoot))) continue;
       summary.tasks += 1;
-      seenTasks.add(`${slug} ${key}`);
+      seenTasks.add(`${slug}\u0000${key}`);
       track(
         rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions),
       );
@@ -604,7 +604,7 @@ export function rebuildAll(
     .prepare(`SELECT project_slug, task_key FROM task_projections`)
     .all() as { project_slug: string; task_key: string }[];
   for (const row of taskRows) {
-    if (!seenTasks.has(`${row.project_slug} ${row.task_key}`)) {
+    if (!seenTasks.has(`${row.project_slug}\u0000${row.task_key}`)) {
       track(rebuildTaskFile(db, row.project_slug, row.task_key, options));
     }
   }

@@ -143,7 +143,6 @@ describe("/profile action", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const { profile } = await runLoader(cookie);
     expect(profile.prefs.notifs.packets.app).toBe(false);
-    expect(profile.prefs.notifs.packets.email).toBe(true); // schema-only, untouched
     expect(profile.prefs.notifs.approvals.app).toBe(true);
   });
 

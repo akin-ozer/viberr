@@ -23,16 +23,18 @@ describe("demo seed", () => {
     expect(summary).toMatchObject({
       users: 5,
       projects: 3,
-      tasks: 10,
-      events: 32,
+      // 10 viberr-core tasks + 2 stub-project tasks (DEP-31, BIL-9) that make
+      // the cross-project inbox rows navigate to real records.
+      tasks: 12,
+      events: 36,
       notifications: 10,
-      agentProfiles: 5,
+      agentProfiles: 3,
     });
     const rows = (sql: string) =>
       (db.prepare(sql).get() as { c: number }).c;
     expect(rows(`SELECT count(*) AS c FROM projects`)).toBe(3);
-    expect(rows(`SELECT count(*) AS c FROM task_projections`)).toBe(10);
-    expect(rows(`SELECT count(*) AS c FROM task_events`)).toBe(32);
+    expect(rows(`SELECT count(*) AS c FROM task_projections`)).toBe(12);
+    expect(rows(`SELECT count(*) AS c FROM task_events`)).toBe(36);
     expect(rows(`SELECT count(*) AS c FROM notifications`)).toBe(10);
     expect(rows(`SELECT count(*) AS c FROM project_members`)).toBe(7);
     // Clean dataset: no parse diagnostics on seeded files.
@@ -46,7 +48,7 @@ describe("demo seed", () => {
     runDemoSeed(db, { dataRoot });
     const count = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
     expect(count(`SELECT count(*) AS c FROM users`)).toBe(5);
-    expect(count(`SELECT count(*) AS c FROM task_projections`)).toBe(10);
+    expect(count(`SELECT count(*) AS c FROM task_projections`)).toBe(12);
     expect(count(`SELECT count(*) AS c FROM notifications`)).toBe(10);
   });
 

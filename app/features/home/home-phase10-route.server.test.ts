@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
  * Phase 10 route-level coverage:
@@ -104,7 +105,7 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     });
     const before = counts();
     expect(before.projects).toBe(3); // seeded demo dataset
-    expect(before.tasks).toBe(10);
+    expect(before.tasks).toBe(12);
 
     const result = (await postHome(ardaId, {
       intent: "rebuild-projections",
@@ -115,9 +116,6 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     expect(result.errors).toBe(0);
     expect(counts()).toEqual(before);
 
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     const rows = listAuditEvents(app.db, { action: "projection.rebuild" });
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]!.actorUserId).toBe(ardaId);
@@ -135,7 +133,7 @@ describe("/resources/health (Phase 10 ops probe)", () => {
     const body = (response as { data?: unknown }).data ?? response;
     expect(body).toMatchObject({
       ok: true,
-      projections: { projects: 3, tasks: 10 },
+      projections: { projects: 3, tasks: 12 },
     });
     expect(typeof (body as { watcher: boolean }).watcher).toBe("boolean");
   });

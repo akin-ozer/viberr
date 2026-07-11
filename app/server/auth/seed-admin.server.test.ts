@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { listAuditEvents } from "../audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { verifyPassword } from "./password.server";
 import { seedInitialAdmin } from "./seed-admin.server";
 import { findUserByEmail, insertUser, listUsers } from "./user-store.server";

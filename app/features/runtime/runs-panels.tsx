@@ -320,11 +320,16 @@ export function AgentLogsPanel({
   sel,
   onSel,
   linesByThread,
+  onRetryBackend,
+  retrying,
 }: {
   runtime: RunView[];
   sel: string | null;
   onSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
+  /** Retry the assigned specialist on the other backend (D4). */
+  onRetryBackend?: (backend: "claude" | "codex") => void;
+  retrying?: boolean;
 }) {
   const [follow, setFollow] = useState(true);
   const [raw, setRaw] = useState(false);
@@ -362,6 +367,15 @@ export function AgentLogsPanel({
   }
 
   const st = runStatePill(cur!);
+  // A backend-availability/quota failure is recoverable on the other engine —
+  // offer the retry inline instead of a dead "continuity error" (D4).
+  const canRetryBackend =
+    !!onRetryBackend &&
+    cur!.kind === "primary" &&
+    cur!.state === "error" &&
+    !!cur!.failedBackendUnavailable &&
+    !!cur!.altBackend;
+  const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude Code";
   const footer =
     cur!.state === "running"
       ? "streaming — raw output stays here as evidence, never in the task record"
@@ -370,7 +384,9 @@ export function AgentLogsPanel({
         : cur!.state === "done"
           ? "run finished at " + (cur!.finished || "—") + " — thread can be re-engaged"
           : cur!.state === "error"
-            ? "stream ended on a continuity error — see the blocked packet"
+            ? canRetryBackend
+              ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit) — retry on ${altLabel}`
+              : "stream ended on a continuity error — see the blocked packet"
             : "thread alive — no run executing";
 
   return (
@@ -396,6 +412,18 @@ export function AgentLogsPanel({
           />
         </span>
         <span className="spacer" />
+        {canRetryBackend && (
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={retrying}
+            onClick={() => onRetryBackend!(cur!.altBackend!)}
+            title={`Re-run the specialist on ${altLabel} — the current backend was unavailable`}
+          >
+            <Icon name="refresh" />
+            Retry on {altLabel}
+          </button>
+        )}
         <button
           type="button"
           className={"fchip" + (raw ? " on" : "")}

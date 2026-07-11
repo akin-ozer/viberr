@@ -5,6 +5,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import type { AgentProfileView, AgentDeploymentView } from "./agent-types";
 
 /**
@@ -98,8 +99,6 @@ describe("loader", () => {
       "operator",
       "developer",
       "reviewer",
-      "tester",
-      "consultant",
     ]);
 
     const operator = data.profiles[0]!;
@@ -112,14 +111,14 @@ describe("loader", () => {
     expect(operator.actions.forbidden).toHaveLength(3);
     expect(operator.actions.direct).toContain("Assign the primary specialist");
 
-    // Near-miss labels stay display-only extras (contracts §7 #7).
-    const tester = data.profiles.find((p) => p.id === "tester")!;
-    expect(tester.actions.direct).toContain("Run the validation suite");
-    expect(tester.extras.map((e) => e.label)).toContain(
-      "Run the validation suite",
-    );
+    // Near-miss labels stay display-only extras (contracts §7 #7). The Reviewer
+    // is the single quality specialist (Tester merged in): "Push commits to the
+    // branch" is a forbidden near-miss that stays a display-only extra.
     const reviewer = data.profiles.find((p) => p.id === "reviewer")!;
     expect(reviewer.actions.forbidden).toContain("Push commits to the branch");
+    expect(reviewer.extras.map((e) => e.label)).toContain(
+      "Push commits to the branch",
+    );
 
     expect(data.stages.map((s) => s.id)).toEqual([
       "triage",
@@ -136,7 +135,7 @@ describe("loader", () => {
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
       ["developer", "primary", "working"],
-      ["consultant", "reviewer", "anchored · on call"],
+      ["reviewer", "reviewer", "anchored · on call"],
     ]);
     // Phase-8 seeds VIB-151 with a running claude primary + codex c0.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
@@ -168,7 +167,7 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
   it("rejects a non-member from deleting a profile", async () => {
     const result = (await postAction(ids.deniz, {
       intent: "delete-profile",
-      profileId: "tester",
+      profileId: "reviewer",
     })) as { init?: { status?: number } };
     expect(result.init?.status).toBe(403);
   });
@@ -230,9 +229,6 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(file).toContain("profileId: migrations");
     expect(file).toContain("Owns database schema changes.");
 
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     const audit = listAuditEvents(app.db, {
       action: "project.agent_profile.created",
     });
@@ -305,6 +301,94 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     expect(grant?.mode).toBe("off");
 
     await postAction(ids.arda, { intent: "delete-profile", profileId: "locked-dev" });
+  });
+
+  it("persists EXACTLY the submitted governed caps — no permissive defaults merged (#37)", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Minimal Dev",
+        role: "Read and comment only",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Only two caps submitted; nothing else should be granted.",
+        // Only two governed caps submitted, as a partial/older client would.
+        caps: { "read-task-repo": "direct", "comment-on-task": "direct" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "minimal-dev",
+    )!;
+    // The persisted cap set equals exactly what the form submitted (no
+    // coercions apply here). Previously the create path merged the permissive
+    // catalog defaults, so 2 submitted caps persisted as ~12.
+    const persisted = created.capabilities
+      .map((c) => [c.capabilityId, c.mode])
+      .sort();
+    expect(persisted).toEqual([
+      ["comment-on-task", "direct"],
+      ["read-task-repo", "direct"],
+    ]);
+    // Repo-mutating powers the creator never chose are ABSENT (not `direct`).
+    const capIds = created.capabilities.map((c) => c.capabilityId);
+    expect(capIds).not.toContain("create-task-branch");
+    expect(capIds).not.toContain("commit-push-branch");
+    expect(capIds).not.toContain("open-review-pr");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "minimal-dev",
+    });
+  });
+
+  it("update with an empty definition keeps existing prose — no placeholder shadow (#28)", async () => {
+    // Create with real prose.
+    await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Prose Keeper",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Owns the checkout pipeline and its integration tests.",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+    // Update the SAME profile with an EMPTY (whitespace) definition. The old
+    // generated placeholder ("Prose Keeper — a implementation specialist.")
+    // must never be persisted; the prior prose is left untouched.
+    const upd = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "prose-keeper",
+      payload: JSON.stringify({
+        name: "Prose Keeper",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "   ",
+        caps: {},
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(upd.ok).toBe(true);
+
+    const updated = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "prose-keeper",
+    )!;
+    expect(updated.desc).toBe(
+      "Owns the checkout pipeline and its integration tests.",
+    );
+    // The ungrammatical placeholder is never persisted.
+    expect(updated.desc).not.toContain("specialist.");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "prose-keeper",
+    });
   });
 
   it("stores the picked model + effort on the deployment definition", async () => {
@@ -394,22 +478,23 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       expect(result.ok).toBe(true);
     }
     const data = await runLoader(ids.arda);
-    expect(data.profiles).toHaveLength(5);
+    // Back to the base roster: operator + developer + reviewer.
+    expect(data.profiles).toHaveLength(3);
 
     // Deleting a TEMPLATE-deployed profile also only removes the deployment.
     const del = (await postAction(ids.arda, {
       intent: "delete-profile",
-      profileId: "tester",
+      profileId: "reviewer",
     })) as { ok: boolean; toast: string };
     expect(del.ok).toBe(true);
-    expect(del.toast).toContain('"Tester" deleted');
+    expect(del.toast).toContain('"Reviewer" deleted');
     const after = await runLoader(ids.arda);
-    expect(after.profiles.map((p) => p.id)).not.toContain("tester");
+    expect(after.profiles.map((p) => p.id)).not.toContain("reviewer");
     // "The global base definition is unaffected."
     const template = readFileSync(
-      path.join(app.dataRoot, "agents/profiles/tester.md"),
+      path.join(app.dataRoot, "agents/profiles/reviewer.md"),
       "utf8",
     );
-    expect(template).toContain("name: Tester");
+    expect(template).toContain("name: Reviewer");
   });
 });

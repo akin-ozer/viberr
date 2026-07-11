@@ -16,7 +16,7 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -406,7 +406,41 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
 });
 
 describe("operatorTransitionStage", () => {
-  it("supervised + recommend mode recommends and does not move", async () => {
+  it("supervised + recommend mode recommends and does not move (approval boundary)", async () => {
+    // impl → review is an `approval` boundary — a human gate — so a supervised
+    // operator recommends and waits (triage → ready is now `auto`, so it would
+    // NOT recommend; the approval boundary is the one that still routes to a card).
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.waiting).toBe("human");
+  });
+
+  it("full autonomy moves the task across an approval boundary as the operator", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("review");
+    // The transition event is attributed to the operator, not a human.
+    expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
+  });
+
+  it("supervised operator CROSSES the triage → ready `auto` boundary directly", async () => {
+    // Post-D2: triage → ready is `auto` (operator advances once scope is clear),
+    // so a supervised operator moves it itself rather than filing a recommendation.
     deployRoster(DEFAULT_POLICY);
     seedTask("triage");
     const r = await operatorTransitionStage(
@@ -415,23 +449,25 @@ describe("operatorTransitionStage", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
       authority("supervised"),
     );
-    expect(r.outcome).toBe("recommended");
-    expect(task().frontmatter.stage).toBe("triage");
-    expect(task().frontmatter.waiting).toBe("human");
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("ready");
   });
 
-  it("full autonomy moves the task across the boundary as the operator", async () => {
+  it("supervised + recommend mode CROSSES an `auto` boundary directly (no human approval needed)", async () => {
+    // ready → impl is an `auto` boundary in the governed workflow ("when a
+    // specialist is assigned") — ungoverned, so a supervised operator must move
+    // it itself instead of stranding the task with a recommendation nobody
+    // needs to approve.
     deployRoster(DEFAULT_POLICY);
-    seedTask("triage");
+    seedTask("ready");
     const r = await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      authority("full"),
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.stage).toBe("ready");
-    // The transition event is attributed to the operator, not a human.
+    expect(task().frontmatter.stage).toBe("impl");
     expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
   });
 });
@@ -663,23 +699,24 @@ describe("applyRecommendation / dismissRecommendation", () => {
 
   it("a stage transition clears stale transition recommendations", async () => {
     deployRoster(DEFAULT_POLICY);
-    seedTask("triage");
-    // Supervised operator recommends moving to ready (adds a transition card).
+    seedTask("impl");
+    // Supervised operator recommends moving to review (impl→review is an
+    // `approval` boundary, so it produces a transition card).
     await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("supervised"),
     );
     expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(true);
     // A human then performs the transition — the stale card must clear.
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       { userId: store.users.arda.id, label: store.users.arda.email },
       { dataRoot: store.dataRoot },
     );
-    expect(task().frontmatter.stage).toBe("ready");
+    expect(task().frontmatter.stage).toBe("review");
     expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(false);
   });
 
@@ -786,11 +823,13 @@ describe("auto-invoke on task creation", () => {
     }
 
     expect(opDone).toBe(true); // an operator run streamed for the task and finished
-    // A fresh task is created at the first (pre-work) stage, so the operator
-    // coordinates by advancing it toward the work stage — under supervised
-    // autonomy that is a transition recommendation, not a specialist assignment.
+    // Post-D2: the pre-work boundaries (triage→ready, ready→impl) are both
+    // `auto`, so a fresh well-scoped task is advanced by the operator all the
+    // way to the work stage, where it assigns + prompts the specialist — no
+    // human approval needed until impl→review.
     const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
-    expect(t.frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(true);
+    expect(t.frontmatter.stage).toBe("impl");
+    expect(t.frontmatter.specialist?.profileId).toBe("developer");
     interruptRunningRuns(key);
   });
 

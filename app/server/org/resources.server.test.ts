@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,9 +9,12 @@ import {
   deleteKnowledgeBase,
   deleteMcpServer,
   deleteSkill,
+  discoverStdioMcpTools,
   getKnowledgeBase,
   getSkill,
   listKnowledgeBases,
+  listSkills,
+  type McpSpawn,
   probeMcpTarget,
   reindexKnowledgeBase,
   saveKnowledgeBase,
@@ -18,6 +22,59 @@ import {
   saveSkill,
   testMcpServer,
 } from "./resources.server";
+
+/**
+ * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
+ * handshake with `tools` tools — no real process spawned.
+ */
+function fakeMcpSpawn(tools: number): McpSpawn {
+  return () => {
+    const stdout = new EventEmitter();
+    const emit = (obj: unknown) =>
+      queueMicrotask(() =>
+        stdout.emit("data", Buffer.from(`${JSON.stringify(obj)}\n`)),
+      );
+    return {
+      stdin: {
+        write(data: string) {
+          for (const line of data.split("\n")) {
+            const t = line.trim();
+            if (!t) continue;
+            const msg = JSON.parse(t) as { method?: string };
+            if (msg.method === "initialize") {
+              emit({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
+            } else if (msg.method === "tools/list") {
+              emit({
+                jsonrpc: "2.0",
+                id: 2,
+                result: {
+                  tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })),
+                },
+              });
+            }
+          }
+        },
+        end() {},
+      },
+      stdout: { on: (event, cb) => stdout.on(event, cb) },
+      on() {},
+      kill() {},
+    };
+  };
+}
+
+/** A stdio spawn that never answers (exercises the timeout path). */
+const silentSpawn: McpSpawn = () => ({
+  stdin: { write() {}, end() {} },
+  stdout: { on() {} },
+  on() {},
+  kill() {},
+});
+
+/** A spawn that fails immediately (command not found). */
+const failingSpawn: McpSpawn = () => {
+  throw new Error("ENOENT");
+};
 
 /**
  * Agent-resource CRUD: every KB/skill mutation is a REAL folder mutation
@@ -189,13 +246,27 @@ describe("mcp servers", () => {
     expect(down.mcp.up).toBe(false);
     expect(down.toast).toContain("unreachable");
 
+    // stdio save runs a REAL best-effort tool-count discovery (fake spawn).
     const stdio = await saveMcpServer(
       db,
       { name: "postgres-readonly", transport: "stdio", target: "npx -y @mcp/pg", cred: "" },
       ACTOR,
+      { spawnImpl: fakeMcpSpawn(7) },
     );
-    expect(stdio.mcp.up).toBeNull();
-    expect(stdio.toast).toBe("postgres-readonly saved — spawned per run, sandboxed");
+    expect(stdio.mcp).toMatchObject({ up: true, tools: 7 });
+    expect(stdio.toast).toBe(
+      "postgres-readonly saved — 7 tools discovered · spawned per run",
+    );
+
+    // A command that never answers → honest unreachable, count stays null.
+    const dead = await saveMcpServer(
+      db,
+      { name: "broken-stdio", transport: "stdio", target: "npx -y @mcp/nope", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 20 },
+    );
+    expect(dead.mcp).toMatchObject({ up: false, tools: null });
+    expect(dead.toast).toContain("didn't respond");
 
     // Duplicate name guard.
     await expect(
@@ -228,5 +299,148 @@ describe("mcp servers", () => {
 
     const { toast } = deleteMcpServer(db, mcp.id, ACTOR);
     expect(toast).toBe("github-mcp removed");
+  });
+
+  it("stdio test discovers a real tool count; a dead command is unreachable", async () => {
+    const { db } = setup();
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "postgres-readonly", transport: "stdio", target: "npx -y @mcp/pg", cred: "" },
+      ACTOR,
+      { spawnImpl: silentSpawn, timeoutMs: 20 }, // saved unreachable first
+    );
+    expect(mcp.up).toBe(false);
+
+    const healthy = await testMcpServer(db, mcp.id, ACTOR, {
+      spawnImpl: fakeMcpSpawn(3),
+    });
+    expect(healthy.mcp).toMatchObject({ up: true, tools: 3 });
+    expect(healthy.toast).toMatch(/^postgres-readonly healthy — 3 tools · \d+ms$/);
+
+    const dead = await testMcpServer(db, mcp.id, ACTOR, {
+      spawnImpl: failingSpawn,
+    });
+    expect(dead.mcp).toMatchObject({ up: false, tools: null });
+    expect(dead.toast).toBe("postgres-readonly unreachable — command not found");
+  });
+
+  it("discoverStdioMcpTools: handshake success, timeout, spawn failure", async () => {
+    expect(
+      await discoverStdioMcpTools("mcp-server", { spawnImpl: fakeMcpSpawn(5) }),
+    ).toMatchObject({ kind: "up", tools: 5 });
+    expect(
+      await discoverStdioMcpTools("mcp-server", {
+        spawnImpl: silentSpawn,
+        timeoutMs: 20,
+      }),
+    ).toMatchObject({ kind: "down", reason: "timed out" });
+    expect(
+      await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
+    ).toMatchObject({ kind: "down", reason: "command not found" });
+  });
+});
+
+describe("disk is truth (finding #7)", () => {
+  it("lists an on-disk skill folder that has no metadata row, with defaults", () => {
+    const { db, dataRoot, ctx } = setup();
+    // A skill folder that appeared on disk outside org settings (like the
+    // shipped *-expertise skills), with frontmatter description.
+    const dir = skillDirPath("developer-expertise", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "SKILL.md"),
+      "---\nname: developer-expertise\ndescription: Implement a task's stage work.\n---\n# body",
+    );
+
+    const skills = listSkills(db, ctx);
+    const disk = skills.find((s) => s.name === "developer-expertise")!;
+    expect(disk).toBeTruthy();
+    expect(disk.id).toBe("disk:developer-expertise");
+    expect(disk.summary).toBe("Implement a task's stage work.");
+    expect(disk.updatedAt).toBeNull();
+    // getSkill resolves the synthetic id (StoreBrowser / edit rely on this).
+    expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
+  });
+
+  it("editing a disk-only skill adopts it into a real metadata row", () => {
+    const { db, dataRoot, ctx } = setup();
+    const dir = skillDirPath("reviewer-expertise", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "# original");
+
+    const before = getSkill(db, "disk:reviewer-expertise", ctx)!;
+    const { skill, toast } = saveSkill(
+      db,
+      { id: before.id, name: "reviewer-expertise", summary: "Review verdicts.", body: "# edited" },
+      ACTOR,
+      ctx,
+    );
+    expect(toast).toBe("Skill reviewer-expertise updated — SKILL.md rewritten");
+    expect(skill.id).toMatch(/^sk_/); // now a real row, not synthetic
+    expect(skill.summary).toBe("Review verdicts.");
+    // Only ONE entry — no duplicate between disk + row.
+    expect(listSkills(db, ctx).filter((s) => s.name === "reviewer-expertise")).toHaveLength(1);
+  });
+
+  it("delete removes a disk-only skill folder even with no row", () => {
+    const { db, dataRoot, ctx } = setup();
+    const dir = skillDirPath("orphan-expertise", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "# body");
+
+    const { toast } = deleteSkill(db, "disk:orphan-expertise", ACTOR, ctx);
+    expect(toast).toBe("Skill orphan-expertise deleted");
+    expect(existsSync(dir)).toBe(false);
+    expect(listSkills(db, ctx)).toHaveLength(0);
+  });
+
+  it("re-indexing a disk-only KB adopts it so the timestamp sticks", () => {
+    const { db, dataRoot, ctx } = setup();
+    const dir = kbDirPath("runbooks", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "deploy.md"), "# runbook");
+
+    const before = listKnowledgeBases(db, ctx).find((k) => k.dir === "runbooks")!;
+    expect(before.id).toBe("disk:runbooks");
+    expect(before.lastIndexedAt).toBeNull();
+
+    reindexKnowledgeBase(db, before.id, ACTOR, ctx);
+    const after = listKnowledgeBases(db, ctx).find((k) => k.dir === "runbooks")!;
+    expect(after.id).toMatch(/^kb_/);
+    expect(after.lastIndexedAt).not.toBeNull();
+  });
+
+  it("a fresh create refuses to clobber an existing on-disk skill folder", () => {
+    const { db, dataRoot, ctx } = setup();
+    const dir = skillDirPath("api-design", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "# keep me");
+
+    expect(() =>
+      saveSkill(
+        db,
+        { name: "api-design", summary: "New skill.", body: "" },
+        ACTOR,
+        ctx,
+      ),
+    ).toThrowError(/already exists/);
+    // Original content untouched.
+    expect(getSkill(db, "disk:api-design", ctx)!.body).toContain("# keep me");
+  });
+
+  it("rejects a path-traversal disk id instead of escaping the store root", () => {
+    const { db, ctx } = setup();
+    // A crafted synthetic id must NOT resolve to a path outside the store.
+    for (const evil of [
+      "disk:../../etc/passwd",
+      "disk:..",
+      "disk:a/b",
+      "disk:a\\b",
+    ]) {
+      expect(() => deleteSkill(db, evil, ACTOR, ctx)).toThrowError(/No such skill/);
+      expect(() => deleteKnowledgeBase(db, evil, ACTOR, ctx)).toThrowError(
+        /No such knowledge base/,
+      );
+    }
   });
 });

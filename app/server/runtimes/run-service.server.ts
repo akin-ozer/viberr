@@ -6,7 +6,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import { getDataRoot, taskDir } from "~/server/files/file-store-root.server";
+import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RunHandle, RunSpec } from "./adapter.server";
@@ -29,7 +29,7 @@ import {
   type AdapterSet,
   type RealBackend,
 } from "./runtime-registry.server";
-import { buildScript, type SimulatedScript } from "./simulated-runtime.server";
+import type { SimulatedScript } from "./simulated-runtime.server";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
@@ -490,82 +490,4 @@ export function getRunLog(
 
 function projectOne(db: Database.Database, run: AgentRunRow): RunView {
   return projectRunsForTask(db, run.project_slug, run.task_key).find((r) => r.id === run.thread_id) ?? projectRunsForTask(db, run.project_slug, run.task_key)[0]!;
-}
-
-// ---------------------------------------------- operator scheduling
-
-/**
- * The operator-scheduling reaction Phase 5 left as a stand-in in setOwner.
- * When a quality-gated, unowned Ready task GAINS an owner, the operator
- * "schedules execution" — in Phase 8 that means starting a real operator
- * run. This is the generalized entry point the task action calls; it keeps
- * the exact operator event copy (written by setOwner) and additionally spins
- * up an operator runtime so the run strip / agent logs reflect the reaction.
- *
- * Kept intentionally best-effort: a runtime failure must never break the
- * ownership mutation (the file write already succeeded and the audit event
- * recorded the reaction). The seed already materializes operator runs for
- * the demo tasks, so this path only fires for freshly-scheduled work.
- */
-export async function scheduleOperatorRun(
-  db: Database.Database,
-  input: { projectSlug: string; taskKey: string; ownerName: string; dataRoot?: string },
-): Promise<{ runId: string } | null> {
-  try {
-    const existing = listRunsForTask(db, input.projectSlug, input.taskKey);
-    if (existing.some((r) => r.op)) {
-      // An operator thread already exists for the task — do not duplicate.
-      return null;
-    }
-    const prompt =
-      `Acceptance boundary now owned by ${input.ownerName}. Schedule execution ` +
-      `against the quality-gated scope for ${input.taskKey}: assign the primary ` +
-      `specialist and supervise toward the next boundary.`;
-    const script = buildOperatorScript(input.taskKey);
-    const { runId } = await startRun(db, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      role: "Operator",
-      kind: "operator",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      agentName: "Operator",
-      agentProfileId: "operator",
-      prompt,
-      script,
-      ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
-    });
-    return { runId };
-  } catch (error) {
-    logger.error("operator run scheduling failed", {
-      taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    return null;
-  }
-}
-
-/** A short operator stream for a freshly scheduled task (simulated). */
-function buildOperatorScript(taskKey: string): SimulatedScript {
-  const sid = newId("op").replace("op_", "");
-  const now = () => new Date().toISOString();
-  const lines: LogLine[] = [
-    { t: "", ev: "init", tag: "system·init", text: `operator runtime · anchored projects/*/tasks/${taskKey}/task.md` },
-    { t: "", ev: "text", tag: "assistant", text: "Acceptance boundary owner confirmed. Scheduling execution against the quality-gated scope." },
-    { t: "", ev: "text", tag: "assistant", text: "Assigned the primary specialist — supervising toward the next boundary." },
-  ];
-  return buildScript({
-    lines,
-    occurredAt: lines.map(() => now()),
-    sessionId: sid,
-    backend: "claude",
-    model: "claude-sonnet-4-5",
-    op: true,
-    keepRunning: false,
-    instant: true,
-  });
-}
-
-export function getDataRootForRuns(dataRoot?: string): string {
-  return getDataRoot(dataRoot);
 }

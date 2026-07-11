@@ -216,8 +216,11 @@ export interface TaskWatcherNotice {
  * inbox item + bell increment, instead of a state a supervisor must discover by
  * scanning the board (FR26, Journey 2, and the "blocked tasks reach a human
  * decision quickly" success metric). Recipients are deduped and the triggering
- * user is skipped. Returns the notified user ids. Never throws on a missing
- * task/project — a notification failure must not fail the governed mutation.
+ * user is skipped. Returns the user ids that were ACTUALLY notified — each
+ * recipient's routing prefs are honored inside createNotification, so a
+ * supervisor who silenced this category is dropped from the result. Never
+ * throws on a missing task/project — a notification failure must not fail the
+ * governed mutation.
  */
 export function notifyTaskWatchers(
   db: Database.Database,
@@ -243,7 +246,9 @@ export function notifyTaskWatchers(
 
   const notified: string[] = [];
   for (const userId of recipients) {
-    createNotification(db, {
+    // createNotification consults this recipient's routing prefs and returns
+    // null when they've silenced this category — only count real deliveries.
+    const id = createNotification(db, {
       userId,
       kind: notice.kind,
       ptype: notice.ptype ?? null,
@@ -254,7 +259,7 @@ export function notifyTaskWatchers(
       taskKey: notice.taskKey,
       ...(notice.occurredAt ? { occurredAt: notice.occurredAt } : {}),
     });
-    notified.push(userId);
+    if (id) notified.push(userId);
   }
   return notified;
 }
@@ -1178,8 +1183,14 @@ export function classifyReviewerVerdict(
  * validation health accordingly (FR15/FR24/FR35). request_changes → failing;
  * approve → healthy. Silent when the verdict is unclear. Idempotent-friendly:
  * writes one typed event per reviewer run.
+ *
+ * A clear verdict ALSO fans a `quality` notification to the task's watchers
+ * (owner + supervisors, routing-prefs honored — FIX #6): before this, the
+ * quality inbox card only ever existed in seed data, so a real reviewer verdict
+ * updated the timeline + board but never pinged the human who owns acceptance.
+ * Exported for tests.
  */
-async function recordReviewerVerdict(
+export async function recordReviewerVerdict(
   db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -1194,6 +1205,7 @@ async function recordReviewerVerdict(
     verdict === "request_changes"
       ? "Reviewer requested changes."
       : "Reviewer approved the work.";
+  const title = verdict === "request_changes" ? "Changes requested" : "Review passed";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       parsed.frontmatter.validation = validation;
@@ -1201,7 +1213,7 @@ async function recordReviewerVerdict(
         occurredAt: new Date().toISOString(),
         type: "quality",
         actor: { kind: "operator" },
-        title: verdict === "request_changes" ? "Changes requested" : "Review passed",
+        title,
         text: `**Validation:** ${validation}. ${summary}`,
         toAgent: false,
         evidence: null,
@@ -1217,6 +1229,20 @@ async function recordReviewerVerdict(
       taskKey,
       details: { verdict, validation },
     });
+    // Ping the owner + supervisors so the quality inbox card appears on real
+    // runs (not just seed). Each recipient's `quality` routing pref is honored
+    // inside notifyTaskWatchers → createNotification.
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "quality",
+        title,
+        text: summary,
+      },
+      ctx,
+    );
   } catch (error) {
     logger.warn("reviewer verdict recording failed", {
       taskKey,
@@ -1329,6 +1355,26 @@ export async function operatorPromptAgent(
         actorRef,
         replyText,
       });
+      // Capture agent-side delivery into the canonical record (NFR15): a real
+      // specialist may have branched/pushed/opened a PR through its OWN git/gh
+      // credentials — outside the server's stored-PAT path — leaving task.md at
+      // branch:null/pr:null. This callback REPLACES the run's default reply
+      // hook (last-writer-wins), so reconcile here too, before the operator
+      // reacts and reads the snapshot. Best-effort, never blocks the react loop.
+      if (finished.state === "finished" && !finished.simulated) {
+        const { reconcileWorkspaceDelivery } = await import(
+          "~/server/github/workspace-delivery.server"
+        );
+        await reconcileWorkspaceDelivery({
+          db,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          backend: input.backend,
+          role: input.role,
+          simulated: false,
+          ...(opCtx.dataRoot !== undefined ? { dataRoot: opCtx.dataRoot } : {}),
+        }).catch(() => {});
+      }
       // A REVIEWER's verdict is a first-class quality signal (FR15/FR35): emit a
       // typed `quality` event and drive the board's validation health (FR24) so
       // a task that keeps failing review reads "failing", not "none". Conservative
@@ -1547,22 +1593,14 @@ export async function setOwner(
     },
   });
 
-  // Phase 8: when scheduling fires, the operator "schedules execution" — spin
-  // up a REAL operator run so the run strip / agent logs reflect the reaction
-  // (generalizes the Phase-5 stand-in; the operator timeline event copy above
-  // is unchanged). Best-effort: a runtime failure never breaks the ownership
-  // mutation (file write + audit already committed). Dynamically imported to
-  // avoid a module cycle; skipped when a seeded operator run already exists.
+  // When scheduling fires, the operator "schedules execution": hand off to the
+  // SAME operator runtime the rest of the lifecycle uses (trigger `transition`),
+  // not the deleted Phase-5 simulated-narration stand-in that always faked a run
+  // even with a real backend (finding #9). Fire-and-forget: it never blocks or
+  // fails the ownership mutation (file write + audit already committed), and it
+  // is a no-op when the project has no operator deployed.
   if (scheduling) {
-    const { scheduleOperatorRun } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    await scheduleOperatorRun(db, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      ownerName: userName(db, input.targetUserId),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    });
+    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
   }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
@@ -2049,12 +2087,26 @@ export async function resolvePacket(
         project.stages.find((s) => s.id === "done")?.id ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
+      // Attempt the REAL merge (FR31) and only claim "merged" when it truly
+      // happened; otherwise record "accepted" (merge pending) — never a false
+      // merge (D3 / NFR15).
+      const reallyMerged = await mergeTaskPrIfPossible(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        actor,
+      );
+      const hasPr = !!existing.parsed.frontmatter.pr;
       event = {
         occurredAt: now,
         type: "completion",
         actor: human,
         title: "Completion accepted",
-        text: "Human acceptance recorded. Task transitioned to **Done** and review PR approved for merge.",
+        text:
+          !hasPr || reallyMerged
+            ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
+            : "Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge).",
         toAgent: false,
         evidence: null,
       };
@@ -2063,7 +2115,7 @@ export async function resolvePacket(
         fm.readiness = "ready";
         fm.waiting = "none";
         fm.validation = "healthy"; // accepted work is validated (FR24)
-        if (fm.pr) fm.pr = { ...fm.pr, state: "merged" };
+        if (fm.pr) fm.pr = { ...fm.pr, state: reallyMerged ? "merged" : "accepted" };
       };
       clearPacket = true;
       break;
@@ -2210,17 +2262,28 @@ async function acceptCompletion(
 
   // Human acceptance merges the review PR (FR31: "accepting a completion merges
   // its PR"). Attempt the REAL merge first when a PR + reachable GitHub exist —
-  // mergeTaskPr writes state=merged + a `github` event + audit on success. The
-  // cache flip below is the honest fallback for the no-GitHub / no-PR case, so
-  // the seeded demo and offline dev stay coherent without a live merge.
-  await mergeTaskPrIfPossible(db, ctx, input.projectSlug, input.taskKey, actor);
+  // mergeTaskPr writes state=merged + a `github` event + audit on success and
+  // returns true. When the real merge CAN'T run (no GitHub / no PAT / not
+  // mergeable) we do NOT claim "merged" — we record "accepted" (merge pending)
+  // so the task record never diverges from GitHub truth (NFR15).
+  const reallyMerged = await mergeTaskPrIfPossible(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    actor,
+  );
+  const hasPr = !!existing.parsed.frontmatter.pr;
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "completion",
     actor: humanActorRef(db, actor),
     title: "Completion accepted",
-    text: `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR approved for merge.`,
+    text:
+      !hasPr || reallyMerged
+        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
+        : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge — merge it manually or reconcile once credentials are set).`,
     toAgent: false,
     evidence: null,
   };
@@ -2230,7 +2293,10 @@ async function acceptCompletion(
     parsed.frontmatter.waiting = "none";
     parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24)
     if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "merged" };
+      parsed.frontmatter.pr = {
+        ...parsed.frontmatter.pr,
+        state: reallyMerged ? "merged" : "accepted",
+      };
     }
     // A Done task carries no pending transition/acceptance recommendations.
     parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(

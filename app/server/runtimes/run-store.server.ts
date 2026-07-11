@@ -214,11 +214,6 @@ export function nextSeq(db: Database.Database, runId: string): number {
   return (row?.m ?? -1) + 1;
 }
 
-export function countRunLines(db: Database.Database, runId: string): number {
-  const row = db.prepare(`SELECT COUNT(*) AS c FROM run_log_lines WHERE run_id = ?`).get(runId) as { c: number };
-  return row.c;
-}
-
 export function listRunLines(
   db: Database.Database,
   runId: string,

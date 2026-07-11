@@ -30,6 +30,32 @@ const WHO_NAME: Record<string, string> = {
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T/;
 
 /**
+ * Signatures that mean "the BACKEND wasn't available" (quota, rate limit,
+ * overload, auth/credit) rather than "the task genuinely failed". Matched
+ * case-insensitively against an errored run's raw log tail so the UI can offer
+ * a retry on the other backend (D4) instead of surfacing a dead end.
+ */
+const BACKEND_UNAVAILABLE_SIGNATURES = [
+  "usage limit",
+  "rate limit",
+  "quota",
+  "insufficient_quota",
+  "overloaded",
+  "capacity",
+  "temporarily unavailable",
+  "service unavailable",
+  "credit balance",
+  "billing",
+  "429",
+];
+
+function isBackendUnavailableError(raw: string[]): boolean {
+  // Only scan the tail — the failure is at the end of the stream.
+  const tail = raw.slice(-12).join("\n").toLowerCase();
+  return BACKEND_UNAVAILABLE_SIGNATURES.some((s) => tail.includes(s));
+}
+
+/**
  * The `finished` display label. Seeded runs store the mock's verbatim label
  * ("9:41", "Mar 30 · 17:26"); real runs store an ISO — format that to a
  * `H:MM` clock. Null → the footer shows the "—" fallback.
@@ -92,6 +118,13 @@ function projectRow(
   }
 
   const finished = finishedLabel(row.finished_at);
+  // A run can end in `error` because its BACKEND was unavailable / quota-limited
+  // rather than because the task genuinely failed. Detect that from the log tail
+  // so the UI can offer a one-click retry on the OTHER backend (D4) instead of
+  // leaving the task stalled on an opaque error.
+  const failedBackendUnavailable =
+    row.state === "error" && !op && isBackendUnavailableError(raw);
+  const altBackend: "claude" | "codex" = backend === "codex" ? "claude" : "codex";
   return {
     id: row.thread_id,
     serverRunId: row.id,
@@ -107,6 +140,7 @@ function projectRow(
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
     interruptedBy,
+    ...(failedBackendUnavailable ? { failedBackendUnavailable: true, altBackend } : {}),
     phase: row.phase,
     step: row.step,
     startedAt: row.started_at,

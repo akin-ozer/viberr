@@ -32,6 +32,7 @@ import {
 } from "~/server/tasks/operator-actions.server";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
+import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { replyTextForRun } from "~/server/tasks/agent-reply.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
@@ -330,15 +331,34 @@ async function executeCodexPlan(
     logger.warn("codex operator plan was not valid JSON", { taskKey: input.taskKey, runId });
     return;
   }
+  // The plan's prose fields persist to the timeline / packets — repair
+  // double-escaped `\n` sequences the model emitted inside its JSON strings
+  // (finding #23: literal "\n" rendered verbatim in the UI).
+  if (plan.reasoning) plan.reasoning = normalizeEscapedNewlines(plan.reasoning);
+  for (const a of plan.actions ?? []) {
+    if (a.text) a.text = normalizeEscapedNewlines(a.text);
+    if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
+  }
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  // One operator turn → one comment. The plan's `reasoning` IS that comment;
+  // codex often ALSO emits redundant `post_comment` actions repeating it almost
+  // verbatim (observed live: three near-identical "Observed…/Recommended…"
+  // comments in one turn). Track what we've already said and drop duplicates so
+  // the timeline stays a decision log, not an echo chamber.
+  const postedComments = new Set<string>();
+  const commentKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
   if (plan.reasoning) {
     await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
+    postedComments.add(commentKey(plan.reasoning));
   }
   for (const a of plan.actions ?? []) {
     try {
       switch (a.tool) {
         case "post_comment":
-          if (a.text) await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
+          if (a.text && !postedComments.has(commentKey(a.text))) {
+            await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
+            postedComments.add(commentKey(a.text));
+          }
           break;
         case "open_packet": {
           const packetType = a.packetType === "blocked" ? "blocked" : "input";

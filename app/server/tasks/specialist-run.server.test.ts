@@ -7,7 +7,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -278,15 +278,19 @@ describe("startSpecialistRun", () => {
       // Without a directive it is still the plain findings summary.
       expect(simulatedFinalReport(backend)).toContain("Findings:");
 
-      // The report is ROLE-AWARE: a reviewer reports a verdict (not "implemented"),
-      // and a tester reports a validation verdict — so the operator reads a report
-      // that matches the agent it prompted.
+      // The report is ROLE-AWARE: the Reviewer is the single quality specialist
+      // (it reviews the diff AND authors/runs the validation suite — Tester merged
+      // in), so both "review" and "validation" roles report a verdict that covers
+      // tests, not an "implemented" summary.
       const reviewReport = simulatedFinalReport(backend, "@reviewer review it", "Code review");
       expect(reviewReport.toLowerCase()).toContain("approve");
       expect(reviewReport).not.toContain("implemented what you asked for");
-      const testReport = simulatedFinalReport(backend, "@tester verify it", "Validation");
-      expect(testReport.toLowerCase()).toContain("pass");
-      expect(testReport).not.toContain("implemented what you asked for");
+      // A "Validation" role classifies as the Reviewer now — same verdict report,
+      // which also reports the tests passing.
+      const validationReport = simulatedFinalReport(backend, "@reviewer validate it", "Validation");
+      expect(validationReport.toLowerCase()).toContain("approve");
+      expect(validationReport.toLowerCase()).toContain("pass");
+      expect(validationReport).not.toContain("implemented what you asked for");
     }
   });
 

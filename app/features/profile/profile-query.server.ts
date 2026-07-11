@@ -2,7 +2,12 @@ import type Database from "better-sqlite3";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import { ROLE_IDS, type RoleId } from "~/features/policy/policy-data";
-import { mergeNotifPrefs, type NotifPrefs } from "./notification-prefs";
+import type { NotificationKind } from "~/shared/mapping/notification.server";
+import {
+  mergeNotifPrefs,
+  notifCategoryForKind,
+  type NotifPrefs,
+} from "./notification-prefs";
 
 /**
  * Profile overlay read model (Phase 9C, profile.md). The session user is
@@ -86,6 +91,28 @@ export function listUserMemberships(
     .map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
 }
 
+/** A user's notification-routing prefs with defaults applied (opt-out model:
+ *  a missing/partial row reads as every category ON). Single reader of the
+ *  `notifs` pref key — both the profile view and the notification-creation
+ *  gate go through here. */
+export function getNotifPrefs(
+  db: Database.Database,
+  userId: string,
+): NotifPrefs {
+  return mergeNotifPrefs(getPref(db, userId, NOTIFS_PREF_KEY));
+}
+
+/** Whether a user wants in-app notifications of this kind. Opt-out: an unset
+ *  pref defaults to ON. Consulted before every notification insert so a
+ *  silenced category never reaches the recipient's inbox (FR26 routing). */
+export function isNotifKindEnabled(
+  db: Database.Database,
+  userId: string,
+  kind: NotificationKind,
+): boolean {
+  return getNotifPrefs(db, userId)[notifCategoryForKind(kind)].app;
+}
+
 export function getMotionPref(
   db: Database.Database,
   userId: string,
@@ -135,7 +162,7 @@ export function getProfileView(
     memberships,
     accessRole,
     prefs: {
-      notifs: mergeNotifPrefs(getPref(db, userId, NOTIFS_PREF_KEY)),
+      notifs: getNotifPrefs(db, userId),
       motion: getMotionPref(db, userId),
       tlDefault: getTimelineDefaultPref(db, userId),
     },

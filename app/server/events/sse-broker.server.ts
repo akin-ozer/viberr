@@ -330,7 +330,8 @@ export function resetSseBrokerForTests(): void {
   cache[BROKER_KEY] = undefined;
 }
 
-/** Observability (tests + future /resources/health). */
+/** test-only — leak invariants (buffer cap, connection registry) have no
+ * behavioral surface, so the tests introspect. */
 export function getSseBrokerStats(): {
   connections: number;
   bufferedEvents: number;

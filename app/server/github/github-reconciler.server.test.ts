@@ -11,7 +11,7 @@ import {
   fakeGithubFetch,
   type FakeResponder,
 } from "../../../test-support/fake-github";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,

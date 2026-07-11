@@ -102,6 +102,11 @@ export interface RunView {
   lifecycle: RunState;
   /** User id + label of an interrupter, else null. */
   interruptedBy?: { userId: string; label: string } | null;
+  /** The run failed because its backend was unavailable / quota-limited (not a
+   *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
+  failedBackendUnavailable?: boolean;
+  /** The OTHER backend to retry on when this one is unavailable (D4). */
+  altBackend?: "claude" | "codex";
   phase: string | null;
   step: string | null;
   /** UTC ISO started_at — client derives elapsed from this + its own clock. */

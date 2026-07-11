@@ -163,7 +163,6 @@ export const RES_CATALOG: readonly ResCatalogGroup[] = [
       { id: "coverage-report", def: false },
       { id: "refactor", def: false },
       { id: "dependency-audit", def: false },
-      { id: "domain-advisor", def: false },
     ],
   },
   {
@@ -205,14 +204,16 @@ export interface ResourceSelection {
   kb: string[];
 }
 
+/**
+ * A newly created profile starts with NO resources pre-granted — the creator
+ * explicitly picks skills/MCPs/KBs from the project's REAL resource catalog
+ * (`buildResourceCatalog`). Deriving defaults from the legacy mock `RES_CATALOG`
+ * pre-checked ids like `repo-write` / "Coding standards" that resolve to nothing,
+ * so a fresh profile shipped grants no real resource could satisfy. Empty is the
+ * honest, safe-by-default starting point.
+ */
 export const RES_DEFAULTS: ResourceSelection = {
-  skills: RES_CATALOG.find((g) => g.key === "skills")!
-    .items.filter((i) => i.def)
-    .map((i) => i.id),
-  mcps: RES_CATALOG.find((g) => g.key === "mcps")!
-    .items.filter((i) => i.def)
-    .map((i) => i.id),
-  kb: RES_CATALOG.find((g) => g.key === "kb")!
-    .items.filter((i) => i.def)
-    .map((i) => i.id),
+  skills: [],
+  mcps: [],
+  kb: [],
 };

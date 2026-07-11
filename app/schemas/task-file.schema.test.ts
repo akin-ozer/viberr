@@ -80,14 +80,34 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     const result = parseTaskFrontmatter({}, { fallbackKey: "VIB-9" });
     expect(result.frontmatter.key).toBe("VIB-9");
     expect(result.frontmatter.title).toBe("VIB-9");
-    expect(result.frontmatter.stage).toBe("triage");
+    // A missing stage is NOT invented as `triage` (which would relocate the
+    // card): it stays blank + gets an `unresolved_stage` warning, so the board
+    // shows it as an unknown stage instead of moving it.
+    expect(result.frontmatter.stage).toBe("");
     expect(result.frontmatter.readiness).toBe("ready");
     expect(result.frontmatter.waiting).toBe("none");
     expect(result.frontmatter.urgent).toBe(false);
     const codes = result.diagnostics.map((d) => d.code);
     expect(codes).toContain("frontmatter.missing_key");
     expect(codes).toContain("frontmatter.missing_field");
+    expect(codes).toContain("frontmatter.unresolved_stage");
     expect(result.diagnostics.every((d) => d.severity !== "error")).toBe(true);
+  });
+
+  it("broken/invalid stage → blank marker + unresolved_stage warning (no `triage` relocation)", () => {
+    // A present-but-unparseable stage (empty string here; also non-strings)
+    // must NOT jump to a hardcoded `triage`. It falls back to a blank stage so
+    // the projection parks the card in the board's unknown-stage bucket.
+    const result = parseTaskFrontmatter(
+      { ...valid, stage: "" },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.frontmatter.stage).toBe("");
+    const stageDiag = result.diagnostics.find((d) => d.path === "stage");
+    expect(stageDiag?.code).toBe("frontmatter.unresolved_stage");
+    // Warning severity → floors readiness at input_required (never invents a
+    // healthier state); it is not an integrity error.
+    expect(stageDiag?.severity).toBe("warning");
   });
 
   it("invalid enum values → warning diagnostics with field paths", () => {

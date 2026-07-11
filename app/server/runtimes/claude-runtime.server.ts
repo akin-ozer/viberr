@@ -43,10 +43,20 @@ export interface ClaudeQueryOptions {
   systemPrompt?: string;
   /** In-process SDK MCP servers (operator governance tools). */
   mcpServers?: Record<string, unknown>;
-  /** Tool allowlist — confines the run to the listed tools. */
+  /** Auto-approve allowlist. NOTE: this does NOT remove other tools from the
+   *  model's context — it only skips the permission prompt. Use `tools` to
+   *  restrict the available built-in set. */
   allowedTools?: string[];
-  /** Tool denylist — deny rules bind even under bypassPermissions. */
+  /** Tool denylist — removes tools from the model's context entirely; binds
+   *  even under bypassPermissions. */
   disallowedTools?: string[];
+  /** Which filesystem settings to load. `[]` = SDK isolation mode: none of the
+   *  host's `~/.claude` settings tiers leak in. */
+  settingSources?: string[];
+  /** Skills to enable. `[]` = none listed → the model sees no skills and the
+   *  Skill tool rejects them (a context filter). Viberr injects its own skill
+   *  as system-prompt text, so a run needs no SDK-discovered skills. */
+  skills?: string[];
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -83,6 +93,21 @@ export function resolveClaudeModel(model?: string): string | undefined {
   if (m.includes("sonnet")) return "sonnet";
   return undefined;
 }
+
+/**
+ * Built-in tools an operator run may never use: it coordinates the task and
+ * writes only through its governance MCP tools — it never edits files, runs
+ * shell commands, or spawns sub-agents that could. Denied tools are removed
+ * from the model's context, so this holds even under bypassPermissions.
+ */
+const OPERATOR_DENIED_BUILTINS = [
+  "Bash",
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "NotebookEdit",
+  "Task",
+] as const;
 
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
@@ -160,22 +185,39 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // Bash; bypassPermissions runs unattended end-to-end.
           permissionMode: spec.autonomous ? "bypassPermissions" : "default",
           maxTurns: 50,
+          // SDK isolation: never load the host machine's ~/.claude settings
+          // tiers into a Viberr run, and enable ZERO skills — Viberr injects
+          // its own skill/KB as system-prompt text, so a run must see exactly
+          // the agent's declared resources, not the operator-user's personal
+          // Claude Code skills/plugins (`settingSources` alone does NOT filter
+          // plugin skills — `skills: []` does).
+          settingSources: [],
+          skills: [],
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         if (deps.env) options.env = deps.env;
-        // Operator runs carry a persona + in-process governance tools, and are
-        // confined to those tools (they never write code). A plain specialist
-        // run leaves all three unset → default prompt + full toolset.
+        // Operator runs carry a persona + in-process governance tools. A plain
+        // specialist run leaves prompt/mcp unset → default prompt + full toolset.
         if (spec.systemPrompt) options.systemPrompt = spec.systemPrompt;
         if (spec.mcpServers) options.mcpServers = spec.mcpServers;
         if (spec.allowedTools && spec.allowedTools.length) {
           options.allowedTools = spec.allowedTools;
         }
-        // Specialist capability confinement: deny the withheld repo commands.
-        // Deny rules override bypassPermissions, so this genuinely binds.
-        if (spec.disallowedTools && spec.disallowedTools.length) {
-          options.disallowedTools = spec.disallowedTools;
-        }
+        // Capability confinement via denylist. `disallowedTools` removes tools
+        // from the model's context entirely and binds even under
+        // bypassPermissions (unlike `allowedTools`, which only auto-approves).
+        //   - operator: deny the repo-mutation built-ins so it genuinely can't
+        //     write code / touch the repo — its job is the in-process
+        //     `mcp__viberr__*` governance tools, which stay available (as does
+        //     the tool-loading path). Enforces the PRD contract in code, not
+        //     just the persona prompt.
+        //   - specialist: deny the git/gh commands for capabilities the profile
+        //     withholds (push / PR / merge), computed upstream.
+        const denied = [
+          ...(spec.kind === "operator" ? OPERATOR_DENIED_BUILTINS : []),
+          ...(spec.disallowedTools ?? []),
+        ];
+        if (denied.length) options.disallowedTools = denied;
 
         const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
         queryHandle = q;

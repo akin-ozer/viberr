@@ -7,7 +7,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";

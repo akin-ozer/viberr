@@ -120,6 +120,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 }
 
+/** Optional `backend` form field → a run backend override (D4 retry). Ignores
+ *  anything that isn't a real backend so a stray value can't break a run. */
+function backendOverride(formData: FormData): { backendOverride?: "claude" | "codex" } {
+  const b = String(formData.get("backend") ?? "");
+  return b === "claude" || b === "codex" ? { backendOverride: b } : {};
+}
+
 export async function action({ request, params }: Route.ActionArgs) {
   const ctx = await requireAuth(request);
   const db = getDb();
@@ -295,7 +302,14 @@ export async function action({ request, params }: Route.ActionArgs) {
       }
       case "run-specialist": {
         // Start a real (or simulated-fallback) run for the assigned specialist.
-        const result = await startSpecialistRun(db, { projectSlug, taskKey }, actor);
+        // An optional `backend` forces the run onto the other engine — the
+        // "retry on the other backend" affordance after an availability/quota
+        // failure (D4).
+        const result = await startSpecialistRun(
+          db,
+          { projectSlug, taskKey, ...backendOverride(formData) },
+          actor,
+        );
         return {
           ok: true as const,
           intent,
@@ -318,10 +332,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "run-reviewer": {
-        // Start a run for a specific engaged reviewer.
+        // Start a run for a specific engaged reviewer (optional `backend`
+        // override for the retry-on-other-backend affordance — D4).
         const result = await startReviewerRun(
           db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            profileId: String(formData.get("profileId") ?? ""),
+            ...backendOverride(formData),
+          },
           actor,
         );
         return {

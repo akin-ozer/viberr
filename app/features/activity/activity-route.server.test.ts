@@ -91,12 +91,16 @@ describe("/projects/:slug/activity", () => {
     );
   });
 
-  it("stub projects load with an empty stream (degrade gracefully)", async () => {
+  it("stub projects load their own task's stream (DEP-31 lives there now)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const result = (await runLoader("deploy-pipeline", cookie)) as {
       stream: ActivityStreamRowView[];
       audit: AuditLogEntryView[];
     };
-    expect(result.stream).toEqual([]);
+    // The stub project carries a real task (DEP-31) so its cross-project
+    // notification navigates to a real record — the stream shows its events
+    // and nothing from other projects.
+    expect(result.stream.length).toBeGreaterThan(0);
+    expect(result.stream.every((row) => row.taskKey === "DEP-31")).toBe(true);
   });
 });

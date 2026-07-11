@@ -34,7 +34,7 @@ import {
 } from "~/server/runtimes/run-service.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { AUDIT_ACTIONS, AUDIT_ACTION_NAMES } from "./audit-actions";
-import { listAuditEvents } from "./audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
  * Phase 10 audit regression — two halves:

@@ -42,7 +42,7 @@ describe("seedRuntimes — counts + fidelity", () => {
     expect(runsForTask.length).toBe(3);
   });
 
-  it("VIB-142 fidelity: op idle, primary+consultant finished, correct backends/tokens", () => {
+  it("VIB-142 fidelity: op idle, primary+reviewer finished, correct backends/tokens", () => {
     seedRuntimes(store.db, { dataRoot: store.dataRoot, projectSlug: store.slug });
     const runs = listRunsForTask(store.db, store.slug, "VIB-142");
     expect(runs.map((r) => r.id)).toEqual(["op", "primary", "c0"]); // stored order preserved

@@ -235,7 +235,7 @@ describe("ProfileDetail", () => {
 });
 
 describe("LiveRoster", () => {
-  it("sorts by task key then operator→primary→consultant and renders backends", () => {
+  it("sorts by task key then operator→primary→reviewer and renders backends", () => {
     const rows = [
       mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", role: "Reviewer", backend: "claude", status: "anchored · on call" }),
       mkDeployment({ taskKey: "VIB-1", engagement: "primary", status: "working" }),
@@ -356,7 +356,8 @@ describe("CreateProfileModal", () => {
     });
     // Catalog defaults seed the caps record.
     expect(payload.caps["merge-pull-request"]).toBe("human");
-    expect(payload.resources.skills).toEqual(["repo-write", "test-runner"]);
+    // A fresh profile starts with NO resources pre-granted (RES_DEFAULTS empty).
+    expect(payload.resources.skills).toEqual([]);
     expect(container.querySelector(".cap-matrix")).not.toBeNull();
   });
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { runDemoSeed } from "~/server/seed/demo-seed.server";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,

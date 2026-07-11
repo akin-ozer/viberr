@@ -23,6 +23,7 @@ import {
   type OperatorAuthority,
 } from "./operator-actions.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { normalizeEscapedNewlines } from "./model-prose.server";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -57,6 +58,11 @@ function textResult(payload: unknown) {
     typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
   return { content: [{ type: "text" as const, text }] };
 }
+
+// Every model-emitted prose string crosses into the store through here —
+// repair double-escaped `\n` sequences before they persist (finding #23:
+// literal "\n" rendered verbatim on the timeline).
+const prose = normalizeEscapedNewlines;
 
 function resultText(r: OperatorActionResult) {
   return textResult(`[${r.outcome}] ${r.message}`);
@@ -97,7 +103,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         { text: z.string().describe("The comment text (markdown allowed).") },
         async (args) =>
           resultText(
-            await operatorPostComment(db, ctx, { ...base, text: args.text }, authority),
+            await operatorPostComment(db, ctx, { ...base, text: prose(args.text) }, authority),
           ),
       ),
       "post_comment",
@@ -146,13 +152,23 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               {
                 ...base,
                 packetType: args.packetType,
-                title: args.title,
-                ...(args.body ? { body: args.body } : {}),
-                ...(args.observations ? { observations: args.observations } : {}),
+                title: prose(args.title),
+                ...(args.body ? { body: prose(args.body) } : {}),
+                ...(args.observations
+                  ? {
+                      // Code-flagged observation values render as code — their
+                      // backslashes are content, so only prose values are repaired.
+                      observations: args.observations.map((o) => ({
+                        k: prose(o.k),
+                        v: o.code ? o.v : prose(o.v),
+                        ...(o.code !== undefined ? { code: o.code } : {}),
+                      })),
+                    }
+                  : {}),
                 options: args.options.map((o) => ({
                   kind: o.kind as (typeof PACKET_OPTION_KINDS)[number],
-                  title: o.title,
-                  ...(o.detail ? { detail: o.detail } : {}),
+                  title: prose(o.title),
+                  ...(o.detail ? { detail: prose(o.detail) } : {}),
                   ...(o.recommended !== undefined ? { recommended: o.recommended } : {}),
                 })),
               },
@@ -178,7 +194,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             await operatorAssignSpecialist(
               db,
               ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: args.reason } : {}) },
+              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
               authority,
             ),
           ),
@@ -210,7 +226,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             await operatorPromptSpecialist(
               db,
               ctx,
-              { ...base, profileId: args.profileId, directive: args.prompt },
+              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
               authority,
             ),
           ),
@@ -233,7 +249,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             await operatorAssignReviewer(
               db,
               ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: args.reason } : {}) },
+              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
               authority,
             ),
           ),
@@ -267,7 +283,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             await operatorPromptReviewer(
               db,
               ctx,
-              { ...base, profileId: args.profileId, directive: args.prompt },
+              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
               authority,
             ),
           ),
@@ -290,7 +306,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             await operatorTransitionStage(
               db,
               ctx,
-              { ...base, toStageId: args.toStageId, ...(args.reason ? { reason: args.reason } : {}) },
+              { ...base, toStageId: args.toStageId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
               authority,
             ),
           ),

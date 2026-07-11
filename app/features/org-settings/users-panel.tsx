@@ -4,6 +4,7 @@ import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { useDialog } from "~/ui/use-dialog";
 import { ConfirmDelete, EditIco, MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
@@ -72,7 +73,6 @@ function InviteModal({
         return;
       }
       if (d.toast) push(d.toast);
-      if (d.duplicate) return; // mock: modal stays open on duplicate domain
       if (typeof d.tempPassword === "string") {
         onSetupNotice({
           email: typeof d.email === "string" ? d.email : "",
@@ -462,6 +462,45 @@ function EditUserModal({
   );
 }
 
+/** Disable confirm — killing sessions + blocking sign-in is disruptive, so a
+ * confirm gate mirrors the remove flow (native <dialog>, ruling 16). */
+function DisableUserDialog({
+  name,
+  onCancel,
+  onConfirm,
+}: {
+  name: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useDialog(onCancel);
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      role="alertdialog"
+      aria-label={`Disable ${name}?`}
+    >
+      <div className="confirm-icon">
+        <Icon name="hand" />
+      </div>
+      <h3>Disable {name}?</h3>
+      <p>
+        They're signed out immediately and can't sign in until re-enabled. Their
+        comments, decisions, and task assignments stay untouched.
+      </p>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onConfirm}>
+          Disable
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 export function UsersPanel({
   users,
   domains,
@@ -476,6 +515,7 @@ export function UsersPanel({
     | { kind: "domain"; item: DomainRecord }
     | null
   >(null);
+  const [disabling, setDisabling] = useState<OrgUserView | null>(null);
   const [inviting, setInviting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<SetupNotice | null>(null);
@@ -589,6 +629,11 @@ export function UsersPanel({
                   password reset pending
                 </Pill>
               )}
+              {u.disabled && (
+                <Pill kind="neutral" sm>
+                  disabled
+                </Pill>
+              )}
               <span className="mini-seg">
                 <button
                   type="button"
@@ -614,6 +659,35 @@ export function UsersPanel({
               >
                 <EditIco />
               </button>
+              {u.disabled ? (
+                <button
+                  type="button"
+                  className="stg-x"
+                  title="Re-enable user"
+                  aria-label={"Enable " + u.name}
+                  onClick={() =>
+                    rowAction.submit({ intent: "user-enable", userId: u.id })
+                  }
+                >
+                  <Icon name="check" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={"stg-x" + (you ? " off" : "")}
+                  title="Disable user"
+                  aria-label={"Disable " + u.name}
+                  onClick={() => {
+                    if (you) {
+                      push("You can't disable your own account");
+                      return;
+                    }
+                    setDisabling(u);
+                  }}
+                >
+                  <Icon name="hand" />
+                </button>
+              )}
               <button
                 type="button"
                 className={"stg-x" + (you ? " off" : "")}
@@ -644,6 +718,16 @@ export function UsersPanel({
           user={editing}
           isYou={editing.id === meId}
           onClose={() => setEditingId(null)}
+        />
+      )}
+      {disabling && (
+        <DisableUserDialog
+          name={disabling.name}
+          onCancel={() => setDisabling(null)}
+          onConfirm={() => {
+            rowAction.submit({ intent: "user-disable", userId: disabling.id });
+            setDisabling(null);
+          }}
         />
       )}
       {confirm && confirm.kind === "user" && (

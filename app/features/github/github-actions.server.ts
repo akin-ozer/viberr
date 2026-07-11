@@ -1,9 +1,15 @@
 import type Database from "better-sqlite3";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
+import { getDefaultConnection } from "~/server/org/connections.server";
 import {
   reconcileProject,
   type GithubActionContext,
 } from "~/server/github/github-reconciler.server";
+import {
+  clearProjectCredential,
+  getProjectCredential,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
@@ -81,5 +87,56 @@ export async function runGrantScope(
     }),
     result:
       result.resolvedViolations.length > 0 ? "resolved" : "revalidated",
+  };
+}
+
+/**
+ * Attach / rotate the project's GitHub credential (finding #13): binds the
+ * org DEFAULT connection's PAT to the project via the phase-7 set-PAT flow.
+ * "Rotate" is the same operation on an already-bound project — it re-points at
+ * the current default (the org connection is where a token is actually
+ * replaced). No default connection is a degraded VALUE, never a throw.
+ */
+export function runSetCredential(
+  db: Database.Database,
+  projectSlug: string,
+  actor: AuditActor,
+): GithubActionOutcome {
+  const connection = getDefaultConnection(db);
+  if (!connection) {
+    return {
+      ok: true,
+      toast: "No GitHub connection to attach — add one in org settings first",
+      result: "no_connection",
+    };
+  }
+  const wasBound = getProjectCredential(db, projectSlug) !== null;
+  setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
+  return {
+    ok: true,
+    toast: wasBound
+      ? `Credential rotated to ${connection.owner}'s connection — sync uses it now`
+      : `Credential attached from ${connection.owner}'s connection`,
+    result: wasBound ? "rotated" : "attached",
+  };
+}
+
+/**
+ * Remove the project's GitHub credential (finding #13): unbinds the stored PAT
+ * so branch/PR sync goes offline (the health reader falls back to the
+ * credentialPolicy display, or "none"). Idempotent.
+ */
+export function runClearCredential(
+  db: Database.Database,
+  projectSlug: string,
+  actor: AuditActor,
+): GithubActionOutcome {
+  const cleared = clearProjectCredential(db, projectSlug, actor);
+  return {
+    ok: true,
+    toast: cleared
+      ? "Credential removed — branch and PR sync goes offline until one is attached"
+      : "No credential was attached",
+    result: cleared ? "cleared" : "noop",
   };
 }

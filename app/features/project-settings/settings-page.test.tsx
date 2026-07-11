@@ -224,6 +224,7 @@ describe("RepoPanel", () => {
   it("renders repo facts, the override toggle and the shared CredentialCard with Grant scope", () => {
     const onToggle = vi.fn();
     const onGrant = vi.fn();
+    const onSet = vi.fn();
     const onOpenTask = vi.fn();
     const { container, getByText } = render(
       <RepoPanel
@@ -233,8 +234,11 @@ describe("RepoPanel", () => {
         canOverride
         canGrant
         busy={false}
+        credBusy={false}
         onToggleOverride={onToggle}
         onGrantScope={onGrant}
+        onSetCredential={onSet}
+        onClearCredential={() => {}}
         onOpenTask={onOpenTask}
       />,
     );
@@ -250,13 +254,55 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Grant scope"));
     expect(onGrant).toHaveBeenCalled();
 
+    // Not a real PAT (policy_display) → only Attach, no Remove (finding #13).
+    expect(container.querySelector(".cred-manage")).not.toBeNull();
+    fireEvent.click(getByText("Attach credential"));
+    expect(onSet).toHaveBeenCalled();
+
     const toggle = container.querySelector('[role="switch"]')!;
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalled();
   });
 
-  it("renders cred-ok when every scope is granted", () => {
+  it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {
+    const onSet = vi.fn();
+    const onClear = vi.fn();
+    const bound = {
+      ...CREDENTIAL,
+      configured: true,
+      source: "pat" as const,
+      scopes: CREDENTIAL.scopes.map((s) => ({ ...s, ok: true })),
+    };
+    const { container, getByText, queryByText } = render(
+      <RepoPanel
+        repo="akin-ozer/viberr"
+        override={false}
+        credential={bound}
+        canOverride
+        canGrant
+        busy={false}
+        credBusy={false}
+        onToggleOverride={() => {}}
+        onGrantScope={() => {}}
+        onSetCredential={onSet}
+        onClearCredential={onClear}
+        onOpenTask={() => {}}
+      />,
+    );
+    expect(queryByText("Attach credential")).toBeNull();
+    fireEvent.click(getByText("Rotate credential"));
+    expect(onSet).toHaveBeenCalled();
+
+    // Remove goes through the confirm dialog, not straight to the action.
+    fireEvent.click(getByText("Remove credential"));
+    expect(onClear).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    fireEvent.click(getByText("Remove credential", { selector: "button.btn.danger" }));
+    expect(onClear).toHaveBeenCalled();
+  });
+
+  it("renders cred-ok when every scope is granted; non-managers get no manage row", () => {
     const allOk = {
       ...CREDENTIAL,
       scopes: CREDENTIAL.scopes.map((s) => ({ ...s, ok: true })),
@@ -269,13 +315,18 @@ describe("RepoPanel", () => {
         canOverride={false}
         canGrant={false}
         busy={false}
+        credBusy={false}
         onToggleOverride={() => {}}
         onGrantScope={() => {}}
+        onSetCredential={() => {}}
+        onClearCredential={() => {}}
         onOpenTask={() => {}}
       />,
     );
     expect(container.querySelector(".cred-ok")).not.toBeNull();
     expect(getByText("all tasks use the default")).toBeTruthy();
+    // canGrant=false → no attach/rotate/remove affordances.
+    expect(container.querySelector(".cred-manage")).toBeNull();
   });
 });
 

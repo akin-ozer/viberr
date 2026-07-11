@@ -1,4 +1,4 @@
-import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
+import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
 
 /**
  * Instance-default workflow templates (orchestrator ruling 15).
@@ -34,8 +34,8 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
     {
       from: "triage",
       to: "ready",
-      boundary: "approval",
-      by: "Human, after the quality gate — agents may flag underspecified tasks",
+      boundary: "auto",
+      by: "Operator, once the goal is scoped — flags underspecified tasks instead",
       locked: false,
     },
     {
@@ -87,3 +87,17 @@ export const LIGHTWEIGHT_TEMPLATE: WorkflowTemplate = {
     },
   ],
 };
+
+/**
+ * The PRD's anti-noise guardrails, ON by default for EVERY project — the seed
+ * demo AND app-created projects. Timeline noise is the product's #1 named risk,
+ * so a fresh board must ship with these enabled, not with an empty guardrail set
+ * that silently disables timeline compaction and operator brevity enforcement.
+ */
+export const DEFAULT_GUARDRAILS: Guardrail[] = [
+  { id: "meaningful-comment", desc: "Agent comments must add information — status chatter is rejected before it reaches the timeline.", on: true },
+  { id: "operator-brevity", desc: "Operator packets keep to observed → changed → recommended → decision required.", on: true },
+  { id: "no-duplicate-summary", desc: "A summary that restates an earlier one is dropped instead of appended.", on: true },
+  { id: "compression-threshold", desc: "Long timelines compress once routine events pass the threshold; typed events are always kept.", on: true, value: 40, unit: "events" },
+  { id: "evidence-separation", desc: "Raw validation output stays in evidence references — never inline in the task record.", on: true },
+];
