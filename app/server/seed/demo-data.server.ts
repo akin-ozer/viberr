@@ -240,8 +240,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // validation suite (the former Tester role is folded in here).
       direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task"],
       recommend: ["Approve the review", "Request changes"],
-      // "Push commits to the branch" is a known near-miss → stays an extra.
-      forbidden: ["Merge a pull request", "Transition a task to Done", "Push commits to the branch"],
+      // The reviewer must NOT push/commit — use the exact catalog label so this
+      // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
+      // policy actually denies (git push + git commit), not a decorative extra.
+      forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
     "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary — raising typed quality flags and recommending approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
   ),

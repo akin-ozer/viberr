@@ -21,11 +21,16 @@ import { Pill } from "~/ui/pill";
 export function DecisionPacket({
   packet,
   busy,
+  canResolve,
   onResolve,
   onAsk,
 }: {
   packet: PacketRender;
   busy: boolean;
+  /** Whether the viewer may RESOLVE this packet (admin|maintainer, or the task
+   *  owner for non-completion options — M2). "Ask operator" stays open to all
+   *  (commenting is app-wide). */
+  canResolve: boolean;
   onResolve: (optionIndex: number) => void;
   onAsk: () => void;
 }) {
@@ -118,16 +123,18 @@ export function DecisionPacket({
         </div>
 
         <div className="packet-actions">
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || p.options.length === 0}
-            aria-busy={busy}
-            onClick={() => onResolve(sel)}
-          >
-            <Icon name="check" />
-            {p.options[sel] ? p.options[sel].t : "Confirm"}
-          </button>
+          {canResolve && (
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || p.options.length === 0}
+              aria-busy={busy}
+              onClick={() => onResolve(sel)}
+            >
+              <Icon name="check" />
+              {p.options[sel] ? p.options[sel].t : "Confirm"}
+            </button>
+          )}
           <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />
             Ask operator

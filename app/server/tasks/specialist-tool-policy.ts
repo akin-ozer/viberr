@@ -35,13 +35,26 @@ const CAP_DENY_RULES: readonly {
     capabilityId: "create-task-branch",
     deny: ["Bash(git checkout -b:*)", "Bash(git switch -c:*)"],
   },
-  { capabilityId: "commit-push-branch", deny: ["Bash(git push:*)"] },
+  { capabilityId: "commit-push-branch", deny: ["Bash(git push:*)", "Bash(git commit:*)"] },
   { capabilityId: "open-review-pr", deny: ["Bash(gh pr create:*)"] },
   {
     capabilityId: "open-or-merge-pr",
     deny: ["Bash(gh pr create:*)", "Bash(gh pr merge:*)"],
   },
   { capabilityId: "merge-pull-request", deny: ["Bash(gh pr merge:*)"] },
+  // The headline "write to the repo" capability now has REAL teeth (D1/Q4): a
+  // specialist whose `execute-code-or-write-repo` is withheld cannot edit files
+  // or commit — Edit/Write/NotebookEdit are removed and git commit is denied.
+  {
+    capabilityId: "execute-code-or-write-repo",
+    deny: ["Edit", "Write", "NotebookEdit", "Bash(git commit:*)"],
+  },
+  // A specialist whose `edit-other-task-branch` is withheld cannot check out or
+  // reset onto an arbitrary other branch (it stays on its own task branch).
+  {
+    capabilityId: "edit-other-task-branch",
+    deny: ["Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)"],
+  },
 ];
 
 /**

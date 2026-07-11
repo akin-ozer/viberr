@@ -4,10 +4,14 @@
  *
  * Agent capability policy is stored as `{ capabilityId, mode }` against this
  * catalog; bespoke labels that have no catalog entry ride along as
- * display-only `extras` (`{ label, mode }`). Known near-misses deliberately
- * kept as extras pending product sign-off:
- *   - Tester   "Run the validation suite"   (catalog: "Run validation suites")
- *   - Reviewer "Push commits to the branch" (catalog: "Commit & push to the branch")
+ * display-only `extras` (`{ label, mode }`).
+ *
+ * ENFORCED-vs-advisory (honesty): a subset of these ids bind at the runtime tool
+ * layer for Claude specialists (`specialist-tool-policy.ts` — branch/push/PR/
+ * merge + `execute-code-or-write-repo` + `edit-other-task-branch`) or gate the
+ * operator toolkit (`operator-actions.ts`). The remainder are advisory guidance
+ * injected into the run persona. `capabilityIsEnforced` distinguishes them so
+ * the UI can label the difference rather than overstating authority.
  *
  * ALWAYS_HUMAN_CAPABILITY_IDS is the server-side invariant list — these are
  * never grantable to an agent in an actionable mode. Enforced at grant-persist
@@ -51,8 +55,6 @@ export const CAP_CATALOG: readonly CapabilityDef[] = [
   // Validation
   { id: "author-test-cases", label: "Author test cases" },
   { id: "attach-evidence-references", label: "Attach evidence references" },
-  { id: "validation-verdict", label: "Validation verdict" },
-  { id: "hold-on-failing-checks", label: "Hold the task on failing checks" },
   // Shared specialist actions
   { id: "read-task-repo", label: "Read the task & repository" },
   { id: "flag-underspecified-tasks", label: "Flag underspecified tasks" },
@@ -73,6 +75,44 @@ export const ALWAYS_HUMAN_CAPABILITY_IDS: readonly string[] = [
 
 const byId = new Map(CAP_CATALOG.map((c) => [c.id, c]));
 const byLabel = new Map(CAP_CATALOG.map((c) => [c.label, c]));
+
+/**
+ * The capabilities that BIND at runtime (real enforcement), vs. the advisory
+ * ones injected as persona guidance. Used by the capability matrix so it never
+ * claims authority that doesn't actually confine an agent. Kept next to the
+ * catalog so it's obvious which ids are enforced:
+ *   - specialist tool policy: create-task-branch, commit-push-branch,
+ *     open-review-pr, open-or-merge-pr, merge-pull-request,
+ *     execute-code-or-write-repo, edit-other-task-branch
+ *   - operator toolkit gate: assign-primary-specialist, summon-reviewers,
+ *     generate-packets, append-typed-events, stage-transitions,
+ *     completion-for-acceptance
+ *   - structural human-only: merge-pull-request, transition-to-done,
+ *     change-project-policy (also ALWAYS_HUMAN)
+ */
+export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+  "create-task-branch",
+  "commit-push-branch",
+  "open-review-pr",
+  "open-or-merge-pr",
+  "merge-pull-request",
+  "execute-code-or-write-repo",
+  "edit-other-task-branch",
+  "assign-primary-specialist",
+  "summon-reviewers",
+  "generate-packets",
+  "append-typed-events",
+  "stage-transitions",
+  "completion-for-acceptance",
+  "transition-to-done",
+  "change-project-policy",
+]);
+
+/** True when withholding `id` genuinely confines the agent at runtime (not just
+ *  advisory persona guidance). */
+export function capabilityIsEnforced(id: string): boolean {
+  return ENFORCED_CAPABILITY_IDS.has(id);
+}
 
 export function capabilityById(id: string): CapabilityDef | null {
   return byId.get(id) ?? null;

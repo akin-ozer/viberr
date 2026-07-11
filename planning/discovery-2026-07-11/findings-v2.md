@@ -143,6 +143,26 @@ several are *holes in* those fixes (marked ⟲regression-of).
 | X14 | M | **M2/M3 confirmed live as a VIEWER (selin):** the full packet with all 3 resolve options + "Ask operator" + "Assign me" rendered; clicking "Owner narrows the goal" was server-rejected (state unchanged) but produced no visible error/toast — silent no-op. The @operator mention posted as a comment (app-wide, correct) and triggered NO run (valve held — good). | live VST-2 as viewer; task.md unchanged | gate resolve/assign/packet controls behind myRole in UI; when a denied action is attempted, surface the rejection. | |
 | X15 | L | **Project invites create a `status: invited` member who already has full view access** without accepting anything (selin browsed VST-2 immediately). The invited status is decorative — there's no accept-invite flow, and viewer access is immediate. | project.md members (status: invited); live browse | either honor `status:invited` (block access until accepted) or drop the field — currently misleading. | |
 
+## Role-bindings items landed vs. deferred to the dedicated role-bindings phase
+LANDED this pass (P3.8): D1/Q4 wiring (execute-code-or-write-repo → deny Edit/Write/
+NotebookEdit/git-commit; edit-other-task-branch → deny checkout/switch/reset; reviewer
+commit-push made a REAL grant D4; commit-push also denies git commit); removed the 2 fully-orphan
+ids (validation-verdict, hold-on-failing-checks) + added `capabilityIsEnforced`/`ENFORCED_CAPABILITY_IDS`
+so the matrix can distinguish enforced vs advisory; D10/Q6 home membership filter (org-admin sees all);
+D7 rescan → org-admin; D3 UI gating M1 (Dismiss), M2 (packet resolve behind canResolve), M3 (Assign-me
+members-only); C9 dismiss docstring.
+DEFERRED to the owner's dedicated role-bindings phase (large mechanical refactors, low urgency):
+- **D2/D5** — make PROJECT_CAP_MATRIX the single runtime source (`actionRequires(action)`) and
+  consolidate the 5 duplicated guard helpers. ~15 enforcement sites hardcode role lists today; a test
+  keeps them in sync. Structural, no behavior bug — pure de-duplication.
+- **Deep catalog prune** — the ~17 advisory-only capability ids remain in the catalog (they're
+  referenced by seed profiles + the modal + tests; pruning them ripples through seed data). Now that
+  the matrix can render "advisory" via `capabilityIsEnforced`, the honesty gap is closed without the
+  risky prune.
+- **D9** — SSE `/resources/events` project-membership check (compact-fact leak). Security-hardening;
+  owner explicitly deprioritized security this pass.
+- **Q5 (D6)** — contributor vs viewer differentiation — owner has not ruled; needs a product decision.
+
 ## Owner rulings (2026-07-11, via AskUserQuestion — all decided)
 - **Q1 → RULED (A7/C2): acceptance requires explicit `direct`.** Full autonomy promotes OTHER
   recommend-capabilities to direct, but completion-for-acceptance only acts at explicit `direct`;

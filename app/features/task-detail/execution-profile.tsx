@@ -79,7 +79,8 @@ function OwnerControl({
   }, [open]);
 
   if (!o) {
-    return (
+    // Only project MEMBERS can take ownership (M3) — hide from non-members.
+    return myRole ? (
       <button
         type="button"
         className="rev-add"
@@ -90,6 +91,8 @@ function OwnerControl({
         <Icon name="plus" />
         Assign me
       </button>
+    ) : (
+      <span className="sub">Unowned — open to any project member</span>
     );
   }
 

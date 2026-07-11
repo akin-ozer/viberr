@@ -650,7 +650,10 @@ function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : (
+            ) : myRole ? (
+              // Only project MEMBERS can take ownership (M3) — setOwner requires
+              // membership, so hide "Assign me" from non-members (myRole null)
+              // rather than render a button that 403s.
               <button
                 type="button"
                 className="rev-add sm"
@@ -660,6 +663,8 @@ function CurrentStatePanel({
                 <Icon name="plus" />
                 Assign me
               </button>
+            ) : (
+              <span className="v sub">Unowned</span>
             )}
           </span>
         </div>
@@ -731,6 +736,13 @@ export function TaskDetailPage({
   // RBAC. The mutations themselves live in ExecutionSection /
   // RecommendationsSection below.
   const canRunAgents = myRole === "admin" || myRole === "maintainer";
+  // The viewer may resolve THIS packet when they're admin|maintainer OR the
+  // task owner (M2 / owner ruling Q2). accept_completion is additionally
+  // re-gated to admin|maintainer on the server — an owner-only viewer who
+  // picks it gets a friendly 409, but the common non-completion options work.
+  const isOwner =
+    task.owner?.kind === "human" && task.owner.userId === me.id;
+  const canResolvePacket = canRunAgents || isOwner;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -863,6 +875,7 @@ export function TaskDetailPage({
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
+            canResolve={canResolvePacket}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />

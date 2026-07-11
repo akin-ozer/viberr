@@ -35,6 +35,37 @@ describe("resolveSpecialistDisallowedTools", () => {
     ).toEqual(["Bash(gh pr merge:*)"]);
   });
 
+  it("withholding execute-code-or-write-repo denies Edit/Write + git commit (D1)", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "human"),
+    ]);
+    expect(denied).toContain("Edit");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("NotebookEdit");
+    expect(denied).toContain("Bash(git commit:*)");
+    // direct keeps write access.
+    expect(
+      resolveSpecialistDisallowedTools([grant("execute-code-or-write-repo", "direct")]),
+    ).not.toContain("Edit");
+  });
+
+  it("withholding edit-other-task-branch denies checkout/switch/reset (D1)", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("edit-other-task-branch", "off"),
+    ]);
+    expect(denied).toContain("Bash(git checkout:*)");
+    expect(denied).toContain("Bash(git switch:*)");
+    expect(denied).toContain("Bash(git reset:*)");
+  });
+
+  it("commit-push withheld also denies git commit (a reviewer can't commit — D4)", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("commit-push-branch", "human"),
+    ]);
+    expect(denied).toContain("Bash(git push:*)");
+    expect(denied).toContain("Bash(git commit:*)");
+  });
+
   it("denies opening a PR only when open-review-pr is withheld", () => {
     expect(
       resolveSpecialistDisallowedTools([grant("open-review-pr", "off")]),
