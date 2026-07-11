@@ -1145,15 +1145,20 @@ export function classifyReviewerVerdict(
     return "request_changes";
   }
 
-  // 3. Weak negatives ("fail", "blocker") ONLY count when NOT locally negated —
-  //    "no blockers" / "no tests fail" / "doesn't fail" are POSITIVE. Scan each
-  //    occurrence's preceding context for a negator (a bare `/\bfail\b/` test
-  //    misclassified clean approvals — the bug this guard fixes).
-  for (const m of t.matchAll(/\b(fail(?:ed|ing|s)?|blockers?)\b/g)) {
+  // 3. Weak negatives ("fail", "failure", "blocker") ONLY count when NOT
+  //    locally negated — "no blockers" / "none of the tests fail" / "nothing
+  //    fails" / "doesn't fail" are POSITIVE. Scan each occurrence's preceding
+  //    context for a negator (a bare `/\bfail\b/` test misclassified clean
+  //    approvals — the bug this guard fixes).
+  for (const m of t.matchAll(/\b(fail(?:ed|ing|s|ures?)?|blockers?)\b/g)) {
     const pre = t.slice(Math.max(0, m.index - 28), m.index);
     // A negator anywhere in the local lead-in flips it positive. `n't` is a
     // contraction suffix (don't/doesn't/won't) so it needs no leading boundary.
-    if (!/(?:\b(?:no|not|zero|without|never|any)\b|n't)[^.!?]*$/.test(pre)) {
+    if (
+      !/(?:\b(?:no|not|none|nothing|zero|without|never|any)\b|n't)[^.!?]*$/.test(
+        pre,
+      )
+    ) {
       return "request_changes";
     }
   }
@@ -1182,6 +1187,36 @@ export function classifyReviewerVerdict(
  * updated the timeline + board but never pinged the human who owns acceptance.
  * Exported for tests.
  */
+/**
+ * Rework evidence since the last rejection: scanning the newest-first timeline,
+ * is there a primary-specialist agent reply or a stage `transition` NEWER than
+ * the most recent failing `quality` event? (Reviewer-authored comments don't
+ * count — a reviewer talking is not the developer fixing.) Used to decide
+ * whether an approve may clear a standing `failing` validation. Pure — exported
+ * for tests.
+ */
+export function hasReworkSinceLastRejection(
+  timeline: readonly TaskFileEvent[],
+): boolean {
+  for (const e of timeline) {
+    // Newest-first walk: everything seen BEFORE the failing quality event is
+    // newer than it.
+    if (e.type === "quality" && /\*\*Validation:\*\* failing/.test(e.text)) {
+      return false; // reached the rejection without seeing rework first
+    }
+    if (e.type === "transition") return true;
+    if (
+      e.type === "comment" &&
+      e.actor.kind === "agent" &&
+      !/review|valid|qa|test/i.test(e.actor.role)
+    ) {
+      return true; // a primary-specialist reply landed after the rejection
+    }
+  }
+  // No failing quality event found at all — nothing to hold against the approve.
+  return true;
+}
+
 export async function recordReviewerVerdict(
   db: Database.Database,
   ctx: TaskMutationContext,
@@ -1199,15 +1234,21 @@ export async function recordReviewerVerdict(
   let validation: "failing" | "healthy" = "healthy";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      // A request_changes always fails. But an APPROVE must NOT clear a
-      // `failing` set by ANOTHER reviewer in the same round (multiple engaged
-      // reviewers) — one rejection blocks acceptance until the developer
-      // reworks (impl→review resets validation to "changed", not "failing").
-      // Otherwise a later approve silently masks an earlier request_changes.
+      // A request_changes always fails. An APPROVE clears a standing `failing`
+      // ONLY when the work has demonstrably moved since the rejection — a
+      // primary-specialist reply or a stage transition after the failing
+      // quality event (rework evidence). That keeps both properties:
+      //   · same-round masking is impossible (reviewer B's simultaneous
+      //     approve can't silently bury reviewer A's rejection — nothing
+      //     changed in between), and
+      //   · a rejection is NOT a life sentence (the old bug: re-review after a
+      //     real fix could never restore health, so the operator refused
+      //     acceptance forever and stalled the task).
       validation =
         verdict === "request_changes"
           ? "failing"
-          : parsed.frontmatter.validation === "failing"
+          : parsed.frontmatter.validation === "failing" &&
+              !hasReworkSinceLastRejection(parsed.timeline)
             ? "failing"
             : "healthy";
       parsed.frontmatter.validation = validation;
@@ -1957,12 +1998,12 @@ export async function transitionStage(
     // Live validation-health (FR24, B7): the board's validation signal was
     // seed-only, so a real task always read "none". Derive it from governance
     // state — entering review means the work is up for review ("changed").
-    // A failing verdict ("failing") and acceptance ("healthy") are set on the
-    // packet/accept paths. Don't stomp a "failing" flag on a re-review.
-    if (
-      input.toStageId === reviewStageIdOf(project) &&
-      parsed.frontmatter.validation === "none"
-    ) {
+    // ANY stale verdict is reset: a `healthy` from a prior round no longer
+    // describes the new evidence, and a `failing` from a prior round starts a
+    // NEW review cycle (the fix that ends "failing forever" — the reviewer
+    // re-verdicts the fresh evidence; a standing rejection within the SAME
+    // round is protected separately by hasReworkSinceLastRejection).
+    if (input.toStageId === reviewStageIdOf(project)) {
       parsed.frontmatter.validation = "changed";
     }
     // A stage move makes any pending transition recommendation stale — drop it
@@ -2251,8 +2292,9 @@ export async function resolvePacket(
         type: "completion",
         actor: human,
         title: "Completion accepted",
-        text:
-          !hasPr || reallyMerged
+        text: !hasPr
+          ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+          : reallyMerged
             ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
             : "Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge).",
         toAgent: false,
@@ -2263,6 +2305,9 @@ export async function resolvePacket(
         fm.readiness = "ready";
         fm.waiting = "none";
         fm.validation = "healthy"; // accepted work is validated (FR24)
+        // Acceptance consumes standing recommendations — a leftover transition
+        // card on a Done task would move it back OUT of Done if applied.
+        fm.recommendations = [];
         if (fm.pr) fm.pr = { ...fm.pr, state: reallyMerged ? "merged" : "accepted" };
       };
       clearPacket = true;
@@ -2428,8 +2473,9 @@ async function acceptCompletion(
     type: "completion",
     actor: humanActorRef(db, actor),
     title: "Completion accepted",
-    text:
-      !hasPr || reallyMerged
+    text: !hasPr
+      ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+      : reallyMerged
         ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
         : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge — merge it manually or reconcile once credentials are set).`,
     toAgent: false,

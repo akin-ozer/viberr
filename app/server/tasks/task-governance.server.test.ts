@@ -619,6 +619,18 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict(null)).toBeNull();
     expect(classifyReviewerVerdict("")).toBeNull();
   });
+
+  it("treats none/nothing as negators and catches the failure(s) noun (F3)", () => {
+    expect(
+      classifyReviewerVerdict("Approve — none of the tests fail; nothing fails."),
+    ).toBe("approve");
+    expect(classifyReviewerVerdict("The suite has failures on CI.")).toBe(
+      "request_changes",
+    );
+    expect(classifyReviewerVerdict("Approved. No failures were observed.")).toBe(
+      "approve",
+    );
+  });
 });
 
 describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {

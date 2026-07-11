@@ -1183,6 +1183,10 @@ export async function operatorAcceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
+    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24) — same as the human path
+    // Acceptance consumes any standing recommendations (a leftover transition
+    // card on a Done task would move it back OUT of Done if applied).
+    parsed.frontmatter.recommendations = [];
     if (parsed.frontmatter.pr) {
       parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "accepted" };
     }
