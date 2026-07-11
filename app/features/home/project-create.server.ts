@@ -1,5 +1,9 @@
 import type Database from "better-sqlite3";
-import type { ProjectFrontmatter } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  ProjectFrontmatter,
+  WorkflowBoundary,
+} from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -19,6 +23,59 @@ import {
 } from "~/shared/workflow/templates";
 import { defaultAgentDeployments } from "~/server/seed/demo-data.server";
 import { slugifyProjectName } from "./project-name";
+
+export type PolicyPreset = "strict" | "balanced" | "auto";
+
+/**
+ * The policy preset shapes REAL governance, not just copy:
+ *
+ * - **strict** — a human gates every stage: the operator does NOT auto-advance
+ *   before work starts. Every pre-work `auto` boundary becomes `approval`, so a
+ *   human must approve triage→ready (and ready→impl) before an agent touches the
+ *   repo. Operator stays supervised.
+ * - **balanced** — the template defaults (pre-work boundaries auto-advance under
+ *   a supervised operator; impl→review approval; review→done human).
+ * - **auto** — the operator runs at FULL autonomy: it crosses the governed
+ *   boundaries itself and accepts completion (review→done stays human-locked,
+ *   an invariant no preset can grant).
+ */
+function presetWorkflow(
+  preset: PolicyPreset,
+  workflow: readonly WorkflowBoundary[],
+  lastStageId: string | undefined,
+): WorkflowBoundary[] {
+  if (preset !== "strict") return workflow.map((b) => ({ ...b }));
+  return workflow.map((b) =>
+    // Human-gate the pre-work auto boundaries; never touch the locked
+    // review→done (into the last stage) boundary.
+    b.boundary === "auto" && b.to !== lastStageId
+      ? {
+          ...b,
+          boundary: "approval",
+          by: "Human approval (strict policy) before work advances",
+        }
+      : { ...b },
+  );
+}
+
+/** `auto` preset → the operator deployment runs at full autonomy. */
+function presetAgents(
+  preset: PolicyPreset,
+  agents: AgentDeployment[],
+): AgentDeployment[] {
+  if (preset !== "auto") return agents;
+  return agents.map((a) =>
+    a.profileId === "operator"
+      ? {
+          ...a,
+          definition: {
+            ...(a.definition ?? {}),
+            autonomy: "full" as const,
+          },
+        }
+      : a,
+  );
+}
 
 /**
  * Best-effort fetch of the repo's real default branch so branch/PR sync
@@ -143,11 +200,18 @@ export async function createProject(
     taskPrefix: key,
     nextTaskNumber: 1,
     stages: template.stages,
-    workflow: template.workflow,
+    // The policy preset shapes REAL governance (not just the description):
+    // strict human-gates the pre-work boundaries; auto runs the operator at
+    // full autonomy. See presetWorkflow / presetAgents.
+    workflow: presetWorkflow(
+      input.policy,
+      template.workflow,
+      template.stages[template.stages.length - 1]?.id,
+    ),
     members: [{ userId: actor.userId, role: "admin" }],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
-    agents: defaultAgentDeployments(),
+    agents: presetAgents(input.policy, defaultAgentDeployments()),
     credentialPolicy: null,
     // Ship the anti-noise guardrails ON — timeline compaction + operator brevity
     // are product defaults (PRD's #1 risk), not opt-in.

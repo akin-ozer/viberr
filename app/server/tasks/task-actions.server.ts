@@ -2341,6 +2341,73 @@ async function acceptCompletion(
   });
 }
 
+/**
+ * Complete the REAL GitHub merge of a PR that was accepted "merge pending"
+ * (D3 / S2): when a task was accepted into Done but no server merge could run,
+ * `pr.state` is "accepted" and the real PR stays open. Once a valid PAT is
+ * configured, a human runs this to actually merge it and flip `pr.state` →
+ * "merged". RBAC: admin|maintainer (the acceptance authority). Returns a typed
+ * outcome so the UI can explain a still-blocked merge instead of pretending.
+ */
+export async function completeTaskMerge(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; merged: boolean; message: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(project, actor, ["admin", "maintainer"], "complete a PR merge");
+  if (!actor.userId) {
+    throw AppError.validation("A signed-in user is required to merge a PR.");
+  }
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const pr = existing.parsed.frontmatter.pr;
+  if (!pr) {
+    throw AppError.validation("This task has no linked pull request to merge.");
+  }
+  if (pr.state !== "accepted") {
+    throw conflict(
+      pr.state === "merged"
+        ? "This PR is already merged."
+        : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
+    );
+  }
+
+  const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+  const result = await mergeTaskPr(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey },
+    { userId: actor.userId, label: actor.label },
+    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+  );
+
+  if (result.status === "merged") {
+    // mergeTaskPr already wrote pr.state="merged" + a github event + audit.
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      merged: true,
+      message: `PR #${result.prNumber} merged.`,
+    };
+  }
+
+  const message =
+    result.status === "no_repo_configured" || result.status === "no_pat_configured"
+      ? "Configure a GitHub credential for this project first, then try again."
+      : result.status === "scope_violation"
+        ? "The credential is missing `pull_request:write`. Grant the scope, then retry."
+        : result.status === "not_mergeable" || result.status === "head_changed"
+          ? `GitHub can't merge it yet: ${result.message}`
+          : "The PR could not be merged. It may be closed or already merged on GitHub.";
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    merged: false,
+    message,
+  };
+}
+
 export async function applyRecommendation(
   db: Database.Database,
   input: { projectSlug: string; taskKey: string; recId: string },

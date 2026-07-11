@@ -21,12 +21,54 @@ regressions, no new mocks/unwired surfaces, no new product questions.**
 | **Notifications** overlay | ✅ | "Waiting on you" + "Everything else"; BIL-9 reads "**To do → In progress**" (lightweight-stage fix); All/Unread + mark-all-read. |
 | **Profile** overlay | ✅ | Notification routing = **5 category toggles** (wired, #4); **no nudge/email-channel** UI (#20); theme Light/Dark/System; GitHub identity. |
 
+## Critical findings from this pass — owner-decided + IMPLEMENTED
+
+The pages RENDER coherently, but a critical read of the create/govern flow surfaced three genuine
+product gaps that were NOT deliberate design. Asked the owner; all three decided and implemented:
+
+- **S1 → WIRED (owner: make presets differ).** The create-project policy preset now shapes REAL
+  governance (`project-create.server.ts` `presetWorkflow`/`presetAgents`): **strict** turns the
+  pre-work `auto` boundaries into `approval` (a human gates triage→ready and ready→impl before any
+  agent touches the repo); **balanced** = template defaults; **auto** runs the operator at full
+  autonomy. review→done stays human-locked in every preset. 3 governance tests.
+- **S2 → BUILT (owner: add a Complete-merge action).** `completeTaskMerge` + a "Complete merge"
+  button on the task's GitHub panel when `pr.state==="accepted"`; runs the real `mergeTaskPr` once a
+  PAT is configured, flips to "merged", and reports an honest failure (never a fake merge) when it
+  still can't. admin|maintainer. 4 tests. Pill now reads "PR #N · merge pending".
+- **S3 → DOCUMENTED (owner: note for the role-bindings phase).** Codex specialist runs have no real
+  tool confinement — the Claude adapter enforces `disallowedTools`, but the Codex SDK ignores
+  allowed/disallowed tools and runs `danger-full-access` with the machine env. So an agent's
+  capability policy is truly ENFORCED only for Claude-backed agents; for Codex it is prompt-only.
+  Recorded here + in the completeness ledger (#33) as a known gap to close during the role-bindings
+  work the owner flagged (security deprioritized for now).
+
+_(Original finding text, for the record:)_
+
+- **S1 — the create-project policy preset is COSMETIC (unwired mock).** "Strict human-gate /
+  Balanced / Autonomous" only changes the project *description string*
+  (`project-create.server.ts:132-136`); `agents: defaultAgentDeployments()` (line 150) deploys the
+  IDENTICAL capability policy for all three. The code even says so: "agent capability presets arrive
+  with Phase 8/9" (line 54). So a user picking "Strict human-gate" gets the same governance as
+  "Autonomous." This is the natural entry point for the owner's stated "touch role bindings" work.
+- **S2 — no way to complete the real merge of an "accepted" PR.** After D3, a Done task whose PR
+  couldn't be server-merged shows `pr.state="accepted"` ("merge pending") and its real PR stays OPEN
+  on GitHub. There is no viberr affordance to actually run that merge later once a PAT is configured;
+  the GitHub-page `reconcile` only FETCHES state (and would map the still-open PR back to "review").
+  A "Complete merge" action is missing.
+- **S3 — auto-advance (D2) starts real repo work with zero human gate.** A well-scoped task flows
+  creation → operator → Codex Developer opening a REAL branch+PR on GitHub with no human click. That
+  is the intended power, but there is no per-project option to require a human "start work" gate
+  before the first repo mutation — which is exactly what the (currently cosmetic) "strict" preset
+  should provide. Ties into S1.
+
+Plus the standing documented limitation: **Codex capability caps are prompt-only** (the Claude adapter
+enforces `disallowedTools`; the Codex SDK ignores them) — relevant to role-bindings work (#33).
+
 ## Notes
 - Boot restores the built-in agents' expertise skills (`developer/reviewer/viberr-app-expertise`) —
   confirmed present on disk after a server boot. (The transient absence after a raw `npm run seed
   --reset` without a reboot is a dev-CLI nuance, not a product bug; see the completeness ledger.)
-- No new critical product questions surfaced — every page reflects the decisions the owner already
-  made (D1–D4 + A–E). The UI is internally consistent with the shipped behavior.
+- Everything tied to the DECIDED changes (D1–D4 + A–E) is internally consistent across the UI.
 
 ## Cross-reference
 Behavioral verification (operator, agents, RBAC, MCP, skills, backends) is in

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { createPat, getProjectCredential } from "~/server/secrets/pat-store.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { createProject } from "./project-create.server";
 
 // Hermetic env for the secret box.
@@ -81,5 +82,66 @@ describe("createProject — GitHub connection wiring", () => {
       .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
       .get(result.slug) as { default_branch: string };
     expect(row.default_branch).toBe("main");
+  });
+});
+
+describe("createProject — policy preset shapes REAL governance", () => {
+  const fm = (store: ReturnType<typeof setupTestStore>, slug: string) =>
+    readProjectFile({ projectSlug: slug, dataRoot: store.dataRoot })!.parsed
+      .frontmatter;
+  const opAutonomy = (agents: { profileId: string; definition?: { autonomy?: string } }[]) =>
+    agents.find((a) => a.profileId === "operator")?.definition?.autonomy;
+  const boundary = (
+    wf: { from: string; to: string; boundary: string }[],
+    from: string,
+    to: string,
+  ) => wf.find((b) => b.from === from && b.to === to)?.boundary;
+
+  it("balanced = template defaults (pre-work auto, supervised operator)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Bal", key: "BAL", owner: "nobody", repoName: "b", template: "governed", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    expect(boundary(f.workflow, "triage", "ready")).toBe("auto");
+    expect(boundary(f.workflow, "ready", "impl")).toBe("auto");
+    expect(opAutonomy(f.agents)).toBeUndefined(); // supervised (default)
+  });
+
+  it("strict = human-gates the pre-work boundaries (no operator auto-advance)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Strict", key: "STR", owner: "nobody", repoName: "s", template: "governed", policy: "strict" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    expect(boundary(f.workflow, "triage", "ready")).toBe("approval");
+    expect(boundary(f.workflow, "ready", "impl")).toBe("approval");
+    // impl→review stays approval; review→done stays the locked human boundary.
+    expect(boundary(f.workflow, "review", "done")).toBe("human");
+    expect(f.workflow.find((b) => b.to === "done")?.locked).toBe(true);
+    expect(opAutonomy(f.agents)).toBeUndefined(); // still supervised
+  });
+
+  it("auto = the operator runs at full autonomy (boundaries unchanged)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Auto", key: "AUT", owner: "nobody", repoName: "a", template: "governed", policy: "auto" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    expect(opAutonomy(f.agents)).toBe("full");
+    // review→done is ALWAYS human-locked — no preset can grant it.
+    expect(boundary(f.workflow, "review", "done")).toBe("human");
   });
 });
