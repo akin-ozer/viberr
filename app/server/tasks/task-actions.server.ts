@@ -1153,19 +1153,42 @@ export function classifyReviewerVerdict(
 ): "request_changes" | "approve" | null {
   if (!text) return null;
   const t = text.toLowerCase();
-  // Strong negative signals win (a "request changes" that also says "looks good
-  // in places" is still a request for changes).
+
+  // 1. An EXPLICIT verdict line is the strongest signal and reviewers emit one
+  //    ("Verdict: approve", "## Review verdict — PASS"). It wins over incidental
+  //    words elsewhere in the prose, so a thorough APPROVE that happens to say
+  //    "no tests fail" is not misread as a rejection.
+  const verdictApprove = /verdict[\s:—–-]*\**\s*(pass|approv|lgtm|ship it)/.test(t);
+  const verdictReject =
+    /verdict[\s:—–-]*\**\s*(fail|request|reject|chang|block|no-?go)/.test(t);
+  if (verdictReject && !verdictApprove) return "request_changes";
+  if (verdictApprove && !verdictReject) return "approve";
+
+  // 2. Strong request-changes PHRASES always count (assertive, not negated).
   if (
     /request(ing)?\s+changes?/.test(t) ||
+    /\bchanges? (are )?(required|needed|requested)\b/.test(t) ||
     /\bnothing (was )?implemented\b/.test(t) ||
     /\bno-?op\b/.test(t) ||
-    /\bchanges? (are )?(required|needed)\b/.test(t) ||
     /\bnot (yet )?(implemented|done|complete)\b/.test(t) ||
-    /\bfail(ed|ing|s)?\b/.test(t) ||
-    /\bblocker\b/.test(t)
+    /\breject(ed|s|ing)?\b/.test(t)
   ) {
     return "request_changes";
   }
+
+  // 3. Weak negatives ("fail", "blocker") ONLY count when NOT locally negated —
+  //    "no blockers" / "no tests fail" / "doesn't fail" are POSITIVE. Scan each
+  //    occurrence's preceding context for a negator (a bare `/\bfail\b/` test
+  //    misclassified clean approvals — the bug this guard fixes).
+  for (const m of t.matchAll(/\b(fail(?:ed|ing|s)?|blockers?)\b/g)) {
+    const pre = t.slice(Math.max(0, m.index - 28), m.index);
+    // A negator anywhere in the local lead-in flips it positive. `n't` is a
+    // contraction suffix (don't/doesn't/won't) so it needs no leading boundary.
+    if (!/(?:\b(?:no|not|zero|without|never|any)\b|n't)[^.!?]*$/.test(pre)) {
+      return "request_changes";
+    }
+  }
+
   if (
     /\bapprove(d|s)?\b/.test(t) ||
     /\blgtm\b/.test(t) ||

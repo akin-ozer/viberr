@@ -590,6 +590,29 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict("No blocking issues, ready to accept.")).toBe("approve");
   });
 
+  it("does NOT misread a clean APPROVE that mentions negated fail/blocker words", () => {
+    // The live VSW-3 bug: a thorough approval that says "no blockers" / "no
+    // tests fail" must classify as approve, not request_changes.
+    expect(
+      classifyReviewerVerdict(
+        "## Review verdict — **APPROVE**. Verified the diff; no blockers, no tests fail. Ready to accept.",
+      ),
+    ).toBe("approve");
+    expect(
+      classifyReviewerVerdict("Verdict: PASS. The change is clean and nothing fails."),
+    ).toBe("approve");
+    expect(
+      classifyReviewerVerdict("Approve — checks don't fail and there are zero blockers."),
+    ).toBe("approve");
+  });
+
+  it("still catches an assertive failure even alongside an explicit reject verdict", () => {
+    expect(
+      classifyReviewerVerdict("Verdict: request changes — the new test fails on empty input."),
+    ).toBe("request_changes");
+    expect(classifyReviewerVerdict("The build fails on CI.")).toBe("request_changes");
+  });
+
   it("returns null on an unclear verdict", () => {
     expect(classifyReviewerVerdict("I looked at the diff.")).toBeNull();
     expect(classifyReviewerVerdict(null)).toBeNull();
