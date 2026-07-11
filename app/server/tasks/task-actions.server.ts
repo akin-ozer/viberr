@@ -5,6 +5,11 @@ import type {
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+import {
+  resolveStageRoles,
+  isTerminalStage,
+  type StageRoles,
+} from "~/shared/workflow/stage-roles";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -169,10 +174,19 @@ function stageName(project: ProjectContext, stageId: string): string {
   return project.stages.find((s) => s.id === stageId)?.name ?? stageId;
 }
 
+/** The four structural stage roles, resolved once from the workflow graph. */
+function stageRolesOf(project: ProjectContext): StageRoles {
+  return resolveStageRoles(project.stages, project.workflow);
+}
+
 /** The review stage id — the one with a governed edge into the final stage. */
 function reviewStageIdOf(project: ProjectContext): string | null {
-  const lastStageId = project.stages[project.stages.length - 1]?.id;
-  return project.workflow.find((w) => w.to === lastStageId)?.from ?? null;
+  return stageRolesOf(project).reviewId;
+}
+
+/** The terminal (Done-equivalent) stage id. */
+function terminalStageIdOf(project: ProjectContext): string | null {
+  return stageRolesOf(project).terminalId;
 }
 
 /**
@@ -1916,7 +1930,7 @@ export async function transitionStage(
   // it degrades cleanly (no throw) when the repo/PAT isn't configured, so a
   // transition never fails on GitHub state. The review stage is the one with a
   // governed edge into the final (Done) stage.
-  const reviewStageId = project.workflow.find((w) => w.to === lastStageId)?.from;
+  const reviewStageId = reviewStageIdOf(project);
   if (reviewStageId && input.toStageId === reviewStageId) {
     void openReviewPrBestEffort(db, ctx, input.projectSlug, input.taskKey, actor);
   }
@@ -2136,7 +2150,7 @@ export async function resolvePacket(
         "accept completion into Done",
       );
       const doneStageId =
-        project.stages.find((s) => s.id === "done")?.id ??
+        terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
       // Attempt the REAL merge (FR31) and only claim "merged" when it truly
@@ -2306,7 +2320,7 @@ async function acceptCompletion(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
   const doneStageId =
-    project.stages.find((s) => s.id === "done")?.id ??
+    terminalStageIdOf(project) ??
     project.stages[project.stages.length - 1]?.id ??
     "done";
 

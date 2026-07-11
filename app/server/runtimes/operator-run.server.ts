@@ -519,10 +519,11 @@ async function runScriptedOperatorDrive(
     const isReact = (input.trigger ?? "manual") === "agent-reply";
     let snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
     const doneStageId = snap.doneStageId;
-    // Classify stages from the ordered list: the review stage is the one before
-    // Done; the implementation ("work") stage is the one before review.
-    const reviewStageId = snap.stageIds[snap.stageIds.length - 2] ?? null;
-    const workStageId = snap.stageIds[snap.stageIds.length - 3] ?? null;
+    // Classify stages from the workflow graph (NOT positionally): the review
+    // stage has an edge into Done, the work stage an edge into review. This is
+    // correct for custom/lightweight boards, not just the default 5-stage one.
+    const reviewStageId = snap.reviewStageId;
+    const workStageId = snap.workStageId;
 
     say(
       `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,

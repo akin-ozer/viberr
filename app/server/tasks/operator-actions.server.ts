@@ -10,6 +10,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { compactTimelineEvents } from "./timeline-compaction.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -556,6 +557,11 @@ export interface OperatorTaskSnapshot {
   stageIds: string[];
   /** The last stage id — reached only via accept_completion. */
   doneStageId: string | null;
+  /** The review stage id (edge into Done) — resolved from the workflow graph,
+   *  NOT positionally, so custom/lightweight boards classify correctly. */
+  reviewStageId: string | null;
+  /** The implementation ("work") stage id (edge into review). */
+  workStageId: string | null;
   deployedSpecialists: DeployedSpecialistView[];
   openPacket: boolean;
   recentTimeline: { type: string; actor: string; text: string }[];
@@ -584,7 +590,8 @@ export function operatorSnapshot(
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
-  const doneStageId = stages[stages.length - 1]?.id ?? null;
+  const roles = resolveStageRoles(stages, workflow);
+  const doneStageId = roles.terminalId;
 
   const nextStages = workflow.flatMap((w) =>
     w.from === fm.stage
@@ -622,6 +629,8 @@ export function operatorSnapshot(
     nextStages,
     stageIds: stages.map((s) => s.id),
     doneStageId,
+    reviewStageId: roles.reviewId,
+    workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx),
     openPacket: !!file.parsed.packet,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({

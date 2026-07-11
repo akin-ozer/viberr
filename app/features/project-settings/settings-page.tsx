@@ -48,11 +48,21 @@ function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
 const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
 const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".8rem" } as const;
 
-/** Mock STAGE_LOCK copy (client mirror of the server guard). */
-const STAGE_LOCK: Record<string, string> = {
-  triage: "it's the entry point",
-  done: "human acceptance stays terminal",
-};
+/**
+ * Client mirror of the server stage-lock guard: the entry (first) and terminal
+ * (last) stages are structural and can't be removed — pinned by position, not
+ * literal id, so custom/lightweight boards behave the same.
+ */
+function stageLockReason(
+  stageId: string,
+  stages: readonly { id: string }[],
+): string | null {
+  if (stages.length === 0) return null;
+  if (stageId === stages[0]!.id) return "it's the entry point";
+  if (stageId === stages[stages.length - 1]!.id)
+    return "human acceptance stays terminal";
+  return null;
+}
 
 // ------------------------------------------------------------------ project
 
@@ -191,7 +201,7 @@ export function StagesPanel({
   };
 
   const remove = (s: { id: string; name: string }) => {
-    const locked = STAGE_LOCK[s.id];
+    const locked = stageLockReason(s.id, stages);
     if (locked) {
       push(`${s.name} can't be removed — ${locked}`);
       return;
@@ -209,15 +219,17 @@ export function StagesPanel({
     setDragId(null);
     setOverId(null);
     if (!src || src === targetId) return;
-    let next = [...stages];
-    const [moved] = next.splice(next.findIndex((s) => s.id === src), 1);
-    next.splice(next.findIndex((s) => s.id === targetId), 0, moved!);
-    // triage stays first, done stays last (mock normalization — the server
-    // re-applies it regardless).
-    next = [
-      next.find((s) => s.id === "triage"),
-      ...next.filter((s) => s.id !== "triage" && s.id !== "done"),
-      next.find((s) => s.id === "done"),
+    const reordered = [...stages];
+    const [moved] = reordered.splice(reordered.findIndex((s) => s.id === src), 1);
+    reordered.splice(reordered.findIndex((s) => s.id === targetId), 0, moved!);
+    // Entry stays first, terminal stays last (the server re-applies this
+    // regardless), pinned by current identity not literal ids.
+    const entryId = stages[0]?.id;
+    const terminalId = stages[stages.length - 1]?.id;
+    const next = [
+      reordered.find((s) => s.id === entryId),
+      ...reordered.filter((s) => s.id !== entryId && s.id !== terminalId),
+      reordered.find((s) => s.id === terminalId),
     ].filter((s): s is NonNullable<typeof s> => Boolean(s));
     onReorder(next.map((s) => s.id));
   };
@@ -233,7 +245,7 @@ export function StagesPanel({
       </div>
       <div className="stg-list">
         {stages.map((s) => {
-          const locked = STAGE_LOCK[s.id];
+          const locked = stageLockReason(s.id, stages);
           const n = count(s.id);
           return (
             <div

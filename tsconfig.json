@@ -5,6 +5,7 @@
     "**/.client/**/*",
     ".react-router/types/**/*"
   ],
+  "exclude": ["data", "docker-data", "build", "node_modules", "e2e/.tmp-data"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["node", "vite/client"],

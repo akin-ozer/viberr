@@ -41,11 +41,23 @@ export interface SettingsMutationContext {
   dataRoot?: string;
 }
 
-/** Mock STAGE_LOCK — reasons double as title/toast copy. */
-export const STAGE_LOCK: Record<string, string> = {
-  triage: "it's the entry point",
-  done: "human acceptance stays terminal",
-};
+/**
+ * The entry (first) and terminal (last) stages are structural and cannot be
+ * removed — regardless of their ids (a Lightweight board is `todo … done`, a
+ * custom board is anything). Returns a lock reason if `stageId` is one of them,
+ * else null. Replaces the old literal-id `STAGE_LOCK` map keyed on
+ * "triage"/"done", which silently failed to protect non-default boards.
+ */
+export function stageLockReason(
+  stageId: string,
+  stages: readonly { id: string }[],
+): string | null {
+  if (stages.length === 0) return null;
+  if (stageId === stages[0]!.id) return "it's the entry point";
+  if (stageId === stages[stages.length - 1]!.id)
+    return "human acceptance stays terminal";
+  return null;
+}
 
 export const NEW_STAGE_COLORS = [
   "var(--blue)",
@@ -212,9 +224,10 @@ export async function addStage(
       name: "New stage",
       color: NEW_STAGE_COLORS[stages.length % NEW_STAGE_COLORS.length]!,
     };
-    // Inserted immediately before `done` (appended when no done exists).
-    const doneIdx = stages.findIndex((s) => s.id === "done");
-    stages.splice(doneIdx < 0 ? stages.length : doneIdx, 0, stage);
+    // Inserted immediately before the terminal (last) stage so Done stays last,
+    // whatever its id.
+    const insertIdx = stages.length > 0 ? stages.length - 1 : 0;
+    stages.splice(insertIdx, 0, stage);
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -253,7 +266,7 @@ export async function removeStage(
     const stage = parsed.frontmatter.stages.find((s) => s.id === input.stageId);
     if (!stage) throw AppError.notFound(`No stage ${input.stageId}.`);
     stageName = stage.name;
-    const locked = STAGE_LOCK[input.stageId];
+    const locked = stageLockReason(input.stageId, parsed.frontmatter.stages);
     if (locked) {
       throw conflict(`${stage.name} can't be removed — ${locked}`);
     }
@@ -301,15 +314,21 @@ export async function reorderStages(
     ) {
       throw AppError.validation("Stage order is out of date — try again.");
     }
-    let next = input.orderedIds.map((id) => byId.get(id)!);
+    const next = input.orderedIds.map((id) => byId.get(id)!);
     // Server re-applies the normalization — never trust client order
-    // (spec §5.2): triage stays first, done stays last.
-    next = [
-      next.find((s) => s.id === "triage"),
-      ...next.filter((s) => s.id !== "triage" && s.id !== "done"),
-      next.find((s) => s.id === "done"),
-    ].filter((s): s is NonNullable<typeof s> => Boolean(s));
-    parsed.frontmatter.stages = next;
+    // (spec §5.2): the entry stage stays first and the terminal stage stays
+    // last, pinned by their CURRENT identity (not the literal ids
+    // "triage"/"done") so custom/lightweight boards are protected too.
+    const entryId = stages[0]!.id;
+    const terminalId = stages[stages.length - 1]!.id;
+    const middle = next.filter(
+      (s) => s.id !== entryId && s.id !== terminalId,
+    );
+    parsed.frontmatter.stages = [
+      byId.get(entryId)!,
+      ...middle,
+      byId.get(terminalId)!,
+    ];
   });
 
   reprojectProject(db, ctx, input.projectSlug);

@@ -9,6 +9,7 @@ import {
   listNotifications,
 } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
@@ -43,7 +44,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     board,
     myRole,
     taskCount: tasks.length,
-    reviewCount: tasks.filter((t) => t.stage === "review").length,
+    reviewCount: (() => {
+      const reviewId = resolveStageRoles(
+        board.project.stages,
+        board.project.workflow,
+      ).reviewId;
+      return reviewId
+        ? tasks.filter((t) => t.stage === reviewId).length
+        : 0;
+    })(),
     violations: countOpenPolicyViolations(db, params.slug),
     notifications: listNotifications(db, user.id, { limit: 100 }),
     unread: countUnreadNotifications(db, user.id),
