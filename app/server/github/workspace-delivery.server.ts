@@ -21,6 +21,8 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import type { PrCacheState } from "./pr-linker.server";
+import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
 
 /**
  * Workspace delivery reconciliation (finding #31).
@@ -95,7 +97,9 @@ export interface ReconcileWorkspaceDeliveryInput {
   projectSlug: string;
   taskKey: string;
   /** The repo working dir the run used (the specialist clone dir), when known.
-   *  Falls back to the conventional `<taskDir>/workspace/<repo-name>` path. */
+   *  Falls back to probing the conventional paths:
+   *  `<taskDir>/workspace/<repo-name>`, `<taskDir>/workspace/repo`, then
+   *  `<taskDir>/workspace` itself — whichever contains a git repo. */
   workdir?: string | null;
   dataRoot?: string;
   /** The finished run's backend + role — attribution for the typed events. */
@@ -144,7 +148,7 @@ function githubEvent(actor: FileActorRef, text: string): TaskFileEvent {
 
 /** Map `gh`'s GraphQL PR-state enum (OPEN|CLOSED|MERGED) to the task-file cache
  *  vocabulary (open → "review") so it matches the server delivery path. */
-function mapGhStateToCache(raw: unknown): string {
+function mapGhStateToCache(raw: unknown): PrCacheState {
   const s = String(raw ?? "OPEN").toUpperCase();
   if (s === "MERGED") return "merged";
   if (s === "CLOSED") return "closed";
@@ -241,10 +245,17 @@ export async function reconcileWorkspaceDelivery(
     const repoName = repo.split("/").pop() ?? repo;
 
     // Locate the workspace git repo: the run's own workdir first, then the
-    // conventional clone path cloneRepo() uses (<taskDir>/workspace/<name>).
+    // conventional clone paths — cloneRepo() uses <taskDir>/workspace/<name>,
+    // reviewers that clone themselves tend to use <taskDir>/workspace/repo,
+    // and an agent told "clone into ./" lands on <taskDir>/workspace itself.
+    // Callers that can't thread workdir (e.g. the operator path) still get
+    // reconciled via these conventions.
+    const wsRoot = path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
     const candidates = [
       input.workdir ?? null,
-      path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace", repoName),
+      path.join(wsRoot, repoName),
+      path.join(wsRoot, "repo"),
+      wsRoot,
     ].filter((c): c is string => !!c);
     const repoDir = candidates.find((c) => existsSync(path.join(c, ".git")));
     if (!repoDir) {
@@ -273,14 +284,37 @@ export async function reconcileWorkspaceDelivery(
     //    = [] which, attributed to fm.branch, would WIPE the real commit cache a
     //    prior developer run recorded. Only compute commits we can honestly
     //    attribute to the branch HEAD is on.
+    //
+    //    Shallow-clone guard: specialist clones are `--depth 1`, where
+    //    `origin/<default>..HEAD` runs over truncated history and misreports
+    //    (every reachable commit looks "ahead"). Deepen first, best-effort;
+    //    when the repo is shallow and the deepen fails (offline, no remote),
+    //    SKIP the commit computation entirely rather than write a wrong cache.
     let commits: { sha: string; msg: string }[] | null = null;
     if (validBranch) {
-      const logRes = await exec(
+      const shallowRes = await exec(
         "git",
-        ["-C", repoDir, "log", "--oneline", `origin/${defaultBranch}..HEAD`],
+        ["-C", repoDir, "rev-parse", "--is-shallow-repository"],
         { cwd: repoDir, timeoutMs: 5_000 },
       );
-      if (logRes.ok) commits = parseOneline(logRes.stdout);
+      const isShallow = shallowRes.ok && shallowRes.stdout.trim() === "true";
+      let historyOk = true;
+      if (isShallow) {
+        const deepen = await exec(
+          "git",
+          ["-C", repoDir, "fetch", "--deepen", "50", "origin", defaultBranch],
+          { cwd: repoDir, timeoutMs: 30_000 },
+        );
+        historyOk = deepen.ok;
+      }
+      if (historyOk) {
+        const logRes = await exec(
+          "git",
+          ["-C", repoDir, "log", "--oneline", `origin/${defaultBranch}..HEAD`],
+          { cwd: repoDir, timeoutMs: 5_000 },
+        );
+        if (logRes.ok) commits = parseOneline(logRes.stdout);
+      }
     }
 
     // 3. Branch + commit-cache write (idempotent: only when something changed).
@@ -353,17 +387,27 @@ export async function reconcileWorkspaceDelivery(
         const obj = safeJsonObject(prRes.stdout);
         const number = obj && typeof obj.number === "number" ? obj.number : null;
         if (number !== null) {
+          // `gh` returns the GraphQL enum OPEN|CLOSED|MERGED; map it to the
+          // SAME cache vocabulary the server delivery path uses (open →
+          // "review"). Comparing/writing gh's raw "open" against the
+          // canonical "review" would treat an already-linked PR as new and
+          // ping-pong the state on every reconcile.
+          const liveState = mapGhStateToCache(obj?.state);
+          const cur = fm.pr;
+          const samePr = !!cur && cur.number === number;
+          // H1 guard (same as the server reconciler): a human-set "accepted"
+          // (merge pending, D3/S2) must NOT be downgraded to "review" while
+          // the PR is still open on GitHub — that would silently hide the
+          // "Complete merge" affordance. Only a real terminal state
+          // (merged/closed) overrides it.
           const detected: PrRef = {
             number,
-            // `gh` returns the GraphQL enum OPEN|CLOSED|MERGED; map it to the
-            // SAME cache vocabulary the server delivery path uses (open →
-            // "review"). Comparing/writing gh's raw "open" against the
-            // canonical "review" would treat an already-linked PR as new and
-            // ping-pong the state on every reconcile.
-            state: mapGhStateToCache(obj?.state),
+            state:
+              samePr && cur.state === "accepted" && liveState === "review"
+                ? "accepted"
+                : liveState,
             title: typeof obj?.title === "string" ? obj.title : "",
           };
-          const cur = fm.pr;
           const stale =
             !cur || cur.number !== detected.number || cur.state !== detected.state;
           if (stale) {
@@ -371,10 +415,28 @@ export async function reconcileWorkspaceDelivery(
               ref,
               githubEvent(
                 actor,
-                `Linked **PR #${detected.number}** opened from the specialist workspace.`,
+                // Honest copy: only a NEWLY linked PR "opened from the
+                // workspace"; a state change on the already-linked PR is a
+                // reconcile, not an open.
+                samePr
+                  ? `Reconciled **PR #${detected.number}** state → \`${detected.state}\` from the specialist workspace.`
+                  : `Linked **PR #${detected.number}** opened from the specialist workspace.`,
               ),
               { pr: detected },
             );
+            // An accepted (merge-pending) PR that was closed on GitHub without
+            // merging loses its Complete-merge path — say why, typed `policy`.
+            if (samePr && cur.state === "accepted" && detected.state === "closed") {
+              await appendTimelineEvent(ref, {
+                occurredAt: new Date().toISOString(),
+                type: "policy",
+                actor: POLICY_ENGINE_ACTOR,
+                title: null,
+                text: `**Policy note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+                toAgent: false,
+                evidence: null,
+              });
+            }
             rebuildPath(db, resolveTaskFilePath(ref), {
               ...(dataRoot !== undefined ? { dataRoot } : {}),
             });

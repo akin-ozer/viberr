@@ -22,6 +22,12 @@ describe("prStatePill (ruling 12 incl. the closed-unmerged risk state)", () => {
   it("review (open/draft) → info 'in review'", () => {
     expect(prStatePill("review")).toEqual({ kind: "info", label: "in review" });
   });
+  it("accepted (human accepted, merge pending) → amber 'merge pending'", () => {
+    expect(prStatePill("accepted")).toEqual({
+      kind: "input",
+      label: "merge pending",
+    });
+  });
   it("unknown states fall back to 'in review' (mirrors prPillFor)", () => {
     expect(prStatePill("open")).toEqual({ kind: "info", label: "in review" });
   });

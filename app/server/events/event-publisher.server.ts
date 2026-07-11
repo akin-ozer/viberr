@@ -23,16 +23,12 @@ import { publishSseEvent, type SseRoute } from "./sse-broker.server";
  * - notification fan-out (`createNotification`) emits
  *   `notification.created` with the recipient user id — routed here as a
  *   USER-TARGETED event (only that user's `user`-scoped connections);
+ *   mark-read emits the matching `notification.read` the same way;
  * - Phase-7 scope violations emit `violation.updated`.
  * No mutation path bypasses the emitter, so no direct publish calls are
  * needed. (Phase 8's high-frequency `run.log-appended` should NOT go
  * through the emitter — publish straight to the broker; see the phase-6
  * report.)
- *
- * `task.readiness-changed` is derived here: the emitter only says "task
- * changed", so the publisher reads the projected readiness back and
- * compares it with the last value it saw for that task. First sightings
- * emit no change event (boot rescans would otherwise flood).
  */
 
 export interface TaskFacts {
@@ -43,11 +39,6 @@ export interface TaskFacts {
 export interface TranslateContext {
   /** Projected facts for the task, null when the row is gone. */
   taskFacts?: TaskFacts | null;
-  /**
-   * Readiness the publisher last saw for this task; `undefined` = first
-   * sighting (no readiness-changed event), null = seen but row was gone.
-   */
-  previousReadiness?: Readiness | null | undefined;
 }
 
 export interface PublishableEvent {
@@ -65,7 +56,7 @@ export function translateProjectionEvent(
       const facts = ctx.taskFacts ?? null;
       const route: SseRoute = { projectSlug: e.projectSlug, taskKey: e.taskKey };
       const entityId = `${e.projectSlug}/${e.taskKey}`;
-      const out: PublishableEvent[] = [
+      return [
         {
           event: {
             type: "task.updated",
@@ -81,27 +72,6 @@ export function translateProjectionEvent(
           route,
         },
       ];
-      if (
-        facts?.readiness &&
-        ctx.previousReadiness !== undefined &&
-        ctx.previousReadiness !== facts.readiness
-      ) {
-        out.push({
-          event: {
-            type: "task.readiness-changed",
-            entityId,
-            occurredAt: e.occurredAt,
-            data: {
-              projectSlug: e.projectSlug,
-              taskKey: e.taskKey,
-              stage: facts.stage ?? null,
-              readiness: facts.readiness,
-            },
-          },
-          route,
-        });
-      }
-      return out;
     }
     case "task.removed":
       return [
@@ -141,10 +111,11 @@ export function translateProjectionEvent(
         },
       ];
     case "notification.created":
+    case "notification.read":
       return [
         {
           event: {
-            type: "notification.created",
+            type: e.type,
             entityId: e.userId,
             occurredAt: e.occurredAt,
             data: { userId: e.userId },
@@ -191,8 +162,6 @@ export function readTaskFacts(
 
 interface PublisherState {
   unsubscribe: () => void;
-  /** `${slug}/${key}` → last readiness this publisher saw. */
-  lastReadiness: Map<string, Readiness>;
 }
 
 const PUBLISHER_KEY = Symbol.for("viberr.eventPublisher");
@@ -205,20 +174,11 @@ export function startEventPublisher(): void {
   const cache = globalThis as unknown as Record<symbol, PublisherState | undefined>;
   if (cache[PUBLISHER_KEY]) return;
 
-  const lastReadiness = new Map<string, Readiness>();
   const unsubscribe = onProjectionEvent((e) => {
     try {
       const ctx: TranslateContext = {};
       if (e.type === "task.updated") {
-        const facts = readTaskFacts(getDb(), e.projectSlug, e.taskKey);
-        const cacheKey = `${e.projectSlug}/${e.taskKey}`;
-        ctx.taskFacts = facts;
-        ctx.previousReadiness = lastReadiness.has(cacheKey)
-          ? (lastReadiness.get(cacheKey) ?? null)
-          : undefined;
-        if (facts?.readiness) lastReadiness.set(cacheKey, facts.readiness);
-      } else if (e.type === "task.removed") {
-        lastReadiness.delete(`${e.projectSlug}/${e.taskKey}`);
+        ctx.taskFacts = readTaskFacts(getDb(), e.projectSlug, e.taskKey);
       }
       for (const publishable of translateProjectionEvent(e, ctx)) {
         // Parse before publish: the wire shape is a contract (CONVENTIONS);
@@ -232,10 +192,10 @@ export function startEventPublisher(): void {
       });
     }
   });
-  cache[PUBLISHER_KEY] = { unsubscribe, lastReadiness };
+  cache[PUBLISHER_KEY] = { unsubscribe };
 }
 
-/** Test-only: detach from the emitter and forget readiness state. */
+/** Test-only: detach from the emitter. */
 export function stopEventPublisherForTests(): void {
   const cache = globalThis as unknown as Record<symbol, PublisherState | undefined>;
   cache[PUBLISHER_KEY]?.unsubscribe();

@@ -15,6 +15,12 @@ import {
  * marks a registered user who is NOT a member of the surrounding project.
  * Operator renders as `{ kind: "agent", name: "Operator" }` — NO backend,
  * NO role (AgentGlyph branches on that).
+ *
+ * READ-TIME REFRESH (E1): the baked snapshot goes stale on user rename —
+ * the content-hash short-circuit means historical events never re-project.
+ * Read paths therefore overlay the CURRENT users-table name/initials/tone
+ * via `createActorRenderOverlay`; the snapshot remains the fallback for
+ * deleted users (their events keep the last-known identity).
  */
 
 export type ActorRender =
@@ -44,6 +50,37 @@ interface UserDisplayRow {
   id: string;
   name: string;
   avatar_tone: string | null;
+}
+
+/**
+ * Read-time identity refresh for STORED ActorRender snapshots (E1): human
+ * actors are re-resolved against the current users table so a rename
+ * reflects everywhere immediately — no reprojection required. A missing
+ * user row (deleted account) keeps the baked snapshot; non-human actors
+ * pass through untouched. Cached per instance — create one per request/query
+ * and map many rows through it.
+ */
+export function createActorRenderOverlay(
+  db: Database.Database,
+): (actor: ActorRender) => ActorRender {
+  const stmt = db.prepare(`SELECT id, name, avatar_tone FROM users WHERE id = ?`);
+  const cache = new Map<string, UserDisplayRow | null>();
+
+  return (actor: ActorRender): ActorRender => {
+    if (actor.kind !== "human") return actor;
+    let row = cache.get(actor.userId);
+    if (row === undefined) {
+      row = (stmt.get(actor.userId) as UserDisplayRow | undefined) ?? null;
+      cache.set(actor.userId, row);
+    }
+    if (!row) return actor; // deleted user → baked snapshot survives
+    return {
+      ...actor,
+      name: row.name,
+      initials: initialsOfName(row.name),
+      tone: row.avatar_tone ?? actor.tone,
+    };
+  };
 }
 
 /** Cached per-call-site lookup helper for resolving many refs at once. */

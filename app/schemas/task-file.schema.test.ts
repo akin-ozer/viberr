@@ -46,6 +46,24 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     });
   });
 
+  it("pr.state is the 4-value enum; unknown strings coerce to \"review\" (never throw, never drop)", () => {
+    // Canonical values pass through untouched.
+    for (const state of ["review", "merged", "closed", "accepted"]) {
+      const result = parseTaskFrontmatter(
+        { ...valid, pr: { number: 318, state, title: "x" } },
+        { fallbackKey: "VIB-142" },
+      );
+      expect(result.frontmatter.pr?.state).toBe(state);
+    }
+    // A legacy raw GitHub "open" (pre-B3 writes) coerces to "review" instead
+    // of dropping the whole PR ref.
+    const legacy = parseTaskFrontmatter(
+      { ...valid, pr: { number: 318, state: "open", title: "x" } },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(legacy.frontmatter.pr).toMatchObject({ number: 318, state: "review" });
+  });
+
   it("reads the pre-rename `consultants` key as `reviewers` (back-compat)", () => {
     const legacy = {
       ...valid,

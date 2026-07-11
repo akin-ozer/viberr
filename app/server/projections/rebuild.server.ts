@@ -4,6 +4,10 @@ import {
   type AuditActor,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
+import {
+  collectProjectionEvents,
+  emitProjectionEvent,
+} from "~/server/events/projection-events.server";
 import { rebuildAll, type RescanSummary } from "./rebuilder.server";
 
 /**
@@ -22,8 +26,10 @@ import { rebuildAll, type RescanSummary } from "./rebuilder.server";
  * agent_runs/run_log_lines, org resources (app-owned or historical truth).
  *
  * Atomic: the drop + rebuild run inside one transaction, so readers never
- * observe a half-empty projection. The final `projection.rebuilt` SSE event
- * (emitted by rebuildAll) broadcasts to every connected client.
+ * observe a half-empty projection. Projection events (per-file updates + the
+ * final `projection.rebuilt` broadcast from rebuildAll) are COLLECTED during
+ * the transaction and emitted only after commit — an SSE-triggered
+ * revalidation must never race a half-built (or rolled-back) projection.
  */
 export function rebuildProjections(
   db: Database.Database,
@@ -40,7 +46,10 @@ export function rebuildProjections(
       ...(options.dataRoot !== undefined ? { dataRoot: options.dataRoot } : {}),
     });
   });
-  run();
+  // Buffer every projection event raised inside the transaction; deliver
+  // after commit (a throwing transaction rolls back AND drops its events).
+  const { events } = collectProjectionEvents(() => run());
+  for (const event of events) emitProjectionEvent(event);
   const result = summary! as RescanSummary;
   recordAudit(db, {
     action: "projection.rebuild",

@@ -96,6 +96,28 @@ export function registerRunCompletion(
   getState().completions.set(runId, cb);
 }
 
+/**
+ * CHAIN a completion callback after whatever is already registered for the run
+ * (or as the only callback when none is). Unlike registerRunCompletion this
+ * never clobbers: the existing callback fires first, then `cb`. Used by the
+ * operator coalesce-queue — a trigger that lands while an operator run is in
+ * flight must fire AFTER that run's own completion work, not replace it.
+ */
+export function chainRunCompletion(
+  runId: string,
+  cb: RunCompletionCallback,
+): void {
+  const state = getState();
+  const existing = state.completions.get(runId);
+  state.completions.set(runId, (finished) => {
+    try {
+      existing?.(finished);
+    } finally {
+      cb(finished);
+    }
+  });
+}
+
 /** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
 export function configureRunServiceForTests(
   adaptersOrDeps?: AdapterSet | AdapterDeps,
@@ -163,6 +185,9 @@ export interface StartRunInput {
   /** JSON schema constraining the run's final output (Codex structured-output
    *  operator — the caller parses + executes the emitted decision plan). */
   outputSchema?: unknown;
+  /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
+   *  specialist's git to its workspace). Merged on top of the adapter env. */
+  env?: Record<string, string>;
   /** Force the simulated engine regardless of backend credential. The operator
    *  scripted-drive uses this to stream a narration run for a backend that has
    *  no in-process tools (Codex) or when Claude is unavailable — the real work
@@ -255,6 +280,7 @@ export async function startRun(
       ? { disallowedTools: input.disallowedTools }
       : {}),
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+    ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),
   };
 
   launch(db, spec, simulated);

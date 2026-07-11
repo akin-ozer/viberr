@@ -93,6 +93,47 @@ describe("rebuilder", () => {
     expect(events).toContain("task.updated");
   });
 
+  it("user rename reflects in the projected timeline at READ time — no reprojection (E1)", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: [
+        {
+          occurredAt: "2026-07-02T09:41:00.000Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.murat.id, nameHint: null },
+          title: null,
+          text: "Looks good.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // Rename AFTER projection — the baked actor_json still holds the old
+    // name and the content-hash short-circuit prevents any reprojection.
+    store.db
+      .prepare(`UPDATE users SET name = ? WHERE id = ?`)
+      .run("Murat Kaya", store.users.murat.id);
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(detail?.timeline[0]?.actor).toMatchObject({
+      kind: "human",
+      userId: store.users.murat.id,
+      name: "Murat Kaya",
+      initials: "MK",
+    });
+
+    // Deleted user → the baked snapshot is the fallback identity.
+    store.db.prepare(`DELETE FROM users WHERE id = ?`).run(store.users.murat.id);
+    const after = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(after?.timeline[0]?.actor).toMatchObject({
+      kind: "human",
+      name: "Murat Test",
+    });
+  });
+
   it("deleting a task file removes its projection rows + records provenance", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

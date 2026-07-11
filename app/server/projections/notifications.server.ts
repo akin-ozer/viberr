@@ -1,7 +1,10 @@
 import type Database from "better-sqlite3";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import { isNotifKindEnabled } from "~/features/profile/profile-query.server";
-import type { ActorRender } from "~/shared/mapping/actor.server";
+import {
+  createActorRenderOverlay,
+  type ActorRender,
+} from "~/shared/mapping/actor.server";
 import {
   mapNotificationRow,
   type NotificationKind,
@@ -107,7 +110,13 @@ export function listNotifications(
        LIMIT ?`,
     )
     .all(userId, options.limit ?? 100) as NotificationRow[];
-  return rows.map(mapNotificationRow);
+  // E1: `from` actors are baked at creation — overlay the current
+  // users-table identity so renames reflect in the inbox immediately.
+  const overlay = createActorRenderOverlay(db);
+  return rows.map((row) => {
+    const record = mapNotificationRow(row);
+    return record.from ? { ...record, from: overlay(record.from) } : record;
+  });
 }
 
 export function countUnreadNotifications(
@@ -120,6 +129,16 @@ export function countUnreadNotifications(
     )
     .get(userId) as { c: number };
   return row.c;
+}
+
+/** Targeted `notification.read` — other tabs of the same user revalidate so
+ * their bell badge drops (E12: mark-read used to emit nothing). */
+function emitNotificationRead(userId: string): void {
+  emitProjectionEvent({
+    type: "notification.read",
+    userId,
+    occurredAt: new Date().toISOString(),
+  });
 }
 
 /** Idempotent read-marking (monotonic; re-marking is a no-op). */
@@ -136,6 +155,7 @@ export function markNotificationsRead(
        WHERE user_id = ? AND read_at IS NULL AND id IN (${placeholders})`,
     )
     .run(new Date().toISOString(), userId, ...ids);
+  if (result.changes > 0) emitNotificationRead(userId);
   return result.changes;
 }
 
@@ -148,12 +168,14 @@ export function markAllNotificationsRead(
       `UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL`,
     )
     .run(new Date().toISOString(), userId);
+  if (result.changes > 0) emitNotificationRead(userId);
   return result.changes;
 }
 
 /**
  * Packet/approval resolution side-effect (contracts §1.2): marks that
  * task's packet + approval notifications read for EVERY user, idempotently.
+ * Emits `notification.read` per affected user (their badges drop live).
  */
 export function markTaskPacketApprovalRead(
   db: Database.Database,
@@ -163,6 +185,14 @@ export function markTaskPacketApprovalRead(
 ): number {
   if (kinds.length === 0) return 0;
   const placeholders = kinds.map(() => "?").join(", ");
+  // Affected users FIRST (the bulk UPDATE loses them) — one event each.
+  const affected = db
+    .prepare(
+      `SELECT DISTINCT user_id FROM notifications
+       WHERE project_slug = ? AND task_key = ? AND read_at IS NULL
+         AND kind IN (${placeholders})`,
+    )
+    .all(projectSlug, taskKey, ...kinds) as { user_id: string }[];
   const result = db
     .prepare(
       `UPDATE notifications SET read_at = ?
@@ -170,5 +200,8 @@ export function markTaskPacketApprovalRead(
          AND kind IN (${placeholders})`,
     )
     .run(new Date().toISOString(), projectSlug, taskKey, ...kinds);
+  if (result.changes > 0) {
+    for (const row of affected) emitNotificationRead(row.user_id);
+  }
   return result.changes;
 }

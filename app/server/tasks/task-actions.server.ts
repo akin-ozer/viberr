@@ -7,6 +7,10 @@ import type {
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
+  compactTimelineEvents,
+  DEFAULT_COMPACTION,
+} from "./timeline-compaction.server";
+import {
   resolveStageRoles,
   isTerminalStage,
   type StageRoles,
@@ -543,8 +547,29 @@ export async function appendComment(
     evidence: null,
   };
 
+  // Timeline compaction fires on HUMAN comments too — a comment flood used to
+  // never compact because compaction only ran inside operator writes.
+  const { guardrailOn, guardrailValue } = await import(
+    "./comment-guardrails.server"
+  );
+  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
+  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
+    if (compactOn) {
+      parsed.timeline = compactTimelineEvents(
+        parsed.timeline,
+        compactAt != null
+          ? {
+              threshold: compactAt,
+              keepRecent: Math.min(
+                DEFAULT_COMPACTION.keepRecent,
+                Math.max(4, Math.floor(compactAt / 2)),
+              ),
+            }
+          : DEFAULT_COMPACTION,
+      );
+    }
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -926,7 +951,7 @@ function projectRepoFor(
  * never propagated (the run already finished; the transcript is in the logs).
  * When the run produced no usable text, we skip posting a comment.
  */
-export function postAgentReplyComment(
+export async function postAgentReplyComment(
   db: Database.Database,
   ctx: TaskMutationContext,
   input: {
@@ -944,6 +969,26 @@ export function postAgentReplyComment(
     });
     return Promise.resolve();
   }
+  // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
+  // chatter is rejected before it reaches the canonical record, and raw output
+  // dumps are trimmed to a head + reference (the full transcript stays in the
+  // agent logs). Both per-project toggles.
+  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
+    "./comment-guardrails.server"
+  );
+  if (
+    guardrailOn(ctx, input.projectSlug, "meaningful-comment") &&
+    isMeaninglessComment(input.replyText)
+  ) {
+    logger.info("agent reply dropped by the meaningful-comment guardrail", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+    });
+    return Promise.resolve();
+  }
+  const separated = guardrailOn(ctx, input.projectSlug, "evidence-separation")
+    ? separateEvidence(input.replyText)
+    : input.replyText;
   // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
   // fabricated (canned "done: implemented…" text with no real work). Mark it as
   // such in the canonical timeline — the run row already carries simulated=1, but
@@ -956,8 +1001,8 @@ export function postAgentReplyComment(
         .get(input.runId) as { simulated: number } | undefined
     )?.simulated === 1;
   const replyText = simulated
-    ? `_(simulated run — no real repository work was performed)_\n\n${input.replyText}`
-    : input.replyText;
+    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
+    : separated;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",

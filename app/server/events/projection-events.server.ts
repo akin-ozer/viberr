@@ -31,6 +31,9 @@ export type ProjectionEvent =
       changed: number;
     }
   | { type: "notification.created"; userId: string; occurredAt: string }
+  /** Some of this user's notifications were marked read — other tabs
+   * revalidate so the bell badge drops everywhere at once. */
+  | { type: "notification.read"; userId: string; occurredAt: string }
   /** Phase 7: a scope violation was opened or resolved (rail badge,
    * GitHub view, Settings card and Activity all revalidate on it). */
   | {
@@ -54,8 +57,41 @@ function getEmitter(): EventEmitter {
   return emitter;
 }
 
+// Active collection buffer (see collectProjectionEvents). Module-local is
+// fine: better-sqlite3 transactions are synchronous, so a collection window
+// can never interleave with another request's emissions.
+let collectBuffer: ProjectionEvent[] | null = null;
+
 export function emitProjectionEvent(event: ProjectionEvent): void {
+  if (collectBuffer) {
+    collectBuffer.push(event);
+    return;
+  }
   getEmitter().emit(CHANNEL, event);
+}
+
+/**
+ * Runs `fn` with projection-event emission DEFERRED: every
+ * emitProjectionEvent call inside is buffered and returned instead of being
+ * delivered. Used by write transactions (rebuildProjections) so SSE
+ * subscribers never observe an event for state that has not committed yet —
+ * the caller re-emits the returned events after commit. Nested collections
+ * buffer into the innermost collector. If `fn` throws, buffered events are
+ * DISCARDED (the transaction rolled back, so nothing actually changed).
+ */
+export function collectProjectionEvents<T>(fn: () => T): {
+  result: T;
+  events: ProjectionEvent[];
+} {
+  const parent = collectBuffer;
+  const events: ProjectionEvent[] = [];
+  collectBuffer = events;
+  try {
+    const result = fn();
+    return { result, events };
+  } finally {
+    collectBuffer = parent;
+  }
 }
 
 /** Subscribes; returns the unsubscribe function. */

@@ -9,9 +9,11 @@ import {
 /**
  * GET /resources/events — the SSE stream (Phase 6).
  *
- * Query params (repeatable): scope=project:<slug> | task:<slug>/<key> | user
+ * Query params (repeatable): scope=project:<slug> | task:<slug>/<key> |
+ * projects | user
  *   - project/task scopes: projection change events for that surface;
- *   - user: this session user's targeted events (notification.created)
+ *   - projects: every project/task-routed event, any project (Home);
+ *   - user: this session user's targeted events (notification.created/read)
  *     plus broadcasts (projection.rebuilt).
  * Reconnect position: `Last-Event-ID` header (native EventSource retry) or
  * `?lastEventId=` (our client wrapper recreates the EventSource, which
@@ -60,7 +62,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         {
           error: {
             code: "validation",
-            message: `Invalid scope "${raw}" — expected project:<slug>, task:<slug>/<key> or user.`,
+            message: `Invalid scope "${raw}" — expected project:<slug>, task:<slug>/<key>, projects or user.`,
           },
         },
         { status: 400 },

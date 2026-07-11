@@ -131,4 +131,39 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     expect(exit).toMatchObject({ outcome: "interrupted" });
   });
+
+  it("idle-timeout settles error (not interrupted) on a hung stream (A8)", async () => {
+    process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS = "20"; // 20ms idle window
+    try {
+      // A stream whose first event lands, then it hangs (never yields again,
+      // never turn.completes). The idle timer must abort → outcome "error".
+      const hangingThread: CodexThread = {
+        id: "hang",
+        async runStreamed(_input, turnOptions) {
+          const signal = turnOptions?.signal;
+          const gen = (async function* () {
+            yield { type: "thread.started", thread_id: "hang" };
+            // Now hang until aborted.
+            await new Promise<void>((_, reject) => {
+              signal?.addEventListener("abort", () =>
+                reject(new DOMException("aborted", "AbortError")),
+              );
+            });
+          })();
+          return { events: gen };
+        },
+      };
+      const client: CodexClient = {
+        startThread: () => hangingThread,
+        resumeThread: () => hangingThread,
+      };
+      const adapter = createCodexAdapter({ codexFactory: () => client });
+      let exit: RunExit | null = null;
+      adapter.start(SPEC, { onLine: () => {}, onExit: (e) => (exit = e) });
+      await new Promise((r) => setTimeout(r, 120));
+      expect(exit).toMatchObject({ outcome: "error" });
+    } finally {
+      delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+    }
+  });
 });

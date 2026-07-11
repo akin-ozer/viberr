@@ -296,6 +296,111 @@ describe("reconcileTask", () => {
     expect(fm.pr?.state).toBe("merged"); // real terminal state overrides "accepted"
   });
 
+  it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {
+    // A real agent committed WITHOUT the `[VIB-301]` prefix; the workspace
+    // reconcile cached those commits. The server reconcile's prefix filter
+    // finds nothing — it must keep the honest cache, not zero it.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        github: {
+          commits: [
+            { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },
+            { sha: "4ce0b18", msg: "wire the branch reconciler" },
+          ],
+          changed: null,
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler03" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 2,
+        behind_by: 0,
+        status: "ahead",
+        commits: [
+          // Same real work — but no `[VIB-301]` bracket prefix anywhere.
+          { sha: "a91f7c2ffff", commit: { message: "VIB-301: add repo attach policy gate" } },
+          { sha: "4ce0b18ffff", commit: { message: "wire the branch reconciler" } },
+        ],
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.github?.commits).toEqual([
+      { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },
+      { sha: "4ce0b18", msg: "wire the branch reconciler" },
+    ]);
+  });
+
+  it("accepted PR closed on GitHub without merging → downgrade + typed policy event explaining why (B9)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "done",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler04" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: false, merged_at: null, head: { sha: "headsha318" },
+        additions: 412, deletions: 87, changed_files: 9,
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.pr?.state).toBe("closed");
+    const policy = file.parsed.timeline.find((e) => e.type === "policy");
+    expect(policy?.text).toContain(
+      "accepted PR #318 was closed on GitHub without merging",
+    );
+  });
+
   it("degrades typed: no branch, no PAT, network down; 403 opens a repo violation", async () => {
     const { store, actor } = setup();
     // Task without a branch.

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SseEvent } from "~/schemas/sse-event.schema";
+import { sseScopes } from "~/features/live-updates/event-types";
 import {
   closeAllSseConnections,
   connectSseClient,
@@ -88,8 +89,9 @@ afterEach(() => {
 });
 
 describe("parseSseScope", () => {
-  it("parses the three scope forms", () => {
+  it("parses the four scope forms", () => {
     expect(parseSseScope("user")).toEqual({ kind: "user" });
+    expect(parseSseScope("projects")).toEqual({ kind: "projects" });
     expect(parseSseScope("project:viberr-core")).toEqual({
       kind: "project",
       slug: "viberr-core",
@@ -105,6 +107,8 @@ describe("parseSseScope", () => {
     for (const bad of [
       "",
       "users",
+      "projectss",
+      "projects:",
       "project:",
       "task:viberr-core",
       "task:viberr-core/",
@@ -114,6 +118,13 @@ describe("parseSseScope", () => {
     ]) {
       expect(parseSseScope(bad), bad).toBeNull();
     }
+  });
+
+  it("every client-side sseScopes helper produces a parseable scope (contract)", () => {
+    expect(parseSseScope(sseScopes.user())).not.toBeNull();
+    expect(parseSseScope(sseScopes.allProjects())).not.toBeNull();
+    expect(parseSseScope(sseScopes.project("viberr-core"))).not.toBeNull();
+    expect(parseSseScope(sseScopes.task("viberr-core", "VIB-1"))).not.toBeNull();
   });
 });
 
@@ -157,6 +168,36 @@ describe("scope filtering", () => {
     const names = conn.names();
     expect(names.filter((n) => n === "task.updated")).toHaveLength(1);
     expect(names).toContain("project.updated");
+  });
+
+  it("the `projects` scope receives every project/task-routed event (E2 — Home)", () => {
+    const home = connect("u1", [{ kind: "projects" }]);
+
+    publishSseEvent(taskEvent("viberr-core", "VIB-1"), {
+      projectSlug: "viberr-core",
+      taskKey: "VIB-1",
+    });
+    publishSseEvent(taskEvent("billing-service", "BIL-9"), {
+      projectSlug: "billing-service",
+      taskKey: "BIL-9",
+    });
+    publishSseEvent(
+      {
+        type: "project.updated",
+        entityId: "viberr-core",
+        occurredAt: new Date().toISOString(),
+        data: { projectSlug: "viberr-core" },
+      },
+      { projectSlug: "viberr-core" },
+    );
+
+    const names = home.names();
+    expect(names.filter((n) => n === "task.updated")).toHaveLength(2);
+    expect(names).toContain("project.updated");
+
+    // …but never user-targeted events (those stay `user`-scope + same user).
+    publishSseEvent(notificationEvent("u1"), { userId: "u1" });
+    expect(home.names()).not.toContain("notification.created");
   });
 
   it("user-targeted events reach ONLY that user's user-scoped connections", () => {

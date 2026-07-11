@@ -8,8 +8,9 @@ import { logger } from "~/server/logging/logger.server";
  * - One connection per browser tab (`/resources/events`), authenticated;
  *   each carries its session user id + the scopes it asked for.
  * - Per-connection filtering by scope (`project:<slug>` | `task:<slug>/<key>`
- *   | `user`). User-targeted events (notification.created) are delivered
- *   ONLY to `user`-scoped connections of that exact user id.
+ *   | `projects` (every project) | `user`). User-targeted events
+ *   (notification.created/read) are delivered ONLY to `user`-scoped
+ *   connections of that exact user id.
  * - Heartbeat comment every 25 s per connection keeps proxies/browsers from
  *   idling the socket out.
  * - Backpressure-safe: writes go through the connection's `write` callback;
@@ -39,6 +40,10 @@ export const RING_BUFFER_SIZE = 256;
 export type SseScope =
   | { kind: "project"; slug: string }
   | { kind: "task"; slug: string; key: string }
+  /** Global project firehose: every project/task-routed compact event, any
+   * project. The Home landing page subscribes it so cross-project changes
+   * (a transition, a new task) refresh the cards without a manual re-scan. */
+  | { kind: "projects" }
   | { kind: "user" };
 
 const PROJECT_SCOPE_RE = /^project:([A-Za-z0-9][A-Za-z0-9_-]*)$/;
@@ -47,6 +52,7 @@ const TASK_SCOPE_RE = /^task:([A-Za-z0-9][A-Za-z0-9_-]*)\/([A-Za-z0-9][A-Za-z0-9
 /** Parses one `scope` query param. Null on anything malformed. */
 export function parseSseScope(raw: string): SseScope | null {
   if (raw === "user") return { kind: "user" };
+  if (raw === "projects") return { kind: "projects" };
   const project = PROJECT_SCOPE_RE.exec(raw);
   if (project) return { kind: "project", slug: project[1]! };
   const task = TASK_SCOPE_RE.exec(raw);
@@ -83,6 +89,7 @@ export function routeMatchesConnection(
   if (route.broadcast) return true;
   if (route.projectSlug === undefined) return false;
   return conn.scopes.some((s) => {
+    if (s.kind === "projects") return true; // all-projects firehose
     if (s.kind === "project") return s.slug === route.projectSlug;
     if (s.kind === "task") {
       return (

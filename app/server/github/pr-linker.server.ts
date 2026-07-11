@@ -1,3 +1,4 @@
+import type { PrState } from "~/schemas/task-file.schema";
 import type { GithubClient } from "./github-client.server";
 
 /**
@@ -16,10 +17,10 @@ import type { GithubClient } from "./github-client.server";
  * task record honest instead of claiming a merge that didn't happen.
  */
 
-/** The `pr.state` vocabulary stored in task.md (prRefSchema is loose —
- * "closed" extends the phase-3 "review"|"merged" pair per ruling 12;
- * "accepted" = human-accepted, real merge pending). */
-export type PrCacheState = "review" | "merged" | "closed" | "accepted";
+/** The `pr.state` vocabulary stored in task.md — the prRefSchema enum
+ * (PR_STATE_VALUES): "closed" extends the phase-3 "review"|"merged" pair per
+ * ruling 12; "accepted" = human-accepted, real merge pending. */
+export type PrCacheState = PrState;
 
 export function mapPrToCacheState(pr: {
   state: string;
@@ -31,16 +32,17 @@ export function mapPrToCacheState(pr: {
   return "review"; // open + draft both read "in review" (ruling 12)
 }
 
-/** Pill rendering contract for the UI step. */
+/** Pill rendering contract for the UI step (mirrored client-side by
+ * `github-pills.prStatePill` — keep the two in lockstep). */
 export function prPillFor(state: PrCacheState): {
   label: string;
-  kind: "done" | "info" | "risk";
+  kind: "done" | "info" | "risk" | "input";
 } {
   switch (state) {
     case "merged":
       return { label: "merged", kind: "done" };
     case "accepted":
-      return { label: "accepted · merge pending", kind: "info" };
+      return { label: "merge pending", kind: "input" };
     case "closed":
       return { label: "closed", kind: "risk" };
     default:

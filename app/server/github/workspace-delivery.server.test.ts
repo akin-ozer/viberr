@@ -34,12 +34,24 @@ function fakeExec(config: {
   commits?: string;
   pr?: { number: number; state: string; title: string };
   ghMissing?: boolean;
+  /** `rev-parse --is-shallow-repository` answer (default: not shallow). */
+  shallow?: boolean;
+  /** Whether `git fetch --deepen …` succeeds (default: true). */
+  deepenOk?: boolean;
 }): CommandExec {
   return async (file, args) => {
+    if (file === "git" && args.includes("--is-shallow-repository")) {
+      return { ok: true, stdout: config.shallow ? "true\n" : "false\n" };
+    }
     if (file === "git" && args.includes("rev-parse")) {
       return config.branch !== undefined
         ? { ok: true, stdout: `${config.branch}\n` }
         : { ok: false, stdout: "", stderr: "not a work tree", code: 128 };
+    }
+    if (file === "git" && args.includes("fetch")) {
+      return config.deepenOk === false
+        ? { ok: false, stdout: "", stderr: "could not resolve host", code: 128 }
+        : { ok: true, stdout: "" };
     }
     if (file === "git" && args.includes("log")) {
       return { ok: true, stdout: config.commits ?? "" };
@@ -137,6 +149,102 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(res.status).toBe("reconciled");
     expect(res.branchLinked).toBe(true);
     expect(readFm(store).frontmatter.branch).toBe(BRANCH);
+  });
+
+  it("probes <taskDir>/workspace/repo when no workdir is given (reviewer clones — B12)", async () => {
+    const store = setupTask();
+    mkdirSync(
+      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", "repo", ".git"),
+      { recursive: true },
+    );
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      dataRoot: store.dataRoot,
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+
+    expect(res.status).toBe("reconciled");
+    expect(res.branchLinked).toBe(true);
+    expect(readFm(store).frontmatter.branch).toBe(BRANCH);
+  });
+
+  it("probes <taskDir>/workspace itself when the agent cloned into ./ (B12)", async () => {
+    const store = setupTask();
+    mkdirSync(
+      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", ".git"),
+      { recursive: true },
+    );
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      dataRoot: store.dataRoot,
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+
+    expect(res.status).toBe("reconciled");
+    expect(res.branchLinked).toBe(true);
+  });
+
+  it("shallow clone: deepens before counting ahead-commits (B12)", async () => {
+    const store = setupTask();
+    const workdir = makeWorkspaceRepo();
+    const calls: string[][] = [];
+    const inner = fakeExec({ branch: BRANCH, commits: COMMITS, shallow: true });
+    const spyExec: CommandExec = async (file, args, opts) => {
+      calls.push([file, ...args]);
+      return inner(file, args, opts);
+    };
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: spyExec,
+    });
+
+    expect(res.commits).toBe(2);
+    // The deepen fetch ran BEFORE the log over origin/<default>..HEAD.
+    const deepenIdx = calls.findIndex((c) => c.includes("--deepen"));
+    const logIdx = calls.findIndex((c) => c.includes("log"));
+    expect(deepenIdx).toBeGreaterThanOrEqual(0);
+    expect(logIdx).toBeGreaterThan(deepenIdx);
+  });
+
+  it("shallow clone whose deepen fails: skips the commit computation instead of misreporting (B12)", async () => {
+    // Truncated history would make `origin/main..HEAD` claim every reachable
+    // commit is "ahead" — with no way to deepen, write NOTHING rather than a
+    // wrong cache (and never wipe a prior run's honest cache).
+    const store = setupTask("ATL-3", {
+      branch: BRANCH,
+      github: { commits: [{ sha: "abc1234", msg: "[ATL-3] real work" }], changed: null },
+    });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: "aaa1111 bogus\nbbb2222 bogus\nccc3333 bogus",
+        shallow: true,
+        deepenOk: false,
+      }),
+    });
+
+    expect(res.commits).toBe(0);
+    expect(readFm(store).frontmatter.github?.commits).toEqual([
+      { sha: "abc1234", msg: "[ATL-3] real work" },
+    ]);
   });
 
   it("is a no-op when the branch already matches (confirm + leave, no duplicate event)", async () => {
@@ -290,10 +398,19 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
-  it("heals a legacy non-canonical \"open\" cache to \"review\" once, then stays idempotent", async () => {
+  it("a legacy non-canonical \"open\" cache reads as \"review\" (schema coercion) — no re-link, no ping-pong", async () => {
+    // The prRefSchema enum coerces the legacy raw "open" to "review" at parse
+    // time, so reconcile sees an already-linked canonical PR: nothing to heal,
+    // no duplicate event, ever.
     const store = setupTask("ATL-3", {
       branch: BRANCH,
-      pr: { number: 9, state: "open", title: "[ATL-3] Add feature" },
+      // Legacy raw value written before the enum tightening — cast past the
+      // compile-time contract to prove the runtime coercion.
+      pr: {
+        number: 9,
+        state: "open" as unknown as "review",
+        title: "[ATL-3] Add feature",
+      },
     });
     const workdir = makeWorkspaceRepo();
     const opts = {
@@ -309,18 +426,102 @@ describe("reconcileWorkspaceDelivery", () => {
       }),
     };
 
-    // First pass: normalize the stale "open" → canonical "review" (one link).
     const first = await reconcileWorkspaceDelivery(opts);
-    expect(first.prLinked).toBe(true);
+    expect(first.prLinked).toBe(false);
     expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "review" });
 
-    // Second pass: now canonical → no re-link, no duplicate event.
     const second = await reconcileWorkspaceDelivery(opts);
     expect(second.prLinked).toBe(false);
-    // Exactly one link event total — the heal — never a duplicate.
     expect(
       readFm(store).timeline.filter((e) => e.text.includes("PR #9")),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
+  });
+
+  it("preserves a human-set \"accepted\" (merge pending) while gh reports the PR still OPEN (B1)", async () => {
+    // D3/S2 regression: a real agent run finishing on an accepted merge-pending
+    // task must NOT clobber pr.state back to "review" — that hides the
+    // Complete-merge button and fabricates a "PR opened" event.
+    const store = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: { number: 9, state: "accepted", title: "[ATL-3] Add feature" },
+    });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: { number: 9, state: "OPEN", title: "[ATL-3] Add feature" },
+      }),
+    });
+
+    expect(res.prLinked).toBe(false);
+    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "accepted" });
+    // No misleading "Linked PR opened" event when nothing actually changed.
+    expect(
+      readFm(store).timeline.filter((e) => e.text.includes("PR #9")),
+    ).toHaveLength(0);
+  });
+
+  it("a real terminal state overrides \"accepted\": MERGED advances it with an honest state-change event (B1)", async () => {
+    const store = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: { number: 9, state: "accepted", title: "[ATL-3] Add feature" },
+    });
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: { number: 9, state: "MERGED", title: "[ATL-3] Add feature" },
+      }),
+    });
+
+    expect(res.prLinked).toBe(true);
+    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "merged" });
+    const ev = readFm(store).timeline.find((e) => e.text.includes("PR #9"));
+    // The already-linked PR changed state — never re-announced as "opened".
+    expect(ev?.text).toContain("Reconciled **PR #9** state");
+    expect(ev?.text).not.toContain("opened from the specialist workspace");
+  });
+
+  it("accepted PR closed externally → downgraded to closed + typed policy event explaining why (B9)", async () => {
+    const store = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: { number: 9, state: "accepted", title: "[ATL-3] Add feature" },
+    });
+    const workdir = makeWorkspaceRepo();
+
+    await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: { number: 9, state: "CLOSED", title: "[ATL-3] Add feature" },
+      }),
+    });
+
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.pr).toMatchObject({ number: 9, state: "closed" });
+    const policy = parsed.timeline.find((e) => e.type === "policy");
+    expect(policy?.text).toContain(
+      "accepted PR #9 was closed on GitHub without merging",
+    );
   });
 
   it("skips a simulated run entirely", async () => {

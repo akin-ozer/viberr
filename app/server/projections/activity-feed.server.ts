@@ -1,5 +1,8 @@
 import type Database from "better-sqlite3";
-import type { ActorRender } from "~/shared/mapping/actor.server";
+import {
+  createActorRenderOverlay,
+  type ActorRender,
+} from "~/shared/mapping/actor.server";
 import type { TaskEventRow } from "~/shared/mapping/task-event.server";
 import { listScopeViolations } from "./policy-violations.server";
 
@@ -64,11 +67,16 @@ export function listActivityStream(
     TaskEventRow,
     "id" | "task_key" | "type" | "actor_json" | "occurred_at" | "title" | "text"
   >[];
+  // E1: overlay the current users-table identity on baked human actors so a
+  // rename shows immediately (deleted users keep the stored snapshot).
+  const overlay = createActorRenderOverlay(db);
   return rows.map((row) => ({
     id: row.id,
     taskKey: row.task_key,
     type: row.type,
-    actor: row.actor_json ? (JSON.parse(row.actor_json) as ActorRender) : null,
+    actor: row.actor_json
+      ? overlay(JSON.parse(row.actor_json) as ActorRender)
+      : null,
     occurredAt: row.occurred_at,
     text: row.title ? `**${row.title}.** ${row.text}` : row.text,
   }));

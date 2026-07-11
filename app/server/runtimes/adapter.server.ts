@@ -52,6 +52,11 @@ export interface RunSpec {
    *  structured-output operator (it has no in-process tool channel), so the run
    *  emits a decision plan the caller parses + executes. */
   outputSchema?: unknown;
+  /** Per-run environment overlay, merged ON TOP of the adapter's base env for
+   *  THIS run only. Used to confine a specialist's git to its own workspace
+   *  (`GIT_CEILING_DIRECTORIES`) so it can never walk up to a host checkout when
+   *  the data root lives inside a git repo (the dogfooding hazard). */
+  env?: Record<string, string>;
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

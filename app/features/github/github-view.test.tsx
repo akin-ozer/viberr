@@ -332,9 +332,9 @@ describe("PullRequestsPanel", () => {
     );
     fireEvent.click(rows[0]!);
     expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
-    // Footer note is verbatim contract.
+    // Footer note is verbatim contract (B10: honest about the offline path).
     expect(container.querySelector(".pol-note")!.textContent).toContain(
-      "Merging stays reserved for humans — accepting a completion in the review queue merges its PR.",
+      "Merging stays reserved for humans — accepting a completion in the review queue merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
     );
   });
 

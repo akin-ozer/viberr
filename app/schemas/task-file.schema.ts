@@ -115,11 +115,20 @@ export const recommendationSchema = z
   .loose();
 export type Recommendation = z.infer<typeof recommendationSchema>;
 
+/** The canonical `pr.state` cache vocabulary (ruling 12 + D3): "review" =
+ * open (incl. draft), "merged", "closed" = closed without merging, and
+ * "accepted" = a human accepted the completion but the real merge is still
+ * pending. Kept in ONE place; pr-linker/pr-open/reconcilers all write from
+ * this set. */
+export const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
+export type PrState = (typeof PR_STATE_VALUES)[number];
+
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
-    /** "review" | "merged" today; Phase 7 adds real GitHub states. */
-    state: z.string().min(1),
+    // Tolerant: an unknown string (e.g. a legacy raw GitHub "open") coerces
+    // to "review" instead of dropping the whole PR ref — parsers never throw.
+    state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
   })
   .loose();

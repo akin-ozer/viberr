@@ -3,6 +3,10 @@ import type Database from "better-sqlite3";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import { hashPassword } from "~/server/auth/password.server";
+import {
+  onProjectionEvent,
+  type ProjectionEvent,
+} from "~/server/events/projection-events.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
@@ -72,6 +76,80 @@ describe("notifications", () => {
 
     expect(markAllNotificationsRead(db, "u_1")).toBe(1);
     expect(countUnreadNotifications(db, "u_1")).toBe(0);
+  });
+
+  it("`from` actors resolve against the CURRENT users table at read time (E1)", () => {
+    const db = ctx.makeDb();
+    mkUser(db, "u_sender");
+    createNotification(db, {
+      id: "n1",
+      userId: "u_1",
+      kind: "mention",
+      text: "t",
+      from: {
+        kind: "human",
+        userId: "u_sender",
+        name: "u_sender",
+        initials: "U",
+        tone: "",
+      },
+    });
+
+    db.prepare(`UPDATE users SET name = ? WHERE id = ?`).run(
+      "Sender Renamed",
+      "u_sender",
+    );
+    const renamed = listNotifications(db, "u_1")[0]!;
+    expect(renamed.from).toMatchObject({
+      kind: "human",
+      name: "Sender Renamed",
+      initials: "SR",
+    });
+
+    // Deleted sender → the baked snapshot survives.
+    db.prepare(`DELETE FROM users WHERE id = ?`).run("u_sender");
+    const orphan = listNotifications(db, "u_1")[0]!;
+    expect(orphan.from).toMatchObject({ kind: "human", name: "u_sender" });
+  });
+
+  it("mark-read emits a user-scoped notification.read event — once, only on change (E12)", () => {
+    const db = ctx.makeDb();
+    createNotification(db, { id: "a", userId: "u_1", kind: "packet", text: "t" });
+    createNotification(db, { id: "b", userId: "u_1", kind: "quality", text: "t" });
+
+    const events: ProjectionEvent[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type === "notification.read") events.push(e);
+    });
+
+    markNotificationsRead(db, "u_1", ["a"]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "notification.read", userId: "u_1" });
+
+    // Idempotent re-mark changes nothing → no event (no badge churn).
+    markNotificationsRead(db, "u_1", ["a"]);
+    expect(events).toHaveLength(1);
+
+    markAllNotificationsRead(db, "u_1");
+    expect(events).toHaveLength(2);
+    markAllNotificationsRead(db, "u_1"); // nothing left unread
+    expect(events).toHaveLength(2);
+    off();
+  });
+
+  it("markTaskPacketApprovalRead emits notification.read per affected user (E12)", () => {
+    const db = ctx.makeDb();
+    createNotification(db, { id: "p1", userId: "u_1", kind: "packet", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "p2", userId: "u_2", kind: "approval", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(db, { id: "m", userId: "u_3", kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+
+    const users: string[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type === "notification.read") users.push(e.userId);
+    });
+    markTaskPacketApprovalRead(db, "viberr-core", "VIB-142");
+    off();
+    expect(users.sort()).toEqual(["u_1", "u_2"]); // u_3's mention untouched
   });
 
   it("markTaskPacketApprovalRead touches only packet/approval kinds — every user", () => {

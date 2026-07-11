@@ -58,7 +58,13 @@ function presetWorkflow(
   );
 }
 
-/** `auto` preset → the operator deployment runs at full autonomy. */
+/**
+ * `auto` preset → the operator deployment runs at full autonomy AND is
+ * explicitly granted `completion-for-acceptance: direct`. The explicit grant
+ * matters: acceptance-to-Done is the one capability full autonomy does NOT
+ * promote from `recommend` (owner ruling Q1 — the human-only-Done exception
+ * requires an explicit `direct`), so the autonomous preset states it outright.
+ */
 function presetAgents(
   preset: PolicyPreset,
   agents: AgentDeployment[],
@@ -68,6 +74,12 @@ function presetAgents(
     a.profileId === "operator"
       ? {
           ...a,
+          capabilities: [
+            ...a.capabilities.filter(
+              (c) => c.capabilityId !== "completion-for-acceptance",
+            ),
+            { capabilityId: "completion-for-acceptance", mode: "direct" as const },
+          ],
           definition: {
             ...(a.definition ?? {}),
             autonomy: "full" as const,

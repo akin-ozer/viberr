@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { PrRef } from "~/schemas/task-file.schema";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
@@ -14,6 +15,7 @@ import {
   getProjectGithubContext,
   type GithubContextFailure,
 } from "./github-context.server";
+import { mapPrToCacheState } from "./pr-linker.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
 
 /**
@@ -48,7 +50,7 @@ export function composePrBody(input: {
   }
   lines.push("");
   lines.push(
-    `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR._`,
+    `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR when GitHub is reachable — otherwise the acceptance is recorded as merge-pending until a human completes the merge._`,
   );
   return lines.join("\n");
 }
@@ -91,13 +93,19 @@ interface GhPull {
   html_url: string;
   title: string;
   state: string;
+  /** Merge facts from GET /pulls/{n} (absent on list items). */
+  merged?: boolean;
+  merged_at?: string | null;
 }
 
 /**
  * Open (or reuse) the review pull request for a task's execution branch
- * (FR31). Idempotent: if an open PR already exists for `head`, it is adopted
- * rather than duplicated (NFR16). Writes `frontmatter.pr` from the real GitHub
- * response, appends a `github` timeline event, and audits. A 403 opens a
+ * (FR31). Idempotent twice over (NFR16): a live PR already cached on the task
+ * (e.g. agent-side delivery on its own branch) is reconciled and reused, and
+ * an open PR for the deterministic `head` branch is adopted — a duplicate is
+ * never created. Writes `frontmatter.pr` in the canonical cache vocabulary
+ * (open → "review"; a human-set "accepted" is never downgraded), appends a
+ * `github` timeline event on creation, and audits. A 403 opens a
  * `pull_request:write` scope violation carried by the task (NFR14) instead of
  * throwing. Never fabricates a PR: on any non-ok GitHub result the task's `pr`
  * cache is left untouched.
@@ -123,6 +131,34 @@ export async function openTaskPr(
   });
   if (gh.status !== "ok") return gh;
 
+  // 0. The task already carries a live PR — e.g. captured from agent-side
+  //    delivery on a branch the head= dedup below would never match. Never
+  //    open a duplicate: reconcile the cached record against the real PR and
+  //    reuse it. Only a closed-unmerged PR clears the way for a fresh one.
+  if (fm.pr && fm.pr.state !== "closed") {
+    const live = await gh.client.request<GhPull>(
+      "GET",
+      `/repos/${gh.repo}/pulls/${fm.pr.number}`,
+    );
+    if (live.ok) {
+      await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
+      return {
+        status: "ok",
+        prNumber: live.data.number,
+        created: false,
+        url: live.data.html_url,
+      };
+    }
+    if (live.kind === "network") {
+      return { status: "network_unavailable", message: live.message };
+    }
+    if (live.kind === "http" && live.status === 401) {
+      return { status: "auth_failed", message: live.message };
+    }
+    // Any other refusal (404 gone, 403 read scope): the cached PR can't be
+    // confirmed — fall through to the normal head-dedup + create path.
+  }
+
   const branch = fm.branch ?? taskBranchName(input.taskKey, fm.title);
   if (!branch) return { status: "no_branch" };
 
@@ -136,7 +172,7 @@ export async function openTaskPr(
   );
   if (existing.ok && existing.data.length > 0) {
     const pr = existing.data[0]!;
-    await writePrToTask(db, ref, input, gh, pr, actor, false, ctx);
+    await writePrToTask(db, ref, input, gh, pr, actor, false, ctx, fm.pr);
     return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
   }
   if (!existing.ok && existing.kind === "network") {
@@ -166,7 +202,7 @@ export async function openTaskPr(
   });
 
   if (created.ok) {
-    await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx);
+    await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx, fm.pr);
     return {
       status: "ok",
       prNumber: created.data.number,
@@ -216,10 +252,32 @@ async function writePrToTask(
   actor: AuditActor & { userId?: string },
   created: boolean,
   ctx: OpenTaskPrContext,
+  existingPr: PrRef | null,
 ): Promise<void> {
-  await patchTaskFrontmatter(ref, {
-    pr: { number: pr.number, state: pr.state || "open", title: pr.title },
-  });
+  // Canonical cache vocabulary: an open PR is "review" — never the raw
+  // GitHub "open" (off-contract, and it would ping-pong against reconcilers).
+  const live = mapPrToCacheState(pr);
+  const samePr = existingPr !== null && existingPr.number === pr.number;
+  // H1 guard: never downgrade a human-set "accepted" (merge pending) — or an
+  // already terminal "merged" — while GitHub still reports the PR open. Only
+  // a real terminal state from GitHub overrides.
+  const state =
+    samePr &&
+    live === "review" &&
+    (existingPr.state === "accepted" || existingPr.state === "merged")
+      ? existingPr.state
+      : live;
+  // Preserve extra cached fields (e.g. checks) when refreshing the same PR.
+  const next: PrRef = {
+    ...(samePr ? existingPr : {}),
+    number: pr.number,
+    state,
+    title: pr.title,
+  };
+  const changed = JSON.stringify(existingPr) !== JSON.stringify(next);
+  if (changed) {
+    await patchTaskFrontmatter(ref, { pr: next });
+  }
   if (created) {
     const nameHint = actor.userId
       ? ((db.prepare(`SELECT name FROM users WHERE id = ?`).get(actor.userId) as
@@ -238,9 +296,11 @@ async function writePrToTask(
       evidence: null,
     });
   }
-  rebuildPath(db, resolveTaskFilePath(ref), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
+  if (changed || created) {
+    rebuildPath(db, resolveTaskFilePath(ref), {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
+  }
   recordAudit(db, {
     action: "github.pr.opened",
     actor,

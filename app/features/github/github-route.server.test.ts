@@ -297,7 +297,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       "utf8",
     );
     expect(file).toContain(
-      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved — PR auto-sync will work after merge.",
+      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved — operations needing `pull_request:write` will work now.",
     );
     // …and projection (newest-first timeline).
     const detail = getTaskDetail(app.db, "viberr-core", "VIB-142")!;

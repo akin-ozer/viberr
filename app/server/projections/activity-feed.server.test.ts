@@ -93,6 +93,31 @@ describe("listActivityStream", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(listActivityStream(store.db, store.slug)).toEqual([]);
   });
+
+  it("user rename shows immediately — human actors resolve at read time (E1)", () => {
+    const store = setupTestStore(ctx);
+    seedStream(store);
+
+    // Rename arda AFTER projection: the baked actor_json still carries the
+    // old name (content-hash short-circuit means no reprojection happens).
+    store.db
+      .prepare(`UPDATE users SET name = ? WHERE id = ?`)
+      .run("Arda Yıldız", store.users.arda.id);
+
+    const rows = listActivityStream(store.db, store.slug);
+    const human = rows.find((r) => r.actor?.kind === "human")!;
+    expect(human.actor).toMatchObject({
+      kind: "human",
+      name: "Arda Yıldız",
+      initials: "AY",
+    });
+
+    // Deleted user → the baked snapshot survives as fallback.
+    store.db.prepare(`DELETE FROM users WHERE id = ?`).run(store.users.arda.id);
+    const after = listActivityStream(store.db, store.slug);
+    const orphan = after.find((r) => r.actor?.kind === "human")!;
+    expect(orphan.actor).toMatchObject({ kind: "human", name: "Arda Test" });
+  });
 });
 
 describe("listAuditLog", () => {

@@ -153,8 +153,8 @@ export function PullRequestsPanel({
           <div className="pol-note" style={{ marginBottom: 0 }}>
             <Icon name="pr" />
             <span>
-              No pull requests yet — the developer specialist opens one at the
-              review boundary.
+              No pull requests yet — one is opened at the review boundary by
+              the server or the delivering agent.
             </span>
           </div>
         )}
@@ -188,7 +188,8 @@ export function PullRequestsPanel({
         <Icon name="lock" />
         <span>
           Merging stays reserved for humans — accepting a completion in the
-          review queue merges its PR.
+          review queue merges its PR when GitHub is reachable; otherwise it
+          records accepted (merge pending).
         </span>
       </div>
     </div>

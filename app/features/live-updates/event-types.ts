@@ -19,6 +19,8 @@ export const SSE_ENDPOINT = "/resources/events";
 /** Scope strings as the endpoint expects them (`scope=` query params). */
 export const sseScopes = {
   user: () => "user" as const,
+  /** Every project/task-routed event, any project (Home landing page). */
+  allProjects: () => "projects" as const,
   project: (slug: string) => `project:${slug}`,
   task: (slug: string, key: string) => `task:${slug}/${key}`,
 };

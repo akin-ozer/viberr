@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { DiagnosticSeverity } from "~/schemas/file-diagnostics";
 import { isAcceptedDisplayState } from "~/server/interpretation/readiness-policy.server";
+import { createActorRenderOverlay } from "~/shared/mapping/actor.server";
 import {
   mapTaskEventRow,
   type TaskEventRow,
@@ -81,7 +82,13 @@ export function listTaskEvents(
        ORDER BY position ASC`,
     )
     .all(slug, key) as TaskEventRow[];
-  return rows.map(mapTaskEventRow);
+  // E1: baked actor snapshots go stale on user rename — overlay the CURRENT
+  // users-table identity at read time (deleted users keep the snapshot).
+  const overlay = createActorRenderOverlay(db);
+  return rows.map((row) => {
+    const event = mapTaskEventRow(row);
+    return { ...event, actor: overlay(event.actor) };
+  });
 }
 
 export function listTaskDiagnostics(

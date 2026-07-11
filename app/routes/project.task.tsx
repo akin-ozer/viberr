@@ -37,6 +37,7 @@ import {
   startSpecialistRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
+import { githubWebHost } from "~/server/github/github-client.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
@@ -118,6 +119,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     deployedSpecialists,
     runActive,
     mentionables,
+    // Host for GitHub browse links (PR/branch/repo) — derived server-side so
+    // the client never hardcodes github.com (GHE deployments keep working).
+    githubHost: githubWebHost(),
   };
 }
 
@@ -430,7 +434,10 @@ export async function action({ request, params }: Route.ActionArgs) {
           taskKey,
           backend,
           autonomy,
-          actor: { userId: null, label: actor.label },
+          // Attribute the run to the human who pressed the button (D8) — the
+          // operator's own actions are still audited as the operator, but the
+          // "started a run" audit row names the maintainer who launched it.
+          actor: { userId: actor.userId, label: actor.label },
         });
         return {
           ok: true as const,
@@ -495,6 +502,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       myRole={layout.myRole}
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
+      githubHost={loaderData.githubHost}
     />
   );
 }

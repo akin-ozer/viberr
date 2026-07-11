@@ -52,6 +52,21 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
     expect(resolveRunModel("codex", "sonnet")).toBe(defaultModelFor("codex"));
   });
 
+  it("resolveRunEffort translates a cross-backend effort tier (D4 retry)", async () => {
+    const { resolveRunEffort } = await import("./model-catalog.server");
+    // Same-backend valid values pass through.
+    expect(resolveRunEffort("claude", "high")).toBe("high");
+    expect(resolveRunEffort("codex", "minimal")).toBe("minimal");
+    // Claude-only "max" retried on Codex maps to Codex's nearest (xhigh), never
+    // passed raw (Codex would reject it).
+    expect(resolveRunEffort("codex", "max")).toBe("xhigh");
+    // Codex-only "minimal" retried on Claude maps to Claude's nearest (low).
+    expect(resolveRunEffort("claude", "minimal")).toBe("low");
+    // Unknown/empty → the backend default.
+    expect(resolveRunEffort("codex", "")).toBe(defaultEffortFor("codex"));
+    expect(resolveRunEffort("claude", "bogus")).toBe(defaultEffortFor("claude"));
+  });
+
   it("modelDisplayName gives the friendly name for a known id, else the raw value", () => {
     expect(modelDisplayName("codex", "gpt-5.5")).toBe("GPT-5.5");
     expect(modelDisplayName("claude", "sonnet")).toBe("Claude Sonnet");

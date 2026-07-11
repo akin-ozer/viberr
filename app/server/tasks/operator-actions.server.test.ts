@@ -108,11 +108,15 @@ function seedTask(stage: string): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
   configureRunServiceForTests();
+  const { resetOperatorLeasesForTests } = await import(
+    "~/server/runtimes/operator-run.server"
+  );
+  resetOperatorLeasesForTests();
 });
 
 afterEach(() => {
@@ -405,6 +409,45 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
   });
 });
 
+describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
+  it("a trigger arriving while a run is in flight is QUEUED and fired once, not dropped", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { runOperator, resetOperatorLeasesForTests } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
+    // Fire two concurrent triggers WITHOUT awaiting the first — the second must
+    // coalesce (queue), not start a second overlapping operator run.
+    const p1 = runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "transition",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+    const r2 = await runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "manual",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+    // The second call coalesced — it returned the queued sentinel, not a new run.
+    expect(r2.runId).toBe("queued");
+    await p1;
+    // Give the queued trigger time to drain, then interrupt anything running.
+    await new Promise((r) => setTimeout(r, 50));
+    interruptRunningRuns("VIB-1");
+    // Exactly the coordination happened; no double-driving (the recommendation
+    // isn't duplicated — a transition rec is present at most once).
+    const recs = task().frontmatter.recommendations.filter(
+      (r) => r.kind === "transition",
+    );
+    expect(recs.length).toBeLessThanOrEqual(1);
+  });
+});
+
 describe("operatorTransitionStage", () => {
   it("supervised + recommend mode recommends and does not move (approval boundary)", async () => {
     // impl → review is an `approval` boundary — a human gate — so a supervised
@@ -533,8 +576,13 @@ describe("operatorAcceptCompletion", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
-  it("full autonomy accepts completion and moves the task to Done", async () => {
-    deployRoster(DEFAULT_POLICY);
+  it("full autonomy + EXPLICIT direct accepts completion and moves the task to Done", async () => {
+    // Owner ruling Q1: acceptance-to-Done requires an EXPLICIT `direct` grant —
+    // full autonomy alone does not promote it. This roster grants it directly.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
     seedTask("review");
     const r = await operatorAcceptCompletion(
       store.db,
@@ -545,9 +593,27 @@ describe("operatorAcceptCompletion", () => {
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("done");
     expect(task().frontmatter.waiting).toBe("none");
-    // The deliberate override is audited distinctly.
+    expect(task().frontmatter.validation).toBe("healthy");
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+
+  it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {
+    // The shipped default operator holds completion-for-acceptance:recommend.
+    // Under full autonomy that must NOT silently promote to an agent-close.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(task().frontmatter.stage).toBe("review");
+    expect(
+      task().frontmatter.recommendations.some((rec) => rec.kind === "accept_completion"),
+    ).toBe(true);
   });
 });
 

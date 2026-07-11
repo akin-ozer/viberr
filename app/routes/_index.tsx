@@ -133,8 +133,10 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Index({ loaderData }: Route.ComponentProps) {
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
-  // Live updates (Phase 6): `user` scope = own notification.created (bell)
-  // + projection.rebuilt broadcasts (store re-scans refresh the cards).
-  useLiveUpdates([sseScopes.user()]);
+  // Live updates (Phase 6): `user` scope = own notification.created/read
+  // (bell) + projection.rebuilt broadcasts; `projects` scope = every
+  // project/task change so the landing cards refresh without a manual
+  // re-scan (E2 — `[user]` alone never saw task/project events).
+  useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
   return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
 }

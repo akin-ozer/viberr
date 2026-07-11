@@ -61,10 +61,13 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
 
 function GithubTrace({
   task,
+  githubHost,
   onCompleteMerge,
   merging,
 }: {
   task: TaskDetail;
+  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  githubHost?: string;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
   merging?: boolean;
@@ -83,13 +86,15 @@ function GithubTrace({
     );
   }
   // Real external link (spec §4.9: the prototype toast goes away): the PR
-  // when one exists, else the branch tree. Phase 7 may refine targets.
+  // when one exists, else the branch tree. Host comes from the loader
+  // (connection-derived), never hardcoded — GHE deployments keep working.
+  const host = githubHost ?? "https://github.com";
   const ghHref = task.repo
     ? task.pr
-      ? `https://github.com/${task.repo}/pull/${task.pr.number}`
+      ? `${host}/${task.repo}/pull/${task.pr.number}`
       : task.branch
-        ? `https://github.com/${task.repo}/tree/${task.branch}`
-        : `https://github.com/${task.repo}`
+        ? `${host}/${task.repo}/tree/${task.branch}`
+        : `${host}/${task.repo}`
     : null;
   return (
     <div className="panel flush">
@@ -617,6 +622,7 @@ export function TaskDetailPage({
   myRole,
   mentionables,
   recommendations,
+  githubHost,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -637,6 +643,8 @@ export function TaskDetailPage({
   mentionables: Mentionables;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
+  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  githubHost?: string;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [logSel, setLogSel] = useState<string | null>(null);
@@ -838,6 +846,7 @@ export function TaskDetailPage({
       <div className="detail-side">
         <GithubTrace
           task={task}
+          {...(githubHost ? { githubHost } : {})}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           merging={runBusy}
         />
