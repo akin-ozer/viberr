@@ -146,74 +146,14 @@ export interface ResCatalogGroup {
   items: { id: string; def: boolean }[];
 }
 
-/** Grantable context resources with defaults (mock RES_CATALOG, verbatim). */
-export const RES_CATALOG: readonly ResCatalogGroup[] = [
-  {
-    group: "Skills",
-    key: "skills",
-    mono: true,
-    items: [
-      { id: "viberr-app-expertise", def: false },
-      { id: "repo-write", def: true },
-      { id: "test-runner", def: true },
-      { id: "lint-autofix", def: false },
-      { id: "diff-review", def: false },
-      { id: "security-scan", def: false },
-      { id: "test-author", def: false },
-      { id: "coverage-report", def: false },
-      { id: "refactor", def: false },
-      { id: "dependency-audit", def: false },
-    ],
-  },
-  {
-    group: "MCP servers",
-    key: "mcps",
-    mono: true,
-    items: [
-      { id: "viberr", def: false },
-      { id: "github", def: true },
-      { id: "filesystem", def: false },
-      { id: "http-fetch", def: false },
-      { id: "postgres", def: false },
-      { id: "docker", def: false },
-    ],
-  },
-  {
-    group: "Knowledge bases",
-    key: "kb",
-    mono: false,
-    items: [
-      { id: "architecture-notes", def: false },
-      { id: "api-contracts", def: false },
-      { id: "deploy-runbooks", def: false },
-      { id: "Viberr Core architecture", def: true },
-      { id: "Coding standards", def: true },
-      { id: "Review checklist", def: false },
-      { id: "Security guidelines", def: false },
-      { id: "Test strategy", def: false },
-      { id: "Product brief", def: false },
-      { id: "Domain glossary", def: false },
-      { id: "Prior decisions", def: false },
-    ],
-  },
-];
-
 export interface ResourceSelection {
   skills: string[];
   mcps: string[];
   kb: string[];
 }
 
-/**
- * A newly created profile starts with NO resources pre-granted — the creator
- * explicitly picks skills/MCPs/KBs from the project's REAL resource catalog
- * (`buildResourceCatalog`). Deriving defaults from the legacy mock `RES_CATALOG`
- * pre-checked ids like `repo-write` / "Coding standards" that resolve to nothing,
- * so a fresh profile shipped grants no real resource could satisfy. Empty is the
- * honest, safe-by-default starting point.
- */
-export const RES_DEFAULTS: ResourceSelection = {
-  skills: [],
-  mcps: [],
-  kb: [],
-};
+// The agent-profile picker is fed the project's REAL resource catalog
+// (`buildResourceCatalog` — live disk skills/KBs + org MCP registry); a new
+// profile starts with an EMPTY selection and the creator grants from that live
+// catalog. The old mock `RES_CATALOG`/`RES_DEFAULTS` (pre-checked ids like
+// `repo-write` / "Coding standards" that resolved to no real resource) are gone.
