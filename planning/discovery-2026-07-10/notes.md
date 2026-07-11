@@ -1,12 +1,17 @@
 # Viberr full-product discovery — 2026-07-10
 
+> **⚠️ HISTORICAL scratch notes.** These are the raw first-pass discovery notes; all questions and
+> findings here were carried into `findings.md` and RESOLVED. The living docs are `app-reference.md`
+> (current architecture), `product-intent.md` (decisions), `completeness-ledger.md` (finding→fix), and
+> `test-catalog.md` (test→finding). Do not treat anything below as an open item.
+
 Working notes for the discovery pass (UI walkthrough + code map). Consolidated docs will live
 alongside this file. Prior context: `planning/operator-verification-2026-07-09.md` (all items
 implemented per memory), RBAC model finalized 2026-07 (2 org roles, 4 project roles).
 
-## Open product questions for Akın
+## Open product questions for Akın — ALL RESOLVED
 
-- [ ] Advisor agent: user suspects redundant with operator — investigate what "advisor" actually is in the app, then ask.
+- [x] Advisor agent redundancy → **removed** (decision A); operator absorbs it. See product-intent.md.
 
 ## UI walkthrough log
 

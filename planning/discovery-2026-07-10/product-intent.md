@@ -65,12 +65,21 @@ at boundaries. GitHub is the execution surface: task-key branch → commits → 
   bypassPermissions.
 - Archive project = hide+separate only, not read-only enforcement (decision D, copy is honest).
 
-## Current open product questions (2026-07-10)
+## Product questions — ALL RESOLVED (owner decided; implemented)
 
-1. **Advisor (consultant) profile redundancy** — owner suspects it should fold into the operator.
-   Facts: PRD FR14 mandates "primary specialist plus consultant specialists"; migration 0011 renamed
-   consultants→reviewers; the operator engages advisors through the reviewer machinery; advisor
-   replies risk being classified as review verdicts (validation flips); zero real advisor runs so far.
-   → Ask the owner before restructuring.
-2. Skills/KB/MCP org registry vs disk duality (org_skills table lists 4, disk has 9 dirs).
-3. Operator "Plan:" comments vs brevity guardrail — is plan-narration noise acceptable?
+1. **Advisor (consultant) profile redundancy** → ✅ REMOVED (decision A). The operator absorbs
+   advisory duties (scope-clarification via packets); the reviewer covers quality. No consultant
+   profile ships. (Later: Tester also merged into Reviewer — decision D1.)
+2. **Skills/KB/MCP org registry vs disk duality** → ✅ disk is truth (decision C-sweep); org settings
+   lists every disk dir via `buildResourceCatalog`, metadata layered from the table.
+3. **Operator "Plan:" comments vs brevity** → ✅ fold plan into the action comment, one timeline entry
+   per operator turn (decision E).
+
+## Additional owner decisions (2026-07-11 shipped-build critical pass)
+
+4. **Policy presets (strict/balanced/auto)** were cosmetic → ✅ WIRED to real governance (S1): strict
+   human-gates the pre-work boundaries; auto runs the operator at full autonomy; review→done stays
+   human-locked in all.
+5. **"Accepted, merge-pending" PRs** → ✅ a "Complete merge" action finishes the real merge later (S2).
+6. **Codex tool confinement** (Codex SDK ignores allowed/disallowed tools; enforcement is Claude-only)
+   → 📎 DOCUMENTED as a known gap for the upcoming role-bindings work (S3; security deprioritized now).

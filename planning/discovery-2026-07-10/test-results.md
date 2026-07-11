@@ -1,5 +1,11 @@
 # Viberr live test results — 2026-07-10/11 (phase 3)
 
+> **⚠️ HISTORICAL (pre-D1–D4).** These are the phase-3 results captured BEFORE the D1–D4 decisions
+> and the finding fixes landed, so some rows (Advisor/Tester roster, triage→ready "recommend",
+> accept→"merged") no longer match the shipped build. For CURRENT results see `test-catalog.md`
+> (30 designed cases → findings → fixes) and `test-sweep-committed-2026-07-11.md`; for the
+> finding→fix map see `completeness-ledger.md`.
+
 Environment: dev server, BOTH backends real (Claude via OAuth token, Codex via CLI auth added to
 .env this session). Test fixtures: project **atlas-api** (created via wizard; members arda=admin,
 elif=maintainer, murat=contributor, selin=viewer; deniz non-member), scratch project
