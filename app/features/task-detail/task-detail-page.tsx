@@ -300,6 +300,7 @@ function TaskHero({
   canEditGoal: boolean;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
+  const csrf = useCsrfToken();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.goal);
   // Close the editor once a save round-trips successfully.
@@ -339,6 +340,7 @@ function TaskHero({
           onSubmit={() => setEditing(true)}
         >
           <input type="hidden" name="intent" value="update-goal" />
+          <input type="hidden" name="_csrf" value={csrf} />
           <textarea
             name="goal"
             className="goal-textarea"
