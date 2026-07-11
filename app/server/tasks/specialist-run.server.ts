@@ -626,13 +626,18 @@ export async function startSpecialistRun(
     },
   });
 
-  // Every specialist run reports back AND has its agent-side delivery
-  // reconciled: register the default reply hook + a workspace-delivery
-  // reconciliation so the agent posts its result as a comment and the task
-  // record picks up the real branch/PR the agent created in its workspace,
-  // even when started from the UI "Run" button. Richer callers (operator
-  // prompt / @mention) overwrite this.
-  await registerReplyAndReconcile(db, ctx, {
+  const { registerAgentCompletion, markWaitingAgent } = await import(
+    "./task-actions.server"
+  );
+  // The board reads "agent working" while the run is in flight.
+  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
+
+  // ONE canonical completion handler for EVERY start path (UI "Run", @mention,
+  // operator prompt): reply → reconcile agent-side delivery → (reviewer) verdict
+  // → re-invoke the operator to react. `ctx.operatorRun` (set when this run is
+  // inside an operator react loop) continues the chain at depth+1; otherwise a
+  // fresh chain starts against the deployed operator.
+  await registerAgentCompletion(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
@@ -640,6 +645,8 @@ export async function startSpecialistRun(
     role: sp.role,
     kind: "primary",
     workdir: clone,
+    agentHandle: agentHandleFor(sp.role),
+    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
   return { runId, backend, simulated, role: sp.role };
@@ -801,10 +808,13 @@ export async function startReviewerRun(
     },
   });
 
-  // A reviewer reports back too: register the default reply hook + workspace
-  // reconciliation so its verdict posts as a comment and any real branch/PR it
-  // produced is reconciled, even when started from the UI "Run" button.
-  await registerReplyAndReconcile(db, ctx, {
+  const { registerAgentCompletion, markWaitingAgent } = await import(
+    "./task-actions.server"
+  );
+  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
+
+  // Same canonical handler — a reviewer additionally records its verdict.
+  await registerAgentCompletion(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
@@ -812,6 +822,8 @@ export async function startReviewerRun(
     role: rev.role,
     kind: "reviewer",
     workdir: clone,
+    agentHandle: agentHandleFor(rev.role),
+    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
   return { runId, backend, simulated, role: rev.role };
@@ -1157,99 +1169,13 @@ async function cloneRepo(
   }
 }
 
-// ------------------------------------------------------- reply + reconcile
+// ------------------------------------------------------- completion hook
 
-/**
- * The completion hook every specialist/reviewer run started here gets: post
- * the agent's reply as a comment (the prior default behavior — see
- * `registerAgentReply`), AND reconcile the task record from what the agent
- * actually did in its workspace (finding #31 — a real coding agent branches /
- * pushes / opens a PR through its OWN git/gh creds, entirely outside viberr's
- * stored-PAT delivery path, leaving task.md `branch`/`pr` null).
- *
- * Both legs are best-effort and never block or throw. The reconciliation is
- * the COMPLEMENT to the server-side `ensureTaskBranch`/`openTaskPr`: it only
- * runs for REAL (non-simulated) runs, is idempotent, and confirms-and-leaves
- * values the server already set instead of clobbering them.
- *
- * Registration is last-writer-wins per run id (run-service), so a richer
- * caller (operator prompt / @mention resume) may overwrite this with its own
- * reply+react callback — same as the prior default hook.
- */
-async function registerReplyAndReconcile(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    runId: string;
-    backend: RealBackend;
-    role: string;
-    /** "reviewer" runs additionally record a verdict (validation + quality
-     *  event + notification) so it fires on EVERY reviewer path, not only when
-     *  the operator prompts one (the operator-prompt path installs its own
-     *  richer callback that already does this). */
-    kind?: "primary" | "reviewer";
-    /** The run's workspace clone dir (null when no real clone happened). */
-    workdir: string | null;
-  },
-): Promise<void> {
-  const [
-    { registerRunCompletion },
-    { postAgentReplyComment, recordReviewerVerdict },
-    { replyTextForRun },
-    { reconcileWorkspaceDelivery },
-  ] = await Promise.all([
-    import("~/server/runtimes/run-service.server"),
-    import("./task-actions.server"),
-    import("./agent-reply.server"),
-    import("~/server/github/workspace-delivery.server"),
-  ]);
-  const actorRef: FileActorRef = {
-    kind: "agent",
-    backend: input.backend,
-    role: input.role,
-  };
-  registerRunCompletion(input.runId, (finished) => {
-    void (async () => {
-      // 1. Default reply (unchanged behavior). Await so the reply lands before
-      //    the verdict's quality event, keeping the timeline ordered.
-      await postAgentReplyComment(db, ctx, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        runId: finished.id,
-        actorRef,
-        replyText: replyTextForRun(db, finished.id),
-      });
-      // 1b. A REVIEWER's verdict drives the board's validation health + a typed
-      //     quality event + an owner/supervisor notification — on ALL reviewer
-      //     paths (UI "Run reviewer", @mention, operator run_reviewer), not just
-      //     the operator-prompt loop (FIX: hunt finding).
-      if (input.kind === "reviewer" && finished.state === "finished") {
-        await recordReviewerVerdict(
-          db,
-          ctx,
-          input.projectSlug,
-          input.taskKey,
-          replyTextForRun(db, finished.id),
-        );
-      }
-    })();
-    // 2. Reconcile agent-side delivery — best-effort, never blocks the run.
-    //    Skipped for simulated runs (no real git work was done).
-    void reconcileWorkspaceDelivery({
-      db,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      ...(input.workdir ? { workdir: input.workdir } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-      backend: input.backend,
-      role: input.role,
-      simulated: finished.simulated === 1,
-    }).catch(() => {
-      // reconcileWorkspaceDelivery never throws, but guard anyway.
-    });
-  });
+/** A short @mention handle for a specialist/reviewer role, used in the
+ *  stuck-loop packet copy ("@dev repeated its report"). */
+function agentHandleFor(role: string): string {
+  const first = role.trim().split(/[\s/&]+/)[0] ?? role;
+  return first.toLowerCase();
 }
 
 // --------------------------------------------------------------------- shared

@@ -40,7 +40,7 @@ export async function recoverUnreactedAgentRuns(
           AND NOT EXISTS (
             SELECT 1 FROM audit_events a
              WHERE a.action = 'task.agent.replied'
-               AND a.details_json LIKE '%"runId":"' || r.id || '%'
+               AND a.details_json LIKE '%"runId":"' || r.id || '"%'
           )`,
     )
     .all() as {
@@ -57,7 +57,7 @@ export async function recoverUnreactedAgentRuns(
     count: rows.length,
   });
 
-  const [{ postAgentReplyComment, autoInvokeOperatorForRecovery }, { replyTextForRun }] =
+  const [{ applyAgentCompletionEffects }, { replyTextForRun }] =
     await Promise.all([
       import("~/server/tasks/task-actions.server"),
       import("~/server/tasks/agent-reply.server"),
@@ -68,19 +68,25 @@ export async function recoverUnreactedAgentRuns(
     try {
       const replyText = replyTextForRun(db, row.id);
       if (!replyText) continue;
-      await postAgentReplyComment(db, ctx, {
-        projectSlug: row.project_slug,
-        taskKey: row.task_key,
-        runId: row.id,
-        actorRef: {
-          kind: "agent",
+      // Run the SAME completion effects the lost in-process callback would have:
+      // reply → workspace-delivery reconcile → (reviewer) verdict → operator
+      // REACT (trigger `agent-reply`, fresh chain at depth 0) or stuck-packet/
+      // waiting flip. A recovered reviewer run therefore records its verdict and
+      // captures its branch/PR exactly like a live one.
+      await applyAgentCompletionEffects(
+        db,
+        ctx,
+        {
+          projectSlug: row.project_slug,
+          taskKey: row.task_key,
           backend: row.backend as RealBackend,
           role: row.role,
+          kind: row.kind === "reviewer" ? "reviewer" : "primary",
+          workdir: null,
+          agentHandle: row.role.trim().split(/[\s/&]+/)[0]?.toLowerCase() ?? row.role,
         },
-        replyText,
-      });
-      // Re-invoke the operator to react to the now-posted reply (fresh chain).
-      await autoInvokeOperatorForRecovery(db, ctx, row.project_slug, row.task_key);
+        { id: row.id, state: "finished", simulated: false },
+      );
       recovered += 1;
     } catch (error) {
       logger.warn("agent-reply recovery failed for a run", {

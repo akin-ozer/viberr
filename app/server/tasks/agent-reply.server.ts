@@ -274,36 +274,50 @@ export function resolveMentionedAgent(
 const MAX_REPLY_CHARS = 1200;
 
 /**
- * Extract a reply from a finished run's persisted lines: prefer the LAST
- * substantial `assistant`/`agent_message` text line, else fall back to the
- * final `result`/`turn.completed` text. Whitespace-normalized + truncated to
- * a readable length (the raw transcript remains in the run's agent logs).
- * Returns null when nothing usable was produced.
+ * Extract the FULL (untruncated) reply from a finished run's persisted lines:
+ * prefer the LAST substantial `assistant`/`agent_message` text line, else fall
+ * back to the final `result`/`turn.completed` text. Whitespace is preserved as
+ * the agent wrote it. Returns null when nothing usable was produced.
+ *
+ * The verdict classifier and the no-progress guard consume THIS (full) text —
+ * a reviewer's verdict frequently lands well past 1200 chars, so classifying on
+ * the truncated comment would silently drop the verdict.
  */
-export function extractReplyText(lines: LogLine[]): string | null {
+export function extractFullReplyText(lines: LogLine[]): string | null {
   const isReplyText = (l: LogLine) =>
     l.ev === "text" &&
     (l.tag === "assistant" || l.tag === "agent_message") &&
     l.text.trim().length > 0;
 
-  // Walk newest-first for the last substantial assistant line.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
-    if (isReplyText(line)) return truncate(line.text.trim());
+    if (isReplyText(line)) return line.text.trim();
   }
-  // Fallback: the final result envelope's text.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (line.ev === "result" && line.text.trim().length > 0) {
-      return truncate(line.text.trim());
+      return line.text.trim();
     }
   }
   return null;
 }
 
+/**
+ * The timeline-comment form of the reply: the full text truncated to a readable
+ * length with a pointer to the full transcript. The raw transcript remains in
+ * the run's agent logs.
+ */
+export function extractReplyText(lines: LogLine[]): string | null {
+  const full = extractFullReplyText(lines);
+  return full == null ? null : truncate(full);
+}
+
 function truncate(text: string): string {
   if (text.length <= MAX_REPLY_CHARS) return text;
-  return text.slice(0, MAX_REPLY_CHARS - 1).trimEnd() + "…";
+  return (
+    text.slice(0, MAX_REPLY_CHARS - 1).trimEnd() +
+    "…\n\n_(truncated — full report in the agent logs)_"
+  );
 }
 
 /** Read a run's persisted display lines (helper for the completion callback). */
@@ -313,6 +327,15 @@ export function replyTextForRun(
 ): string | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
   return extractReplyText(lines);
+}
+
+/** The full untruncated reply text of a run (for verdict + no-progress checks). */
+export function fullReplyTextForRun(
+  db: Database.Database,
+  runId: string,
+): string | null {
+  const lines = listRunLines(db, runId).map((l) => l.display);
+  return extractFullReplyText(lines);
 }
 
 // -------------------------------------------------------- resume workdir
