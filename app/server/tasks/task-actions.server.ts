@@ -2806,6 +2806,25 @@ export async function applyRecommendation(
       actor,
       ctx,
     );
+  } else if (rec.kind === "run_specialist") {
+    // The operator recommended starting the primary specialist's run (it can't
+    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked in
+    // startSpecialistRun) starts the run.
+    const { startSpecialistRun } = await import("./specialist-run.server");
+    await startSpecialistRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+  } else if (rec.kind === "run_reviewer" && rec.profileId) {
+    const { startReviewerRun } = await import("./specialist-run.server");
+    await startReviewerRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      actor,
+      ctx,
+    );
   } else if (rec.kind === "transition" && rec.toStageId) {
     await transitionStage(
       db,

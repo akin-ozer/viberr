@@ -12,7 +12,13 @@ import { Pill } from "~/ui/pill";
 
 export interface RecommendationView {
   id: string;
-  kind: "assign_specialist" | "assign_reviewer" | "transition" | "accept_completion";
+  kind:
+    | "assign_specialist"
+    | "assign_reviewer"
+    | "run_specialist"
+    | "run_reviewer"
+    | "transition"
+    | "accept_completion";
   profileId?: string;
   toStageId?: string;
   label: string;
@@ -22,6 +28,8 @@ export interface RecommendationView {
 const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
   assign_specialist: "branch",
   assign_reviewer: "check",
+  run_specialist: "bolt",
+  run_reviewer: "bolt",
   transition: "board",
   accept_completion: "check",
 };
@@ -29,6 +37,8 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
 const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   assign_specialist: "Primary specialist",
   assign_reviewer: "Reviewer",
+  run_specialist: "Run specialist",
+  run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",
 };

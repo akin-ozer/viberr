@@ -35,6 +35,8 @@ import {
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
+  operatorRunReviewer,
+  operatorRunSpecialist,
   operatorTransitionStage,
   resolveOperatorAuthority,
   type OperatorAutonomy,
@@ -214,6 +216,86 @@ describe("operatorAssignSpecialist", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(task().frontmatter.specialist).toBeNull();
+  });
+});
+
+describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYABLE card", () => {
+  it("run_specialist under recommend adds an actionable card (not a dead-end comment) that apply STARTS the run", async () => {
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    // Assign the specialist directly first (assignment isn't what's recommended
+    // here — starting its run is).
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+
+    const r = await operatorRunSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    // The regression: a STRUCTURED, applyable recommendation — NOT a bare
+    // "Awaiting a maintainer to confirm" comment with no button.
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("run_specialist");
+    // No run started yet (it's only recommended).
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+
+    // A maintainer applies the card → the specialist run actually starts.
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+  });
+
+  it("run_reviewer under recommend adds an applyable card carrying the reviewer profileId", async () => {
+    deployRoster([
+      { capabilityId: "summon-reviewers", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    // Engage the reviewer first (starting its run is what's recommended).
+    const { assignReviewer } = await import("./specialist-run.server");
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const r = await operatorRunReviewer(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("run_reviewer");
+    expect(recs[0]!.profileId).toBe("reviewer");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
   });
 });
 

@@ -756,15 +756,15 @@ export async function operatorRunSpecialist(
     return { outcome: "denied", message: "Running the specialist is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      "**Recommendation:** start the primary specialist's run. Awaiting a maintainer to confirm.",
-      "recommend",
+      { kind: "run_specialist", label: "Start the primary specialist's run" },
+      "The specialist is ready to work this task; a maintainer starts the run.",
     );
-    return { outcome: "recommended", message: "Posted a run recommendation." };
+    return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
   }
   const result = await startSpecialistRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
@@ -821,15 +821,16 @@ export async function operatorRunReviewer(
     return { outcome: "denied", message: "Running a reviewer is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      `**Recommendation:** start the reviewer run for \`${input.profileId}\`. Awaiting a maintainer to confirm.`,
-      "recommend",
+      { kind: "run_reviewer", profileId: input.profileId, label: `Start ${name}'s review run` },
+      `${name} is engaged as a reviewer; a maintainer starts the review run.`,
     );
-    return { outcome: "recommended", message: "Posted a reviewer-run recommendation." };
+    return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
   }
   const result = await startReviewerRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {

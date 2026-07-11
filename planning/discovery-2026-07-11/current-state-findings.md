@@ -75,12 +75,14 @@ Original detail (for the record):
    `GITHUB/GOOGLE_OAUTH_CLIENT_ID` env is set; this instance has neither, so the row is unclaimable.
    (The OAuth-claim *logic* IS built and unit-tested — the stale "documented later wiring" comment at
    [users-panel.tsx:19](../../app/features/org-settings/users-panel.tsx) is itself a LOW finding.)
-**Still open (not part of the seed ruling):**
-6. **`run_specialist`/`run_reviewer` "recommend" branch is a dead-end**
+6. **`run_specialist`/`run_reviewer` "recommend" branch was a dead-end — FIXED.**
    ([operator-actions.server.ts:758](../../app/server/tasks/operator-actions.server.ts)) — under supervised
-   autonomy it posts a "*Recommendation: … Awaiting a maintainer to confirm*" comment with **no card and
-   no apply button**, unlike the sibling assign/transition/accept paths. A supervised operator strands the
-   task. A real UX gap, independent of seed policy — documented for a follow-up pass.
+   autonomy it posted a "*Recommendation: … Awaiting a maintainer to confirm*" comment with **no card and
+   no apply button**, unlike the sibling assign/transition/accept paths, so a supervised operator stranded
+   the task. Fixed: added `run_specialist` / `run_reviewer` recommendation kinds — both operator paths now
+   emit an **actionable card** (via `addRecommendation`), `applyRecommendation` starts the run
+   (admin|maintainer, RBAC re-checked in `startSpecialistRun`/`startReviewerRun`), and the UI renders the
+   card with a one-click Apply. 2 regression tests; verified live in the browser (card + Apply button).
 
 ## LOW — honesty/cosmetic (documented)
 

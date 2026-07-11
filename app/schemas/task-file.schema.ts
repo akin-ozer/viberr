@@ -91,6 +91,13 @@ export const RECOMMENDATION_KINDS = [
   "assign_specialist",
   "assign_reviewer",
   "transition",
+  // Under `recommend` autonomy the operator can't start runs itself, so it
+  // recommends STARTING the specialist / reviewer run — an actionable card a
+  // maintainer applies with one click (previously a dead-end comment with no
+  // apply affordance). profileId targets the reviewer to run; the primary
+  // specialist run needs none.
+  "run_specialist",
+  "run_reviewer",
   // A clean review → the operator recommends accepting completion, which moves
   // the task to Done (the review→done boundary). Rendered as an actionable card
   // symmetric with the other stage transitions; applying it (admin|maintainer)
