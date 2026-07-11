@@ -338,6 +338,34 @@ export function parseTaskFrontmatter(
     );
   }
 
+  // stage — the board column. A missing or unparseable stage must NOT be
+  // silently invented as a real stage id: the old hardcoded `triage` fallback
+  // relocated the card to a different board column (wrong for a task that was in
+  // e.g. `review`) and was meaningless for a project without a `triage` stage.
+  // Fall back to a BLANK marker + an `unresolved_stage` warning instead. The
+  // blank stage matches no project column, so the projection lands the card in
+  // the board's orphan ("unknown stage") bucket rather than moving it, and both
+  // this warning and the projection's `reference.unknown_stage` floor readiness
+  // to input_required so it surfaces. (Resolving a blank stage to the project's
+  // first / last-known stage would need the project's stage list and belongs to
+  // the projection layer, not this context-free parser.)
+  let stage: string;
+  const stageResult = taskFrontmatterSchema.shape.stage.safeParse(data.stage);
+  if (stageResult.success) {
+    stage = stageResult.data;
+  } else {
+    stage = "";
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.unresolved_stage",
+        data.stage === undefined
+          ? "Frontmatter field `stage` is missing — the task's stage is unresolved (shown as an unknown stage) until it is set."
+          : `Frontmatter field \`stage\` is invalid (${stageResult.error.issues[0]?.message ?? "unparseable"}) — the task's stage is unresolved (shown as an unknown stage) until it is corrected.`,
+        "stage",
+      ),
+    );
+  }
+
   const frontmatter: TaskFrontmatter = {
     key,
     title: tolerant(
@@ -348,14 +376,7 @@ export function parseTaskFrontmatter(
       key,
       { required: true },
     ),
-    stage: tolerant(
-      diagnostics,
-      "stage",
-      data.stage,
-      taskFrontmatterSchema.shape.stage,
-      "triage",
-      { required: true },
-    ),
+    stage,
     readiness: tolerant(
       diagnostics,
       "readiness",

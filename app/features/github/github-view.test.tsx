@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
-import { CredentialCard } from "./credential-card";
+import { CredentialCard, CredentialManageActions } from "./credential-card";
 import {
   BranchesPanel,
   PullRequestsPanel,
@@ -169,6 +169,80 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-warn .btn")!.textContent).toBe(
       "Grant scope",
     );
+  });
+
+  it("renders the manageActions slot in every state, including 'none'", () => {
+    const slot = <div className="cred-manage">manage-slot</div>;
+    const withPat = render(
+      <CredentialCard
+        credential={healthyCredential}
+        onOpenTask={() => {}}
+        manageActions={slot}
+      />,
+    );
+    expect(withPat.container.querySelector(".cred-manage")).not.toBeNull();
+    cleanup();
+    const withNone = render(
+      <CredentialCard
+        credential={noneCredential}
+        onOpenTask={() => {}}
+        manageActions={slot}
+      />,
+    );
+    expect(withNone.container.querySelector(".cred-manage")).not.toBeNull();
+  });
+});
+
+describe("CredentialManageActions (finding #13)", () => {
+  it("unconfigured → only Attach; configured → Rotate + confirmed Remove", () => {
+    const onSet = vi.fn();
+    const onClear = vi.fn();
+    const attach = render(
+      <CredentialManageActions
+        configured={false}
+        canManage
+        busy={false}
+        onSet={onSet}
+        onClear={onClear}
+      />,
+    );
+    expect(attach.queryByText("Remove credential")).toBeNull();
+    fireEvent.click(attach.getByText("Attach credential"));
+    expect(onSet).toHaveBeenCalled();
+    cleanup();
+
+    const bound = render(
+      <CredentialManageActions
+        configured
+        canManage
+        busy={false}
+        onSet={onSet}
+        onClear={onClear}
+      />,
+    );
+    fireEvent.click(bound.getByText("Rotate credential"));
+    expect(onSet).toHaveBeenCalledTimes(2);
+    // Remove is gated by the confirm dialog.
+    fireEvent.click(bound.getByText("Remove credential"));
+    expect(onClear).not.toHaveBeenCalled();
+    expect(bound.container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    fireEvent.click(
+      bound.getByText("Remove credential", { selector: "button.btn.danger" }),
+    );
+    expect(onClear).toHaveBeenCalled();
+  });
+
+  it("renders nothing when the viewer can't manage credentials", () => {
+    const { container } = render(
+      <CredentialManageActions
+        configured
+        canManage={false}
+        busy={false}
+        onSet={() => {}}
+        onClear={() => {}}
+      />,
+    );
+    expect(container.querySelector(".cred-manage")).toBeNull();
   });
 });
 

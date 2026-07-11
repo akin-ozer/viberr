@@ -41,7 +41,7 @@ describe("LiveRunPanel", () => {
   });
 
   it("shows the AgentPicker when 2+ runs are running (concurrent case)", () => {
-    const runs = [mkRun({ id: "primary" }), mkRun({ id: "c0", who: { kind: "agent", backend: "codex", name: "Codex", role: "Consultant" }, backend: "codex" })];
+    const runs = [mkRun({ id: "primary" }), mkRun({ id: "c0", who: { kind: "agent", backend: "codex", name: "Codex", role: "Reviewer" }, backend: "codex" })];
     const { container, getByText } = render(
       <LiveRunPanel runtime={runs} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
     );

@@ -23,6 +23,12 @@ beforeAll(async () => {
   runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedOrgResources } = await import("~/server/org/org-seed.server");
   seedOrgResources(app.db, { dataRoot: app.dataRoot });
+  // Ships the *-expertise skill folders to disk (no DB rows) — the org view
+  // must surface them too (disk is truth, finding #7).
+  const { seedDefaultAgentAssets } = await import(
+    "~/server/seed/default-assets.server"
+  );
+  seedDefaultAgentAssets(app.dataRoot);
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // org admin
@@ -77,13 +83,22 @@ describe("RBAC", () => {
     expect(data.view.domains).toHaveLength(1);
     expect(data.view.kbs).toHaveLength(3);
     expect(data.view.mcps).toHaveLength(3);
-    expect(data.view.skills).toHaveLength(4);
+    // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 3
+    // shipped *-expertise skill folders that have no row — all listed. (Tester
+    // was merged into the Reviewer, so tester-expertise no longer ships.)
+    expect(data.view.skills).toHaveLength(7);
+    const skillNames = data.view.skills.map((s) => s.name);
+    expect(skillNames).toContain("developer-expertise");
+    expect(skillNames).toContain("reviewer-expertise");
+    expect(skillNames).not.toContain("tester-expertise");
+    const devSkill = data.view.skills.find((s) => s.name === "developer-expertise")!;
+    // A disk-only skill: synthetic id + a summary derived from its SKILL.md.
+    expect(devSkill.id).toBe("disk:developer-expertise");
+    expect(devSkill.summary.length).toBeGreaterThan(0);
     // Specialists only — the operator template is not listed.
     expect(data.view.gagents.map((g) => g.id)).toEqual([
-      "consultant",
       "developer",
       "reviewer",
-      "tester",
     ]);
     // Every seeded template is deployed in viberr-core → delete-guarded.
     expect(data.view.gagents.every((g) => g.used >= 1)).toBe(true);
@@ -155,16 +170,15 @@ describe("users & access intents", () => {
     expect(removed).toMatchObject({ ok: true, toast: "Yeni Kişi removed" });
   });
 
-  it("domain whitelist dedupes with the modal-stays-open contract", async () => {
+  it("duplicate domain whitelist is refused like the other invite intents", async () => {
     const dup = await postAction(ids.arda, {
       intent: "invite-domain",
       email: "@viberr.dev",
       role: "member",
     });
     expect(dup).toMatchObject({
-      ok: true,
-      duplicate: true,
-      toast: "@viberr.dev is already whitelisted",
+      ok: false,
+      error: "@viberr.dev is already whitelisted",
     });
 
     const added = await postAction(ids.arda, {
@@ -183,6 +197,35 @@ describe("users & access intents", () => {
     expect(removed).toMatchObject({
       ok: true,
       toast: "@hepapi.com removed from the allowlist",
+    });
+  });
+
+  it("disable/enable round-trips through the view; self-disable is refused", async () => {
+    const disabled = await postAction(ids.arda, {
+      intent: "user-disable",
+      userId: ids.selin,
+    });
+    expect(disabled.ok).toBe(true);
+    expect(String(disabled.toast)).toContain("disabled");
+    const { view } = await runLoader(ids.arda);
+    expect(view.users.find((u) => u.id === ids.selin)!.disabled).toBe(true);
+
+    const enabled = await postAction(ids.arda, {
+      intent: "user-enable",
+      userId: ids.selin,
+    });
+    expect(enabled.ok).toBe(true);
+    const { view: after } = await runLoader(ids.arda);
+    expect(after.users.find((u) => u.id === ids.selin)!.disabled).toBe(false);
+
+    // An admin can't disable their own account (the last-admin lockout).
+    const self = await postAction(ids.arda, {
+      intent: "user-disable",
+      userId: ids.arda,
+    });
+    expect(self).toMatchObject({
+      ok: false,
+      error: "You can't disable your own account",
     });
   });
 });

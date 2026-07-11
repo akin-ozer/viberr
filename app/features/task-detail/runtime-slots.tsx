@@ -46,17 +46,29 @@ export function AgentLogsSlot({
   logSel,
   onLogSel,
   linesByThread,
+  onRetryBackend,
+  retrying,
 }: {
   runtime: RunView[];
   /** Parent-held agent-logs thread selection (spec §4.10 wiring). */
   logSel: string | null;
   onLogSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
+  /** Retry the assigned specialist on the other backend (D4). */
+  onRetryBackend?: (backend: "claude" | "codex") => void;
+  retrying?: boolean;
 }) {
   // Suppress the panel entirely (incl. the mock's empty state) only when the
   // task has never had any runtime thread — matches the mock: VIB-166/168.
   if (runtime.length === 0) return null;
   return (
-    <AgentLogsPanel runtime={runtime} sel={logSel} onSel={onLogSel} linesByThread={linesByThread} />
+    <AgentLogsPanel
+      runtime={runtime}
+      sel={logSel}
+      onSel={onLogSel}
+      linesByThread={linesByThread}
+      {...(onRetryBackend ? { onRetryBackend } : {})}
+      retrying={retrying ?? false}
+    />
   );
 }

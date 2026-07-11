@@ -150,17 +150,3 @@ export function listAgentDeployments(
   }
   return instances;
 }
-
-/** Distinct-task engagement count per profile id (ActiveBadge numbers). */
-export function deploymentCountsByProfile(
-  deployments: AgentDeploymentView[],
-): Record<string, number> {
-  const sets = new Map<string, Set<string>>();
-  for (const d of deployments) {
-    if (!sets.has(d.profileId)) sets.set(d.profileId, new Set());
-    sets.get(d.profileId)!.add(d.taskKey);
-  }
-  const counts: Record<string, number> = {};
-  for (const [profileId, keys] of sets) counts[profileId] = keys.size;
-  return counts;
-}

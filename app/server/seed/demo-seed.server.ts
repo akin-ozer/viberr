@@ -30,6 +30,7 @@ import {
   SEED_PEOPLE,
   seedNotifications,
   seedProjects,
+  seedStubTasks,
   seedTasks,
   type SeedUserIds,
 } from "./demo-data.server";
@@ -208,6 +209,24 @@ export function runDemoSeed(
     );
   }
 
+  // 4b. Stub-project tasks (DEP-31, BIL-9) so the cross-project inbox rows
+  //     navigate to a real record instead of a "task not found" page.
+  const stubTasks = seedStubTasks(ids);
+  for (const task of stubTasks) {
+    events += task.timeline.length;
+    writeFileAtomic(
+      taskFilePath(task.projectSlug, task.frontmatter.key, dataRoot),
+      serializeTaskFile({
+        frontmatter: task.frontmatter,
+        unknownFrontmatter: {},
+        goal: task.goal,
+        packet: task.packet,
+        timeline: task.timeline,
+        extraSections: [],
+      }),
+    );
+  }
+
   // 5. Projections (force: user renames change actor snapshots without
   //    changing file hashes on re-seed).
   const rescan = rebuildAll(db, { dataRoot, force: true });
@@ -228,6 +247,9 @@ export function runDemoSeed(
       taskKey: n.taskKey,
       occurredAt: n.occurredAt,
       readAt: n.unread ? null : seededAt,
+      // A fixture inbox — deterministic regardless of any prefs a prior
+      // session left, so `seed --reset` stays pristine.
+      bypassPrefs: true,
     });
   }
 
@@ -257,7 +279,7 @@ export function runDemoSeed(
     details: {
       reset: options.reset ?? false,
       projects: projects.length,
-      tasks: tasks.length,
+      tasks: tasks.length + stubTasks.length,
       notifications: notifications.length,
     },
   });
@@ -265,7 +287,7 @@ export function runDemoSeed(
   const summary: DemoSeedSummary = {
     users: SEED_PEOPLE.length,
     projects: projects.length,
-    tasks: tasks.length,
+    tasks: tasks.length + stubTasks.length,
     events,
     notifications: notifications.length,
     agentProfiles: SEED_AGENT_PROFILES.length,

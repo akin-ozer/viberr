@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import type { loader as taskLoader, action as taskAction } from "~/routes/project.task";
 
 /**
@@ -54,7 +55,7 @@ async function postIntent(key: string, userId: string, fields: Record<string, st
 }
 
 describe("loader — runtime projection shape", () => {
-  it("VIB-142: op idle (finished-no-label), primary+consultant done, stored order", async () => {
+  it("VIB-142: op idle (finished-no-label), primary+reviewer done, stored order", async () => {
     const { runtime } = await runLoader("VIB-142", ids.arda);
     expect(runtime.map((r) => r.id)).toEqual(["op", "primary", "c0"]);
     expect(runtime[0]).toMatchObject({ op: true, state: "idle", who: { name: "Operator" } });
@@ -95,7 +96,6 @@ describe("action — run-interrupt RBAC + audit", () => {
     expect(interrupted.lifecycle).toBe("interrupted");
     expect(interrupted.interruptedBy?.userId).toBe(ids.arda);
 
-    const { listAuditEvents } = await import("~/server/audit/audit-recorder.server");
     const audits = listAuditEvents(app.db, { action: "runtime.run.interrupted" });
     expect(audits[0]?.actorUserId).toBe(ids.arda);
     expect(audits[0]?.taskKey).toBe("VIB-151");

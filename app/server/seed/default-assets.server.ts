@@ -9,13 +9,9 @@ import path from "node:path";
 import viberrSkillMd from "./assets/viberr-app-expertise.skill.md?raw";
 import developerSkillMd from "./assets/developer-expertise.skill.md?raw";
 import reviewerSkillMd from "./assets/reviewer-expertise.skill.md?raw";
-import testerSkillMd from "./assets/tester-expertise.skill.md?raw";
-import domainAdvisorSkillMd from "./assets/domain-advisor.skill.md?raw";
 import operatorDefinitionMd from "./assets/operator.definition.md?raw";
 import developerDefinitionMd from "./assets/developer.definition.md?raw";
 import reviewerDefinitionMd from "./assets/reviewer.definition.md?raw";
-import testerDefinitionMd from "./assets/tester.definition.md?raw";
-import consultantDefinitionMd from "./assets/consultant.definition.md?raw";
 import operatorProfileMd from "./assets/operator.profile.md?raw";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
@@ -24,7 +20,7 @@ import { SEED_AGENT_PROFILES } from "./demo-data.server";
 
 /**
  * Ships Viberr's DEFAULT agent assets — the operator PLUS the base specialists
- * (Developer, Reviewer, Tester) — into the live store: each agent's expertise
+ * (Developer, Reviewer) — into the live store: each agent's expertise
  * skill, its detailed definition (persona), and its profile template. Writes
  * each into `${VIBERR_DATA_ROOT}` the first time a store lacks it, so the agent
  * runtimes can load them from the store (file-native, so a user can then edit
@@ -36,7 +32,7 @@ import { SEED_AGENT_PROFILES } from "./demo-data.server";
  */
 
 /** The base specialist profile ids shipped into every store (built-in agents). */
-const DEFAULT_SPECIALIST_IDS = ["developer", "reviewer", "tester"] as const;
+const DEFAULT_SPECIALIST_IDS = ["developer", "reviewer"] as const;
 
 /** Static prose assets bundled from `assets/` (skills + definitions + operator
  *  profile template). */
@@ -45,14 +41,10 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   { rel: path.join("skills", "viberr-app-expertise", "SKILL.md"), content: viberrSkillMd },
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
-  { rel: path.join("skills", "tester-expertise", "SKILL.md"), content: testerSkillMd },
-  { rel: path.join("skills", "domain-advisor", "SKILL.md"), content: domainAdvisorSkillMd },
   // Definitions — the detailed persona + personality each run loads.
   { rel: path.join("agents", "definitions", "operator.md"), content: operatorDefinitionMd },
   { rel: path.join("agents", "definitions", "developer.md"), content: developerDefinitionMd },
   { rel: path.join("agents", "definitions", "reviewer.md"), content: reviewerDefinitionMd },
-  { rel: path.join("agents", "definitions", "tester.md"), content: testerDefinitionMd },
-  { rel: path.join("agents", "definitions", "consultant.md"), content: consultantDefinitionMd },
   // The operator PROFILE template — so an operator deployment resolves (kind,
   // backends, capabilities) in a store that was never demo-seeded, which is what
   // makes the operator preinstalled everywhere.
@@ -63,7 +55,7 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
  * The base specialist profile templates, generated from SEED_AGENT_PROFILES so
  * a deployment resolves (kind, backends, capabilities, resources) in a store
  * that was never demo-seeded — the counterpart of the operator profile template
- * that makes Developer/Reviewer/Tester preinstalled everywhere.
+ * that makes Developer/Reviewer preinstalled everywhere.
  */
 function specialistProfileAssets(): { rel: string; content: string }[] {
   return SEED_AGENT_PROFILES.filter((p) =>

@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type Database from "better-sqlite3";
 import type {
   AgentRef,
+  FileActorRef,
   TaskFileEvent,
 } from "~/schemas/task-file.schema";
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
@@ -459,7 +460,15 @@ export interface StartSpecialistRunResult {
  */
 export async function startSpecialistRun(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; directive?: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    directive?: string;
+    /** Force this run onto a specific backend regardless of the profile's
+     *  default — used by "retry on the other backend" after an availability /
+     *  quota failure (D4). */
+    backendOverride?: RealBackend;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
@@ -479,7 +488,8 @@ export async function startSpecialistRun(
       "Assign a specialist before starting a run.",
     );
   }
-  const backend: RealBackend = sp.backend === "codex" ? "codex" : "claude";
+  const backend: RealBackend =
+    input.backendOverride ?? (sp.backend === "codex" ? "codex" : "claude");
   // Resolve the model + effort from the deployment (falls back to a sane
   // default). Effort is threaded into the run so the SDK gets the profile's
   // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
@@ -616,16 +626,19 @@ export async function startSpecialistRun(
     },
   });
 
-  // Every specialist run reports back: register the default reply hook so the
-  // agent posts its result as a comment even when started from the UI "Run"
-  // button. Richer callers (operator prompt / @mention) overwrite this.
-  const { registerAgentReply } = await import("./task-actions.server");
-  await registerAgentReply(db, ctx, {
+  // Every specialist run reports back AND has its agent-side delivery
+  // reconciled: register the default reply hook + a workspace-delivery
+  // reconciliation so the agent posts its result as a comment and the task
+  // record picks up the real branch/PR the agent created in its workspace,
+  // even when started from the UI "Run" button. Richer callers (operator
+  // prompt / @mention) overwrite this.
+  await registerReplyAndReconcile(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
     backend,
     role: sp.role,
+    workdir: clone,
   });
 
   return { runId, backend, simulated, role: sp.role };
@@ -642,7 +655,14 @@ export async function startSpecialistRun(
  */
 export async function startReviewerRun(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; profileId: string; directive?: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    directive?: string;
+    /** Force this run onto a specific backend (D4 retry-on-other-backend). */
+    backendOverride?: RealBackend;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
@@ -664,7 +684,8 @@ export async function startReviewerRun(
     );
   }
   const rev = reviewers[index]!;
-  const backend: RealBackend = rev.backend === "codex" ? "codex" : "claude";
+  const backend: RealBackend =
+    input.backendOverride ?? (rev.backend === "codex" ? "codex" : "claude");
 
   let model = defaultModelFor(backend);
   let effort = "";
@@ -779,15 +800,16 @@ export async function startReviewerRun(
     },
   });
 
-  // A reviewer reports back too: register the default reply hook so its verdict
-  // posts as a comment even when the run was started from the UI "Run" button.
-  const { registerAgentReply } = await import("./task-actions.server");
-  await registerAgentReply(db, ctx, {
+  // A reviewer reports back too: register the default reply hook + workspace
+  // reconciliation so its verdict posts as a comment and any real branch/PR it
+  // produced is reconciled, even when started from the UI "Run" button.
+  await registerReplyAndReconcile(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
     backend,
     role: rev.role,
+    workdir: clone,
   });
 
   return { runId, backend, simulated, role: rev.role };
@@ -833,7 +855,7 @@ function readSkillBody(name: string, dataRoot?: string): string {
  * Assemble a specialist's run PERSONA: its detailed definition (who it is + how
  * it works) followed by each of its declared skill bodies (its craft). This is
  * what makes a built-in agent behave as itself — the Developer implements and
- * reports back, the Reviewer critiques, the Tester validates — rather than a
+ * reports back, the Reviewer critiques AND validates (tests) — rather than a
  * generic "analyze the repo" agent. Returns "" when the store ships neither a
  * definition nor any skill (the run still works on the analyze prompt alone).
  *
@@ -932,12 +954,13 @@ function buildAnalyzePrompt(input: {
 }
 
 /** Classify a specialist by its role label so the simulated report and persona
- *  match what the agent actually does (developer implements, reviewer critiques,
- *  tester validates). Anything unrecognized reports as a developer. */
-function classifyRole(role?: string): "developer" | "reviewer" | "tester" {
+ *  match what the agent actually does. The Reviewer is the single quality
+ *  specialist (it reviews the diff AND authors/runs tests), so review/test/QA
+ *  roles all classify as "reviewer". Anything unrecognized reports as a
+ *  developer. */
+function classifyRole(role?: string): "developer" | "reviewer" {
   const r = (role ?? "").toLowerCase();
-  if (/review/.test(r)) return "reviewer";
-  if (/test|valid|qa/.test(r)) return "tester";
+  if (/review|test|valid|qa/.test(r)) return "reviewer";
   return "developer";
 }
 
@@ -961,17 +984,12 @@ export function simulatedFinalReport(
   if (directive?.trim()) {
     if (kind === "reviewer") {
       return (
-        `@operator — reviewed the change against the goal. Correctness: the logic ` +
-        `holds on the paths that matter. Security: input is validated and no ` +
-        `secrets leak. Tests: the new behavior is covered. No blocking findings ` +
-        `(one nit: a comment could be clearer). Verdict: **approve** — ready to accept.`
-      );
-    }
-    if (kind === "tester") {
-      return (
-        `@operator — validated the change. Exercised the happy path plus empty, ` +
-        `boundary, and error-path cases, and added a test for the empty-input case ` +
-        `that was previously uncovered. Full suite passes. Verdict: **pass** — no blockers.`
+        `@operator — reviewed and validated the change against the goal. ` +
+        `Correctness: the logic holds on the paths that matter. Security: input ` +
+        `is validated and no secrets leak. Tests: authored and ran coverage for ` +
+        `the new behavior incl. the empty and boundary cases; full suite passes. ` +
+        `No blocking findings (one nit: a comment could be clearer). Verdict: ` +
+        `**approve** — ready to accept.`
       );
     }
     const test = backend === "codex" ? "a test that exercises" : "a test covering";
@@ -982,10 +1000,7 @@ export function simulatedFinalReport(
     );
   }
   if (kind === "reviewer") {
-    return "Review findings: the change is small and localized; no obvious correctness or security issues in the diff, and the existing tests still pass. Before acceptance I'd want a test that exercises the new path.";
-  }
-  if (kind === "tester") {
-    return "Validation findings: the existing suite passes, but coverage of the new path is thin — the empty and boundary cases are not exercised yet, which is the main gap for this goal.";
+    return "Review findings: the change is small and localized; no obvious correctness or security issues in the diff. The existing tests pass, but coverage of the new path is thin — the empty and boundary cases are not exercised yet, which I'd want closed before acceptance.";
   }
   return backend === "codex"
     ? "Findings: a small Node/TypeScript service (Express). Entry at src/index.ts, HTTP layer under src/server. Dependencies are lean; no test suite is wired yet — the main gap for this goal."
@@ -1138,6 +1153,80 @@ async function cloneRepo(
     });
     return null;
   }
+}
+
+// ------------------------------------------------------- reply + reconcile
+
+/**
+ * The completion hook every specialist/reviewer run started here gets: post
+ * the agent's reply as a comment (the prior default behavior — see
+ * `registerAgentReply`), AND reconcile the task record from what the agent
+ * actually did in its workspace (finding #31 — a real coding agent branches /
+ * pushes / opens a PR through its OWN git/gh creds, entirely outside viberr's
+ * stored-PAT delivery path, leaving task.md `branch`/`pr` null).
+ *
+ * Both legs are best-effort and never block or throw. The reconciliation is
+ * the COMPLEMENT to the server-side `ensureTaskBranch`/`openTaskPr`: it only
+ * runs for REAL (non-simulated) runs, is idempotent, and confirms-and-leaves
+ * values the server already set instead of clobbering them.
+ *
+ * Registration is last-writer-wins per run id (run-service), so a richer
+ * caller (operator prompt / @mention resume) may overwrite this with its own
+ * reply+react callback — same as the prior default hook.
+ */
+async function registerReplyAndReconcile(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    runId: string;
+    backend: RealBackend;
+    role: string;
+    /** The run's workspace clone dir (null when no real clone happened). */
+    workdir: string | null;
+  },
+): Promise<void> {
+  const [
+    { registerRunCompletion },
+    { postAgentReplyComment },
+    { replyTextForRun },
+    { reconcileWorkspaceDelivery },
+  ] = await Promise.all([
+    import("~/server/runtimes/run-service.server"),
+    import("./task-actions.server"),
+    import("./agent-reply.server"),
+    import("~/server/github/workspace-delivery.server"),
+  ]);
+  const actorRef: FileActorRef = {
+    kind: "agent",
+    backend: input.backend,
+    role: input.role,
+  };
+  registerRunCompletion(input.runId, (finished) => {
+    // 1. Default reply (unchanged behavior).
+    void postAgentReplyComment(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef,
+      replyText: replyTextForRun(db, finished.id),
+    });
+    // 2. Reconcile agent-side delivery — best-effort, never blocks the run.
+    //    Skipped for simulated runs (no real git work was done).
+    void reconcileWorkspaceDelivery({
+      db,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      ...(input.workdir ? { workdir: input.workdir } : {}),
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      backend: input.backend,
+      role: input.role,
+      simulated: finished.simulated === 1,
+    }).catch(() => {
+      // reconcileWorkspaceDelivery never throws, but guard anyway.
+    });
+  });
 }
 
 // --------------------------------------------------------------------- shared

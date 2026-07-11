@@ -7,10 +7,7 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
-import {
-  deploymentCountsByProfile,
-  listAgentDeployments,
-} from "./agent-deployments.server";
+import { listAgentDeployments } from "./agent-deployments.server";
 
 /**
  * Live-deployment projection (agents spec §3.3 + ruling 7): derivation from
@@ -24,7 +21,7 @@ afterEach(ctx.cleanup);
 
 function seedTasks(dataRoot: string, slug: string) {
   // review + waiting human → operator "packet open", primary "waiting on
-  // human", consultant "anchored · on call".
+  // human", reviewer "anchored · on call".
   writeTask(dataRoot, slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       stage: "review",
@@ -41,7 +38,7 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "agent",
       operator: { assignedAtStageId: "ready" },
       specialist: { profileId: "developer", backend: "claude", role: "Developer" },
-      reviewers: [{ profileId: "consultant", backend: "codex", role: "Consultant" }],
+      reviewers: [{ profileId: "reviewer", backend: "codex", role: "Reviewer" }],
     }),
   });
   // ready + waiting none → primary "on call".
@@ -50,7 +47,7 @@ function seedTasks(dataRoot: string, slug: string) {
       stage: "ready",
       waiting: "none",
       operator: { assignedAtStageId: "ready" },
-      specialist: { profileId: "tester", backend: "codex", role: "Tester" },
+      specialist: { profileId: "reviewer", backend: "codex", role: "Reviewer" },
     }),
   });
   // done → contributes NOTHING even with a full crew.
@@ -89,11 +86,11 @@ describe("listAgentDeployments", () => {
     expect(byKey("VIB-2").map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
       ["developer", "primary", "working"],
-      ["consultant", "reviewer", "anchored · on call"],
+      ["reviewer", "reviewer", "anchored · on call"],
     ]);
     expect(byKey("VIB-3").map((d) => [d.profileId, d.engagement, d.status])).toEqual([
       ["operator", "operator", "coordinating"],
-      ["tester", "primary", "on call"],
+      ["reviewer", "primary", "on call"],
     ]);
 
     // Join key is the ASSIGNMENT's profileId — the display role string is
@@ -158,20 +155,5 @@ describe("listAgentDeployments", () => {
     expect(vib1Primary.running).toBe(false);
     // Status vocabulary is untouched by the join.
     expect(vib1Primary.status).toBe("waiting on human");
-  });
-
-  it("counts distinct task keys per profile (ActiveBadge numbers)", () => {
-    const store = setupTestStore(ctx);
-    seedTasks(store.dataRoot, store.slug);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-
-    const counts = deploymentCountsByProfile(
-      listAgentDeployments(store.db, store.slug),
-    );
-    expect(counts.operator).toBe(3);
-    expect(counts.developer).toBe(2); // VIB-1 + VIB-2 (VIB-4 is done)
-    expect(counts.reviewer).toBe(1);
-    expect(counts.consultant).toBe(1);
-    expect(counts.tester).toBe(1);
   });
 });

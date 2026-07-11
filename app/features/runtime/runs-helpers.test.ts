@@ -34,7 +34,7 @@ describe("runLabel / roleShort", () => {
     expect(runLabel(base)).toBe("Codex · Developer");
     expect(runLabel({ ...base, op: true, who: { kind: "agent", name: "Operator" } })).toBe("Operator");
   });
-  it("roleShort maps op/primary/consultant", () => {
+  it("roleShort maps op/primary/reviewer", () => {
     expect(roleShort({ ...base, op: true })).toBe("operator");
     expect(roleShort(base)).toBe("primary");
     expect(roleShort({ ...base, role: "Reviewer" })).toBe("reviewer");

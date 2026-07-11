@@ -1,13 +1,15 @@
+import type { NotificationKind } from "~/shared/mapping/notification.server";
+
 /**
  * Notification-routing preference schema (Phase 9C, profile.md §3.4/§3.5 +
  * ruling 13). Client-safe: catalog copy + defaults + the EXPLICIT plural
  * pref-id ↔ singular notification-kind mapping (contracts §4 flags the
  * mismatch — keep both vocabularies, map once here).
  *
- * Per ruling 13 the `email` booleans and the nudge shape are SCHEMA-ONLY
- * (no mailer in V1): they persist through the store untouched but no UI
- * surfaces them — only the `app` toggle renders. The mock's `ghConnected`
- * pref is dropped entirely (derived from the user row instead).
+ * V1 routes to the in-app channel ONLY (no mailer, ruling 13): each category
+ * carries a single `app` toggle. The dead email booleans and the nudge shape
+ * (which no UI ever surfaced and no code ever read) were removed. The mock's
+ * `ghConnected` pref is dropped entirely (derived from the user row instead).
  */
 
 export const NOTIF_PREF_CATEGORIES = [
@@ -22,25 +24,38 @@ export type NotifPrefCategory = (typeof NOTIF_PREF_CATEGORIES)[number];
 
 export interface NotifChannelPrefs {
   app: boolean;
-  /** Schema-only in V1 — no mailer (ruling 13). */
-  email: boolean;
 }
 
 export type NotifPrefs = Record<NotifPrefCategory, NotifChannelPrefs>;
 
-/** Mock `initPrefs` defaults, verbatim (ui.jsx). */
+/** Every routing category ON by default — the model is opt-OUT (a user only
+ *  ever stores a pref when they silence a category). */
 export const DEFAULT_NOTIF_PREFS: NotifPrefs = {
-  packets: { app: true, email: true },
-  approvals: { app: true, email: false },
-  mentions: { app: true, email: true },
-  policy: { app: true, email: true },
-  quality: { app: true, email: false },
+  packets: { app: true },
+  approvals: { app: true },
+  mentions: { app: true },
+  policy: { app: true },
+  quality: { app: true },
 };
 
-/** Nudge prefs — schema-only (ruling 13 / profile.md §8 Q3): kept for a
- * future "re-ping unanswered decisions" feature, never rendered in V1. */
-export const DEFAULT_NUDGE = { on: true, hours: 2 } as const;
-export const PROFILE_NUDGE_HOURS = [1, 2, 4, 8, 24] as const;
+/**
+ * The EXPLICIT singular-kind → plural-category map (contracts §4). Every
+ * `notifications.kind` routes through exactly one pref category; a `Record`
+ * keyed by `NotificationKind` makes adding a kind a compile error until it is
+ * mapped. This is the single source consulted before a notification is
+ * inserted (createNotification) — off category ⇒ the row is never written.
+ */
+const KIND_TO_CATEGORY: Record<NotificationKind, NotifPrefCategory> = {
+  packet: "packets",
+  approval: "approvals",
+  mention: "mentions",
+  policy: "policy",
+  quality: "quality",
+};
+
+export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory {
+  return KIND_TO_CATEGORY[kind];
+}
 
 /** The 5 routing categories — PROFILE_NTF, verbatim from profile.jsx. */
 export const PROFILE_NTF: {
@@ -98,9 +113,8 @@ export function mergeNotifPrefs(raw: unknown): NotifPrefs {
   for (const category of NOTIF_PREF_CATEGORIES) {
     const entry = (raw as Record<string, unknown>)[category];
     if (entry === null || typeof entry !== "object") continue;
-    const { app, email } = entry as Record<string, unknown>;
+    const { app } = entry as Record<string, unknown>;
     if (typeof app === "boolean") merged[category].app = app;
-    if (typeof email === "boolean") merged[category].email = email;
   }
   return merged;
 }

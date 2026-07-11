@@ -104,7 +104,7 @@ export function bootServer(): void {
 
   // Preinstall the built-in agents — the operator (ADR-002, one per active task,
   // so the create-time auto-invoke fires everywhere) plus the base specialists
-  // (Developer, Reviewer, Tester) — into every project that lacks any of them,
+  // (Developer, Reviewer) — into every project that lacks any of them,
   // so they are usable across all boards, including projects that predate them.
   // Runs after the rescan (so the project list is populated) and before the
   // watcher (no concurrent writer).

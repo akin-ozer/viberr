@@ -132,6 +132,11 @@ const USERS: OrgUserView[] = [
     pwreset: true, disabled: false,
   },
 ];
+const DISABLED_USER: OrgUserView = {
+  id: "u_dz", name: "Deniz Yıldız", email: "deniz@viberr.dev", initials: "DY",
+  tone: "", role: "member", status: "active", idp: "local", pwreset: false,
+  disabled: true,
+};
 const DOMAINS: DomainRecord[] = [
   { id: "d1", domain: "@viberr.dev", role: "member", createdAt: "2026-07-01T09:00:00.000Z" },
 ];
@@ -181,6 +186,40 @@ describe("UsersPanel", () => {
     fireEvent.click(getByText("Remove", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "user-remove", userId: "u_selin" }),
+    );
+  });
+
+  it("disable confirms then posts user-disable; self-disable is client-guarded", async () => {
+    const { getByText, getByLabelText, queryByRole } = renderPanel(
+      <UsersPanel users={USERS} domains={DOMAINS} meId="u_arda" />,
+    );
+    // Self-disable is refused client-side — no dialog, no server round-trip.
+    fireEvent.click(getByLabelText("Disable Arda Kaya"));
+    await waitFor(() =>
+      expect(getByText("You can't disable your own account")).toBeTruthy(),
+    );
+    expect(queryByRole("alertdialog")).toBeNull();
+    expect(lastForm).toBeNull();
+
+    // Disabling another user goes through the confirm.
+    fireEvent.click(getByLabelText("Disable Selin Aksoy"));
+    expect(getByText("Disable Selin Aksoy?")).toBeTruthy();
+    fireEvent.click(getByText("Disable", { selector: "button.btn.danger" }));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "user-disable", userId: "u_selin" }),
+    );
+  });
+
+  it("a disabled user shows the pill + an enable action that posts user-enable", async () => {
+    const { getByText, getByLabelText, queryByLabelText } = renderPanel(
+      <UsersPanel users={[ME, DISABLED_USER]} domains={DOMAINS} meId="u_arda" />,
+    );
+    expect(getByText("disabled")).toBeTruthy();
+    // The disable button is replaced by an enable button (no confirm needed).
+    expect(queryByLabelText("Disable Deniz Yıldız")).toBeNull();
+    fireEvent.click(getByLabelText("Enable Deniz Yıldız"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "user-enable", userId: "u_dz" }),
     );
   });
 

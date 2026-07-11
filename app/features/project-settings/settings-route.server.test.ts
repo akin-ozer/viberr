@@ -5,6 +5,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import type { SettingsViewData } from "./settings-query.server";
 
 /**
@@ -122,9 +123,6 @@ describe("identity", () => {
     const { view } = await runLoader(ids.arda);
     expect(view.project.description).toBe(
       "Updated description for the settings test.",
-    );
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
     );
     expect(
       listAuditEvents(app.db, { action: "project.settings.updated" })[0],
@@ -332,9 +330,6 @@ describe("members", () => {
       ok: true,
       toast: "Selin Aksoy removed from Viberr Core",
     });
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     expect(
       listAuditEvents(app.db, { action: "project.member.removed" })[0],
     ).toMatchObject({ subjectId: ids.selin, projectSlug: "viberr-core" });
@@ -424,9 +419,6 @@ describe("danger zone", () => {
         .prepare(`SELECT slug FROM projects WHERE slug = 'billing-service'`)
         .get(),
     ).toBeUndefined();
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     expect(listAuditEvents(app.db, { action: "project.deleted" })[0]).toMatchObject(
       { subjectId: "billing-service" },
     );
@@ -469,9 +461,6 @@ describe("archive-project", () => {
     ).toBe(1);
     expect((await runLoader(ids.arda)).view.project.archived).toBe(true);
 
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     expect(
       listAuditEvents(app.db, { action: "project.archived" })[0],
     ).toMatchObject({ subjectId: "viberr-core" });

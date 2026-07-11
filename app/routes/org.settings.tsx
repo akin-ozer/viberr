@@ -3,6 +3,7 @@ import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { requireAuth, requireRole } from "~/server/auth/require-user.server";
+import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
@@ -179,6 +180,19 @@ export async function action({ request }: Route.ActionArgs) {
         const result = deleteOrgUser(db, field("userId"), actor);
         return ok(result.toast);
       }
+      case "user-disable": {
+        if (field("userId") === admin.id) {
+          return fail("You can't disable your own account", 409);
+        }
+        // Kills their sessions + blocks sign-in (login.server + require-user
+        // already gate on `disabled`); last-admin guard lives in updateUser.
+        const user = disableUser(db, field("userId"), actor);
+        return ok(`${user.name} disabled — they can't sign in`);
+      }
+      case "user-enable": {
+        const user = enableUser(db, field("userId"), actor);
+        return ok(`${user.name} re-enabled`);
+      }
       case "invite-github": {
         const result = whitelistGithubUser(
           db,
@@ -202,10 +216,7 @@ export async function action({ request }: Route.ActionArgs) {
           actor,
         );
         if (result.status === "invalid") return fail(result.message);
-        if (result.status === "duplicate") {
-          // Mock: toast + the modal stays open.
-          return ok(result.message, { duplicate: true });
-        }
+        if (result.status === "duplicate") return fail(result.message, 409);
         return ok(result.toast);
       }
       case "invite-local": {

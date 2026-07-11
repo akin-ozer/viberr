@@ -147,10 +147,15 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   if (isRouteErrorResponse(error)) {
     title = error.status === 404 ? "Page not found" : `Error ${error.status}`;
+    // Guards throw `data("<user message>", { status })` (e.g. the 403 from
+    // requireProjectMember) — that string IS the page copy. statusText is
+    // transport boilerplate, so it is only a fallback.
+    const thrown = typeof error.data === "string" ? error.data.trim() : "";
     detail =
-      error.status === 404
+      thrown ||
+      (error.status === 404
         ? "The page you are looking for does not exist."
-        : error.statusText || detail;
+        : error.statusText || detail);
   } else if (import.meta.env.DEV && error instanceof Error) {
     detail = error.message;
     stack = error.stack;

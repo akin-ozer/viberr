@@ -159,6 +159,53 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.effort).toBeUndefined();
   });
 
+  it("isolates every run from the host ~/.claude (settingSources + skills empty)", async () => {
+    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+    let captured: { settingSources?: string[]; skills?: string[] } | undefined;
+    const queryFn = (params: { options?: { settingSources?: string[]; skills?: string[] } }) => {
+      captured = params.options;
+      const { q } = fakeQuery(result);
+      return q;
+    };
+    createClaudeAdapter({ queryFn: queryFn as never }).start(SPEC, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    // Empty settingSources = no host settings tiers; empty skills = the model
+    // sees NONE of the operator-user's personal Claude Code skills/plugins.
+    expect(captured?.settingSources).toEqual([]);
+    expect(captured?.skills).toEqual([]);
+  });
+
+  it("denies the repo-mutation built-ins for an operator run, leaving specialists unconfined", async () => {
+    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+    // Capture each run's options by index (no reassignment → clean typing).
+    const seen: ({ disallowedTools?: string[] } | undefined)[] = [];
+    const queryFn = (params: { options?: { disallowedTools?: string[] } }) => {
+      seen.push(params.options);
+      const { q } = fakeQuery(result);
+      return q;
+    };
+    const run = async (spec: RunSpec) => {
+      createClaudeAdapter({ queryFn: queryFn as never }).start(spec, { onLine: () => {}, onExit: () => {} });
+      await drain();
+      return seen[seen.length - 1];
+    };
+
+    // Operator: Bash/Edit/Write/NotebookEdit/Task are removed from context so it
+    // genuinely cannot write code — its job is the mcp__viberr__* tools.
+    expect((await run({ ...SPEC, kind: "operator" }))?.disallowedTools).toEqual(
+      expect.arrayContaining(["Bash", "Edit", "Write", "NotebookEdit"]),
+    );
+
+    // A specialist with no withheld caps keeps the full toolset (it does the
+    // dev work) — no denylist is imposed.
+    expect((await run({ ...SPEC, kind: "primary" }))?.disallowedTools).toBeUndefined();
+
+    // A specialist WITH withheld caps has exactly those denied (nothing extra).
+    expect(
+      (await run({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] }))?.disallowedTools,
+    ).toEqual(["Bash(git push:*)"]);
+  });
+
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ type: "assistant", message: { content: [{ type: "text", text: "line " + i }] } }));
     const { q, wasInterrupted } = fakeQuery(many);

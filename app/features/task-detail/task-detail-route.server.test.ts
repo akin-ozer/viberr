@@ -90,7 +90,7 @@ describe("loader — VIB-142 fidelity", () => {
       "triage", "ready", "impl", "review", "done",
     ]);
 
-    // Execution profile: operator since stage 1, codex specialist, consultant.
+    // Execution profile: operator since stage 1, codex specialist, reviewer.
     expect(t.operator?.sinceLabel).toBe("stage 1");
     expect(t.specialist?.backend).toBe("codex");
     expect(t.specialist?.role).toBe("Developer");
@@ -359,7 +359,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
 /* ---------------------------------------------------- ownership matrix */
 
 describe("ownership actions", () => {
-  it("take on VIB-148 fires the operator-scheduling reaction (ruling §3.3)", async () => {
+  it("take on VIB-148 fires the REAL operator reaction (no simulated stand-in)", async () => {
     const result = (await postIntent("VIB-148", ids.arda, {
       intent: "owner-take",
     })) as { ok: true; toast: string };
@@ -370,17 +370,16 @@ describe("ownership actions", () => {
     // Operator reaction: waiting flips to agent, readiness to ready…
     expect(after.task.waiting).toBe("agent");
     expect(after.task.readiness).toBe("ready");
-    // …and the operator wrote its own `agent` event ABOVE the assign event.
-    expect(after.task.timeline[0]).toMatchObject({ type: "agent" });
-    expect(after.task.timeline[0]!.actor).toMatchObject({
-      kind: "agent",
-      name: "Operator",
-    });
-    expect(after.task.timeline[0]!.text).toBe(
-      "Acceptance boundary now owned by **Arda Kaya** — scheduling execution against the quality-gated scope.",
+    // …and the operator genuinely coordinated (the same runOperator path every
+    // lifecycle trigger uses — the legacy scheduleOperatorRun narration is
+    // gone): its activity lands ABOVE the assign event.
+    const operatorActed = after.task.timeline.findIndex(
+      (e) => e.actor.kind === "agent" && e.actor.name === "Operator",
     );
-    expect(after.task.timeline[1]).toMatchObject({ type: "assign" });
-    expect(after.task.timeline[1]!.text).toBe(
+    const assignAt = after.task.timeline.findIndex((e) => e.type === "assign");
+    expect(operatorActed).toBeGreaterThanOrEqual(0);
+    expect(assignAt).toBeGreaterThan(operatorActed);
+    expect(after.task.timeline[assignAt]!.text).toBe(
       "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
     );
   });
@@ -520,7 +519,7 @@ describe("loader — deployed specialists", () => {
   it("exposes the project's deployed specialists (developer) + runActive flag", async () => {
     const result = await runLoader("VIB-166", ids.arda);
     const ids2 = result.deployedSpecialists.map((s) => s.id);
-    // The seed deploys operator + developer/reviewer/tester/consultant; the
+    // The seed deploys operator + developer/reviewer; the
     // operator must NOT appear (specialists only).
     expect(ids2).toContain("developer");
     expect(ids2).not.toContain("operator");
@@ -564,8 +563,9 @@ describe("assign-specialist + run-specialist intents", () => {
   });
 
   it("run-specialist requires an assigned specialist", async () => {
-    // VIB-148 has no specialist assigned.
-    const result = (await postIntent("VIB-148", ids.arda, {
+    // VIB-168 has no specialist assigned (VIB-148 gains one when the ownership
+    // test's real operator reaction assigns the Developer).
+    const result = (await postIntent("VIB-168", ids.arda, {
       intent: "run-specialist",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(400);

@@ -8,8 +8,10 @@ import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import {
+  runClearCredential,
   runGrantScope,
   runReconcile,
+  runSetCredential,
 } from "~/features/github/github-actions.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
 import { GithubViewPage } from "~/features/github/github-view";
@@ -74,6 +76,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
       }
       return await runGrantScope(db, params.slug, actor);
+    }
+    // Attach/rotate + remove the project credential — same credential-change
+    // RBAC as grant-scope (admin|maintainer).
+    if (intent === "set-credential" || intent === "clear-credential") {
+      if (myRole !== "admin" && myRole !== "maintainer") {
+        return data(
+          {
+            ok: false as const,
+            error:
+              "Only project admins and maintainers can change the credential.",
+          },
+          { status: 403 },
+        );
+      }
+      return intent === "set-credential"
+        ? runSetCredential(db, params.slug, actor)
+        : runClearCredential(db, params.slug, actor);
     }
     return data(
       { ok: false as const, error: "Unknown action." },

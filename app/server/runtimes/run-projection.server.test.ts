@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
-import { upsertRun, type InsertRunInput } from "./run-store.server";
+import { insertRunLine, upsertRun, type InsertRunInput } from "./run-store.server";
 import { projectRunsForTask } from "./run-projection.server";
 
 /**
@@ -95,14 +95,14 @@ describe("projectRunsForTask grouping", () => {
     expect(views[0]!.who.name).toBe("Claude Code"); // WHO_NAME[claude]
   });
 
-  it("groups distinct agents separately and keeps three entries (op + primary + consultant)", () => {
+  it("groups distinct agents separately and keeps three entries (op + primary + reviewer)", () => {
     insert({ id: "run_op", threadId: "op", kind: "operator", role: "Operator", agentName: "Operator", agentProfileId: "operator" });
     insert({ id: "run_p", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
     insert({
       id: "run_c",
       threadId: "c0",
       kind: "reviewer",
-      role: "Consultant",
+      role: "Reviewer",
       backend: "codex",
       agentName: "reviewer",
       agentProfileId: "reviewer",
@@ -121,5 +121,32 @@ describe("projectRunsForTask grouping", () => {
     const views = projectRunsForTask(db, SLUG, TASK);
     expect(views.length).toBe(1);
     expect(views[0]!.serverRunId).toBe("run_p2"); // the running one
+  });
+
+  it("flags a backend-availability failure so the UI can retry on the other backend (D4)", () => {
+    insert({ id: "run_q", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
+    insertRunLine(db, {
+      runId: "run_q",
+      seq: 0,
+      occurredAt: "2026-07-11T00:00:00.000Z",
+      raw: JSON.stringify({ type: "error", text: "You've hit your usage limit. Try again later." }),
+      display: { kind: "error", text: "usage limit" } as never,
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.failedBackendUnavailable).toBe(true);
+    expect(view!.altBackend).toBe("claude"); // codex failed → offer claude
+  });
+
+  it("does NOT flag a genuine task failure as backend-unavailable", () => {
+    insert({ id: "run_f", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
+    insertRunLine(db, {
+      runId: "run_f",
+      seq: 0,
+      occurredAt: "2026-07-11T00:00:00.000Z",
+      raw: JSON.stringify({ type: "error", text: "TypeError: cannot read property of undefined" }),
+      display: { kind: "error", text: "task error" } as never,
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.failedBackendUnavailable).toBeUndefined();
   });
 });

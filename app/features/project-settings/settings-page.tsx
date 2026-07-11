@@ -7,7 +7,10 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
-import { CredentialCard } from "~/features/github/credential-card";
+import {
+  CredentialCard,
+  CredentialManageActions,
+} from "~/features/github/credential-card";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 
@@ -475,8 +478,11 @@ export function RepoPanel({
   canOverride,
   canGrant,
   busy,
+  credBusy,
   onToggleOverride,
   onGrantScope,
+  onSetCredential,
+  onClearCredential,
   onOpenTask,
 }: {
   repo: string | null;
@@ -485,8 +491,11 @@ export function RepoPanel({
   canOverride: boolean;
   canGrant: boolean;
   busy: boolean;
+  credBusy: boolean;
   onToggleOverride: () => void;
   onGrantScope: () => void;
+  onSetCredential: () => void;
+  onClearCredential: () => void;
   onOpenTask: (taskKey: string) => void;
 }) {
   return (
@@ -560,6 +569,15 @@ export function RepoPanel({
               Grant scope
             </button>
           ) : undefined
+        }
+        manageActions={
+          <CredentialManageActions
+            configured={credential.source === "pat"}
+            canManage={canGrant}
+            busy={credBusy}
+            onSet={onSetCredential}
+            onClear={onClearCredential}
+          />
         }
       />
     </div>
@@ -724,11 +742,13 @@ export function SettingsPage({
   const stageFetcher = useFetcher<ActionResult>();
   const memberFetcher = useFetcher<ActionResult>();
   const repoFetcher = useFetcher<ActionResult>();
+  const credFetcher = useFetcher<ActionResult>();
   const dangerFetcher = useFetcher<ActionResult>();
   useActionToast(identityFetcher);
   useActionToast(stageFetcher);
   useActionToast(memberFetcher);
   useActionToast(repoFetcher);
+  useActionToast(credFetcher);
   useActionToast(dangerFetcher);
 
   const isAdmin = myRole === "admin";
@@ -840,6 +860,7 @@ export function SettingsPage({
             canOverride={isAdmin}
             canGrant={canGrant}
             busy={repoFetcher.state !== "idle"}
+            credBusy={credFetcher.state !== "idle"}
             onToggleOverride={() =>
               repoFetcher.submit(
                 {
@@ -853,6 +874,18 @@ export function SettingsPage({
             onGrantScope={() =>
               repoFetcher.submit(
                 { intent: "grant-scope", _csrf: csrf },
+                { method: "post" },
+              )
+            }
+            onSetCredential={() =>
+              credFetcher.submit(
+                { intent: "set-credential", _csrf: csrf },
+                { method: "post" },
+              )
+            }
+            onClearCredential={() =>
+              credFetcher.submit(
+                { intent: "clear-credential", _csrf: csrf },
                 { method: "post" },
               )
             }

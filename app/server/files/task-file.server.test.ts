@@ -73,7 +73,7 @@ const FULL: ParsedTaskFile = {
     { occurredAt: "2026-07-04T05:31:00.000Z", type: "blocked", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
       text: "**Blocked decision:** recovery packet raised for human review." },
     { occurredAt: "2026-07-04T05:30:00.000Z", type: "agent", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
-      text: "Re-engaged **Claude Code (Reviewer)** as consultant; re-anchored on `task.md` before review." },
+      text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
     { occurredAt: "2026-07-03T12:12:00.000Z", type: "assign", actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" }, title: null, toAgent: false, evidence: null,
       text: "Took task ownership — owner is the human reviewer and acceptance authority for this task." },
   ],

@@ -88,29 +88,44 @@ describe("transitionStage boundary enforcement", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
-  it("approval boundary (triage→ready): reviewer forbidden, maintainer ok", async () => {
+  it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
+    // impl → review is the `approval` human-gate boundary (triage → ready is now
+    // `auto`, tested below).
     const store = prepared();
-    withTask(store);
+    withTask(store, { stage: "impl" });
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-        actor(store.users.selin), // reviewer
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
+        actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
 
     const task = await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       actor(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
-    expect(task.stage).toBe("ready");
-    // Leaving triage without an operator assigns one (ruling 16 semantics).
-    expect(task.operator).toMatchObject({ assignedAtStageId: "ready" });
+    expect(task.stage).toBe("review");
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
+  });
+
+  it("auto boundary (triage→ready): any member incl. viewer; operator attaches", async () => {
+    // Post-D2: triage → ready is `auto` — any project member may cross it, and
+    // leaving triage attaches an operator (ruling 16 semantics).
+    const store = prepared();
+    withTask(store);
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("ready");
+    expect(task.operator).toMatchObject({ assignedAtStageId: "ready" });
   });
 
   it("auto boundary (ready→impl): any member incl. viewer; guests rejected", async () => {
@@ -405,14 +420,16 @@ describe("resolvePacket kind matrix", () => {
     expect(task.waiting).toBe("none");
     expect(task.displayReadiness).toBe("accepted");
     expect(task.validation).toBe("healthy"); // accepted work is validated (FR24)
-    expect(task.pr).toMatchObject({ state: "merged" });
+    // D3: no reachable GitHub merge in the test env, so the PR is recorded as
+    // "accepted" (merge pending) — NEVER a false "merged".
+    expect(task.pr).toMatchObject({ state: "accepted" });
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "completion",
       title: "Completion accepted",
-      text: "Human acceptance recorded. Task transitioned to **Done** and review PR approved for merge.",
     });
+    expect(detail?.timeline[0]!.text).toContain("accepted, merge pending");
   });
 
   it("request_edit: contributor forbidden, maintainer ok — waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {

@@ -6,15 +6,19 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
+import { setPref } from "~/server/prefs/user-prefs.server";
+import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
   appendComment,
   createTask,
   DEFAULT_GOAL,
+  notifyTaskWatchers,
+  recordReviewerVerdict,
   releaseOwner,
   setOwner,
 } from "./task-actions.server";
@@ -361,5 +365,174 @@ describe("ownership", () => {
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
       "Released task ownership — review & acceptance stall until another member takes the seat.",
     );
+  });
+});
+
+describe("notification routing (FIX #4)", () => {
+  function withOwnedTask(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("fans a watcher notice to owner + supervisors, honoring the default opt-in", () => {
+    const store = prepared();
+    withOwnedTask(store);
+    const notified = notifyTaskWatchers(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { dataRoot: store.dataRoot },
+    );
+    // arda (admin) + murat (maintainer) + selin (owner); nobody silenced.
+    expect(notified.sort()).toEqual(
+      [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
+    );
+  });
+
+  it("drops a supervisor who silenced that category (opt-out)", () => {
+    const store = prepared();
+    withOwnedTask(store);
+    // murat silences approvals; arda + selin keep the default.
+    setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
+    const notified = notifyTaskWatchers(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(notified.sort()).toEqual(
+      [store.users.arda.id, store.users.selin.id].sort(),
+    );
+    const rows = store.db
+      .prepare(`SELECT user_id FROM notifications WHERE kind = 'approval'`)
+      .all() as { user_id: string }[];
+    expect(rows.map((r) => r.user_id)).not.toContain(store.users.murat.id);
+  });
+});
+
+describe("reviewer quality notification (FIX #6)", () => {
+  it("a clear verdict flips validation, writes a quality event, and pings watchers", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "changed",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Requesting changes — the tests fail.",
+    );
+
+    // Validation health flipped on the canonical file.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+
+    // Typed quality event on the timeline.
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(detail?.timeline[0]).toMatchObject({
+      type: "quality",
+      title: "Changes requested",
+    });
+
+    // A `quality` notification reached the owner + supervisors (real run, not seed).
+    const rows = store.db
+      .prepare(`SELECT user_id FROM notifications WHERE kind = 'quality'`)
+      .all() as { user_id: string }[];
+    expect(rows.map((r) => r.user_id).sort()).toEqual(
+      [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
+    );
+  });
+
+  it("an unclear reviewer reply emits neither event nor notification", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.selin.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Here are some thoughts on the structure.",
+    );
+    const quality = store.db
+      .prepare(`SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`)
+      .get() as { c: number };
+    expect(quality.c).toBe(0);
+  });
+});
+
+describe("owner-assign scheduling routes through the real operator (FIX #9)", () => {
+  it("a quality-gated unowned task flips ready/agent and schedules NO simulated run", async () => {
+    const store = prepared();
+    // operator attached + waiting on a human owner + a passed quality gate is
+    // the exact shape operatorSchedulesOnOwner reacts to (spec §5.2).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        operator: { assignedAtStageId: "impl" },
+        waiting: "human",
+        ownerUserId: null,
+      }),
+      timeline: [
+        {
+          occurredAt: "2026-07-02T09:00:00.000Z",
+          type: "agent",
+          actor: { kind: "operator" },
+          title: null,
+          text: "**Quality gate:** passed — scope is clear.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+
+    // The deterministic scheduling reaction still flips the board state.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.ownerUserId).toBe(store.users.selin.id);
+    expect(fm.readiness).toBe("ready");
+    expect(fm.waiting).toBe("agent");
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(
+      detail?.timeline.some(
+        (e) => e.type === "agent" && e.text.includes("scheduling execution"),
+      ),
+    ).toBe(true);
+
+    // The deleted stand-in used to insert a SIMULATED operator run here. With no
+    // operator deployed in the test project, the real autoInvokeOperator path is
+    // a clean no-op — and critically never fabricates a narration run.
+    const opRuns = store.db
+      .prepare(`SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`)
+      .get() as { c: number };
+    expect(opRuns.c).toBe(0);
   });
 });

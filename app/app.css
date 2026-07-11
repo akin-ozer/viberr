@@ -496,6 +496,26 @@ h1, h2, h3, h4 {
   min-height: 0;
 }
 
+.board-orphans {
+  display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+  margin: 0 1.4rem .6rem;
+  padding: .55rem .8rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--coral-dark) 40%, transparent);
+  background: var(--rose-light);
+  color: var(--coral-dark);
+}
+.board-orphans > .ico { flex: none; color: var(--coral-dark); }
+.board-orphans-label { font-size: .84rem; color: var(--fg); flex: 1; min-width: 12rem; }
+.board-orphans-keys { display: flex; gap: .4rem; flex-wrap: wrap; }
+.board-orphan-key {
+  font-family: var(--mono); font-size: .76rem;
+  padding: .12rem .45rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--coral-dark) 45%, transparent);
+  color: var(--coral-dark); text-decoration: none;
+}
+.board-orphan-key:hover { background: color-mix(in srgb, var(--coral-dark) 14%, transparent); }
+
 .column { display: flex; flex-direction: column; min-height: 0; }
 .col-head {
   display: flex; align-items: center; gap: .5rem;

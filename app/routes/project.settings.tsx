@@ -7,7 +7,11 @@ import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
-import { runGrantScope } from "~/features/github/github-actions.server";
+import {
+  runClearCredential,
+  runGrantScope,
+  runSetCredential,
+} from "~/features/github/github-actions.server";
 import {
   addStage,
   deleteProject,
@@ -148,6 +152,27 @@ export async function action({ request, params }: Route.ActionArgs) {
           );
         }
         return await runGrantScope(db, slug, actor);
+      }
+      case "set-credential":
+      case "clear-credential": {
+        // Attach/rotate + remove the credential — admin|maintainer, matching
+        // grant-scope (a credential change, not a project-file mutation).
+        const myRole =
+          listProjectMembers(db, slug).find((m) => m.userId === ctx.user.id)
+            ?.role ?? null;
+        if (myRole !== "admin" && myRole !== "maintainer") {
+          return data(
+            {
+              ok: false as const,
+              error:
+                "Only project admins and maintainers can change the credential.",
+            },
+            { status: 403 },
+          );
+        }
+        return intent === "set-credential"
+          ? runSetCredential(db, slug, actor)
+          : runClearCredential(db, slug, actor);
       }
       case "archive-project": {
         const result = await setProjectArchived(

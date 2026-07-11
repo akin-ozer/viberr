@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getEnv } from "../config/env.server";
+import { resolveClaudeConfigDir } from "./claude-config.server";
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
@@ -30,12 +31,6 @@ export interface LocatedTranscript {
   lineCount: number;
   /** Bytes on disk. */
   bytes: number;
-}
-
-/** Resolve Claude's config dir the same way the runtime registry does. */
-function claudeConfigDir(): string {
-  const env = getEnv();
-  return env.CLAUDE_CONFIG_DIR ?? path.resolve(env.VIBERR_DATA_ROOT, "runtimes", "claude-home");
 }
 
 /** Resolve Codex's home dir: explicit CODEX_HOME, else the conventional ~/.codex. */
@@ -77,7 +72,7 @@ function fileStats(filePath: string): { lineCount: number; bytes: number } {
 /** Claude: `<sid>.jsonl` inside any per-project dir under
  *  `$CLAUDE_CONFIG_DIR/projects/` (search every project dir by session id). */
 function locateClaude(sessionId: string): string | null {
-  const projectsDir = path.join(claudeConfigDir(), "projects");
+  const projectsDir = path.join(resolveClaudeConfigDir(), "projects");
   if (!existsSync(projectsDir)) return null;
   let entries: string[];
   try {

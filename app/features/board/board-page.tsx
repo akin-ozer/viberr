@@ -785,6 +785,29 @@ export function BoardPage({
         ))}
       </div>
 
+      {orphanTasks.length > 0 && (
+        <div className="board-orphans" role="region" aria-label="Unstaged tasks">
+          <Icon name="alert" />
+          <span className="board-orphans-label">
+            {orphanTasks.length} unstaged{" "}
+            {orphanTasks.length === 1 ? "task" : "tasks"} — the stage in the file
+            doesn't match any board column. Fix the task file to place it.
+          </span>
+          <span className="board-orphans-keys">
+            {orphanTasks.map((t) => (
+              <Link
+                key={t.key}
+                to={`tasks/${t.key}`}
+                className="board-orphan-key"
+                title={t.title}
+              >
+                {t.key}
+              </Link>
+            ))}
+          </span>
+        </div>
+      )}
+
       {group === "stage" ? (
         <div className="board">
           {columns.map((c) => {

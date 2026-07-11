@@ -30,14 +30,17 @@ describe("seedOrgResources", () => {
   it("adds org resources with REAL files while the demo dataset stays intact", () => {
     const { db, dataRoot, demo, org } = seedAll();
 
-    // Existing seed output regression (brief contract).
+    // Existing seed output regression (brief contract). 12 tasks = 10
+    // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 3 profiles after the
+    // Advisor/consultant removal AND the Tester→Reviewer merge (operator +
+    // developer + reviewer).
     expect(demo).toMatchObject({
       users: 5,
       projects: 3,
-      tasks: 10,
-      events: 32,
+      tasks: 12,
+      events: 36,
       notifications: 10,
-      agentProfiles: 5,
+      agentProfiles: 3,
       runs: 18,
     });
 

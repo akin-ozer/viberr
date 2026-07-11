@@ -8,7 +8,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { CredentialCard } from "./credential-card";
+import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import { connectionPill, prStatePill, syncPill } from "./github-pills";
 import type {
@@ -58,10 +58,12 @@ export function RepositoryPanel({
   data,
   onOpenTask,
   warnActions,
+  manageActions,
 }: {
   data: Pick<GithubViewData, "project" | "connection" | "credential">;
   onOpenTask: (taskKey: string) => void;
   warnActions?: React.ReactNode;
+  manageActions?: React.ReactNode;
 }) {
   const conn = connectionPill(data.connection);
   return (
@@ -116,6 +118,7 @@ export function RepositoryPanel({
         credential={data.credential}
         onOpenTask={onOpenTask}
         warnActions={warnActions}
+        manageActions={manageActions}
         connectionAuth={
           data.connection.status === "auth_failed"
             ? data.connection.reason
@@ -302,8 +305,10 @@ export function GithubViewPage({
   const csrf = useCsrfToken();
   const reconcileFetcher = useFetcher<ActionResult>();
   const grantFetcher = useFetcher<ActionResult>();
+  const credFetcher = useFetcher<ActionResult>();
   useActionToast(reconcileFetcher);
   useActionToast(grantFetcher);
+  useActionToast(credFetcher);
 
   const slug = data.project.slug;
   const openTask = (taskKey: string) =>
@@ -364,6 +369,28 @@ export function GithubViewPage({
     </span>
   );
 
+  // Attach / rotate / remove the project credential (finding #13) —
+  // admin|maintainer, same gate as Grant scope.
+  const manageActions = canGrant ? (
+    <CredentialManageActions
+      configured={data.credential.source === "pat"}
+      canManage={canGrant}
+      busy={credFetcher.state !== "idle"}
+      onSet={() =>
+        credFetcher.submit(
+          { intent: "set-credential", _csrf: csrf },
+          { method: "post" },
+        )
+      }
+      onClear={() =>
+        credFetcher.submit(
+          { intent: "clear-credential", _csrf: csrf },
+          { method: "post" },
+        )
+      }
+    />
+  ) : undefined;
+
   return (
     <div className="board-wrap" data-screen-label="GitHub">
       {/* Live updates (phase 6): no subscription needed HERE — this route
@@ -411,6 +438,7 @@ export function GithubViewPage({
             data={data}
             onOpenTask={openTask}
             warnActions={warnActions}
+            manageActions={manageActions}
           />
           <PullRequestsPanel
             prs={data.prs}

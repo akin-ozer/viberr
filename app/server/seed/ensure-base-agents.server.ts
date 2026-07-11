@@ -10,7 +10,7 @@ import { baseAgentDeployments } from "./demo-data.server";
 
 /**
  * Backfill the built-in agent roster — the operator plus the base specialists
- * (Developer, Reviewer, Tester) — into every project that is missing any of
+ * (Developer, Reviewer) — into every project that is missing any of
  * them, so the operator is preinstalled (its create-time auto-invoke fires) and
  * the core specialists are usable across all boards, including projects that
  * predate them (e.g. app-created before these shipped, or seeded with a trimmed

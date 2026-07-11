@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   ProjectCredentialHealth,
   ScopeChip,
 } from "~/server/secrets/pat-store.server";
 import { Icon } from "~/ui/icon";
+import { useDialog } from "~/ui/use-dialog";
 
 /**
  * THE credential card (github-view spec §7.12: one component, used by the
@@ -29,6 +30,7 @@ export function CredentialCard({
   credential,
   onOpenTask,
   warnActions,
+  manageActions,
   connectionAuth,
 }: {
   credential: CredentialCardData;
@@ -36,6 +38,8 @@ export function CredentialCard({
   onOpenTask: (taskKey: string) => void;
   /** Right-aligned footer action slot (Fix in Settings / Grant scope). */
   warnActions?: ReactNode;
+  /** Always-visible manage row (attach / rotate / remove the credential). */
+  manageActions?: ReactNode;
   /** Live token auth health from the connection probe. When the token is
    * revoked/expired, the "all scopes granted" affirmation is suppressed — the
    * scopes a dead token was granted are moot, and showing both was
@@ -57,6 +61,7 @@ export function CredentialCard({
           </span>
           {warnActions}
         </div>
+        {manageActions}
       </div>
     );
   }
@@ -114,6 +119,115 @@ export function CredentialCard({
           All required scopes granted. Secrets stay isolated from task
           records and timelines.
         </div>
+      )}
+      {manageActions}
+    </div>
+  );
+}
+
+function RemoveCredentialDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useDialog(onCancel);
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      role="alertdialog"
+      aria-label="Remove credential?"
+    >
+      <div className="confirm-icon">
+        <Icon name="alert" />
+      </div>
+      <h3>Remove this credential?</h3>
+      <p>
+        Branch and PR sync go offline until a credential is attached again.
+        Nothing already pushed to GitHub is affected, and the token itself stays
+        in org settings.
+      </p>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onConfirm}>
+          Remove credential
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+/**
+ * The attach / rotate / remove manage row shared by the GitHub view and
+ * project Settings (finding #13). `configured` (a real PAT is bound) shows
+ * Rotate + Remove; otherwise a single Attach. admin|maintainer only — the
+ * parent gates `canManage`. Remove goes through a confirm.
+ */
+export function CredentialManageActions({
+  configured,
+  canManage,
+  busy,
+  onSet,
+  onClear,
+}: {
+  configured: boolean;
+  canManage: boolean;
+  busy: boolean;
+  /** Attach (unconfigured) or rotate (configured) → set-credential. */
+  onSet: () => void;
+  /** Remove → clear-credential (after the confirm). */
+  onClear: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  if (!canManage) return null;
+  return (
+    <div
+      className="cred-manage"
+      style={{
+        display: "flex",
+        gap: ".4rem",
+        marginTop: ".6rem",
+        flexWrap: "wrap",
+      }}
+    >
+      <button
+        type="button"
+        className="btn ghost sm"
+        onClick={onSet}
+        disabled={busy}
+        title={
+          configured
+            ? "Re-bind to the default connection's PAT"
+            : "Bind the default connection's PAT to this project"
+        }
+      >
+        <Icon name={configured ? "refresh" : "lock"} />
+        {configured ? "Rotate credential" : "Attach credential"}
+      </button>
+      {configured && (
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={() => setConfirming(true)}
+          disabled={busy}
+          title="Unbind the credential from this project"
+        >
+          <Icon name="x" />
+          Remove credential
+        </button>
+      )}
+      {confirming && (
+        <RemoveCredentialDialog
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            onClear();
+          }}
+        />
       )}
     </div>
   );

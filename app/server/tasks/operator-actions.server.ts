@@ -1031,7 +1031,15 @@ export async function operatorTransitionStage(
   if (g === "deny") {
     return { outcome: "denied", message: "Stage transitions are not permitted for the operator here." };
   }
-  if (g === "recommend") {
+  // An `auto` boundary is ungoverned by the project's own workflow — it declares
+  // "no approval needed" — so crossing it is not an exercise of governance
+  // authority and does NOT wait on a human, even when the operator's
+  // stage-transitions capability is `recommend` (supervised). Otherwise a task
+  // strands at a pre-work stage (e.g. Ready→In Progress "when a specialist is
+  // assigned") with a recommendation nobody needs to approve. Governed
+  // boundaries (`approval`/`human`) still route through the recommend/deny gate.
+  const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  if (g === "recommend" && boundary !== "auto") {
     const name = stageNameOf(db, ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
       db,
@@ -1063,6 +1071,25 @@ function stageNameOf(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+}
+
+/** The workflow boundary the operator would cross to move a task from its
+ *  current stage to `toStageId`, or null when it isn't a declared transition. */
+function operatorBoundaryFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  toStageId: string,
+): "auto" | "approval" | "human" | null {
+  const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const project = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  if (!task || !project) return null;
+  const from = task.parsed.frontmatter.stage;
+  const w = project.parsed.frontmatter.workflow.find((b) => b.from === from && b.to === toStageId);
+  return w ? w.boundary : null;
 }
 
 /**
@@ -1127,12 +1154,16 @@ export async function operatorAcceptCompletion(
   }
 
   // FULL autonomy: the operator accepts completion and moves the task to Done.
+  // A REAL PR merge is attributed to a human (mergeTaskPr requires a user
+  // identity), so the operator cannot merge — it records the PR as "accepted"
+  // (merge pending), never a false "merged". A human merges / reconciles later.
+  const hasPr = !!file.parsed.frontmatter.pr;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
     if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "merged" };
+      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "accepted" };
     }
     parsed.packet = null;
     parsed.timeline.unshift({
@@ -1140,7 +1171,9 @@ export async function operatorAcceptCompletion(
       type: "completion",
       actor: { kind: "operator" },
       title: "Completion accepted",
-      text: `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
+      text: hasPr
+        ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
+        : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
       toAgent: false,
       evidence: null,
     });

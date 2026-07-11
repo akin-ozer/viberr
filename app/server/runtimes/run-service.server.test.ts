@@ -3,14 +3,13 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "../../../test-support/test-store";
 import { AppError } from "~/server/errors/app-error.server";
-import { listAuditEvents } from "~/server/audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   configureRunServiceForTests,
   getRunLog,
   interruptRun,
   listRunsForTask,
   resumeRun,
-  scheduleOperatorRun,
   startRun,
 } from "./run-service.server";
 import { getRun, listRunLines } from "./run-store.server";
@@ -216,21 +215,6 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     }
   });
 
-  it("scheduleOperatorRun spins up a real operator run (once)", async () => {
-    const first = await scheduleOperatorRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", ownerName: "Arda Kaya", dataRoot: store.dataRoot,
-    });
-    await settle();
-    expect(first).not.toBeNull();
-    const runs = listRunsForTask(store.db, store.slug, "VIB-1");
-    expect(runs.filter((r) => r.op).length).toBe(1);
-    // Idempotent: a second call does not add a second operator thread.
-    const second = await scheduleOperatorRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", ownerName: "Arda Kaya", dataRoot: store.dataRoot,
-    });
-    expect(second).toBeNull();
-  });
-
   it("interrupting a finished run is an idempotent no-op (not an error)", async () => {
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
@@ -285,15 +269,5 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const views = listRunsForTask(store.db, store.slug, "VIB-1");
     const devViews = views.filter((v) => v.who.name === "dev");
     expect(devViews.length).toBe(1);
-  });
-
-  it("scheduleOperatorRun stamps the Operator identity", async () => {
-    await scheduleOperatorRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", ownerName: "Arda Kaya", dataRoot: store.dataRoot,
-    });
-    await settle();
-    const views = listRunsForTask(store.db, store.slug, "VIB-1");
-    const op = views.find((v) => v.op)!;
-    expect(op.who.name).toBe("Operator");
   });
 });

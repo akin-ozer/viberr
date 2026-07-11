@@ -125,6 +125,10 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "github.pr.opened": "task",
   "github.pr.merged": "task",
   "github.pr.merge_refused": "task",
+  // Agent-side delivery reconciled from the specialist workspace (NFR15):
+  // branch/PR the agent created with its own credentials, captured into task.md.
+  "github.workspace.branch_reconciled": "task",
+  "github.workspace.pr_linked": "task",
   // scope-violation rows may be project-wide (taskKey nullable).
   "github.scope_violation.opened": "project",
   "github.scope_violation.resolved": "project",

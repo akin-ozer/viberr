@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { newId } from "~/shared/ids/new-id.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { listAuditEvents } from "../audit/audit-recorder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { isAppError } from "../errors/app-error.server";
 import { verifyPassword } from "./password.server";
 import {

@@ -53,13 +53,10 @@ export const CAP_CATALOG: readonly CapabilityDef[] = [
   { id: "attach-evidence-references", label: "Attach evidence references" },
   { id: "validation-verdict", label: "Validation verdict" },
   { id: "hold-on-failing-checks", label: "Hold the task on failing checks" },
-  // Advisory
+  // Shared specialist actions
   { id: "read-task-repo", label: "Read the task & repository" },
-  { id: "comment-with-guidance", label: "Comment with guidance" },
   { id: "flag-underspecified-tasks", label: "Flag underspecified tasks" },
-  { id: "write-to-repository", label: "Write to the repository" },
   { id: "open-or-merge-pr", label: "Open or merge a PR" },
-  { id: "any-stage-transition", label: "Any stage transition" },
   // Always-human governed actions
   { id: "merge-pull-request", label: "Merge a pull request" },
   { id: "transition-to-done", label: "Transition a task to Done" },

@@ -304,18 +304,15 @@ export default function Login({
     if (busy) return;
     setClientErr(null);
     setDismissedServerErr(actionError);
-    setInfo(null);
-    setProviderBusy(which);
     if (!providers[which]) {
-      setTimeout(() => {
-        setProviderBusy(null);
-        setInfo(
-          (which === "github" ? "GitHub" : "Google") +
-            " OAuth isn't configured on this deployment — use a local account, or ask an admin to set it up.",
-        );
-      }, 900);
+      setInfo(
+        (which === "github" ? "GitHub" : "Google") +
+          " OAuth isn't configured on this deployment — use a local account, or ask an admin to set it up.",
+      );
       return;
     }
+    setInfo(null);
+    setProviderBusy(which);
     // Kick off better-auth's social sign-in and follow the provider URL.
     void (async () => {
       try {

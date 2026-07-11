@@ -41,15 +41,14 @@ describe("seed profile models", () => {
 });
 
 describe("baseAgentDeployments", () => {
-  it("is the operator plus Developer / Reviewer / Tester", () => {
+  it("is the operator plus Developer / Reviewer", () => {
     const ids = baseAgentDeployments().map((d) => d.profileId).sort();
     expect(ids).toEqual([...BASE_AGENT_PROFILE_IDS].sort());
     expect(ids).toContain("operator");
     expect(ids).toContain("developer");
     expect(ids).toContain("reviewer");
-    expect(ids).toContain("tester");
-    // The Advisor is NOT force-backfilled onto every board.
-    expect(ids).not.toContain("consultant");
+    // Tester was merged into the Reviewer (the single quality specialist).
+    expect(ids).not.toContain("tester");
   });
 });
 
@@ -62,20 +61,21 @@ describe("seedDefaultAgentAssets", () => {
       readFileSync(path.join(dataRoot, ...parts), "utf8");
 
     // Definitions (the run persona) for every built-in agent.
-    for (const id of ["operator", "developer", "reviewer", "tester"]) {
+    for (const id of ["operator", "developer", "reviewer"]) {
       expect(existsSync(path.join(dataRoot, "agents", "definitions", `${id}.md`))).toBe(true);
     }
     expect(read("agents", "definitions", "developer.md")).toContain("You are the Developer");
     expect(read("agents", "definitions", "reviewer.md")).toContain("You are the Reviewer");
-    expect(read("agents", "definitions", "tester.md")).toContain("You are the Tester");
+    // Tester was merged into the Reviewer — no separate Tester definition ships.
+    expect(existsSync(path.join(dataRoot, "agents", "definitions", "tester.md"))).toBe(false);
 
     // Real, loadable skills — one per specialist role.
     expect(read("skills", "developer-expertise", "SKILL.md")).toContain("developer expertise");
     expect(read("skills", "reviewer-expertise", "SKILL.md")).toContain("reviewer expertise");
-    expect(read("skills", "tester-expertise", "SKILL.md")).toContain("tester expertise");
+    expect(existsSync(path.join(dataRoot, "skills", "tester-expertise", "SKILL.md"))).toBe(false);
 
     // Profile templates so the deployments resolve in a never-seeded store.
-    for (const id of ["operator", "developer", "reviewer", "tester"]) {
+    for (const id of ["operator", "developer", "reviewer"]) {
       expect(existsSync(path.join(dataRoot, "agents", "profiles", `${id}.md`))).toBe(true);
     }
     // The Developer profile references its real skill (not a placeholder name).
@@ -143,7 +143,7 @@ describe("ensureBaseAgentsDeployed", () => {
     expect(ids).toContain("operator");
     expect(ids).toContain("developer");
     expect(ids).toContain("reviewer");
-    expect(ids).toContain("tester");
+    expect(ids).not.toContain("tester");
   });
 
   it("is idempotent — a fully-rostered project is left untouched", () => {

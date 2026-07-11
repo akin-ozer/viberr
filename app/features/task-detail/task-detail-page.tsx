@@ -660,6 +660,19 @@ export function TaskDetailPage({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
+  // Retry the assigned specialist on the OTHER backend after a backend
+  // availability / quota failure (D4). admin|maintainer; server re-checks.
+  const onRetryBackend =
+    canRunAgents && !runActive
+      ? (backend: "claude" | "codex") => {
+          if (runBusy) return;
+          const fd = new FormData();
+          fd.set("_csrf", csrf);
+          fd.set("intent", "run-specialist");
+          fd.set("backend", backend);
+          runFetcher.submit(fd, { method: "post" });
+        }
+      : undefined;
   // BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
   // scrolls the Agent-logs panel into view. The reply run is the group
   // representative → selecting its id shows its live output (streamed by the
@@ -768,6 +781,8 @@ export function TaskDetailPage({
           logSel={shownLogSel}
           onLogSel={selectLog}
           linesByThread={linesByThread}
+          {...(onRetryBackend ? { onRetryBackend } : {})}
+          retrying={runBusy}
         />
 
         <Timeline

@@ -13,6 +13,7 @@ import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
+  DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
@@ -148,7 +149,9 @@ export async function createProject(
     // specialists it can assign — so every project can run governed agent work.
     agents: defaultAgentDeployments(),
     credentialPolicy: null,
-    guardrails: [],
+    // Ship the anti-noise guardrails ON — timeline compaction + operator brevity
+    // are product defaults (PRD's #1 risk), not opt-in.
+    guardrails: DEFAULT_GUARDRAILS,
   };
 
   await createProjectFile(

@@ -1,6 +1,7 @@
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RuntimeAdapter } from "./adapter.server";
+import { resolveClaudeConfigDir } from "./claude-config.server";
 import {
   createClaudeAdapter,
   type ClaudeQueryFn,
@@ -133,23 +134,24 @@ export function codexSpawnEnv(codexHome: string): Record<string, string> {
 /** Constructs the three adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const env = safeEnv();
-  // Inject only the credential vars that are present. When neither is set
-  // (pure CLI/keychain auth via VIBERR_CLAUDE_USE_CLI_AUTH), pass no env so
-  // the spawned SDK inherits the full process env (and the logged-in CLI).
+  // The SDK's `env` REPLACES the child environment (it is not merged), so we
+  // MUST start from process.env — otherwise the spawned runtime loses PATH and
+  // HOME, which silently breaks stdio MCP servers (`npx …` can't be found) and
+  // the CLI's own auth/session lookup. Then overlay the credential vars and a
+  // deterministic config dir so session transcripts land where session-export
+  // reads them (resolveClaudeConfigDir is the single source both agree on).
   const claudeEnv: Record<string, string> = {
+    ...(process.env as Record<string, string>),
     ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
     ...(env.CLAUDE_CODE_OAUTH_TOKEN
       ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
       : {}),
-    // Persist the session store so resuming an agent (via a task comment)
-    // works across restarts. Must ride in the SDK's env (which replaces the
-    // child env) or the config dir would fall back to ephemeral ~/.claude.
-    ...(env.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR } : {}),
+    CLAUDE_CONFIG_DIR: resolveClaudeConfigDir(),
   };
   return {
     claude: createClaudeAdapter({
       ...(deps.claudeQueryFn ? { queryFn: deps.claudeQueryFn } : {}),
-      ...(Object.keys(claudeEnv).length ? { env: claudeEnv } : {}),
+      env: claudeEnv,
     }),
     codex: createCodexAdapter({
       ...(deps.codexFactory ? { codexFactory: deps.codexFactory } : {}),
@@ -179,15 +181,12 @@ function safeEnv(): {
 } {
   try {
     const env = getEnv();
-    // Default Claude's session store under the data volume when not overridden.
-    const claudeConfigDir =
-      env.CLAUDE_CONFIG_DIR ?? `${env.VIBERR_DATA_ROOT}/runtimes/claude-home`;
     return {
       ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
       ...(env.CLAUDE_CODE_OAUTH_TOKEN
         ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
         : {}),
-      CLAUDE_CONFIG_DIR: claudeConfigDir,
+      CLAUDE_CONFIG_DIR: resolveClaudeConfigDir(),
       ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
       ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
       ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}),

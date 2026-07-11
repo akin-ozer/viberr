@@ -9,11 +9,17 @@ import type { GithubClient } from "./github-client.server";
  *   merged            → cache "merged" → done pill "merged"
  *   open (incl draft) → cache "review" → info pill "in review"
  *   closed-unmerged   → cache "closed" → risk pill "closed"
+ *
+ * Plus one state GitHub never reports but Viberr sets itself: "accepted" — a
+ * human accepted the completion but the REAL merge couldn't run (no reachable
+ * GitHub / not mergeable). It means "accepted, merge pending" and keeps the
+ * task record honest instead of claiming a merge that didn't happen.
  */
 
 /** The `pr.state` vocabulary stored in task.md (prRefSchema is loose —
- * "closed" extends the phase-3 "review"|"merged" pair per ruling 12). */
-export type PrCacheState = "review" | "merged" | "closed";
+ * "closed" extends the phase-3 "review"|"merged" pair per ruling 12;
+ * "accepted" = human-accepted, real merge pending). */
+export type PrCacheState = "review" | "merged" | "closed" | "accepted";
 
 export function mapPrToCacheState(pr: {
   state: string;
@@ -33,6 +39,8 @@ export function prPillFor(state: PrCacheState): {
   switch (state) {
     case "merged":
       return { label: "merged", kind: "done" };
+    case "accepted":
+      return { label: "accepted · merge pending", kind: "info" };
     case "closed":
       return { label: "closed", kind: "risk" };
     default:

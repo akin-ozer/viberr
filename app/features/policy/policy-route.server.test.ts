@@ -5,6 +5,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import type { PolicyViewData } from "./policy-query.server";
 import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
 
@@ -92,7 +93,7 @@ describe("loader", () => {
       [ids.selin, "contributor"],
     ]);
     expect(view.transitions.map((t) => [t.from, t.to, t.boundary, t.locked])).toEqual([
-      ["triage", "ready", "approval", false],
+      ["triage", "ready", "auto", false],
       ["ready", "impl", "auto", false],
       ["impl", "review", "approval", false],
       ["review", "done", "human", true],
@@ -102,8 +103,6 @@ describe("loader", () => {
       "operator",
       "developer",
       "reviewer",
-      "tester",
-      "consultant",
     ]);
     // Fresh seed: no policy-change audit yet → the chip hides.
     expect(view.edited).toBeNull();
@@ -145,9 +144,6 @@ describe("set-role", () => {
       .get(ids.selin) as { role: string };
     expect(row.role).toBe("viewer");
     // …audit row written…
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     const audit = listAuditEvents(app.db, {
       action: "project.member.role_changed",
     });
@@ -226,9 +222,6 @@ describe("set-boundary", () => {
       view.transitions.find((t) => t.from === "impl" && t.to === "review")!
         .boundary,
     ).toBe("auto");
-    const { listAuditEvents } = await import(
-      "~/server/audit/audit-recorder.server"
-    );
     const audit = listAuditEvents(app.db, {
       action: "project.policy.boundary_changed",
     });

@@ -46,14 +46,18 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
 });
 
 describe("RES_CATALOG", () => {
-  it("defaults come from the catalog def flags (mock RES_DEFAULTS)", () => {
-    expect(RES_DEFAULTS.skills).toEqual(["repo-write", "test-runner"]);
-    expect(RES_DEFAULTS.mcps).toEqual(["github"]);
-    expect(RES_DEFAULTS.kb).toEqual([
-      "Viberr Core architecture",
-      "Coding standards",
-    ]);
+  it("a new profile pre-grants NO resources — the creator picks from the real catalog", () => {
+    // The legacy mock defaults (repo-write / test-runner / "Coding standards")
+    // resolved to nothing; a fresh profile now starts empty and safe-by-default.
+    expect(RES_DEFAULTS.skills).toEqual([]);
+    expect(RES_DEFAULTS.mcps).toEqual([]);
+    expect(RES_DEFAULTS.kb).toEqual([]);
     expect(RES_CATALOG.map((g) => g.key)).toEqual(["skills", "mcps", "kb"]);
+  });
+
+  it("the advisory-only domain-advisor skill is gone from the catalog", () => {
+    const skills = RES_CATALOG.find((g) => g.key === "skills")!.items.map((i) => i.id);
+    expect(skills).not.toContain("domain-advisor");
   });
 });
 
