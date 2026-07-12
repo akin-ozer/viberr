@@ -51,6 +51,16 @@ handling) is also in this merge and is owned by that session for the combined re
 - **DC-1..11 / ED-1..6** — dead code deleted (line-buffer, Identity, invited-status remnants,
   duplicated AgentDeploymentDefinition, unused exports/imports/props, stale selftest markers);
   env + docstring drift fixed.
+- **WI-11** — task goal editor surfaces a failed save (useActionFeedback) instead of silently
+  staying open.
+- **WI-12** — org.settings action authenticates once (`requireRoleAuth`), not twice.
+- **WI-13** — review/activity loaders guard membership BEFORE the 404 (a non-member can't
+  learn a project exists), matching the config-surface siblings.
+- **WI-14** — profile action maps ALL AppErrors to `{ok:false}`, not just `kind==='user'`.
+- **WI-17** — github-view "Open on GitHub" uses the loader's GHE-safe host.
+- **TD-1/TD-2/DC-7** — operator glyph uses `var(--bg)` (was white-on-white in dark mode);
+  pinned-star tokenized with a dark override; dead `.stage-menu-btn.card` CSS removed.
+- **N5** — bare `/projects` redirects to the home list instead of 404.
 - **e2e determinism** — `VIBERR_FORCE_SIMULATED_RUNTIME` + operator-ordering-robust assertions.
 
 ## Deferred to the combined Codex re-check (runtime/MCP layer overlap)
@@ -67,7 +77,8 @@ merge conflicts and are best done against its final shape:
   which Codex touched).
 
 ## Remaining pass-4 polish (non-conflicting; not yet done)
-MU-5 (login flash), WI-11 (goal-editor error), WI-12 (org.settings double auth), WI-13 (guard
-order), WI-14 (profile error mapping), WI-17 (GHE host in github-view), XS-11 (advisory row
-labeling in the matrix), TD-1/TD-2 (operator-glyph dark-mode + star token in app.css), N5
-(/projects redirect), N11 (agents tab URL state).
+- **MU-5** (login flash) — restore the rejected-OAuth message on /login (or delete the dead
+  reader). Left with the other auth-config items since it touches the better-auth error flow.
+- **XS-11** — label advisory vs enforced rows distinctly in the capability matrix's "Other
+  actions" group (the ruling-7 prune already removed the *toggleable* fakes).
+- **N11** — make the Agents Live/Profiles tab URL-addressable (`?view=`).
