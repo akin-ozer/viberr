@@ -44,8 +44,8 @@ not clean. The final evidence below supersedes that baseline without erasing it.
 - Final regression: complete — typecheck; Vitest 146 files/1,318 tests; focused terminal/reviewer
   152 tests plus broader focused 165; production build; Playwright 19/19 in 20.5 seconds; healthy
   Docker/API/rescan; real MCP probe; cross-role/archive/responsive browser evidence; clean final logs.
-- Publication cleanup: the merged test fixture `test-support/deep-validation/VDV-13.md` is still on
-  `origin/main` and must be removed before the final product PR is published.
+- Publication cleanup: complete. The branch was rebased onto the fixture merge from `origin/main`,
+  then `test-support/deep-validation/VDV-13.md` was removed before publication.
 
 ## Final evidence snapshot
 

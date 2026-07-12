@@ -188,8 +188,9 @@ a 5-project/38-task/43-change rescan with zero errors in 172 ms without disturbi
   then deliberately closed and its branch deleted after evidence capture.
 - These remote states are proven through the authenticated host GitHub CLI. Viberr still has no
   project PAT, so app-owned clone/reconcile/merge remains unverified until the credential is bound.
-- The final implementation cleanup will remove the merged fixture directory so product code does
-  not retain validation artifacts.
+- The final branch was rebased onto the merged fixture commit and removed
+  `test-support/deep-validation/VDV-13.md`, so the published product tree retains no validation
+  marker file.
 
 ### Baseline-to-final reconciliation
 

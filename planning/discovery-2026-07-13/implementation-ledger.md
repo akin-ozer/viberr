@@ -57,9 +57,9 @@ they are not silently counted as live proof.
 - Backends: Claude and Codex configured, both honestly `unknown` because no final run signal existed.
 - VDV: 24 cases retained as a discovery matrix. Its baseline model outcomes remain baseline evidence,
   not rewritten as post-fix live successes.
-- GitHub cleanup: PR #22 was closed and its branch deleted. The merged fixture
-  `test-support/deep-validation/VDV-13.md` is still on `origin/main` and must be removed before the
-  final product PR is published.
+- GitHub cleanup: PR #22 was closed and its branch deleted. The branch was rebased onto PR #20's
+  merge and the merged `test-support/deep-validation/VDV-13.md` fixture was removed before the
+  final product PR was published.
 
 ## Previously deferred pass-4 checks folded into rows above
 
