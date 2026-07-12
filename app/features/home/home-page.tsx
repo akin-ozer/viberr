@@ -1116,23 +1116,24 @@ function StoreStrip({
   rebuilding: boolean;
   onRebuild: () => void;
 }) {
+  // Both store-maintenance actions are org-admin only server-side; render them
+  // only for an admin rather than a Re-scan button that silently 403s (MU-4).
+  if (!isAdmin) return null;
   return (
     <footer className="store-strip" data-screen-label="Store strip">
       <button type="button" className="btn ghost sm" onClick={onRescan}>
         <Icon name="refresh" className={scanning ? "spin" : ""} />
         {scanning ? "Scanning…" : "Re-scan"}
       </button>
-      {isAdmin && (
-        <button
-          type="button"
-          className="btn ghost sm"
-          onClick={onRebuild}
-          title="Drop every projection row and re-project the whole store from files"
-        >
-          <Icon name="memory" className={rebuilding ? "spin" : ""} />
-          {rebuilding ? "Rebuilding…" : "Rebuild projections"}
-        </button>
-      )}
+      <button
+        type="button"
+        className="btn ghost sm"
+        onClick={onRebuild}
+        title="Drop every projection row and re-project the whole store from files"
+      >
+        <Icon name="memory" className={rebuilding ? "spin" : ""} />
+        {rebuilding ? "Rebuilding…" : "Rebuild projections"}
+      </button>
     </footer>
   );
 }
