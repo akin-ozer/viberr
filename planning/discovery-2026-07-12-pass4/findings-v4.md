@@ -7,6 +7,26 @@ FIXED (implementation ledger has the entry) → VALIDATED (post-fix re-check don
 
 ## Work items (implementation phase scope) — EVERY item must reach VALIDATED
 
+### NEW live findings from the real Docker run (highest priority)
+- **P0 · F-MIG1 (CRITICAL) — `archived` column migration drift breaks every pre-existing DB.**
+  `archived` was added to the already-shipped `0003_projections.sql` (commit 1daaf9f) with no
+  `ALTER TABLE`; any DB migrated before that never gets the column → projection rebuild throws
+  for every project → app shows 0 projects, all routes 404. Fix (aligned with "projections are
+  rebuildable, no migrations needed" charter): a projections-schema-version guard that drops +
+  rebuilds the projection DB from canonical files when the schema signature changes — so schema
+  edits self-heal on boot. (Alternatively an additive ALTER migration, but the version-guard
+  matches the file-native architecture and covers future drift too.)
+- **P0b · F-OP1 (HIGH) — failed real Claude operator run is silent.** The Claude operator's
+  only completion hook releases the lease; a run error (crash/quota/auth/idle) produces no
+  timeline entry, packet, or notification. Give the real Claude (and scripted) operator the
+  same failure escalation the Codex operator and specialists have (typed blocked event +
+  recovery packet + waiting→human). operator-run.server.ts:674 area.
+- **P0c · F-ISO1 (MED) — account-managed skills/subagents leak into real runs.** Even in a
+  clean container, `skills:[]` doesn't suppress Anthropic account-tier skills (deep-research,
+  dataviz, doctor, …) or subagents (Explore, Plan, …). Investigate an SDK/env way to close
+  them; if none exists, document honestly (S3-style) and stop claiming "only declared skills."
+  claude-runtime.server.ts:206-219.
+
 ### Ruling-driven (largest first)
 - **P1 · Better-auth org-role cutover + strict single-source RBAC** (R-5; subsumes XS-9,
   XS-10, DC-2): better-auth `member` table becomes the org-role source, `users.role`
