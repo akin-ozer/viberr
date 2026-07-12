@@ -437,6 +437,37 @@ function ProfileGithub({
   const gh = user.githubConnected;
   useServerToast(fetcher);
   const error = actionError(fetcher);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [connectErr, setConnectErr] = useState<string | null>(null);
+
+  // Start better-auth's GitHub OAuth link and follow the returned provider URL
+  // — the same flow the login screen uses. (The old `/auth/github` href had no
+  // route and 404'd; pass-4 MU-1.)
+  const startConnect = () => {
+    if (connectBusy) return;
+    setConnectErr(null);
+    setConnectBusy(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/sign-in/social", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: "github", callbackURL: "/profile" }),
+        });
+        const body = (await res.json()) as { url?: string };
+        if (body.url) {
+          window.location.href = body.url;
+          return;
+        }
+        throw new Error("no redirect url");
+      } catch {
+        setConnectBusy(false);
+        setConnectErr(
+          "GitHub sign-in couldn't start — it may not be configured on this deployment. Ask an admin, or use your workspace identity.",
+        );
+      }
+    })();
+  };
 
   return (
     <div className="panel">
@@ -513,21 +544,23 @@ function ProfileGithub({
               only, and your GitHub review approvals can't be matched back to
               you.
             </span>
-            <a
+            <button
+              type="button"
               className="btn sm"
               style={{ marginLeft: "auto" }}
-              href="/auth/github?returnTo=/profile"
+              disabled={connectBusy}
+              onClick={startConnect}
             >
               <Icon name="github" />
-              Connect
-            </a>
+              {connectBusy ? "Connecting…" : "Connect"}
+            </button>
           </div>
         )}
       </div>
-      {error && (
+      {(error || connectErr) && (
         <div className="login-err" role="alert" style={{ marginTop: ".7rem" }}>
           <Icon name="alert" />
-          {error}
+          {error ?? connectErr}
         </div>
       )}
       <div className="pol-note" style={{ margin: ".9rem 0 0" }}>
