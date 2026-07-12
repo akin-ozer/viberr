@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
-import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  AgentDeploymentDefinition,
+  CapabilityMode,
+} from "~/schemas/project-file.schema";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -29,24 +33,9 @@ import type { AgentProfileView } from "./agent-types";
  */
 
 /** Loose `definition` override carried on a project.md deployment entry.
- * Every field optional — template value wins when absent. */
-export interface AgentDeploymentDefinition {
-  kind?: "operator" | "specialist";
-  name?: string;
-  role?: string;
-  icon?: string;
-  backends?: ("codex" | "claude")[];
-  model?: string;
-  /** Reasoning/effort level the run passes to the SDK. */
-  effort?: string;
-  scope?: string;
-  desc?: string;
-  stages?: string[];
-  spanAll?: boolean;
-  /** Operator only: default autonomy (supervised | full). */
-  autonomy?: "supervised" | "full";
-  resources?: { skills?: string[]; mcps?: string[]; kb?: string[] };
-}
+ * Single source of truth is the zod schema in project-file.schema; re-exported
+ * here for the roster/CRUD callers that assemble it. */
+export type { AgentDeploymentDefinition };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

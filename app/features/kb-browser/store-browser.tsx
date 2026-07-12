@@ -584,7 +584,6 @@ function useStoreOps(
 export function StoreBrowser({
   title,
   subMono,
-  root,
   metaTail,
   tree,
   resource,
@@ -593,8 +592,6 @@ export function StoreBrowser({
 }: {
   title: string;
   subMono: string;
-  /** e.g. "store://kb/api-contracts" (no trailing slash). */
-  root: string;
   metaTail?: string;
   tree: StoreNode[];
   resource: StoreBrowserResource;

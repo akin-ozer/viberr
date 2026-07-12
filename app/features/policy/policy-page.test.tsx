@@ -8,10 +8,10 @@ import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from ".
 afterEach(cleanup);
 
 const MEMBERS: MembershipView[] = [
-  { userId: "u_elif", role: "admin", status: "active", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
-  { userId: "u_arda", role: "admin", status: "active", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
-  { userId: "u_murat", role: "maintainer", status: "active", name: "Murat Yıldız", email: "murat@viberr.dev", initials: "MY", tone: "teal" },
-  { userId: "u_selin", role: "contributor", status: "active", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet" },
+  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
+  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
+  { userId: "u_murat", role: "maintainer", name: "Murat Yıldız", email: "murat@viberr.dev", initials: "MY", tone: "teal" },
+  { userId: "u_selin", role: "contributor", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet" },
 ];
 
 const STAGES = [

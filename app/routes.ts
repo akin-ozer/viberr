@@ -5,9 +5,9 @@ export default [
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
   // OAuth is served by better-auth's own handler at /api/auth/callback/*.
-  // TEMPORARY admin surface — replaced by the real org settings in phase 9.
+  // Legacy /org/users path — now a redirect into the real tabbed org settings.
   route("org/users", "routes/org.users.tsx"),
-  // Placeholder until phase 9 ports the tabbed org-settings surface.
+  // The real tabbed org-settings surface (org profile, members, resources).
   route("org/settings", "routes/org.settings.tsx"),
 
   // better-auth request handler (sign-in/out, social, .well-known, getSession).

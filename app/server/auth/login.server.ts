@@ -54,9 +54,11 @@ export interface LoginAttempt {
 
 /**
  * Verifies credentials and mints a better-auth session. Pre-checks the legacy
- * `users` row for the specific failure reasons, syncs the better-auth
- * credential to the current password hash (so an admin reset takes effect),
- * then delegates password verification + session creation to better-auth.
+ * `users` row for the specific failure reasons (unknown email, disabled, no
+ * password), then delegates password verification + session creation to
+ * better-auth. The better-auth credential is synced to the current hash at
+ * write time by the password writers (resetPassword / completeForcedPasswordReset),
+ * so no sync happens here.
  */
 export async function loginWithCredentials(
   db: Database.Database,

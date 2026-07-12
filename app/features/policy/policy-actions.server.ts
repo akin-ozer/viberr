@@ -6,10 +6,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
-import {
-  readProjectFile,
-  updateProjectFile,
-} from "~/server/files/project-writer.server";
+import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { ROLE_LABEL, BOUNDARIES, type RoleId } from "./policy-data";
 
@@ -171,7 +168,7 @@ export async function setMemberRole(
 
 // ------------------------------------------------------------ set boundary
 
-export const LOCKED_BOUNDARY_MESSAGE =
+const LOCKED_BOUNDARY_MESSAGE =
   "Completion is human-authorized in V1 — this boundary can't be delegated";
 
 /**

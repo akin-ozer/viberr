@@ -151,14 +151,20 @@ describe("ProfilePage", () => {
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
-  it("GitHub identity: not-connected card with missing chips and a real Connect link", () => {
+  it("GitHub identity: not-connected card with missing chips and a real Connect button", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("GitHub identity")).toBeTruthy();
     expect(getByText("not connected")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(2);
     expect(container.querySelector(".cred-warn")).toBeTruthy();
-    const connect = container.querySelector(".cred-warn a.btn") as HTMLAnchorElement;
-    expect(connect.getAttribute("href")).toBe("/auth/github?returnTo=/profile");
+    // MU-1: Connect starts the real OAuth flow via a button (POST to
+    // /api/auth/sign-in/social), not a dead /auth/github link.
+    const connect = container.querySelector(
+      ".cred-warn button.btn",
+    ) as HTMLButtonElement;
+    expect(connect).toBeTruthy();
+    expect(connect.textContent).toContain("Connect");
+    expect(container.querySelector(".cred-warn a.btn")).toBeNull();
   });
 
   it("GitHub identity: connected card offers Disconnect", () => {

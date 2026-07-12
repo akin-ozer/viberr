@@ -276,7 +276,7 @@ describe("CapabilityMatrixModal", () => {
       }),
       mkProfile({}),
     ];
-    const { container, getByText } = render(
+    const { container, getByText, getAllByText } = render(
       <CapabilityMatrixModal
         profiles={profiles}
         projectName="Viberr Core"
@@ -288,8 +288,11 @@ describe("CapabilityMatrixModal", () => {
       getByText("Every profile's permissions for each action in Viberr Core."),
     ).toBeTruthy();
     expect(getByText("Repository & execution")).toBeTruthy();
-    expect(getByText("Workflow & approvals")).toBeTruthy();
-    // Off-catalog operator action lands in "Other actions".
+    // "Reserved for humans" appears both as a group header and as the mode
+    // legend label (CAP_META.forbidden), so match at least one.
+    expect(getAllByText("Reserved for humans").length).toBeGreaterThan(0);
+    // Off-catalog actions (operator coordination + the pruned advisory review
+    // caps a seed profile still carries) land in "Other actions".
     expect(getByText("Other actions")).toBeTruthy();
     expect(getByText("Assign the primary specialist")).toBeTruthy();
     // Cell modes render as mx-cell classes with accessible titles.

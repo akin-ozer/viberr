@@ -540,6 +540,7 @@ function BoardHeader({
   waitingHuman,
   group,
   canCreate,
+  canRescan,
   setParam,
   onRescan,
   onNew,
@@ -548,6 +549,7 @@ function BoardHeader({
   waitingHuman: number;
   group: "stage" | "list";
   canCreate: boolean;
+  canRescan: boolean;
   setParam: (key: string, value: string | null) => void;
   onRescan: () => void;
   onNew: () => void;
@@ -579,15 +581,17 @@ function BoardHeader({
             List
           </button>
         </div>
-        <button
-          type="button"
-          className="btn ghost sm"
-          onClick={onRescan}
-          title="Reconcile the board with the file-native store"
-        >
-          <Icon name="refresh" />
-          Re-scan
-        </button>
+        {canRescan && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={onRescan}
+            title="Reconcile the board with the file-native store"
+          >
+            <Icon name="refresh" />
+            Re-scan
+          </button>
+        )}
         {canCreate && (
           <button type="button" className="btn primary sm" onClick={onNew}>
             <Icon name="plus" />
@@ -904,9 +908,15 @@ export function BoardPage({
   const rescanDone = useRef(false);
   useEffect(() => {
     if (rescanFetcher.state === "submitting") rescanDone.current = false;
-    if (rescanFetcher.state === "idle" && rescanFetcher.data?.ok && !rescanDone.current) {
+    if (rescanFetcher.state === "idle" && rescanFetcher.data && !rescanDone.current) {
       rescanDone.current = true;
-      push("Re-scan complete — board matches the file-native store");
+      // Surface BOTH outcomes — a swallowed {ok:false} (e.g. a role 403) used to
+      // leave the "Re-scanning…" toast as the last word (MU-3).
+      push(
+        rescanFetcher.data.ok
+          ? "Re-scan complete — board matches the file-native store"
+          : (rescanFetcher.data.error ?? "Re-scan failed."),
+      );
     }
   }, [rescanFetcher.state, rescanFetcher.data, push]);
 
@@ -917,6 +927,7 @@ export function BoardPage({
         waitingHuman={waitingHuman}
         group={group}
         canCreate={canCreate}
+        canRescan={canTransition}
         setParam={setParam}
         onRescan={rescan}
         onNew={() => setCreating(stages[0]?.id ?? "triage")}

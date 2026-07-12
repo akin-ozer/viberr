@@ -7,10 +7,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
-import {
-  readProjectFile,
-  updateProjectFile,
-} from "~/server/files/project-writer.server";
+import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
@@ -61,7 +58,7 @@ const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 // the FIRST available model + the default effort — so we never hardcode a
 // specific id that could drift out of the list.
 
-export const profileFormSchema = z.object({
+const profileFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   role: z.string().trim().min(1, "Role is required."),
   backend: z.enum(["codex", "claude"]),

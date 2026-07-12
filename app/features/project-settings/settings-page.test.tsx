@@ -32,9 +32,9 @@ const STAGES = [
 ];
 
 const MEMBERS: MembershipView[] = [
-  { userId: "u_arda", role: "admin", status: "active", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
-  { userId: "u_elif", role: "admin", status: "active", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
-  { userId: "u_new", role: "viewer", status: "invited", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal" },
+  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
+  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
+  { userId: "u_new", role: "viewer", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal" },
 ];
 
 // A REAL bound PAT carrying an open scope violation — the honest case that
@@ -186,13 +186,12 @@ describe("MembersPanel", () => {
     onNavPolicy: () => {},
   };
 
-  it("renders active/invited counts, the you-tag and the pending pill", () => {
+  it("renders the active count, the you-tag and the policy link", () => {
     const { container, getByText } = render(
       <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
     );
-    expect(getByText("2 active · 1 invited")).toBeTruthy();
+    expect(getByText("3 active")).toBeTruthy();
     expect(container.querySelector(".you-tag")).not.toBeNull();
-    expect(getByText("invite pending")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
