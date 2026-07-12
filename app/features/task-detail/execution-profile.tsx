@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { type ProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
@@ -57,6 +58,10 @@ function OwnerControl({
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   const admin = myRole === "admin";
+  // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
+  // read + comment only, so its take/hand-off buttons would just 403. Gate the
+  // controls the same way the server does rather than render a button that fails.
+  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -79,8 +84,8 @@ function OwnerControl({
   }, [open]);
 
   if (!o) {
-    // Only project MEMBERS can take ownership (M3) — hide from non-members.
-    return myRole ? (
+    // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
+    return canOwn ? (
       <button
         type="button"
         className="rev-add"
@@ -92,14 +97,23 @@ function OwnerControl({
         Assign me
       </button>
     ) : (
-      <span className="sub">Unowned — open to any project member</span>
+      <span className="sub">Unowned — a contributor or above can take it</span>
     );
   }
 
+  // Hand-off requires owner-or-admin (owner-assign); only the owner or an admin
+  // sees the candidate list.
+  const canHandOff = mine || admin;
   // Hand-off candidates: active members minus the current owner and me.
-  const candidates = members.filter(
-    (m) => m.userId !== o.userId && m.userId !== meId,
-  );
+  const candidates = canHandOff
+    ? members.filter((m) => m.userId !== o.userId && m.userId !== meId)
+    : [];
+
+  // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
+  // viewer can't take over, hand off, or release.
+  if (!canOwn && !admin) {
+    return null;
+  }
 
   return (
     <div className="own-wrap" ref={ref}>
@@ -115,7 +129,7 @@ function OwnerControl({
       </button>
       {open && (
         <div className="own-menu" role="menu" aria-label="Manage task ownership">
-          {!mine && (
+          {!mine && canOwn && (
             <button
               type="button"
               className="menu-item"
