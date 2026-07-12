@@ -1,5 +1,12 @@
 # Role-bindings surface map (2026-07-11)
 
+> ✅ **SUPERSEDED (2026-07-12): the role-bindings phase is DONE.** The rework shipped on
+> `viberr-rolebindings-pass3` (PR #14). Current ground truth + what changed:
+> `../discovery-2026-07-12/role-bindings-current-state.md` + `implementation-ledger.md`.
+> Matrix-as-source (`app/shared/rbac.ts`), Q5 clean tiering, full D9 SSE, R4 gating, capability
+> prune, S3 labeling, and F11 (the branch-deny HIGH) are all resolved.
+
+
 The complete map of both authorization systems, produced for the owner's planned role-bindings
 rework. Every claim is file:line-anchored (verified against the live codebase this session).
 
