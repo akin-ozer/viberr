@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import { runMigrations } from "./migration-runner.server";
+import { reconcileSchemaFromMigrations } from "./schema-reconcile.server";
 
 /**
  * Opens (creating parent directories as needed) a better-sqlite3 database
@@ -42,10 +43,14 @@ export function getDb(): Database.Database {
     const dbPath = getProjectionDbPath();
     db = openDatabase(dbPath);
     const result = runMigrations(db);
+    // Heal added-column drift from edited migrations before any projection
+    // rebuild reads/writes the schema (pass-4 F-MIG1).
+    const healed = reconcileSchemaFromMigrations(db);
     logger.info("sqlite ready", {
       dbPath,
       migrationsApplied: result.applied,
       migrationsAlreadyApplied: result.alreadyApplied.length,
+      schemaHealed: healed,
     });
     cache[DB_CACHE_KEY] = db;
   }
