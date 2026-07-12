@@ -58,3 +58,27 @@ parent's injected process environment. In a standalone deployment (systemd/Docke
 CLAUDE_CONFIG_DIR, no Claude parent) there is nothing to inherit — the declared-resources-only
 guarantee holds. Declared skills (developer-expertise etc.) DO load correctly in every case. The
 app-reference's absolute "no host plugins leak" wording is corrected to state this precise boundary.
+
+## Addendum 2: adversarial self-review round (2026-07-12)
+Ran 3 parallel adversarial reviewers over the full diff (RBAC / capability+runtime / UI) before the
+external code review. UI review: clean. The other two found 4 real defects the tests missed — all
+fixed, all with new regression tests (suite 1136 → 1153):
+1. **MEDIUM (labeling)** — `merge-pull-request` was in `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, so the
+   capability matrix badged it "advisory on Codex" — understating a structural ALWAYS_HUMAN cap.
+   `capabilityEnforcement` now checks ALWAYS_HUMAN first → "both" (no badge). Verified live (merge row
+   has no badge; branch/push rows still do).
+2. **LOW-MED (F1)** — stage eligibility was enforced only at ASSIGN; a re-prompt of an already-assigned
+   specialist could run at an ineligible stage. `assertStageEligible` now also fires in
+   startSpecialistRun/startReviewerRun (the run boundary).
+3. **LOW (seed)** — the operator SEED ASSET (`operator.profile.md`) still granted the pruned
+   `compress-timelines`/`owner-reassignment` (raw kebab labels on the card). Removed from the asset +
+   the skill-doc prose.
+4. **MEDIUM (test gap)** — rbac.ts/policy-data.ts comments promised a `policy-rbac.server.test.ts`
+   that drove the guards per role, but it didn't exist. Written: it drives every canonical guard as
+   admin/maintainer/contributor/viewer/non-member and asserts the outcome matches ACTION_ROLES +
+   proves each set is a monotonic rank-floor. Plus `capabilities.test.ts` (enforcement classification
+   + prune + merge-label regression) and an F1 run-boundary rejection test.
+
+Reviewer LOW/informational notes NOT changed (all fail-safe / by-design): releaseOwner 404-vs-403
+ordering (board is app-wide readable — no new leak), demoted-viewer-owner can't self-release
+(fail-closed; admin releases), policy module gating members under `edit-policy` (both admin today).
