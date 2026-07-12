@@ -3,6 +3,39 @@
 The complete map of both authorization systems, produced for the owner's planned role-bindings
 rework. Every claim is file:line-anchored (verified against the live codebase this session).
 
+## ⚠️ Updates since this map (P3.8 + hardening waves, as of 2026-07-12) — READ FIRST
+
+The map below is the DISCOVERY-time state. These rows changed before the role-bindings phase began
+(all on branch `viberr-selftest-implementation` / PR #7 — base your rework on that branch):
+
+- **Fixed mismatches**: M1 (Dismiss gated by `canApply`), M2 (packet resolve options gated —
+  viewers get 0 resolve buttons; accept_completion additionally disabled for owner-only viewers),
+  M3 (Assign-me members-only). M4/M5: M5 closed — reviewer push is now a REAL grant.
+- **Wired capabilities (Q4 partial)**: `execute-code-or-write-repo` → deny Edit/Write/NotebookEdit +
+  git commit; `edit-other-task-branch` → deny checkout/switch/reset; commit-push adds git commit.
+  The 2 fully-orphan ids (`validation-verdict`, `hold-on-failing-checks`) were REMOVED from the
+  catalog. `ENFORCED_CAPABILITY_IDS` + `capabilityIsEnforced` (app/shared/capabilities.ts) now
+  distinguish enforced vs advisory — the matrix modal renders honestly. Counts in §2 are stale
+  accordingly (32→30 ids; consumed set larger).
+- **Packet resolve authority (Q2 ruling)**: task OWNER (with CURRENT project membership — checked)
+  may resolve non-completion packets; accept_completion stays admin|maintainer.
+- **New recommendation kinds**: `run_specialist` / `run_reviewer` — the operator's supervised
+  run-recommendations are now applyable cards; `applyRecommendation` dispatches them to
+  startSpecialistRun/startReviewerRun (RBAC re-checked inside).
+- **Home**: project list is membership-scoped (org-admins see all) — Q6. Home rescan is org-admin
+  gated (D7). `runOperator` audits the real userId (D8).
+- **SSE**: the `projects` scope expands to per-project scopes for non-org-admins
+  (resources.events.ts) — partial D9; full membership enforcement still this phase's scope.
+- **Honest empty slate (owner ruling)**: seed ships 0 MCP servers / 0 connections / 0 PATs;
+  `policy_display` credential source removed; seeded profiles have `mcps: []`. Don't reintroduce
+  fabricated grants/health in seeds.
+- **Ownership row**: take/release own-task ownership is open through **viewer** (per the shipped
+  matrix); create-task remains contributor+.
+
+Still open for THIS phase: D2/D5 matrix-as-runtime-source + deleting the 5 duplicated guard helpers,
+deep catalog prune (beyond the 2 orphans), full D9 SSE membership, **Q5 contributor-vs-viewer split
+(owner ruling still open — ask)**, S3 codex confinement (still deprioritized).
+
 Two systems, meeting at defined seams:
 1. **Human RBAC** — org roles `admin|member`; project roles `admin|maintainer|contributor|viewer`.
 2. **Agent capability policy** — per-deployment `{capabilityId, mode}` with modes

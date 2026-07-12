@@ -65,7 +65,46 @@ react + reconcile on all paths · X9 ✅ verdict on full text · X10 ✅ truncat
 + UI · X12 ✅ empty-repo→null · X13 ✅ honest completion copy · X14 ✅ M2/M3 UI gating · X15 ✅ invited-status
 dropped.
 
-## Net
-~55 findings + 15 live discoveries + 8 owner rulings implemented. Deferred (all documented, owner-scoped):
-D2/D5 guard consolidation, deep catalog prune, D9 SSE membership, D6/Q5 role split — the dedicated
-role-bindings phase. Every fix carries a regression test; suite green, typecheck clean.
+## Post-PR hardening waves (2026-07-11/12, after the sections above)
+
+**Wave 1 — adversarial multi-agent review of the full diff: 16 confirmed defects (3 HIGH), all fixed**
+(commit `efdd25f`): #1 waiting-state leak on packet-less chain end (HIGH — completion now ALWAYS clears
+`waiting: agent`) · #2 GIT_CEILING_DIRECTORIES scoped to the task dir not workspace root (HIGH) ·
+#3 codex per-run env overlaid on a full process.env snapshot, never `{}` (HIGH) · #4 no-progress compares
+truncated forms · #5/#7 lease release idempotent per acquisition token · #6/#14 rework matched by
+specialist identity · #8 packet owner-resolve requires CURRENT membership · #9 review re-entry never
+launders a standing failing · #10 SSE `projects` scope expands per-project for non-admins · #11 dropped-
+guardrail replies still audit (boot idempotency) · #12 markdown-aware guardrail truncation · #13 compaction
+never folds agent comments · #15 packet Confirm disabled for owner-only viewers on accept_completion ·
+#16 file-watcher self-heals transient errors. Regression tests for the subtlest.
+
+**Wave 2 — CI hardening** (commits `e94626f`, `39512ee`): hermetic test env (`test-support/setup-env.ts`
+seeds the two required secrets — no `.env` dependency; CI parity verified by running the suite with
+`.env` hidden and checking the real exit code) · adapter onPhase/onExit persist wrapped catch-and-log
+(a run settling after a test's DB closed was an unhandled timer error failing the suite with all tests
+green). Both with deterministic regression tests.
+
+**Wave 3 — fresh current-state sweep: 19 net-new findings, ALL fixed** (see current-state-findings.md):
+- **HIGH** KB injection read only top-level `*.md` — GitHub-imported/uploaded/nested docs never reached
+  agents (even the seed api-contracts KB injected 1/6 docs). → shared recursive multi-extension reader
+  `app/server/files/kb-injection.server.ts` with honest truncation marker (commit `6a5266d`, 8 tests).
+- **7 MED** seed-fabrication cluster → owner ruling **"honest empty slate"** (commit `28c57c0`): org-seed
+  ships 0 MCP / 0 connections / 0 PATs; `policy_display` credential source REMOVED from pat-store (no
+  bound PAT ⇒ source `none`, honest card); fake masked token + `github-mcp` profile refs dropped from
+  demo-data. Plus the operator `run_specialist`/`run_reviewer` recommend dead-end → real applyable
+  recommendation cards (new recommendation kinds, applyRecommendation dispatch, UI) (commit `2feb1a6`).
+- **11 LOW** honesty/cosmetic (commit `e1371ed`): notifyTaskWatchers logs recipient-resolution failure ·
+  unvalidated PAT shows "scopes not yet verified" not "All granted" · pr-open 422 ⇒ `nothing_to_review` ·
+  dead `packetOption.accept` removed · KB copy "read live · re-scanned" (no phantom scheduler) · stale
+  users-panel OAuth comment corrected · project archive/unarchive/delete + github.reconcile.project in the
+  Activity audit whitelist · decision-packet body renders inline code.
+
+## Net (final, 2026-07-12)
+~55 findings + 15 live discoveries + 8 owner rulings + 16 adversarial + 2 CI + 19 current-state findings
+implemented — **everything found is fixed**; every fix carries a regression test. **1130 tests green**,
+typecheck clean, PR #7 (21 commits) CI-green and mergeable. Live-validated across three campaigns
+(25 + 21 + 22 cases; real PRs #4/#8/#10 merged, #5/#6/#9 closed on akin-ozer/viberr).
+
+Deferred (owner-scoped, **role-bindings phase — started 2026-07-12 in a separate session**):
+D2/D5 matrix-as-runtime-source + guard consolidation, deep capability-catalog prune, D9 SSE membership,
+D6/Q5 contributor-vs-viewer split (needs the open Q5 ruling), S3 codex tool confinement.

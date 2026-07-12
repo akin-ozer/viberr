@@ -83,4 +83,6 @@ verification of each changed flow. Nothing deferred; nothing on a chip.
 
 **Deferred by owner decision** (not defects): the deep role-bindings rework (matrix-as-runtime-source,
 contributor/viewer split — open ruling Q5) and Codex tool-confinement (S3), both documented for the
-dedicated role-bindings phase per the product-intent doc.
+dedicated role-bindings phase per the product-intent doc. **That phase started 2026-07-12 in a
+separate session** — its briefing lives in `role-bindings-map.md` (read the "Updates since this map"
+addendum first).

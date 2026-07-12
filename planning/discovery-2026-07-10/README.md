@@ -1,8 +1,9 @@
 # Viberr full-product pass — documentation index (2026-07-10 → 2026-07-11)
 
 The docs from a full discovery → critical-questions → 20+ task testing → implementation → verification
-pass. Everything is **implemented, tested (1029 green), and current** unless a doc's own banner says
-"historical". Read in this order.
+pass. Everything is **implemented, tested, and current** unless a doc's own banner says "historical".
+Read in this order. **A second full pass (2026-07-11/12) builds on this one — see
+`../discovery-2026-07-11/` (start at its FINAL-REPORT.md); the suite is now 1130 green on PR #7.**
 
 ## Current / authoritative
 - **`app-reference.md`** — the live architecture, data model, routes, agent runtime. Current as of
@@ -26,7 +27,13 @@ pass. Everything is **implemented, tested (1029 green), and current** unless a d
 - **`test-sweep-results.md`** — the Test Harbor 22-task sweep, PRE-D1–D4 (partially superseded).
 - **`phase4-progress.md`** — the phase-4 implementation log (work continued past it).
 
-## Outcome
-All findings + decisions implemented; nothing deferred except **codex tool confinement (S3)**, which
-the owner scoped to the upcoming role-bindings phase. Git: PRs #1/#2 merged to `main`; PR #3 open with
-the remainder. 1029 tests pass, typecheck clean, seed pristine.
+## Outcome (updated 2026-07-12)
+All findings + decisions from THIS pass implemented; nothing deferred except **codex tool confinement
+(S3)**, scoped to the role-bindings phase. Git: PRs #1/#2/#3 merged to `main`.
+
+**Since then (pass 2, `../discovery-2026-07-11/`):** a second full discovery→testing→implementation
+cycle landed on PR #7 (`viberr-selftest-implementation`, 21 commits, CI green, mergeable) — ~55 more
+findings + 8 owner rulings + 16 adversarial-review fixes + 2 CI fixes + 19 current-state findings
+(incl. the **honest-empty-slate** seed ruling: 0 fabricated MCP/connections/PATs; and the KB
+recursive-injection HIGH fix). **1130 tests pass.** The dedicated **role-bindings phase started
+2026-07-12** in a separate session (D2/D5 matrix-as-source, deep prune, full D9, Q5, S3).

@@ -151,7 +151,13 @@ ids (validation-verdict, hold-on-failing-checks) + added `capabilityIsEnforced`/
 so the matrix can distinguish enforced vs advisory; D10/Q6 home membership filter (org-admin sees all);
 D7 rescan → org-admin; D3 UI gating M1 (Dismiss), M2 (packet resolve behind canResolve), M3 (Assign-me
 members-only); C9 dismiss docstring.
-DEFERRED to the owner's dedicated role-bindings phase (large mechanical refactors, low urgency):
+Also landed after this list was written (hardening waves — see implementation-ledger.md): SSE
+`projects`-scope expansion for non-org-admins (partial D9) and packet owner-resolve requiring
+CURRENT membership (#8).
+
+DEFERRED to the owner's dedicated role-bindings phase — **phase STARTED 2026-07-12 in a separate
+session** (base branch `viberr-selftest-implementation`; read role-bindings-map.md's "Updates since
+this map" addendum first):
 - **D2/D5** — make PROJECT_CAP_MATRIX the single runtime source (`actionRequires(action)`) and
   consolidate the 5 duplicated guard helpers. ~15 enforcement sites hardcode role lists today; a test
   keeps them in sync. Structural, no behavior bug — pure de-duplication.
