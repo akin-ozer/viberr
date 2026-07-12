@@ -1593,12 +1593,16 @@ export async function applyAgentCompletionEffects(
       agentHandle: input.agentHandle,
       reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
     });
-    notifyTaskWatchers(db, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      kind: "quality",
-      text: `${input.role} run failed — ${reasonText}.`,
-    });
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        kind: "quality",
+        text: `${input.role} run failed — ${reasonText}.`,
+      },
+      ctx,
+    );
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
