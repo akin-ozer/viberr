@@ -7,18 +7,18 @@
   ],
   "exclude": ["data", "docker-data", "build", "node_modules", "e2e/.tmp-data"],
   "compilerOptions": {
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "lib": ["DOM", "DOM.Iterable", "ES2025"],
     "types": ["node", "vite/client"],
-    "target": "ES2022",
-    "module": "ES2022",
+    "target": "ES2025",
+    "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "rootDirs": [".", "./.react-router/types"],
     "paths": {
       "~/*": ["./app/*"]
     },
-    "stableTypeOrdering": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "noEmit": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
