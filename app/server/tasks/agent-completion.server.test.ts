@@ -225,6 +225,67 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // NOT read "agent working" forever.
     expect(parsed.frontmatter.waiting).toBe("human");
   });
+
+  it("surfaces a FAILED run as a typed blocked event + recovery packet, not silence (F8)", async () => {
+    // A run that ends in `error` (e.g. a Codex quota exhaustion) used to leave no
+    // trace on the timeline and revert waiting=human silently. Now it must post a
+    // blocked event naming the reason and open a recovery packet.
+    const script = buildScript({
+      lines: [
+        { t: "", ev: "init", tag: "thread.started", text: "codex thread started" },
+        { t: "", ev: "err", tag: "turn.failed", text: "You've hit your usage limit. Upgrade to Plus to continue using Codex." },
+      ],
+      occurredAt: [new Date().toISOString(), new Date().toISOString()],
+      sessionId: "t",
+      backend: "codex",
+      model: "gpt-5.5",
+      op: false,
+      keepRunning: false,
+      instant: true,
+    });
+    const started = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      kind: "primary",
+      role: "Developer",
+      backend: "codex",
+      model: "gpt-5.5",
+      prompt: "implement",
+      workdir: store.dataRoot,
+      autonomous: true,
+      script,
+      dataRoot: store.dataRoot,
+      actor: actor(store.users.arda),
+    });
+    await waitFor(() => {
+      const row = store.db
+        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+        .get(started.runId) as { state: string } | undefined;
+      return row?.state === "error";
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        role: "Developer",
+        kind: "primary",
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: started.runId, state: "error", simulated: false },
+    );
+    const parsed = taskFile().parsed;
+    const blocked = parsed.timeline.find((e) => e.type === "blocked");
+    expect(blocked).toBeTruthy();
+    expect(blocked!.text).toContain("did not complete");
+    expect(blocked!.text.toLowerCase()).toContain("quota");
+    // waiting must be flipped off `agent` (no phantom "agent working").
+    expect(parsed.frontmatter.waiting).toBe("human");
+  });
 });
 
 describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => {

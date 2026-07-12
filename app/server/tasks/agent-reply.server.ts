@@ -338,6 +338,33 @@ export function fullReplyTextForRun(
   return extractFullReplyText(lines);
 }
 
+/**
+ * A human-readable failure reason for a run that ended in `error` (F8): the last
+ * error line the backend emitted (e.g. a Codex "usage limit" message, an auth
+ * failure, a crashed tool). Returns null when the run logged no error line.
+ * Classified into a short kind so the recovery packet can be specific.
+ */
+export function runFailureReason(
+  db: Database.Database,
+  runId: string,
+): { kind: "quota" | "auth" | "unknown"; text: string } | null {
+  const lines = listRunLines(db, runId).map((l) => l.display);
+  let last: LogLine | null = null;
+  for (const l of lines) {
+    if (l.ev === "err" || /fail|error/i.test(l.tag ?? "")) last = l;
+  }
+  if (!last?.text) return null;
+  const text = last.text.trim();
+  const kind: "quota" | "auth" | "unknown" = /usage limit|quota|rate limit|too many requests|429/i.test(
+    text,
+  )
+    ? "quota"
+    : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
+      ? "auth"
+      : "unknown";
+  return { kind, text };
+}
+
 // -------------------------------------------------------- resume workdir
 
 // ---------------------------------------------------- simulated reply stream

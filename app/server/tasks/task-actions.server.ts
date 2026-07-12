@@ -1547,6 +1547,61 @@ export async function applyAgentCompletionEffects(
     actorRef,
     replyText: commentText,
   });
+  // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
+  //     trace on the timeline and never re-invoked the operator — the task just
+  //     silently reverted to waiting=human (F8). Surface the failure as a typed
+  //     event, escalate a recovery packet so it reaches a human's queue, and stop
+  //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
+  //     human action and are handled elsewhere, so only `error` lands here.
+  if (finished.state === "error" && !finished.simulated) {
+    const { runFailureReason } = await import("./agent-reply.server");
+    const failure = runFailureReason(db, finished.id);
+    const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
+    const roleLabel = input.kind === "reviewer" ? "reviewer" : "specialist";
+    const failText = failure?.text
+      ? failure.text.length > 180
+        ? failure.text.slice(0, 177) + "…"
+        : failure.text
+      : "";
+    const reasonText =
+      failure?.kind === "quota"
+        ? `${backendLabel} is over its usage quota`
+        : failure?.kind === "auth"
+          ? `${backendLabel} rejected the credentials`
+          : failText
+            ? `${backendLabel} run failed: ${failText}`
+            : `the ${backendLabel} run ended in an error`;
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "blocked",
+        actor: actorRef,
+        title: null,
+        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}. No changes were delivered.${
+          failure?.kind === "quota" || failure?.kind === "auth"
+            ? " Retry on the other backend, or fix the credential and re-run."
+            : ""
+        }`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      agentHandle: input.agentHandle,
+      reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
+    });
+    notifyTaskWatchers(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      text: `${input.role} run failed — ${reasonText}.`,
+    });
+    await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
+    return;
+  }
   // 2. Reconcile agent-side delivery (NFR15) — real runs only.
   if (finished.state === "finished" && !finished.simulated) {
     const { reconcileWorkspaceDelivery } = await import(
