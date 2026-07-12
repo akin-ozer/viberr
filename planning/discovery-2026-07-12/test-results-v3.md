@@ -71,3 +71,23 @@ comments + @mentions + valve ✅ · RBAC triggering across 5 users ✅ · operat
 vague-packet, policy-block) ✅✅ · agent delivery + real PRs (merged #12, closed #11) ✅ · MCP honest
 empty ✅ · skills isolation ⚠️(F13) · codex/claude parity + retry ✅. **Real PR lifecycle: #12 merged,
 #11 closed via gh.** Findings surfaced: F8, F10, F11(HIGH), F12, F13 + R1-R7 confirmed live.
+
+## Post-implementation live re-validation (2026-07-12, branch viberr-rolebindings-pass3)
+
+Re-ran the key cases against the restarted dev server (new code) to prove the fixes:
+
+| Check | Before | After (this branch) |
+|-------|--------|---------------------|
+| viewer (selin) take-ownership | 200 | **403** (Q5 clean tiering) |
+| viewer manual transition (cross-stage) | 403 | 403 (unchanged, correct) |
+| non-member (deniz) review page | 200 | **403** (R4) |
+| non-member activity page | 200 | **403** (R4) |
+| non-member SSE `scope=project:…` | streams events | **403** (R2 full D9) |
+| Claude specialist delivery, default `edit-other-task-branch: human` | branch-deny, NO delivery (F11) | **PR #13 delivered**, branch pushed, host isolated |
+| capability matrix | no enforcement labels | **CLAUDE-ENFORCED** badges + legend (S3); `edit-other-task-branch` gone |
+| task Permissions rail | misleading "owner accepts / human-owner-only" | renders honestly from the matrix per role (F4) |
+| Codex quota failure (VSF-27, operator auto-flow) | silent revert to waiting=human, no trace | **blocked recovery packet** "Work stalled — Codex is over its usage quota" (F8) |
+| operator auto-flow (VSF-27 well-scoped) | — | Triage→Ready→In Progress + deployed the **stage-eligible** Developer (F1 intact) |
+
+All green: `npm test` 1136 · `npm run typecheck` clean · `npm run e2e` 13/13. One pre-existing
+async-teardown-race test flakes intermittently (passes on re-run; not introduced this pass).
