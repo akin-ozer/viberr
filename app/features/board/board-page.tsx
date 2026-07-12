@@ -12,7 +12,9 @@ import {
   useSearchParams,
 } from "react-router";
 import type { TaskSummary } from "~/shared/mapping/task.server";
+import { taskWaitsOnUser, type ProjectRole } from "~/shared/rbac";
 import { Avatar } from "~/ui/avatar";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -50,12 +52,18 @@ export interface BoardColumnData {
   tasks: TaskSummary[];
 }
 
-function WaitTag({ task }: { task: TaskSummary }) {
+function WaitTag({
+  task,
+  waitingOnMe,
+}: {
+  task: TaskSummary;
+  waitingOnMe: boolean;
+}) {
   if (task.waiting === "agent") {
     return (
       <span className="wait-tag agent">
-        <span className="working" />
-        agent working
+        <Icon name="cpu" />
+        waiting on agent
       </span>
     );
   }
@@ -63,7 +71,7 @@ function WaitTag({ task }: { task: TaskSummary }) {
     return (
       <span className="wait-tag human">
         <Icon name="hand" />
-        waiting on you
+        {waitingOnMe ? "waiting on you" : "waiting on a human"}
       </span>
     );
   }
@@ -121,6 +129,7 @@ function TaskCard({
   canTransition,
   dragging,
   arrived,
+  waitingOnMe,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -135,6 +144,8 @@ function TaskCard({
   dragging: boolean;
   /** This card just landed here from a drop (plays the arrival pulse). */
   arrived: boolean;
+  /** True only for the viewer's explicit project responsibility/owned task. */
+  waitingOnMe: boolean;
   onDragStart: (task: TaskSummary, e: DragEvent) => void;
   onDragEnd: () => void;
   onDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
@@ -190,7 +201,7 @@ function TaskCard({
               <Icon name="pr" />#{task.pr.number}
             </span>
           )}
-          <WaitTag task={task} />
+          <WaitTag task={task} waitingOnMe={waitingOnMe} />
         </div>
       </Link>
     </div>
@@ -224,6 +235,7 @@ function Column({
   dropTarget,
   previewTask,
   beforeKey,
+  waitsOnMe,
   onCardDragStart,
   onCardDragEnd,
   onCardDragOver,
@@ -245,6 +257,7 @@ function Column({
   previewTask: TaskSummary | null;
   /** Insertion slot: render the preview before this card (null = column end). */
   beforeKey: string | null;
+  waitsOnMe: (task: TaskSummary) => boolean;
   onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
   onCardDragEnd: () => void;
   onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
@@ -289,6 +302,7 @@ function Column({
                   canTransition={canTransition}
                   dragging={draggingKey === t.key}
                   arrived={arrivedKey === t.key}
+                  waitingOnMe={waitsOnMe(t)}
                   onDragStart={onCardDragStart}
                   onDragEnd={onCardDragEnd}
                   onDragOver={onCardDragOver}
@@ -306,9 +320,11 @@ function Column({
 function ListView({
   tasks,
   stages,
+  waitsOnMe,
 }: {
   tasks: TaskSummary[];
   stages: BoardStage[];
+  waitsOnMe: (task: TaskSummary) => boolean;
 }) {
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
@@ -345,7 +361,7 @@ function ListView({
             <OwnerLine task={t} />
             <ReviewerStack task={t} label />
             <ReadinessPill value={t.displayReadiness} sm />
-            <WaitTag task={t} />
+            <WaitTag task={t} waitingOnMe={waitsOnMe(t)} />
           </Link>
         ))}
       </div>
@@ -372,6 +388,7 @@ function NewTaskModal({
     ok: boolean;
     key?: string;
     stageName?: string;
+    operatorTrigger?: "queued" | "awaiting_input" | "not_deployed" | "coalesced";
     error?: string;
   }>();
   const csrf = useCsrfToken();
@@ -392,7 +409,13 @@ function NewTaskModal({
         fetcher.data.key +
           " created in " +
           fetcher.data.stageName +
-          " — its task.md is in the store",
+          (fetcher.data.operatorTrigger === "queued"
+            ? " — bounded Operator assessment queued"
+            : fetcher.data.operatorTrigger === "awaiting_input"
+              ? " — add a concrete goal before running the Operator"
+              : fetcher.data.operatorTrigger === "coalesced"
+                ? " — Operator assessment already queued"
+                : " — its task.md is in the store"),
       );
       onClose();
     }
@@ -531,7 +554,7 @@ function NewTaskModal({
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
   { id: "human", label: "Waiting on me", icon: "hand" },
-  { id: "agent", label: "Agent working", icon: "cpu" },
+  { id: "agent", label: "Waiting on agent", icon: "cpu" },
   { id: "risk", label: "Needs attention", icon: "alert" },
 ];
 
@@ -559,7 +582,7 @@ function BoardHeader({
       <div>
         <h1>Board</h1>
         <div className="sub">
-          {taskCount} tasks · {waitingHuman} waiting on a human decision
+          {taskCount} tasks · {waitingHuman} waiting on you
         </div>
       </div>
       <div className="board-tools">
@@ -668,6 +691,7 @@ function StageBoard({
   drag,
   overStage,
   beforeKey,
+  waitsOnMe,
   arrivedKey,
   draggedTask,
   onCardDragStart,
@@ -685,6 +709,7 @@ function StageBoard({
   drag: { key: string; fromStage: string } | null;
   overStage: string | null;
   beforeKey: string | null;
+  waitsOnMe: (task: TaskSummary) => boolean;
   arrivedKey: string | null;
   draggedTask: TaskSummary | null;
   onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
@@ -720,6 +745,7 @@ function StageBoard({
             dropTarget={hovered}
             previewTask={hovered ? draggedTask : null}
             beforeKey={beforeKey}
+            waitsOnMe={waitsOnMe}
             onCardDragStart={onCardDragStart}
             onCardDragEnd={onCardDragEnd}
             onCardDragOver={onCardDragOver}
@@ -737,12 +763,17 @@ export function BoardPage({
   orphanTasks,
   canCreate,
   canTransition,
+  viewer,
+  readOnly = false,
 }: {
   columns: BoardColumnData[];
   orphanTasks: TaskSummary[];
   canCreate: boolean;
   /** admin|maintainer — enables the per-card stage-move dropdown. */
   canTransition: boolean;
+  viewer: { userId: string; projectRole: ProjectRole | null };
+  /** Archived projects keep board history/navigation but expose no mutations. */
+  readOnly?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -753,6 +784,8 @@ export function BoardPage({
   const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
+  const mayCreate = canCreate && !readOnly;
+  const mayTransition = canTransition && !readOnly;
 
   // Drag-and-drop stage moves. `drag` is the card in flight; `overStage` is the
   // column under the cursor. While a card is dragged across columns, the source
@@ -774,6 +807,7 @@ export function BoardPage({
   const moveDone = useRef<unknown>(null);
 
   const onCardDragStart = (task: TaskSummary, e: DragEvent) => {
+    if (!mayTransition) return;
     setDrag({ key: task.key, fromStage: task.stage });
     setOverStage(task.stage);
     setBeforeKey(null);
@@ -821,7 +855,7 @@ export function BoardPage({
     }
   };
   const onColumnDrop = (stageId: string, e: DragEvent) => {
-    if (!drag) return;
+    if (!drag || !mayTransition) return;
     e.preventDefault();
     const { key, fromStage } = drag;
     const target = beforeKey;
@@ -856,7 +890,7 @@ export function BoardPage({
     const d = transitionFetcher.data;
     if (d.ok && d.toast) push(d.toast);
     else if (!d.ok && d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
       setArrivedKey(null);
     }
   }, [transitionFetcher.state, transitionFetcher.data, push]);
@@ -874,7 +908,15 @@ export function BoardPage({
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
     [columns, orphanTasks],
   );
-  const waitingHuman = allTasks.filter((t) => t.waiting === "human").length;
+  const waitsOnMe = (task: TaskSummary) =>
+    taskWaitsOnUser({
+      waiting: task.waiting,
+      viewerUserId: viewer.userId,
+      projectRole: viewer.projectRole,
+      ownerUserId:
+        task.owner?.kind === "human" ? task.owner.userId : null,
+    });
+  const waitingHuman = allTasks.filter(waitsOnMe).length;
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
     ? (allTasks.find((t) => t.key === drag.key) ?? null)
@@ -882,7 +924,11 @@ export function BoardPage({
 
   const visible = (tasks: TaskSummary[]) =>
     tasks.filter(
-      (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
+      (t) =>
+        matchesBoardFilter(
+          { ...t, waitingOnMe: waitsOnMe(t) },
+          filter,
+        ) && matchesSearch(t, query),
     );
 
   const setParam = (key: string, value: string | null) => {
@@ -898,7 +944,7 @@ export function BoardPage({
   };
 
   const rescan = () => {
-    if (rescanFetcher.state !== "idle") return;
+    if (!mayTransition || rescanFetcher.state !== "idle") return;
     push("Re-scanning the task store…");
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -926,12 +972,14 @@ export function BoardPage({
         taskCount={allTasks.length}
         waitingHuman={waitingHuman}
         group={group}
-        canCreate={canCreate}
-        canRescan={canTransition}
+        canCreate={mayCreate}
+        canRescan={mayTransition}
         setParam={setParam}
         onRescan={rescan}
         onNew={() => setCreating(stages[0]?.id ?? "triage")}
       />
+
+      {readOnly && <ArchivedBadge />}
 
       <FilterBar
         filter={filter}
@@ -946,12 +994,13 @@ export function BoardPage({
           columns={columns}
           visible={visible}
           doneStageId={doneStageId}
-          canCreate={canCreate}
-          canTransition={canTransition}
+          canCreate={mayCreate}
+          canTransition={mayTransition}
           onNew={(stageId) => setCreating(stageId)}
           drag={drag}
           overStage={overStage}
           beforeKey={beforeKey}
+          waitsOnMe={waitsOnMe}
           arrivedKey={arrivedKey}
           draggedTask={draggedTask}
           onCardDragStart={onCardDragStart}
@@ -961,10 +1010,14 @@ export function BoardPage({
           onColumnDrop={onColumnDrop}
         />
       ) : (
-        <ListView tasks={visible(allTasks)} stages={stages} />
+        <ListView
+          tasks={visible(allTasks)}
+          stages={stages}
+          waitsOnMe={waitsOnMe}
+        />
       )}
 
-      {creating && (
+      {creating && mayCreate && (
         <NewTaskModal
           stages={stages.filter((s) => s.id !== doneStageId)}
           initialStage={creating}

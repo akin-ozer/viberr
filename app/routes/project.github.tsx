@@ -15,7 +15,9 @@ import {
 } from "~/features/github/github-actions.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
 import { GithubViewPage } from "~/features/github/github-view";
-import { type RbacAction, roleCan } from "~/shared/rbac";
+import { authorizeProjectAction, type RbacAction } from "~/shared/rbac";
+import { withProjectAuditAuthority } from "~/server/audit/audit-recorder.server";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
 
 /**
  * /projects/:slug/github — the GitHub surface (github-view spec), replacing
@@ -42,7 +44,11 @@ export async function action({ request, params }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const actor = {
+    userId: ctx.user.id,
+    label: ctx.user.email,
+    orgRole: ctx.user.role,
+  };
   const intent = String(formData.get("intent") ?? "");
 
   // RBAC — consult the single ACTION_ROLES source (rbac.ts), never a hardcoded
@@ -57,29 +63,39 @@ export async function action({ request, params }: Route.ActionArgs) {
       { ok: false as const, error: `Your role can't ${what}.` },
       { status: 403 },
     );
+  const authorizeActor = (action: RbacAction) => {
+    const authority = authorizeProjectAction(myRole, ctx.user.role, action);
+    return authority.allowed
+      ? withProjectAuditAuthority(actor, authority.source)
+      : null;
+  };
 
   try {
+    assertProjectActive(db, params.slug);
     if (intent === "reconcile") {
-      if (!roleCan(myRole, "reconcile-github")) {
+      const auditActor = authorizeActor("reconcile-github");
+      if (!auditActor) {
         return deny("reconcile-github", "reconcile with GitHub");
       }
-      return await runReconcile(db, params.slug, actor);
+      return await runReconcile(db, params.slug, auditActor);
     }
     if (intent === "grant-scope") {
-      if (!roleCan(myRole, "grant-github-scope")) {
+      const auditActor = authorizeActor("grant-github-scope");
+      if (!auditActor) {
         return deny("grant-github-scope", "re-check the credential");
       }
-      return await runGrantScope(db, params.slug, actor);
+      return await runGrantScope(db, params.slug, auditActor);
     }
     // Attach/rotate + remove the project credential — same credential-change
     // RBAC as grant-scope (`grant-github-scope`, maintainer+).
     if (intent === "set-credential" || intent === "clear-credential") {
-      if (!roleCan(myRole, "grant-github-scope")) {
+      const auditActor = authorizeActor("grant-github-scope");
+      if (!auditActor) {
         return deny("grant-github-scope", "change the credential");
       }
       return intent === "set-credential"
-        ? runSetCredential(db, params.slug, actor)
-        : runClearCredential(db, params.slug, actor);
+        ? runSetCredential(db, params.slug, auditActor)
+        : runClearCredential(db, params.slug, auditActor);
     }
     return data(
       { ok: false as const, error: "Unknown action." },
@@ -99,6 +115,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function GithubView({ loaderData }: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   return (
-    <GithubViewPage data={loaderData.view} myRole={layout?.myRole ?? null} />
+    <GithubViewPage
+      data={loaderData.view}
+      myRole={layout?.myRole ?? null}
+      readOnly={Boolean(layout?.board.project.archived)}
+    />
   );
 }

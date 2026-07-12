@@ -88,7 +88,7 @@ describe("/projects/:slug/review", () => {
       validation: "none",
     };
     expect(reviewRowSub(bare)).toBe(
-      "Agent working — the packet arrives at the boundary.",
+      "No active handoff — assign an owner, reviewer, or agent.",
     );
   });
 });

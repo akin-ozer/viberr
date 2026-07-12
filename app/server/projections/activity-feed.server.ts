@@ -113,7 +113,7 @@ export const AUDIT_LOG_LIMIT = 60;
 const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.policy.boundary_changed": "change",
   "project.member.role_changed": "change",
-  "project.member.invited": "change",
+  "project.member.access_granted": "change",
   "project.member.removed": "change",
   "project.stage.added": "change",
   "project.stage.renamed": "change",
@@ -122,6 +122,7 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.settings.updated": "change",
   "project.repo_override.changed": "change",
   "project.agent_profile.created": "change",
+  "project.agent_profile.deployed": "change",
   "project.agent_profile.updated": "change",
   "project.agent_profile.deleted": "change",
   "project.created": "change",
@@ -133,9 +134,17 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "github.credential.cleared": "change",
   "github.credential.revalidated": "change",
   "github.pr.merge_refused": "blockedact",
+  "task.board.reordered": "audit",
   "task.ownership.admin_released": "audit",
+  "task.operator.routing_decided": "audit",
+  "task.operator.readiness_assessed": "audit",
+  "task.operator.auto_queued": "audit",
+  "task.operator.auto_finished": "audit",
+  "task.operator.auto_failed": "blockedact",
+  "task.operator.auto_skipped_missing_intent": "blockedact",
   "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
+  "projection.rescan": "audit",
 };
 
 const BOUNDARY_LABEL: Record<string, string> = {
@@ -179,8 +188,8 @@ function auditText(
         resolveUserName(str(d.targetUserId)) ?? "a member";
       return `${actor} set ${target} to **${str(d.to) ?? "?"}**.`;
     }
-    case "project.member.invited":
-      return `${actor} invited ${str(d.email) ?? "a member"} as ${str(d.role) ?? "viewer"}.`;
+    case "project.member.access_granted":
+      return `${actor} granted ${str(d.email) ?? "a member"} project access as ${str(d.role) ?? "viewer"}.`;
     case "project.member.removed": {
       const target = resolveUserName(row.subject_id) ?? "a member";
       return `${actor} removed ${target} from the project.`;
@@ -207,6 +216,8 @@ function auditText(
       return `${actor} ${d.enabled ? "enabled" : "disabled"} task-level repo overrides.`;
     case "project.agent_profile.created":
       return `${actor} created agent profile **${str(d.name) ?? "?"}**.`;
+    case "project.agent_profile.deployed":
+      return `${actor} deployed global agent profile **${str(d.name) ?? "?"}** to the project.`;
     case "project.agent_profile.updated":
       return `${actor} updated agent profile **${str(d.name) ?? "?"}**.`;
     case "project.agent_profile.deleted":
@@ -242,17 +253,45 @@ function auditText(
     }
     case "github.pr.merge_refused":
       return `Blocked: review PR merge refused — the project credential is missing \`${str(d.scope) ?? "a scope"}\` — on`;
+    case "task.board.reordered":
+      return `${actor} reordered a board task — recorded per audit policy on`;
     case "task.ownership.admin_released":
       return `${actor} released the task owner — recorded per audit policy on`;
     case "runtime.run.started": {
       const role = str(d.role) ?? "agent";
       return `${actor} opened the ${role} runtime session — recorded per audit policy on`;
     }
+    case "task.operator.routing_decided":
+      return `${actor} routed **${str(d.purpose) ?? "work"}** to profile **${str(d.selectedProfileId) ?? "?"}**: ${str(d.reason) ?? "no explanation recorded"}.`;
+    case "task.operator.readiness_assessed":
+      return `${actor} assessed readiness as **${str(d.to) ?? "?"}**: ${str(d.rationale) ?? "no rationale recorded"}.`;
+    case "task.operator.auto_queued":
+      return `${actor} queued a bounded automatic Operator ${str(d.trigger) ?? "lifecycle"} assessment.`;
+    case "task.operator.auto_finished":
+      return `${actor} completed the automatic Operator assessment.`;
+    case "task.operator.auto_failed":
+      return `${actor} could not complete the automatic Operator assessment.`;
+    case "task.operator.auto_skipped_missing_intent":
+      return `${actor} paused automatic Triage because the canonical goal still needs concrete intent.`;
     case "runtime.run.interrupted":
       return `${actor} interrupted an agent run — recorded per audit policy on`;
+    case "projection.rescan":
+      return `${actor} re-scanned projections for the workspace.`;
     default:
       // Whitelisted-but-untemplated (future additions): honest fallback.
       return `${actor} — ${row.action.replace(/[._]/g, " ")}.`;
+  }
+}
+
+function withAuthorityNotice(text: string, detailsJson: string | null): string {
+  if (!detailsJson) return text;
+  try {
+    const details = JSON.parse(detailsJson) as Record<string, unknown>;
+    return details.authoritySource === "org_admin_override"
+      ? `${text} **Org admin override used.**`
+      : text;
+  } catch {
+    return text;
   }
 }
 
@@ -336,7 +375,13 @@ export function listAuditLog(
   const auditEntries: AuditLogEntry[] = rows.map((row) => ({
     id: row.id,
     kind: AUDIT_ACTION_KINDS[row.action] ?? "change",
-    text: finishText(auditText(row, resolveUserName), row.task_key),
+    text: finishText(
+      withAuthorityNotice(
+        auditText(row, resolveUserName),
+        row.details_json,
+      ),
+      row.task_key,
+    ),
     taskKey: row.task_key,
     occurredAt: row.occurred_at,
     status: null,

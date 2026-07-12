@@ -12,10 +12,13 @@ import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
+  deployGlobalAgentProfile,
   updateAgentProfile,
 } from "~/features/agents/agent-profile-actions.server";
 import { assembleAgentRoster } from "~/features/agents/agents-query.server";
 import { AgentsPage } from "~/features/agents/agents-page";
+import { listGlobalAgentProfiles } from "~/server/org/gagents.server";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
 
 /**
  * /projects/:slug/agents — the agent-governance surface (agents spec),
@@ -49,6 +52,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // KB created in org settings is now grantable to an agent, replacing the
     // hardcoded mock catalog whose items resolved to nothing.
     resourceCatalog: buildResourceCatalog(db),
+    globalProfiles: listGlobalAgentProfiles(db),
   };
 }
 
@@ -57,7 +61,11 @@ export async function action({ request, params }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const actor = {
+    userId: ctx.user.id,
+    label: ctx.user.email,
+    orgRole: ctx.user.role,
+  };
   const intent = String(formData.get("intent") ?? "");
 
   const parsePayload = (): unknown => {
@@ -69,6 +77,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   };
 
   try {
+    assertProjectActive(db, params.slug);
     if (intent === "create-profile") {
       const result = await createAgentProfile(
         db,
@@ -78,6 +87,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       return {
         ok: true as const,
         toast: `Profile "${result.name}" created — available for future assignments`,
+        profileId: result.profileId,
+      };
+    }
+    if (intent === "deploy-global-profile") {
+      const result = await deployGlobalAgentProfile(
+        db,
+        {
+          projectSlug: params.slug,
+          profileId: String(formData.get("profileId") ?? ""),
+        },
+        actor,
+      );
+      return {
+        ok: true as const,
+        toast: `Global profile "${result.name}" deployed — its template remains shared`,
         profileId: result.profileId,
       };
     }
@@ -137,7 +161,9 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       projectSlug={layout?.board.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
+      readOnly={Boolean(layout?.board.project.archived)}
       resourceCatalog={loaderData.resourceCatalog}
+      globalProfiles={loaderData.globalProfiles}
     />
   );
 }

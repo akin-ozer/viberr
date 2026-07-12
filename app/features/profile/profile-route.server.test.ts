@@ -28,10 +28,11 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function runLoader(cookie?: string) {
+async function runLoader(cookie?: string, project?: string) {
   const { loader } = await import("~/routes/profile");
+  const search = project ? `?project=${encodeURIComponent(project)}` : "";
   return loader({
-    request: app.request("/profile", cookie ? { cookie } : {}),
+    request: app.request(`/profile${search}`, cookie ? { cookie } : {}),
     params: {},
     context: {},
   } as never) as Promise<{ profile: ProfileView }>;
@@ -80,17 +81,22 @@ describe("/profile loader", () => {
     expect(profile.user.id).toBe(ardaId);
     expect(profile.user.email).toBe("arda@viberr.dev");
     expect(profile.user.hasPassword).toBe(true);
-    expect(profile.user.githubConnected).toBe(false); // derived from idp
+    expect(profile.user.githubConnected).toBe(false); // no linked GitHub account
     // NEVER ship the hash.
     expect("passwordHash" in profile.user).toBe(false);
 
-    // Arda belongs to all three seeded projects; most-active first.
+    // Arda belongs to all three seeded projects; most-active is the explicit
+    // fallback when the URL does not choose a context.
     expect(profile.memberships.map((m) => m.slug)).toEqual([
       "viberr-core",
       "billing-service",
       "deploy-pipeline",
     ]);
-    expect(profile.accessRole).toBe("admin");
+    expect(profile.selectedProject).toEqual({
+      slug: "viberr-core",
+      name: "Viberr Core",
+      role: "admin",
+    });
 
     // Pref defaults (nothing stored yet).
     expect(profile.prefs.notifs).toEqual(DEFAULT_NOTIF_PREFS);
@@ -104,7 +110,54 @@ describe("/profile loader", () => {
     expect(profile.memberships).toEqual([
       { slug: "viberr-core", name: "Viberr Core", role: "maintainer" },
     ]);
-    expect(profile.accessRole).toBe("maintainer");
+    expect(profile.selectedProject).toEqual({
+      slug: "viberr-core",
+      name: "Viberr Core",
+      role: "maintainer",
+    });
+  });
+
+  it("binds role and project destinations to the URL-selected membership", async () => {
+    app.db
+      .prepare(
+        `UPDATE project_members SET role = 'viewer'
+         WHERE user_id = ? AND project_slug = 'deploy-pipeline'`,
+      )
+      .run(ardaId);
+    const { cookie } = await app.cookieFor(ardaId);
+    const { profile } = await runLoader(cookie, "deploy-pipeline");
+
+    expect(profile.memberships.find((m) => m.slug === "viberr-core")?.role).toBe(
+      "admin",
+    );
+    expect(profile.selectedProject).toEqual({
+      slug: "deploy-pipeline",
+      name: "Deploy Pipeline",
+      role: "viewer",
+    });
+
+    app.db
+      .prepare(
+        `UPDATE project_members SET role = 'admin'
+         WHERE user_id = ? AND project_slug = 'deploy-pipeline'`,
+      )
+      .run(ardaId);
+  });
+
+  it("derives GitHub connection from the linked provider account, not users.idp", async () => {
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO account
+           (id, accountId, providerId, userId, createdAt, updatedAt)
+         VALUES ('acct_profile_gh', 'octocat', 'github', ?, ?, ?)`,
+      )
+      .run(ardaId, now, now);
+    const { cookie } = await app.cookieFor(ardaId);
+    const { profile } = await runLoader(cookie);
+    expect(profile.user.idp).toBe("local");
+    expect(profile.user.githubConnected).toBe(true);
+    app.db.prepare(`DELETE FROM account WHERE id = 'acct_profile_gh'`).run();
   });
 });
 
@@ -116,7 +169,7 @@ describe("/profile action", () => {
       title: "Staff engineer",
     });
     expect(data.ok).toBe(true);
-    expect(data.toast).toBe("Profile saved — visible to Viberr Core members");
+    expect(data.toast).toBe("Profile saved — visible across your projects");
     const { findUserById } = await import("~/server/auth/user-store.server");
     const user = findUserById(app.db, murId)!;
     expect(user.name).toBe("Murat Yıldız");
@@ -268,26 +321,12 @@ describe("/profile action", () => {
     expect(ids).not.toContain(other.sessionId);
   });
 
-  it("github-disconnect guards: not connected on a local account", async () => {
+  it("does not claim to unlink a Better Auth GitHub account", async () => {
     const { status, data } = await postAction(ardaId, {
       intent: "github-disconnect",
     });
     expect(status).toBe(400);
-    expect(data.error).toBe("GitHub isn't connected on this account.");
-  });
-
-  it("github-disconnect flips idp back to local for a github-linked account with a password", async () => {
-    const { updateUserFields } = await import(
-      "~/server/auth/user-store.server"
-    );
-    updateUserFields(app.db, ardaId, { idp: "github" });
-    const { data } = await postAction(ardaId, { intent: "github-disconnect" });
-    expect(data.ok).toBe(true);
-    expect(data.toast).toBe(
-      "GitHub disconnected — audit falls back to your workspace identity",
-    );
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    expect(findUserById(app.db, ardaId)!.idp).toBe("local");
+    expect(data.error).toBe("Unknown action.");
   });
 
   it("rejects a forged CSRF token", async () => {

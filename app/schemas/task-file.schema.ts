@@ -33,7 +33,12 @@ export type Readiness = (typeof READINESS_VALUES)[number];
 export const WAITING_VALUES = ["human", "agent", "none"] as const;
 export type Waiting = (typeof WAITING_VALUES)[number];
 
-export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none"] as const;
+export const VALIDATION_VALUES = [
+  "healthy",
+  "changed",
+  "failing",
+  "none",
+] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
 /** The 9 timeline event types (cross-cutting contracts §1.3). Parsers keep
@@ -75,6 +80,22 @@ export const agentRefSchema = z
   })
   .loose();
 export type AgentRef = z.infer<typeof agentRefSchema>;
+
+/** Durable result of one required reviewer's latest completed review run.
+ * Verdicts are keyed by profile id (never role text) and are invalidated when
+ * a new review cycle starts. `runId` makes the governance fact traceable to the
+ * exact, non-simulated runtime output that produced it. */
+export const reviewerVerdictSchema = z
+  .object({
+    profileId: z.string().min(1),
+    verdict: z.enum(["approve", "request_changes"]),
+    summary: z.string(),
+    runId: z.string().min(1),
+    reviewedAt: z.string().min(1),
+    evidenceFingerprint: z.string().min(1),
+  })
+  .loose();
+export type ReviewerVerdict = z.infer<typeof reviewerVerdictSchema>;
 
 /** Operator assignment — stage id captured when the operator attached
  * (ruling 16: store the stage id; UI renders "stage <1-based index>"). */
@@ -127,7 +148,12 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
  * "accepted" = a human accepted the completion but the real merge is still
  * pending. Kept in ONE place; pr-linker/pr-open/reconcilers all write from
  * this set. */
-export const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
+export const PR_STATE_VALUES = [
+  "review",
+  "merged",
+  "closed",
+  "accepted",
+] as const;
 export type PrState = (typeof PR_STATE_VALUES)[number];
 
 export const prRefSchema = z
@@ -137,6 +163,8 @@ export const prRefSchema = z
     // to "review" instead of dropping the whole PR ref — parsers never throw.
     state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
+    /** Last live PR head SHA observed while reconciling/delivering. */
+    headSha: z.string().min(1).nullable().optional(),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
@@ -213,6 +241,7 @@ export const taskFrontmatterSchema = z.object({
   ownerUserId: z.string().nullable(),
   specialist: agentRefSchema.nullable(),
   reviewers: z.array(agentRefSchema),
+  reviewerVerdicts: z.array(reviewerVerdictSchema),
   operator: operatorRefSchema.nullable(),
   /** Pending operator recommendations rendered as one-click action cards. */
   recommendations: z.array(recommendationSchema),
@@ -240,6 +269,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "ownerUserId",
   "specialist",
   "reviewers",
+  "reviewerVerdicts",
   "operator",
   "recommendations",
   "urgent",
@@ -435,6 +465,13 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.reviewers,
       [],
     ),
+    reviewerVerdicts: tolerant(
+      diagnostics,
+      "reviewerVerdicts",
+      data.reviewerVerdicts,
+      taskFrontmatterSchema.shape.reviewerVerdicts,
+      [],
+    ),
     operator: tolerant(
       diagnostics,
       "operator",
@@ -479,7 +516,13 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.repo,
       null,
     ),
-    pr: tolerant(diagnostics, "pr", data.pr, taskFrontmatterSchema.shape.pr, null),
+    pr: tolerant(
+      diagnostics,
+      "pr",
+      data.pr,
+      taskFrontmatterSchema.shape.pr,
+      null,
+    ),
     github: tolerant(
       diagnostics,
       "github",
@@ -529,7 +572,8 @@ export function parseTaskPacket(raw: unknown): {
   packet: TaskPacket | null;
   diagnostics: FileDiagnostic[];
 } {
-  if (raw === undefined || raw === null) return { packet: null, diagnostics: [] };
+  if (raw === undefined || raw === null)
+    return { packet: null, diagnostics: [] };
   const result = taskPacketSchema.safeParse(raw);
   if (result.success) {
     const diagnostics: FileDiagnostic[] = [];

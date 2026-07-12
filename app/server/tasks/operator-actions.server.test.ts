@@ -8,7 +8,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -19,6 +19,7 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   applyRecommendation,
   createTask,
@@ -29,6 +30,7 @@ import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   gate,
   operatorAcceptCompletion,
+  operatorAssessReadiness,
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorOpenPacket,
@@ -37,6 +39,7 @@ import {
   operatorPromptSpecialist,
   operatorRunReviewer,
   operatorRunSpecialist,
+  operatorSnapshot,
   operatorTransitionStage,
   resolveOperatorAuthority,
   type OperatorAutonomy,
@@ -104,6 +107,9 @@ function seedTask(stage: string): void {
       ownerUserId: store.users.arda.id,
       operator: { assignedAtStageId: "triage" },
       title: "Operator drive",
+      readiness: "ready",
+      waiting: "none",
+      validation: "healthy",
     }),
     goal: "Prove the operator drives the task.",
   });
@@ -119,6 +125,10 @@ beforeEach(async () => {
     "~/server/runtimes/operator-run.server"
   );
   resetOperatorLeasesForTests();
+  const { resetOperatorDispatchForTests } = await import(
+    "~/server/runtimes/operator-dispatch.server"
+  );
+  resetOperatorDispatchForTests();
 });
 
 afterEach(() => {
@@ -158,6 +168,69 @@ describe("resolveOperatorAuthority backend override", () => {
   });
 });
 
+describe("operator routing context", () => {
+  it("hard-filters candidates and supplies fit, backend, workload, and observed cost without a score", () => {
+    deployRoster(DEFAULT_POLICY);
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const developer = project.parsed.frontmatter.agents.find((agent) => agent.profileId === "developer")!;
+    developer.definition = {
+      ...(developer.definition ?? {}),
+      kind: "specialist",
+      name: "Dev",
+      role: "Implementation",
+      scope: "Own concrete application changes and their tests.",
+      desc: "Best for implementation work, not documentation-only tasks.",
+      backends: ["claude"],
+      model: "sonnet",
+      stages: ["impl"],
+      resources: { skills: ["typescript"], kb: ["architecture"], mcps: ["viberr"] },
+    };
+    writeProject(store.dataRoot, project.parsed.frontmatter);
+    seedTask("impl");
+    upsertRun(store.db, {
+      id: "routing-cost",
+      projectSlug: store.slug,
+      taskKey: "VIB-99",
+      threadId: "routing-cost",
+      role: "Implementation",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "sonnet",
+      sdk: "Claude Agent SDK",
+      agentProfileId: "developer",
+      state: "finished",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      inputTokens: 800,
+      outputTokens: 200,
+      totalCostUsd: 0.25,
+    });
+
+    const snapshot = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("supervised"),
+    );
+    expect(snapshot.routingCandidates.decisionRule).toBe("operator_decides_no_static_score");
+    const dev = snapshot.routingCandidates.primary.find((candidate) => candidate.profileId === "developer")!;
+    expect(dev).toMatchObject({
+      scope: "Own concrete application changes and their tests.",
+      resources: {
+        skills: ["typescript"],
+        knowledgeBases: ["architecture"],
+        mcps: [{ name: "viberr", configured: true, backendCompatible: true }],
+      },
+      backendHealth: { status: "unconfigured" },
+      cost: { runsWithUsd: 1, averageUsd: 0.25, averageTokens: 1000 },
+    });
+    expect(dev.workload.recentRuns).toBe(1);
+    expect(Object.hasOwn(dev, "score")).toBe(false);
+  });
+});
+
 describe("gate", () => {
   it("maps modes to direct / recommend / deny by autonomy", () => {
     deployRoster(DEFAULT_POLICY);
@@ -177,11 +250,25 @@ describe("operatorAssignSpecialist", () => {
     const r = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        reason: "The implementation profile matches the concrete code goal and is currently available.",
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(task().timeline.some((event) => event.text.includes("Routing decision (primary)"))).toBe(true);
+    const audit = listAuditEvents(store.db, {
+      action: "task.operator.routing_decided",
+    })[0]!;
+    expect(audit.details).toMatchObject({
+      purpose: "primary",
+      selectedProfileId: "developer",
+      reason: "The implementation profile matches the concrete code goal and is currently available.",
+    });
   });
 
   it("recommend mode adds an actionable recommendation and does NOT assign", async () => {
@@ -216,6 +303,90 @@ describe("operatorAssignSpecialist", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(task().frontmatter.specialist).toBeNull();
+  });
+});
+
+describe("operator readiness gate", () => {
+  it("prevents routing while input is required and opens a durable clarification packet", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY,
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("triage");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.readiness = "input_required";
+        parsed.frontmatter.waiting = "human";
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+    });
+    expect(toolkit.allowedTools).toContain("mcp__viberr__assess_readiness");
+    expect(toolkit.allowedTools).not.toContain("mcp__viberr__prompt_specialist");
+    expect(toolkit.allowedTools).not.toContain("mcp__viberr__transition_stage");
+
+    const denied = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("full"),
+    );
+    expect(denied).toMatchObject({ outcome: "denied" });
+    expect(task().frontmatter.specialist).toBeNull();
+
+    const assessed = await operatorAssessReadiness(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        verdict: "input_required",
+        rationale: "The goal only describes a lifecycle exercise and does not identify a product change.",
+        missingInformation: "Name the concrete repository outcome and its verification criteria.",
+      },
+      authority("supervised"),
+    );
+    expect(assessed.outcome).toBe("done");
+    expect(task().frontmatter.readiness).toBe("input_required");
+    expect(task().packet?.title).toBe("Clarify the implementation intent");
+    expect(listAuditEvents(store.db, { action: "task.operator.readiness_assessed" })[0]?.details)
+      .toMatchObject({ from: "input_required", to: "input_required" });
+  });
+
+  it("marks a concrete canonical goal ready atomically before a transition", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("triage");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.readiness = "input_required";
+        parsed.frontmatter.waiting = "human";
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const assessed = await operatorAssessReadiness(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        verdict: "ready",
+        rationale: "The goal names the operator behavior to implement and requires a verifiable proof.",
+      },
+      authority("supervised"),
+    );
+    expect(assessed.outcome).toBe("done");
+    expect(task().frontmatter).toMatchObject({ readiness: "ready", waiting: "none" });
+    expect(task().frontmatter.operator).toEqual({ assignedAtStageId: "triage" });
   });
 });
 
@@ -483,10 +654,13 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
       dataRoot: store.dataRoot,
     });
     expect(await waitForFinishedRun("VIB-1", (r) => r.op === true)).toBe(true);
-    // Full autonomy performed impl→review and then coordinated review by
-    // engaging + prompting a reviewer.
+    // Full autonomy performed impl→review. The offline fallback then refused
+    // to rank several eligible reviewers with a hidden static preference.
     expect(task().frontmatter.stage).toBe("review");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(task().frontmatter.reviewers).toEqual([]);
+    // This fixture withholds generate-packets, so the operator cannot open the
+    // decision packet; it still must not silently choose a reviewer.
+    expect(task().packet).toBeNull();
     interruptRunningRuns("VIB-1");
   });
 
@@ -656,7 +830,7 @@ describe("operatorTransitionStage", () => {
 describe("auto-invoke on stage transition", () => {
   const arda = () => ({ userId: store.users.arda.id, label: store.users.arda.email });
 
-  it("a human transition to a working stage runs the operator, which prompts the stage's agent", async () => {
+  it("a human transition runs the operator without statically ranking several candidates", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("ready");
     // Human moves ready → impl (auto boundary). This should hand off to the operator.
@@ -668,12 +842,8 @@ describe("auto-invoke on stage transition", () => {
     );
     const opDone = await waitForFinishedRun("VIB-1", (r) => r.op === true);
     expect(opDone).toBe(true);
-    // The operator picked the task up at the new stage and prompted its specialist.
-    expect(task().frontmatter.specialist?.profileId).toBe("developer");
-    expect(
-      task().timeline.some((e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent),
-    ).toBe(true);
-    interruptRunningRuns("VIB-1"); // stop the specialist stream the operator kicked off
+    expect(task().frontmatter.specialist).toBeNull();
+    expect(task().packet).toBeNull(); // generate-packets is withheld in this policy
   });
 
   it("a transition INTO the final Done stage does not auto-invoke the operator", async () => {
@@ -692,6 +862,30 @@ describe("auto-invoke on stage transition", () => {
 });
 
 describe("operatorAcceptCompletion", () => {
+  it("does not recommend impossible repository completion without a review PR", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.repo = "akin-ozer/viberr";
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const result = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+
+    expect(result).toMatchObject({ outcome: "noop" });
+    expect(result.message).toMatch(/no linked review pull request/i);
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(task().frontmatter.stage).toBe("review");
+  });
+
   it("supervised posts an actionable accept-completion → Done recommendation (never moves to Done)", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
@@ -1007,7 +1201,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
 });
 
 describe("auto-invoke on task creation", () => {
-  it("creating a task runs the operator, which picks it up", async () => {
+  it("does not launch a paid/operator turn for a placeholder goal", async () => {
     deployRoster(DEFAULT_POLICY);
     const created = await createTask(
       store.db,
@@ -1016,32 +1210,25 @@ describe("auto-invoke on task creation", () => {
       { dataRoot: store.dataRoot },
     );
 
-    // The auto-invoke is fire-and-forget; poll until the operator run has both
-    // appeared AND finished (so its sink doesn't finalize after DB teardown).
     const key = created.key;
-    let opDone = false;
-    for (let i = 0; i < 120 && !opDone; i++) {
-      const op = listRunsForTask(store.db, store.slug, key).find((r) => r.op);
-      opDone = !!op && op.lifecycle !== "running" && op.lifecycle !== "queued";
-      if (!opDone) await new Promise((r) => setTimeout(r, 25));
-    }
-
-    expect(opDone).toBe(true); // an operator run streamed for the task and finished
-    // Post-D2: the pre-work boundaries (triage→ready, ready→impl) are both
-    // `auto`, so a fresh well-scoped task is advanced by the operator all the
-    // way to the work stage, where it assigns + prompts the specialist — no
-    // human approval needed until impl→review.
+    expect(created.operatorTrigger).toBe("awaiting_input");
+    expect(listRunsForTask(store.db, store.slug, key)).toHaveLength(0);
     const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
-    expect(t.frontmatter.stage).toBe("impl");
-    expect(t.frontmatter.specialist?.profileId).toBe("developer");
-    interruptRunningRuns(key);
+    expect(t.frontmatter.stage).toBe("triage");
+    expect(t.frontmatter.readiness).toBe("input_required");
+    expect(t.timeline[0]?.text).toContain("Automatic Triage paused");
   });
 
-  it("prompts the specialist by @mention when a task is created at the work stage", async () => {
+  it("a deterministic fallback never invents scope or ranks a specialist", async () => {
     deployRoster(DEFAULT_POLICY);
     const created = await createTask(
       store.db,
-      { projectSlug: store.slug, title: "Work-stage task", stageId: "impl" },
+      {
+        projectSlug: store.slug,
+        title: "Work-stage task",
+        stageId: "impl",
+        goal: "Implement the named task outcome exactly as specified and verify the resulting behavior.",
+      },
       { userId: store.users.arda.id, label: store.users.arda.email },
       { dataRoot: store.dataRoot },
     );
@@ -1054,12 +1241,10 @@ describe("auto-invoke on task creation", () => {
     }
     expect(opDone).toBe(true);
     const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
-    // The operator assigned the specialist and prompted it with an @mention.
-    expect(t.frontmatter.specialist?.profileId).toBe("developer");
-    const prompt = t.timeline.find(
-      (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
-    );
-    expect(prompt?.text.startsWith("@")).toBe(true);
+    expect(t.frontmatter.stage).toBe("impl");
+    expect(t.frontmatter.readiness).toBe("input_required");
+    expect(t.frontmatter.specialist).toBeNull();
+    expect(t.timeline.some((event) => event.text.includes("deterministic fallback will not invent"))).toBe(true);
     interruptRunningRuns(key);
   });
 
@@ -1071,6 +1256,7 @@ describe("auto-invoke on task creation", () => {
       { userId: store.users.arda.id, label: store.users.arda.email },
       { dataRoot: store.dataRoot },
     );
+    expect(created.operatorTrigger).toBe("not_deployed");
     await new Promise((r) => setTimeout(r, 60));
     const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     expect(t.frontmatter.specialist).toBeNull();

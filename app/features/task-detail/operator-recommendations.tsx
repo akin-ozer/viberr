@@ -46,6 +46,7 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
 export function OperatorRecommendations({
   recommendations,
   canApply,
+  canApplyCompletion = false,
   busy,
   onApply,
   onDismiss,
@@ -53,6 +54,8 @@ export function OperatorRecommendations({
   recommendations: RecommendationView[];
   /** admin|maintainer — gates the Apply button (server re-checks). */
   canApply: boolean;
+  /** Current contributor+ task owner may apply only accept_completion. */
+  canApplyCompletion?: boolean;
   busy: boolean;
   onApply: (recId: string) => void;
   onDismiss: (recId: string) => void;
@@ -87,7 +90,8 @@ export function OperatorRecommendations({
             {/* Apply AND Dismiss are both maintainer-level (M1) — the server
                 enforces admin|maintainer for each, so hide them from lower
                 roles rather than render a button that 403s on click. */}
-            {canApply && (
+            {(canApply ||
+              (r.kind === "accept_completion" && canApplyCompletion)) && (
               <div className="op-rec-actions">
                 <button
                   type="button"
@@ -99,15 +103,17 @@ export function OperatorRecommendations({
                   <Icon name="check" />
                   Apply
                 </button>
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  disabled={busy}
-                  onClick={() => onDismiss(r.id)}
-                  title="Dismiss without acting"
-                >
-                  Dismiss
-                </button>
+                {canApply && (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    disabled={busy}
+                    onClick={() => onDismiss(r.id)}
+                    title="Dismiss without acting"
+                  >
+                    Dismiss
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -1,7 +1,11 @@
 import type Database from "better-sqlite3";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+import type { UserRole } from "~/shared/mapping/user.server";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  withProjectAuditAuthority,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -9,6 +13,8 @@ import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { ROLE_LABEL, BOUNDARIES, type RoleId } from "./policy-data";
+import { roleCan } from "~/shared/rbac";
+import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
 
 /**
  * Policy mutations (policy spec §5): member role assignment + workflow
@@ -29,6 +35,7 @@ import { ROLE_LABEL, BOUNDARIES, type RoleId } from "./policy-data";
 export interface PolicyActor {
   userId: string;
   label: string;
+  orgRole?: UserRole;
 }
 
 export interface PolicyMutationContext {
@@ -59,13 +66,14 @@ function requirePolicyAction(
   projectSlug: string,
   actor: PolicyActor,
   what: string,
-): { projectName: string } {
+): ReturnType<typeof assertProjectAction> {
   // Delegates to the single canonical guard, consulting the SPECIFIC action id
   // so editing the matrix row for one (e.g. manage-members) would change its
   // enforcement independently of the other (pass-4 XS-9). Both are admin-only
   // today, but this closes the single-source bypass.
   return assertProjectAction(action, projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    ...(actor.orgRole !== undefined ? { orgRole: actor.orgRole } : {}),
   });
 }
 
@@ -99,7 +107,7 @@ export async function setMemberRole(
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  const { projectName } = requirePolicyAction(
+  const { projectName, authoritySource } = requirePolicyAction(
     ctx,
     "manage-members",
     input.projectSlug,
@@ -110,6 +118,7 @@ export async function setMemberRole(
     throw AppError.validation("Unknown project role.");
   }
   const role = input.role as ProjectRole;
+  const auditActor = withProjectAuditAuthority(actor, authoritySource);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -151,13 +160,36 @@ export async function setMemberRole(
   }
 
   reprojectProject(db, ctx, input.projectSlug);
+  const releasedTaskKeys =
+    previousRole &&
+    roleCan(previousRole, "own-task") &&
+    !roleCan(role, "own-task")
+      ? await releaseProjectOwnerships(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            targetUserId: input.targetUserId,
+            targetName,
+            reason: "role_demoted",
+          },
+          auditActor,
+          {
+            ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+          },
+        )
+      : [];
   recordAudit(db, {
     action: "project.member.role_changed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
-    details: { from: previousRole, to: role, targetUserId: input.targetUserId },
+    details: {
+      from: previousRole,
+      to: role,
+      targetUserId: input.targetUserId,
+      releasedTaskKeys,
+    },
   });
 
   return {
@@ -169,7 +201,7 @@ export async function setMemberRole(
 // ------------------------------------------------------------ set boundary
 
 const LOCKED_BOUNDARY_MESSAGE =
-  "Completion is human-authorized in V1 — this boundary can't be delegated";
+  "The human Review → Done boundary stays locked. Eligible full-autonomy operators can finalize healthy repo-less work only through their separate completion capability.";
 
 /**
  * updateTransitionBoundary (policy spec §5.2): validates the rule exists,
@@ -183,11 +215,18 @@ export async function setTransitionBoundary(
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requirePolicyAction(ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
+  const { authoritySource } = requirePolicyAction(
+    ctx,
+    "edit-policy",
+    input.projectSlug,
+    actor,
+    "edit workflow & policy",
+  );
   if (!(BOUNDARY_VALUES as readonly string[]).includes(input.boundary)) {
     throw AppError.validation("Unknown boundary.");
   }
   const boundary = input.boundary as "auto" | "approval" | "human";
+  const auditActor = withProjectAuditAuthority(actor, authoritySource);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -226,11 +265,15 @@ export async function setTransitionBoundary(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.policy.boundary_changed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "workflow_boundary",
     subjectId: `${input.from}>${input.to}`,
     projectSlug: input.projectSlug,
-    details: { from: input.from, to: input.to, boundary },
+    details: {
+      from: input.from,
+      to: input.to,
+      boundary,
+    },
   });
   return { toast, changed: true };
 }

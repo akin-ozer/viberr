@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { REVALIDATE_DEBOUNCE_MS, useLiveUpdates } from "./use-live-updates";
 
 const revalidate = vi.fn(() => Promise.resolve());
@@ -35,14 +35,20 @@ class FakeEventSource {
       fn({ data: "{}", lastEventId } as MessageEvent<string>);
     }
   }
+  open() {
+    this.onopen?.();
+  }
+  fail() {
+    this.onerror?.();
+  }
   static last(): FakeEventSource {
     return FakeEventSource.instances.at(-1)!;
   }
 }
 
 function Probe({ scopes }: { scopes: string[] }) {
-  useLiveUpdates(scopes);
-  return null;
+  const status = useLiveUpdates(scopes);
+  return <output data-testid="status">{status}</output>;
 }
 
 beforeEach(() => {
@@ -65,6 +71,36 @@ describe("useLiveUpdates", () => {
     expect(FakeEventSource.last().url).toBe(
       "/resources/events?scope=project%3Aviberr-core&scope=user",
     );
+  });
+
+  it("exposes connected and reconnecting transport states", () => {
+    render(<Probe scopes={["user"]} />);
+    expect(screen.getByTestId("status").textContent).toBe("connecting");
+
+    act(() => FakeEventSource.last().open());
+    expect(screen.getByTestId("status").textContent).toBe("connected");
+
+    act(() => FakeEventSource.last().fail());
+    expect(screen.getByTestId("status").textContent).toBe("reconnecting");
+  });
+
+  it("reports browser offline and reconnects immediately when online", () => {
+    render(<Probe scopes={["user"]} />);
+    const first = FakeEventSource.last();
+
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(screen.getByTestId("status").textContent).toBe("offline");
+
+    act(() => window.dispatchEvent(new Event("online")));
+    expect(first.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(screen.getByTestId("status").textContent).toBe("connecting");
+  });
+
+  it("reports unavailable when no scopes can be subscribed", () => {
+    render(<Probe scopes={[]} />);
+    expect(screen.getByTestId("status").textContent).toBe("unavailable");
+    expect(FakeEventSource.instances).toHaveLength(0);
   });
 
   it("coalesces an event burst into ONE debounced revalidation", () => {

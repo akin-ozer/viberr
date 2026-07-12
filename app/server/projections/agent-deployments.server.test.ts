@@ -113,7 +113,7 @@ describe("listAgentDeployments", () => {
       role: "Primary specialist",
       model: "m",
       sdk: "sdk",
-      simulated: true,
+      simulated: false,
     } as const;
     upsertRun(store.db, {
       ...base,
@@ -142,6 +142,16 @@ describe("listAgentDeployments", () => {
       backend: "codex",
       state: "finished",
     });
+    upsertRun(store.db, {
+      ...base,
+      id: "run_demo",
+      taskKey: "VIB-3",
+      threadId: "primary",
+      kind: "primary",
+      backend: "claude",
+      state: "running",
+      simulated: true,
+    });
 
     const deployments = listAgentDeployments(store.db, store.slug);
     const vib2 = deployments.filter((d) => d.taskKey === "VIB-2");
@@ -155,5 +165,10 @@ describe("listAgentDeployments", () => {
     expect(vib1Primary.running).toBe(false);
     // Status vocabulary is untouched by the join.
     expect(vib1Primary.status).toBe("waiting on human");
+    expect(
+      deployments.find(
+        (d) => d.taskKey === "VIB-3" && d.engagement === "primary",
+      )!.running,
+    ).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigate, useFetcher } from "react-router";
 import type { Route } from "./+types/notifications";
 import { requireUser } from "~/server/auth/require-user.server";
@@ -13,6 +14,10 @@ import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
 import { NotificationsPage } from "~/features/notifications/notifications-page";
 import type { NotificationPageItem } from "~/features/notifications/notifications-page-helpers";
+import {
+  notificationReadAllFeedback,
+  type NotificationReadResult,
+} from "~/features/notifications/read-feedback";
 
 /**
  * /notifications — URL-addressable PageOverlay route (phase-4 shell
@@ -40,9 +45,18 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   const { notifications, unread } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<NotificationReadResult>();
+  const readAllFetcher = useFetcher<NotificationReadResult>();
   const csrf = useCsrfToken();
   const push = useToast();
+  const handledReadAll = useRef<unknown>(null);
+
+  useEffect(() => {
+    if (readAllFetcher.state !== "idle" || !readAllFetcher.data) return;
+    if (handledReadAll.current === readAllFetcher.data) return;
+    handledReadAll.current = readAllFetcher.data;
+    push(notificationReadAllFeedback(readAllFetcher.data));
+  }, [push, readAllFetcher.data, readAllFetcher.state]);
 
   // New rows / packet-resolution auto-reads land live (the badge in the
   // shells is already SSE-wired; the overlay subscribes on its own since
@@ -70,8 +84,10 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
-    push("All notifications marked read");
+    readAllFetcher.submit(fd, {
+      method: "post",
+      action: "/notifications/read",
+    });
   };
 
   const openItem = (n: NotificationPageItem) => {
@@ -85,6 +101,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
       <NotificationsPage
         items={items}
         unread={unread}
+        readAllBusy={readAllFetcher.state !== "idle"}
         onRead={markRead}
         onReadAll={markAllRead}
         onOpen={openItem}

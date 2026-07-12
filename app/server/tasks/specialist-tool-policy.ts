@@ -14,18 +14,21 @@ import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
  * withheld command — this is real enforcement, not guidance.
  *
  * Scope (deliberate + honest): only the high-consequence, cleanly command-
- * mappable capabilities are enforced at the tool layer (branch, push, open PR,
- * merge PR). Finer-grained delivery capabilities remain advisory in the run
+ * mappable capabilities are enforced at the tool layer (branch, local commit,
+ * merge PR). Push and PR creation are always withheld from the model because
+ * Viberr finalizes them with its project-bound credential. Finer-grained delivery capabilities remain advisory in the run
  * persona. Codex runs use their own sandbox config and ignore this list.
  *
- * Polarity (safe-by-default): a capability is enforced (its commands denied)
- * only when an admin has EXPLICITLY withheld it — mode `human` (reserved for a
- * person) or `off` (withheld) — or when it is an always-human capability.
- * `direct` / `recommend` / unspecified capabilities keep the agent's default
- * tool access, so an ordinary developer run is never crippled.
+ * Polarity (safe-by-default): omitted, `human`, and `off` capabilities are
+ * withheld. Only an explicit `direct` or `recommend` grant leaves a mapped
+ * local action available; remote delivery always stays server-owned.
  */
 
 const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
+const SERVER_OWNED_DELIVERY_DENIES = [
+  "Bash(git push:*)",
+  "Bash(gh pr create:*)",
+] as const;
 
 const CAP_DENY_RULES: readonly {
   capabilityId: string;
@@ -43,8 +46,7 @@ const CAP_DENY_RULES: readonly {
       "Bash(git switch -C:*)",
     ],
   },
-  { capabilityId: "commit-push-branch", deny: ["Bash(git push:*)", "Bash(git commit:*)"] },
-  { capabilityId: "open-review-pr", deny: ["Bash(gh pr create:*)"] },
+  { capabilityId: "commit-push-branch", deny: ["Bash(git commit:*)"] },
   { capabilityId: "merge-pull-request", deny: ["Bash(gh pr merge:*)"] },
   // The headline "write to the repo" capability has REAL teeth (D1/Q4): a
   // specialist whose `execute-code-or-write-repo` is withheld cannot edit files
@@ -74,8 +76,40 @@ function isWithheld(
 ): boolean {
   const mode = modeById.get(capabilityId);
   return (
-    ALWAYS_HUMAN.has(capabilityId) || mode === "human" || mode === "off"
+    ALWAYS_HUMAN.has(capabilityId) ||
+    mode === undefined ||
+    mode === "human" ||
+    mode === "off"
   );
+}
+
+const CODEX_ADVISORY_ONLY_CAPABILITIES = [
+  "create-task-branch",
+  "commit-push-branch",
+  "execute-code-or-write-repo",
+] as const;
+
+export interface SpecialistBackendCapabilitySupport {
+  supported: boolean;
+  advisoryOnlyWithheld: string[];
+}
+
+/** Codex has no tool denylist equivalent for local branch/commit/write work. */
+export function specialistBackendCapabilitySupport(
+  grants: readonly CapabilityGrant[],
+  backend: "claude" | "codex",
+): SpecialistBackendCapabilitySupport {
+  if (backend === "claude") {
+    return { supported: true, advisoryOnlyWithheld: [] };
+  }
+  const modeById = new Map(grants.map((grant) => [grant.capabilityId, grant.mode]));
+  const advisoryOnlyWithheld = CODEX_ADVISORY_ONLY_CAPABILITIES.filter((id) =>
+    isWithheld(modeById, id),
+  );
+  return {
+    supported: advisoryOnlyWithheld.length === 0,
+    advisoryOnlyWithheld,
+  };
 }
 
 /**
@@ -86,7 +120,10 @@ export function resolveSpecialistDisallowedTools(
   grants: readonly CapabilityGrant[],
 ): string[] {
   const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
-  const denied = new Set<string>();
+  // Remote authentication and PR creation are server-owned even when the
+  // profile is allowed to deliver. The agent may create/commit locally; it
+  // never receives a project token and is never asked to push or run gh.
+  const denied = new Set<string>(SERVER_OWNED_DELIVERY_DENIES);
   for (const rule of CAP_DENY_RULES) {
     if (isWithheld(modeById, rule.capabilityId)) {
       for (const t of rule.deny) denied.add(t);
@@ -105,7 +142,6 @@ export interface DeliveryPermissions {
  * Which delivery steps a specialist may perform, so the run PROMPT matches the
  * tool-layer enforcement (XS-4): instructing `git checkout -B` while denying it
  * is a contradiction that produces confused, failing runs. When a step is
- * withheld the prompt omits its instruction instead.
  */
 export function resolveDeliveryPermissions(
   grants: readonly CapabilityGrant[],

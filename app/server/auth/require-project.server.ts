@@ -25,7 +25,11 @@ export async function requireProjectMember(
   try {
     requireProjectRole(
       projectSlug,
-      { userId: ctx.user.id, label: ctx.user.email },
+      {
+        userId: ctx.user.id,
+        label: ctx.user.email,
+        orgRole: ctx.user.role,
+      },
       allowed,
       what,
     );

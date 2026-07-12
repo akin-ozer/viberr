@@ -84,6 +84,7 @@ describe("RBAC", () => {
     expect(data.view.domains).toHaveLength(1);
     expect(data.view.kbs).toHaveLength(3);
     expect(data.view.mcps).toHaveLength(0);
+    expect(data.view.secrets).toHaveLength(0);
     // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 3
     // shipped *-expertise skill folders that have no row — all listed. (Tester
     // was merged into the Reviewer, so tester-expertise no longer ships.)
@@ -103,6 +104,13 @@ describe("RBAC", () => {
     ]);
     // Every seeded template is deployed in viberr-core → delete-guarded.
     expect(data.view.gagents.every((g) => g.used >= 1)).toBe(true);
+    expect(
+      data.view.resourceUsages.some(
+        (usage) =>
+          usage.ref === "reviewer-expertise" &&
+          usage.source === "template-deployment",
+      ),
+    ).toBe(true);
     expect(data.view.stages.map((s) => s.id)).toEqual([
       "triage", "ready", "impl", "review", "done",
     ]);
@@ -232,6 +240,50 @@ describe("users & access intents", () => {
 });
 
 describe("resource + store intents", () => {
+  it("route-level delete guard returns an explicit used-by list", async () => {
+    const blocked = await postAction(ids.arda, {
+      intent: "kb-delete",
+      kbId: "kb_seed_arch",
+    });
+    expect(blocked.ok).toBe(false);
+    expect(String(blocked.error)).toContain(
+      "Global profile · Operator",
+    );
+    expect(String(blocked.error)).toContain(
+      "Viberr Core (viberr-core) · Developer",
+    );
+    expect(existsSync(path.join(app.dataRoot, "kb", "architecture-notes"))).toBe(
+      true,
+    );
+  });
+
+  it("org-secret actions expose metadata only and support rotation", async () => {
+    const created = await postAction(ids.arda, {
+      intent: "secret-save",
+      name: "billing-token",
+      value: "route-plaintext-secret",
+    });
+    expect(created).toMatchObject({ ok: true, toast: "billing-token stored" });
+    const { view } = await runLoader(ids.arda);
+    const secret = view.secrets.find((item) => item.name === "billing-token")!;
+    expect(secret.ref).toBe("secret://org/billing-token");
+    expect(JSON.stringify(view)).not.toContain("route-plaintext-secret");
+
+    const rotated = await postAction(ids.arda, {
+      intent: "secret-save",
+      secretId: secret.id,
+      name: secret.name,
+      value: "rotated-route-secret",
+    });
+    expect(rotated).toMatchObject({ ok: true, toast: "billing-token rotated" });
+
+    const removed = await postAction(ids.arda, {
+      intent: "secret-delete",
+      secretId: secret.id,
+    });
+    expect(removed).toMatchObject({ ok: true, toast: "billing-token deleted" });
+  });
+
   it("kb re-index reports the real doc count", async () => {
     const result = await postAction(ids.arda, {
       intent: "kb-reindex",

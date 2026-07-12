@@ -1,9 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  createMemoryRouter,
+  Outlet,
+  RouterProvider,
+} from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import type { MembershipView } from "~/features/project-settings/membership.server";
-import type { TransitionView } from "./policy-query.server";
-import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
+import type { PolicyViewData, TransitionView } from "./policy-query.server";
+import {
+  AgentCapability,
+  HumanAccess,
+  PolicyPage,
+  WorkflowRules,
+  type PcapProfile,
+} from "./policy-page";
 
 afterEach(cleanup);
 
@@ -154,7 +166,10 @@ describe("WorkflowRules", () => {
         (b) => (b as HTMLButtonElement).disabled,
       ),
     ).toBe(true);
-    expect(getByText("locked · V1")).toBeTruthy();
+    expect(getByText("human path locked · V1")).toBeTruthy();
+    expect(locked.getAttribute("title")).toContain(
+      "full-autonomy operators",
+    );
 
     // BCLS visual language: auto→direct, approval→recommend, human→human.
     const rows = container.querySelectorAll(".trans-row");
@@ -191,5 +206,60 @@ describe("WorkflowRules", () => {
     );
     // Falls back to rendering the raw id instead of crashing.
     expect(getByText("Human acceptance of the completion report")).toBeTruthy();
+  });
+});
+
+describe("PolicyPage archived mode", () => {
+  it("keeps the RBAC/capability model inspectable while disabling policy changes", async () => {
+    const data: PolicyViewData = {
+      projectName: "Viberr Core",
+      members: MEMBERS,
+      stages: STAGES,
+      transitions: TRANSITIONS,
+      profiles: PROFILES as unknown as PolicyViewData["profiles"],
+      edited: { by: "Elif Demir", t: "Today" },
+    };
+    const router = createMemoryRouter(
+      [
+        {
+          id: "root",
+          path: "/",
+          loader: () => ({ csrf: "test-csrf" }),
+          element: (
+            <ToastProvider>
+              <Outlet />
+            </ToastProvider>
+          ),
+          children: [
+            {
+              path: "projects/viberr-core/policy",
+              element: (
+                <PolicyPage
+                  data={data}
+                  projectSlug="viberr-core"
+                  myRole="admin"
+                  readOnly
+                />
+              ),
+            },
+          ],
+        },
+      ],
+      { initialEntries: ["/projects/viberr-core/policy"] },
+    );
+    const { container, getAllByText, getByText } = render(
+      <RouterProvider router={router} />,
+    );
+    await waitFor(() => expect(getByText("Archived · read-only")).toBeTruthy());
+
+    expect(
+      Array.from(container.querySelectorAll(".mini-seg button, .cap-seg button")).every(
+        (button) => (button as HTMLButtonElement).disabled,
+      ),
+    ).toBe(true);
+    expect(getAllByText("Capability matrix").length).toBeGreaterThan(0);
+    expect(getByText("Manage profiles")).toBeTruthy();
+    expect(getByText("Human access · RBAC")).toBeTruthy();
+    expect(getByText("Workflow rules")).toBeTruthy();
   });
 });

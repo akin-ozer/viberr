@@ -111,7 +111,7 @@ describe("workspace layout loader (seeded)", () => {
       "done",
     ]);
     expect(result.taskCount).toBe(10);
-    expect(result.reviewCount).toBe(2);
+    expect(result.reviewCount).toBe(1); // personalized: human decision routed to Arda
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
     expect(result.notifications.length).toBe(10);
@@ -159,8 +159,8 @@ describe("home loader (seeded)", () => {
     ]);
     const core = result.projects.find((p) => p.slug === "viberr-core")!;
     expect(core.total).toBe(10);
-    expect(core.running).toBe(3); // tasks with waiting === "agent"
-    expect(core.waiting).toBe(2); // open decision packets, project-wide
+    expect(core.running).toBe(0); // permanent simulated seed sessions are not live work
+    expect(core.waiting).toBe(5); // human decisions routed to project supervisors
     expect(core.dist.review).toBe(2);
     expect(core.dist.done).toBe(2);
     expect(core.members.length).toBe(4);

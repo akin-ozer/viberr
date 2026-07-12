@@ -109,6 +109,9 @@ export interface ReconcileWorkspaceDeliveryInput {
   simulated?: boolean;
   /** Injected command runner (tests). Defaults to a real `execFile` wrapper. */
   exec?: CommandExec;
+  /** Server-owned delivery resolves PRs through the GitHub API, so it skips
+   *  the legacy ambient `gh` probe while reusing branch/commit reconciliation. */
+  skipPrDetection?: boolean;
 }
 
 export interface WorkspaceDeliveryResult {
@@ -369,7 +372,7 @@ export async function reconcileWorkspaceDelivery(
     //    if gh is absent or returns nothing, the task's `pr` is left untouched.
     let prLinked = false;
     let reconciledPr: PrRef | null = fm.pr;
-    if (effectiveBranch) {
+    if (effectiveBranch && !input.skipPrDetection) {
       const prRes = await exec(
         "gh",
         [

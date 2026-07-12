@@ -39,21 +39,35 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
-import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
+import {
+  interruptRunAndWait,
+  listRunsForTask,
+} from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
-import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
+import { getOperatorDispatchStatus } from "~/server/runtimes/operator-dispatch.server";
+import { resolveOperatorAuthority } from "~/server/tasks/operator-actions.server";
+import {
+  getProject,
+  listProjectMembers,
+} from "~/server/projections/board-query.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
-import type { TaskMemberView } from "~/features/task-detail/execution-profile";
+import type {
+  OperatorExecutionStatus,
+  TaskMemberView,
+} from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
 import { Icon } from "~/ui/icon";
-import { roleCan } from "~/shared/rbac";
+import { authorizeProjectAction } from "~/shared/rbac";
+import { withProjectAuditAuthority } from "~/server/audit/audit-recorder.server";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -92,6 +106,32 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // seeded "running" runs drip their live lines over SSE on first subscribe.
   resumeSeededRunningRuns(db, params.slug, params.key);
   const runtime = listRunsForTask(db, params.slug, params.key);
+  const operatorRun = runtime.find((run) => run.op === true) ?? null;
+  const operatorDispatch = getOperatorDispatchStatus(
+    db,
+    params.slug,
+    params.key,
+  );
+  const operatorConfigured = resolveOperatorAuthority({}, params.slug).deployed;
+  const operatorStatus: OperatorExecutionStatus =
+    operatorRun?.lifecycle === "running" || operatorRun?.lifecycle === "queued"
+      ? operatorRun.lifecycle
+      : operatorDispatch?.state === "running" ||
+          operatorDispatch?.state === "queued"
+        ? operatorDispatch.state
+        : operatorRun
+          ? operatorRun.lifecycle === "error"
+            ? "failed"
+            : operatorRun.lifecycle
+          : operatorDispatch
+            ? operatorDispatch.state === "failed"
+              ? "failed"
+              : operatorDispatch.state
+            : detail.operator
+              ? "engaged"
+              : operatorConfigured
+                ? "configured"
+                : "not_configured";
 
   // Deployed specialists the "Assign specialist" menu offers; runActive
   // disables the Run button while a run for this task is already running.
@@ -106,30 +146,40 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // Pending operator recommendations live in the task FILE (not the projection);
   // read them here so the task-detail renders them as actionable cards. The
   // loader revalidates on every SSE task change, so applied/dismissed ones drop.
-  const taskFile = readTaskFile({ projectSlug: params.slug, taskKey: params.key });
+  const taskFile = readTaskFile({
+    projectSlug: params.slug,
+    taskKey: params.key,
+  });
   const recommendations = taskFile?.parsed.frontmatter.recommendations ?? [];
+  const project = getProject(db, params.slug);
+  const reviewStageId = project
+    ? resolveStageRoles(project.stages, project.workflow).reviewId
+    : null;
 
   return {
     task: { ...detail, timeline: slice.events },
     recommendations,
+    reviewStageId,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
     timelineNextLimit: slice.nextLimit,
     tlDefault,
     runtime,
+    operatorStatus,
     deployedSpecialists,
     runActive,
     mentionables,
-    // Host for GitHub browse links (PR/branch/repo) — derived server-side so
-    // the client never hardcodes github.com (GHE deployments keep working).
+    // Host for browse links, aligned with the supported github.com API/clone.
     githubHost: githubWebHost(),
   };
 }
 
 /** Optional `backend` form field → a run backend override (D4 retry). Ignores
  *  anything that isn't a real backend so a stray value can't break a run. */
-function backendOverride(formData: FormData): { backendOverride?: "claude" | "codex" } {
+function backendOverride(formData: FormData): {
+  backendOverride?: "claude" | "codex";
+} {
   const b = String(formData.get("backend") ?? "");
   return b === "claude" || b === "codex" ? { backendOverride: b } : {};
 }
@@ -139,12 +189,17 @@ export async function action({ request, params }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const actor = {
+    userId: ctx.user.id,
+    label: ctx.user.email,
+    orgRole: ctx.user.role,
+  };
   const intent = String(formData.get("intent") ?? "");
   const projectSlug = params.slug;
   const taskKey = params.key;
 
   try {
+    assertProjectActive(db, projectSlug);
     switch (intent) {
       case "comment": {
         // commentToAgent is a superset of appendComment: records the comment,
@@ -190,14 +245,16 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
-        const { option } = await resolvePacket(
+        const { option, completion } = await resolvePacket(
           db,
           { projectSlug, taskKey, optionIndex },
           actor,
         );
         const toast =
           option.kind === "accept_completion"
-            ? `Completion accepted · ${taskKey} moved to Done`
+            ? completion?.mergePending
+              ? `Completion accepted · ${taskKey} stays in Review until its PR is merged`
+              : `Completion accepted · ${taskKey} moved to Done`
             : option.kind === "block_on_policy"
               ? "Task held on policy · opening repository settings"
               : option.kind === "hold_runtime_debug"
@@ -214,10 +271,45 @@ export async function action({ request, params }: Route.ActionArgs) {
             : {}),
         };
       }
+      case "accept-completion": {
+        // Packet-independent owner acceptance. transitionStage routes a human
+        // terminal transition through the same acceptance contract used by
+        // packets/recommendations, including healthy-review and PR checks.
+        const project = getProject(db, projectSlug);
+        const terminalStageId = project
+          ? resolveStageRoles(project.stages, project.workflow).terminalId
+          : null;
+        if (!project || !terminalStageId) {
+          throw AppError.validation(
+            "This project has no terminal stage for completion.",
+          );
+        }
+        const task = await transitionStage(
+          db,
+          { projectSlug, taskKey, toStageId: terminalStageId },
+          actor,
+        );
+        const completed = task.stage === terminalStageId;
+        const currentStageName =
+          project.stages.find((stage) => stage.id === task.stage)?.name ??
+          task.stage;
+        return {
+          ok: true as const,
+          intent,
+          toast: completed
+            ? `Completion accepted · ${taskKey} moved to Done`
+            : `Completion accepted · ${taskKey} stays in ${currentStageName} until its PR is merged`,
+        };
+      }
       case "complete-merge": {
         // Run the REAL merge for a PR accepted "merge pending" (D3/S2).
-        // admin|maintainer; server re-checks. Reports honestly if still blocked.
-        const result = await completeTaskMerge(db, { projectSlug, taskKey }, actor);
+        // Server re-checks task-owner/project/org authority and reports
+        // honestly if the merge is still blocked.
+        const result = await completeTaskMerge(
+          db,
+          { projectSlug, taskKey },
+          actor,
+        );
         return {
           ok: true as const,
           intent,
@@ -276,12 +368,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Manual stage change from the Current-state dropdown (admin|maintainer).
         // `manual` lets the move cross any stage, not just a governed boundary;
         // the same server rules still post the **Transition:** timeline comment.
+        const requestedStage = String(formData.get("to") ?? "");
         const task = await transitionStage(
           db,
           {
             projectSlug,
             taskKey,
-            toStageId: String(formData.get("to") ?? ""),
+            toStageId: requestedStage,
             manual: true,
           },
           actor,
@@ -289,17 +382,21 @@ export async function action({ request, params }: Route.ActionArgs) {
         const proj = getProject(db, projectSlug);
         const toName =
           proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        const requestedTerminal = proj?.stages.at(-1)?.id === requestedStage;
         return {
           ok: true as const,
           intent,
           stage: task.stage,
-          toast: `Moved ${taskKey} to ${toName}`,
+          toast:
+            requestedTerminal && task.stage !== requestedStage
+              ? `Completion accepted · ${taskKey} stays in ${toName} until its PR is merged`
+              : `Moved ${taskKey} to ${toName}`,
         };
       }
       case "run-interrupt": {
         // Real governed action (runs spec §5.1): RBAC admin|maintainer,
         // writes interrupted state + audit event. Idempotent-safe.
-        const result = interruptRun(
+        const result = await interruptRunAndWait(
           db,
           { projectSlug, taskKey, runId: String(formData.get("runId") ?? "") },
           actor,
@@ -310,7 +407,12 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast:
             result.outcome === "interrupted"
               ? "Run interrupted — the thread stays resumable"
-              : "That run already finished — nothing to interrupt",
+              : result.outcome === "interrupting"
+                ? "Interrupt requested — waiting for runtime acknowledgement"
+                : "That run already finished — nothing to interrupt",
+          ...(result.outcome === "interrupting"
+            ? { toastKind: "info" as const }
+            : {}),
         };
       }
       case "assign-specialist": {
@@ -318,7 +420,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         // "Open agent runtime sessions" — admin|maintainer, enforced server-side).
         const result = await assignSpecialist(
           db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            profileId: String(formData.get("profileId") ?? ""),
+          },
           actor,
         );
         return {
@@ -328,7 +434,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "run-specialist": {
-        // Start a real (or simulated-fallback) run for the assigned specialist.
+        // Start a real run when configured, otherwise an explicitly simulated
+        // demo run that cannot become governance or delivery evidence.
         // An optional `backend` forces the run onto the other engine — the
         // "retry on the other backend" affordance after an availability/quota
         // failure (D4).
@@ -347,7 +454,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Engage a deployed specialist as a reviewer (admin|maintainer).
         const result = await assignReviewer(
           db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            profileId: String(formData.get("profileId") ?? ""),
+          },
           actor,
         );
         return {
@@ -381,13 +492,19 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Release a reviewer from the task.
         const result = await removeReviewer(
           db,
-          { projectSlug, taskKey, profileId: String(formData.get("profileId") ?? "") },
+          {
+            projectSlug,
+            taskKey,
+            profileId: String(formData.get("profileId") ?? ""),
+          },
           actor,
         );
         return {
           ok: true as const,
           intent,
-          toast: result.removed ? "Reviewer released" : "That reviewer wasn't engaged",
+          toast: result.removed
+            ? "Reviewer released"
+            : "That reviewer wasn't engaged",
         };
       }
       case "apply-recommendation": {
@@ -413,7 +530,9 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: result.label ? `Dismissed · ${result.label}` : "Recommendation dismissed",
+          toast: result.label
+            ? `Dismissed · ${result.label}`
+            : "Recommendation dismissed",
         };
       }
       case "run-operator": {
@@ -428,16 +547,24 @@ export async function action({ request, params }: Route.ActionArgs) {
           )?.role ?? null;
         // `run-agents` in the single ACTION_ROLES source (admin|maintainer) —
         // not a hardcoded tier (pass-4 XS-10).
-        if (!roleCan(role, "run-agents")) {
+        const authority = authorizeProjectAction(
+          role,
+          ctx.user.role,
+          "run-agents",
+        );
+        if (!authority.allowed) {
           throw new AppError({
             code: ERROR_CODES.FORBIDDEN,
             status: 403,
-            userMessage: "Running the operator requires the admin or maintainer role.",
+            userMessage:
+              "Running the operator requires the admin or maintainer role.",
             kind: "user",
           });
         }
         const backend =
-          String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude";
+          String(formData.get("backend") ?? "claude") === "codex"
+            ? "codex"
+            : "claude";
         const autonomy =
           String(formData.get("autonomy") ?? "supervised") === "full"
             ? "full"
@@ -450,7 +577,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // Attribute the run to the human who pressed the button (D8) — the
           // operator's own actions are still audited as the operator, but the
           // "started a run" audit row names the maintainer who launched it.
-          actor: { userId: actor.userId, label: actor.label },
+          actor: withProjectAuditAuthority(actor, authority.source),
         });
         return {
           ok: true as const,
@@ -508,6 +635,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       key={loaderData.task.key}
       task={loaderData.task}
       runtime={loaderData.runtime}
+      operatorStatus={loaderData.operatorStatus}
       deployedSpecialists={loaderData.deployedSpecialists}
       runActive={loaderData.runActive}
       timelineHasMore={loaderData.timelineHasMore}
@@ -517,9 +645,12 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       members={members}
       me={{ id: layout.user.id, name: layout.user.name }}
       myRole={layout.myRole}
+      projectRole={layout.projectRole}
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
+      reviewStageId={loaderData.reviewStageId}
       githubHost={loaderData.githubHost}
+      readOnly={layout.board.project.archived}
     />
   );
 }

@@ -9,7 +9,13 @@ import { rebuildAll, type RescanSummary } from "./rebuilder.server";
  */
 export function rescanProjections(
   db: Database.Database,
-  options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
+  options: {
+    dataRoot?: string;
+    force?: boolean;
+    actor?: AuditActor;
+    /** Present when the instance-wide rescan was launched from a project UI. */
+    projectSlug?: string;
+  } = {},
 ): RescanSummary {
   const summary = rebuildAll(db, {
     ...(options.dataRoot !== undefined ? { dataRoot: options.dataRoot } : {}),
@@ -18,6 +24,13 @@ export function rescanProjections(
   recordAudit(db, {
     action: "projection.rescan",
     actor: options.actor ?? SYSTEM_ACTOR,
+    ...(options.projectSlug
+      ? {
+          subjectKind: "project",
+          subjectId: options.projectSlug,
+          projectSlug: options.projectSlug,
+        }
+      : {}),
     details: { ...summary },
   });
   return summary;

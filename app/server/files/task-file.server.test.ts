@@ -20,6 +20,16 @@ const FULL: ParsedTaskFile = {
     ownerUserId: "u_arda01",
     specialist: { profileId: "developer", backend: "codex", role: "Developer" },
     reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    reviewerVerdicts: [
+      {
+        profileId: "reviewer",
+        verdict: "approve",
+        summary: "The implementation and tests satisfy the goal.",
+        runId: "run_review_142",
+        reviewedAt: "2026-07-04T06:55:00.000Z",
+        evidenceFingerprint: "round-trip-evidence-fingerprint",
+      },
+    ],
     operator: { assignedAtStageId: "triage" },
     recommendations: [],
     urgent: true,
@@ -28,7 +38,9 @@ const FULL: ParsedTaskFile = {
     repo: null,
     pr: { number: 318, state: "review", title: "Attach execution workspace" },
     github: {
-      commits: [{ sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" }],
+      commits: [
+        { sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" },
+      ],
       changed: { files: 9, add: 412, del: 87 },
     },
     createdAt: "2026-07-03T06:00:00.000Z",
@@ -48,36 +60,120 @@ const FULL: ParsedTaskFile = {
       { k: "Flag", v: "PAT scope missing pull_request:write", code: false },
     ],
     options: [
-      { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
-      { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope.", rec: false, ev: "**Decision:** request one edit." },
-      { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
+      {
+        kind: "accept_completion",
+        t: "Accept completion",
+        d: "Mark task done and merge the review PR. Human-authorized.",
+        rec: true,
+        accept: true,
+      },
+      {
+        kind: "request_edit",
+        t: "Request one edit",
+        d: "Ask the developer to widen PAT scope.",
+        rec: false,
+        ev: "**Decision:** request one edit.",
+      },
+      {
+        kind: "block_on_policy",
+        t: "Block on policy",
+        d: "Hold until policy updates.",
+        rec: false,
+      },
     ],
   },
   timeline: [
-    { occurredAt: "2026-07-04T06:58:00.000Z", type: "comment", actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" }, title: null, toAgent: true, evidence: null,
-      text: "@operator if the PAT scope is the only blocker, let's widen it rather than block the whole task." },
-    { occurredAt: "2026-07-04T06:41:00.000Z", type: "completion", actor: { kind: "agent", backend: "codex", role: "Developer" }, title: "Completion report", toAgent: false,
+    {
+      occurredAt: "2026-07-04T06:58:00.000Z",
+      type: "comment",
+      actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" },
+      title: null,
+      toAgent: true,
+      evidence: null,
+      text: "@operator if the PAT scope is the only blocker, let's widen it rather than block the whole task.",
+    },
+    {
+      occurredAt: "2026-07-04T06:41:00.000Z",
+      type: "completion",
+      actor: { kind: "agent", backend: "codex", role: "Developer" },
+      title: "Completion report",
+      toAgent: false,
       text: "Implemented repo attach, branch creation, and PR-sync projection.",
       evidence: [
         { label: "unit/policy_gate_test", add: "+14", del: "0" },
         { label: "integration/pr_sync_test", add: "+38", del: "−4" },
-      ] },
-    { occurredAt: "2026-07-04T06:39:00.000Z", type: "github", actor: { kind: "agent", backend: "codex", role: "Developer" }, title: null, toAgent: false, evidence: null,
-      text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`." },
-    { occurredAt: "2026-07-04T06:38:00.000Z", type: "policy", actor: { kind: "system", systemId: "policy-engine" }, title: null, toAgent: false, evidence: null,
-      text: "**Policy violation:** active PAT is missing `pull_request:write`." },
-    { occurredAt: "2026-07-04T06:20:00.000Z", type: "quality", actor: { kind: "agent", backend: "claude", role: "Reviewer" }, title: null, toAgent: false, evidence: null,
-      text: "**Quality flag:** snapshot `task_projection.json` changed — confirm the new compact shape." },
-    { occurredAt: "2026-07-04T06:02:00.000Z", type: "transition", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
-      text: "**Transition request:** move VIB-142 from In Progress to Review." },
-    { occurredAt: "2026-07-04T05:31:00.000Z", type: "blocked", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
-      text: "**Blocked decision:** recovery packet raised for human review." },
-    { occurredAt: "2026-07-04T05:30:00.000Z", type: "agent", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
-      text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
-    { occurredAt: "2026-07-03T12:12:00.000Z", type: "assign", actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" }, title: null, toAgent: false, evidence: null,
-      text: "Took task ownership — owner is the human reviewer and acceptance authority for this task." },
+      ],
+    },
+    {
+      occurredAt: "2026-07-04T06:39:00.000Z",
+      type: "github",
+      actor: { kind: "agent", backend: "codex", role: "Developer" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`.",
+    },
+    {
+      occurredAt: "2026-07-04T06:38:00.000Z",
+      type: "policy",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "**Policy violation:** active PAT is missing `pull_request:write`.",
+    },
+    {
+      occurredAt: "2026-07-04T06:20:00.000Z",
+      type: "quality",
+      actor: { kind: "agent", backend: "claude", role: "Reviewer" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "**Quality flag:** snapshot `task_projection.json` changed — confirm the new compact shape.",
+    },
+    {
+      occurredAt: "2026-07-04T06:02:00.000Z",
+      type: "transition",
+      actor: { kind: "operator" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "**Transition request:** move VIB-142 from In Progress to Review.",
+    },
+    {
+      occurredAt: "2026-07-04T05:31:00.000Z",
+      type: "blocked",
+      actor: { kind: "operator" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "**Blocked decision:** recovery packet raised for human review.",
+    },
+    {
+      occurredAt: "2026-07-04T05:30:00.000Z",
+      type: "agent",
+      actor: { kind: "operator" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review.",
+    },
+    {
+      occurredAt: "2026-07-03T12:12:00.000Z",
+      type: "assign",
+      actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text: "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
+    },
   ],
-  extraSections: [{ title: "Notes", raw: "Free-form section humans may add — preserved verbatim." }],
+  extraSections: [
+    {
+      title: "Notes",
+      raw: "Free-form section humans may add — preserved verbatim.",
+    },
+  ],
 };
 
 describe("task.md round-trip", () => {
@@ -193,7 +289,9 @@ describe("task.md event-body escaping (structure-like text)", () => {
     expect(text).toContain("\\to: agent");
     expect(text).toContain("\\evidence:");
     // Pre-existing backslash gains one more (and loses it again on parse).
-    expect(text).toContain("\\\\## a line that already starts with a backslash");
+    expect(text).toContain(
+      "\\\\## a line that already starts with a backslash",
+    );
     // The real timeline heading stays unescaped.
     expect(text).toContain(
       "### 2026-07-04T07:30:00.000Z · comment · user:u_arda01 (Arda Kaya)",
@@ -328,14 +426,24 @@ describe("task.md tolerant parsing", () => {
       packet: null,
       extraSections: [],
       timeline: [
-        { occurredAt: "2026-07-04T06:00:00.000Z", type: "escalation", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null, text: "Future event type." },
+        {
+          occurredAt: "2026-07-04T06:00:00.000Z",
+          type: "escalation",
+          actor: { kind: "operator" },
+          title: null,
+          toAgent: false,
+          evidence: null,
+          text: "Future event type.",
+        },
       ],
     });
     const { parsed, diagnostics } = parseTaskFileContent(text, {
       fallbackKey: "VIB-142",
     });
     expect(parsed.timeline[0]?.type).toBe("escalation");
-    expect(diagnostics.some((d) => d.code === "timeline.unknown_type")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "timeline.unknown_type")).toBe(
+      true,
+    );
   });
 
   it("a file without frontmatter still yields a task (hard stop diagnostic)", () => {

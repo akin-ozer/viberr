@@ -1,11 +1,16 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { useNavigate, type FetcherWithComponents } from "react-router";
+import {
+  useLocation,
+  useNavigate,
+  type FetcherWithComponents,
+} from "react-router";
 import { Avatar, initialsOf } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
 import { useToast } from "~/ui/toast";
 import { formatDayBucket } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { RBAC_ROWS, type RoleId } from "~/features/policy/policy-data";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
@@ -21,9 +26,9 @@ import { PROFILE_NTF, type NotifPrefs } from "./notification-prefs";
  * Identity is the session user widened by the loader (ruling 6 — id is
  * authoritative, names render-only). "Your access" reads the shared
  * RBAC_ROWS table (contracts §3.2, imported from features/policy — never
- * restated) indexed by the REAL membership role. GitHub connection state
- * is derived from users.idp (ruling 13); Connect starts the real OAuth
- * flow, Disconnect is a governed action with a lockout guard.
+ * restated) indexed by the URL-selected membership. GitHub connection state
+ * comes from Better Auth's linked accounts; Connect starts the real OAuth
+ * flow, while unsupported provider unlinking is not claimed.
  */
 
 export interface ProfileData {
@@ -40,7 +45,7 @@ export interface ProfileData {
     githubHandle: string | null;
   };
   memberships: { slug: string; name: string; role: RoleId }[];
-  accessRole: RoleId | null;
+  selectedProject: { slug: string; name: string; role: RoleId } | null;
   prefs: {
     notifs: NotifPrefs;
     motion: "full" | "reduce";
@@ -92,6 +97,7 @@ function ProfileIdentity({
   submit: (fields: Record<string, string>) => void;
 }) {
   const { user, memberships } = data;
+  const timeZone = useViewerTimeZone();
   const [name, setName] = useState(user.name);
   const [title, setTitle] = useState(user.title ?? "");
   useServerToast(fetcher);
@@ -102,8 +108,13 @@ function ProfileIdentity({
     if (dirty) submit({ intent: "identity", name, title });
   };
 
-  const signsInVia =
-    user.idp === "local" ? "local account" : `${user.idp} oauth`;
+  const signsInVia = user.githubConnected
+    ? user.hasPassword
+      ? "local account + GitHub OAuth"
+      : "GitHub OAuth"
+    : user.idp === "local"
+      ? "local account"
+      : `${user.idp} oauth`;
 
   return (
     <div className="panel">
@@ -188,7 +199,9 @@ function ProfileIdentity({
         </div>
         <div className="kv-row">
           <span className="k">Joined</span>
-          <span className="v">{formatDayBucket(user.createdAt)}</span>
+          <span className="v">
+            {formatDayBucket(user.createdAt, new Date(), timeZone)}
+          </span>
         </div>
       </div>
     </div>
@@ -355,14 +368,17 @@ function ProfileAppearance({
 // ------------------------------------------------------------ Your access
 
 function ProfileAccess({
-  role,
+  selectedProject,
+  memberships,
+  onProjectChange,
   onNav,
-  hasMembership,
 }: {
-  role: RoleId | null;
+  selectedProject: ProfileData["selectedProject"];
+  memberships: ProfileData["memberships"];
+  onProjectChange: (slug: string) => void;
   onNav: (view: "policy" | "settings") => void;
-  hasMembership: boolean;
 }) {
+  const role = selectedProject?.role ?? null;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -376,6 +392,26 @@ function ProfileAccess({
           </span>
         )}
       </div>
+      {selectedProject && (
+        <div className="kv" style={{ marginBottom: ".8rem" }}>
+          <label className="kv-row">
+            <span className="k">Project context</span>
+            <span className="v">
+              <select
+                aria-label="Project context"
+                value={selectedProject.slug}
+                onChange={(event) => onProjectChange(event.target.value)}
+              >
+                {memberships.map((membership) => (
+                  <option key={membership.slug} value={membership.slug}>
+                    {membership.name} · {membership.role}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </label>
+        </div>
+      )}
       {role ? (
         <div className="kv">
           {RBAC_ROWS.map((r) => (
@@ -401,7 +437,7 @@ function ProfileAccess({
         <span>
           Your role is assigned by an admin and enforced on every action.
           Changes go through{" "}
-          {hasMembership ? (
+          {selectedProject ? (
             <button
               type="button"
               className="keybtn"
@@ -424,19 +460,15 @@ function ProfileGithub({
   data,
   onNav,
   hasMembership,
-  fetcher,
-  submit,
+  profileReturnTo,
 }: {
   data: ProfileData;
   onNav: (view: "policy" | "settings") => void;
   hasMembership: boolean;
-  fetcher: ProfileFetcher;
-  submit: (fields: Record<string, string>) => void;
+  profileReturnTo: string;
 }) {
   const { user } = data;
   const gh = user.githubConnected;
-  useServerToast(fetcher);
-  const error = actionError(fetcher);
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
 
@@ -452,7 +484,10 @@ function ProfileGithub({
         const res = await fetch("/api/auth/sign-in/social", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: "github", callbackURL: "/profile" }),
+          body: JSON.stringify({
+            provider: "github",
+            callbackURL: profileReturnTo,
+          }),
         });
         const body = (await res.json()) as { url?: string };
         if (body.url) {
@@ -520,29 +555,20 @@ function ProfileGithub({
           <div className="cred-ok">
             <Icon name="check" />
             <span>
-              Connected — your approvals, acceptances, and runtime-session
-              opens are attributed to{" "}
+              Connected for GitHub sign-in as{" "}
               <strong>
                 {user.githubHandle ? `@${user.githubHandle}` : user.email}
-              </strong>{" "}
-              in audit records.
+              </strong>
+              . Viberr audit records continue to use your workspace identity;
+              this link does not approve or attribute GitHub reviews.
             </span>
-            <button
-              type="button"
-              className="btn ghost sm"
-              style={{ marginLeft: "auto" }}
-              onClick={() => submit({ intent: "github-disconnect" })}
-            >
-              Disconnect
-            </button>
           </div>
         ) : (
           <div className="cred-warn">
             <Icon name="alert" />
             <span>
-              Not connected — actions record under your workspace identity
-              only, and your GitHub review approvals can't be matched back to
-              you.
+              Not connected — Viberr actions still record under your workspace
+              identity. Link GitHub only to add GitHub as a sign-in method.
             </span>
             <button
               type="button"
@@ -557,17 +583,17 @@ function ProfileGithub({
           </div>
         )}
       </div>
-      {(error || connectErr) && (
+      {connectErr && (
         <div className="login-err" role="alert" style={{ marginTop: ".7rem" }}>
           <Icon name="alert" />
-          {error ?? connectErr}
+          {connectErr}
         </div>
       )}
       <div className="pol-note" style={{ margin: ".9rem 0 0" }}>
         <Icon name="lock" />
         <span>
-          This identity only attributes <strong>your</strong> actions. Agents
-          execute with the project credential in{" "}
+          This sign-in link does not grant repository access or change audit
+          attribution. Agents execute against github.com with the project PAT in{" "}
           {hasMembership ? (
             <button
               type="button"
@@ -762,17 +788,28 @@ export function ProfilePage({
     identity: ProfileFetcher;
     prefs: ProfileFetcher;
     password: ProfileFetcher;
-    github: ProfileFetcher;
   };
   submitWith: (
     fetcher: ProfileFetcher,
   ) => (fields: Record<string, string>) => void;
 }) {
   const navigate = useNavigate();
-  const first = data.memberships[0] ?? null;
-  const onNav = (view: "policy" | "settings") => {
-    if (first) navigate(`/projects/${first.slug}/${view}`);
+  const location = useLocation();
+  const selectedProject = data.selectedProject;
+  const onProjectChange = (slug: string) => {
+    const search = new URLSearchParams(location.search);
+    search.set("project", slug);
+    navigate(`${location.pathname}?${search.toString()}`, {
+      replace: true,
+      state: location.state,
+    });
   };
+  const onNav = (view: "policy" | "settings") => {
+    if (selectedProject) navigate(`/projects/${selectedProject.slug}/${view}`);
+  };
+  const profileReturnTo = selectedProject
+    ? `/profile?project=${encodeURIComponent(selectedProject.slug)}`
+    : "/profile";
 
   return (
     <div className="board-wrap" data-screen-label="Profile & preferences">
@@ -806,16 +843,16 @@ export function ProfilePage({
           </div>
           <div className="profile-col">
             <ProfileAccess
-              role={data.accessRole}
+              selectedProject={selectedProject}
+              memberships={data.memberships}
+              onProjectChange={onProjectChange}
               onNav={onNav}
-              hasMembership={first !== null}
             />
             <ProfileGithub
               data={data}
               onNav={onNav}
-              hasMembership={first !== null}
-              fetcher={fetchers.github}
-              submit={submitWith(fetchers.github)}
+              hasMembership={selectedProject !== null}
+              profileReturnTo={profileReturnTo}
             />
             {data.user.hasPassword && (
               <ProfilePassword

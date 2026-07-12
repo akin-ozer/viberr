@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
@@ -17,7 +18,7 @@ import type { SettingsViewData } from "./settings-query.server";
  * Project Settings view (design/html-app/app/settings.jsx → 1:1 port,
  * project-settings spec): project identity, workflow-stages editor
  * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
- * members panel (invite/remove — roles live in Policy), repository &
+ * members panel (grant/remove access — roles live in Policy), repository &
  * credentials (shared CredentialCard + the real Grant-scope flow), danger
  * zone. All governed state comes from the loader; every mutation is a
  * route-action POST (no optimistic UI). Client-side guard toasts mirror
@@ -39,7 +40,7 @@ function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
     if (d.ok) {
       if (d.toast) push(d.toast);
     } else if (d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [fetcher.state, fetcher.data, push]);
 }
@@ -202,7 +203,7 @@ export function StagesPanel({
   const remove = (s: { id: string; name: string }) => {
     const locked = stageLockReason(s.id, stages);
     if (locked) {
-      push(`${s.name} can't be removed — ${locked}`);
+      push({ kind: "error", text: `${s.name} can't be removed — ${locked}` });
       return;
     }
     const n = count(s.id);
@@ -354,7 +355,7 @@ export function MembersPanel({
   projectName,
   canManage,
   busy,
-  onInvite,
+  onGrantAccess,
   onRemove,
   onNavPolicy,
 }: {
@@ -363,7 +364,7 @@ export function MembersPanel({
   projectName: string;
   canManage: boolean;
   busy: boolean;
-  onInvite: (name: string, email: string) => void;
+  onGrantAccess: (name: string, email: string) => void;
   onRemove: (member: MembershipView) => void;
   onNavPolicy: () => void;
 }) {
@@ -371,7 +372,7 @@ export function MembersPanel({
   const [nm, setNm] = useState("");
   const [em, setEm] = useState("");
 
-  const invite = () => {
+  const grantAccess = () => {
     const name = nm.trim();
     const email = em.trim().toLowerCase();
     if (!name || !email.includes("@")) {
@@ -382,14 +383,17 @@ export function MembersPanel({
       push(`${email} is already a member`);
       return;
     }
-    onInvite(name, email);
+    onGrantAccess(name, email);
     setNm("");
     setEm("");
   };
 
   const remove = (m: MembershipView) => {
     if (m.userId === meId) {
-      push(`You can't remove yourself from ${projectName}`);
+      push({
+        kind: "error",
+        text: `You can't remove yourself from ${projectName}`,
+      });
       return;
     }
     if (
@@ -451,19 +455,22 @@ export function MembersPanel({
             value={em}
             onChange={(e) => setEm(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") invite();
+              if (e.key === "Enter") grantAccess();
             }}
           />
-          <button type="button" className="btn sm" onClick={invite} disabled={busy}>
+          <button type="button" className="btn sm" onClick={grantAccess} disabled={busy}>
             <Icon name="send" />
-            Invite
+            Grant access
           </button>
         </div>
       )}
       <div className="pol-note" style={POL_NOTE_STYLE}>
         <Icon name="shield" />
         <span>
-          New members join as Viewer. Roles are managed in{" "}
+          Access is immediate; no email is sent. Existing users keep their
+          account. New emails require configured GitHub or Google sign-in and
+          must use that provider with the exact email above. Everyone joins as
+          Viewer. Roles are managed in{" "}
           <button type="button" className="keybtn" onClick={onNavPolicy}>
             Policy → Human access
           </button>
@@ -684,8 +691,8 @@ export function DangerZone({
           </div>
           <div className="dd">
             {archived
-              ? "This project is archived — hidden from the workspace. Restore it to make it active again."
-              : "Hides the project from the workspace and moves it to the Home “Archived” section. Timelines are preserved and it can be restored anytime."}
+              ? "This project is archived and read-only. Restore it to resume runs and make its configuration editable again."
+              : "Moves the project to Home’s Archived section, stops active runs, and makes every direct project route read-only. History stays navigable and it can be restored anytime."}
           </div>
         </span>
         <button
@@ -699,22 +706,24 @@ export function DangerZone({
           {archived ? "Restore" : "Archive"}
         </button>
       </div>
-      <div className="dz-row">
-        <span className="dz-main">
-          <div className="dn">Delete project</div>
-          <div className="dd">
-            Removes tasks, timelines, and audit logs. This cannot be undone.
-          </div>
-        </span>
-        <button
-          type="button"
-          className="btn danger sm"
-          onClick={() => (isAdmin ? setConfirming(true) : deny("Deletion"))}
-        >
-          Delete project
-        </button>
-      </div>
-      {confirming && (
+      {!archived && (
+        <div className="dz-row">
+          <span className="dz-main">
+            <div className="dn">Delete project</div>
+            <div className="dd">
+              Removes tasks, timelines, and audit logs. This cannot be undone.
+            </div>
+          </span>
+          <button
+            type="button"
+            className="btn danger sm"
+            onClick={() => (isAdmin ? setConfirming(true) : deny("Deletion"))}
+          >
+            Delete project
+          </button>
+        </div>
+      )}
+      {!archived && confirming && (
         <DeleteProjectDialog
           projectName={projectName}
           busy={busy}
@@ -755,8 +764,10 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
 
-  const isAdmin = myRole === "admin";
-  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const archived = data.project.archived;
+  const isAdmin = myRole === "admin" && !archived;
+  const canGrant =
+    !archived && (myRole === "admin" || myRole === "maintainer");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can
@@ -783,6 +794,9 @@ export function SettingsPage({
           <h1>Settings</h1>
           <div className="sub">Board configuration for {data.project.name}</div>
         </div>
+        <div className="board-tools">
+          {archived && <ArchivedBadge />}
+        </div>
       </div>
       <div className="policy-wrap">
         <div className="policy-cols">
@@ -803,7 +817,7 @@ export function SettingsPage({
             stages={data.stages}
             counts={data.stageCounts}
             canManage={isAdmin}
-            editingId={editingStageId}
+            editingId={isAdmin ? editingStageId : null}
             setEditingId={setEditingStageId}
             onRename={(stageId, name) =>
               stageFetcher.submit(
@@ -843,9 +857,9 @@ export function SettingsPage({
             projectName={data.project.name}
             canManage={isAdmin}
             busy={memberFetcher.state !== "idle"}
-            onInvite={(name, email) =>
+            onGrantAccess={(name, email) =>
               memberFetcher.submit(
-                { intent: "invite", _csrf: csrf, name, email },
+                { intent: "grant-access", _csrf: csrf, name, email },
                 { method: "post" },
               )
             }

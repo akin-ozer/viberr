@@ -49,6 +49,10 @@ import {
   writeStoreFiles,
   type UploadFileInput,
 } from "~/server/org/store-files.server";
+import {
+  deleteOrgSecret,
+  saveOrgSecret,
+} from "~/server/secrets/org-secret-store.server";
 
 /**
  * /org/settings — the instance-level admin surface (org-settings spec),
@@ -94,6 +98,22 @@ function parseJsonStringArray(raw: string): string[] {
     // fall through
   }
   return [];
+}
+
+function parseJsonStringRecord(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      );
+    }
+  } catch {
+    // fall through
+  }
+  return {};
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -182,7 +202,7 @@ export async function action({ request }: Route.ActionArgs) {
         if (field("userId") === admin.id) {
           return fail("You can't remove your own account", 409);
         }
-        const result = deleteOrgUser(db, field("userId"), actor);
+        const result = await deleteOrgUser(db, field("userId"), actor);
         return ok(result.toast);
       }
       case "user-disable": {
@@ -269,7 +289,7 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             transport: field("transport"),
             target: field("target"),
-            cred: field("cred"),
+            auth: parseJsonStringRecord(field("auth")),
           },
           actor,
         );
@@ -279,6 +299,20 @@ export async function action({ request }: Route.ActionArgs) {
         return ok((await testMcpServer(db, field("mcpId"), actor)).toast);
       case "mcp-delete":
         return ok(deleteMcpServer(db, field("mcpId"), actor).toast);
+      case "secret-save":
+        return ok(
+          saveOrgSecret(
+            db,
+            {
+              id: field("secretId") || null,
+              name: field("name"),
+              value: field("value"),
+            },
+            actor,
+          ).toast,
+        );
+      case "secret-delete":
+        return ok(deleteOrgSecret(db, field("secretId"), actor).toast);
       case "skill-save": {
         const result = saveSkill(
           db,

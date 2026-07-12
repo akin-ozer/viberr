@@ -203,25 +203,9 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
   };
 }
 
-/**
- * Web host for browse links (PR/branch/repo pages), derived from an API base
- * URL the way GitHub deployments lay them out:
- *   https://api.github.com          → https://github.com
- *   https://ghe.corp/api/v3         → https://ghe.corp   (GHE server)
- *   https://api.ghe.example.com/... → https://ghe.example.com
- * Defaults to https://github.com when no base is configured — the single
- * place UI links derive their host from instead of hardcoding github.com.
- */
-export function githubWebHost(apiBaseUrl?: string | null): string {
-  if (!apiBaseUrl || apiBaseUrl === GITHUB_API_BASE) return "https://github.com";
-  try {
-    const url = new URL(apiBaseUrl);
-    if (url.hostname === "api.github.com") return "https://github.com";
-    const host = url.hostname.replace(/^api\./, "");
-    return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
-  } catch {
-    return "https://github.com";
-  }
+/** The current connection, API, clone, and PAT model supports github.com. */
+export function githubWebHost(): string {
+  return "https://github.com";
 }
 
 /** Convenience header read used by the PAT validator. */

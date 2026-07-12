@@ -66,6 +66,10 @@ export interface ClaudeQueryOptions {
    *  (F13), so a host-installed plugin's slash-commands/skills never reach a
    *  Viberr run. */
   plugins?: { type: "local"; path: string }[];
+  /** Explicit subagent definitions. Empty means no app/user-defined agents. */
+  agents?: Record<string, never>;
+  /** Ignore every MCP source except the explicit per-run declaration. */
+  strictMcpConfig?: boolean;
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -160,6 +164,48 @@ function assistantUsage(
   return { input_tokens: inTok, output_tokens: outTok, cached_input_tokens: cached };
 }
 
+/** Derive a concise live phase without persisting prompt/tool inputs. Claude's
+ * stream already tells us when the session initializes, invokes a tool,
+ * produces ordinary assistant work, and returns its terminal result. */
+function phaseForClaudeEnvelope(message: unknown): [string, string] | null {
+  if (!message || typeof message !== "object") return null;
+  const envelope = message as {
+    type?: unknown;
+    subtype?: unknown;
+    is_error?: unknown;
+    message?: { content?: unknown };
+  };
+  if (envelope.type === "system" && envelope.subtype === "init") {
+    return ["Initializing", "Claude session ready"];
+  }
+  if (envelope.type === "assistant") {
+    const content = Array.isArray(envelope.message?.content)
+      ? envelope.message.content
+      : [];
+    const tool = content.find(
+      (block): block is { type: "tool_use"; name?: unknown } =>
+        !!block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "tool_use",
+    );
+    if (tool) {
+      const name = typeof tool.name === "string" ? tool.name : "provider tool";
+      return ["Using tools", name];
+    }
+    return ["Working", "Claude is preparing a response"];
+  }
+  if (envelope.type === "user") {
+    return ["Using tools", "Processing tool results"];
+  }
+  if (envelope.type === "result") {
+    return [
+      "Finalizing",
+      envelope.is_error ? "Claude reported a failed result" : "Claude result received",
+    ];
+  }
+  return null;
+}
+
 export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapter {
   return {
     backend: "claude",
@@ -170,6 +216,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let interrupted = false;
       let settled = false;
       let queryHandle: ClaudeQuery | null = null;
+
+      cb.onPhase?.("Initializing", "Starting Claude runtime");
 
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
@@ -217,6 +265,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           settingSources: [],
           skills: [],
           plugins: [],
+          agents: {},
+          strictMcpConfig: true,
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         // Base adapter env, overlaid with any per-run env (e.g. the specialist's
@@ -281,7 +331,44 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         try {
           for await (const message of q) {
             const occurredAt = new Date().toISOString();
+            // The init envelope is the runtime's own proof of what was loaded.
+            // Never persist leaked resource names: fail with one sanitized line
+            // if an account/parent session bypassed the requested empty skill
+            // or plugin boundary.
+            if (
+              message &&
+              typeof message === "object" &&
+              (message as { type?: unknown }).type === "system" &&
+              (message as { subtype?: unknown }).subtype === "init"
+            ) {
+              const init = message as { skills?: unknown; plugins?: unknown };
+              const leakedSkills =
+                Array.isArray(init.skills) && init.skills.length > 0;
+              const leakedPlugins =
+                Array.isArray(init.plugins) && init.plugins.length > 0;
+              if (leakedSkills || leakedPlugins) {
+                cb.onLine({
+                  raw: JSON.stringify({
+                    type: "viberr.runtime_error",
+                    code: "undeclared_claude_resources",
+                  }),
+                  display: {
+                    t: new Date(occurredAt).toISOString().slice(11, 19),
+                    ev: "err",
+                    tag: "runtime·isolation",
+                    text:
+                      "Claude exposed account-managed skills or plugins that this profile did not declare. The run was stopped before agent work began.",
+                  },
+                  facts: {},
+                  occurredAt,
+                });
+                void q.interrupt().catch(() => {});
+                return settle("error");
+              }
+            }
             const { display, facts } = projectEnvelope("claude", message, occurredAt);
+            const phase = phaseForClaudeEnvelope(message);
+            if (phase) cb.onPhase?.(...phase);
             if (facts.sessionId) sessionId = facts.sessionId;
             if (facts.isResult) {
               sawResult = true;

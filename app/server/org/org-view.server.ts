@@ -18,6 +18,14 @@ import {
   type OrgSeedContext,
   type SkillView,
 } from "./resources.server";
+import {
+  listOrgSecrets,
+  type OrgSecretMetadata,
+} from "~/server/secrets/org-secret-store.server";
+import {
+  listAgentResourceUsages,
+  type AgentResourceUsage,
+} from "./resource-dependencies.server";
 
 /**
  * The /org/settings loader payload — all slices at once (they're small,
@@ -31,9 +39,11 @@ export interface OrgSettingsView {
   domains: DomainRecord[];
   kbs: KbView[];
   mcps: McpView[];
+  secrets: OrgSecretMetadata[];
   skills: SkillView[];
   gagents: GagentView[];
   stages: StageDef[];
+  resourceUsages: AgentResourceUsage[];
 }
 
 export function getOrgSettingsView(
@@ -46,8 +56,10 @@ export function getOrgSettingsView(
     domains: listDomains(db),
     kbs: listKnowledgeBases(db, ctx),
     mcps: listMcpServers(db),
+    secrets: listOrgSecrets(db),
     skills: listSkills(db, ctx),
     gagents: listGlobalAgentProfiles(db, ctx),
     stages: GOVERNED_TEMPLATE.stages,
+    resourceUsages: listAgentResourceUsages(db, ctx),
   };
 }

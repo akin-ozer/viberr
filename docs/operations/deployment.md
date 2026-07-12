@@ -1,8 +1,10 @@
 # Deployment — single-node Docker
 
 Viberr is a single-node, self-hosted monolith: one Node process serving the SSR app,
-SSE live updates, and an embedded SQLite projection database, with all authoritative
-state on the local filesystem. There is no external database, cache, or queue to run.
+SSE live updates, and an embedded SQLite database. Project/task/profile/KB/skill truth is
+file-native; SQLite owns both derived projections and non-rebuildable app state such as identity,
+sessions, encrypted GitHub/MCP secrets, audit, notifications, org metadata, runtime rows, and the
+automatic-operator dispatch queue. There is no external database, cache, or queue to run.
 
 ## What runs
 
@@ -26,8 +28,9 @@ VIBERR_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # decodes to exactly 32
 
 Inject them at runtime — do not bake them into the image. With Compose they come from
 `.env` via `env_file`; on a container platform, set them as runtime secrets/env vars.
-`VIBERR_SECRET_ENCRYPTION_KEY` encrypts stored GitHub PATs; **losing or rotating it
-makes existing encrypted tokens undecryptable** (users must re-add PATs).
+`VIBERR_SECRET_ENCRYPTION_KEY` encrypts stored GitHub PATs and organization secrets referenced by
+MCP authentication mappings; **losing or rotating it makes those values undecryptable** (admins
+must delete and re-add them).
 
 Optional integrations, enabled only when their vars are present:
 `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*` (bootstrap
@@ -72,24 +75,31 @@ If the host uses an OS credential store instead of `auth.json`, configure
 before logging in. A `CODEX_API_KEY` / `OPENAI_API_KEY` also works, but uses
 usage-based Platform billing.
 
-**Security boundary:** the dedicated `CODEX_HOME` prevents importing the host's
+**Execution boundary:** the dedicated `CODEX_HOME` prevents importing the host's
 full personal Codex configuration; it does not isolate that credential or the
 application data from an autonomous coding process running as the same container
 user. Treat the single-container setup as trusted-task mode. Untrusted tasks need
 a separate worker user/container with only the task workspace mounted, plus
-server-owned Git push/PR delivery so repository credentials never enter the
-agent's environment.
+the server-owned Git push/PR delivery Viberr already uses so repository credentials never enter
+the agent's environment. Viberr verifies the exact remote SHA and a non-empty comparison before it
+opens/reuses the task PR.
 
 Without any credential the app falls back to the built-in **simulated** backend (runs
-still stream in the UI, clearly labelled). Confirm what's active:
+still stream in the UI, clearly labelled). Simulated rows are demonstration output only:
+they do not satisfy delivery, reviewer approval, backend-health, or completion evidence.
+Confirm configuration and recent real-run evidence:
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .backends
-# {"claude":"real","codex":"simulated"}   ← claude credential reached the container
+# {
+#   "claude":{"status":"verified","configured":true,"verified":true,...},
+#   "codex":{"status":"unconfigured","configured":false,"verified":false,...}
+# }
 ```
 
-`real` means the credential is present (SDK executes); it is not a validity check — an
-invalid key surfaces as a failed run in the agent log, not here.
+The states are `unconfigured`, `unknown`, `verified`, and `degraded`. Configuration is a
+credential/CLI-auth presence check. Only a recent real run supplies the verified/degraded signal;
+the health request never probes or spends a provider call.
 
 ## First run
 
@@ -105,9 +115,19 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
   demo dataset.
 - To load the demo org/projects/tasks (the mock content) into a fresh store:
   `docker compose exec app npm run seed`. Omit this for a clean production instance.
-- Health: `GET /resources/health` → `{ ok, projections: { projects, tasks }, watcher }`.
-  Compose has a healthcheck hitting it; container platforms should use it as the readiness
-  probe.
+- Health: `GET /resources/health` →
+  `{ ok, integrity, projections: { projects, tasks }, watcher, backends }`. A structural SQLite
+  failure returns 503 with `integrity.recoveryRequired=true`. Compose has a healthcheck hitting it;
+  container platforms should use it as the readiness probe.
+
+## Automatic operator limits
+
+Task creation and lifecycle transitions enqueue durable, coalesced operator dispatches. A new task
+whose goal is still the generated placeholder is recorded as awaiting input without starting a paid
+turn. Defaults are two automatic operator runs at once, a rolling one-dollar observed/estimated
+hourly budget, and a five-cent reservation per queued run. Deployments may tighten them with
+`VIBERR_OPERATOR_AUTO_CONCURRENCY`, `VIBERR_OPERATOR_AUTO_HOURLY_BUDGET_USD`, and
+`VIBERR_OPERATOR_AUTO_ESTIMATED_RUN_USD`. Queued/running dispatches recover at boot.
 
 ## Persistence, backup & restore
 
@@ -126,17 +146,23 @@ auth/ cache/ logs/
   exists, the backup contains a live credential and must be encrypted and access
   controlled like any other secret. Stop the container (or accept a
   crash-consistent copy — SQLite is WAL, so also copy `*-wal`/`*-shm`) and archive it.
-- **Restore** = drop the directory back and start the container. If only
-  `state/projection.sqlite` is lost but `projects/` survives, you do **not** need a DB
-  backup: the projections are derived — boot runs a reconciling rescan, or run a full
-  rebuild (see the [runbook](./runbook.md)). Files are canonical; the DB is a cache.
+- **Restore** = drop the complete directory back and start the container. Losing
+  `state/projection.sqlite` is not merely losing a cache: users, sessions, secrets, audit, org
+  resources, notifications, and dispatch state are app-owned there. Surviving project/task files
+  let Viberr reconstruct only those projections after identity and member references are repaired.
+  Prefer a complete backup; see the [runbook](./runbook.md) before attempting recovery.
 
 ## Upgrades
 
-New app version → rebuild the image and `docker compose up -d`. Migrations apply at boot;
-the data-root volume carries state across deploys. Roll back by redeploying the previous
-image against the same volume (migrations are additive and forward-only — take a data-root
-backup before a major upgrade).
+New app version → take a complete stopped data-root backup, rebuild the image, and follow that
+release's compatibility note. Do not assume an older image can safely open a database touched by a
+newer image.
+
+This 2026-07-13 development correction intentionally edits canonical migration files without a
+backward-compatibility layer. For its demo/validation store, stop Compose, preserve the SQLite/WAL/SHM
+trio, move that trio out of `docker-data/state/`, rebuild, and run
+`docker compose run --rm app npm run seed`. That creates a fresh migrated DB and destructively
+recreates demo canonical/resource state. It is not a production restore procedure.
 
 ## Scaling note
 

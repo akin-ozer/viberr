@@ -17,6 +17,7 @@ import {
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
 import { slugify } from "~/shared/ids/slugify";
+import { listProjectAgentReferences } from "./resource-dependencies.server";
 
 /**
  * Global agent profile TEMPLATES (org-settings spec §3.7/§4.4) — the org
@@ -44,6 +45,8 @@ export interface GagentView {
   mcps: string[];
   kbs: string[];
   used: number;
+  /** Explicit projects that currently deploy this template. */
+  usedBy?: { slug: string; name: string }[];
 }
 
 function conflict(userMessage: string): AppError {
@@ -77,29 +80,13 @@ function readTemplateFile(
 }
 
 /** Distinct-project deployment counts per profileId (the `used` fact). */
-export function usedByProject(db: Database.Database): Record<string, number> {
-  const rows = db
-    .prepare(`SELECT slug, agent_policy_json FROM projects`)
-    .all() as { slug: string; agent_policy_json: string }[];
+export function usedByProject(
+  db: Database.Database,
+  ctx: GagentContext = {},
+): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const row of rows) {
-    try {
-      const deployments = JSON.parse(row.agent_policy_json) as unknown;
-      if (!Array.isArray(deployments)) continue;
-      const seen = new Set<string>();
-      for (const d of deployments) {
-        const profileId =
-          typeof d === "object" && d !== null
-            ? (d as { profileId?: unknown }).profileId
-            : null;
-        if (typeof profileId === "string" && !seen.has(profileId)) {
-          seen.add(profileId);
-          counts[profileId] = (counts[profileId] ?? 0) + 1;
-        }
-      }
-    } catch {
-      // tolerated — a malformed projection row counts nothing
-    }
+  for (const ref of listProjectAgentReferences(db, ctx)) {
+    counts[ref.profileId] = (counts[ref.profileId] ?? 0) + 1;
   }
   return counts;
 }
@@ -108,6 +95,7 @@ function toView(
   id: string,
   parsed: ParsedTemplate,
   used: number,
+  usedBy: { slug: string; name: string }[] = [],
 ): GagentView {
   const fm = parsed.frontmatter;
   return {
@@ -120,6 +108,7 @@ function toView(
     mcps: fm.resources.mcps,
     kbs: fm.resources.kb,
     used,
+    usedBy,
   };
 }
 
@@ -130,14 +119,24 @@ export function listGlobalAgentProfiles(
 ): GagentView[] {
   const dir = agentProfilesDir(ctx.dataRoot);
   if (!existsSync(dir)) return [];
-  const used = usedByProject(db);
+  const references = listProjectAgentReferences(db, ctx);
+  const used = usedByProject(db, ctx);
   const out: GagentView[] = [];
   for (const entry of readdirSync(dir).sort()) {
     if (!entry.endsWith(".md")) continue;
     const id = entry.slice(0, -3);
     const parsed = readTemplateFile(id, ctx);
     if (!parsed || parsed.frontmatter.kind !== "specialist") continue;
-    out.push(toView(id, parsed, used[id] ?? 0));
+    out.push(
+      toView(
+        id,
+        parsed,
+        used[id] ?? 0,
+        references
+          .filter((ref) => ref.profileId === id)
+          .map((ref) => ({ slug: ref.projectSlug, name: ref.projectName })),
+      ),
+    );
   }
   return out;
 }
@@ -199,7 +198,7 @@ export function saveGlobalAgentProfile(
       subjectId: input.id,
       details: { name, backend },
     });
-    const used = usedByProject(db)[input.id] ?? 0;
+    const used = usedByProject(db, ctx)[input.id] ?? 0;
     return {
       profile: toView(input.id, merged, used),
       toast: `${name} updated — running threads re-anchor on next turn`,
@@ -263,12 +262,17 @@ export function deleteGlobalAgentProfile(
       "The operator is a system profile and can't be deleted.",
     );
   }
-  const used = usedByProject(db)[id] ?? 0;
+  const projectRefs = listProjectAgentReferences(db, ctx).filter(
+    (ref) => ref.profileId === id,
+  );
+  const used = projectRefs.length;
   if (used > 0) {
     return {
       status: "in_use",
       used,
-      message: `Detach ${existing.frontmatter.name} from its ${used} project${used === 1 ? "" : "s"} first`,
+      message: `Detach ${existing.frontmatter.name} from: ${projectRefs
+        .map((ref) => `${ref.projectName} (${ref.projectSlug})`)
+        .join(", ")} first`,
     };
   }
   rmSync(agentProfileFilePath(id, ctx.dataRoot), { force: true });

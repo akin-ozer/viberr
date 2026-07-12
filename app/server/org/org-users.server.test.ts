@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
 import { hashPassword } from "~/server/auth/password.server";
 import { verifyPassword } from "~/server/auth/password.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   findUserByEmail,
   insertUser,
@@ -156,26 +164,28 @@ describe("edit / role / reset / remove", () => {
     expect(tempPassword.length).toBeGreaterThanOrEqual(8);
   });
 
-  it("removes a user row but never the last active admin", () => {
+  it("removes a user row but never the last active admin", async () => {
     const db = makeDb();
+    const dataRoot = ctx.makeTempDir();
     const { user } = createLocalAccount(
       db,
       { name: "Gidici", email: "gidici@test.dev", role: "member" },
       ACTOR,
     );
-    const removed = deleteOrgUser(db, user.id, ACTOR);
+    const removed = await deleteOrgUser(db, user.id, ACTOR, { dataRoot });
     expect(removed.toast).toBe("Gidici removed");
     expect(findUserByEmail(db, "gidici@test.dev")).toBeNull();
 
-    expect(() => deleteOrgUser(db, "u_admin", ACTOR)).toThrowError(
-      /last active admin/,
-    );
+    await expect(
+      deleteOrgUser(db, "u_admin", ACTOR, { dataRoot }),
+    ).rejects.toThrowError(/last active admin/);
   });
 
   // WI-3: delete must remove the better-auth identity too, so re-creating the
   // same email later doesn't hit the UNIQUE constraint on "user".email.
-  it("delete removes the better-auth identity so the email can be reused", () => {
+  it("delete removes the better-auth identity so the email can be reused", async () => {
     const db = makeDb();
+    const dataRoot = ctx.makeTempDir();
     const { user } = createLocalAccount(
       db,
       { name: "Reuse", email: "reuse@test.dev", role: "member" },
@@ -185,7 +195,7 @@ describe("edit / role / reset / remove", () => {
       db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id),
     ).toBeTruthy();
 
-    deleteOrgUser(db, user.id, ACTOR);
+    await deleteOrgUser(db, user.id, ACTOR, { dataRoot });
     expect(db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id)).toBeUndefined();
 
     // Re-creating the same email succeeds (no orphaned identity constraint).
@@ -195,6 +205,85 @@ describe("edit / role / reset / remove", () => {
       ACTOR,
     );
     expect(again.user.email).toBe("reuse@test.dev");
+  });
+
+  it("removes canonical memberships and releases owned tasks before identity deletion", async () => {
+    const store = setupTestStore(ctx);
+    const target = store.users.selin;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-77", {
+        ownerUserId: target.id,
+        waiting: "human",
+        recommendations: [
+          {
+            id: "rec-keep",
+            kind: "transition",
+            label: "Keep this decision",
+            detail: "The pending decision survives account cleanup.",
+            toStageId: "ready",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const removed = await deleteOrgUser(
+      store.db,
+      target.id,
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+
+    expect(removed.toast).toContain("removed");
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    expect(
+      project.parsed.frontmatter.members.some(
+        (member) => member.userId === target.id,
+      ),
+    ).toBe(false);
+    const task = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-77",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(task.parsed.frontmatter.ownerUserId).toBeNull();
+    expect(task.parsed.frontmatter.recommendations).toHaveLength(1);
+    expect(task.parsed.timeline[0]?.type).toBe("assign");
+    expect(findUserByEmail(store.db, target.email)).toBeNull();
+  });
+
+  it("preflights sole project-admin membership without partially deleting the account", async () => {
+    const store = setupTestStore(ctx);
+    const target = store.users.arda;
+    insertUser(store.db, {
+      id: "u_backup_org_admin",
+      email: "backup-admin@viberr.test",
+      name: "Backup Org Admin",
+      role: "admin",
+      passwordHash: hashPassword("viberr-dev-2828"),
+    });
+
+    await expect(
+      deleteOrgUser(
+        store.db,
+        target.id,
+        { userId: store.users.murat.id, label: store.users.murat.email },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Promote another project admin/);
+    expect(findUserByEmail(store.db, target.email)).not.toBeNull();
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    expect(
+      project.parsed.frontmatter.members.some(
+        (member) => member.userId === target.id,
+      ),
+    ).toBe(true);
   });
 });
 

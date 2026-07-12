@@ -61,20 +61,22 @@ describe("ReviewQueuePage", () => {
     expect(getByText("Review queue")).toBeTruthy();
     expect(
       getByText(
-        "2 tasks at the review boundary · 1 waiting on your acceptance",
+        "2 tasks at the review boundary · 1 waiting on your decision",
       ),
     ).toBeTruthy();
     // Policy chip with its explanatory tooltip (the only pre-click hint).
-    const chip = getByTitle("Review → Done is locked to humans — see Policy");
+    const chip = getByTitle(
+      "Review → Done follows the configured completion policy — see Policy",
+    );
     expect(chip.classList.contains("hero-file")).toBe(true);
-    expect(chip.textContent).toContain("Review → Done · human only");
+    expect(chip.textContent).toContain("Review → Done · governed completion");
     // Panel heads + "X of Y" count pair.
-    expect(getByText("Waiting on your acceptance")).toBeTruthy();
+    expect(getByText("Waiting on your decision")).toBeTruthy();
     expect(getByText("1 of 2")).toBeTruthy();
-    expect(getByText("Still with agents")).toBeTruthy();
+    expect(getByText("Waiting on agents")).toBeTruthy();
     // The pol-note acceptance explainer always renders.
     expect(container.querySelector(".pol-note")!.textContent).toContain(
-      "always a human action, always in the audit log",
+      "merge pending",
     );
   });
 
@@ -88,11 +90,11 @@ describe("ReviewQueuePage", () => {
     expect(first.querySelector(".sub")!.textContent).toBe(
       "Completion report — Accept completion, or send back for one fix?",
     );
-    // "your acceptance" — deliberately NOT the board's "waiting on you".
+    // Review responsibility is personal rather than project-wide.
     expect(first.querySelector(".wait-tag.human")!.textContent).toContain(
-      "your acceptance",
+      "your decision",
     );
-    expect(first.textContent).toContain("PR #318");
+    expect(first.textContent).toContain("PR #318 · in review");
     expect(first.textContent).toContain("evidence changed");
 
     const second = rows[1]!;
@@ -102,11 +104,31 @@ describe("ReviewQueuePage", () => {
     );
     expect(second.querySelector(".sub")!.textContent).not.toContain("**");
     expect(second.querySelector(".wait-tag.agent")!.textContent).toContain(
-      "agent working",
+      "waiting on agent",
     );
-    expect(second.querySelector(".wait-tag.agent .working")).toBeTruthy();
+    expect(second.querySelector(".wait-tag.agent .working")).toBeNull();
     // Merged PR renders the done pill kind.
-    expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
+    expect(second.querySelector(".pill.done")!.textContent).toBe(
+      "PR #311 · merged",
+    );
+  });
+
+  it("keeps closed and accepted PR states distinct", () => {
+    const closed = {
+      ...rowHuman,
+      key: "VIB-146",
+      pr: { number: 320, state: "closed" as const },
+    };
+    const accepted = {
+      ...rowHuman,
+      key: "VIB-147",
+      pr: { number: 321, state: "accepted" as const },
+    };
+    const { getByText } = renderQueue([closed, accepted], []);
+    expect(getByText("PR #320 · closed").classList.contains("risk")).toBe(true);
+    expect(
+      getByText("PR #321 · merge pending").classList.contains("input"),
+    ).toBe(true);
   });
 
   it("renders both empty states with exact copy (no all-empty hero)", () => {
@@ -116,16 +138,16 @@ describe("ReviewQueuePage", () => {
         "Nothing waits on you. Completion reports land here when a task reaches the boundary.",
       ),
     ).toBeTruthy();
-    expect(getByText("No review work in flight.")).toBeTruthy();
+    expect(getByText("No review tasks are waiting on an agent.")).toBeTruthy();
     expect(
-      getByText("0 tasks at the review boundary · 0 waiting on your acceptance"),
+      getByText("0 tasks at the review boundary · 0 waiting on your decision"),
     ).toBeTruthy();
   });
 
   it("singular header copy for exactly one review task", () => {
     const { getByText } = renderQueue([rowHuman], []);
     expect(
-      getByText("1 task at the review boundary · 1 waiting on your acceptance"),
+      getByText("1 task at the review boundary · 1 waiting on your decision"),
     ).toBeTruthy();
   });
 });

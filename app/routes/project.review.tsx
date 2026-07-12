@@ -2,7 +2,10 @@ import { data } from "react-router";
 import type { Route } from "./+types/project.review";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getProject } from "~/server/projections/board-query.server";
+import {
+  getProject,
+  listProjectMembers,
+} from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
 import { ReviewQueuePage } from "~/features/review/review-page";
 
@@ -23,21 +26,34 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // unlike the app-wide board/task read surfaces it's project-scoped, like
   // policy/agents/settings/github. Guard membership FIRST (matching those
   // siblings), then the 404 — a non-member must not learn a project exists (WI-13).
-  await requireProjectMember(request, params.slug, "view the review queue");
+  const ctx = await requireProjectMember(
+    request,
+    params.slug,
+    "view the review queue",
+  );
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  const queue = getReviewQueue(db, params.slug);
+  const projectRole =
+    listProjectMembers(db, params.slug).find(
+      (member) => member.userId === ctx.user.id,
+    )?.role ?? null;
+  const queue = getReviewQueue(db, params.slug, {
+    userId: ctx.user.id,
+    projectRole,
+  });
   return { slug: params.slug, ...queue };
 }
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
-  const { slug, ready, working, total } = loaderData;
+  const { slug, ready, others, working, unattended, total } = loaderData;
   return (
     <ReviewQueuePage
       projectSlug={slug}
       ready={ready}
+      others={others}
       working={working}
+      unattended={unattended}
       total={total}
     />
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLocation, useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -7,6 +7,10 @@ import {
   NotificationItem,
   type NotificationView,
 } from "~/features/notifications/notification-item";
+import {
+  notificationReadAllFeedback,
+  type NotificationReadResult,
+} from "~/features/notifications/read-feedback";
 
 /**
  * Bell button + notifications popover — ONE implementation for both the
@@ -27,9 +31,18 @@ export function TopBell({
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<NotificationReadResult>();
+  const readAllFetcher = useFetcher<NotificationReadResult>();
   const csrf = useCsrfToken();
   const push = useToast();
+  const handledReadAll = useRef<unknown>(null);
+
+  useEffect(() => {
+    if (readAllFetcher.state !== "idle" || !readAllFetcher.data) return;
+    if (handledReadAll.current === readAllFetcher.data) return;
+    handledReadAll.current = readAllFetcher.data;
+    push(notificationReadAllFeedback(readAllFetcher.data));
+  }, [push, readAllFetcher.data, readAllFetcher.state]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,8 +64,10 @@ export function TopBell({
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
-    fetcher.submit(fd, { method: "post", action: "/notifications/read" });
-    push("All notifications marked read");
+    readAllFetcher.submit(fd, {
+      method: "post",
+      action: "/notifications/read",
+    });
   };
 
   const openItem = (n: NotificationView) => {
@@ -87,8 +102,16 @@ export function TopBell({
                 {unread > 0 ? unread + " unread" : "caught up"}
               </span>
               {unread > 0 && (
-                <button type="button" className="btn ghost sm" onClick={markAllRead}>
-                  Mark all read
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={markAllRead}
+                  disabled={readAllFetcher.state !== "idle"}
+                  aria-busy={
+                    readAllFetcher.state !== "idle" || undefined
+                  }
+                >
+                  {readAllFetcher.state !== "idle" ? "Marking…" : "Mark all read"}
                 </button>
               )}
             </div>

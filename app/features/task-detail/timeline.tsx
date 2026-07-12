@@ -9,6 +9,7 @@ import {
 import { useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { formatDayDotTime } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
@@ -150,6 +151,7 @@ export function TimelineItem({
   /** Known mentionable names, for whole-name highlight in comment bodies. */
   mentionNames?: string[];
 }) {
+  const timeZone = useViewerTimeZone();
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
@@ -184,7 +186,9 @@ export function TimelineItem({
               app user · not in project
             </Pill>
           )}
-          <span className="tl-time">{formatDayDotTime(ev.occurredAt)}</span>
+          <span className="tl-time">
+            {formatDayDotTime(ev.occurredAt, new Date(), timeZone)}
+          </span>
         </div>
 
         {ev.type === "comment" ? (
@@ -234,6 +238,7 @@ export function Timeline({
   ask,
   mentionables,
   onAgentLog,
+  readOnly = false,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -248,6 +253,8 @@ export function Timeline({
   /** BUG 3: when an @agent comment triggers a run, the server returns the
    *  grouped Agent-logs id to auto-select + stream. Fired once per success. */
   onAgentLog?: (threadId: string) => void;
+  /** Archived task timelines remain filterable/readable but cannot be extended. */
+  readOnly?: boolean;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
@@ -350,7 +357,7 @@ export function Timeline({
         </span>
       </div>
 
-      <div className="composer">
+      {!readOnly && <div className="composer">
         <div className="composer-box">
           <div className="composer-input" style={{ position: "relative" }}>
             {/* Highlight backdrop: mirrors the draft with @mentions styled,
@@ -431,7 +438,7 @@ export function Timeline({
             </button>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="timeline" style={{ marginTop: "1.1rem" }}>
         {items.length === 0 ? (

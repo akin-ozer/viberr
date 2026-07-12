@@ -1,11 +1,18 @@
 import type Database from "better-sqlite3";
 import type {
   PacketOption,
+  ParsedTaskFile,
   TaskFileEvent,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
-import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
+import type { UserRole } from "~/shared/mapping/user.server";
+import {
+  authorizeProjectAction,
+  type RbacAction,
+  roleCan,
+  rolesForAction,
+} from "~/shared/rbac";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
   compactTimelineEvents,
@@ -16,7 +23,11 @@ import {
   isTerminalStage,
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  recordAudit,
+  withProjectAuditAuthority,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
@@ -38,12 +49,20 @@ import {
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getRun } from "~/server/runtimes/run-store.server";
-import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  isBackendAvailable,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
+import type { DeliveryPermissions } from "./specialist-tool-policy";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
+import {
+  clearReviewEvidence,
+  reviewEvidenceFingerprint,
+} from "./review-evidence.server";
 
 /**
  * Task mutations (Phase 3 server functions; Phase 4/5 route actions call
@@ -60,11 +79,15 @@ export interface TaskActor {
   userId: string;
   /** Human-readable audit label, e.g. the email. */
   label: string;
+  /** Authenticated organization role. Omitted internal/test actors are members. */
+  orgRole?: UserRole;
 }
 
 export interface TaskMutationContext {
   /** Override the data root (tests). Defaults to env VIBERR_DATA_ROOT. */
   dataRoot?: string;
+  /** Mock GitHub transport used by completion race tests. */
+  githubFetchImpl?: typeof fetch;
   /**
    * Set by the operator runtime (operator-actions.server) when an action is
    * performed by the OPERATOR agent rather than a human. It bypasses the
@@ -108,12 +131,16 @@ export function operatorShouldReactToReply(
 ): boolean {
   if (finishedState !== "finished" || !replyText) return false;
   if (prevReply !== null && prevReply.trim() === replyText.trim()) return false;
-  if (reactDepth === undefined || reactDepth >= OPERATOR_REACT_DEPTH_CAP) return false;
+  if (reactDepth === undefined || reactDepth >= OPERATOR_REACT_DEPTH_CAP)
+    return false;
   return true;
 }
 
 /** Audit actor for operator-performed mutations (no human user id). */
-export const OPERATOR_AUDIT_ACTOR = { userId: null, label: "operator" } as const;
+export const OPERATOR_AUDIT_ACTOR = {
+  userId: null,
+  label: "operator",
+} as const;
 
 /** Placeholder TaskActor the operator toolkit threads through the shared
  *  mutations; its user id is never read once `operatorAuthorized` is set (the
@@ -145,6 +172,7 @@ function conflict(userMessage: string): AppError {
 
 interface ProjectContext {
   slug: string;
+  repo: string | null;
   stages: { id: string; name: string }[];
   workflow: {
     from: string;
@@ -166,6 +194,7 @@ function loadProjectContext(
   const fm = file.parsed.frontmatter;
   return {
     slug: fm.slug,
+    repo: fm.repo,
     stages: fm.stages.map((s) => ({ id: s.id, name: s.name })),
     workflow: fm.workflow.map((w) => ({
       from: w.from,
@@ -210,7 +239,33 @@ export function requireProjectRole(
   what: string,
   ctx: TaskMutationContext = {},
 ): ProjectRole {
-  return requireMemberRole(loadProjectContext(ctx, projectSlug), actor, allowed, what);
+  return requireProjectRoleAuthority(projectSlug, actor, allowed, what, ctx)
+    .role;
+}
+
+/** Same route-level guard, retaining the authorization source for audit flow. */
+export function requireProjectRoleAuthority(
+  projectSlug: string,
+  actor: TaskActor,
+  allowed: ProjectRole[] | "any-member",
+  what: string,
+  ctx: TaskMutationContext = {},
+): {
+  role: ProjectRole;
+  authoritySource: "project_role" | "org_admin_override";
+} {
+  const project = loadProjectContext(ctx, projectSlug);
+  const role = project.memberRoles.get(actor.userId);
+  const explicitlyAllowed =
+    role !== undefined && (allowed === "any-member" || allowed.includes(role));
+  if (explicitlyAllowed) {
+    return { role, authoritySource: "project_role" };
+  }
+  if (actor.orgRole === "admin") {
+    return { role: "admin", authoritySource: "org_admin_override" };
+  }
+  if (!role) throw forbidden(`Only project members can ${what}.`);
+  throw forbidden(`Your project role (${role}) cannot ${what}.`);
 }
 
 /** The operator's canonical notification actor. */
@@ -255,10 +310,11 @@ export function notifyTaskWatchers(
         .filter(([, role]) => role === "admin" || role === "maintainer")
         .map(([userId]) => userId),
     );
-    const owner = readTaskFile(
-      taskRef(ctx, notice.projectSlug, notice.taskKey),
-    )?.parsed.frontmatter.ownerUserId;
-    if (owner) recipients.add(owner);
+    const owner = readTaskFile(taskRef(ctx, notice.projectSlug, notice.taskKey))
+      ?.parsed.frontmatter.ownerUserId;
+    if (owner && roleCan(project.memberRoles.get(owner), "own-task")) {
+      recipients.add(owner);
+    }
   } catch (error) {
     // A corrupt project/task file (or context load failure) must NOT silently
     // notify nobody of a real governance event — log it so the blind spot is
@@ -300,6 +356,7 @@ function requireMemberRole(
   what: string,
 ): ProjectRole {
   const role = project.memberRoles.get(actor.userId);
+  if (actor.orgRole === "admin") return role ?? "admin";
   if (!role) {
     throw forbidden(`Only project members can ${what}.`);
   }
@@ -322,13 +379,60 @@ export function requireAction(
   action: RbacAction,
   what: string,
 ): ProjectRole {
-  return requireMemberRole(project, actor, [...rolesForAction(action)], what);
+  const role = project.memberRoles.get(actor.userId) ?? null;
+  const authority = authorizeProjectAction(role, actor.orgRole, action);
+  if (!authority.allowed) {
+    return requireMemberRole(project, actor, [...rolesForAction(action)], what);
+  }
+  return authority.source === "org_admin_override"
+    ? "admin"
+    : authority.projectRole!;
+}
+
+function authorityAuditActor(
+  project: ProjectContext,
+  actor: TaskActor,
+  action: RbacAction,
+): AuditActor {
+  const authority = authorizeProjectAction(
+    project.memberRoles.get(actor.userId) ?? null,
+    actor.orgRole,
+    action,
+  );
+  return authority.source === "org_admin_override"
+    ? withProjectAuditAuthority(actor, authority.source)
+    : actor;
+}
+
+type CompletionAuthoritySource =
+  "project_role" | "task_owner" | "org_admin_override";
+
+function requireCompletionAuthority(
+  project: ProjectContext,
+  task: { frontmatter: TaskFrontmatter },
+  actor: TaskActor,
+): CompletionAuthoritySource {
+  const role = project.memberRoles.get(actor.userId) ?? null;
+  if (roleCan(role, "accept-completion")) return "project_role";
+  if (
+    task.frontmatter.ownerUserId === actor.userId &&
+    roleCan(role, "own-task")
+  ) {
+    return "task_owner";
+  }
+  if (actor.orgRole === "admin") return "org_admin_override";
+  requireAction(
+    project,
+    actor,
+    "accept-completion",
+    "accept completion into Done",
+  );
+  return "project_role";
 }
 
 function userName(db: Database.Database, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
+    { name: string } | undefined;
   return row?.name ?? userId;
 }
 
@@ -340,7 +444,11 @@ function humanActorRef(db: Database.Database, actor: TaskActor) {
   };
 }
 
-function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
+function taskRef(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+) {
   return {
     projectSlug,
     taskKey,
@@ -398,7 +506,12 @@ export async function createTask(
   input: CreateTaskInput,
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ key: string; task: TaskSummary; stageName: string }> {
+): Promise<{
+  key: string;
+  task: TaskSummary;
+  stageName: string;
+  operatorTrigger: "queued" | "awaiting_input" | "not_deployed" | "coalesced";
+}> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireAction(project, actor, "create-task", "create tasks");
 
@@ -409,7 +522,9 @@ export async function createTask(
   const stageId = input.stageId ?? project.stages[0]?.id ?? "triage";
   const stage = project.stages.find((s) => s.id === stageId);
   if (!stage) {
-    throw AppError.validation(`Stage ${stageId} does not exist in this project.`);
+    throw AppError.validation(
+      `Stage ${stageId} does not exist in this project.`,
+    );
   }
   const doneStageId = project.stages[project.stages.length - 1]?.id;
   if (stageId === doneStageId) {
@@ -432,12 +547,11 @@ export async function createTask(
     ownerUserId: null,
     specialist: null,
     reviewers: [],
+    reviewerVerdicts: [],
     recommendations: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
     operator:
-      stageId === project.stages[0]?.id
-        ? null
-        : { assignedAtStageId: stageId },
+      stageId === project.stages[0]?.id ? null : { assignedAtStageId: stageId },
     urgent: input.urgent ?? false,
     validation: "none",
     branch: null,
@@ -462,7 +576,7 @@ export async function createTask(
 
   recordAudit(db, {
     action: "task.created",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: authorityAuditActor(project, actor, "create-task"),
     subjectKind: "task",
     subjectId: key,
     projectSlug: input.projectSlug,
@@ -470,15 +584,23 @@ export async function createTask(
     details: { title, stage: stageId },
   });
 
-  // A dedicated operator coordinates every active task (ADR-002): auto-invoke
-  // it to pick up the new task. Fire-and-forget — it never blocks or fails the
-  // create, and it is a no-op when the project has no operator deployed.
-  void autoInvokeOperator(db, ctx, input.projectSlug, key, "create");
+  // Creation enqueues a visible, bounded Triage assessment instead of
+  // launching an unbounded paid run per task. A placeholder goal is cheaper and
+  // safer to stop deterministically: it stays input-required until a human
+  // supplies concrete intent. Enqueueing is awaited, execution is not.
+  const operatorTrigger = await autoInvokeOperator(
+    db,
+    ctx,
+    input.projectSlug,
+    key,
+    "create",
+  );
 
   return {
     key,
     task: summaryOrThrow(db, input.projectSlug, key),
     stageName: stage.name,
+    operatorTrigger,
   };
 }
 
@@ -509,22 +631,26 @@ export async function updateTaskGoal(
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
   }
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.goal = goal;
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "policy",
-      actor: humanActorRef(db, actor),
-      title: "Goal updated",
-      text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
-      toAgent: false,
-      evidence: null,
-    });
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.goal = goal;
+      clearReviewEvidence(parsed, reviewStageIdOf(project));
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "policy",
+        actor: humanActorRef(db, actor),
+        title: "Goal updated",
+        text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.goal.updated",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: authorityAuditActor(project, actor, "update-goal"),
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -532,7 +658,13 @@ export async function updateTaskGoal(
     details: {},
   });
   // Re-engage the operator so it reads the amended goal on its next turn.
-  void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  void autoInvokeOperator(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    "transition",
+  );
 
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
@@ -553,24 +685,65 @@ async function autoInvokeOperator(
   projectSlug: string,
   taskKey: string,
   trigger: "create" | "transition",
-): Promise<void> {
+): Promise<"queued" | "awaiting_input" | "not_deployed" | "coalesced"> {
   try {
-    const { resolveOperatorAuthority } = await import("./operator-actions.server");
+    if (!db.open) return "coalesced";
+    const { resolveOperatorAuthority } =
+      await import("./operator-actions.server");
+    if (!db.open) return "coalesced";
     const authority = resolveOperatorAuthority(ctx, projectSlug);
-    if (!authority.deployed) return; // no operator in this project — nothing to run
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
-    await runOperator(db, {
+    if (!authority.deployed) return "not_deployed";
+
+    const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (
+      trigger === "create" &&
+      (!task || task.parsed.goal.trim() === DEFAULT_GOAL)
+    ) {
+      if (task) {
+        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "quality",
+            actor: { kind: "operator" },
+            title: null,
+            text: "**Automatic Triage paused:** the goal is still a placeholder. Add a concrete outcome and verification boundary, then run the operator; no paid agent turn was started.",
+            toAgent: false,
+            evidence: null,
+          });
+        });
+        if (!db.open) return "coalesced";
+        reprojectTask(db, ctx, projectSlug, taskKey);
+      }
+      recordAudit(db, {
+        action: "task.operator.auto_skipped_missing_intent",
+        actor: OPERATOR_AUDIT_ACTOR,
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: { trigger },
+      });
+      return "awaiting_input";
+    }
+
+    const { enqueueAutoOperator } =
+      await import("~/server/runtimes/operator-dispatch.server");
+    if (!db.open) return "coalesced";
+    const queued = enqueueAutoOperator(db, {
       projectSlug,
       taskKey,
       trigger,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
+    return queued.queued ? "queued" : "coalesced";
   } catch (error) {
+    if (!db.open) return "coalesced";
     logger.error("auto operator invocation failed", {
       taskKey,
       trigger,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    return "coalesced";
   }
 }
 
@@ -629,28 +802,38 @@ export async function appendComment(
 
   // Timeline compaction fires on HUMAN comments too — a comment flood used to
   // never compact because compaction only ran inside operator writes.
-  const { guardrailOn, guardrailValue } = await import(
-    "./comment-guardrails.server"
+  const { guardrailOn, guardrailValue } =
+    await import("./comment-guardrails.server");
+  const compactOn = guardrailOn(
+    ctx,
+    input.projectSlug,
+    "compression-threshold",
   );
-  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
-  });
+  const compactAt = guardrailValue(
+    ctx,
+    input.projectSlug,
+    "compression-threshold",
+  );
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+      if (compactOn) {
+        parsed.timeline = compactTimelineEvents(
+          parsed.timeline,
+          compactAt != null
+            ? {
+                threshold: compactAt,
+                keepRecent: Math.min(
+                  DEFAULT_COMPACTION.keepRecent,
+                  Math.max(4, Math.floor(compactAt / 2)),
+                ),
+              }
+            : DEFAULT_COMPACTION,
+        );
+      }
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
@@ -695,10 +878,12 @@ export async function appendComment(
               .map((w) => w[0]?.toUpperCase() ?? "")
               .join(""),
             tone:
-              (db
-                .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
-                .get(actor.userId) as { avatar_tone: string | null } | undefined)
-                ?.avatar_tone ?? "",
+              (
+                db
+                  .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
+                  .get(actor.userId) as
+                  { avatar_tone: string | null } | undefined
+              )?.avatar_tone ?? "",
           },
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
@@ -769,11 +954,8 @@ export async function commentToAgent(
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
-  const {
-    resolveMentionedAgent,
-    resumeWorkdir,
-    buildReplyScript,
-  } = await import("./agent-reply.server");
+  const { resolveMentionedAgent, resumeWorkdir, buildReplyScript } =
+    await import("./agent-reply.server");
   const target = resolveMentionedAgent(
     db,
     ctx,
@@ -792,7 +974,13 @@ export async function commentToAgent(
   );
 
   if (!target) {
-    return { ...base, agent: null, triggered: null, logThreadId: null, runtimeDenied: false };
+    return {
+      ...base,
+      agent: null,
+      triggered: null,
+      logThreadId: null,
+      runtimeDenied: false,
+    };
   }
 
   const agentIdentity = {
@@ -803,7 +991,8 @@ export async function commentToAgent(
 
   // 3. RBAC: only admin|maintainer trigger runtime work. A lower role still
   //    got their comment recorded above — just skip the run (no throw).
-  if (!hasRuntimeRole(ctx, input.projectSlug, actor)) {
+  const runtimeActor = authorizedRuntimeActor(ctx, input.projectSlug, actor);
+  if (!runtimeActor) {
     return {
       ...base,
       agent: agentIdentity,
@@ -818,14 +1007,15 @@ export async function commentToAgent(
   //     operator reads it in its snapshot; it is also passed as the run's human
   //     directive. The operator responds via its own comments during the run.
   if (target.isOperator) {
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    const { runOperator } =
+      await import("~/server/runtimes/operator-run.server");
     const result = await runOperator(db, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       trigger: "manual",
       humanComment: input.text.trim(),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-      actor: { userId: actor.userId, label: actor.label },
+      actor: runtimeActor,
     });
     const logThreadId = resolveReplyLogThread(
       db,
@@ -833,37 +1023,59 @@ export async function commentToAgent(
       input.taskKey,
       result.runId,
     );
-    return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
+    return {
+      ...base,
+      agent: agentIdentity,
+      triggered: "started",
+      logThreadId,
+      runtimeDenied: false,
+    };
   }
 
   const commenterName = userName(db, actor.userId);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   const title = existing?.parsed.frontmatter.title ?? input.taskKey;
-  const repo = existing?.parsed.frontmatter.repo ?? projectRepoFor(ctx, input.projectSlug);
+  const repo =
+    existing?.parsed.frontmatter.repo ?? projectRepoFor(ctx, input.projectSlug);
 
   // The follow-up prompt built from the comment (autonomous reply).
   const followUp =
     `A human (${commenterName}) commented on task ${input.taskKey} ("${title}"): ` +
     `"${input.text.trim()}". Respond to their comment directly. Continue or ` +
-    `adjust your work on the repository in your working directory as needed, ` +
-    `then give a concise reply.`;
+    `adjust your work on the repository in your working directory as needed. ` +
+    `Commit completed changes locally, but do not push, run gh, or open a PR; ` +
+    `Viberr finalizes authenticated remote delivery. Then give a concise reply.`;
 
-  const { resumeRun } = await import(
-    "~/server/runtimes/run-service.server"
-  );
+  const { resumeRun } = await import("~/server/runtimes/run-service.server");
 
   let runId: string;
   let triggered: "resumed" | "started";
+  let resumedWorkdir: string | null = null;
+  let resumedDelivery: DeliveryPermissions | undefined;
 
   if (target.session) {
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context.
-    const workdir = resumeWorkdir(
-      input.projectSlug,
-      input.taskKey,
-      repo,
-      ctx.dataRoot,
-    );
+    const sessionBackend: RealBackend =
+      target.session.backend === "codex" ? "codex" : "claude";
+    const specialistRuntime = await import("./specialist-run.server");
+    const workdir = isBackendAvailable(sessionBackend)
+      ? await specialistRuntime.requireSpecialistWorkspace(db, ctx, {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          repo,
+          role: target.role,
+          ...(!target.isPrimary
+            ? { workspaceKey: `reviewer-${target.profileId}` }
+            : {}),
+        })
+      : resumeWorkdir(
+          input.projectSlug,
+          input.taskKey,
+          repo,
+          ctx.dataRoot,
+          !target.isPrimary ? `reviewer-${target.profileId}` : undefined,
+        );
     const script = buildReplyScript(
       target.session.backend === "codex" ? "codex" : "claude",
       target.model,
@@ -871,12 +1083,13 @@ export async function commentToAgent(
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
-    const { resolveResumeConfinement } = await import("./specialist-run.server");
-    const confinement = resolveResumeConfinement(db, ctx, {
+    const confinement = specialistRuntime.resolveResumeConfinement(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: target.profileId,
     });
+    resumedWorkdir = workdir;
+    resumedDelivery = confinement.delivery;
     const resumed = await resumeRun(db, {
       runId: target.session.id,
       prompt: followUp,
@@ -884,7 +1097,9 @@ export async function commentToAgent(
       disallowedTools: confinement.disallowedTools,
       env: confinement.env,
       ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
-      ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
+      ...(confinement.systemPrompt
+        ? { systemPrompt: confinement.systemPrompt }
+        : {}),
       // Apply the agent's CURRENT profile model/effort on resume — not the
       // stale value on the prior run row (editing an agent to a new model
       // must take effect when its session is resumed via a comment).
@@ -898,7 +1113,7 @@ export async function commentToAgent(
       autonomous: true,
       script,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-      actor: { userId: actor.userId, label: actor.label },
+      actor: runtimeActor,
     });
     runId = resumed.runId;
     triggered = "resumed";
@@ -913,39 +1128,49 @@ export async function commentToAgent(
     //         reviewer on its own thread.
     const hasPrimary = !!existing?.parsed.frontmatter.specialist;
     if (target.isPrimary || !hasPrimary) {
-      const { assignSpecialist, startSpecialistRun } = await import(
-        "./specialist-run.server"
-      );
+      const { assignSpecialist, startSpecialistRun } =
+        await import("./specialist-run.server");
       if (!hasPrimary) {
         await assignSpecialist(
           db,
-          { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
-          actor,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: target.profileId,
+          },
+          runtimeActor,
           ctx,
         );
       }
       const started = await startSpecialistRun(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
-        actor,
+        runtimeActor,
         ctx,
       );
       runId = started.runId;
     } else {
-      const { assignReviewer, startReviewerRun } = await import(
-        "./specialist-run.server"
-      );
+      const { assignReviewer, startReviewerRun } =
+        await import("./specialist-run.server");
       // Engage as a reviewer if not already (idempotent), then run as reviewer.
       await assignReviewer(
         db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
-        actor,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: target.profileId,
+        },
+        runtimeActor,
         ctx,
       );
       const started = await startReviewerRun(
         db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
-        actor,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: target.profileId,
+        },
+        runtimeActor,
         ctx,
       );
       runId = started.runId;
@@ -970,7 +1195,9 @@ export async function commentToAgent(
       backend: target.session?.backend === "codex" ? "codex" : "claude",
       role: target.role,
       kind: target.isPrimary ? "primary" : "reviewer",
-      workdir: null,
+      profileId: target.profileId,
+      workdir: resumedWorkdir,
+      ...(resumedDelivery ? { delivery: resumedDelivery } : {}),
       agentHandle: target.name.toLowerCase(),
       ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
     });
@@ -981,9 +1208,20 @@ export async function commentToAgent(
   // group's RunView.id is the thread the UI should auto-select + stream. Look
   // it up from the freshly-projected grouped list (best-effort — a projection
   // hiccup just yields null and the UI simply doesn't auto-select).
-  const logThreadId = resolveReplyLogThread(db, input.projectSlug, input.taskKey, runId);
+  const logThreadId = resolveReplyLogThread(
+    db,
+    input.projectSlug,
+    input.taskKey,
+    runId,
+  );
 
-  return { ...base, agent: agentIdentity, triggered, logThreadId, runtimeDenied: false };
+  return {
+    ...base,
+    agent: agentIdentity,
+    triggered,
+    logThreadId,
+    runtimeDenied: false,
+  };
 }
 
 /**
@@ -1011,11 +1249,11 @@ function resolveReplyLogThread(
 }
 
 /** admin|maintainer against project membership (runtime-action gate). */
-function hasRuntimeRole(
+function authorizedRuntimeActor(
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
-): boolean {
+): TaskActor | null {
   const file = readProjectFile({
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
@@ -1023,7 +1261,11 @@ function hasRuntimeRole(
   const role = file?.parsed.frontmatter.members.find(
     (m) => m.userId === actor.userId,
   )?.role;
-  return roleCan(role, "run-agents");
+  const authority = authorizeProjectAction(role, actor.orgRole, "run-agents");
+  if (!authority.allowed) return null;
+  return authority.source === "org_admin_override"
+    ? withProjectAuditAuthority(actor, authority.source)
+    : actor;
 }
 
 function projectRepoFor(
@@ -1066,9 +1308,8 @@ export async function postAgentReplyComment(
   // chatter is rejected before it reaches the canonical record, and raw output
   // dumps are trimmed to a head + reference (the full transcript stays in the
   // agent logs). Both per-project toggles.
-  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
-    "./comment-guardrails.server"
-  );
+  const { guardrailOn, isMeaninglessComment, separateEvidence } =
+    await import("./comment-guardrails.server");
   if (
     guardrailOn(ctx, input.projectSlug, "meaningful-comment") &&
     isMeaninglessComment(input.replyText)
@@ -1122,9 +1363,12 @@ export async function postAgentReplyComment(
   // the reply landing before it re-reads the task; other callers ignore it
   // (fire-and-forget). Errors are logged, never propagated — the run already
   // finished and the transcript is in the logs.
-  return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
-  })
+  return updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+    },
+  )
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       recordAudit(db, {
@@ -1195,8 +1439,8 @@ function latestAgentReplyText(
  * recovery packet with concrete options instead of leaving a silent stall.
  * Idempotent: a task with an open packet is left alone (the human already has
  * a decision in front of them). Falls back through the operator's own
- * capability gate — when generate-packets is withheld, no packet opens and the
- * stall stays visible only via waiting=human (the pre-existing behavior).
+ * system recovery path — infrastructure/loop failures are not optional
+ * operator actions and therefore never depend on `generate-packets`.
  */
 async function openStuckLoopPacket(
   db: Database.Database,
@@ -1209,50 +1453,50 @@ async function openStuckLoopPacket(
   },
 ): Promise<void> {
   try {
-    const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-    if (!existing || existing.parsed.packet) return; // already escalated
-    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
-      "./operator-actions.server"
+    const existing = readTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
     );
-    const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
-    const result = await operatorOpenPacket(
+    if (!existing || existing.parsed.packet) return; // already escalated
+    const { openSystemRecovery } = await import("./task-recovery.server");
+    const result = await openSystemRecovery(
       db,
-      ctx,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        packetType: "blocked",
+        code: "coordination_stalled",
         title: `Work stalled — pick a recovery path`,
         body: `${input.reason} Coordination is paused until a human chooses how to proceed.`,
         observations: [
-          { k: "Agent", v: `@${input.agentHandle}` },
-          { k: "Signal", v: input.reason },
+          { k: "Agent", v: `@${input.agentHandle}`, code: false },
+          { k: "Signal", v: input.reason, code: false },
         ],
         options: [
           {
             kind: "redirect",
-            title: "Redirect with sharper guidance",
-            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-            recommended: true,
+            t: "Redirect with sharper guidance",
+            d: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            rec: true,
           },
           {
             kind: "request_edit",
-            title: "Send back for another attempt",
-            detail: "Ask the same specialist to try again from its last report.",
+            t: "Send back for another attempt",
+            d: "Ask the same specialist to try again from its last report.",
+            rec: false,
           },
           {
             kind: "hold_runtime_debug",
-            title: "Hold for runtime debugging",
-            detail: "Freeze coordination while the provider-native session is inspected.",
+            t: "Hold for runtime debugging",
+            d: "Freeze coordination while the provider-native session is inspected.",
+            rec: false,
           },
         ],
       },
-      authority,
+      ctx,
     );
-    if (result.outcome !== "done") {
+    if (!result.recorded) {
       logger.info("stuck-loop packet not opened", {
         taskKey: input.taskKey,
-        reason: result.message,
+        reason: "already recorded or task missing",
       });
     }
   } catch (error) {
@@ -1263,74 +1507,72 @@ async function openStuckLoopPacket(
   }
 }
 
-/**
- * Classify a reviewer's reply into a verdict (FR15/FR35). Conservative: returns
- * a verdict only on a clear signal, else null (no validation change). Pure —
- * exported for tests.
- */
+export interface StructuredReviewerVerdict {
+  verdict: "request_changes" | "approve";
+  summary: string;
+}
+
+/** Parse the one machine-readable reviewer contract. Ordinary prose never
+ * becomes governance state, even if it contains words such as "approve" or
+ * "fail". The marker must occupy one line and contain valid JSON. */
+export function parseReviewerVerdict(
+  text: string | null,
+): StructuredReviewerVerdict | null {
+  if (!text) return null;
+  const matches = [
+    ...text.matchAll(/^VIBERR_REVIEW_VERDICT:\s*(\{[^\r\n]*\})\s*$/gm),
+  ];
+  if (matches.length !== 1) return null;
+  try {
+    const value = JSON.parse(matches[0]![1]!) as Record<string, unknown>;
+    if (
+      (value.verdict !== "approve" && value.verdict !== "request_changes") ||
+      typeof value.summary !== "string" ||
+      !value.summary.trim()
+    ) {
+      return null;
+    }
+    return { verdict: value.verdict, summary: value.summary.trim() };
+  } catch {
+    return null;
+  }
+}
+
+/** Compatibility-shaped pure helper used by governance callers/tests. It is
+ * intentionally strict: only the structured marker above is classified. */
 export function classifyReviewerVerdict(
   text: string | null,
 ): "request_changes" | "approve" | null {
-  if (!text) return null;
-  const t = text.toLowerCase();
+  return parseReviewerVerdict(text)?.verdict ?? null;
+}
 
-  // 1. An EXPLICIT verdict line is the strongest signal and reviewers emit one
-  //    ("Verdict: approve", "## Review verdict — PASS"). It wins over incidental
-  //    words elsewhere in the prose, so a thorough APPROVE that happens to say
-  //    "no tests fail" is not misread as a rejection.
-  const verdictApprove = /verdict[\s:—–-]*\**\s*(pass|approv|lgtm|ship it)/.test(t);
-  const verdictReject =
-    /verdict[\s:—–-]*\**\s*(fail|request|reject|chang|block|no-?go)/.test(t);
-  if (verdictReject && !verdictApprove) return "request_changes";
-  if (verdictApprove && !verdictReject) return "approve";
-
-  // 2. Strong request-changes PHRASES always count (assertive, not negated).
-  if (
-    /request(ing)?\s+changes?/.test(t) ||
-    /\bchanges? (are )?(required|needed|requested)\b/.test(t) ||
-    /\bnothing (was )?implemented\b/.test(t) ||
-    /\bno-?op\b/.test(t) ||
-    /\bnot (yet )?(implemented|done|complete)\b/.test(t) ||
-    /\breject(ed|s|ing)?\b/.test(t)
-  ) {
-    return "request_changes";
-  }
-
-  // 3. Weak negatives ("fail", "failure", "blocker") ONLY count when NOT
-  //    locally negated — "no blockers" / "none of the tests fail" / "nothing
-  //    fails" / "doesn't fail" are POSITIVE. Scan each occurrence's preceding
-  //    context for a negator (a bare `/\bfail\b/` test misclassified clean
-  //    approvals — the bug this guard fixes).
-  for (const m of t.matchAll(/\b(fail(?:ed|ing|s|ures?)?|blockers?)\b/g)) {
-    const pre = t.slice(Math.max(0, m.index - 28), m.index);
-    // A negator anywhere in the local lead-in flips it positive. `n't` is a
-    // contraction suffix (don't/doesn't/won't) so it needs no leading boundary.
-    if (
-      !/(?:\b(?:no|not|none|nothing|zero|without|never|any)\b|n't)[^.!?]*$/.test(
-        pre,
-      )
-    ) {
-      return "request_changes";
-    }
-  }
-
-  if (
-    /\bapprove(d|s)?\b/.test(t) ||
-    /\blgtm\b/.test(t) ||
-    /\blooks good to merge\b/.test(t) ||
-    /\bready (to|for) (merge|accept)/.test(t) ||
-    /\bno (blocking )?issues\b/.test(t)
-  ) {
-    return "approve";
-  }
-  return null;
+/** Required reviewer profiles that do not currently have an explicit approval
+ * in this review cycle. A request-changes verdict is therefore also missing an
+ * approval until that same reviewer re-runs and approves. */
+export function missingReviewerApprovalProfileIds(
+  task: Pick<
+    import("~/schemas/task-file.schema").ParsedTaskFile,
+    "goal" | "frontmatter"
+  >,
+  projectRepo: string | null,
+): string[] {
+  const currentEvidence = reviewEvidenceFingerprint(task, projectRepo);
+  const verdicts = new Map(
+    task.frontmatter.reviewerVerdicts
+      .filter((item) => item.evidenceFingerprint === currentEvidence)
+      .map((item) => [item.profileId, item.verdict]),
+  );
+  return task.frontmatter.reviewers
+    .map((reviewer) => reviewer.profileId)
+    .filter((profileId) => verdicts.get(profileId) !== "approve");
 }
 
 /**
  * Emit a typed `quality` event from a reviewer's verdict and set the task's
- * validation health accordingly (FR15/FR24/FR35). request_changes → failing;
- * approve → healthy. Silent when the verdict is unclear. Idempotent-friendly:
- * writes one typed event per reviewer run.
+ * validation health accordingly (FR15/FR24/FR35). A rejection fails validation
+ * and returns the task to implementation. Approvals become healthy only after
+ * every assigned reviewer approves in the current review cycle. Missing or
+ * malformed structured output is surfaced and never counts as a verdict.
  *
  * A clear verdict ALSO fans a `quality` notification to the task's watchers
  * (owner + supervisors, routing-prefs honored — FIX #6): before this, the
@@ -1380,49 +1622,109 @@ export async function recordReviewerVerdict(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  replyText: string | null,
+  input: {
+    profileId: string;
+    runId: string;
+    replyText: string | null;
+    simulated: boolean;
+  },
 ): Promise<void> {
-  const verdict = classifyReviewerVerdict(replyText);
-  if (!verdict) return;
-  const summary =
-    verdict === "request_changes"
-      ? "Reviewer requested changes."
-      : "Reviewer approved the work.";
-  const title = verdict === "request_changes" ? "Changes requested" : "Review passed";
-  let validation: "failing" | "healthy" = "healthy";
+  // Simulated reports are useful UI demonstrations, never review evidence.
+  if (input.simulated) return;
+  const before = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (
+    !before?.parsed.frontmatter.reviewers.some(
+      (reviewer) => reviewer.profileId === input.profileId,
+    )
+  ) {
+    return;
+  }
+  const structured = parseReviewerVerdict(input.replyText);
+  const project = loadProjectContext(ctx, projectSlug);
+  let validation: "changed" | "failing" | "healthy" = "changed";
+  let title = "Structured verdict missing";
+  let summary =
+    "The reviewer run finished without VIBERR_REVIEW_VERDICT JSON, so it did not satisfy review.";
+  let allRequiredApproved = false;
+  let recorded = false;
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      // A request_changes always fails. An APPROVE clears a standing `failing`
-      // ONLY when the work has demonstrably moved since the rejection — a
-      // primary-specialist reply or a stage transition after the failing
-      // quality event (rework evidence). That keeps both properties:
-      //   · same-round masking is impossible (reviewer B's simultaneous
-      //     approve can't silently bury reviewer A's rejection — nothing
-      //     changed in between), and
-      //   · a rejection is NOT a life sentence (the old bug: re-review after a
-      //     real fix could never restore health, so the operator refused
-      //     acceptance forever and stalled the task).
-      validation =
-        verdict === "request_changes"
-          ? "failing"
-          : parsed.frontmatter.validation === "failing" &&
-              !hasReworkSinceLastRejection(
-                parsed.timeline,
-                parsed.frontmatter.specialist,
-              )
-            ? "failing"
-            : "healthy";
+      const assigned = parsed.frontmatter.reviewers.some(
+        (reviewer) => reviewer.profileId === input.profileId,
+      );
+      if (!assigned) return;
+      recorded = true;
+
+      // The latest completed real run is authoritative. Invalidate this
+      // reviewer's previous result even when the new response is malformed;
+      // otherwise an old approval could survive a newer unverifiable review.
+      parsed.frontmatter.reviewerVerdicts =
+        parsed.frontmatter.reviewerVerdicts.filter(
+          (item) => item.profileId !== input.profileId,
+        );
+      if (structured) {
+        parsed.frontmatter.reviewerVerdicts.push({
+          profileId: input.profileId,
+          verdict: structured.verdict,
+          summary: structured.summary,
+          runId: input.runId,
+          reviewedAt: new Date().toISOString(),
+          evidenceFingerprint: reviewEvidenceFingerprint(parsed, project.repo),
+        });
+        title =
+          structured.verdict === "request_changes"
+            ? "Changes requested"
+            : "Reviewer approval recorded";
+        summary = structured.summary;
+      }
+
+      const hasRejection = parsed.frontmatter.reviewerVerdicts.some(
+        (item) =>
+          parsed.frontmatter.reviewers.some(
+            (reviewer) => reviewer.profileId === item.profileId,
+          ) && item.verdict === "request_changes",
+      );
+      allRequiredApproved =
+        parsed.frontmatter.reviewers.length > 0 &&
+        missingReviewerApprovalProfileIds(parsed, project.repo).length === 0;
+      const isReviewStage =
+        parsed.frontmatter.stage === reviewStageIdOf(project);
+      validation = hasRejection
+        ? "failing"
+        : allRequiredApproved && isReviewStage
+          ? "healthy"
+          : "changed";
       parsed.frontmatter.validation = validation;
+
+      if (structured?.verdict === "request_changes") {
+        const workStageId = stageRolesOf(project).workId;
+        if (workStageId) parsed.frontmatter.stage = workStageId;
+        parsed.frontmatter.waiting = "agent";
+        parsed.frontmatter.readiness = "ready";
+        parsed.frontmatter.recommendations =
+          parsed.frontmatter.recommendations.filter(
+            (item) =>
+              item.kind !== "accept_completion" && item.kind !== "transition",
+          );
+        parsed.packet = null;
+      }
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "quality",
         actor: { kind: "operator" },
         title,
-        text: `**Validation:** ${validation}. ${summary}`,
+        text: `**Validation:** ${validation}. ${summary}${
+          structured?.verdict === "request_changes"
+            ? " The task returned to implementation."
+            : allRequiredApproved
+              ? " All required reviewers approved."
+              : " Waiting for every assigned reviewer to approve."
+        }`,
         toAgent: false,
         evidence: null,
       });
     });
+    if (!recorded) return;
     reprojectTask(db, ctx, projectSlug, taskKey);
     recordAudit(db, {
       action: "task.quality.flagged",
@@ -1431,7 +1733,13 @@ export async function recordReviewerVerdict(
       subjectId: taskKey,
       projectSlug,
       taskKey,
-      details: { verdict, validation },
+      details: {
+        profileId: input.profileId,
+        runId: input.runId,
+        verdict: structured?.verdict ?? "missing",
+        validation,
+        allRequiredApproved,
+      },
     });
     // Ping the owner + supervisors so the quality inbox card appears on real
     // runs (not just seed). Each recipient's `quality` routing pref is honored
@@ -1489,22 +1797,29 @@ export async function registerAgentCompletion(
     backend: RealBackend;
     role: string;
     kind: "primary" | "reviewer";
+    /** Stable deployed profile identity; required for reviewer governance. */
+    profileId?: string;
     workdir: string | null;
+    delivery?: DeliveryPermissions;
     /** The agent's @mention handle, for the stuck-loop packet copy. */
     agentHandle: string;
     /** Present when started inside an operator react loop (continue the chain). */
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    operatorRun?: {
+      backend: RealBackend;
+      autonomy: OperatorAutonomy;
+      reactDepth: number;
+    };
   },
 ): Promise<void> {
-  const { registerRunCompletion } = await import(
-    "~/server/runtimes/run-service.server"
-  );
+  const { registerRunCompletion } =
+    await import("~/server/runtimes/run-service.server");
   registerRunCompletion(input.runId, (finished) => {
     void applyAgentCompletionEffects(db, ctx, input, {
       id: finished.id,
       state: finished.state,
       simulated: finished.simulated === 1,
     }).catch((error: unknown) => {
+      if (!db.open) return;
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
         runId: finished.id,
@@ -1529,15 +1844,22 @@ export async function applyAgentCompletionEffects(
     backend: RealBackend;
     role: string;
     kind: "primary" | "reviewer";
+    profileId?: string;
     workdir: string | null;
+    delivery?: DeliveryPermissions;
     agentHandle: string;
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    operatorRun?: {
+      backend: RealBackend;
+      autonomy: OperatorAutonomy;
+      reactDepth: number;
+    };
   },
   finished: { id: string; state: string; simulated: boolean },
 ): Promise<void> {
-  const { replyTextForRun, fullReplyTextForRun } = await import(
-    "./agent-reply.server"
-  );
+  if (!db.open) return;
+  const { replyTextForRun, fullReplyTextForRun } =
+    await import("./agent-reply.server");
+  if (!db.open) return;
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -1560,6 +1882,7 @@ export async function applyAgentCompletionEffects(
     actorRef,
     replyText: commentText,
   });
+  if (!db.open) return;
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
   //     trace on the timeline and never re-invoked the operator — the task just
   //     silently reverted to waiting=human (F8). Surface the failure as a typed
@@ -1568,87 +1891,145 @@ export async function applyAgentCompletionEffects(
   //     human action and are handled elsewhere, so only `error` lands here.
   if (finished.state === "error" && !finished.simulated) {
     const { runFailureReason } = await import("./agent-reply.server");
+    if (!db.open) return;
     const failure = runFailureReason(db, finished.id);
     const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
     const roleLabel = input.kind === "reviewer" ? "reviewer" : "specialist";
-    const failText = failure?.text
-      ? failure.text.length > 180
-        ? failure.text.slice(0, 177) + "…"
-        : failure.text
-      : "";
     const reasonText =
       failure?.kind === "quota"
         ? `${backendLabel} is over its usage quota`
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
-          : failText
-            ? `${backendLabel} run failed: ${failText}`
-            : `the ${backendLabel} run ended in an error`;
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "blocked",
-        actor: actorRef,
-        title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}. No changes were delivered.${
-          failure?.kind === "quota" || failure?.kind === "auth"
-            ? " Retry on the other backend, or fix the credential and re-run."
-            : ""
-        }`,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-    await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      agentHandle: input.agentHandle,
-      reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
-    });
-    notifyTaskWatchers(
+          : `the ${backendLabel} run ended in an error`;
+    const { openSystemRecovery } = await import("./task-recovery.server");
+    await openSystemRecovery(
       db,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        kind: "quality",
-        text: `${input.role} run failed — ${reasonText}.`,
+        code: `agent_run_failed:${finished.id}`,
+        title: `${input.role} ${roleLabel} run failed`,
+        body: `The run did not complete — ${reasonText}. No changes were delivered. Retry on the other backend, fix the runtime credential, or redirect the task.`,
+        observations: [
+          { k: "Run", v: finished.id, code: true },
+          { k: "Backend", v: backendLabel, code: false },
+        ],
+        notificationKind: "quality",
+        notificationText: `${input.role} run failed — ${reasonText}.`,
       },
       ctx,
     );
-    await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
-  // 2. Reconcile agent-side delivery (NFR15) — real runs only.
+  // 2. Finalize delivery — real runs only. Fresh/resumed runs carry their
+  // resolved permissions and use Viberr's server-owned authenticated push/PR
+  // path. Boot-recovered legacy rows fall back to local reconciliation only.
   if (finished.state === "finished" && !finished.simulated) {
-    const { reconcileWorkspaceDelivery } = await import(
-      "~/server/github/workspace-delivery.server"
+    if (input.delivery) {
+      const { deliverSpecialistWorkspace } =
+        await import("~/server/github/server-owned-delivery.server");
+      const delivered = await deliverSpecialistWorkspace(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        workdir: input.workdir,
+        backend: input.backend,
+        role: input.role,
+        permissions: input.delivery,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      });
+      if (!db.open) return;
+      if (delivered.status === "failed") {
+        const { openSystemRecovery } = await import("./task-recovery.server");
+        await openSystemRecovery(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            code: `delivery:${delivered.code}`,
+            title: delivered.title,
+            body: delivered.detail,
+            observations: [
+              { k: "Delivery", v: delivered.code, code: true },
+              { k: "Run", v: finished.id, code: true },
+            ],
+          },
+          ctx,
+        );
+        return;
+      }
+      if (delivered.status === "withheld") {
+        const { reconcileWorkspaceDelivery } =
+          await import("~/server/github/workspace-delivery.server");
+        await reconcileWorkspaceDelivery({
+          db,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          backend: input.backend,
+          role: input.role,
+          simulated: false,
+          skipPrDetection: true,
+          ...(input.workdir ? { workdir: input.workdir } : {}),
+          ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+        }).catch(() => {});
+        if (!db.open) return;
+      }
+    } else {
+      const { reconcileWorkspaceDelivery } =
+        await import("~/server/github/workspace-delivery.server");
+      await reconcileWorkspaceDelivery({
+        db,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        backend: input.backend,
+        role: input.role,
+        simulated: false,
+        ...(input.workdir ? { workdir: input.workdir } : {}),
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      }).catch(() => {});
+      if (!db.open) return;
+    }
+  }
+  // Any real primary completion begins a new evidence cycle. This matters for
+  // repo-less work and for delivery paths whose live GitHub cache has not been
+  // reconciled yet: an approval from before the specialist's latest turn may
+  // never authorize completion after that turn.
+  if (
+    input.kind === "primary" &&
+    finished.state === "finished" &&
+    !finished.simulated
+  ) {
+    const project = loadProjectContext(ctx, input.projectSlug);
+    let invalidated = false;
+    await updateTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        invalidated = clearReviewEvidence(parsed, reviewStageIdOf(project));
+      },
     );
-    await reconcileWorkspaceDelivery({
-      db,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      backend: input.backend,
-      role: input.role,
-      simulated: false,
-      ...(input.workdir ? { workdir: input.workdir } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    }).catch(() => {});
+    if (invalidated) {
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
   }
   // 3. Reviewer verdict — classify on the FULL (untruncated) reply so a verdict
   //    past the 1200-char comment cap is never dropped.
-  if (input.kind === "reviewer" && finished.state === "finished") {
-    await recordReviewerVerdict(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      fullText,
-    );
+  if (
+    input.kind === "reviewer" &&
+    input.profileId &&
+    finished.state === "finished"
+  ) {
+    await recordReviewerVerdict(db, ctx, input.projectSlug, input.taskKey, {
+      profileId: input.profileId,
+      runId: finished.id,
+      replyText: fullText,
+      simulated: finished.simulated,
+    });
+    if (!db.open) return;
   }
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
-  const { resolveOperatorAuthority } = await import("./operator-actions.server");
+  const { resolveOperatorAuthority } =
+    await import("./operator-actions.server");
+  if (!db.open) return;
   let reactBackend: RealBackend;
   let reactAutonomy: OperatorAutonomy;
   let currentDepth: number;
@@ -1676,27 +2057,37 @@ export async function applyAgentCompletionEffects(
   );
   if (!shouldReact) {
     const noProgress =
-      !!commentText && prevReply !== null && prevReply.trim() === commentText.trim();
+      !!commentText &&
+      prevReply !== null &&
+      prevReply.trim() === commentText.trim();
     const depthCapped =
       !!commentText &&
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
     if (noProgress) {
-      logger.info("operator react skipped — agent made no progress (repeated its reply)", {
-        taskKey: input.taskKey,
-        runId: finished.id,
-      });
+      logger.info(
+        "operator react skipped — agent made no progress (repeated its reply)",
+        {
+          taskKey: input.taskKey,
+          runId: finished.id,
+        },
+      );
     }
     if (noProgress || depthCapped) {
-      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        agentHandle: input.agentHandle,
-        reason: noProgress
-          ? "The agent repeated its previous report verbatim — no forward progress."
-          : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
-      });
+      await openStuckLoopPacket(
+        db,
+        { ...ctx, operatorAuthorized: true },
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          agentHandle: input.agentHandle,
+          reason: noProgress
+            ? "The agent repeated its previous report verbatim — no forward progress."
+            : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
+        },
+      );
+      if (!db.open) return;
     }
     // ALWAYS flip waiting off `agent` when the chain terminates (adversarial-
     // review HIGH #1). markWaitingAgent set it at run start; openStuckLoopPacket
@@ -1717,6 +2108,7 @@ export async function applyAgentCompletionEffects(
     return;
   }
   const { runOperator } = await import("~/server/runtimes/operator-run.server");
+  if (!db.open) return;
   await runOperator(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1807,19 +2199,23 @@ export async function operatorPromptAgent(
     toAgent: true,
     evidence: null,
   };
-  await updateTaskFile(taskRef(opCtx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(comment);
-  });
+  await updateTaskFile(
+    taskRef(opCtx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(comment);
+    },
+  );
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
-  const { startSpecialistRun, startReviewerRun } = await import(
-    "./specialist-run.server"
-  );
+  const { startSpecialistRun, startReviewerRun } =
+    await import("./specialist-run.server");
   let runId: string;
   if (input.kind === "reviewer") {
     if (!input.profileId) {
-      throw AppError.validation("A reviewer profile id is required to run a reviewer.");
+      throw AppError.validation(
+        "A reviewer profile id is required to run a reviewer.",
+      );
     }
     const started = await startReviewerRun(
       db,
@@ -1916,16 +2312,20 @@ export async function setOwner(
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
   const isTake = input.targetUserId === actor.userId;
+  const targetRole = project.memberRoles.get(input.targetUserId);
+  if (!targetRole || !roleCan(targetRole, "own-task")) {
+    throw forbidden(
+      isTake
+        ? "Ownership can only be held by a project member who can own tasks (contributor or above)."
+        : "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+    );
+  }
   if (!isTake) {
     // Hand off: current owner or project admin only; target must be able to OWN
     // (contributor+ — a viewer is read+comment only and can't hold the owner seat).
     if (currentOwnerId !== actor.userId && actorRole !== "admin") {
-      throw forbidden("Only the current owner or a project admin can hand off ownership.");
-    }
-    const targetRole = project.memberRoles.get(input.targetUserId);
-    if (!targetRole || !roleCan(targetRole, "own-task")) {
       throw forbidden(
-        "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+        "Only the current owner or a project admin can hand off ownership.",
       );
     }
   }
@@ -1957,7 +2357,8 @@ export async function setOwner(
 
   // Operator scheduling stand-in: only an UNOWNED task gaining its owner
   // triggers the reaction (spec §5.2 — VIB-148 generalization).
-  const scheduling = !currentOwnerId && operatorSchedulesOnOwner(existing.parsed);
+  const scheduling =
+    !currentOwnerId && operatorSchedulesOnOwner(existing.parsed);
   const operatorEvent: TaskFileEvent | null = scheduling
     ? {
         occurredAt: event.occurredAt,
@@ -1970,20 +2371,23 @@ export async function setOwner(
       }
     : null;
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = input.targetUserId;
-    parsed.timeline.unshift(event);
-    if (operatorEvent) {
-      parsed.frontmatter.readiness = "ready";
-      parsed.frontmatter.waiting = "agent";
-      parsed.timeline.unshift(operatorEvent);
-    }
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.ownerUserId = input.targetUserId;
+      parsed.timeline.unshift(event);
+      if (operatorEvent) {
+        parsed.frontmatter.readiness = "ready";
+        parsed.frontmatter.waiting = "agent";
+        parsed.timeline.unshift(operatorEvent);
+      }
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     action: isTake ? "task.ownership.taken" : "task.ownership.handed_off",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: authorityAuditActor(project, actor, "own-task"),
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -2002,7 +2406,13 @@ export async function setOwner(
   // fails the ownership mutation (file write + audit already committed), and it
   // is a no-op when the project has no operator deployed.
   if (scheduling) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    void autoInvokeOperator(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      "transition",
+    );
   }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
@@ -2037,7 +2447,12 @@ export async function releaseOwner(
     requireAction(project, actor, "own-task", "release task ownership");
   } else {
     // Releasing SOMEONE ELSE's seat: admin only (release-any-ownership).
-    requireAction(project, actor, "release-any-ownership", "release another member's ownership");
+    requireAction(
+      project,
+      actor,
+      "release-any-ownership",
+      "release another member's ownership",
+    );
   }
 
   const text = isSelf
@@ -2054,21 +2469,38 @@ export async function releaseOwner(
     evidence: null,
   };
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = null;
-    parsed.timeline.unshift(event);
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.ownerUserId = null;
+      parsed.timeline.unshift(event);
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
-  recordAudit(db, {
-    action: isSelf ? "task.ownership.released" : "task.ownership.admin_released",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "task",
+  const commonAudit = {
+    subjectKind: "task" as const,
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { previousOwnerUserId: currentOwnerId, forced: !isSelf },
-  });
+    details: {
+      previousOwnerUserId: currentOwnerId,
+      forced: !isSelf,
+    },
+  };
+  if (isSelf) {
+    recordAudit(db, {
+      action: "task.ownership.released",
+      actor: authorityAuditActor(project, actor, "own-task"),
+      ...commonAudit,
+    });
+  } else {
+    recordAudit(db, {
+      action: "task.ownership.admin_released",
+      actor: authorityAuditActor(project, actor, "release-any-ownership"),
+      ...commonAudit,
+    });
+  }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
@@ -2132,6 +2564,12 @@ export async function transitionStage(
 
   const firstStageId = project.stages[0]?.id;
   const lastStageId = project.stages[project.stages.length - 1]?.id;
+  const resolvesReadiness =
+    !ctx.operatorAuthorized &&
+    fromStageId === firstStageId &&
+    input.toStageId !== firstStageId &&
+    existing.parsed.frontmatter.readiness === "input_required";
+  let transitionAuditActor: AuditActor = actor;
 
   // A HUMAN manually moving a task INTO the final stage IS accepting completion
   // — route it through the full acceptance contract (real merge attempt,
@@ -2165,93 +2603,137 @@ export async function transitionStage(
   } else if (input.manual) {
     // Manual stage override (board/task dropdown) — a maintainer-level action,
     // regardless of the boundary crossed (forward, backward, or off-graph).
-    requireAction(project, actor, "approve-transition", "change the task stage");
+    requireAction(
+      project,
+      actor,
+      "approve-transition",
+      "change the task stage",
+    );
+    transitionAuditActor = authorityAuditActor(
+      project,
+      actor,
+      "approve-transition",
+    );
   } else if (boundary!.boundary === "auto") {
     // An auto boundary crossed by a human (unreachable from the UI, which always
     // sends manual:true) — the loosest gate: any member.
     requireMemberRole(project, actor, "any-member", "move this task");
+    if (!project.memberRoles.has(actor.userId) && actor.orgRole === "admin") {
+      transitionAuditActor = withProjectAuditAuthority(
+        actor,
+        "org_admin_override",
+      );
+    }
   } else if (boundary!.boundary === "approval") {
-    requireAction(project, actor, "approve-transition", "approve stage transitions");
+    requireAction(
+      project,
+      actor,
+      "approve-transition",
+      "approve stage transitions",
+    );
+    transitionAuditActor = authorityAuditActor(
+      project,
+      actor,
+      "approve-transition",
+    );
   } else {
     // human boundary (review→done locked in V1): acceptance authority.
-    requireAction(project, actor, "accept-completion", "accept completion into Done");
+    requireAction(
+      project,
+      actor,
+      "accept-completion",
+      "accept completion into Done",
+    );
+    transitionAuditActor = authorityAuditActor(
+      project,
+      actor,
+      "accept-completion",
+    );
   }
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
-    actor: ctx.operatorAuthorized ? { kind: "operator" } : humanActorRef(db, actor),
+    actor: ctx.operatorAuthorized
+      ? { kind: "operator" }
+      : humanActorRef(db, actor),
     title: null,
     text: ctx.operatorAuthorized
       ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
-      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.${
+          resolvesReadiness
+            ? " The authorized human transition also resolved readiness from input_required to ready."
+            : ""
+        }`,
     toAgent: false,
     evidence: null,
   };
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.stage = input.toStageId;
-    if (input.toStageId === lastStageId) {
-      parsed.frontmatter.waiting = "none";
-    }
-    if (
-      fromStageId === firstStageId &&
-      input.toStageId !== firstStageId &&
-      !parsed.frontmatter.operator
-    ) {
-      parsed.frontmatter.operator = { assignedAtStageId: input.toStageId };
-    }
-    // Leaving the first (triage) stage means the task was accepted into the
-    // workflow, so the triage-time `input_required` gate is cleared — otherwise
-    // a task with agents actively working would keep showing "input required"
-    // on the board forever. `blocked` / `inconsistency_risk_detected` are real
-    // states set elsewhere and must survive a transition, so only clear the
-    // triage default.
-    if (
-      fromStageId === firstStageId &&
-      input.toStageId !== firstStageId &&
-      parsed.frontmatter.readiness === "input_required"
-    ) {
-      parsed.frontmatter.readiness = "ready";
-    }
-    // Live validation-health (FR24, B7): the board's validation signal was
-    // seed-only, so a real task always read "none". Derive it from governance
-    // state — entering review means the work is up for review ("changed").
-    // ANY stale verdict is reset: a `healthy` from a prior round no longer
-    // describes the new evidence, and a `failing` from a prior round starts a
-    // NEW review cycle (the fix that ends "failing forever" — the reviewer
-    // re-verdicts the fresh evidence). BUT a bare re-entry must NOT launder a
-    // standing `failing` (adversarial-review #9): only reset failing→changed
-    // when there is genuine rework since the rejection — otherwise a maintainer
-    // could bounce a rejected task out of and back into review to clear the
-    // flag and accept without a re-review. A non-failing validation always
-    // resets to `changed` on review entry.
-    if (input.toStageId === reviewStageIdOf(project)) {
-      const stale = parsed.frontmatter.validation;
-      if (
-        stale !== "failing" ||
-        hasReworkSinceLastRejection(
-          parsed.timeline,
-          parsed.frontmatter.specialist,
-        )
-      ) {
-        parsed.frontmatter.validation = "changed";
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.stage = input.toStageId;
+      if (input.toStageId === lastStageId) {
+        parsed.frontmatter.waiting = "none";
       }
-    }
-    // A stage move makes any pending transition recommendation stale — drop it
-    // so a Done task never shows a "move to <stage>" card.
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.kind !== "transition",
-    );
-    parsed.timeline.unshift(event);
-  });
+      if (
+        fromStageId === firstStageId &&
+        input.toStageId !== firstStageId &&
+        !parsed.frontmatter.operator
+      ) {
+        parsed.frontmatter.operator = { assignedAtStageId: input.toStageId };
+      }
+      // Leaving the first (triage) stage means the task was accepted into the
+      // workflow, so the triage-time `input_required` gate is cleared — otherwise
+      // a task with agents actively working would keep showing "input required"
+      // on the board forever. `blocked` / `inconsistency_risk_detected` are real
+      // states set elsewhere and must survive a transition, so only clear the
+      // triage default.
+      if (resolvesReadiness) {
+        parsed.frontmatter.readiness = "ready";
+      }
+      // Live validation-health (FR24, B7): the board's validation signal was
+      // seed-only, so a real task always read "none". Derive it from governance
+      // state — entering review means the work is up for review ("changed").
+      // ANY stale verdict is reset: a `healthy` from a prior round no longer
+      // describes the new evidence, and a `failing` from a prior round starts a
+      // NEW review cycle (the fix that ends "failing forever" — the reviewer
+      // re-verdicts the fresh evidence). BUT a bare re-entry must NOT launder a
+      // standing `failing` (adversarial-review #9): only reset failing→changed
+      // when there is genuine rework since the rejection — otherwise a maintainer
+      // could bounce a rejected task out of and back into review to clear the
+      // flag and accept without a re-review. A non-failing validation always
+      // resets to `changed` on review entry.
+      if (input.toStageId === reviewStageIdOf(project)) {
+        // Every review entry starts a new evidence round. Prior reviewer verdicts
+        // remain represented in timeline/audit history but cannot satisfy the new
+        // round's required approvals.
+        parsed.frontmatter.reviewerVerdicts = [];
+        const stale = parsed.frontmatter.validation;
+        if (
+          stale !== "failing" ||
+          hasReworkSinceLastRejection(
+            parsed.timeline,
+            parsed.frontmatter.specialist,
+          )
+        ) {
+          parsed.frontmatter.validation = "changed";
+        }
+      }
+      // A stage move makes any pending transition recommendation stale — drop it
+      // so a Done task never shows a "move to <stage>" card.
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter(
+          (r) => r.kind !== "transition",
+        );
+      parsed.timeline.unshift(event);
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     action: "task.transition",
-    actor: ctx.operatorAuthorized
-      ? OPERATOR_AUDIT_ACTOR
-      : { userId: actor.userId, label: actor.label },
+    actor: ctx.operatorAuthorized ? OPERATOR_AUDIT_ACTOR : transitionAuditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -2262,11 +2744,22 @@ export async function transitionStage(
       boundary: boundary?.boundary ?? "manual",
       ...(input.manual ? { manual: true } : {}),
       ...(ctx.operatorAuthorized ? { by: "operator" } : {}),
+      ...(resolvesReadiness
+        ? {
+            readiness: {
+              from: "input_required",
+              to: "ready",
+              resolvedBy: "authorized_transition",
+            },
+          }
+        : {}),
     },
   });
 
   // Approving a requested transition resolves its approval notifications.
-  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, [
+    "approval",
+  ]);
 
   // A stage transition is a coordination trigger: when a NON-operator moves a
   // task onto a new (non-Done) stage, hand off to the operator so it picks the
@@ -2276,7 +2769,13 @@ export async function transitionStage(
   // here would be redundant and could recurse. Fire-and-forget — it never blocks
   // or fails the transition, and it is a no-op when no operator is deployed.
   if (!ctx.operatorAuthorized && input.toStageId !== lastStageId) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    void autoInvokeOperator(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      "transition",
+    );
   }
 
   // Delivery spine (FR31): entering the REVIEW stage is the point a PR is
@@ -2287,7 +2786,13 @@ export async function transitionStage(
   // governed edge into the final (Done) stage.
   const reviewStageId = reviewStageIdOf(project);
   if (reviewStageId && input.toStageId === reviewStageId) {
-    void openReviewPrBestEffort(db, ctx, input.projectSlug, input.taskKey, actor);
+    void openReviewPrBestEffort(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      actor,
+    );
   }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
@@ -2306,17 +2811,23 @@ async function openReviewPrBestEffort(
   actor: TaskActor,
 ): Promise<void> {
   try {
+    if (!db.open) return;
     const { openTaskPr } = await import("~/server/github/pr-open.server");
+    if (!db.open) return;
     const result = await openTaskPr(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+      {
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+        ...(ctx.githubFetchImpl ? { fetchImpl: ctx.githubFetchImpl } : {}),
+      },
     );
     if (result.status !== "ok") {
       logger.info("review PR not opened", { taskKey, reason: result.status });
     }
   } catch (error) {
+    if (!db.open) return;
     logger.warn("review PR open failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
@@ -2337,23 +2848,28 @@ async function mergeTaskPrIfPossible(
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
-): Promise<boolean> {
-  if (!actor.userId) return false;
+): Promise<"merged" | "pending" | "head_changed"> {
+  if (!actor.userId) return "pending";
   try {
-    const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+    const { mergeTaskPr } =
+      await import("~/server/github/github-reconciler.server");
     const result = await mergeTaskPr(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
       { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
     );
-    return result.status === "merged";
+    return result.status === "merged"
+      ? "merged"
+      : result.status === "head_changed"
+        ? "head_changed"
+        : "pending";
   } catch (error) {
     logger.warn("PR merge on acceptance failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return false;
+    return "pending";
   }
 }
 
@@ -2395,50 +2911,94 @@ export async function reorderTask(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   if (!project.stages.some((s) => s.id === input.toStageId)) {
-    throw AppError.validation(`Unknown stage ${input.toStageId} for this project.`);
+    throw AppError.validation(
+      `Unknown stage ${input.toStageId} for this project.`,
+    );
   }
 
   const movedStage = existing.parsed.frontmatter.stage !== input.toStageId;
   // A stage change goes through the governed manual transition (comment +
   // operator hand-off + reproject); the rank is set afterwards.
   if (movedStage) {
-    await transitionStage(
+    const transitioned = await transitionStage(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: input.toStageId, manual: true },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        toStageId: input.toStageId,
+        manual: true,
+      },
       actor,
       ctx,
     );
+    if (transitioned.stage !== input.toStageId) {
+      return {
+        task: transitioned,
+        movedStage: false,
+        toName:
+          project.stages.find((stage) => stage.id === transitioned.stage)
+            ?.name ?? transitioned.stage,
+        acceptedIntoDone: false,
+      };
+    }
   }
 
   // Midpoint of the requested gap in the target column's CURRENT order.
-  const { listProjectTasks, effectiveBoardRank, compareBoardOrder, taskKeyNumber, BOARD_RANK_BASE } =
-    await import("~/server/projections/board-query.server");
+  const {
+    listProjectTasks,
+    effectiveBoardRank,
+    compareBoardOrder,
+    taskKeyNumber,
+    BOARD_RANK_BASE,
+  } = await import("~/server/projections/board-query.server");
   const inStage = listProjectTasks(db, input.projectSlug)
     .filter((t) => t.stage === input.toStageId && t.key !== input.taskKey)
     .sort(compareBoardOrder);
   const beforeKey = input.beforeKey ?? null;
-  const idx = beforeKey == null ? -1 : inStage.findIndex((t) => t.key === beforeKey);
+  const idx =
+    beforeKey == null ? -1 : inStage.findIndex((t) => t.key === beforeKey);
 
   let newRank: number;
   if (inStage.length === 0) {
     newRank = taskKeyNumber(input.taskKey) * BOARD_RANK_BASE;
   } else if (idx < 0) {
     // append to the end (beforeKey null or no longer present)
-    newRank = effectiveBoardRank(inStage[inStage.length - 1]!) + BOARD_RANK_BASE;
+    newRank =
+      effectiveBoardRank(inStage[inStage.length - 1]!) + BOARD_RANK_BASE;
   } else if (idx === 0) {
     newRank = effectiveBoardRank(inStage[0]!) - BOARD_RANK_BASE;
   } else {
     newRank =
-      (effectiveBoardRank(inStage[idx - 1]!) + effectiveBoardRank(inStage[idx]!)) / 2;
+      (effectiveBoardRank(inStage[idx - 1]!) +
+        effectiveBoardRank(inStage[idx]!)) /
+      2;
   }
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.boardRank = newRank;
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.boardRank = newRank;
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.board.reordered",
+    actor: authorityAuditActor(project, actor, "reorder-board"),
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      fromStageId: existing.parsed.frontmatter.stage,
+      toStageId: input.toStageId,
+      beforeKey,
+      boardRank: newRank,
+    },
+  });
 
   const toName =
-    project.stages.find((s) => s.id === input.toStageId)?.name ?? input.toStageId;
+    project.stages.find((s) => s.id === input.toStageId)?.name ??
+    input.toStageId;
   // Dragging INTO the terminal stage runs the full acceptance contract (merge
   // attempt + completion event) via the H4 redirect — surface that honestly so
   // the toast isn't a bare "Moved" for what is actually an acceptance + merge.
@@ -2458,9 +3018,10 @@ export async function reorderTask(
  * Resolves the task's active decision packet by option index, dispatching
  * on the option's stable `kind` (ruling 7) — NEVER on the English title.
  *
- *   accept_completion   human-only acceptance (admin|maintainer): stage →
- *                       done, waiting → none, pr.state → merged, packet
- *                       cleared, `completion` event ("Completion accepted").
+ *   accept_completion   human-only acceptance (admin|maintainer, org-admin
+ *                       override, or current contributor owner). Healthy
+ *                       non-repository work moves to Done; repository work
+ *                       remains in Review until its linked PR is truly merged.
  *   request_edit /
  *   redirect / custom   waiting → agent, readiness → ready, packet cleared,
  *                       `transition` event (option.ev or the fallback copy).
@@ -2477,7 +3038,11 @@ export async function resolvePacket(
   input: { projectSlug: string; taskKey: string; optionIndex: number },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ task: TaskSummary; option: PacketOption }> {
+): Promise<{
+  task: TaskSummary;
+  option: PacketOption;
+  completion?: CompletionAcceptanceResult;
+}> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -2494,9 +3059,9 @@ export async function resolvePacket(
   // is addressed to the task OWNER, so the owner (whatever their project role)
   // OR an admin|maintainer may resolve it — a contributor who took ownership is
   // no longer told "decision needed" and then handed a 403. The
-  // `accept_completion` option is the one exception: merging + moving to Done
-  // stays admin|maintainer (re-gated below), preserving the human-only-Done
-  // authority split.
+  // Completion uses the same task-scoped owner exception: the active
+  // contributor+ owner may accept their own task, while non-owners still need
+  // project-supervisor or org-admin emergency authority.
   // The owner path additionally requires CURRENT project membership
   // (adversarial-review #8) — a user removed from the project who still holds a
   // stale ownerUserId must not resolve packets. `memberRoles.has` is the live
@@ -2506,11 +3071,50 @@ export async function resolvePacket(
     !!actor.userId &&
     existing.parsed.frontmatter.ownerUserId === actor.userId &&
     roleCan(project.memberRoles.get(actor.userId), "own-task");
-  if (option.kind !== "accept_completion" && isOwner) {
+  if (isOwner) {
     // owner is allowed — skip the maintainer gate (the owner must still be able
     // to own the task, i.e. contributor+; a demoted viewer-owner is caught above)
   } else {
     requireAction(project, actor, "resolve-packet", "resolve decision packets");
+  }
+
+  if (option.kind === "accept_completion") {
+    const completionAuthority = requireCompletionAuthority(
+      project,
+      existing.parsed,
+      actor,
+    );
+    const completion = await acceptCompletion(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+    recordAudit(db, {
+      action: "task.packet.resolved",
+      actor:
+        completionAuthority === "org_admin_override"
+          ? withProjectAuditAuthority(actor, completionAuthority)
+          : actor,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        optionKind: option.kind,
+        optionTitle: option.t,
+        packetKind: packet.kind,
+        authoritySource: completionAuthority,
+        completed: completion.completed,
+        mergePending: completion.mergePending,
+      },
+    });
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      option,
+      completion,
+    };
   }
 
   const now = new Date().toISOString();
@@ -2522,58 +3126,6 @@ export async function resolvePacket(
   let clearPacket = false;
 
   switch (option.kind) {
-    case "accept_completion": {
-      // Human-only Review → Done boundary (always-human invariant).
-      requireAction(project, actor, "accept-completion", "accept completion into Done");
-      // Refuse a standing `failing` validation (C2) — same stance as the human
-      // acceptCompletion + operator (H3): a stale acceptance packet must not
-      // merge work the last review rejected.
-      if (existing.parsed.frontmatter.validation === "failing") {
-        throw conflict(
-          "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
-        );
-      }
-      const doneStageId =
-        terminalStageIdOf(project) ??
-        project.stages[project.stages.length - 1]?.id ??
-        "done";
-      // Attempt the REAL merge (FR31) and only claim "merged" when it truly
-      // happened; otherwise record "accepted" (merge pending) — never a false
-      // merge (D3 / NFR15).
-      const reallyMerged = await mergeTaskPrIfPossible(
-        db,
-        ctx,
-        input.projectSlug,
-        input.taskKey,
-        actor,
-      );
-      const hasPr = !!existing.parsed.frontmatter.pr;
-      event = {
-        occurredAt: now,
-        type: "completion",
-        actor: human,
-        title: "Completion accepted",
-        text: !hasPr
-          ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
-          : reallyMerged
-            ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-            : "Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge).",
-        toAgent: false,
-        evidence: null,
-      };
-      mutate = (fm) => {
-        fm.stage = doneStageId;
-        fm.readiness = "ready";
-        fm.waiting = "none";
-        fm.validation = "healthy"; // accepted work is validated (FR24)
-        // Acceptance consumes standing recommendations — a leftover transition
-        // card on a Done task would move it back OUT of Done if applied.
-        fm.recommendations = [];
-        if (fm.pr) fm.pr = { ...fm.pr, state: reallyMerged ? "merged" : "accepted" };
-      };
-      clearPacket = true;
-      break;
-    }
     case "block_on_policy": {
       event = {
         occurredAt: now,
@@ -2628,20 +3180,25 @@ export async function resolvePacket(
     }
   }
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    if (!parsed.packet) {
-      // Raced with a concurrent resolve inside the lock window.
-      throw conflict("This packet was already resolved.");
-    }
-    mutate(parsed.frontmatter);
-    if (clearPacket) parsed.packet = null;
-    parsed.timeline.unshift(event);
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      if (!parsed.packet) {
+        // Raced with a concurrent resolve inside the lock window.
+        throw conflict("This packet was already resolved.");
+      }
+      mutate(parsed.frontmatter);
+      if (clearPacket) parsed.packet = null;
+      parsed.timeline.unshift(event);
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     action: "task.packet.resolved",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: isOwner
+      ? actor
+      : authorityAuditActor(project, actor, "resolve-packet"),
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -2650,6 +3207,7 @@ export async function resolvePacket(
       optionKind: option.kind,
       optionTitle: option.t,
       packetKind: packet.kind,
+      ...(isOwner ? { authoritySource: "task_owner" } : {}),
     },
   });
 
@@ -2665,7 +3223,13 @@ export async function resolvePacket(
     option.kind === "redirect" ||
     option.kind === "custom";
   if (sentBackToAgent) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    void autoInvokeOperator(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      "transition",
+    );
   }
 
   return {
@@ -2684,31 +3248,187 @@ export async function resolvePacket(
  * enforced by the underlying mutation (admin|maintainer). Idempotent — an
  * already-resolved recommendation id is a friendly 409.
  */
+interface CompletionAcceptanceResult {
+  completed: boolean;
+  mergePending: boolean;
+}
+
+interface CompletionEvidenceSnapshot {
+  fingerprint: string;
+  prNumber: number | null;
+}
+
+function assertCurrentCompletionInvariants(
+  parsed: ParsedTaskFile,
+  project: ProjectContext,
+  actor: TaskActor,
+  expected: CompletionEvidenceSnapshot,
+): CompletionAuthoritySource {
+  const authority = requireCompletionAuthority(project, parsed, actor);
+  const reviewStageId = reviewStageIdOf(project);
+  if (!reviewStageId || parsed.frontmatter.stage !== reviewStageId) {
+    throw conflict(
+      "Completion state changed while the request was in progress. The task must still be in Review.",
+    );
+  }
+  if (parsed.frontmatter.validation !== "healthy") {
+    throw conflict(
+      "Completion state changed while the request was in progress. Validation is no longer healthy.",
+    );
+  }
+  const missing = missingReviewerApprovalProfileIds(parsed, project.repo);
+  if (missing.length > 0) {
+    throw conflict(
+      `Completion state changed while the request was in progress. Missing reviewer approval: ${missing.join(", ")}.`,
+    );
+  }
+  if (
+    reviewEvidenceFingerprint(parsed, project.repo) !== expected.fingerprint
+  ) {
+    throw conflict(
+      "The goal or delivery evidence changed while completion was in progress. Review the current evidence before accepting it.",
+    );
+  }
+  if ((parsed.frontmatter.pr?.number ?? null) !== expected.prNumber) {
+    throw conflict(
+      "The linked pull request changed while completion was in progress. Review the current PR before accepting it.",
+    );
+  }
+  return authority;
+}
+
+function applyAcceptedCompletion(
+  parsed: ParsedTaskFile,
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  doneStageId: string,
+  mergedPr: boolean,
+): void {
+  parsed.frontmatter.stage = doneStageId;
+  parsed.frontmatter.readiness = "ready";
+  parsed.frontmatter.waiting = "none";
+  parsed.frontmatter.recommendations =
+    parsed.frontmatter.recommendations.filter(
+      (recommendation) =>
+        recommendation.kind !== "transition" &&
+        recommendation.kind !== "accept_completion",
+    );
+  parsed.packet = null;
+  parsed.timeline.unshift({
+    occurredAt: new Date().toISOString(),
+    type: "completion",
+    actor: humanActorRef(db, actor),
+    title: "Completion accepted",
+    text: mergedPr
+      ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** after its review PR was merged.`
+      : `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no repository delivery required).`,
+    toAgent: false,
+    evidence: null,
+  });
+}
+
+/** Finalize an already-valid acceptance after any required merge is real. */
+async function finalizeAcceptedCompletion(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  mergedPr: boolean,
+  expected: CompletionEvidenceSnapshot,
+): Promise<void> {
+  // Reload project authority after the external await as well. Task invariants
+  // are then checked and mutated inside one per-file locked transaction.
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const doneStageId =
+    terminalStageIdOf(project) ??
+    project.stages[project.stages.length - 1]?.id ??
+    "done";
+  let completionAuthority: CompletionAuthoritySource | null = null;
+  let didFinalize = false;
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      if (parsed.frontmatter.stage === doneStageId) return;
+      completionAuthority = assertCurrentCompletionInvariants(
+        parsed,
+        project,
+        actor,
+        expected,
+      );
+      const effectiveRepo = parsed.frontmatter.repo ?? project.repo;
+      if (
+        effectiveRepo &&
+        (!mergedPr || parsed.frontmatter.pr?.state !== "merged")
+      ) {
+        throw conflict(
+          "Repository-backed completion can finish only after the linked PR is confirmed merged.",
+        );
+      }
+      if (!effectiveRepo && mergedPr) {
+        throw conflict(
+          "The delivery target changed while completion was in progress.",
+        );
+      }
+      applyAcceptedCompletion(parsed, db, input, actor, doneStageId, mergedPr);
+      didFinalize = true;
+    },
+  );
+  if (!didFinalize) return;
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  const completionAuditActor =
+    completionAuthority === "org_admin_override"
+      ? withProjectAuditAuthority(actor, completionAuthority)
+      : actor;
+  recordAudit(db, {
+    action: "task.transition",
+    actor: completionAuditActor,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      to: doneStageId,
+      boundary: "human",
+      via: "accept_completion",
+      authoritySource: completionAuthority,
+      mergedPr,
+    },
+  });
+}
+
 /**
- * Human acceptance of the review→done boundary: move the task to Done, mark the
- * review PR merged, clear any open packet, and record a `completion` event. RBAC:
- * admin|maintainer (acceptance authority — the always-human Done invariant). This
- * is the shared acceptance used by both the acceptance packet and the operator's
- * `accept_completion` recommendation card, so both paths reach Done identically.
+ * Human acceptance of the review→done boundary. Repository-backed tasks remain
+ * in Review until the linked PR is truly merged; non-repository tasks may
+ * finish directly. Validation must already be healthy and the task must be at
+ * the governed review stage, so acceptance cannot launder unknown evidence.
  */
 async function acceptCompletion(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string; force?: boolean },
+  input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<void> {
+): Promise<CompletionAcceptanceResult> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "accept-completion", "accept completion into Done");
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
-
-  // Refuse to accept a task with a standing `failing` validation (C2) — a stale
-  // "accept completion" recommendation created before a reviewer rejected must
-  // not merge broken work. Same stance as the operator's H3 refusal. The
-  // developer reworks + a reviewer re-approves (which clears failing, A3) first.
-  if (!input.force && existing.parsed.frontmatter.validation === "failing") {
+  const completionAuthority = requireCompletionAuthority(
+    project,
+    existing.parsed,
+    actor,
+  );
+  const missingReviewerApprovals = missingReviewerApprovalProfileIds(
+    existing.parsed,
+    project.repo,
+  );
+  if (missingReviewerApprovals.length > 0) {
     throw conflict(
-      "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+      `Completion requires explicit approval from every assigned reviewer. Missing: ${missingReviewerApprovals.join(", ")}.`,
+    );
+  }
+  if (existing.parsed.frontmatter.validation !== "healthy") {
+    throw conflict(
+      "Completion requires a healthy validation verdict. Run or repeat review before accepting it.",
     );
   }
 
@@ -2717,74 +3437,173 @@ async function acceptCompletion(
     project.stages[project.stages.length - 1]?.id ??
     "done";
 
-  if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
+  if (existing.parsed.frontmatter.stage === doneStageId) {
+    return { completed: true, mergePending: false };
+  }
+  const reviewStageId = reviewStageIdOf(project);
+  if (!reviewStageId || existing.parsed.frontmatter.stage !== reviewStageId) {
+    throw conflict(
+      "Completion can be accepted only from the governed Review stage.",
+    );
+  }
 
-  // Human acceptance merges the review PR (FR31: "accepting a completion merges
-  // its PR"). Attempt the REAL merge first when a PR + reachable GitHub exist —
-  // mergeTaskPr writes state=merged + a `github` event + audit on success and
-  // returns true. When the real merge CAN'T run (no GitHub / no PAT / not
-  // mergeable) we do NOT claim "merged" — we record "accepted" (merge pending)
-  // so the task record never diverges from GitHub truth (NFR15).
-  const reallyMerged = await mergeTaskPrIfPossible(
+  const effectiveRepo = existing.parsed.frontmatter.repo ?? project.repo;
+  if (effectiveRepo && !existing.parsed.frontmatter.pr) {
+    throw conflict(
+      "Repository-backed completion requires a linked review pull request.",
+    );
+  }
+  if (effectiveRepo && existing.parsed.frontmatter.pr?.state === "closed") {
+    throw conflict(
+      "A closed, unmerged pull request cannot satisfy repository completion. Open a new review PR and validate that evidence.",
+    );
+  }
+  const completionAuditActor =
+    completionAuthority === "org_admin_override"
+      ? withProjectAuditAuthority(actor, completionAuthority)
+      : actor;
+  const expected: CompletionEvidenceSnapshot = {
+    fingerprint: reviewEvidenceFingerprint(existing.parsed, project.repo),
+    prNumber: existing.parsed.frontmatter.pr?.number ?? null,
+  };
+  const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
+  const mergeStatus = alreadyMerged
+    ? "merged"
+    : effectiveRepo
+      ? await mergeTaskPrIfPossible(
+          db,
+          ctx,
+          input.projectSlug,
+          input.taskKey,
+          completionAuditActor,
+        )
+      : "pending";
+  if (mergeStatus === "head_changed") {
+    await updateTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        clearReviewEvidence(parsed, reviewStageIdOf(project));
+      },
+    );
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    throw conflict(
+      "The pull request head changed after review. Review the current head before accepting completion.",
+    );
+  }
+  const reallyMerged = mergeStatus === "merged";
+
+  if (effectiveRepo && !reallyMerged) {
+    const currentProject = loadProjectContext(ctx, input.projectSlug);
+    const currentDoneStageId =
+      terminalStageIdOf(currentProject) ??
+      currentProject.stages[currentProject.stages.length - 1]?.id ??
+      "done";
+    let currentAuthority: CompletionAuthoritySource | null = null;
+    let externallyMerged = false;
+    await updateTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        currentAuthority = assertCurrentCompletionInvariants(
+          parsed,
+          currentProject,
+          actor,
+          expected,
+        );
+        if (parsed.frontmatter.pr?.state === "merged") {
+          applyAcceptedCompletion(
+            parsed,
+            db,
+            input,
+            actor,
+            currentDoneStageId,
+            true,
+          );
+          externallyMerged = true;
+          return;
+        }
+        if (
+          !parsed.frontmatter.pr ||
+          parsed.frontmatter.pr.state === "closed"
+        ) {
+          throw conflict(
+            "The linked pull request changed while acceptance was in progress.",
+          );
+        }
+        if (parsed.frontmatter.pr) {
+          parsed.frontmatter.pr = {
+            ...parsed.frontmatter.pr,
+            state: "accepted",
+          };
+        }
+        parsed.frontmatter.readiness = "ready";
+        parsed.frontmatter.waiting = "human";
+        parsed.frontmatter.recommendations =
+          parsed.frontmatter.recommendations.filter(
+            (recommendation) => recommendation.kind !== "accept_completion",
+          );
+        parsed.packet = null;
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "completion",
+          actor: humanActorRef(db, actor),
+          title: "Completion accepted · merge pending",
+          text: `Acceptance is approved, but ${input.taskKey} remains in **Review** until its linked pull request is actually merged.`,
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    const latestAuditActor =
+      currentAuthority === "org_admin_override"
+        ? withProjectAuditAuthority(actor, currentAuthority)
+        : actor;
+    if (externallyMerged) {
+      recordAudit(db, {
+        action: "task.transition",
+        actor: latestAuditActor,
+        subjectKind: "task",
+        subjectId: input.taskKey,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        details: {
+          to: currentDoneStageId,
+          boundary: "human",
+          via: "accept_completion",
+          authoritySource: currentAuthority,
+          mergedPr: true,
+        },
+      });
+      return { completed: true, mergePending: false };
+    }
+    recordAudit(db, {
+      action: "task.completion.accepted_merge_pending",
+      actor: latestAuditActor,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { authoritySource: currentAuthority },
+    });
+    return { completed: false, mergePending: true };
+  }
+
+  await finalizeAcceptedCompletion(
     db,
     ctx,
-    input.projectSlug,
-    input.taskKey,
+    input,
     actor,
+    reallyMerged,
+    expected,
   );
-  const hasPr = !!existing.parsed.frontmatter.pr;
-
-  const event: TaskFileEvent = {
-    occurredAt: new Date().toISOString(),
-    type: "completion",
-    actor: humanActorRef(db, actor),
-    title: "Completion accepted",
-    text: !hasPr
-      ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
-      : reallyMerged
-        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-        : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge — merge it manually or reconcile once credentials are set).`,
-    toAgent: false,
-    evidence: null,
-  };
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.stage = doneStageId;
-    parsed.frontmatter.readiness = "ready";
-    parsed.frontmatter.waiting = "none";
-    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24)
-    if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = {
-        ...parsed.frontmatter.pr,
-        state: reallyMerged ? "merged" : "accepted",
-      };
-    }
-    // A Done task carries no pending transition/acceptance recommendations.
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.kind !== "transition" && r.kind !== "accept_completion",
-    );
-    parsed.packet = null;
-    parsed.timeline.unshift(event);
-  });
-  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-
-  recordAudit(db, {
-    action: "task.transition",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "task",
-    subjectId: input.taskKey,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: { to: doneStageId, boundary: "human", via: "accept_completion" },
-  });
+  return { completed: true, mergePending: false };
 }
 
 /**
  * Complete the REAL GitHub merge of a PR that was accepted "merge pending"
- * (D3 / S2): when a task was accepted into Done but no server merge could run,
- * `pr.state` is "accepted" and the real PR stays open. Once a valid PAT is
- * configured, a human runs this to actually merge it and flip `pr.state` →
- * "merged". RBAC: admin|maintainer (the acceptance authority). Returns a typed
- * outcome so the UI can explain a still-blocked merge instead of pretending.
+ * When acceptance is approved but merge is pending, the task intentionally
+ * remains in Review with `pr.state=accepted`. A valid later merge finalizes the
+ * same acceptance and moves the task to Done.
  */
 export async function completeTaskMerge(
   db: Database.Database,
@@ -2793,45 +3612,100 @@ export async function completeTaskMerge(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; merged: boolean; message: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "accept-completion", "complete a PR merge");
   if (!actor.userId) {
     throw AppError.validation("A signed-in user is required to merge a PR.");
   }
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const completionAuthority = requireCompletionAuthority(
+    project,
+    existing.parsed,
+    actor,
+  );
+  const missingReviewerApprovals = missingReviewerApprovalProfileIds(
+    existing.parsed,
+    project.repo,
+  );
+  if (missingReviewerApprovals.length > 0) {
+    throw conflict(
+      `Completion requires explicit approval from every assigned reviewer. Missing: ${missingReviewerApprovals.join(", ")}.`,
+    );
+  }
+  const completionAuditActor =
+    completionAuthority === "org_admin_override"
+      ? withProjectAuditAuthority(actor, completionAuthority)
+      : actor;
   const pr = existing.parsed.frontmatter.pr;
   if (!pr) {
     throw AppError.validation("This task has no linked pull request to merge.");
   }
-  if (pr.state !== "accepted") {
+  if (pr.state !== "accepted" && pr.state !== "merged") {
     throw conflict(
-      pr.state === "merged"
-        ? "This PR is already merged."
-        : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
+      `This PR is "${pr.state}", not an accepted merge-pending or externally merged PR.`,
     );
   }
+  if (existing.parsed.frontmatter.validation !== "healthy") {
+    throw conflict(
+      "The accepted work no longer has a healthy validation verdict. Re-review it before merging.",
+    );
+  }
+  if (existing.parsed.frontmatter.stage !== reviewStageIdOf(project)) {
+    throw conflict("A merge-pending completion must remain in Review.");
+  }
 
-  const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
-  const result = await mergeTaskPr(
-    db,
-    { projectSlug: input.projectSlug, taskKey: input.taskKey },
-    { userId: actor.userId, label: actor.label },
-    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
-  );
+  const expected: CompletionEvidenceSnapshot = {
+    fingerprint: reviewEvidenceFingerprint(existing.parsed, project.repo),
+    prNumber: pr.number,
+  };
 
-  if (result.status === "merged") {
-    // mergeTaskPr already wrote pr.state="merged" + a github event + audit.
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // A reconcile may observe the accepted PR was merged externally. Consume
+  // that fact without issuing a duplicate merge request.
+  if (pr.state === "merged") {
+    await finalizeAcceptedCompletion(db, ctx, input, actor, true, expected);
     return {
       task: summaryOrThrow(db, input.projectSlug, input.taskKey),
       merged: true,
-      message: `PR #${result.prNumber} merged.`,
+      message: `PR #${pr.number} was already merged · ${input.taskKey} moved to Done.`,
     };
   }
 
+  const { mergeTaskPr } =
+    await import("~/server/github/github-reconciler.server");
+  const result = await mergeTaskPr(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey },
+    completionAuditActor,
+    {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(ctx.githubFetchImpl ? { fetchImpl: ctx.githubFetchImpl } : {}),
+    },
+  );
+
+  if (result.status === "merged") {
+    // mergeTaskPr wrote the real GitHub fact; now and only now may the
+    // repository-backed task cross Review → Done.
+    await finalizeAcceptedCompletion(db, ctx, input, actor, true, expected);
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      merged: true,
+      message: `PR #${result.prNumber} merged · ${input.taskKey} moved to Done.`,
+    };
+  }
+
+  if (result.status === "head_changed") {
+    await updateTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        clearReviewEvidence(parsed, reviewStageIdOf(project));
+      },
+    );
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  }
+
   const message =
-    result.status === "no_repo_configured" || result.status === "no_pat_configured"
+    result.status === "no_repo_configured" ||
+    result.status === "no_pat_configured"
       ? "Configure a GitHub credential for this project first, then try again."
       : result.status === "scope_violation"
         ? "The credential is missing `pull_request:write`. Grant the scope, then retry."
@@ -2863,7 +3737,11 @@ export async function applyRecommendation(
     const { assignSpecialist } = await import("./specialist-run.server");
     await assignSpecialist(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: rec.profileId,
+      },
       actor,
       ctx,
     );
@@ -2871,7 +3749,11 @@ export async function applyRecommendation(
     const { assignReviewer } = await import("./specialist-run.server");
     await assignReviewer(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: rec.profileId,
+      },
       actor,
       ctx,
     );
@@ -2890,14 +3772,22 @@ export async function applyRecommendation(
     const { startReviewerRun } = await import("./specialist-run.server");
     await startReviewerRun(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: rec.profileId,
+      },
       actor,
       ctx,
     );
   } else if (rec.kind === "transition" && rec.toStageId) {
     await transitionStage(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: rec.toStageId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        toStageId: rec.toStageId,
+      },
       actor,
       ctx,
     );
@@ -2916,19 +3806,27 @@ export async function applyRecommendation(
   }
 
   // Clear the applied recommendation.
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.id !== input.recId,
-    );
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter((r) => r.id !== input.recId);
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // Resolving the recommendation clears its "Waiting on you" bell (transition
   // recs already clear it inside transitionStage; this covers assign/accept).
-  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, [
+    "approval",
+  ]);
 
   recordAudit(db, {
     action: "task.recommendation.applied",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: authorityAuditActor(
+      loadProjectContext(ctx, input.projectSlug),
+      actor,
+      rec.kind === "accept_completion" ? "accept-completion" : "resolve-packet",
+    ),
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -2936,7 +3834,10 @@ export async function applyRecommendation(
     details: { kind: rec.kind, label: rec.label },
   });
 
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    label: rec.label,
+  };
 }
 
 /**
@@ -2962,21 +3863,28 @@ export async function dismissRecommendation(
     (r) => r.id === input.recId,
   );
   if (!rec) {
-    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: null };
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      label: null,
+    };
   }
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.id !== input.recId,
-    );
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter((r) => r.id !== input.recId);
+    },
+  );
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // Resolving the recommendation (either way) clears its "Waiting on you" bell.
-  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, [
+    "approval",
+  ]);
 
   recordAudit(db, {
     action: "task.recommendation.dismissed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: authorityAuditActor(project, actor, "resolve-packet"),
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -2984,5 +3892,8 @@ export async function dismissRecommendation(
     details: { kind: rec.kind, label: rec.label },
   });
 
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    label: rec.label,
+  };
 }

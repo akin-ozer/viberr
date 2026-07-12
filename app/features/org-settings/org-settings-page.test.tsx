@@ -7,6 +7,7 @@ import type { ConnectionRecord } from "~/server/org/connections.server";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
+import type { OrgSecretMetadata } from "~/server/secrets/org-secret-store.server";
 import { ToastProvider } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { ResourcesPanel } from "./resources-panel";
@@ -275,9 +276,21 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    cred: "secret://mcp/github", tools: 14, up: true, lastCheckedAt: new Date().toISOString() },
+    auth: { Authorization: "secret://org/github" }, tools: 14, up: true,
+    codexSupported: false, lastCheckedAt: new Date().toISOString() },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    cred: null, tools: 0, up: false, lastCheckedAt: new Date().toISOString() },
+    auth: {}, tools: 0, up: false, codexSupported: true,
+    lastCheckedAt: new Date().toISOString() },
+];
+const SECRETS: OrgSecretMetadata[] = [
+  {
+    id: "sec1",
+    name: "github",
+    ref: "secret://org/github",
+    masked: "····oken",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -302,20 +315,22 @@ const STAGES = [
 
 function renderResources() {
   return renderPanel(
-    <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+    <ResourcesPanel kbs={KBS} mcps={MCPS} secrets={SECRETS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
   );
 }
 
 describe("ResourcesPanel", () => {
   it("renders the four panels with store paths, health and usage lines", () => {
-    const { getByText } = renderResources();
+    const { getByText, getAllByText } = renderResources();
     expect(getByText("store://kb/architecture-notes/ · 2 docs")).toBeTruthy();
     expect(getByText(/read live · re-scanned just now/)).toBeTruthy();
-    expect(getByText(/14 tools · checked just now · auth: secret:\/\/mcp\/github/)).toBeTruthy();
+    expect(getByText(/14 tools · checked just now · auth: Authorization→secret:\/\/org\/github · Claude only/)).toBeTruthy();
+    expect(getByText("secret://org/github")).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
-      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 profiles/),
+      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 reference/),
     ).toBeTruthy();
+    expect(getAllByText("used by Global profile · Developer").length).toBeGreaterThan(0);
     expect(getByText(/Codex · Ready · In Progress · 2 context resources · used in 4 projects/)).toBeTruthy();
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
@@ -335,6 +350,20 @@ describe("ResourcesPanel", () => {
     );
   });
 
+  it("blocks a referenced resource in the UI with its explicit consumer", async () => {
+    const { getByLabelText, getByText, queryByRole } = renderResources();
+    fireEvent.click(getByLabelText("Delete terraform-review"));
+    await waitFor(() =>
+      expect(
+        getByText(
+          "Can't delete skill terraform-review; used by: Global profile · Developer.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(queryByRole("alertdialog")).toBeNull();
+    expect(lastForm).toBeNull();
+  });
+
   it("agent modal: stage chips exclude Done; context chips list org resources", () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Edit Developer"));
@@ -347,6 +376,31 @@ describe("ResourcesPanel", () => {
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
     expect(skillChip.className).toContain(" on");
+  });
+
+  it("secret rotation never pre-fills a value; HTTP auth is labeled Claude-only", async () => {
+    const { getByText, getByLabelText } = renderResources();
+    fireEvent.click(getByLabelText("Rotate github"));
+    expect(getByText("Rotate org secret")).toBeTruthy();
+    const value = document.querySelector("#secret-value") as HTMLInputElement;
+    expect(value.value).toBe("");
+    fireEvent.change(value, { target: { value: "replacement-secret" } });
+    fireEvent.click(getByText("Rotate value", { selector: "button" }));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "secret-save",
+        secretId: "sec1",
+        name: "github",
+        value: "replacement-secret",
+      }),
+    );
+
+    fireEvent.click(getByLabelText("Edit github-mcp"));
+    expect(
+      getByText(/Authenticated HTTP MCP is Claude-only/),
+    ).toBeTruthy();
+    const auth = document.querySelector("#mcp-auth") as HTMLTextAreaElement;
+    expect(auth.value).toBe("Authorization=secret://org/github");
   });
 
   it("kb name opens the StoreBrowser over the real tree", () => {

@@ -64,6 +64,23 @@ afterEach(() => {
 });
 
 describe("createSseClient", () => {
+  it("reports connecting, connected, reconnecting, and closed states", () => {
+    const statuses: string[] = [];
+    const client = makeClient({ onStatus: (status) => statuses.push(status) });
+
+    expect(statuses).toEqual(["connecting"]);
+    FakeEventSource.last().open();
+    expect(statuses.at(-1)).toBe("connected");
+
+    FakeEventSource.last().fail();
+    expect(statuses.at(-1)).toBe("reconnecting");
+    vi.advanceTimersByTime(1000);
+    expect(statuses.at(-1)).toBe("connecting");
+
+    client.close();
+    expect(statuses.at(-1)).toBe("closed");
+  });
+
   it("connects immediately and delivers named events", () => {
     const seen: string[] = [];
     makeClient({ onEvent: (name) => seen.push(name) });
@@ -186,6 +203,24 @@ describe("createSseClient", () => {
       FakeEventSource.last().fail(); // error on the (already closed) source
       vi.advanceTimersByTime(60_000);
       expect(FakeEventSource.instances).toHaveLength(1);
+      client.close();
+    });
+
+    it("starts paused without opening a stream when the page is hidden", () => {
+      const doc = fakeDoc("hidden");
+      const statuses: string[] = [];
+      const client = makeClient({
+        doc: doc as unknown as Document,
+        onStatus: (status) => statuses.push(status),
+      });
+
+      expect(FakeEventSource.instances).toHaveLength(0);
+      expect(statuses).toEqual(["connecting", "paused"]);
+      expect(client.status).toBe("paused");
+
+      doc.setVisibility("visible");
+      expect(FakeEventSource.instances).toHaveLength(1);
+      expect(client.status).toBe("connecting");
       client.close();
     });
   });

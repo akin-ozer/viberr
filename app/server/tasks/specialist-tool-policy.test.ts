@@ -3,6 +3,7 @@ import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
+  specialistBackendCapabilitySupport,
 } from "./specialist-tool-policy";
 
 /**
@@ -15,11 +16,20 @@ const grant = (capabilityId: string, mode: CapabilityGrant["mode"]) =>
   ({ capabilityId, mode }) as CapabilityGrant;
 
 describe("resolveSpecialistDisallowedTools", () => {
-  it("always denies PR merge (an always-human capability), even with no grants", () => {
-    expect(resolveSpecialistDisallowedTools([])).toEqual(["Bash(gh pr merge:*)"]);
+  it("fails closed when mapped capability grants are omitted", () => {
+    expect(resolveSpecialistDisallowedTools([])).toEqual(
+      expect.arrayContaining([
+        "Bash(git push:*)",
+        "Bash(gh pr create:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(git checkout -b:*)",
+        "Bash(git commit:*)",
+        "Edit",
+      ]),
+    );
   });
 
-  it("denies git push when commit-push is withheld (human or off), not when direct", () => {
+  it("always denies model-side git push while commit permission remains capability-bound", () => {
     expect(
       resolveSpecialistDisallowedTools([grant("commit-push-branch", "human")]),
     ).toContain("Bash(git push:*)");
@@ -27,15 +37,27 @@ describe("resolveSpecialistDisallowedTools", () => {
       resolveSpecialistDisallowedTools([grant("commit-push-branch", "off")]),
     ).toContain("Bash(git push:*)");
     expect(
-      resolveSpecialistDisallowedTools([grant("commit-push-branch", "direct")]),
-    ).not.toContain("Bash(git push:*)");
+      resolveSpecialistDisallowedTools([
+        grant("commit-push-branch", "direct"),
+        grant("execute-code-or-write-repo", "direct"),
+      ]),
+    ).toContain("Bash(git push:*)");
+    expect(
+      resolveSpecialistDisallowedTools([
+        grant("commit-push-branch", "direct"),
+        grant("execute-code-or-write-repo", "direct"),
+      ]),
+    ).not.toContain("Bash(git commit:*)");
   });
 
-  it("keeps default tool access for unspecified / recommend capabilities", () => {
-    // Only the always-human merge deny is present; push/PR/branch stay allowed.
-    expect(
-      resolveSpecialistDisallowedTools([grant("commit-push-branch", "recommend")]),
-    ).toEqual(["Bash(gh pr merge:*)"]);
+  it("recommend grants its mapped action while other omissions stay withheld", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("commit-push-branch", "recommend"),
+      grant("execute-code-or-write-repo", "direct"),
+    ]);
+    expect(denied).not.toContain("Bash(git commit:*)");
+    expect(denied).toContain("Bash(git checkout -b:*)");
+    expect(denied).not.toContain("Edit");
   });
 
   it("withholding execute-code-or-write-repo denies Edit/MultiEdit/Write + git commit (D1, XS-13)", () => {
@@ -62,6 +84,7 @@ describe("resolveSpecialistDisallowedTools", () => {
       grant("create-task-branch", "direct"),
       grant("commit-push-branch", "direct"),
       grant("open-review-pr", "direct"),
+      grant("execute-code-or-write-repo", "direct"),
       grant("edit-other-task-branch", "off"), // orphan grant: ignored, no rule
     ]);
     expect(denied).not.toContain("Bash(git checkout:*)");
@@ -77,22 +100,25 @@ describe("resolveSpecialistDisallowedTools", () => {
     expect(denied).toContain("Bash(git commit:*)");
   });
 
-  it("denies opening a PR only when open-review-pr is withheld", () => {
+  it("always denies model-side PR creation; the capability gates Viberr's finalizer", () => {
     expect(
       resolveSpecialistDisallowedTools([grant("open-review-pr", "off")]),
     ).toContain("Bash(gh pr create:*)");
     expect(
       resolveSpecialistDisallowedTools([grant("open-review-pr", "direct")]),
-    ).not.toContain("Bash(gh pr create:*)");
+    ).toContain("Bash(gh pr create:*)");
   });
 
-  it("a fully-empowered developer is confined only by the always-human merge rule", () => {
+  it("a fully-empowered developer can commit locally but remote delivery stays server-owned", () => {
     const grants = [
       grant("create-task-branch", "direct"),
       grant("commit-push-branch", "direct"),
       grant("open-review-pr", "direct"),
+      grant("execute-code-or-write-repo", "direct"),
     ];
     expect(resolveSpecialistDisallowedTools(grants)).toEqual([
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
       "Bash(gh pr merge:*)",
     ]);
   });
@@ -129,6 +155,48 @@ describe("resolveSpecialistDisallowedTools", () => {
         "Bash(git switch -C:*)",
       ]),
     );
+  });
+});
+
+describe("specialistBackendCapabilitySupport", () => {
+  const fullyGranted = [
+    grant("create-task-branch", "direct"),
+    grant("commit-push-branch", "direct"),
+    grant("execute-code-or-write-repo", "direct"),
+  ];
+
+  it("allows Claude to bind withheld local capabilities", () => {
+    expect(specialistBackendCapabilitySupport([], "claude")).toEqual({
+      supported: true,
+      advisoryOnlyWithheld: [],
+    });
+  });
+
+  it("hard-rejects Codex when a local enforced capability is missing or off", () => {
+    expect(specialistBackendCapabilitySupport([], "codex")).toMatchObject({
+      supported: false,
+      advisoryOnlyWithheld: [
+        "create-task-branch",
+        "commit-push-branch",
+        "execute-code-or-write-repo",
+      ],
+    });
+    expect(
+      specialistBackendCapabilitySupport(
+        [...fullyGranted.slice(0, 2), grant("execute-code-or-write-repo", "off")],
+        "codex",
+      ),
+    ).toMatchObject({
+      supported: false,
+      advisoryOnlyWithheld: ["execute-code-or-write-repo"],
+    });
+  });
+
+  it("allows Codex only when every local capability is explicitly actionable", () => {
+    expect(specialistBackendCapabilitySupport(fullyGranted, "codex")).toEqual({
+      supported: true,
+      advisoryOnlyWithheld: [],
+    });
   });
 });
 

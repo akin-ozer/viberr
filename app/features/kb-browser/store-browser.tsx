@@ -472,7 +472,7 @@ function useStoreOps(
       if (d.toast) push(d.toast);
       if (d.captureToast) push(d.captureToast);
     } else if (d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [opsFetcher.state, opsFetcher.data, push]);
 

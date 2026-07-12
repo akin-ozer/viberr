@@ -4,8 +4,15 @@ import type Database from "better-sqlite3";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
-import { buildScript, type SimulatedScript } from "~/server/runtimes/simulated-runtime.server";
+import {
+  listRunLines,
+  listRunsForTaskRows,
+  type AgentRunRow,
+} from "~/server/runtimes/run-store.server";
+import {
+  buildScript,
+  type SimulatedScript,
+} from "~/server/runtimes/simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -134,7 +141,8 @@ function latestSessionRun(
       if (row.kind !== "primary") continue;
       if (!row.session_id) continue;
       if (row.agent_profile_id != null) continue;
-      const rowBackend: RealBackend = row.backend === "codex" ? "codex" : "claude";
+      const rowBackend: RealBackend =
+        row.backend === "codex" ? "codex" : "claude";
       if (rowBackend === target.backend) return row;
     }
   }
@@ -195,8 +203,7 @@ export function resolveMentionedAgent(
 
   // 2. Generic `@agent` → the primary specialist on the task.
   if (handleSet.has("agent") && primaryRef) {
-    const sp =
-      specialists.find((s) => s.id === primaryRef.profileId) ?? null;
+    const sp = specialists.find((s) => s.id === primaryRef.profileId) ?? null;
     const backend: RealBackend =
       primaryRef.backend === "codex" ? "codex" : "claude";
     const role = sp?.role ?? primaryRef.role;
@@ -205,7 +212,7 @@ export function resolveMentionedAgent(
       name: sp?.name ?? primaryRef.profileId,
       role,
       backend,
-      model: sp?.model ?? (defaultModelFor(backend)),
+      model: sp?.model ?? defaultModelFor(backend),
       effort: sp?.effort ?? "",
       actorRef: agentActorRef(backend, role),
       isPrimary: true,
@@ -219,7 +226,9 @@ export function resolveMentionedAgent(
   }
 
   // 3. A deployed specialist by name / id / backend.
-  const matched = specialists.find((s) => handleMatchesSpecialist(handleSet, s));
+  const matched = specialists.find((s) =>
+    handleMatchesSpecialist(handleSet, s),
+  );
   if (matched) {
     const isPrimary = primaryRef?.profileId === matched.id;
     return {
@@ -355,13 +364,14 @@ export function runFailureReason(
   }
   if (!last?.text) return null;
   const text = last.text.trim();
-  const kind: "quota" | "auth" | "unknown" = /usage limit|quota|rate limit|too many requests|429/i.test(
-    text,
-  )
-    ? "quota"
-    : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
-      ? "auth"
-      : "unknown";
+  const kind: "quota" | "auth" | "unknown" =
+    /usage limit|quota|rate limit|too many requests|429/i.test(text)
+      ? "quota"
+      : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(
+            text,
+          )
+        ? "auth"
+        : "unknown";
   return { kind, text };
 }
 
@@ -388,14 +398,49 @@ export function buildReplyScript(
   const lines: LogLine[] =
     backend === "codex"
       ? [
-          { t: "", ev: "init", tag: "thread.started", text: "codex thread · resumed for a follow-up comment" },
+          {
+            t: "",
+            ev: "init",
+            tag: "thread.started",
+            text: "codex thread · resumed for a follow-up comment",
+          },
           { t: "", ev: "text", tag: "agent_message", text: replyText },
-          { t: "", ev: "result", tag: "turn.completed", text: "reply complete", usage: { input_tokens: 900, cached_input_tokens: 400, output_tokens: 120 } },
+          {
+            t: "",
+            ev: "result",
+            tag: "turn.completed",
+            text: "reply complete",
+            usage: {
+              input_tokens: 900,
+              cached_input_tokens: 400,
+              output_tokens: 120,
+            },
+          },
         ]
       : [
-          { t: "", ev: "init", tag: "system·init", text: "resumed session · follow-up comment" },
+          {
+            t: "",
+            ev: "init",
+            tag: "system·init",
+            text: "resumed session · follow-up comment",
+          },
           { t: "", ev: "text", tag: "assistant", text: replyText },
-          { t: "", ev: "result", tag: "result", text: "reply complete", stats: { subtype: "success", dur: 2400, api: 2100, turns: 1, cost: 0.01, in: 900, cached: 400, out: 120 } },
+          {
+            t: "",
+            ev: "result",
+            tag: "result",
+            text: "reply complete",
+            stats: {
+              subtype: "success",
+              dur: 2400,
+              api: 2100,
+              turns: 1,
+              cost: 0.01,
+              in: 900,
+              cached: 400,
+              out: 120,
+            },
+          },
         ];
   return buildScript({
     lines,
@@ -423,14 +468,21 @@ export function resumeWorkdir(
   taskKey: string,
   repo: string | null,
   dataRoot?: string,
+  workspaceKey?: string,
 ): string {
   const base = taskDir(projectSlug, taskKey, dataRoot);
+  const safeWorkspaceKey = workspaceKey
+    ?.trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const workspace = safeWorkspaceKey
+    ? path.join(base, "workspace", safeWorkspaceKey)
+    : path.join(base, "workspace");
   if (repo) {
     const name = repo.split("/").pop() ?? repo;
-    const clone = path.join(base, "workspace", name);
+    const clone = path.join(workspace, name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
-  const workspace = path.join(base, "workspace");
   mkdirSync(workspace, { recursive: true });
   return workspace;
 }

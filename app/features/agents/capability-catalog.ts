@@ -131,6 +131,7 @@ export const CAP_META = {
   direct: { label: "Acts directly", icon: "check" },
   recommend: { label: "Recommends only", icon: "arrow" },
   forbidden: { label: "Reserved for humans", icon: "lock" },
+  off: { label: "Not granted", icon: "x" },
 } as const;
 
 // ------------------------------------------------------- context resources

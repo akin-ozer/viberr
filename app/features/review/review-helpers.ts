@@ -1,5 +1,6 @@
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
+import type { PrState } from "~/schemas/task-file.schema";
 
 export interface ReviewRowView {
   key: string;
@@ -7,7 +8,7 @@ export interface ReviewRowView {
   waiting: "human" | "agent" | "none";
   packet: { kind: string; title: string } | null;
   latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" } | null;
+  pr: { number: number; state: PrState } | null;
   validation: ValidationValue;
 }
 
@@ -18,5 +19,9 @@ export function reviewRowSub(t: ReviewRowView): string {
     ? t.packet.kind + " — " + t.packet.title
     : t.latestEventText
       ? plainText(t.latestEventText)
-      : "Agent working — the packet arrives at the boundary.";
+      : t.waiting === "agent"
+        ? "Waiting for the agent's next turn at the review boundary."
+        : t.waiting === "human"
+          ? "A human decision is ready at the review boundary."
+          : "No active handoff — assign an owner, reviewer, or agent.";
 }

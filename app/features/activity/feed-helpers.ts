@@ -35,10 +35,11 @@ export function matchesActorFilter(
 export function groupStreamByDay(
   rows: ActivityStreamRowView[],
   now: Date = new Date(),
+  timeZone?: string,
 ): { day: string; rows: ActivityStreamRowView[] }[] {
   const groups: { day: string; rows: ActivityStreamRowView[] }[] = [];
   for (const row of rows) {
-    const day = formatDayBucket(row.occurredAt, now);
+    const day = formatDayBucket(row.occurredAt, now, timeZone);
     const last = groups[groups.length - 1];
     if (last && last.day === day) last.rows.push(row);
     else groups.push({ day, rows: [row] });
@@ -48,9 +49,14 @@ export function groupStreamByDay(
 
 /** Audit panel time form (mock freeform strings, generated from real
  * timestamps): "today 9:38" / "yesterday 16:04" / "Mar 30". */
-export function auditTimeLabel(iso: string, now: Date = new Date()): string {
-  const bucket = formatDayBucket(iso, now);
-  if (bucket === "Today") return "today " + formatClock(iso);
-  if (bucket === "Yesterday") return "yesterday " + formatClock(iso);
+export function auditTimeLabel(
+  iso: string,
+  now: Date = new Date(),
+  timeZone?: string,
+): string {
+  const bucket = formatDayBucket(iso, now, timeZone);
+  if (bucket === "Today") return "today " + formatClock(iso, timeZone);
+  if (bucket === "Yesterday")
+    return "yesterday " + formatClock(iso, timeZone);
   return bucket;
 }

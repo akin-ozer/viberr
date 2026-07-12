@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import {
+  createTestDbContext,
+  type TestDbContext,
+} from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -10,8 +13,15 @@ import {
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
-import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
+import {
+  configureRunServiceForTests,
+  startRun,
+} from "~/server/runtimes/run-service.server";
+import {
+  getRun,
+  insertRunLine,
+  upsertRun,
+} from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { buildScript } from "~/server/runtimes/simulated-runtime.server";
 import {
@@ -40,7 +50,10 @@ function actor(user: { id: string; email: string }) {
 }
 
 function deployDevSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  const file = readProjectFile({
+    projectSlug: store.slug,
+    dataRoot: store.dataRoot,
+  })!;
   const fm = file.parsed.frontmatter;
   writeProject(store.dataRoot, {
     ...fm,
@@ -93,6 +106,7 @@ beforeEach(() => {
       stage: "impl",
       ownerUserId: store.users.arda.id,
       title: "Unified completion pipeline probe",
+      reviewers: [{ profileId: "dev", backend: "claude", role: "developer" }],
     }),
     goal: "Exercise the canonical completion handler.",
   });
@@ -125,8 +139,18 @@ describe("waiting-state bookkeeping (A2)", () => {
   });
 
   it("markWaitingAgent is idempotent and reprojects", async () => {
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await markWaitingAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+    );
+    await markWaitingAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+    );
     expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
   });
 });
@@ -142,7 +166,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { t: "", ev: "text", tag: "assistant", text },
         { t: "", ev: "result", tag: "result", text: "done" },
       ],
-      occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
+      occurredAt: [
+        new Date().toISOString(),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
       sessionId: "t",
       backend: "claude",
       model: "sonnet",
@@ -177,7 +205,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // 1500 chars of filler BEFORE the verdict line: the truncated comment
     // (1200 chars) never contains it — the old classifier missed it.
     const filler = "Detailed review notes follow. ".repeat(50);
-    const reply = `${filler}\nVerdict: request changes — the diff violates the spec.`;
+    const reply = `${filler}\nVIBERR_REVIEW_VERDICT: {"verdict":"request_changes","summary":"The diff violates the spec."}`;
     const runId = await finishedRunWith(reply);
     await applyAgentCompletionEffects(
       store.db,
@@ -188,6 +216,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         backend: "claude",
         role: "Reviewer",
         kind: "reviewer",
+        profileId: "dev",
         workdir: null,
         agentHandle: "reviewer",
       },
@@ -195,12 +224,19 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
-    const quality = taskFile().parsed.timeline.find((e) => e.type === "quality");
+    const quality = taskFile().parsed.timeline.find(
+      (e) => e.type === "quality",
+    );
     expect(quality).toBeTruthy();
   });
 
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await markWaitingAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+    );
     const runId = await finishedRunWith("All done — summary of the work.");
     await applyAgentCompletionEffects(
       store.db,
@@ -233,7 +269,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // blocked event naming the reason and open a recovery packet.
     // Deploy an operator (with generate-packets) alongside the dev — every active
     // task has one, and it's what opens the recovery packet on a failed run.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const pf = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
     writeProject(store.dataRoot, {
       ...pf.parsed.frontmatter,
       agents: [
@@ -288,7 +327,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
       },
     });
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await markWaitingAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+    );
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
@@ -313,7 +357,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(failureEvent!.text.toLowerCase()).toContain("quota");
     // A recovery packet reaches the human's queue (not just a timeline note):
     // it must open and mark the task blocked so it surfaces as "waiting on you".
-    expect(parsed.packet, "a recovery packet must open on a failed run").toBeTruthy();
+    expect(
+      parsed.packet,
+      "a recovery packet must open on a failed run",
+    ).toBeTruthy();
     expect(parsed.packet!.type).toBe("blocked");
     // The task owner + supervisors get a quality notification about the failure.
     const notif = store.db
@@ -321,7 +368,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         `SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality' AND text LIKE '%run failed%'`,
       )
       .get() as { n: number };
-    expect(notif.n, "watchers are notified of the run failure").toBeGreaterThan(0);
+    expect(notif.n, "watchers are notified of the run failure").toBeGreaterThan(
+      0,
+    );
     // waiting must be flipped off `agent` (no phantom "agent working").
     expect(parsed.frontmatter.waiting).toBe("human");
   });
@@ -335,9 +384,8 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    // With a directive the simulated reviewer report closes with an explicit
-    // "Verdict: **approve**" — the completion hook must classify it and flip
-    // validation to healthy without any operator/@mention involvement.
+    // Simulated reviewer output may demonstrate the structured marker, but it
+    // must never become approval evidence.
     const result = await startReviewerRun(
       store.db,
       {
@@ -349,11 +397,17 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
+    const completed = await waitFor(() => {
+      const run = getRun(store.db, result.runId);
+      return run?.state === "finished";
+    }, 25_000);
+    expect(completed).toBe(true);
     const changed = await waitFor(() => {
       const fm = taskFile().parsed.frontmatter;
       return fm.validation === "healthy";
-    }, 25_000);
-    expect(changed).toBe(true);
+    }, 250);
+    expect(changed).toBe(false);
+    expect(taskFile().parsed.frontmatter.reviewerVerdicts).toEqual([]);
     expect(result.runId).toBeTruthy();
   }, 30_000);
 });

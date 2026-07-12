@@ -1,51 +1,76 @@
 import type Database from "better-sqlite3";
-import { listMcpServers } from "~/server/org/resources.server";
+import { parseCommandLine } from "~/server/mcp/command-line.server";
+import {
+  listMcpServers,
+  resolveMcpAuth,
+  type McpView,
+} from "~/server/org/resources.server";
+import { AppError } from "~/server/errors/app-error.server";
+
+export type McpBackend = "claude" | "codex";
+
+/** Provider compatibility used by the settings UI and routing context. */
+export function mcpBackendSupport(mcp: Pick<McpView, "transport" | "auth">): {
+  claude: true;
+  codex: boolean;
+  reason: string | null;
+} {
+  const codex = mcp.transport === "stdio" || Object.keys(mcp.auth).length === 0;
+  return {
+    claude: true,
+    codex,
+    reason: codex
+      ? null
+      : "Codex cannot express arbitrary Streamable HTTP header mappings; route this profile to Claude.",
+  };
+}
 
 /**
- * Resolve a specialist profile's declared MCP names to portable runtime
- * `mcpServers` configs from the org MCP registry (item-1 / FR9). The MCP leg was
- * decorative — a profile's `resources.mcps` reached no run. This turns each
- * declared name into a real server config. The Claude adapter accepts this
- * shape directly; the Codex adapter translates it to `mcp_servers` config:
- *   - HTTP  → `{ type: "http", url: <target> }`
- *   - stdio → `{ command, args }` (target is the shell command line)
+ * Resolves only the MCPs explicitly declared by the specialist profile. Secret
+ * refs are opened here—immediately before a run spec is spawned—and never
+ * returned from a loader or persisted into run state/logs.
  *
- * `viberr` is skipped (it is the OPERATOR's in-process governance server, built
- * separately and never offered to specialists). Unknown names are skipped.
- * Returns `{}` when nothing resolves, so callers can spread it unconditionally.
- *
- * NOTE (honest scope): credentials are NOT injected here. The registry stores a
- * `secret://…` ref, not the token; wiring the real auth header requires the
- * secret store and a working external server, neither of which is exercised in
- * this environment (the seeded MCP targets are placeholders). This makes the
- * declared MCP a real, connectable server config; supplying live credentials is
- * the remaining step for a production MCP.
+ * Claude receives HTTP headers and stdio env maps directly. Codex supports
+ * stdio env, but its CLI exposes only a bearer-token setting for HTTP rather
+ * than Viberr's explicit arbitrary-header map. A Codex route therefore fails
+ * clearly instead of silently attempting an unauthenticated connection.
  */
 export function resolveSpecialistMcpServers(
   db: Database.Database,
   mcpNames: readonly string[],
+  backend?: McpBackend,
 ): Record<string, unknown> {
   if (mcpNames.length === 0) return {};
-  let registry: { name: string; transport: "HTTP" | "stdio"; target: string }[];
-  try {
-    registry = listMcpServers(db);
-  } catch {
-    return {};
-  }
+  const registry = listMcpServers(db);
   const byName = new Map(registry.map((m) => [m.name, m]));
 
   const servers: Record<string, unknown> = {};
   for (const name of mcpNames) {
-    if (name === "viberr") continue; // operator's in-process server, not for specialists
+    if (name === "viberr") continue;
     const row = byName.get(name);
     if (!row || !row.target) continue;
+    const support = mcpBackendSupport(row);
+    if (backend === "codex" && !support.codex) {
+      throw AppError.validation(`${row.name}: ${support.reason}`);
+    }
+    const auth = resolveMcpAuth(db, row.auth);
     if (row.transport === "stdio") {
-      const parts = row.target.trim().split(/\s+/);
-      const command = parts[0];
-      if (!command) continue;
-      servers[name] = { command, args: parts.slice(1) };
+      const parts = parseCommandLine(row.target);
+      const command = parts?.[0];
+      if (!command) {
+        throw AppError.validation(`${row.name} has an invalid stdio command.`);
+      }
+      servers[name] = {
+        command,
+        args: parts.slice(1),
+        ...(Object.keys(auth).length ? { env: auth } : {}),
+      };
     } else {
-      servers[name] = { type: "http", url: row.target };
+      servers[name] = {
+        type: "http",
+        url: row.target,
+        ...(Object.keys(auth).length ? { headers: auth } : {}),
+      };
     }
   }
   return servers;

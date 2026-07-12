@@ -153,24 +153,8 @@ describe("github-client", () => {
   });
 });
 
-describe("githubWebHost (B11: browse-link host derivation)", () => {
-  it("defaults to https://github.com when no base is configured", () => {
+describe("githubWebHost", () => {
+  it("matches the supported github.com API/clone/PAT model", () => {
     expect(githubWebHost()).toBe("https://github.com");
-    expect(githubWebHost(null)).toBe("https://github.com");
-    expect(githubWebHost("https://api.github.com")).toBe("https://github.com");
-  });
-
-  it("derives the GHE web host from its API base", () => {
-    expect(githubWebHost("https://ghe.corp/api/v3")).toBe("https://ghe.corp");
-    expect(githubWebHost("https://api.ghe.example.com/v3")).toBe(
-      "https://ghe.example.com",
-    );
-    expect(githubWebHost("https://ghe.corp:8443/api/v3")).toBe(
-      "https://ghe.corp:8443",
-    );
-  });
-
-  it("falls back to github.com on an unparseable base", () => {
-    expect(githubWebHost("not a url")).toBe("https://github.com");
   });
 });

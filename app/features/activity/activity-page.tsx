@@ -4,6 +4,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { formatClock } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
@@ -50,11 +51,15 @@ const PEV_META: Record<string, { icon: IconName; cls: string }> = {
 function AuditLogs({
   entries,
   total,
+  now,
+  timeZone,
   onOpen,
   onShowOlder,
 }: {
   entries: AuditLogEntryView[];
   total: number;
+  now: Date;
+  timeZone: string;
   onOpen: (key: string) => void;
   onShowOlder: () => void;
 }) {
@@ -103,7 +108,7 @@ function AuditLogs({
                           ? "Resolved" +
                             (e.resolvedBy ? ` by ${e.resolvedBy}` : "") +
                             (e.resolvedAt
-                              ? ` · ${auditTimeLabel(e.resolvedAt)}`
+                              ? ` · ${auditTimeLabel(e.resolvedAt, now, timeZone)}`
                               : "")
                           : "Open — grant the missing scope to resolve"
                       }
@@ -115,7 +120,9 @@ function AuditLogs({
                   </>
                 )}
               </span>
-              <span className="pev-t">{auditTimeLabel(e.occurredAt)}</span>
+              <span className="pev-t">
+                {auditTimeLabel(e.occurredAt, now, timeZone)}
+              </span>
             </div>
           );
         })}
@@ -169,6 +176,8 @@ export function ActivityPage({
   audit: AuditLogEntryView[];
   auditTotal: number;
 }) {
+  const timeZone = useViewerTimeZone();
+  const now = new Date();
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const [f, setF] = useState<ActorFilter>("all");
@@ -189,6 +198,8 @@ export function ActivityPage({
 
   const shown = groupStreamByDay(
     stream.filter((r) => matchesActorFilter(r, f)),
+    now,
+    timeZone,
   );
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
   const streamRemaining = Math.max(0, streamTotal - stream.length);
@@ -254,7 +265,9 @@ export function ActivityPage({
                         {r.taskKey}
                       </button>
                     </span>
-                    <span className="pev-t">{formatClock(r.occurredAt)}</span>
+                    <span className="pev-t">
+                      {formatClock(r.occurredAt, timeZone)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -293,6 +306,8 @@ export function ActivityPage({
           <AuditLogs
             entries={audit}
             total={auditTotal}
+            now={now}
+            timeZone={timeZone}
             onOpen={onOpen}
             onShowOlder={() =>
               showOlder("audit", Math.min(audit.length + AUDIT_STEP, AUDIT_MAX))

@@ -1,15 +1,20 @@
-import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type Database from "better-sqlite3";
 import type {
   AgentRef,
   FileActorRef,
   TaskFileEvent,
 } from "~/schemas/task-file.schema";
-import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import type {
+  CapabilityGrant,
+  ProjectRole,
+} from "~/schemas/project-file.schema";
+import {
+  recordAudit,
+  withProjectAuditAuthority,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -23,18 +28,20 @@ import {
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
+import {
+  KB_INJECTION_BUDGET,
+  readKbBody,
+} from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import {
-  getPatToken,
-  getProjectCredential,
-} from "~/server/secrets/pat-store.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import type { LogLine } from "~/features/runtime/runtime-types";
-import { isBackendAvailable, type RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  isBackendAvailable,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -45,20 +52,23 @@ import {
   buildScript,
   type SimulatedScript,
 } from "~/server/runtimes/simulated-runtime.server";
-import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
+import {
+  listRunsForTask,
+  startRun,
+} from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { roleCan } from "~/shared/rbac";
+import {
+  authorizeProjectAction,
+  type ProjectAuthoritySource,
+} from "~/shared/rbac";
 import {
   type DeliveryPermissions,
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
+  specialistBackendCapabilitySupport,
 } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
-import {
-  cloneFailureLogDetails,
-  createGitHubClonePlan,
-  githubRemoteSanitizationArgs,
-} from "./git-clone-auth.server";
+import { preflightSpecialistWorkspace } from "./specialist-preflight.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -76,8 +86,6 @@ import type { TaskActor, TaskMutationContext } from "./task-actions.server";
  * RBAC (both fns): admin|maintainer — contracts §3.2 "Open agent runtime
  * sessions". Mirrors the transition/interrupt project-membership check.
  */
-
-const execFileAsync = promisify(execFile);
 
 // ----------------------------------------------------------------- helpers
 
@@ -159,8 +167,9 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
 function mcpServersFor(
   db: Database.Database,
   names: string[],
+  backend: RealBackend,
 ): { mcpServers?: Record<string, unknown> } {
-  const servers = resolveSpecialistMcpServers(db, names);
+  const servers = resolveSpecialistMcpServers(db, names, backend);
   return Object.keys(servers).length ? { mcpServers: servers } : {};
 }
 
@@ -251,7 +260,8 @@ export async function assignSpecialist(
   );
   assertStageEligible(specialist, existing.parsed.frontmatter.stage);
 
-  const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
+  const backendLabel =
+    specialist.backend === "claude" ? "Claude Code" : "Codex";
   const ref: AgentRef = {
     profileId: specialist.profileId,
     backend: specialist.backend,
@@ -266,9 +276,10 @@ export async function assignSpecialist(
     (parsed) => {
       parsed.frontmatter.specialist = ref;
       // Clear any pending "assign specialist" recommendation — it's now done.
-      parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-        (r) => r.kind !== "assign_specialist",
-      );
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter(
+          (r) => r.kind !== "assign_specialist",
+        );
       parsed.timeline.unshift(event);
     },
   );
@@ -363,10 +374,21 @@ export async function assignReviewer(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
       parsed.frontmatter.reviewers.push(ref);
+      parsed.frontmatter.reviewerVerdicts =
+        parsed.frontmatter.reviewerVerdicts.filter(
+          (item) => item.profileId !== reviewer.profileId,
+        );
+      if (parsed.frontmatter.validation === "healthy") {
+        parsed.frontmatter.validation = "changed";
+      }
       // Clear a matching pending "engage reviewer" recommendation.
-      parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-        (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
-      );
+      parsed.frontmatter.recommendations =
+        parsed.frontmatter.recommendations.filter(
+          (r) =>
+            !(
+              r.kind === "assign_reviewer" && r.profileId === reviewer.profileId
+            ),
+        );
       parsed.timeline.unshift(event);
     },
   );
@@ -414,7 +436,12 @@ export async function removeReviewer(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<RemoveReviewerResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "remove a reviewer");
+  const auditActor = runtimeAuditActor(
+    ctx,
+    input.projectSlug,
+    actor,
+    "remove a reviewer",
+  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -427,7 +454,11 @@ export async function removeReviewer(
   // Best-effort display name for the event; falls back to the role snapshot.
   let label = target.role;
   try {
-    label = resolveDeployedSpecialist(ctx, input.projectSlug, input.profileId).name;
+    label = resolveDeployedSpecialist(
+      ctx,
+      input.projectSlug,
+      input.profileId,
+    ).name;
   } catch {
     // Profile may have been undeployed since engagement — keep the role label.
   }
@@ -439,6 +470,13 @@ export async function removeReviewer(
       parsed.frontmatter.reviewers = parsed.frontmatter.reviewers.filter(
         (r) => r.profileId !== input.profileId,
       );
+      parsed.frontmatter.reviewerVerdicts =
+        parsed.frontmatter.reviewerVerdicts.filter(
+          (item) => item.profileId !== input.profileId,
+        );
+      if (parsed.frontmatter.validation === "healthy") {
+        parsed.frontmatter.validation = "changed";
+      }
       parsed.timeline.unshift(event);
     },
   );
@@ -446,7 +484,7 @@ export async function removeReviewer(
 
   recordAudit(db, {
     action: "task.reviewer.removed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -506,9 +544,7 @@ export async function startSpecialistRun(
 
   const sp = existing.parsed.frontmatter.specialist;
   if (!sp) {
-    throw AppError.validation(
-      "Assign a specialist before starting a run.",
-    );
+    throw AppError.validation("Assign a specialist before starting a run.");
   }
   const backend: RealBackend =
     input.backendOverride ?? (sp.backend === "codex" ? "codex" : "claude");
@@ -529,7 +565,11 @@ export async function startSpecialistRun(
   let disallowedTools: string[] = [];
   let resolvedSpec: ResolvedSpecialist | null = null;
   try {
-    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+    const resolved = resolveDeployedSpecialist(
+      ctx,
+      input.projectSlug,
+      sp.profileId,
+    );
     resolvedSpec = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
@@ -549,7 +589,9 @@ export async function startSpecialistRun(
       effort = resolveRunEffort(backend, resolved.effort);
     }
   } catch {
-    // Profile may have been undeployed since assignment — keep the default.
+    throw AppError.validation(
+      "The assigned specialist profile is no longer deployed. Assign a current profile before starting a run.",
+    );
   }
   // Stage eligibility holds at the RUN boundary too (F1): an already-assigned
   // specialist must not be re-run after the task moved to a stage it isn't
@@ -557,6 +599,17 @@ export async function startSpecialistRun(
   // Outside the try so the graceful undeployed-profile fallback can't swallow it.
   if (resolvedSpec) {
     assertStageEligible(resolvedSpec, existing.parsed.frontmatter.stage);
+    const support = specialistBackendCapabilitySupport(
+      resolvedSpec.capabilities,
+      backend,
+    );
+    if (!support.supported) {
+      throw AppError.validation(
+        `Codex cannot enforce this profile's withheld local capabilities (${support.advisoryOnlyWithheld.join(
+          ", ",
+        )}). Use Claude or grant those capabilities explicitly.`,
+      );
+    }
   }
 
   // The agent's run persona: its detailed definition + declared skills + KB docs.
@@ -573,35 +626,23 @@ export async function startSpecialistRun(
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
-  const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+  const repo =
+    existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
 
-  // Best-effort clone — only when a REAL backend will actually consume a
-  // working tree. With no credential the simulated engine carries the run and
-  // needs no checkout, so we skip the network clone entirely (keeps the demo
-  // and the test suite fast + offline). Still best-effort even when real.
+  const delivery = resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []);
+  // A real model never starts in an empty fallback workspace. Checkout/tool/
+  // auth preflight either returns a verified Git worktree or opens the
+  // system-owned recovery path and rejects before startRun creates a run row.
+  // Simulated runs remain offline and do not require a checkout.
   const realBackend = isBackendAvailable(backend);
-  const clone =
-    repo && realBackend
-      ? await cloneRepo(db, {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          repo,
-          dataRoot: ctx.dataRoot,
-        })
-      : null;
-  // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
-  // the clone when it succeeded, else an empty workspace root the agent clones
-  // into. NEVER the task dir (which sits inside the data root, which may live
-  // inside a host git repo). Confine git with GIT_CEILING (workspaceRunEnv).
-  const workspaceRoot = taskWorkspaceRoot(
-    input.projectSlug,
-    input.taskKey,
-    ctx.dataRoot,
-  );
-  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
-  if (runWorkdir && !existsSync(runWorkdir)) {
-    mkdirSync(runWorkdir, { recursive: true });
-  }
+  const runWorkdir = realBackend
+    ? await requireSpecialistWorkspace(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        repo,
+        role: sp.role,
+      })
+    : null;
 
   const analyzePrompt = buildAnalyzePrompt({
     role: sp.role,
@@ -609,9 +650,11 @@ export async function startSpecialistRun(
     title,
     goal,
     repo,
-    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
-    cloned: !!clone,
-    delivery: resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []),
+    branch:
+      existing.parsed.frontmatter.branch ??
+      taskBranchName(input.taskKey, title),
+    cloned: !!runWorkdir,
+    delivery,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -620,7 +663,7 @@ export async function startSpecialistRun(
     backend,
     model,
     repo,
-    cloned: !!clone,
+    cloned: !!runWorkdir,
     role: sp.role,
     ...(input.directive ? { directive: input.directive } : {}),
   });
@@ -649,7 +692,7 @@ export async function startSpecialistRun(
     ...(disallowedTools.length ? { disallowedTools } : {}),
     // Wire the profile's declared MCP servers into the run (item-1/FR9): a
     // profile that declares an org MCP gets it on both supported SDKs.
-    ...mcpServersFor(db, mcpNames),
+    ...mcpServersFor(db, mcpNames, backend),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend
       ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
@@ -682,13 +725,12 @@ export async function startSpecialistRun(
       profileId: sp.profileId,
       backend,
       simulated,
-      cloned: !!clone,
+      cloned: !!runWorkdir,
     },
   });
 
-  const { registerAgentCompletion, markWaitingAgent } = await import(
-    "./task-actions.server"
-  );
+  const { registerAgentCompletion, markWaitingAgent } =
+    await import("./task-actions.server");
   // The board reads "agent working" while the run is in flight.
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
@@ -704,7 +746,9 @@ export async function startSpecialistRun(
     backend,
     role: sp.role,
     kind: "primary",
+    profileId: sp.profileId,
     workdir: runWorkdir,
+    delivery,
     agentHandle: agentHandleFor(sp.role),
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
@@ -764,7 +808,11 @@ export async function startReviewerRun(
   let disallowedTools: string[] = [];
   let resolvedRev: ResolvedSpecialist | null = null;
   try {
-    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
+    const resolved = resolveDeployedSpecialist(
+      ctx,
+      input.projectSlug,
+      rev.profileId,
+    );
     resolvedRev = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
@@ -780,13 +828,26 @@ export async function startReviewerRun(
       effort = resolveRunEffort(backend, resolved.effort);
     }
   } catch {
-    // Profile may have been undeployed since engagement — keep the default.
+    throw AppError.validation(
+      "The reviewer profile is no longer deployed. Engage a current profile before starting a run.",
+    );
   }
   // Stage eligibility at the RUN boundary (F1) — same rationale as
   // startSpecialistRun: an engaged reviewer must not be re-run at a stage its
   // profile isn't eligible for. Outside the try so the fallback can't swallow it.
   if (resolvedRev) {
     assertStageEligible(resolvedRev, existing.parsed.frontmatter.stage);
+    const support = specialistBackendCapabilitySupport(
+      resolvedRev.capabilities,
+      backend,
+    );
+    if (!support.supported) {
+      throw AppError.validation(
+        `Codex cannot enforce this profile's withheld local capabilities (${support.advisoryOnlyWithheld.join(
+          ", ",
+        )}). Use Claude or grant those capabilities explicitly.`,
+      );
+    }
   }
 
   const persona = buildSpecialistPersona({
@@ -798,27 +859,20 @@ export async function startReviewerRun(
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
-  const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+  const repo =
+    existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
 
+  const delivery = resolveDeliveryPermissions(resolvedRev?.capabilities ?? []);
   const realBackend = isBackendAvailable(backend);
-  const clone =
-    repo && realBackend
-      ? await cloneRepo(db, {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          repo,
-          dataRoot: ctx.dataRoot,
-        })
-      : null;
-  const workspaceRoot = taskWorkspaceRoot(
-    input.projectSlug,
-    input.taskKey,
-    ctx.dataRoot,
-  );
-  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
-  if (runWorkdir && !existsSync(runWorkdir)) {
-    mkdirSync(runWorkdir, { recursive: true });
-  }
+  const runWorkdir = realBackend
+    ? await requireSpecialistWorkspace(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        repo,
+        role: rev.role,
+        workspaceKey: `reviewer-${rev.profileId}`,
+      })
+    : null;
 
   const analyzePrompt = buildAnalyzePrompt({
     role: rev.role,
@@ -826,9 +880,12 @@ export async function startReviewerRun(
     title,
     goal,
     repo,
-    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
-    cloned: !!clone,
-    delivery: resolveDeliveryPermissions(resolvedRev?.capabilities ?? []),
+    branch:
+      existing.parsed.frontmatter.branch ??
+      taskBranchName(input.taskKey, title),
+    cloned: !!runWorkdir,
+    delivery,
+    structuredReviewVerdict: true,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -837,7 +894,7 @@ export async function startReviewerRun(
     backend,
     model,
     repo,
-    cloned: !!clone,
+    cloned: !!runWorkdir,
     role: rev.role,
     ...(input.directive ? { directive: input.directive } : {}),
   });
@@ -860,7 +917,7 @@ export async function startReviewerRun(
     script,
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
-    ...mcpServersFor(db, mcpNames),
+    ...mcpServersFor(db, mcpNames, backend),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend
       ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
@@ -893,13 +950,12 @@ export async function startReviewerRun(
       profileId: rev.profileId,
       backend,
       simulated,
-      cloned: !!clone,
+      cloned: !!runWorkdir,
     },
   });
 
-  const { registerAgentCompletion, markWaitingAgent } = await import(
-    "./task-actions.server"
-  );
+  const { registerAgentCompletion, markWaitingAgent } =
+    await import("./task-actions.server");
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
   // Same canonical handler — a reviewer additionally records its verdict.
@@ -910,7 +966,9 @@ export async function startReviewerRun(
     backend,
     role: rev.role,
     kind: "reviewer",
+    profileId: rev.profileId,
     workdir: runWorkdir,
+    delivery,
     agentHandle: agentHandleFor(rev.role),
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
@@ -1012,6 +1070,8 @@ function buildAnalyzePrompt(input: {
   cloned: boolean;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
+  /** Reviewer runs must close with a strict, machine-readable verdict. */
+  structuredReviewVerdict?: boolean;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
 }): string {
@@ -1037,23 +1097,31 @@ function buildAnalyzePrompt(input: {
       prompt += `- Do all work on the branch \`${input.branch}\` (create it from the default branch if it does not exist): \`git checkout -B ${input.branch}\`.\n`;
     }
     if (canCommitPush) {
-      prompt +=
-        `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
-        `- Push the branch${canOpenPr ? " and open a pull request that references " + input.taskKey + " in its title/body" : ""}.\n`;
-    } else if (canOpenPr) {
-      prompt += `- Open a pull request that references ${input.taskKey} in its title/body.\n`;
+      prompt += `- Commit the finished local changes and prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n`;
     }
+    prompt +=
+      `- Do NOT push, run \`gh\`, or open a pull request yourself. Viberr owns remote authentication and will ` +
+      `${canCommitPush ? "push the verified local branch" : "leave remote delivery withheld by policy"}` +
+      `${canCommitPush && canOpenPr ? " and open/reconcile the review PR" : ""} after your run finishes.\n`;
     // Reflect what the profile's capabilities actually allow so the run never
     // attempts (and fails) a step its tools deny.
     if (!canBranch && !canCommitPush && !canOpenPr) {
       prompt += `- Your profile does not grant branch/commit/PR delivery — do the analysis and any in-workspace edits, then report findings; do NOT attempt to branch, commit, push, or open a PR.\n`;
     }
-    prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
+    prompt += `- Report the exact local branch name and commit SHAs; Viberr reports the verified remote branch and PR result separately.`;
   }
   if (input.directive?.trim()) {
     prompt +=
       `\n\nThe operator has engaged you and directs: "${input.directive.trim()}" ` +
       `Address that directive as you work, then give a concise reply.`;
+  }
+  if (input.structuredReviewVerdict) {
+    prompt +=
+      `\n\n## Required structured review verdict\n` +
+      `End your response with exactly one single-line marker in this format:\n` +
+      `VIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"concise evidence-based reason"}\n` +
+      `The verdict value must be either "approve" or "request_changes". ` +
+      `Do not wrap the marker in a code fence. Prose such as LGTM or "Verdict: pass" is not accepted as a verdict.`;
   }
   return prompt;
 }
@@ -1093,11 +1161,12 @@ export function simulatedFinalReport(
         `Correctness: the logic holds on the paths that matter. Security: input ` +
         `is validated and no secrets leak. Tests: authored and ran coverage for ` +
         `the new behavior incl. the empty and boundary cases; full suite passes. ` +
-        `No blocking findings (one nit: a comment could be clearer). Verdict: ` +
-        `**approve** — ready to accept.`
+        `No blocking findings (one nit: a comment could be clearer). Ready to accept.\n` +
+        `VIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"The implementation matches the goal and the full suite passes."}`
       );
     }
-    const test = backend === "codex" ? "a test that exercises" : "a test covering";
+    const test =
+      backend === "codex" ? "a test that exercises" : "a test covering";
     return (
       `@operator — done: implemented what you asked for, wired into the existing ` +
       `structure (matching the conventions under src/), and added ${test} the new ` +
@@ -1129,7 +1198,9 @@ function buildAnalyzeScript(input: {
 }): SimulatedScript {
   const sid = newId("run").replace("run_", "");
   const now = () => new Date().toISOString();
-  const repoName = input.repo ? input.repo.split("/").pop() ?? input.repo : "workspace";
+  const repoName = input.repo
+    ? (input.repo.split("/").pop() ?? input.repo)
+    : "workspace";
   const directive = input.directive?.trim();
   const opener = directive
     ? `The operator asked me to: ${directive} On it — scanning the repository first.`
@@ -1140,12 +1211,41 @@ function buildAnalyzeScript(input: {
   const lines: LogLine[] =
     input.backend === "codex"
       ? [
-          { t: "", ev: "init", tag: "thread.started", text: `codex thread · analyzing ${repoName}` },
+          {
+            t: "",
+            ev: "init",
+            tag: "thread.started",
+            text: `codex thread · analyzing ${repoName}`,
+          },
           { t: "", ev: "text", tag: "agent_message", text: opener },
-          { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "ls -R", input: { command: "ls -R" } },
-          { t: "", ev: "out", tag: "command_output", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
-          { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "cat package.json", input: { command: "cat package.json" } },
-          { t: "", ev: "out", tag: "command_output", text: '{ "name": "app", "dependencies": { "express": "^4" } }' },
+          {
+            t: "",
+            ev: "tool",
+            tag: "command_execution",
+            name: "exec",
+            text: "ls -R",
+            input: { command: "ls -R" },
+          },
+          {
+            t: "",
+            ev: "out",
+            tag: "command_output",
+            text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md",
+          },
+          {
+            t: "",
+            ev: "tool",
+            tag: "command_execution",
+            name: "exec",
+            text: "cat package.json",
+            input: { command: "cat package.json" },
+          },
+          {
+            t: "",
+            ev: "out",
+            tag: "command_output",
+            text: '{ "name": "app", "dependencies": { "express": "^4" } }',
+          },
           {
             t: "",
             ev: "text",
@@ -1157,16 +1257,56 @@ function buildAnalyzeScript(input: {
             ev: "result",
             tag: "turn.completed",
             text: "analysis complete",
-            usage: { input_tokens: 4200, cached_input_tokens: 1800, output_tokens: 640 },
+            usage: {
+              input_tokens: 4200,
+              cached_input_tokens: 1800,
+              output_tokens: 640,
+            },
           },
         ]
       : [
-          { t: "", ev: "init", tag: "system·init", text: `analyzing ${repoName} · read-only pass` },
-          { t: "", ev: "text", tag: "assistant", text: directive ? opener : "Scanning the repository layout to understand its structure and dependencies." },
-          { t: "", ev: "tool", tag: "tool_use", name: "Bash", text: "ls -R", input: { command: "ls -R" } },
-          { t: "", ev: "out", tag: "tool_result", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
-          { t: "", ev: "tool", tag: "tool_use", name: "Read", text: "package.json", input: { file_path: "package.json" } },
-          { t: "", ev: "out", tag: "tool_result", text: '{ "name": "app", "dependencies": { "express": "^4" } }' },
+          {
+            t: "",
+            ev: "init",
+            tag: "system·init",
+            text: `analyzing ${repoName} · read-only pass`,
+          },
+          {
+            t: "",
+            ev: "text",
+            tag: "assistant",
+            text: directive
+              ? opener
+              : "Scanning the repository layout to understand its structure and dependencies.",
+          },
+          {
+            t: "",
+            ev: "tool",
+            tag: "tool_use",
+            name: "Bash",
+            text: "ls -R",
+            input: { command: "ls -R" },
+          },
+          {
+            t: "",
+            ev: "out",
+            tag: "tool_result",
+            text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md",
+          },
+          {
+            t: "",
+            ev: "tool",
+            tag: "tool_use",
+            name: "Read",
+            text: "package.json",
+            input: { file_path: "package.json" },
+          },
+          {
+            t: "",
+            ev: "out",
+            tag: "tool_result",
+            text: '{ "name": "app", "dependencies": { "express": "^4" } }',
+          },
           {
             t: "",
             ev: "text",
@@ -1178,7 +1318,16 @@ function buildAnalyzeScript(input: {
             ev: "result",
             tag: "result",
             text: "analysis complete",
-            stats: { subtype: "success", dur: 8400, api: 7100, turns: 3, cost: 0.06, in: 4200, cached: 1800, out: 640 },
+            stats: {
+              subtype: "success",
+              dur: 8400,
+              api: 7100,
+              turns: 3,
+              cost: 0.06,
+              in: 4200,
+              cached: 1800,
+              out: 640,
+            },
           },
         ];
 
@@ -1195,7 +1344,10 @@ function buildAnalyzeScript(input: {
 
 // ------------------------------------------------------------------- repo clone
 
-function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | null {
+function projectRepo(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): string | null {
   const file = readProjectFile({
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
@@ -1203,33 +1355,47 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
   return file?.parsed.frontmatter.repo ?? null;
 }
 
-/**
- * Best-effort `git clone` of `<owner>/<name>` into
- * `<taskDir>/workspace/<name>`. Supplies a project-bound PAT through an
- * ephemeral Git askpass process when one exists (private repos), else uses a
- * plain credential-free clone (public repos).
- * Returns the clone dir on success, null on any failure (the caller then
- * points the run at its dedicated workspace root and tells the agent to clone
- * into that directory itself).
- *
- * Never throws — clone failure must not break starting the run.
- */
-/**
- * The dedicated per-task workspace directory (`<taskDir>/workspace`). A
- * specialist run's cwd is ALWAYS inside here — NEVER the task dir itself —
- * and `GIT_CEILING_DIRECTORIES` is pinned to it, so an agent's git can never
- * walk UP to a host checkout even when `VIBERR_DATA_ROOT` lives inside a git
- * repo (the dogfooding hazard: a run once switched the running app's own
- * source onto its task branch). This only constrains Git discovery; autonomous
- * Codex specialists still need a separate OS/container boundary before this can
- * be treated as filesystem isolation.
- */
-function taskWorkspaceRoot(
-  projectSlug: string,
-  taskKey: string,
-  dataRoot?: string,
-): string {
-  return path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
+export async function requireSpecialistWorkspace(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    repo: string | null;
+    role: string;
+    workspaceKey?: string;
+  },
+): Promise<string> {
+  const preflight = await preflightSpecialistWorkspace(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    repo: input.repo,
+    ...(input.workspaceKey ? { workspaceKey: input.workspaceKey } : {}),
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  if (preflight.status === "ready") return preflight.workdir;
+
+  const { openSystemRecovery } = await import("./task-recovery.server");
+  await openSystemRecovery(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      code: `specialist_preflight:${preflight.code}`,
+      title: preflight.title,
+      body: `${preflight.detail} No ${input.role} model session was started.`,
+      observations: [
+        { k: "Preflight", v: preflight.code, code: true },
+        {
+          k: "Project credential",
+          v: preflight.credentialBound ? "bound" : "not bound",
+          code: false,
+        },
+      ],
+    },
+    ctx,
+  );
+  throw AppError.validation(`Run not started — ${preflight.detail}`);
 }
 
 /** The per-run env that stops Git from discovering a parent checkout. */
@@ -1248,6 +1414,7 @@ export function resolveResumeConfinement(
 ): {
   disallowedTools: string[];
   env: Record<string, string>;
+  delivery: DeliveryPermissions;
   mcpServers?: Record<string, unknown>;
   systemPrompt?: string;
 } {
@@ -1264,18 +1431,25 @@ export function resolveResumeConfinement(
       kb: resolved.kb,
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
-    const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
+    const mcpServers = resolveSpecialistMcpServers(
+      db,
+      resolved.mcps,
+      resolved.backend,
+    );
     return {
       disallowedTools: resolveSpecialistDisallowedTools(resolved.capabilities),
       env,
-      ...(mcpServers && Object.keys(mcpServers).length
-        ? { mcpServers }
-        : {}),
+      delivery: resolveDeliveryPermissions(resolved.capabilities),
+      ...(mcpServers && Object.keys(mcpServers).length ? { mcpServers } : {}),
       ...(persona ? { systemPrompt: persona } : {}),
     };
   } catch {
     // Profile not a current deployment — still apply the conservative settings.
-    return { disallowedTools: resolveSpecialistDisallowedTools([]), env };
+    return {
+      disallowedTools: resolveSpecialistDisallowedTools([]),
+      env,
+      delivery: resolveDeliveryPermissions([]),
+    };
   }
 }
 
@@ -1287,69 +1461,13 @@ function workspaceRunEnv(
   // The ceiling must be a STRICT ANCESTOR of the run cwd — `GIT_CEILING` only
   // blocks git from ascending INTO a listed dir, so a ceiling EQUAL to cwd is a
   // no-op (git's first step up lands in the ceiling's unblocked parent). The
-  // empty-workspace run has cwd == the workspace root, so we pin the ceiling to
-  // the TASK dir (its parent). That stops git-repo discovery for BOTH cwd
-  // shapes — `<taskDir>/workspace` (empty) and `<taskDir>/workspace/<repo>`
-  // (cloned) — before it can reach a host `.git` above the data root
+  // run cwd is `<taskDir>/workspace/<repo>`, so we pin the ceiling to the TASK
+  // dir. That stops git-repo discovery before it can reach a host `.git`
   // (adversarial-review HIGH #2).
   const ceiling = taskDir(projectSlug, taskKey, dataRoot);
   return {
     GIT_CEILING_DIRECTORIES: ceiling,
   };
-}
-
-async function cloneRepo(
-  db: Database.Database,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    repo: string;
-    dataRoot?: string;
-  },
-): Promise<string | null> {
-  try {
-    const name = input.repo.split("/").pop() ?? input.repo;
-    const dir = path.join(
-      taskWorkspaceRoot(input.projectSlug, input.taskKey, input.dataRoot),
-      name,
-    );
-    if (existsSync(path.join(dir, ".git"))) {
-      // Already cloned for this task — scrub URLs produced by older Viberr
-      // versions before reuse. `--replace-all` removes every prior origin URL,
-      // including a legacy `x-access-token:<PAT>@github.com` value.
-      await execFileAsync(
-        "git",
-        githubRemoteSanitizationArgs(input.repo, dir),
-        { timeout: 10_000 },
-      );
-      return dir;
-    }
-    mkdirSync(path.dirname(dir), { recursive: true });
-
-    const cred = getProjectCredential(db, input.projectSlug);
-    const token = cred ? getPatToken(db, cred.id) : null;
-    const clone = createGitHubClonePlan({
-      repo: input.repo,
-      destination: dir,
-      ...(token ? { token } : {}),
-    });
-    try {
-      await execFileAsync("git", clone.args, {
-        timeout: 60_000,
-        env: clone.env,
-      });
-      return dir;
-    } finally {
-      clone.dispose();
-    }
-  } catch (error) {
-    // Repo is private with no cred, network down, git missing — fall back.
-    logger.info("specialist run clone failed — falling back to workspace root", {
-      taskKey: input.taskKey,
-      ...cloneFailureLogDetails(error),
-    });
-    return null;
-  }
 }
 
 // ------------------------------------------------------- completion hook
@@ -1383,10 +1501,10 @@ function runtimeAuditActor(
   projectSlug: string,
   actor: TaskActor,
   what: string,
-): { userId: string | null; label: string } {
+): AuditActor {
   if (ctx.operatorAuthorized) return { userId: null, label: "operator" };
-  requireRuntimeRole(ctx, projectSlug, actor, what);
-  return { userId: actor.userId, label: actor.label };
+  const source = requireRuntimeRole(ctx, projectSlug, actor, what);
+  return withProjectAuditAuthority(actor, source);
 }
 
 /**
@@ -1399,7 +1517,7 @@ function requireRuntimeRole(
   projectSlug: string,
   actor: TaskActor,
   what: string,
-): ProjectRole {
+): Exclude<ProjectAuthoritySource, "denied"> {
   const file = readProjectFile({
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
@@ -1408,11 +1526,16 @@ function requireRuntimeRole(
   const role = file.parsed.frontmatter.members.find(
     (m) => m.userId === actor.userId,
   )?.role;
-  if (!role) throw forbidden(`Only project members can ${what}.`);
-  if (!roleCan(role, "run-agents")) {
+  const authority = authorizeProjectAction(
+    role ?? null,
+    actor.orgRole,
+    "run-agents",
+  );
+  if (!authority.allowed) {
+    if (!role) throw forbidden(`Only project members can ${what}.`);
     throw forbidden(`Your project role (${role}) cannot ${what}.`);
   }
-  return role;
+  return authority.source as Exclude<ProjectAuthoritySource, "denied">;
 }
 
 /** One deployed specialist as the task-detail assign menu offers it. */

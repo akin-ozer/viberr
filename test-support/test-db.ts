@@ -7,6 +7,7 @@ import {
   runMigrations,
 } from "~/server/db/migration-runner.server";
 import { openDatabase } from "~/server/db/sqlite.server";
+import { disposeRunsForDatabaseForTests } from "~/server/runtimes/run-service.server";
 
 /**
  * Temp-dir DB helper for tests (phase-1 pattern, centralized).
@@ -40,7 +41,10 @@ export function createTestDbContext(): TestDbContext {
       return db;
     },
     cleanup(): void {
-      for (const db of openDbs) if (db.open) db.close();
+      for (const db of openDbs) {
+        disposeRunsForDatabaseForTests(db);
+        if (db.open) db.close();
+      }
       openDbs = [];
       for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
       tempDirs = [];

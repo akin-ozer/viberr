@@ -3,9 +3,9 @@ import { data, Form, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/login";
 import { assertCsrf, assertTrustedOrigin } from "~/server/auth/csrf.server";
 import {
-  clearLoginFlash,
-  readLoginFlash,
-} from "~/server/auth/login-flash.server";
+  oauthLoginErrorCallback,
+  oauthLoginErrorMessage,
+} from "~/server/auth/oauth-login-error";
 import {
   completeForcedPasswordReset,
   loginWithCredentials,
@@ -44,7 +44,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Signed in and no reset pending → nothing to do here.
   if (auth && !auth.pwresetRequired) throw redirect(returnTo ?? "/");
 
-  const flash = readLoginFlash(request);
+  const oauthError = oauthLoginErrorMessage(url.searchParams.get("error"));
+  const flash = oauthError
+    ? ({ kind: "error" as const, message: oauthError })
+    : null;
   const payload = {
     mode: auth ? ("reset" as const) : ("login" as const),
     returnTo,
@@ -58,9 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
     },
   };
-  return flash
-    ? data(payload, { headers: { "Set-Cookie": clearLoginFlash() } })
-    : data(payload);
+  return data(payload);
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -280,9 +281,7 @@ export default function Login({
   >(undefined);
   const serverErrHidden =
     dismissedServerErr !== undefined && dismissedServerErr === actionError;
-  const [info, setInfo] = useState<string | null>(
-    flash?.kind === "info" ? flash.message : null,
-  );
+  const [info, setInfo] = useState<string | null>(null);
   const [providerBusy, setProviderBusy] = useState<
     "github" | "google" | null
   >(null);
@@ -319,7 +318,11 @@ export default function Login({
         const res = await fetch("/api/auth/sign-in/social", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: which, callbackURL: returnTo ?? "/" }),
+          body: JSON.stringify({
+            provider: which,
+            callbackURL: returnTo ?? "/",
+            errorCallbackURL: oauthLoginErrorCallback(returnTo),
+          }),
         });
         const body = (await res.json()) as { url?: string };
         if (body.url) {

@@ -17,8 +17,10 @@ Canonical truth is **files, not the database**: projects and tasks live as markd
 (frontmatter + body) under a runtime data root that humans and agents may edit directly.
 The app watches the files, parses tolerantly (malformed input becomes readable diagnostics,
 never a crash), derives readiness, and materializes projections into SQLite for fast reads.
-SQLite handles app management only — users, sessions, encrypted secrets, projections,
-audit — never canonical business truth.
+Project/task/profile/KB/skill truth is file-native. SQLite also owns non-rebuildable app state —
+users, sessions, encrypted GitHub and MCP secrets, audit, notifications, org-resource metadata,
+runtime projections, and the automatic-operator dispatch queue — so the database remains part of
+the backup surface even though it is never canonical task truth.
 
 Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · better-sqlite3 (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
@@ -59,9 +61,13 @@ Sign in with the seeded demo accounts:
 | Murat Yıldız / Selin Aksoy / Deniz Şahin | `…@viberr.dev` | `viberr-dev-2828` | member |
 
 The seed materializes the full demo dataset: the **viberr-core** project with tasks
-VIB-139…VIB-168 (packets, timelines, agent runs with live-dripping logs), two stub
-projects, notifications, agent profiles, knowledge bases. `npm run seed -- --reset`
-restores it to pristine at any time.
+VIB-139…VIB-168 (packets, timelines, agent runs with live-dripping logs), two small
+cross-project task fixtures, notifications, agent profiles, and knowledge bases.
+
+`npm run seed -- --reset` is a **destructive demo reset**, not a schema upgrade: it removes every
+canonical project, agent profile, runtime log, KB/skill file, MCP configuration/domain allowlist,
+and derived row before recreating the demo. Users, installed GitHub credentials, and encrypted org
+secret values survive. Back up the data root and stop the app before using it on a store that matters.
 
 Without `npm run seed`, an empty instance boots too: when the users table is empty the
 server creates a bootstrap admin at startup — set `VIBERR_SEED_ADMIN_EMAIL` /
@@ -79,7 +85,7 @@ first sign-in).
 | `npm test` | vitest unit + integration suite |
 | `npm run e2e` | Playwright golden paths (isolated data root, own port — safe to run next to a dev server; first time: `npx playwright install chromium`) |
 | `npm run migrate` | apply pending `db/migrations/*.sql` |
-| `npm run seed` | idempotent demo dataset (`-- --reset` wipes derived state first) |
+| `npm run seed` | idempotent demo dataset (`-- --reset` destructively replaces canonical demo/resource state; see above) |
 | `npm run rescan` | reconcile projections with the file store |
 
 ## Enabling real agent backends
@@ -109,14 +115,17 @@ it is not a security sandbox from autonomous coding runs in the same container.
 For untrusted tasks, run Codex under a separate OS user/container with only the
 task workspace mounted and keep delivery credentials in the server process.
 
-Confirm what's live: `GET /resources/health` → `backends: { claude, codex }` reports
-`real` vs `simulated`. New runs then stream real SDK output; raw NDJSON of every run is
-persisted under `<data root>/runtimes/`. Container specifics: `docs/operations/deployment.md`.
+Confirm what's live: `GET /resources/health` reports each backend as `unconfigured`, `unknown`,
+`verified`, or `degraded`. `configured` means a credential or explicit CLI-auth opt-in is present;
+only a recent real run can make the provider `verified` or `degraded`. The health request itself
+never spends a provider call. New runs stream SDK output; raw NDJSON of every run is persisted under
+`<data root>/runtimes/`. Container specifics: `docs/operations/deployment.md`.
 
 ## Enabling GitHub integration
 
 Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
-(AES-256-GCM with `VIBERR_SECRET_ENCRYPTION_KEY`).
+(AES-256-GCM with `VIBERR_SECRET_ENCRYPTION_KEY`). The same key protects organization secrets
+referenced by MCP HTTP-header or stdio-environment mappings.
 
 1. Create a token on GitHub — *Settings → Developer settings → Fine-grained personal
    access token*, resource owner = the org/user owning the project repo, grant access to
@@ -127,10 +136,13 @@ Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
 2. In Viberr: **Org settings → Connections** → add the connection (the token is
    validated before anything is saved), then attach the repo in
    **Project settings → Repository**.
-3. Keep `VIBERR_SECRET_ENCRYPTION_KEY` stable — rotating it orphans stored tokens
-   (they must be deleted and re-added).
+3. Keep `VIBERR_SECRET_ENCRYPTION_KEY` stable — rotating it orphans stored tokens and MCP
+   organization secrets (they must be deleted and re-added).
 
 Without a token everything degrades honestly (typed "no credential" states, never a crash).
+Specialists never receive the token or push themselves: Viberr prepares the checkout, then owns the
+authenticated push, verifies the exact remote head and a non-empty comparison, and opens/reuses the
+task PR after the model run.
 
 ## Enabling OAuth sign-in
 
@@ -160,6 +172,12 @@ against `/resources/health` and `restart: unless-stopped`. See
 story (backup/restore, projection rebuild) and
 [docs/operations/runbook.md](docs/operations/runbook.md) for day-2 operations.
 
+For this breaking development pass, do not reuse a database whose canonical migration files were
+already recorded at their older contents. Stop Compose, preserve the SQLite/WAL/SHM trio, move that
+trio out of `docker-data/state/`, rebuild the image, then run
+`docker compose run --rm app npm run seed` to create a fresh demo database. This is intentionally
+destructive; the runbook separates that development reset from production restore/recovery.
+
 ## Project layout
 
 ```
@@ -184,38 +202,52 @@ data/              # runtime data root (gitignored): projects/<slug>/tasks/<KEY>
 
 ## Architecture
 
-The authoritative planning artifacts live in [`planning/planning-artifacts/`](planning/planning-artifacts/)
-(PRD, architecture, epics, UX spec). Build-time documentation — phase-by-phase reports,
-conventions, cross-cutting contracts — lives in [`docs/build/`](docs/build/). Canonical
-file formats (project.md / task.md / timeline event grammar) are specified in
+The current product authority for this correction pass lives in
+[`planning/discovery-2026-07-13/`](planning/discovery-2026-07-13/). The original PRD, architecture,
+epics, and UX material under [`planning/planning-artifacts/`](planning/planning-artifacts/) remain
+historical intent; phase reports under [`docs/build/`](docs/build/) are historical build records.
+Canonical file formats are specified in
 [`docs/architecture/file-formats.md`](docs/architecture/file-formats.md).
 
 ## Screenshots / design parity
 
-The app is a 1:1 port of the high-fidelity design mock in `design/html-app/` — class
-names, tokens, light/dark themes, and copy are kept intact, so the reference screenshots
-under `design/html-app/_shots/` show exactly what the running app looks like (board,
-task workspace with decision packets, live agent runs, review queue, org settings…).
+The high-fidelity mock in `design/html-app/` remains the visual starting point: its tokens, themes,
+and much of its copy are carried forward. It is not a current behavioral golden. Responsive shell,
+governance, routing, reviewer, archive, recovery, and honest integration states deliberately diverge;
+the dated walkthrough and fresh validation evidence live in the current discovery dossier.
+
+## Current governance contracts
+
+- A contributor who currently owns a task may resolve its packets and accept that task's completion;
+  maintainers/admins retain project-wide authority. Organization admins have visible, audited
+  emergency project-admin authority without acquiring membership.
+- Automatic operator triggers use a durable, coalescing queue with concurrency/cost bounds. Hard
+  eligibility removes impossible specialists; the intelligent operator then compares declared
+  skill/KB/MCP fit, backend health, workload, and observed cost, and persists its reason. Viberr does
+  not apply a hidden static score.
+- Reviewers use isolated workspaces and must emit one structured, non-simulated verdict. Every
+  assigned reviewer must approve the current evidence round; any rejection returns the task to
+  implementation.
+- Completion requires the governed Review stage and exactly healthy validation. A repository task
+  needs a linked PR and reaches Done only after a real merge. If acceptance succeeds but merge cannot,
+  it remains in Review as **accepted · merge pending**. A healthy repo-less task may finish directly.
+- Archived projects are readable history. Mutations and new runs are blocked, active runs are
+  stopped, and Settings exposes Restore as the only project mutation.
 
 ## Known gaps (V1 release notes)
 
 Deliberate scope boundaries, documented rather than half-built:
 
 - **No mailer.** Notifications are in-app only; email/nudge preferences on the profile
-  are schema-only. Invited users don't get an email — admins hand over the one-time
-  password shown at creation.
+  are schema-only. Project **Grant access** provisions an OAuth-whitelisted account and membership
+  but sends nothing; admins must give the person the exact sign-in instruction. Local org-user
+  creation separately surfaces a one-time password for manual handoff.
 - **Org-level audit console.** Org-scoped audit rows (user admin, connections, auth)
   are recorded but only project-scoped audit has a UI (Activity → Audit logs). The mock
   defines no org audit tab.
 - **Provenance/audit tables grow unboundedly** — no retention policy yet; see the
   runbook for the manual cleanup story.
 - **Notifications page caps at the newest 200 rows** (no pagination).
-- **Stub-project task links** (DEP-31, BIL-7) land on an in-shell 404 — the two stub
-  projects exist for cross-project navigation, their tasks are not seeded.
-- **Home "GitHub connections" tile** derives from project repos, not from org
-  connections.
-- **MCP server credentials UI** is not built (org settings lists servers and probes
-  reachability; secrets would be a follow-up).
 - **Fine-grained PAT validation is partly probe-based** — GitHub doesn't expose
   fine-grained permissions in headers, so some scope checks report "assumed" until
   first use (documented in the credential card).

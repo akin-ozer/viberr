@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { Icon } from "~/ui/icon";
 import { WORKSPACE_NAV, workspaceViewFromPathname } from "./nav";
@@ -17,6 +18,11 @@ export function Rail({
   boardCount,
   reviewCount,
   violations,
+  orgAdminOverride,
+  canViewProtected = true,
+  mobile = false,
+  open = false,
+  onClose,
 }: {
   projectSlug: string;
   projectName: string;
@@ -25,46 +31,124 @@ export function Rail({
   boardCount: number;
   reviewCount: number;
   violations: number;
+  orgAdminOverride?: boolean;
+  /** Review/config surfaces are member-only, except org-admin emergency access. */
+  canViewProtected?: boolean;
+  mobile?: boolean;
+  open?: boolean;
+  onClose?: () => void;
 }) {
   const location = useLocation();
   const activeView = workspaceViewFromPathname(location.pathname);
+  const navRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const mobileClosed = mobile && !open;
+
+  useEffect(() => {
+    if (!mobile || !open) return;
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobile, onClose, open]);
+
+  const trapTab = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!mobile || !open || event.key !== "Tab") return;
+    const focusable = [...(navRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    ) ?? [])];
+    if (!focusable.length) return;
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
-    <nav className="rail" aria-label="Primary">
-      <Link className="project-switch" to="/" title="All projects">
-        <span>
-          <div className="pj-name">{projectName}</div>
-          <div className="pj-meta">
-            {(projectRepo ? projectRepo + " · " : "") +
-              membersCount +
-              (membersCount === 1 ? " member" : " members")}
-          </div>
-        </span>
-        <Icon name="chevron" />
-      </Link>
-
-      <div className="rail-label">Workspace</div>
-      {WORKSPACE_NAV.map((n) => (
-        <NavLink
-          key={n.id}
-          to={`/projects/${projectSlug}/${n.id}`}
-          className={"nav-item" + (activeView === n.id ? " active" : "")}
+    <>
+      {mobile && open && (
+        <button
+          type="button"
+          className="rail-scrim"
+          aria-label="Close project navigation"
+          onClick={onClose}
+        />
+      )}
+      <nav
+        id="project-rail"
+        ref={navRef}
+        className={`rail${mobile ? " mobile" : ""}${open ? " open" : ""}`}
+        aria-label="Primary"
+        aria-hidden={mobileClosed || undefined}
+        inert={mobileClosed || undefined}
+        onKeyDown={trapTab}
+      >
+        {mobile && (
+          <button
+            type="button"
+            className="rail-close icon-btn"
+            aria-label="Close project navigation"
+            onClick={onClose}
+            ref={closeRef}
+          >
+            <Icon name="x" />
+          </button>
+        )}
+        <Link
+          className="project-switch"
+          to="/"
+          title="All projects"
+          onClick={mobile ? onClose : undefined}
         >
-          <Icon name={n.icon} className="ico" />
-          {n.label}
-          {n.id === "board" && <span className="count">{boardCount}</span>}
-          {n.id === "review" && <span className="count">{reviewCount}</span>}
-          {n.id === "settings" && violations > 0 && (
-            <span
-              className="count"
-              style={{ color: "var(--coral-dark)", fontWeight: 700 }}
-            >
-              {violations}
-            </span>
-          )}
-        </NavLink>
-      ))}
+          <span>
+            <div className="pj-name">{projectName}</div>
+            <div className="pj-meta">
+              {(projectRepo ? projectRepo + " · " : "") +
+                membersCount +
+                (membersCount === 1 ? " member" : " members") +
+                (orgAdminOverride ? " · org admin override" : "")}
+            </div>
+          </span>
+          <Icon name="chevron" />
+        </Link>
 
-      <div className="rail-spacer" />
-    </nav>
+        <div className="rail-label">Workspace</div>
+        {WORKSPACE_NAV.filter(
+          (item) => item.id === "board" || canViewProtected,
+        ).map((n) => (
+          <NavLink
+            key={n.id}
+            to={`/projects/${projectSlug}/${n.id}`}
+            className={"nav-item" + (activeView === n.id ? " active" : "")}
+            onClick={mobile ? onClose : undefined}
+          >
+            <Icon name={n.icon} className="ico" />
+            {n.label}
+            {n.id === "board" && <span className="count">{boardCount}</span>}
+            {n.id === "review" && <span className="count">{reviewCount}</span>}
+            {n.id === "settings" && violations > 0 && (
+              <span
+                className="count"
+                style={{ color: "var(--coral-dark)", fontWeight: 700 }}
+              >
+                {violations}
+              </span>
+            )}
+          </NavLink>
+        ))}
+
+        <div className="rail-spacer" />
+      </nav>
+    </>
   );
 }

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import {
+  createTestDbContext,
+  type TestDbContext,
+} from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -13,6 +16,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
+import { setBackendAvailability } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   assignReviewer,
@@ -56,7 +60,10 @@ async function waitForLines(
 
 /** Re-write the store's project.md with a deployed `dev` specialist (claude). */
 function deployDevSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  const file = readProjectFile({
+    projectSlug: store.slug,
+    dataRoot: store.dataRoot,
+  })!;
   const fm = file.parsed.frontmatter;
   writeProject(store.dataRoot, {
     ...fm,
@@ -145,7 +152,11 @@ describe("assignSpecialist", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(result).toMatchObject({ profileId: "dev", role: "developer", backend: "claude" });
+    expect(result).toMatchObject({
+      profileId: "dev",
+      role: "developer",
+      backend: "claude",
+    });
 
     const file = readTaskFile({
       projectSlug: store.slug,
@@ -162,7 +173,9 @@ describe("assignSpecialist", () => {
     expect(event.text).toContain("Deployed **dev**");
     expect(event.text).toContain("primary specialist");
 
-    const audit = listAuditEvents(store.db, { action: "task.specialist.assigned" });
+    const audit = listAuditEvents(store.db, {
+      action: "task.specialist.assigned",
+    });
     expect(audit[0]?.taskKey).toBe("VIB-1");
   });
 
@@ -224,7 +237,10 @@ describe("startSpecialistRun", () => {
 
   it("rejects RUNNING an already-assigned specialist at a stage it isn't eligible for (F1 run boundary)", async () => {
     // Re-deploy `dev` scoped to the REVIEW stage only, assigned to VIB-1.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       repo: null,
@@ -269,6 +285,74 @@ describe("startSpecialistRun", () => {
     ).rejects.toThrow(/not eligible/i);
   });
 
+  it("hard-rejects Codex when omitted local capabilities cannot be enforced", async () => {
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5.4-codex",
+            stages: ["impl"],
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await assign();
+
+    await expect(
+      startSpecialistRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Codex cannot enforce.*create-task-branch/);
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT count(*) AS n FROM agent_runs WHERE task_key = 'VIB-1'`,
+          )
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
+  });
+
+  it("fails closed when an assigned profile was undeployed", async () => {
+    await assign();
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await expect(
+      startSpecialistRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/no longer deployed/);
+  });
+
   it("creates a run row with the specialist backend + a simulated stream (>0 lines)", async () => {
     await assign();
     const result = await startSpecialistRun(
@@ -290,7 +374,8 @@ describe("startSpecialistRun", () => {
     expect(lineCount).toBeGreaterThan(0);
 
     // Stop the realistic-cadence timer so it does not outlive the test.
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const { interruptRun } =
+      await import("~/server/runtimes/run-service.server");
     interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
@@ -303,11 +388,56 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.timeline[0]!.text).toContain("Started a Claude Code run");
-    const audit = listAuditEvents(store.db, { action: "task.specialist.run_started" });
+    expect(file.parsed.timeline[0]!.text).toContain(
+      "Started a Claude Code run",
+    );
+    const audit = listAuditEvents(store.db, {
+      action: "task.specialist.run_started",
+    });
     expect(audit[0]?.taskKey).toBe("VIB-1");
-    const startAudit = listAuditEvents(store.db, { action: "runtime.run.started" });
+    const startAudit = listAuditEvents(store.db, {
+      action: "runtime.run.started",
+    });
     expect(startAudit.length).toBe(1); // not double-counted
+  });
+
+  it("fails real-run preflight into one recovery packet before creating a run row", async () => {
+    await assign();
+    setBackendAvailability("claude", true);
+    try {
+      await expect(
+        startSpecialistRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/Run not started/);
+      const runs = store.db
+        .prepare(
+          "SELECT count(*) AS c FROM agent_runs WHERE task_key = 'VIB-1'",
+        )
+        .get() as { c: number };
+      expect(runs.c).toBe(0);
+      const task = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed;
+      expect(task.packet).toMatchObject({
+        type: "blocked",
+        from: "system:runtime-recovery",
+      });
+      expect(task.frontmatter).toMatchObject({
+        waiting: "human",
+        readiness: "blocked",
+      });
+      expect(task.timeline[0]?.text).toContain(
+        "No developer model session was started",
+      );
+    } finally {
+      setBackendAvailability("claude", false);
+    }
   });
 
   it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
@@ -316,12 +446,20 @@ describe("startSpecialistRun", () => {
       // With an operator directive, the simulated agent must report the work DONE —
       // otherwise the operator (reading only a "findings" summary) keeps
       // re-prompting the same canned reply and spirals (the CTL-3 bug).
-      const withDirective = simulatedFinalReport(backend, "@dev implement the feature and add a test");
+      const withDirective = simulatedFinalReport(
+        backend,
+        "@dev implement the feature and add a test",
+      );
       expect(withDirective.toLowerCase()).toContain("done");
       expect(withDirective.toLowerCase()).toContain("ready to advance");
       expect(withDirective).not.toContain("Findings:");
       // Deterministic, so a repeat trips the operator's no-progress guard.
-      expect(simulatedFinalReport(backend, "@dev implement the feature and add a test")).toBe(withDirective);
+      expect(
+        simulatedFinalReport(
+          backend,
+          "@dev implement the feature and add a test",
+        ),
+      ).toBe(withDirective);
       // Without a directive it is still the plain findings summary.
       expect(simulatedFinalReport(backend)).toContain("Findings:");
 
@@ -329,12 +467,21 @@ describe("startSpecialistRun", () => {
       // (it reviews the diff AND authors/runs the validation suite — Tester merged
       // in), so both "review" and "validation" roles report a verdict that covers
       // tests, not an "implemented" summary.
-      const reviewReport = simulatedFinalReport(backend, "@reviewer review it", "Code review");
+      const reviewReport = simulatedFinalReport(
+        backend,
+        "@reviewer review it",
+        "Code review",
+      );
       expect(reviewReport.toLowerCase()).toContain("approve");
+      expect(reviewReport).toContain("VIBERR_REVIEW_VERDICT:");
       expect(reviewReport).not.toContain("implemented what you asked for");
       // A "Validation" role classifies as the Reviewer now — same verdict report,
       // which also reports the tests passing.
-      const validationReport = simulatedFinalReport(backend, "@reviewer validate it", "Validation");
+      const validationReport = simulatedFinalReport(
+        backend,
+        "@reviewer validate it",
+        "Validation",
+      );
       expect(validationReport.toLowerCase()).toContain("approve");
       expect(validationReport.toLowerCase()).toContain("pass");
       expect(validationReport).not.toContain("implemented what you asked for");
@@ -377,44 +524,91 @@ describe("assignReviewer / removeReviewer", () => {
     expect(file.parsed.timeline[0]!.text).toContain("Engaged **dev**");
     expect(file.parsed.timeline[0]!.text).toContain("as a reviewer");
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]
+        ?.taskKey,
     ).toBe("VIB-1");
   });
 
   it("is idempotent — a second assign is a no-op (alreadyEngaged)", async () => {
     const opts = { dataRoot: store.dataRoot };
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
-    const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      opts,
+    );
+    const again = await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      opts,
+    );
     expect(again.alreadyEngaged).toBe(true);
-    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
     expect(file.parsed.frontmatter.reviewers).toHaveLength(1);
   });
 
   it("removeReviewer drops the ref (+ event/audit); missing id is a no-op", async () => {
     const opts = { dataRoot: store.dataRoot };
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
-    const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      opts,
+    );
+    const removed = await removeReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      opts,
+    );
     expect(removed.removed).toBe(true);
-    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
     expect(file.parsed.frontmatter.reviewers).toEqual([]);
-    expect(file.parsed.timeline[0]!.text).toContain("Released reviewer **dev**");
-    expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]?.taskKey).toBe("VIB-1");
+    expect(file.parsed.timeline[0]!.text).toContain(
+      "Released reviewer **dev**",
+    );
+    expect(
+      listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]
+        ?.taskKey,
+    ).toBe("VIB-1");
 
-    const noop = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" }, actor(store.users.arda), opts);
+    const noop = await removeReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" },
+      actor(store.users.arda),
+      opts,
+    );
     expect(noop.removed).toBe(false);
   });
 
   it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
-        assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(user), { dataRoot: store.dataRoot }),
+        assignReviewer(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+          actor(user),
+          { dataRoot: store.dataRoot },
+        ),
       ).rejects.toMatchObject({ status: 403 });
     }
   });
 
   it("rejects engaging a reviewer whose profile isn't eligible for the current stage (F1)", async () => {
     // Re-deploy `dev` scoped to REVIEW only; VIB-1 is at impl → ineligible.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       repo: null,
@@ -424,8 +618,12 @@ describe("assignReviewer / removeReviewer", () => {
           capabilities: [],
           extras: [],
           definition: {
-            kind: "specialist", name: "dev", role: "developer",
-            backends: ["claude"], model: "sonnet", effort: "xhigh",
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            effort: "xhigh",
             stages: ["review"],
           },
         } as never,
@@ -433,7 +631,12 @@ describe("assignReviewer / removeReviewer", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
-      assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+      assignReviewer(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
     ).rejects.toThrow(/not eligible/i);
   });
 });
@@ -475,14 +678,16 @@ describe("startReviewerRun", () => {
     const lineCount = await waitForLines(result.runId, 1);
     expect(lineCount).toBeGreaterThan(0);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const { interruptRun } =
+      await import("~/server/runtimes/run-service.server");
     interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
       actor(store.users.arda),
     );
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]
+        ?.taskKey,
     ).toBe("VIB-1");
   });
 
@@ -499,7 +704,8 @@ describe("startReviewerRun", () => {
     // reply as an agent-authored comment. This is the "reviewer didn't comment
     // after a run" fix: the UI "Run" button path now reports back.
     await waitForLines(result.runId, 2);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    const { interruptRun } =
+      await import("~/server/runtimes/run-service.server");
     interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
@@ -507,7 +713,11 @@ describe("startReviewerRun", () => {
     );
     let replied = false;
     for (let i = 0; i < 120 && !replied; i++) {
-      const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+      const file = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      });
       replied = !!file?.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
       );

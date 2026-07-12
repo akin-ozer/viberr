@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  createMemoryRouter,
+  Outlet,
+  RouterProvider,
+} from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import {
   BranchesPanel,
+  GithubViewPage,
   PullRequestsPanel,
   RepositoryPanel,
 } from "./github-view";
@@ -422,5 +429,67 @@ describe("BranchesPanel", () => {
     expect(container.querySelector(".empty")!.textContent).toContain(
       "No execution branches yet",
     );
+  });
+});
+
+describe("GithubViewPage archived mode", () => {
+  it("retains repository/PR history and links while hiding every mutation", async () => {
+    const router = createMemoryRouter(
+      [
+        {
+          id: "root",
+          path: "/",
+          loader: () => ({ csrf: "test-csrf" }),
+          element: (
+            <ToastProvider>
+              <Outlet />
+            </ToastProvider>
+          ),
+          children: [
+            {
+              path: "projects/viberr-core/github",
+              element: (
+                <GithubViewPage
+                  myRole="admin"
+                  readOnly
+                  data={{
+                    project: {
+                      slug: "viberr-core",
+                      name: "Viberr Core",
+                      repo: "akin-ozer/viberr",
+                      defaultBranch: "main",
+                    },
+                    githubHost: "https://github.com",
+                    connection: {
+                      status: "connected",
+                      repo: "akin-ozer/viberr",
+                      remoteDefaultBranch: "main",
+                      private: true,
+                    },
+                    credential: violationCredential,
+                    prs,
+                    branches,
+                  }}
+                />
+              ),
+            },
+          ],
+        },
+      ],
+      { initialEntries: ["/projects/viberr-core/github"] },
+    );
+    const { container, getByText, queryByText } = render(
+      <RouterProvider router={router} />,
+    );
+    await waitFor(() => expect(getByText("Archived · read-only")).toBeTruthy());
+
+    expect(queryByText("Reconcile")).toBeNull();
+    expect(queryByText("Grant scope")).toBeNull();
+    expect(queryByText("Rotate credential")).toBeNull();
+    expect(queryByText("Remove credential")).toBeNull();
+    expect(getByText("Fix in Settings")).toBeTruthy();
+    expect(getByText("Open on GitHub")).toBeTruthy();
+    expect(container.querySelectorAll(".rq-row")).toHaveLength(prs.length);
+    expect(container.querySelectorAll(".live-row")).toHaveLength(branches.length);
   });
 });

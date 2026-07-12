@@ -9,6 +9,7 @@ import type { TaskMutationContext } from "./task-actions.server";
 import {
   gate,
   operatorAcceptCompletion,
+  operatorAssessReadiness,
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorOpenPacket,
@@ -72,6 +73,11 @@ function resultText(r: OperatorActionResult) {
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
   const base = { projectSlug, taskKey };
+  // Tool availability is frozen for this turn. If readiness was unresolved at
+  // turn start, this toolkit can assess/ask/comment only; even a ready verdict
+  // cannot be followed by assignment/transition in the same model turn.
+  const workAllowed =
+    operatorSnapshot(db, ctx, projectSlug, taskKey, authority).readiness === "ready";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -93,6 +99,38 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         textResult(operatorSnapshot(db, ctx, projectSlug, taskKey, authority)),
     ),
     "get_task",
+  );
+
+  add(
+    tool(
+      "assess_readiness",
+      "Resolve readiness BEFORE any assignment, run, prompt, or stage transition. Choose ready only when the canonical goal names a concrete outcome and verification boundary. Choose input_required when intent is missing or only asks to exercise a lifecycle; Viberr then keeps the task in Triage and opens a clarification packet. Never invent product or repository work.",
+      {
+        verdict: z.enum(["ready", "input_required"]),
+        rationale: z.string().describe("Evidence from the canonical goal supporting this verdict."),
+        missingInformation: z
+          .string()
+          .optional()
+          .describe("For input_required: exactly what outcome or verification boundary the human must add."),
+      },
+      async (args) =>
+        resultText(
+          await operatorAssessReadiness(
+            db,
+            ctx,
+            {
+              ...base,
+              verdict: args.verdict,
+              rationale: prose(args.rationale),
+              ...(args.missingInformation
+                ? { missingInformation: prose(args.missingInformation) }
+                : {}),
+            },
+            authority,
+          ),
+        ),
+    ),
+    "assess_readiness",
   );
 
   if (gate(authority, "append-typed-events") !== "deny") {
@@ -180,14 +218,14 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  if (gate(authority, "assign-primary-specialist") !== "deny") {
+  if (workAllowed && gate(authority, "assign-primary-specialist") !== "deny") {
     add(
       tool(
         "assign_specialist",
-        "Assign a deployed specialist as the task's PRIMARY specialist. Pass the specialist's profileId (from get_task's deployedSpecialists) and a short reason. Under supervised autonomy this posts a recommendation card; under full autonomy it assigns directly.",
+        "Assign a hard-eligible routingCandidates.primary profile. Compare declared scope/skills/KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score or preselect a winner. The task must already be ready.",
         {
           profileId: z.string().describe("The specialist profile id to assign."),
-          reason: z.string().optional().describe("Why this specialist fits — shown on the recommendation card."),
+          reason: z.string().describe("Why this candidate is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
           resultText(
@@ -214,19 +252,25 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "prompt_specialist",
-        "Hand the task to the primary specialist for the CURRENT stage: assign it (if needed), post a task-related prompt comment addressed to it, and start its run with that prompt as its directive. Use this when a task enters a new working stage — it triggers the agent WITH a prompt, not silently. Pass the specialist's profileId and a concrete `prompt` telling it what to do for this task at this stage.",
+        "Hand the ready task to a routingCandidates.primary profile for this stage. YOU choose after comparing fit/resources, backend health, workload, and observed cost, and persist why. Keep the directive inside the canonical goal; never ask the specialist to invent a change.",
         {
           profileId: z.string().describe("The primary specialist profile id to prompt."),
           prompt: z
             .string()
             .describe("The task-related directive to give the specialist (what to do now at this stage)."),
+          reason: z.string().describe("Why this candidate is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
           resultText(
             await operatorPromptSpecialist(
               db,
               ctx,
-              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
+              {
+                ...base,
+                profileId: args.profileId,
+                directive: prose(args.prompt),
+                reason: prose(args.reason),
+              },
               authority,
             ),
           ),
@@ -235,14 +279,14 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  if (gate(authority, "summon-reviewers") !== "deny") {
+  if (workAllowed && gate(authority, "summon-reviewers") !== "deny") {
     add(
       tool(
         "assign_reviewer",
-        "Engage a deployed specialist as a REVIEWER (advisory, non-primary). Pass its profileId and a short reason. Supervised → recommendation card; full autonomy → engages directly.",
+        "Engage a hard-eligible routingCandidates.reviewer profile. Compare review fit/resources, backend health, workload, and observed cost; YOU choose and persist why. Supervised → recommendation card; full autonomy → engages directly.",
         {
           profileId: z.string().describe("The specialist profile id to engage as reviewer."),
-          reason: z.string().optional().describe("Why engage this reviewer — shown on the recommendation card."),
+          reason: z.string().describe("Why this reviewer is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
           resultText(
@@ -271,19 +315,25 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "prompt_reviewer",
-        "Hand the task to a reviewer for the REVIEW stage: engage it (if needed), post a task-related prompt comment addressed to it, and start its reviewer run with that prompt as its directive. Use this when a task enters the review stage. Pass the reviewer's profileId and a concrete `prompt` telling it what to review for this task.",
+        "Hand the ready task to a routingCandidates.reviewer profile for the review stage. Compare review fit/resources, backend health, workload, and observed cost, persist why, and keep the directive grounded in this task's goal and evidence.",
         {
           profileId: z.string().describe("The reviewer profile id to prompt."),
           prompt: z
             .string()
             .describe("The task-related directive to give the reviewer (what to review now)."),
+          reason: z.string().describe("Why this reviewer is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
           resultText(
             await operatorPromptReviewer(
               db,
               ctx,
-              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
+              {
+                ...base,
+                profileId: args.profileId,
+                directive: prose(args.prompt),
+                reason: prose(args.reason),
+              },
               authority,
             ),
           ),
@@ -292,7 +342,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  if (gate(authority, "stage-transitions") !== "deny") {
+  if (workAllowed && gate(authority, "stage-transitions") !== "deny") {
     add(
       tool(
         "transition_stage",
@@ -319,7 +369,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // (direct or recommend). `human`/`off` withhold the tool entirely — full
   // autonomy does NOT smuggle it back in (owner ruling Q1: the human-only-Done
   // exception requires an explicit grant, never an autonomy side-effect).
-  if (gate(authority, "completion-for-acceptance") !== "deny") {
+  if (workAllowed && gate(authority, "completion-for-acceptance") !== "deny") {
     add(
       tool(
         "accept_completion",

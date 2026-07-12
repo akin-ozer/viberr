@@ -33,6 +33,41 @@ export type RealBackend = "claude" | "codex";
 
 interface RegistryState {
   detected: Partial<Record<RealBackend, boolean>>;
+  signals: Partial<Record<RealBackend, BackendRunSignal>>;
+}
+
+interface BackendRunSignal {
+  latest: "success" | "failure";
+  checkedAtMs: number;
+  lastSuccessAtMs: number | null;
+  lastFailureAtMs: number | null;
+}
+
+/** A run result is a useful provider-health signal for this long. Health reads
+ * never call a provider; after this window an otherwise configured backend is
+ * reported as unknown until another real run supplies fresh evidence. */
+export const BACKEND_HEALTH_SIGNAL_TTL_MS = 30 * 60 * 1000;
+
+export type BackendHealthStatus =
+  | "unconfigured"
+  | "unknown"
+  | "verified"
+  | "degraded";
+
+export interface BackendHealth {
+  status: BackendHealthStatus;
+  /** A credential or an explicit CLI-auth opt-in is present. */
+  configured: boolean;
+  /** A recent real run completed successfully. */
+  verified: boolean;
+  /** The most recent real run failed. This is a warning, not proof that every
+   * future run will fail. */
+  degraded: boolean;
+  /** Configured, but with no recent real-run result. */
+  unknown: boolean;
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
 }
 
 const REGISTRY_KEY = Symbol.for("viberr.runtimeRegistry");
@@ -41,9 +76,11 @@ function getState(): RegistryState {
   const cache = globalThis as unknown as Record<symbol, RegistryState | undefined>;
   let state = cache[REGISTRY_KEY];
   if (!state) {
-    state = { detected: {} };
+    state = { detected: {}, signals: {} };
     cache[REGISTRY_KEY] = state;
   }
+  // HMR can retain a cache created before run-result health signals existed.
+  if (!state.signals) state.signals = {};
   return state;
 }
 
@@ -106,6 +143,65 @@ export function resetRegistryForTests(): void {
 /** Force a cached detection result (tests / an explicit override). */
 export function setBackendAvailability(backend: RealBackend, available: boolean): void {
   getState().detected[backend] = available;
+}
+
+/** Records an observation from an actual provider-backed run. Simulated runs
+ * and human interrupts deliberately do not call this: neither says whether a
+ * configured provider is usable. */
+export function recordBackendRunResult(
+  backend: RealBackend,
+  outcome: "success" | "failure",
+  observedAt: Date = new Date(),
+): void {
+  const state = getState();
+  const prior = state.signals[backend];
+  const checkedAtMs = observedAt.getTime();
+  if (!Number.isFinite(checkedAtMs)) return;
+  state.signals[backend] = {
+    latest: outcome,
+    checkedAtMs,
+    lastSuccessAtMs:
+      outcome === "success" ? checkedAtMs : (prior?.lastSuccessAtMs ?? null),
+    lastFailureAtMs:
+      outcome === "failure" ? checkedAtMs : (prior?.lastFailureAtMs ?? null),
+  };
+}
+
+/** Returns cached health only; this function never performs a paid or network
+ * provider probe. Configuration presence and verified usability remain
+ * separate facts so `/resources/health` cannot overclaim from an env var. */
+export function getBackendHealth(
+  backend: RealBackend,
+  now: Date = new Date(),
+): BackendHealth {
+  const configured = isBackendAvailable(backend);
+  const signal = getState().signals[backend];
+  const ageMs = signal ? now.getTime() - signal.checkedAtMs : Infinity;
+  const fresh =
+    configured &&
+    !!signal &&
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= BACKEND_HEALTH_SIGNAL_TTL_MS;
+  const status: BackendHealthStatus = !configured
+    ? "unconfigured"
+    : !fresh
+      ? "unknown"
+      : signal.latest === "success"
+        ? "verified"
+        : "degraded";
+  const iso = (value: number | null | undefined) =>
+    typeof value === "number" ? new Date(value).toISOString() : null;
+  return {
+    status,
+    configured,
+    verified: status === "verified",
+    degraded: status === "degraded",
+    unknown: status === "unknown",
+    lastCheckedAt: iso(signal?.checkedAtMs),
+    lastSuccessAt: iso(signal?.lastSuccessAtMs),
+    lastFailureAt: iso(signal?.lastFailureAtMs),
+  };
 }
 
 // ---------------------------------------------------------- selection

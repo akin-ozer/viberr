@@ -11,20 +11,32 @@ import { Icon } from "./icon";
 
 /**
  * Toast stack, ported from design/html-app/app/ui.jsx: bottom-center,
- * auto-dismiss after 2600 ms, check icon (mock toasts are success-only —
- * errors render inline/route-level per CONVENTIONS). Phase 4 mounts ONE
- * ToastProvider in root.tsx; features call useToast() instead of the
- * mock's prop-drilled `push`.
+ * auto-dismiss after 2600 ms. Feedback is typed so a failed mutation can
+ * never be rendered with the success checkmark. Phase 4 mounts ONE
+ * ToastProvider in root.tsx; features call useToast() instead of the mock's
+ * prop-drilled `push`.
  */
+
+export type ToastKind = "success" | "error" | "info";
+
+export type ToastInput =
+  | string
+  | {
+      text: string;
+      kind: ToastKind;
+    };
 
 export interface Toast {
   id: string;
   text: string;
+  kind: ToastKind;
 }
+
+export type PushToast = (input: ToastInput) => void;
 
 const TOAST_DISMISS_MS = 2600;
 
-export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
+export function useToasts(): { toasts: Toast[]; push: PushToast } {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -35,9 +47,13 @@ export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
     [],
   );
 
-  const push = useCallback((text: string) => {
+  const push = useCallback((input: ToastInput) => {
+    const { text, kind } =
+      typeof input === "string"
+        ? { text: input, kind: "success" as const }
+        : input;
     const id = crypto.randomUUID();
-    setToasts((t) => [...t, { id, text }]);
+    setToasts((t) => [...t, { id, text, kind }]);
     timers.current.push(
       setTimeout(() => {
         setToasts((t) => t.filter((x) => x.id !== id));
@@ -50,10 +66,23 @@ export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
 
 function ToastHost({ toasts }: { toasts: Toast[] }) {
   return (
-    <div className="toast-wrap" role="status" aria-live="polite">
+    <div className="toast-wrap">
       {toasts.map((t) => (
-        <div className="toast" key={t.id}>
-          <Icon name="check" />
+        <div
+          className={`toast ${t.kind}`}
+          key={t.id}
+          role={t.kind === "error" ? "alert" : "status"}
+          aria-live={t.kind === "error" ? "assertive" : "polite"}
+        >
+          <Icon
+            name={
+              t.kind === "success"
+                ? "check"
+                : t.kind === "error"
+                  ? "alert"
+                  : "bell"
+            }
+          />
           {t.text}
         </div>
       ))}
@@ -61,7 +90,7 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
   );
 }
 
-const ToastContext = createContext<(text: string) => void>(() => {});
+const ToastContext = createContext<PushToast>(() => {});
 
 /** App-wide toast context: mounts the single ToastHost (root layout). */
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -74,7 +103,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** `push(text)` — 2600 ms auto-dismissing confirmation toast. */
-export function useToast(): (text: string) => void {
+/** Strings are success feedback; pass `{ kind, text }` for errors/info. */
+export function useToast(): PushToast {
   return useContext(ToastContext);
 }

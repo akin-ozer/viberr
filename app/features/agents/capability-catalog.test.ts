@@ -77,6 +77,7 @@ describe("capabilitiesToActionLabels", () => {
         { capabilityId: "report-validation-verdict", mode: "recommend" },
         { capabilityId: "merge-pull-request", mode: "human" },
         { capabilityId: "transition-to-done", mode: "human" },
+        { capabilityId: "open-review-pr", mode: "off" },
       ],
       [{ label: "Run the validation suite", mode: "direct" }],
     );
@@ -90,6 +91,7 @@ describe("capabilitiesToActionLabels", () => {
       "Merge a pull request",
       "Transition a task to Done",
     ]);
+    expect(buckets.off).toEqual(["Open the review pull request"]);
   });
 
   it("keeps unknown capability ids tolerantly (renders the id)", () => {

@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   Link,
   useLocation,
   useNavigate,
+  useNavigation,
   useSearchParams,
 } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
@@ -11,6 +17,7 @@ import type { NotificationView } from "~/features/notifications/notification-ite
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
 import { workspaceViewFromPathname, workspaceViewLabel } from "./nav";
+import type { LiveUpdateStatus } from "~/features/live-updates/use-live-updates";
 
 /**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
@@ -20,6 +27,75 @@ import { workspaceViewFromPathname, workspaceViewLabel } from "./nav";
  * Typing in the search while on a non-board view navigates to the board
  * with the query applied (mirrors Home's "typing leaves settings" rule).
  */
+export function RailToggle({
+  open,
+  onToggle,
+  buttonRef,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <button
+      type="button"
+      className="icon-btn rail-toggle"
+      aria-label={open ? "Close project navigation" : "Open project navigation"}
+      aria-expanded={open}
+      aria-controls="project-rail"
+      onClick={onToggle}
+      ref={buttonRef}
+    >
+      <Icon name={open ? "x" : "review"} />
+    </button>
+  );
+}
+
+const LIVE_STATUS: Record<
+  LiveUpdateStatus,
+  { label: string; title: string }
+> = {
+  connecting: { label: "Connecting", title: "Opening live updates" },
+  connected: { label: "Live", title: "Live updates connected" },
+  reconnecting: {
+    label: "Reconnecting",
+    title: "Live updates interrupted — reconnecting",
+  },
+  offline: { label: "Offline", title: "Browser is offline" },
+  paused: { label: "Paused", title: "Live updates pause in background tabs" },
+  unavailable: {
+    label: "Unavailable",
+    title: "Live updates are unavailable in this browser",
+  },
+};
+
+export function LiveUpdateIndicator({ status }: { status: LiveUpdateStatus }) {
+  const meta = LIVE_STATUS[status];
+  return (
+    <span
+      className={`live-status ${status}`}
+      role="status"
+      aria-live="polite"
+      title={meta.title}
+    >
+      <span className="live-status-dot" />
+      {meta.label}
+    </span>
+  );
+}
+
+export function NavigationStatus() {
+  const navigation = useNavigation();
+  if (navigation.state === "idle") return null;
+  const label = navigation.formMethod ? "Applying change…" : "Loading view…";
+  return (
+    <span className="nav-pending" role="status" aria-live="polite">
+      <Icon name="refresh" className="spin" />
+      {label}
+    </span>
+  );
+}
+
 export function Topbar({
   projectSlug,
   projectName,
@@ -28,6 +104,11 @@ export function Topbar({
   theme,
   notifications,
   unread,
+  liveStatus = "connecting",
+  showRailToggle = false,
+  railOpen = false,
+  onToggleRail,
+  railToggleRef,
 }: {
   projectSlug: string;
   projectName: string;
@@ -37,6 +118,11 @@ export function Topbar({
   theme: ThemePreference;
   notifications: NotificationView[];
   unread: number;
+  liveStatus?: LiveUpdateStatus;
+  showRailToggle?: boolean;
+  railOpen?: boolean;
+  onToggleRail?: () => void;
+  railToggleRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,6 +175,13 @@ export function Topbar({
 
   return (
     <div className="topbar">
+      {showRailToggle && onToggleRail && (
+        <RailToggle
+          open={railOpen}
+          onToggle={onToggleRail}
+          buttonRef={railToggleRef}
+        />
+      )}
       <Link className="home-brand" to="/" title="Home — all projects">
         <span className="mark">V</span>
         <b>Viberr</b>
@@ -127,6 +220,8 @@ export function Topbar({
         />
         <span className="kbd">⌘K</span>
       </div>
+      <NavigationStatus />
+      <LiveUpdateIndicator status={liveStatus} />
       <TopBell notifications={notifications} unread={unread} />
       <UserMenu user={user} theme={theme} showSwitchProject />
     </div>

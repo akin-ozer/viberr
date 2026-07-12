@@ -30,6 +30,8 @@ export interface RunSpec {
   prompt: string;
   /** Absolute working directory for the spawned CLI. */
   workdir: string;
+  /** Data root owning this run's canonical JSONL (tests may override it). */
+  dataRoot?: string;
   /** Resume an existing provider session, if any. */
   resumeSessionId?: string | null;
   /** Whether the run should be autonomous (Claude bypassPermissions / Codex

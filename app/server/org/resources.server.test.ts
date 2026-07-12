@@ -9,6 +9,7 @@ import {
   deleteKnowledgeBase,
   deleteMcpServer,
   deleteSkill,
+  discoverHttpMcpTools,
   discoverStdioMcpTools,
   getKnowledgeBase,
   getSkill,
@@ -22,6 +23,7 @@ import {
   saveSkill,
   testMcpServer,
 } from "./resources.server";
+import { saveOrgSecret } from "~/server/secrets/org-secret-store.server";
 
 /**
  * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
@@ -93,8 +95,48 @@ function setup() {
   return { db, dataRoot, ctx: { dataRoot } };
 }
 
-/** An "up" probe transport: any HTTP response counts as reachable. */
-const respondingFetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
+function mcpFetch(
+  tools: number,
+  inspect?: (headers: Headers, method: string) => void,
+): typeof fetch {
+  return (async (_input, init) => {
+    const request = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
+    const headers = new Headers(init?.headers);
+    inspect?.(headers, request.method ?? "");
+    if (request.method === "initialize") {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          result: { protocolVersion: "2025-11-25", capabilities: {} },
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "mcp-session-id": "session-1",
+          },
+        },
+      );
+    }
+    if (request.method === "notifications/initialized") {
+      return new Response(null, { status: 202 });
+    }
+    if (request.method === "tools/list") {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          result: {
+            tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(null, { status: 400 });
+  }) as typeof fetch;
+}
 
 describe("knowledge bases", () => {
   it("create makes the real folder; scan sees files added outside Viberr", () => {
@@ -283,53 +325,135 @@ describe("skills", () => {
 });
 
 describe("mcp servers", () => {
-  it("probe is honest: any HTTP response = up, network error = down, stdio = skipped", async () => {
+  it("HTTP health requires initialize + tools/list; an error page is down", async () => {
     expect(
       await probeMcpTarget("HTTP", "https://mcp.internal:1/sse", {
-        fetchImpl: respondingFetch,
+        fetchImpl: mcpFetch(4),
       }),
-    ).toMatchObject({ kind: "up" });
+    ).toMatchObject({ kind: "up", tools: 4 });
     expect(
       await probeMcpTarget("HTTP", "https://mcp.internal:1/sse", {
-        fetchImpl: unreachableFetch(),
+        fetchImpl: (async () => new Response("not MCP", { status: 404 })) as typeof fetch,
       }),
-    ).toMatchObject({ kind: "down" });
+    ).toMatchObject({ kind: "down", reason: "initialize returned HTTP 404" });
     expect(await probeMcpTarget("stdio", "npx -y whatever")).toEqual({
       kind: "skipped",
     });
     expect(
-      await probeMcpTarget("HTTP", "not a url", { fetchImpl: respondingFetch }),
+      await probeMcpTarget("HTTP", "not a url", { fetchImpl: mcpFetch(1) }),
     ).toMatchObject({ kind: "down" });
+
+    const redacted = await discoverHttpMcpTools("https://mcp.example.test", {
+      fetchImpl: (async () => {
+        throw new Error("transport failed with header-plaintext-secret");
+      }) as typeof fetch,
+    });
+    expect(redacted).toEqual({ kind: "down", reason: "connection failed" });
+    expect(JSON.stringify(redacted)).not.toContain("header-plaintext-secret");
   });
 
-  it("save probes HTTP targets and never fabricates tool counts", async () => {
+  it("HTTP handshake injects mapped headers without persisting plaintext", async () => {
     const { db } = setup();
+    const { secret } = saveOrgSecret(
+      db,
+      { name: "private-api", value: "header-plaintext" },
+      ACTOR,
+    );
+    const seen: Array<[string | null, string]> = [];
     const up = await saveMcpServer(
       db,
-      { name: "GitHub MCP", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      {
+        name: "GitHub MCP",
+        transport: "HTTP",
+        target: "https://x.dev/sse",
+        auth: { "X-API-Key": secret.ref },
+      },
       ACTOR,
-      { fetchImpl: respondingFetch },
+      {
+        fetchImpl: mcpFetch(6, (headers, method) => {
+          seen.push([headers.get("x-api-key"), method]);
+        }),
+      },
     );
-    expect(up.mcp).toMatchObject({ name: "github-mcp", up: true, tools: null });
-    expect(up.toast).toContain("endpoint reachable");
+    expect(up.mcp).toMatchObject({
+      name: "github-mcp",
+      up: true,
+      tools: 6,
+      auth: { "X-API-Key": secret.ref },
+      codexSupported: false,
+    });
+    expect(seen).toEqual([
+      ["header-plaintext", "initialize"],
+      ["header-plaintext", "notifications/initialized"],
+      ["header-plaintext", "tools/list"],
+    ]);
+    const stored = db
+      .prepare("SELECT auth_json FROM org_mcp_servers WHERE id = ?")
+      .get(up.mcp.id) as { auth_json: string };
+    expect(stored.auth_json).not.toContain("header-plaintext");
+    expect(up.toast).not.toContain("header-plaintext");
 
     const down = await saveMcpServer(
       db,
-      { name: "browserbase", transport: "HTTP", target: "https://y.dev/sse", cred: "secret://mcp/bb" },
+      {
+        name: "browserbase",
+        transport: "HTTP",
+        target: "https://y.dev/sse",
+        auth: {},
+      },
       ACTOR,
       { fetchImpl: unreachableFetch() },
     );
     expect(down.mcp.up).toBe(false);
-    expect(down.toast).toContain("unreachable");
+    expect(down.toast).toContain("handshake failed");
 
-    // stdio save runs a REAL best-effort tool-count discovery (fake spawn).
+    await expect(
+      saveMcpServer(
+        db,
+        {
+          name: "missing-secret",
+          transport: "HTTP",
+          target: "https://z.dev/mcp",
+          auth: { Authorization: "secret://org/not-there" },
+        },
+        ACTOR,
+        { fetchImpl: mcpFetch(1) },
+      ),
+    ).rejects.toThrow(/secret is missing/);
+  });
+
+  it("stdio save discovers tools, injects env, and parses quoted argv", async () => {
+    const { db } = setup();
+    const { secret } = saveOrgSecret(
+      db,
+      { name: "pg-token", value: "stdio-plaintext" },
+      ACTOR,
+    );
+    let spawned:
+      | { command: string; args: string[]; env?: Record<string, string> }
+      | undefined;
+    const inspectingSpawn: McpSpawn = (command, args, options) => {
+      spawned = { command, args, env: options?.env };
+      return fakeMcpSpawn(7)(command, args, options);
+    };
+
     const stdio = await saveMcpServer(
       db,
-      { name: "postgres-readonly", transport: "stdio", target: "npx -y @mcp/pg", cred: "" },
+      {
+        name: "postgres-readonly",
+        transport: "stdio",
+        target: `node "server path.js" --scope 'read only'`,
+        auth: { PG_TOKEN: secret.ref },
+      },
       ACTOR,
-      { spawnImpl: fakeMcpSpawn(7) },
+      { spawnImpl: inspectingSpawn },
     );
     expect(stdio.mcp).toMatchObject({ up: true, tools: 7 });
+    expect(spawned).toMatchObject({
+      command: "node",
+      args: ["server path.js", "--scope", "read only"],
+      env: { PG_TOKEN: "stdio-plaintext" },
+    });
     expect(stdio.toast).toBe(
       "postgres-readonly saved — 7 tools discovered · spawned per run",
     );
@@ -337,7 +461,12 @@ describe("mcp servers", () => {
     // A command that never answers → honest unreachable, count stays null.
     const dead = await saveMcpServer(
       db,
-      { name: "broken-stdio", transport: "stdio", target: "npx -y @mcp/nope", cred: "" },
+      {
+        name: "broken-stdio",
+        transport: "stdio",
+        target: "npx -y @mcp/nope",
+        auth: {},
+      },
       ACTOR,
       { spawnImpl: silentSpawn, timeoutMs: 20 },
     );
@@ -348,26 +477,36 @@ describe("mcp servers", () => {
     await expect(
       saveMcpServer(
         db,
-        { name: "github-mcp", transport: "HTTP", target: "https://z.dev", cred: "" },
+        {
+          name: "postgres-readonly",
+          transport: "stdio",
+          target: "npx duplicate",
+          auth: {},
+        },
         ACTOR,
-        { fetchImpl: respondingFetch },
+        { spawnImpl: fakeMcpSpawn(1) },
       ),
     ).rejects.toThrowError(/already exists/);
   });
 
-  it("test updates health and includes known tool counts in the toast", async () => {
+  it("HTTP test refreshes the honest tool count", async () => {
     const { db } = setup();
     const { mcp } = await saveMcpServer(
       db,
-      { name: "github-mcp", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      {
+        name: "github-mcp",
+        transport: "HTTP",
+        target: "https://x.dev/sse",
+        auth: {},
+      },
       ACTOR,
-      { fetchImpl: respondingFetch },
+      { fetchImpl: mcpFetch(2) },
     );
-    // Seeded rows carry demo tool counts — emulate one.
-    db.prepare(`UPDATE org_mcp_servers SET tools_count = 14 WHERE id = ?`).run(mcp.id);
-
-    const healthy = await testMcpServer(db, mcp.id, ACTOR, { fetchImpl: respondingFetch });
+    const healthy = await testMcpServer(db, mcp.id, ACTOR, {
+      fetchImpl: mcpFetch(14),
+    });
     expect(healthy.toast).toMatch(/^github-mcp healthy — 14 tools · \d+ms$/);
+    expect(healthy.mcp.tools).toBe(14);
 
     const dead = await testMcpServer(db, mcp.id, ACTOR, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
@@ -381,7 +520,12 @@ describe("mcp servers", () => {
     const { db } = setup();
     const { mcp } = await saveMcpServer(
       db,
-      { name: "postgres-readonly", transport: "stdio", target: "npx -y @mcp/pg", cred: "" },
+      {
+        name: "postgres-readonly",
+        transport: "stdio",
+        target: "npx -y @mcp/pg",
+        auth: {},
+      },
       ACTOR,
       { spawnImpl: silentSpawn, timeoutMs: 20 }, // saved unreachable first
     );
@@ -413,6 +557,31 @@ describe("mcp servers", () => {
     expect(
       await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
     ).toMatchObject({ kind: "down", reason: "command not found" });
+    expect(
+      await discoverStdioMcpTools(`node "unterminated`, {
+        spawnImpl: fakeMcpSpawn(1),
+      }),
+    ).toEqual({ kind: "down", reason: "invalid command quoting" });
+  });
+
+  it("parses Streamable HTTP SSE responses", async () => {
+    const fetchImpl = (async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { method: string };
+      if (request.method === "notifications/initialized") {
+        return new Response(null, { status: 202 });
+      }
+      const result =
+        request.method === "initialize"
+          ? { protocolVersion: "2025-11-25", capabilities: {} }
+          : { tools: [{ name: "one" }] };
+      return new Response(
+        `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: request.method === "initialize" ? 1 : 2, result })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+    await expect(
+      discoverHttpMcpTools("https://mcp.example.test", { fetchImpl }),
+    ).resolves.toMatchObject({ kind: "up", tools: 1 });
   });
 });
 

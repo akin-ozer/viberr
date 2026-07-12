@@ -8,18 +8,19 @@ export type BoardFilterId = "all" | "human" | "agent" | "risk";
 
 export interface FilterableTask {
   waiting: string;
+  /** Personalized responsibility computed from explicit project role + owner. */
+  waitingOnMe?: boolean;
   readiness: string;
   validation: string;
   urgent: boolean;
 }
 
-/** Verbatim mock semantics with canonical enum values ("Needs attention" =
- * readiness risk/blocked || validation failing || urgent). */
+/** Personalized human responsibility plus canonical agent/risk predicates. */
 export function matchesBoardFilter(
   task: FilterableTask,
   filter: BoardFilterId,
 ): boolean {
-  if (filter === "human") return task.waiting === "human";
+  if (filter === "human") return task.waitingOnMe === true;
   if (filter === "agent") return task.waiting === "agent";
   if (filter === "risk") {
     return (

@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   waitFor,
   type RenderResult,
 } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import {
+  createMemoryRouter,
+  createRoutesStub,
+  Outlet,
+  RouterProvider,
+} from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import type { AgentDeploymentView, AgentProfileView } from "./agent-types";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
@@ -15,7 +23,12 @@ import {
   CreateProfileModal,
   type ProfileFormPayload,
 } from "./create-profile-modal";
-import { LiveRoster, ProfileDetail } from "./agents-page";
+import {
+  AgentsPage,
+  DeployGlobalProfileModal,
+  LiveRoster,
+  ProfileDetail,
+} from "./agents-page";
 
 afterEach(cleanup);
 
@@ -129,10 +142,239 @@ function mkDeployment(patch: Partial<AgentDeploymentView>): AgentDeploymentView 
   };
 }
 
+const URL_PROFILES: AgentProfileView[] = [
+  mkProfile({
+    id: "operator",
+    kind: "operator",
+    name: "Operator",
+    role: "Task coordinator",
+    icon: "shield",
+    backends: ["claude"],
+    spanAll: true,
+    stages: STAGES.map((stage) => stage.id),
+  }),
+  mkProfile({ id: "developer", name: "Developer" }),
+  mkProfile({
+    id: "reviewer",
+    name: "Reviewer",
+    role: "Quality",
+    stages: ["review"],
+  }),
+];
+
+function AgentsHarness({
+  removable = false,
+  myRole = "viewer",
+  readOnly = false,
+}: {
+  removable?: boolean;
+  myRole?: string;
+  readOnly?: boolean;
+}) {
+  const [profiles, setProfiles] = useState(URL_PROFILES);
+  return (
+    <>
+      {removable && (
+        <button
+          type="button"
+          onClick={() =>
+            setProfiles((current) =>
+              current.filter((profile) => profile.id !== "reviewer"),
+            )
+          }
+        >
+          Remove reviewer fixture
+        </button>
+      )}
+      <AgentsPage
+        profiles={profiles}
+        deployments={[
+          mkDeployment({
+            profileId: "reviewer",
+            role: "Reviewer",
+            engagement: "reviewer",
+            backend: "claude",
+          }),
+        ]}
+        stages={STAGES}
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        myRole={myRole}
+        readOnly={readOnly}
+      />
+    </>
+  );
+}
+
+function renderAgentsRoute(initialEntry: string, removable = false) {
+  const router = createMemoryRouter(
+    [
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "test-csrf" }),
+        element: (
+          <ToastProvider>
+            <Outlet />
+          </ToastProvider>
+        ),
+        children: [
+          {
+            path: "projects/:slug/agents",
+            element: <AgentsHarness removable={removable} />,
+          },
+          {
+            path: "projects/:slug/tasks/:key",
+            element: <div>Task destination</div>,
+          },
+        ],
+      },
+    ],
+    { initialEntries: [initialEntry] },
+  );
+  return { router, ...render(<RouterProvider router={router} />) };
+}
+
+describe("AgentsPage URL state", () => {
+  it("deep-links Live and preserves the selected profile when returning to Profiles", async () => {
+    const { router, container, getByText } = renderAgentsRoute(
+      "/projects/viberr-core/agents?view=live&profile=reviewer",
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".live-wrap")).not.toBeNull(),
+    );
+    expect(router.state.location.search).toBe("?view=live&profile=reviewer");
+
+    fireEvent.click(getByText("Profiles"));
+    await waitFor(() =>
+      expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+        "Reviewer",
+      ),
+    );
+    expect(router.state.location.search).toBe(
+      "?view=profiles&profile=reviewer",
+    );
+  });
+
+  it("uses push history for profile/tab choices so Back and Forward restore UI", async () => {
+    const { router, container, getByText } = renderAgentsRoute(
+      "/projects/viberr-core/agents",
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toBe(
+        "?view=profiles&profile=operator",
+      ),
+    );
+
+    fireEvent.click(getByText("Developer").closest("button")!);
+    await waitFor(() =>
+      expect(router.state.location.search).toBe(
+        "?view=profiles&profile=developer",
+      ),
+    );
+    fireEvent.click(getByText(/^Live/));
+    await waitFor(() =>
+      expect(router.state.location.search).toBe(
+        "?view=live&profile=developer",
+      ),
+    );
+
+    await act(async () => router.navigate(-1));
+    await waitFor(() =>
+      expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+        "Developer",
+      ),
+    );
+    expect(router.state.location.search).toBe(
+      "?view=profiles&profile=developer",
+    );
+
+    await act(async () => router.navigate(-1));
+    await waitFor(() =>
+      expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+        "Operator",
+      ),
+    );
+    await act(async () => router.navigate(1));
+    await waitFor(() =>
+      expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+        "Developer",
+      ),
+    );
+  });
+
+  it("replaces a stale profile query with the operator when that profile disappears", async () => {
+    const { router, container, getByText } = renderAgentsRoute(
+      "/projects/viberr-core/agents?view=profiles&profile=reviewer",
+      true,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+        "Reviewer",
+      ),
+    );
+    fireEvent.click(getByText("Remove reviewer fixture"));
+    await waitFor(() =>
+      expect(router.state.location.search).toBe(
+        "?view=profiles&profile=operator",
+      ),
+    );
+    expect(container.querySelector(".ag-detail h1")?.textContent).toBe(
+      "Operator",
+    );
+  });
+
+  it("archives profile management without blocking tabs, profiles, or task history", async () => {
+    const router = createMemoryRouter(
+      [
+        {
+          id: "root",
+          path: "/",
+          loader: () => ({ csrf: "test-csrf" }),
+          element: (
+            <ToastProvider>
+              <Outlet />
+            </ToastProvider>
+          ),
+          children: [
+            {
+              path: "projects/:slug/agents",
+              element: <AgentsHarness myRole="admin" readOnly />,
+            },
+          ],
+        },
+      ],
+      { initialEntries: ["/projects/viberr-core/agents"] },
+    );
+    const { container, getByText, queryByText } = render(
+      <RouterProvider router={router} />,
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toBe(
+        "?view=profiles&profile=operator",
+      ),
+    );
+
+    expect(getByText("Archived · read-only")).toBeTruthy();
+    expect(queryByText("New profile")).toBeNull();
+    expect(queryByText("Deploy global")).toBeNull();
+    expect(queryByText("Edit profile")).toBeNull();
+    expect(queryByText("Delete")).toBeNull();
+    expect(container.querySelector(".ag-add")).toBeNull();
+
+    expect(getByText("Capability matrix")).toBeTruthy();
+    fireEvent.click(getByText(/^Live/));
+    await waitFor(() =>
+      expect(container.querySelector(".live-wrap")).not.toBeNull(),
+    );
+    expect(container.textContent).toContain("VIB-142");
+  });
+});
+
 describe("ProfileDetail", () => {
   it("renders hero, stage chips, cap columns, resources and deployments", () => {
     const onOpen = vi.fn();
-    const { container, getByText } = render(
+    const { container, getByText, queryByText } = render(
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
@@ -147,11 +389,13 @@ describe("ProfileDetail", () => {
     expect(getByText("Developer")).toBeTruthy();
     expect(getByText("2 of 5 stages")).toBeTruthy();
     expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(2);
-    expect(container.querySelectorAll(".cap-col")).toHaveLength(3);
+    expect(container.querySelectorAll(".cap-col")).toHaveLength(4);
     expect(getByText("Acts directly")).toBeTruthy();
     expect(getByText("Reserved for humans")).toBeTruthy();
+    expect(getByText("Not granted")).toBeTruthy();
     // Deployment row navigates by task key.
-    expect(getByText("running on 1 task")).toBeTruthy();
+    expect(getByText("engaged on 1 task · no live run")).toBeTruthy();
+    expect(queryByText("running on 1 task")).toBeNull();
     fireEvent.click(container.querySelector(".deploy-row")!);
     expect(onOpen).toHaveBeenCalledWith("VIB-142");
   });
@@ -211,7 +455,10 @@ describe("ProfileDetail", () => {
     fireEvent.click(getByText("Delete"));
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(getByText("Delete the Developer profile?")).toBeTruthy();
-    expect(getByText("1 active task")).toBeTruthy();
+    expect(getByText("1 task")).toBeTruthy();
+    expect(container.textContent).toContain(
+      "existing assignments and any already-started runs remain",
+    );
     fireEvent.click(getByText("Delete profile"));
     expect(onDelete).toHaveBeenCalledWith("developer");
   });
@@ -231,6 +478,54 @@ describe("ProfileDetail", () => {
     );
     expect(queryByText("Delete")).toBeNull();
     expect(queryByText("Edit profile")).toBeNull();
+  });
+});
+
+describe("DeployGlobalProfileModal", () => {
+  it("explains reference-only deployment and disables templates already present", () => {
+    const onDeploy = vi.fn();
+    const profiles = [
+      {
+        id: "developer",
+        name: "Developer",
+        backend: "codex" as const,
+        summary: "Builds features.",
+        stages: ["impl"],
+        skills: ["developer-expertise"],
+        mcps: [],
+        kbs: [],
+        used: 1,
+      },
+      {
+        id: "advisor",
+        name: "Advisor",
+        backend: "claude" as const,
+        summary: "Provides advice.",
+        stages: ["review"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+        used: 0,
+      },
+    ];
+    const { getByText, getAllByText } = render(
+      <DeployGlobalProfileModal
+        profiles={profiles}
+        deployedIds={["developer"]}
+        projectName="Viberr Core"
+        busy={false}
+        error={null}
+        onClose={() => {}}
+        onDeploy={onDeploy}
+      />,
+    );
+
+    expect(
+      getByText(/copies only this project's capability policy/),
+    ).toBeTruthy();
+    expect(getByText("Deployed").closest("button")!.disabled).toBe(true);
+    fireEvent.click(getAllByText("Deploy", { selector: "button" })[0]!);
+    expect(onDeploy).toHaveBeenCalledWith("advisor");
   });
 });
 

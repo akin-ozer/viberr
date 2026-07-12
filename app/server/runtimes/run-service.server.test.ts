@@ -6,8 +6,10 @@ import { AppError } from "~/server/errors/app-error.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   configureRunServiceForTests,
+  disposeRunsForDatabaseForTests,
   getRunLog,
   interruptRun,
+  interruptRunAndWait,
   listRunsForTask,
   resumeRun,
   startRun,
@@ -18,6 +20,10 @@ import type { SimulatedScript } from "./simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RunSpec, RuntimeAdapter } from "./adapter.server";
 import type { AdapterSet } from "./runtime-registry.server";
+import {
+  getBackendHealth,
+  setBackendAvailability,
+} from "./runtime-registry.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -87,7 +93,7 @@ describe("run-service lifecycle (simulated)", () => {
     expect(run.output_tokens).toBe(3);
   });
 
-  it("a run settling after the DB closed logs instead of throwing (teardown race)", async () => {
+  it("store teardown cancels callbacks before the DB closes", async () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "session x" },
       { t: "2", ev: "text", tag: "assistant", text: "hello" },
@@ -104,11 +110,7 @@ describe("run-service lifecycle (simulated)", () => {
       script,
       dataRoot: store.dataRoot,
     });
-    // The CI teardown race: a test's DB closes while the adapter's timers are
-    // still driving lines + the exit. Every sink write inside an adapter
-    // callback must be caught-and-logged — an uncaught throw on a timer is an
-    // unhandled error that fails the whole suite (vitest "Errors: 1 error")
-    // even with every test green. (cleanup() tolerates the early close.)
+    disposeRunsForDatabaseForTests(store.db);
     store.db.close();
     await settle();
     expect(runId).toMatch(/^run_/);
@@ -197,6 +199,74 @@ describe("run-service lifecycle (simulated)", () => {
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
   });
+
+  it("feeds provider health from real success/failure, but not simulated runs", async () => {
+    let outcome: "finished" | "error" = "finished";
+    const realClaude: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        cb.onExit({
+          outcome,
+          effectiveBackend: "claude",
+          simulated: false,
+          sessionId: "real-session",
+        });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    const simulated: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        cb.onExit({
+          outcome: "finished",
+          effectiveBackend: "simulated",
+          simulated: true,
+          sessionId: "sim-session",
+        });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({
+      claude: realClaude,
+      codex: realClaude,
+      simulated,
+    });
+    setBackendAvailability("claude", true);
+
+    await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "health-success",
+      role: "R",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    expect(getBackendHealth("claude")).toMatchObject({
+      status: "verified",
+      verified: true,
+    });
+
+    outcome = "error";
+    await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "health-failure",
+      role: "R",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    expect(getBackendHealth("claude")).toMatchObject({
+      status: "degraded",
+      verified: false,
+      degraded: true,
+    });
+  });
 });
 
 describe("interruptRun — RBAC + audit + idempotency", () => {
@@ -254,6 +324,93 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     const result = interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId }, { userId: store.users.arda.id, label: store.users.arda.email });
     expect(result.outcome).toBe("already-terminal");
     expect(getRun(store.db, runId)!.state).toBe("finished");
+  });
+
+  it("waits for the exact provider run to acknowledge interruption", async () => {
+    let interrupted = false;
+    const delayed: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        return {
+          runId: spec.runId,
+          interrupt() {
+            interrupted = true;
+            setTimeout(
+              () =>
+                cb.onExit({
+                  outcome: "interrupted",
+                  effectiveBackend: "simulated",
+                  simulated: true,
+                  sessionId: "delayed-session",
+                }),
+              8,
+            );
+          },
+        };
+      },
+    };
+    configureRunServiceForTests({
+      claude: delayed,
+      codex: delayed,
+      simulated: delayed,
+    });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "R",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+
+    const result = await interruptRunAndWait(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { timeoutMs: 200, pollMs: 2 },
+    );
+
+    expect(interrupted).toBe(true);
+    expect(result.outcome).toBe("interrupted");
+    expect(result.run?.serverRunId).toBe(runId);
+    expect(getRun(store.db, runId)?.state).toBe("interrupted");
+  });
+
+  it("reports a pending acknowledgement instead of false success", async () => {
+    const slow: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec) {
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({
+      claude: slow,
+      codex: slow,
+      simulated: slow,
+    });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "R",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+
+    const result = await interruptRunAndWait(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { timeoutMs: 5, pollMs: 1 },
+    );
+
+    expect(result.outcome).toBe("interrupting");
+    expect(result.run?.serverRunId).toBe(runId);
+    expect(getRun(store.db, runId)?.state).toBe("running");
   });
 });
 

@@ -1,14 +1,51 @@
 # Build state
 
-**Current status:** ALL PHASES COMPLETE (1–11). The full Viberr application is built, tested (753 unit/integration + 13 Playwright e2e), and verified live. Docker/compose, CI, README, and ops docs are in place. See docs/build/reports/phase-11.md for the final verification matrix and known gaps.
+**Current status:** the original phases 1–11 are historical build milestones, not current completion
+proof. The 2026-07-13 correction pass is implemented and validated. Final evidence is: clean
+typecheck; Vitest 146 files/1,318 tests; production build; Playwright 19/19 in 20.5 seconds; healthy
+Docker Compose with 5 projects/38 tasks, watcher active and projection integrity healthy; real
+DeepWiki MCP initialize/tools-list; cross-role/archive/responsive browser evidence; and clean final
+browser/Compose logs. Do not reuse the old 753-unit/13-e2e numbers as the current result. The live authority is
+[`planning/discovery-2026-07-13/`](../../planning/discovery-2026-07-13/); the phase-11 report remains
+evidence of the earlier build only.
 
 ## Environment facts
 
-- Repo root: /Users/akinozer/projects/viberr (git initialized, branch main). planning/ and design/ are read-only reference.
+- Repo root: /Users/akinozer/projects/viberr. The correction work is on a `codex/` branch; the current
+  discovery dossier is actively maintained. Original planning and design files remain historical
+  references.
 - macOS (darwin), zsh. Node available via system. Dev server port 5173 expected by .claude/launch.json (`npm run dev`).
 - Data root for dev: ./data (gitignored).
 
-## Phase log
+## 2026-07-13 superseding correction
+
+- RBAC is centralized: a contributor+ current owner may accept only that task, while organization
+  admins have audited emergency project-admin authority without acquiring membership.
+- Operator triggers use a durable/coalescing dispatcher with cost and concurrency bounds. Routing
+  hard-filters impossible candidates within the project, supplies skill/KB/MCP/backend facts plus
+  organization-wide workload and observed-cost context, and lets the intelligent operator persist
+  the final reason without a static score.
+- Reviewers have isolated workspaces and one strict structured-verdict contract. Simulated results do
+  not govern validation; any rejection returns to implementation and every assigned reviewer must
+  approve the current cycle.
+- Completion requires healthy validation from Review. Repository tasks require a linked PR and reach
+  Done only on a real merge; accepted-but-unmerged work remains Review/merge-pending. Repo-less work
+  may finish directly.
+- MCP resources now support encrypted org-secret references, explicit HTTP-header/stdio-env mappings,
+  real initialize/tools-list probes, and backend-compatibility gates.
+- Archive is read-only history with Restore as the only project mutation; archiving stops project
+  runs. Project deletion purges namespaced operational state. Health includes SQLite integrity and
+  recent backend signals.
+- Canonical migration files changed intentionally without a compatibility layer. Validation used a
+  fresh database; see the operations runbook. A separate Compose container forced a clean rescan of
+  5 projects/38 tasks/43 changes with zero errors in 172 ms. Final screenshots are indexed in the
+  current discovery dossier.
+
+## Historical phase log
+
+The entries below describe behavior and counts at each phase close. Later correction work supersedes
+their role names, consultant/reviewer terminology, archive/MCP gaps, review-copy claims, health shape,
+and test totals.
 
 - Phase 0 (orchestrator): read PRD/architecture/change-proposals/mock entry points; wrote BUILD-PLAN.md, CONVENTIONS.md, STATE.md; created git repo and task list.
 - Phase 1: RR7 (7.18.1) SSR app at repo root, no Tailwind; viberr.css ported verbatim → app/app.css (+marked additions); @fontsource fonts (no CDN); viberr_theme cookie light/dark/system with pre-paint script; typed env (zod4, fail-fast, key as 32-byte Buffer); better-sqlite3 WAL + migration runner + 0001 (users, sessions); JSON logger + AppError/toErrorResponse; scripts dev/build/start/typecheck/test/migrate/seed; 16 tests green; typecheck/build/dev(:5173)/start all verified. See docs/build/reports/phase-1.md.

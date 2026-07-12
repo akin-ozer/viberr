@@ -100,7 +100,7 @@ describe("global agent profiles", () => {
       kbs: ["Coding standards"],
     });
     expect(list[1]!.used).toBe(1);
-    expect(usedByProject(db)).toEqual({ developer: 2, reviewer: 1 });
+    expect(usedByProject(db, ctx)).toEqual({ developer: 2, reviewer: 1 });
   });
 
   it("create writes a template file; duplicate names are refused", () => {
@@ -146,11 +146,12 @@ describe("global agent profiles", () => {
   it("edit preserves capability policy + extras (fields the modal doesn't own)", () => {
     const { db, dataRoot, ctx } = setup();
     writeTemplate(dataRoot, "developer", "specialist");
+    insertProjectRow(db, "p-one", ["developer"]);
     saveGlobalAgentProfile(
       db,
       {
         id: "developer",
-        name: "Developer",
+        name: "Developer V2",
         backend: "claude",
         summary: "New summary.",
         stages: ["impl"],
@@ -173,6 +174,14 @@ describe("global agent profiles", () => {
     expect(parsed!.frontmatter.stages).toEqual(["impl"]);
     expect(parsed!.frontmatter.resources.skills).toEqual(["conventional-commits"]);
     expect(parsed!.description).toBe("New summary.");
+    // The canonical template id/file stays stable across a display-name
+    // rename, so project references need no multi-file rewrite.
+    expect(parsed!.frontmatter.id).toBe("developer");
+    expect(listGlobalAgentProfiles(db, ctx)[0]).toMatchObject({
+      id: "developer",
+      name: "Developer V2",
+      used: 1,
+    });
   });
 
   it("delete is refused while deployed; otherwise removes the file", () => {
@@ -183,7 +192,7 @@ describe("global agent profiles", () => {
     const refused = deleteGlobalAgentProfile(db, "developer", ACTOR, ctx);
     expect(refused).toMatchObject({ status: "in_use", used: 1 });
     if (refused.status === "in_use") {
-      expect(refused.message).toBe("Detach Developer from its 1 project first");
+      expect(refused.message).toBe("Detach Developer from: p-one (p-one) first");
     }
     expect(existsSync(agentProfileFilePath("developer", dataRoot))).toBe(true);
 

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
 import {
   recordAudit,
+  withProjectAuditAuthority,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -9,7 +10,8 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { roleCan } from "~/shared/rbac";
+import { authorizeProjectAction } from "~/shared/rbac";
+import type { UserRole } from "~/shared/mapping/user.server";
 import type { RunHandle, RunSpec } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
@@ -23,6 +25,7 @@ import {
 } from "./run-store.server";
 import {
   createAdapters,
+  recordBackendRunResult,
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
@@ -51,7 +54,15 @@ import { newId } from "~/shared/ids/new-id.server";
 // ---------------------------------------------- live handle registry
 
 interface ServiceState {
-  handles: Map<string, RunHandle>;
+  handles: Map<
+    string,
+    {
+      handle: RunHandle;
+      db: Database.Database;
+      projectSlug: string;
+      dispose(): void;
+    }
+  >;
   adapters: AdapterSet;
   /**
    * In-process run-completion callbacks keyed by run id. `launch()`'s onExit
@@ -131,11 +142,77 @@ export function configureRunServiceForTests(
   setBackendAvailability("claude", false);
   setBackendAvailability("codex", false);
   const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
+  const previous = cache[SERVICE_KEY];
+  if (previous) {
+    for (const active of previous.handles.values()) active.dispose();
+    previous.handles.clear();
+    previous.completions.clear();
+  }
   const adapters =
     adaptersOrDeps && "simulated" in adaptersOrDeps
       ? (adaptersOrDeps as AdapterSet)
       : createAdapters((adaptersOrDeps as AdapterDeps) ?? {});
   cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
+}
+
+/**
+ * Test/store lifecycle hook: detach every callback owned by `db` before the
+ * database is closed. Interrupt is best-effort, but persistence callbacks are
+ * disabled first so an asynchronous provider cannot write into a dead store.
+ */
+export function disposeRunsForDatabaseForTests(db: Database.Database): void {
+  const state = getState();
+  for (const [runId, active] of state.handles) {
+    if (active.db !== db) continue;
+    active.dispose();
+    state.handles.delete(runId);
+    state.completions.delete(runId);
+  }
+}
+
+/** Stop and detach all live callbacks owned by a project before deletion. */
+export function disposeRunsForProject(
+  db: Database.Database,
+  projectSlug: string,
+): void {
+  const state = getState();
+  for (const [runId, active] of state.handles) {
+    if (active.db !== db || active.projectSlug !== projectSlug) continue;
+    active.dispose();
+    state.handles.delete(runId);
+    state.completions.delete(runId);
+  }
+}
+
+/** Stop all queued/running sessions when a project becomes archived. */
+export function stopProjectRuns(
+  db: Database.Database,
+  projectSlug: string,
+): number {
+  const rows = db
+    .prepare(
+      `SELECT id, task_key, thread_id FROM agent_runs
+       WHERE project_slug = ? AND state IN ('queued', 'running')`,
+    )
+    .all(projectSlug) as { id: string; task_key: string; thread_id: string }[];
+  disposeRunsForProject(db, projectSlug);
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    patchRun(db, row.id, {
+      state: "interrupted",
+      finishedAt: now,
+      phase: null,
+      step: null,
+    });
+    publishRunStateChanged({
+      projectSlug,
+      taskKey: row.task_key,
+      runId: row.id,
+      threadId: row.thread_id,
+      state: "interrupted",
+    });
+  }
+  return rows.length;
 }
 
 // ---------------------------------------------- start / resume
@@ -271,6 +348,7 @@ export async function startRun(
     ...(input.effort ? { effort: input.effort } : {}),
     prompt: input.prompt,
     workdir,
+    ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
     script: input.script,
@@ -395,9 +473,14 @@ function launch(
   // (crashing the process in prod, failing the suite when a test's DB closes
   // before an in-flight run settles). sink.line self-catches; guard the
   // phase/finalize paths the same way.
+  let exitedSynchronously = false;
+  let disposed = false;
   const handle = adapter.start(spec, {
-    onLine: (line) => sink.line(line),
+    onLine: (line) => {
+      if (!disposed) sink.line(line);
+    },
     onPhase: (phase, step) => {
+      if (disposed) return;
       try {
         sink.phase(phase, step);
       } catch (error) {
@@ -408,6 +491,21 @@ function launch(
       }
     },
     onExit: (exit) => {
+      exitedSynchronously = true;
+      if (disposed) return;
+      // A real provider result is the cheapest honest health probe we have.
+      // Never infer validity from credential presence, and never let simulated
+      // runs or human interrupts affect provider health.
+      if (
+        !exit.simulated &&
+        (exit.effectiveBackend === "claude" || exit.effectiveBackend === "codex") &&
+        exit.outcome !== "interrupted"
+      ) {
+        recordBackendRunResult(
+          exit.effectiveBackend,
+          exit.outcome === "finished" ? "success" : "failure",
+        );
+      }
       try {
         sink.finalize(exit);
       } catch (error) {
@@ -435,7 +533,24 @@ function launch(
       }
     },
   });
-  state.handles.set(spec.runId, handle);
+  // Test/fallback adapters may complete inside start(). Do not resurrect a
+  // handle after onExit already removed it.
+  if (!exitedSynchronously) {
+    state.handles.set(spec.runId, {
+      handle,
+      db,
+      projectSlug: spec.projectSlug,
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        try {
+          handle.interrupt("system", "store shutdown");
+        } catch {
+          // Best-effort teardown; callbacks are already detached.
+        }
+      },
+    });
+  }
 }
 
 // ---------------------------------------------- interrupt
@@ -443,6 +558,12 @@ function launch(
 export interface InterruptResult {
   /** interrupted | already-terminal (idempotent no-op). */
   outcome: "interrupted" | "already-terminal";
+  run: RunView | null;
+}
+
+export interface InterruptAcknowledgementResult {
+  /** `interrupting` means the provider has not acknowledged termination yet. */
+  outcome: "interrupted" | "already-terminal" | "interrupting";
   run: RunView | null;
 }
 
@@ -455,7 +576,7 @@ export interface InterruptResult {
 export function interruptRun(
   db: Database.Database,
   input: { projectSlug: string; taskKey: string; runId: string },
-  actor: { userId: string; label: string },
+  actor: { userId: string; label: string; orgRole?: UserRole },
 ): InterruptResult {
   const run = getRun(db, input.runId);
   if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
@@ -468,7 +589,8 @@ export function interruptRun(
   // (pass-4 XS-10).
   const members = listProjectMembers(db, input.projectSlug);
   const role = members.find((m) => m.userId === actor.userId)?.role ?? null;
-  if (!roleCan(role, "run-agents")) {
+  const authority = authorizeProjectAction(role, actor.orgRole, "run-agents");
+  if (!authority.allowed) {
     throw new AppError({
       code: ERROR_CODES.FORBIDDEN,
       status: 403,
@@ -483,10 +605,12 @@ export function interruptRun(
   }
 
   const state = getState();
-  const handle = state.handles.get(input.runId);
-  if (handle) {
-    handle.interrupt(actor.userId, actor.label);
-    state.handles.delete(input.runId);
+  const active = state.handles.get(input.runId);
+  if (active) {
+    active.handle.interrupt(actor.userId, actor.label);
+    // Keep the handle registered until the adapter's onExit callback removes
+    // it. Dropping it here made a still-running provider look detached and
+    // prevented a second interrupt while acknowledgement was pending.
     // The adapter's onExit → sink.finalize sets the interrupted state; stamp
     // the interrupter here so it lands regardless of the adapter's timing.
     patchRun(db, input.runId, { interruptedBy: actor.userId });
@@ -511,17 +635,53 @@ export function interruptRun(
 
   recordAudit(db, {
     action: "runtime.run.interrupted",
-    actor,
+    actor: withProjectAuditAuthority(actor, authority.source),
     subjectKind: "run",
     subjectId: input.runId,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { threadId: run.thread_id, backend: run.backend, role: run.role },
+    details: {
+      threadId: run.thread_id,
+      backend: run.backend,
+      role: run.role,
+    },
   });
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
 
   const after = getRun(db, input.runId);
   return { outcome: "interrupted", run: after ? projectOne(db, after) : null };
+}
+
+/**
+ * Request interruption, then wait for the exact run row to acknowledge a
+ * terminal state. The route uses this instead of announcing success as soon
+ * as a signal is sent. A slow provider returns `interrupting`; SSE will still
+ * deliver the eventual terminal transition and the UI reports only a pending
+ * request in the meantime.
+ */
+export async function interruptRunAndWait(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; runId: string },
+  actor: { userId: string; label: string; orgRole?: UserRole },
+  options: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<InterruptAcknowledgementResult> {
+  const requested = interruptRun(db, input, actor);
+  if (requested.outcome === "already-terminal") return requested;
+
+  const timeoutMs = options.timeoutMs ?? 3_000;
+  const pollMs = options.pollMs ?? 25;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const row = getRun(db, input.runId);
+    if (!row) return { outcome: "interrupting", run: null };
+    if (row.state !== "running" && row.state !== "queued") {
+      return { outcome: "interrupted", run: projectOne(db, row) };
+    }
+    if (Date.now() >= deadline) {
+      return { outcome: "interrupting", run: projectOne(db, row) };
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 // ---------------------------------------------- reads

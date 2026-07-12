@@ -57,7 +57,7 @@ export interface GithubViewData {
     repo: string | null;
     defaultBranch: string;
   };
-  /** GHE-safe web host for "Open on GitHub" links (WI-17). */
+  /** Supported github.com web host for browse links. */
   githubHost: string;
   connection: RepoAccessResult;
   credential: ProjectCredentialHealth;
@@ -179,7 +179,7 @@ export async function getGithubViewData(
       repo: project.repo,
       defaultBranch: project.defaultBranch,
     },
-    // GHE-safe web host (WI-17) — the view must never hardcode github.com.
+    // Keep browse links aligned with the supported github.com client/clone path.
     githubHost: githubWebHost(),
     connection,
     credential,

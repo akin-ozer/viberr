@@ -5,6 +5,7 @@ import {
   type FetcherWithComponents,
 } from "react-router";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -43,7 +44,7 @@ function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
     if (d.ok) {
       if (d.toast) push(d.toast);
     } else if (d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [fetcher.state, fetcher.data, push]);
 }
@@ -330,9 +331,12 @@ export function BranchesPanel({
 export function GithubViewPage({
   data,
   myRole,
+  readOnly = false,
 }: {
   data: GithubViewData;
   myRole: string | null;
+  /** Archived projects retain repository history and external links. */
+  readOnly?: boolean;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -365,7 +369,13 @@ export function GithubViewPage({
 
   // Grant scope stays a governed credential action (conventions: PAT/policy
   // changes are admin-shaped; project roles admin|maintainer hold it).
-  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const canGrant =
+    !readOnly && (myRole === "admin" || myRole === "maintainer");
+  const canReconcile =
+    !readOnly &&
+    (myRole === "admin" ||
+      myRole === "maintainer" ||
+      myRole === "contributor");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".
@@ -446,16 +456,19 @@ export function GithubViewPage({
           </div>
         </div>
         <div className="board-tools">
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={reconcile}
-            disabled={busy}
-            title="Reconcile task state with GitHub"
-          >
-            <Icon name="refresh" />
-            Reconcile
-          </button>
+          {readOnly && <ArchivedBadge />}
+          {canReconcile && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={reconcile}
+              disabled={busy}
+              title="Reconcile task state with GitHub"
+            >
+              <Icon name="refresh" />
+              Reconcile
+            </button>
+          )}
           {data.project.repo && (
             <a
               className="btn ghost sm"

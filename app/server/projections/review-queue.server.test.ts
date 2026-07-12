@@ -9,6 +9,7 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -84,6 +85,7 @@ function setup() {
       title: "Orphaned review task",
       stage: "review",
       waiting: "none",
+      pr: { number: 310, state: "closed", title: "Closed fixture" },
     }),
   });
 
@@ -110,17 +112,18 @@ function setup() {
 }
 
 describe("getReviewQueue", () => {
-  it("splits review-stage tasks on waiting — review+none lands with agents", () => {
+  it("splits review-stage tasks without calling review+none agent work", () => {
     const store = setup();
     const queue = getReviewQueue(store.db, store.slug);
 
     expect(queue.total).toBe(3);
     expect(queue.ready.map((t) => t.key)).toEqual(["VIB-101"]);
-    // waiting !== "human" — including the legal review+none combination.
-    expect(queue.working.map((t) => t.key)).toEqual(["VIB-102", "VIB-103"]);
-    expect(queue.working.find((t) => t.key === "VIB-103")?.waiting).toBe(
+    expect(queue.working.map((t) => t.key)).toEqual(["VIB-102"]);
+    expect(queue.unattended.map((t) => t.key)).toEqual(["VIB-103"]);
+    expect(queue.unattended[0]?.waiting).toBe(
       "none",
     );
+    expect(queue.unattended[0]?.pr?.state).toBe("closed");
   });
 
   it("carries the subline sources: packet header, newest event text, or nothing", () => {
@@ -138,9 +141,48 @@ describe("getReviewQueue", () => {
     // Newest-first: position 0 is the transition request, not the comment.
     expect(withTimeline.latestEventText).toContain("**Transition request:**");
 
-    const bare = queue.working.find((t) => t.key === "VIB-103")!;
+    const bare = queue.unattended.find((t) => t.key === "VIB-103")!;
     expect(bare.packet).toBeNull();
     expect(bare.latestEventText).toBeNull();
+  });
+
+  it("routes review responsibility to supervisors or the active task owner only", () => {
+    const store = setup();
+    const ownerFile = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-101",
+      dataRoot: store.dataRoot,
+    })!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...ownerFile.parsed.frontmatter,
+        ownerUserId: store.users.selin.id,
+      },
+      packet: ownerFile.parsed.packet,
+      timeline: ownerFile.parsed.timeline,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const owner = getReviewQueue(store.db, store.slug, {
+      userId: store.users.selin.id,
+      projectRole: "contributor",
+    });
+    expect(owner.ready.map((t) => t.key)).toEqual(["VIB-101"]);
+
+    const otherContributor = getReviewQueue(store.db, store.slug, {
+      userId: store.users.elif.id,
+      projectRole: "viewer",
+    });
+    expect(otherContributor.ready).toHaveLength(0);
+    expect(otherContributor.others.map((t) => t.key)).toEqual(["VIB-101"]);
+
+    // Emergency org-admin authority is intentionally absent from this read
+    // predicate: a nonmember can intervene, but it is not routine work for them.
+    const nonmemberOrgAdmin = getReviewQueue(store.db, store.slug, {
+      userId: store.users.deniz.id,
+      projectRole: null,
+    });
+    expect(nonmemberOrgAdmin.ready).toHaveLength(0);
   });
 
   it("keeps pr + validation for the meta cluster", () => {
@@ -155,7 +197,13 @@ describe("getReviewQueue", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug);
-    expect(queue).toEqual({ ready: [], working: [], total: 0 });
+    expect(queue).toEqual({
+      ready: [],
+      others: [],
+      working: [],
+      unattended: [],
+      total: 0,
+    });
   });
 
   // WI-1: on a Lightweight board (todo/doing/done) the review role resolves to

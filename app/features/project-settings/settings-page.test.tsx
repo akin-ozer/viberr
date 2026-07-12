@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  createMemoryRouter,
+  Outlet,
+  RouterProvider,
+} from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import {
@@ -8,6 +14,7 @@ import {
   MembersPanel,
   ProjectPanel,
   RepoPanel,
+  SettingsPage,
   StagesPanel,
 } from "./settings-page";
 
@@ -188,7 +195,7 @@ describe("MembersPanel", () => {
 
   it("renders the active count, the you-tag and the policy link", () => {
     const { container, getByText } = render(
-      <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
+      <MembersPanel {...base} onGrantAccess={() => {}} onRemove={() => {}} />,
     );
     expect(getByText("3 active")).toBeTruthy();
     expect(container.querySelector(".you-tag")).not.toBeNull();
@@ -201,7 +208,7 @@ describe("MembersPanel", () => {
       m.userId === "u_elif" ? { ...m, role: "viewer" as const } : m,
     );
     const { container } = render(
-      <MembersPanel {...base} members={oneAdmin} onInvite={() => {}} onRemove={onRemove} />,
+      <MembersPanel {...base} members={oneAdmin} onGrantAccess={() => {}} onRemove={onRemove} />,
     );
     const removeButtons = container.querySelectorAll(".stg-x");
     fireEvent.click(removeButtons[0]!); // self
@@ -210,27 +217,27 @@ describe("MembersPanel", () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
-  it("invite validates name+email then submits and clears the form", () => {
-    const onInvite = vi.fn();
+  it("access grant validates name+email then submits and clears the form", () => {
+    const onGrantAccess = vi.fn();
     const { getByPlaceholderText, getByText } = render(
-      <MembersPanel {...base} onInvite={onInvite} onRemove={() => {}} />,
+      <MembersPanel {...base} onGrantAccess={onGrantAccess} onRemove={() => {}} />,
     );
-    fireEvent.click(getByText("Invite"));
-    expect(onInvite).not.toHaveBeenCalled(); // empty form → client toast only
+    fireEvent.click(getByText("Grant access"));
+    expect(onGrantAccess).not.toHaveBeenCalled(); // empty form → client toast only
 
     const nameInput = getByPlaceholderText("Full name") as HTMLInputElement;
     const emailInput = getByPlaceholderText("email@company.dev") as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "Deniz Şahin" } });
     fireEvent.change(emailInput, { target: { value: "Deniz@viberr.dev" } });
     fireEvent.keyDown(emailInput, { key: "Enter" }); // email field submits
-    expect(onInvite).toHaveBeenCalledWith("Deniz Şahin", "deniz@viberr.dev");
+    expect(onGrantAccess).toHaveBeenCalledWith("Deniz Şahin", "deniz@viberr.dev");
     expect(nameInput.value).toBe("");
     expect(emailInput.value).toBe("");
   });
 
   it("hides invite + remove for non-admins", () => {
     const { container, queryByPlaceholderText } = render(
-      <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
+      <MembersPanel {...base} canManage={false} onGrantAccess={() => {}} onRemove={() => {}} />,
     );
     expect(queryByPlaceholderText("Full name")).toBeNull();
     expect(container.querySelector(".stg-x")).toBeNull();
@@ -420,5 +427,80 @@ describe("DangerZone", () => {
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  it("an archived project exposes Restore as its only mutation", () => {
+    const onArchive = vi.fn();
+    const { getByText, queryByText } = render(
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="admin"
+        archived
+        busy={false}
+        onArchive={onArchive}
+        onDelete={() => {}}
+      />,
+    );
+    expect(queryByText("Delete project")).toBeNull();
+    fireEvent.click(getByText("Restore"));
+    expect(onArchive).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("SettingsPage archived mode", () => {
+  it("keeps policy/history navigation while Restore is the only change", async () => {
+    const view: SettingsViewData = {
+      project: { ...PROJECT, archived: true },
+      stages: STAGES,
+      stageCounts: { triage: 2, review: 1 },
+      members: MEMBERS,
+      credential: CREDENTIAL,
+      repoOverride: true,
+    };
+    const router = createMemoryRouter(
+      [
+        {
+          id: "root",
+          path: "/",
+          loader: () => ({ csrf: "test-csrf" }),
+          element: (
+            <ToastProvider>
+              <Outlet />
+            </ToastProvider>
+          ),
+          children: [
+            {
+              path: "projects/viberr-core/settings",
+              element: <SettingsPage data={view} meId="u_arda" myRole="admin" />,
+            },
+          ],
+        },
+      ],
+      { initialEntries: ["/projects/viberr-core/settings"] },
+    );
+    const { container, getByText, queryByText, queryByPlaceholderText } = render(
+      <RouterProvider router={router} />,
+    );
+    await waitFor(() =>
+      expect(getByText("Archived · read-only")).toBeTruthy(),
+    );
+
+    expect(
+      Array.from(container.querySelectorAll(".set-fields input, .set-fields textarea")).every(
+        (input) => (input as HTMLInputElement).disabled,
+      ),
+    ).toBe(true);
+    expect(queryByText("Add stage")).toBeNull();
+    expect(queryByPlaceholderText("Full name")).toBeNull();
+    expect(queryByText("Grant scope")).toBeNull();
+    expect(queryByText("Rotate credential")).toBeNull();
+    expect(queryByText("Remove credential")).toBeNull();
+    expect(queryByText("Delete project")).toBeNull();
+    expect(getByText("Restore")).toBeTruthy();
+
+    // These are read/navigation affordances, not mutations.
+    expect(getByText("Policy → Workflow rules")).toBeTruthy();
+    expect(getByText("Policy → Human access")).toBeTruthy();
+    expect(getByText("VIB-142")).toBeTruthy();
   });
 });

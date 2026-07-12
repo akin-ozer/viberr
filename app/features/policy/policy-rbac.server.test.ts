@@ -150,6 +150,39 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     );
   });
 
+  it("a nonmember org admin has audited emergency project-admin authority", async () => {
+    const result = await createTask(
+      store.db,
+      {
+        projectSlug: store.slug,
+        title: "Emergency override probe",
+        goal: "Verify org-admin project recovery authority.",
+      },
+      {
+        ...actorOf(store.users.deniz),
+        orgRole: "admin",
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.task).toBeTruthy();
+    const audit = store.db
+      .prepare(
+        `SELECT details_json FROM audit_events
+         WHERE action = 'task.created' AND task_key = ?`,
+      )
+      .get(result.key) as { details_json: string };
+    expect(JSON.parse(audit.details_json)).toMatchObject({
+      authoritySource: "org_admin_override",
+    });
+    const member = store.db
+      .prepare(
+        `SELECT role FROM project_members
+         WHERE project_slug = ? AND user_id = ?`,
+      )
+      .get(store.slug, store.users.deniz.id);
+    expect(member).toBeUndefined();
+  });
+
   it("own-task (take ownership) → contributor+ (viewer + non-member denied)", async () => {
     await assertMatchesMatrix("own-task", (actor) =>
       setOwner(store.db, { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: actor.userId }, actor, { dataRoot: store.dataRoot }),

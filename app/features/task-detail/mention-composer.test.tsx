@@ -27,7 +27,13 @@ const MENTIONABLES: Mentionables = {
   ],
 };
 
-function renderComposer() {
+function renderComposer({
+  readOnly = false,
+  hasMore = false,
+}: {
+  readOnly?: boolean;
+  hasMore?: boolean;
+} = {}) {
   const Stub = createRoutesStub([
     {
       path: "/t",
@@ -35,12 +41,13 @@ function renderComposer() {
         <ToastProvider>
           <Timeline
             events={[]}
-            hasMore={false}
-            remaining={0}
+            hasMore={hasMore}
+            remaining={hasMore ? 3 : 0}
             nextLimit={40}
             tlDefault="all"
             ask={0}
             mentionables={MENTIONABLES}
+            readOnly={readOnly}
           />
         </ToastProvider>
       ),
@@ -63,6 +70,19 @@ function type(ta: HTMLTextAreaElement, value: string) {
 const listbox = () => document.querySelector('[role="listbox"]');
 
 describe("comment composer @-mention autocomplete", () => {
+  it("archived history keeps filters and pagination but closes commenting", () => {
+    const { container, getByText, queryByText } = renderComposer({
+      readOnly: true,
+      hasMore: true,
+    });
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(queryByText("Comment")).toBeNull();
+    expect(getByText("All")).toBeTruthy();
+    expect(getByText("Important events")).toBeTruthy();
+    expect(getByText("Comments")).toBeTruthy();
+    expect(getByText("Show older events · 3 more")).toBeTruthy();
+  });
+
   it("opens a dropdown listing matching agents when typing @de", async () => {
     const { ta } = renderComposer();
     type(ta, "@de");

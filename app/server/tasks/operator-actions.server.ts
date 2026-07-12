@@ -24,6 +24,7 @@ import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -41,6 +42,8 @@ import {
 import {
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  DEFAULT_GOAL,
+  missingReviewerApprovalProfileIds,
   notifyTaskWatchers,
   operatorPromptAgent,
   transitionStage,
@@ -55,6 +58,11 @@ import {
   startSpecialistRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
+import {
+  buildOperatorRoutingContext,
+  type OperatorRoutingCandidate,
+} from "./operator-routing.server";
+import { reviewEvidenceFingerprint } from "./review-evidence.server";
 
 /**
  * Operator-authorized, capability-GATED task mutations — the layer the
@@ -204,7 +212,11 @@ export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
 
 // ------------------------------------------------------------- helpers
 
-function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
+function taskRef(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+) {
   return {
     projectSlug,
     taskKey,
@@ -223,12 +235,129 @@ function reproject(
   });
 }
 
+function taskReadiness(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): string | null {
+  return (
+    readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter
+      .readiness ?? null
+  );
+}
+
+function readinessDenial(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): OperatorActionResult | null {
+  const readiness = taskReadiness(ctx, projectSlug, taskKey);
+  if (readiness === "ready") return null;
+  return {
+    outcome: "denied",
+    message:
+      readiness === "input_required"
+        ? "The task still requires an explicit readiness assessment; do not assign, run, prompt, or advance work until its implementation intent is resolved."
+        : `The task is ${readiness ?? "unavailable"}; resolve that readiness state before routing or advancing work.`,
+  };
+}
+
+function routingCandidate(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    purpose: "primary" | "reviewer";
+    allowEngagedReviewer?: boolean;
+  },
+): { candidate: OperatorRoutingCandidate | null; denial: string | null } {
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!task)
+    return { candidate: null, denial: `Task ${input.taskKey} not found.` };
+  const specialists = listDeployedSpecialists(db, input.projectSlug, ctx);
+  const context = buildOperatorRoutingContext(db, ctx, {
+    projectSlug: input.projectSlug,
+    stageId: task.parsed.frontmatter.stage,
+    purpose: input.purpose,
+    specialists,
+    primaryProfileId: task.parsed.frontmatter.specialist?.profileId ?? null,
+    reviewerProfileIds: input.allowEngagedReviewer
+      ? []
+      : task.parsed.frontmatter.reviewers.map((reviewer) => reviewer.profileId),
+  });
+  const candidate =
+    context.eligible.find((item) => item.profileId === input.profileId) ?? null;
+  const excluded = context.excluded.find(
+    (item) => item.profileId === input.profileId,
+  );
+  return {
+    candidate,
+    denial: candidate
+      ? null
+      : excluded
+        ? `${excluded.name} is not eligible: ${excluded.reasons.join("; ")}.`
+        : `No hard-eligible deployed specialist "${input.profileId}" is available.`,
+  };
+}
+
+async function recordRoutingDecision(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    purpose: "primary" | "reviewer";
+    candidate: OperatorRoutingCandidate;
+    reason?: string;
+  },
+): Promise<void> {
+  const reason =
+    input.reason?.trim() ||
+    `${input.candidate.name} is hard-eligible for this stage; the operator selected it after comparing its declared fit, backend health, workload, and observed cost context.`;
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "agent",
+        actor: { kind: "operator" },
+        title: null,
+        text: `**Routing decision (${input.purpose}):** selected **${input.candidate.name}** (${input.candidate.backend}). ${reason}`,
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.routing_decided",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      purpose: input.purpose,
+      selectedProfileId: input.candidate.profileId,
+      selectedBackend: input.candidate.backend,
+      reason,
+      context: {
+        resources: input.candidate.resources,
+        backendHealth: input.candidate.backendHealth,
+        workload: input.candidate.workload,
+        cost: input.candidate.cost,
+      },
+    },
+  });
+}
+
 /** The operator mutation context — carries the operator-authorized flag so
  *  the shared mutations skip human RBAC and attribute to the operator. */
 function opCtx(ctx: TaskMutationContext): TaskMutationContext {
   return { ...ctx, operatorAuthorized: true };
 }
-
 
 /**
  * Append an operator-authored `comment` timeline event, reproject, audit.
@@ -255,9 +384,12 @@ async function writeOperatorComment(
     guardrailOn(ctx, projectSlug, "meaningful-comment") &&
     isMeaninglessComment(text)
   ) {
-    logger.info("operator comment dropped by the meaningful-comment guardrail", {
-      taskKey,
-    });
+    logger.info(
+      "operator comment dropped by the meaningful-comment guardrail",
+      {
+        taskKey,
+      },
+    );
     return;
   }
   if (guardrailOn(ctx, projectSlug, "evidence-separation")) {
@@ -347,7 +479,12 @@ async function addRecommendation(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  rec: { kind: RecommendationKind; profileId?: string; toStageId?: string; label: string },
+  rec: {
+    kind: RecommendationKind;
+    profileId?: string;
+    toStageId?: string;
+    label: string;
+  },
   reasoning: string,
 ): Promise<void> {
   const recommendation: Recommendation = {
@@ -496,7 +633,8 @@ export async function operatorOpenPacket(
 
   const packet: TaskPacket = {
     type: input.packetType,
-    kind: input.packetType === "blocked" ? "Blocked decision" : "Decision required",
+    kind:
+      input.packetType === "blocked" ? "Blocked decision" : "Decision required",
     from: "operator",
     title,
     body: (input.body ?? "").trim(),
@@ -508,26 +646,29 @@ export async function operatorOpenPacket(
     options,
   };
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.packet = packet;
-    parsed.frontmatter.waiting = "human";
-    if (input.packetType === "blocked") {
-      parsed.frontmatter.readiness = "blocked";
-      parsed.frontmatter.validation = "failing"; // blocked work is unhealthy (FR24)
-    }
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: input.packetType === "blocked" ? "blocked" : "comment",
-      actor: { kind: "operator" },
-      title,
-      text:
-        input.packetType === "blocked"
-          ? `**Blocked:** ${title}. Opened a decision packet for the owner to resolve.`
-          : `**Decision packet:** ${title}. Awaiting a human decision.`,
-      toAgent: false,
-      evidence: null,
-    });
-  });
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.packet = packet;
+      parsed.frontmatter.waiting = "human";
+      if (input.packetType === "blocked") {
+        parsed.frontmatter.readiness = "blocked";
+        parsed.frontmatter.validation = "failing"; // blocked work is unhealthy (FR24)
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: input.packetType === "blocked" ? "blocked" : "comment",
+        actor: { kind: "operator" },
+        title,
+        text:
+          input.packetType === "blocked"
+            ? `**Blocked:** ${title}. Opened a decision packet for the owner to resolve.`
+            : `**Decision packet:** ${title}. Awaiting a human decision.`,
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
   reproject(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.packet_opened",
@@ -584,7 +725,13 @@ export interface OperatorTaskSnapshot {
   waiting: string;
   owner: string | null;
   specialist: { profileId: string; role: string; backend: string } | null;
-  reviewers: { profileId: string; role: string; backend: string }[];
+  reviewers: {
+    profileId: string;
+    role: string;
+    backend: string;
+    verdict: "approve" | "request_changes" | null;
+    verdictSummary: string | null;
+  }[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
@@ -602,6 +749,18 @@ export interface OperatorTaskSnapshot {
      *  operator should only assign/prompt an eligible one. */
     eligibleForCurrentStage: boolean;
   })[];
+  /** Hard-eligible candidates plus factual comparison context. The intelligent
+   * operator makes the final choice; Viberr deliberately supplies no score or
+   * pre-selected winner. */
+  routingCandidates: {
+    primary: OperatorRoutingCandidate[];
+    reviewer: OperatorRoutingCandidate[];
+    excluded: {
+      primary: { profileId: string; name: string; reasons: string[] }[];
+      reviewer: { profileId: string; name: string; reasons: string[] }[];
+    };
+    decisionRule: "operator_decides_no_static_score";
+  };
   openPacket: boolean;
   recentTimeline: { type: string; actor: string; text: string }[];
   autonomy: OperatorAutonomy;
@@ -639,10 +798,31 @@ export function operatorSnapshot(
   );
 
   const ownerName = fm.ownerUserId
-    ? ((db
-        .prepare(`SELECT name FROM users WHERE id = ?`)
-        .get(fm.ownerUserId) as { name: string } | undefined)?.name ?? null)
+    ? ((
+        db
+          .prepare(`SELECT name FROM users WHERE id = ?`)
+          .get(fm.ownerUserId) as { name: string } | undefined
+      )?.name ?? null)
     : null;
+  const deployedSpecialists = listDeployedSpecialists(db, projectSlug, ctx);
+  const primaryRouting = buildOperatorRoutingContext(db, ctx, {
+    projectSlug,
+    stageId: fm.stage,
+    purpose: "primary",
+    specialists: deployedSpecialists,
+  });
+  const reviewerRouting = buildOperatorRoutingContext(db, ctx, {
+    projectSlug,
+    stageId: fm.stage,
+    purpose: "reviewer",
+    specialists: deployedSpecialists,
+    primaryProfileId: fm.specialist?.profileId ?? null,
+    reviewerProfileIds: fm.reviewers.map((reviewer) => reviewer.profileId),
+  });
+  const currentReviewEvidence = reviewEvidenceFingerprint(
+    file.parsed,
+    project.parsed.frontmatter.repo,
+  );
 
   return {
     key: fm.key,
@@ -660,27 +840,46 @@ export function operatorSnapshot(
           backend: fm.specialist.backend,
         }
       : null,
-    reviewers: fm.reviewers.map((r) => ({
-      profileId: r.profileId,
-      role: r.role,
-      backend: r.backend,
-    })),
+    reviewers: fm.reviewers.map((r) => {
+      const result = fm.reviewerVerdicts.find(
+        (item) =>
+          item.profileId === r.profileId &&
+          item.evidenceFingerprint === currentReviewEvidence,
+      );
+      return {
+        profileId: r.profileId,
+        role: r.role,
+        backend: r.backend,
+        verdict: result?.verdict ?? null,
+        verdictSummary: result?.summary ?? null,
+      };
+    }),
     nextStages,
     stageIds: stages.map((s) => s.id),
     doneStageId,
     reviewStageId: roles.reviewId,
     workStageId: roles.workId,
-    deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx).map((s) => ({
+    deployedSpecialists: deployedSpecialists.map((s) => ({
       ...s,
-      eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
+      eligibleForCurrentStage: specialistEligibleForStage(
+        s,
+        file.parsed.frontmatter.stage,
+      ),
     })),
+    routingCandidates: {
+      primary: primaryRouting.eligible,
+      reviewer: reviewerRouting.eligible,
+      excluded: {
+        primary: primaryRouting.excluded,
+        reviewer: reviewerRouting.excluded,
+      },
+      decisionRule: "operator_decides_no_static_score",
+    },
     openPacket: !!file.parsed.packet,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
       type: e.type,
       actor:
-        e.actor.kind === "human"
-          ? (e.actor.nameHint ?? "human")
-          : e.actor.kind,
+        e.actor.kind === "human" ? (e.actor.nameHint ?? "human") : e.actor.kind,
       text: e.text,
     })),
     autonomy: authority.autonomy,
@@ -689,6 +888,125 @@ export function operatorSnapshot(
 }
 
 // ------------------------------------------------------------- actions
+
+/**
+ * Resolve the Triage/readiness gate as one durable operator decision. A ready
+ * verdict is refused for the placeholder goal or while a decision packet is
+ * open. An input-required verdict remains in Triage and opens the governed
+ * clarification packet when packet authority is available. No specialist or
+ * stage action can run until this writes `readiness: ready`.
+ */
+export async function operatorAssessReadiness(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    verdict: "ready" | "input_required";
+    rationale: string;
+    missingInformation?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!file) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const rationale = input.rationale.trim();
+  if (rationale.length < 12) {
+    return {
+      outcome: "denied",
+      message: "A readiness assessment needs a concrete rationale.",
+    };
+  }
+  if (input.verdict === "ready") {
+    if (file.parsed.packet) {
+      return {
+        outcome: "denied",
+        message:
+          "A human decision packet is still open; the operator cannot silently clear it.",
+      };
+    }
+    const goal = file.parsed.goal.trim();
+    if (!goal || goal === DEFAULT_GOAL || goal.length < 20) {
+      return {
+        outcome: "denied",
+        message:
+          "The canonical goal is still a placeholder or too vague to mark ready. Keep it input-required and ask for implementation intent.",
+      };
+    }
+  }
+
+  const from = file.parsed.frontmatter.readiness;
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.frontmatter.readiness = input.verdict;
+      parsed.frontmatter.waiting = input.verdict === "ready" ? "none" : "human";
+      if (!parsed.frontmatter.operator) {
+        parsed.frontmatter.operator = {
+          assignedAtStageId: parsed.frontmatter.stage,
+        };
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "quality",
+        actor: { kind: "operator" },
+        title: null,
+        text:
+          input.verdict === "ready"
+            ? `**Readiness resolved:** ready. ${rationale}`
+            : `**Readiness assessment:** input required. ${rationale}`,
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.readiness_assessed",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { from, to: input.verdict, rationale },
+  });
+
+  if (input.verdict === "input_required" && !file.parsed.packet) {
+    const missing =
+      input.missingInformation?.trim() ||
+      "State the concrete product or repository outcome, its boundaries, and how completion will be verified. The operator will not invent a change.";
+    await operatorOpenPacket(
+      db,
+      ctx,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        packetType: "input",
+        title: "Clarify the implementation intent",
+        body: missing,
+        observations: [{ k: "Readiness", v: "input_required" }],
+        options: [
+          {
+            kind: "custom",
+            title: "Provide the concrete scope and continue",
+            detail:
+              "Update the canonical goal with the intended outcome and verification criteria.",
+            recommended: true,
+          },
+        ],
+      },
+      authority,
+    );
+  }
+
+  return {
+    outcome: "done",
+    message:
+      input.verdict === "ready"
+        ? `Marked ${input.taskKey} ready with an auditable assessment.`
+        : `Kept ${input.taskKey} input-required; implementation work will not start without clarified intent.`,
+  };
+}
 
 /** Post an operator comment (governed by append-typed-events). */
 export async function operatorPostComment(
@@ -700,7 +1018,10 @@ export async function operatorPostComment(
   const text = input.text.trim();
   if (!text) return { outcome: "noop", message: "Empty comment ignored." };
   if (gate(authority, "append-typed-events") === "deny") {
-    return { outcome: "denied", message: "The operator cannot post events in this project." };
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project.",
+    };
   }
   await writeOperatorComment(
     db,
@@ -717,16 +1038,33 @@ export async function operatorPostComment(
 export async function operatorAssignSpecialist(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    reason?: string;
+  },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "assign-primary-specialist");
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Assigning the primary specialist is not permitted for the operator here.",
+      message:
+        "Assigning the primary specialist is not permitted for the operator here.",
     };
   }
+  const routed = routingCandidate(db, ctx, { ...input, purpose: "primary" });
+  if (!routed.candidate) {
+    return { outcome: "denied", message: routed.denial! };
+  }
+  await recordRoutingDecision(db, ctx, {
+    ...input,
+    purpose: "primary",
+    candidate: routed.candidate,
+  });
   if (g === "recommend") {
     const name = specialistName(db, ctx, input.projectSlug, input.profileId);
     await addRecommendation(
@@ -741,7 +1079,10 @@ export async function operatorAssignSpecialist(
       },
       input.reason ?? `${name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${name} as the primary specialist.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended assigning ${name} as the primary specialist.`,
+    };
   }
   const result = await assignSpecialist(
     db,
@@ -749,7 +1090,10 @@ export async function operatorAssignSpecialist(
     OPERATOR_TASK_ACTOR,
     opCtx(ctx),
   );
-  return { outcome: "done", message: `Assigned ${result.name} as the primary specialist.` };
+  return {
+    outcome: "done",
+    message: `Assigned ${result.name} as the primary specialist.`,
+  };
 }
 
 /** Start the primary specialist's run (governed by assign-primary-specialist). */
@@ -759,9 +1103,14 @@ export async function operatorRunSpecialist(
   input: { projectSlug: string; taskKey: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "assign-primary-specialist");
   if (g === "deny") {
-    return { outcome: "denied", message: "Running the specialist is not permitted for the operator here." };
+    return {
+      outcome: "denied",
+      message: "Running the specialist is not permitted for the operator here.",
+    };
   }
   if (g === "recommend") {
     await addRecommendation(
@@ -772,9 +1121,17 @@ export async function operatorRunSpecialist(
       { kind: "run_specialist", label: "Start the primary specialist's run" },
       "The specialist is ready to work this task; a maintainer starts the run.",
     );
-    return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
+    return {
+      outcome: "recommended",
+      message: "Recommended starting the primary specialist's run.",
+    };
   }
-  const result = await startSpecialistRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startSpecialistRun(
+    db,
+    input,
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} specialist.`,
@@ -785,13 +1142,36 @@ export async function operatorRunSpecialist(
 export async function operatorAssignReviewer(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    reason?: string;
+  },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "summon-reviewers");
   if (g === "deny") {
-    return { outcome: "denied", message: "Summoning reviewers is not permitted for the operator here." };
+    return {
+      outcome: "denied",
+      message: "Summoning reviewers is not permitted for the operator here.",
+    };
   }
+  const routed = routingCandidate(db, ctx, {
+    ...input,
+    purpose: "reviewer",
+    allowEngagedReviewer: true,
+  });
+  if (!routed.candidate) {
+    return { outcome: "denied", message: routed.denial! };
+  }
+  await recordRoutingDecision(db, ctx, {
+    ...input,
+    purpose: "reviewer",
+    candidate: routed.candidate,
+  });
   if (g === "recommend") {
     const name = specialistName(db, ctx, input.projectSlug, input.profileId);
     await addRecommendation(
@@ -806,9 +1186,17 @@ export async function operatorAssignReviewer(
       },
       input.reason ?? `${name} should review the work at this stage.`,
     );
-    return { outcome: "recommended", message: `Recommended engaging ${name} as a reviewer.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended engaging ${name} as a reviewer.`,
+    };
   }
-  const result = await assignReviewer(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await assignReviewer(
+    db,
+    input,
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
   return {
     outcome: "done",
     message: result.alreadyEngaged
@@ -824,9 +1212,14 @@ export async function operatorRunReviewer(
   input: { projectSlug: string; taskKey: string; profileId: string },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "summon-reviewers");
   if (g === "deny") {
-    return { outcome: "denied", message: "Running a reviewer is not permitted for the operator here." };
+    return {
+      outcome: "denied",
+      message: "Running a reviewer is not permitted for the operator here.",
+    };
   }
   if (g === "recommend") {
     const name = specialistName(db, ctx, input.projectSlug, input.profileId);
@@ -835,12 +1228,24 @@ export async function operatorRunReviewer(
       ctx,
       input.projectSlug,
       input.taskKey,
-      { kind: "run_reviewer", profileId: input.profileId, label: `Start ${name}'s review run` },
+      {
+        kind: "run_reviewer",
+        profileId: input.profileId,
+        label: `Start ${name}'s review run`,
+      },
       `${name} is engaged as a reviewer; a maintainer starts the review run.`,
     );
-    return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended starting ${name}'s review run.`,
+    };
   }
-  const result = await startReviewerRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startReviewerRun(
+    db,
+    input,
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} reviewer.`,
@@ -857,8 +1262,9 @@ function deployedAgent(
   profileId: string,
 ): DeployedSpecialistView | null {
   return (
-    listDeployedSpecialists(db, projectSlug, ctx).find((s) => s.id === profileId) ??
-    null
+    listDeployedSpecialists(db, projectSlug, ctx).find(
+      (s) => s.id === profileId,
+    ) ?? null
   );
 }
 
@@ -875,13 +1281,11 @@ async function ensureTaskBranchBestEffort(
   taskKey: string,
 ): Promise<void> {
   try {
-    const { ensureTaskBranch } = await import("~/server/github/branch-sync.server");
-    await ensureTaskBranch(
-      db,
-      { projectSlug, taskKey },
-      OPERATOR_AUDIT_ACTOR,
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
-    );
+    const { ensureTaskBranch } =
+      await import("~/server/github/branch-sync.server");
+    await ensureTaskBranch(db, { projectSlug, taskKey }, OPERATOR_AUDIT_ACTOR, {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
   } catch {
     // Non-fatal: coordination proceeds without a branch when GitHub is absent.
   }
@@ -903,7 +1307,8 @@ function taskContext(
   const goal = file?.parsed.goal ?? "";
   const stageId = file?.parsed.frontmatter.stage ?? "";
   const stageName =
-    project?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+    project?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ??
+    stageId;
   return { title, goal, stageName };
 }
 
@@ -931,17 +1336,32 @@ export async function operatorPromptSpecialist(
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "assign-primary-specialist");
   if (g === "deny") {
     return {
       outcome: "denied",
-      message: "Prompting the primary specialist is not permitted for the operator here.",
+      message:
+        "Prompting the primary specialist is not permitted for the operator here.",
     };
   }
   const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
   if (!agent) {
-    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to prompt.` };
+    return {
+      outcome: "denied",
+      message: `No deployed specialist "${input.profileId}" to prompt.`,
+    };
   }
+  const routed = routingCandidate(db, ctx, { ...input, purpose: "primary" });
+  if (!routed.candidate) {
+    return { outcome: "denied", message: routed.denial! };
+  }
+  await recordRoutingDecision(db, ctx, {
+    ...input,
+    purpose: "primary",
+    candidate: routed.candidate,
+  });
 
   if (g === "recommend") {
     await addRecommendation(
@@ -954,9 +1374,14 @@ export async function operatorPromptSpecialist(
         profileId: input.profileId,
         label: `Assign ${agent.name} as the primary specialist`,
       },
-      input.reason ?? input.directive ?? `${agent.name} fits the current stage of work.`,
+      input.reason ??
+        input.directive ??
+        `${agent.name} fits the current stage of work.`,
     );
-    return { outcome: "recommended", message: `Recommended assigning ${agent.name} as the primary specialist.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended assigning ${agent.name} as the primary specialist.`,
+    };
   }
 
   // direct: assign as primary if it isn't already, then prompt + run.
@@ -965,7 +1390,11 @@ export async function operatorPromptSpecialist(
   if (currentPrimary !== input.profileId) {
     await assignSpecialist(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: input.profileId,
+      },
       OPERATOR_TASK_ACTOR,
       opCtx(ctx),
     );
@@ -993,7 +1422,10 @@ export async function operatorPromptSpecialist(
     },
     ctx,
   );
-  return { outcome: "done", message: `Prompted @${agent.name} and started its run.` };
+  return {
+    outcome: "done",
+    message: `Prompted @${agent.name} and started its run.`,
+  };
 }
 
 /**
@@ -1015,6 +1447,8 @@ export async function operatorPromptReviewer(
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "summon-reviewers");
   if (g === "deny") {
     return {
@@ -1024,8 +1458,24 @@ export async function operatorPromptReviewer(
   }
   const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
   if (!agent) {
-    return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
+    return {
+      outcome: "denied",
+      message: `No deployed specialist "${input.profileId}" to engage as a reviewer.`,
+    };
   }
+  const routed = routingCandidate(db, ctx, {
+    ...input,
+    purpose: "reviewer",
+    allowEngagedReviewer: true,
+  });
+  if (!routed.candidate) {
+    return { outcome: "denied", message: routed.denial! };
+  }
+  await recordRoutingDecision(db, ctx, {
+    ...input,
+    purpose: "reviewer",
+    candidate: routed.candidate,
+  });
 
   if (g === "recommend") {
     await addRecommendation(
@@ -1038,15 +1488,24 @@ export async function operatorPromptReviewer(
         profileId: input.profileId,
         label: `Engage ${agent.name} as a reviewer`,
       },
-      input.reason ?? input.directive ?? `${agent.name} should review the work at this stage.`,
+      input.reason ??
+        input.directive ??
+        `${agent.name} should review the work at this stage.`,
     );
-    return { outcome: "recommended", message: `Recommended engaging ${agent.name} as a reviewer.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended engaging ${agent.name} as a reviewer.`,
+    };
   }
 
   // direct: engage (idempotent) then prompt + run.
   await assignReviewer(
     db,
-    { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+    },
     OPERATOR_TASK_ACTOR,
     opCtx(ctx),
   );
@@ -1069,19 +1528,32 @@ export async function operatorPromptReviewer(
     },
     ctx,
   );
-  return { outcome: "done", message: `Prompted reviewer @${agent.name} and started its run.` };
+  return {
+    outcome: "done",
+    message: `Prompted reviewer @${agent.name} and started its run.`,
+  };
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */
 export async function operatorTransitionStage(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; toStageId: string; reason?: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    toStageId: string;
+    reason?: string;
+  },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
+  const notReady = readinessDenial(ctx, input.projectSlug, input.taskKey);
+  if (notReady) return notReady;
   const g = gate(authority, "stage-transitions");
   if (g === "deny") {
-    return { outcome: "denied", message: "Stage transitions are not permitted for the operator here." };
+    return {
+      outcome: "denied",
+      message: "Stage transitions are not permitted for the operator here.",
+    };
   }
   // An `auto` boundary is ungoverned by the project's own workflow — it declares
   // "no approval needed" — so crossing it is not an exercise of governance
@@ -1090,7 +1562,12 @@ export async function operatorTransitionStage(
   // strands at a pre-work stage (e.g. Ready→In Progress "when a specialist is
   // assigned") with a recommendation nobody needs to approve. Governed
   // boundaries (`approval`/`human`) still route through the recommend/deny gate.
-  const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  const boundary = operatorBoundaryFor(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.toStageId,
+  );
   if (g === "recommend" && boundary !== "auto") {
     const name = stageNameOf(db, ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
@@ -1105,10 +1582,21 @@ export async function operatorTransitionStage(
       },
       input.reason ?? `The work is ready to advance to ${name}.`,
     );
-    return { outcome: "recommended", message: `Recommended moving the task to ${name}.` };
+    return {
+      outcome: "recommended",
+      message: `Recommended moving the task to ${name}.`,
+    };
   }
-  const task = await transitionStage(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
+  const task = await transitionStage(
+    db,
+    input,
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
+  return {
+    outcome: "done",
+    message: `Moved ${input.taskKey} to ${task.stage}.`,
+  };
 }
 
 /** Resolve a stage's display name for a recommendation label. */
@@ -1122,7 +1610,10 @@ function stageNameOf(
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+  return (
+    file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ??
+    stageId
+  );
 }
 
 /** The workflow boundary the operator would cross to move a task from its
@@ -1140,7 +1631,9 @@ function operatorBoundaryFor(
   });
   if (!task || !project) return null;
   const from = task.parsed.frontmatter.stage;
-  const w = project.parsed.frontmatter.workflow.find((b) => b.from === from && b.to === toStageId);
+  const w = project.parsed.frontmatter.workflow.find(
+    (b) => b.from === from && b.to === toStageId,
+  );
   return w ? w.boundary : null;
 }
 
@@ -1163,7 +1656,8 @@ export async function operatorAcceptCompletion(
     projectSlug: input.projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  if (!project) throw AppError.notFound(`Project ${input.projectSlug} not found.`);
+  if (!project)
+    throw AppError.notFound(`Project ${input.projectSlug} not found.`);
   const stages = project.parsed.frontmatter.stages;
   const doneStageId = stages[stages.length - 1]?.id ?? "done";
 
@@ -1171,24 +1665,59 @@ export async function operatorAcceptCompletion(
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
-  // Never accept a task a reviewer FLAGGED (validation "failing"): a
-  // request-changes verdict blocks acceptance until the developer reworks it
-  // (which resets validation off "failing"). This stops the operator from
-  // auto-accepting flagged work — e.g. when one of several reviewers rejected
-  // it — under full autonomy.
-  if (file.parsed.frontmatter.validation === "failing") {
+  const missingReviewerApprovals = missingReviewerApprovalProfileIds(
+    file.parsed,
+    project.parsed.frontmatter.repo,
+  );
+  if (missingReviewerApprovals.length > 0) {
     return {
       outcome: "noop",
-      message: `${input.taskKey} has an open "changes requested" verdict — not accepting until it's resolved.`,
+      message: `${input.taskKey} is still waiting for explicit approval from: ${missingReviewerApprovals.join(", ")}.`,
     };
   }
+  // Acceptance consumes an already-healthy verdict; it never fabricates one.
+  if (file.parsed.frontmatter.validation !== "healthy") {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} does not have a healthy validation verdict — not accepting until review completes.`,
+    };
+  }
+  const reviewStageId = resolveStageRoles(
+    stages,
+    project.parsed.frontmatter.workflow,
+  ).reviewId;
+  if (!reviewStageId || file.parsed.frontmatter.stage !== reviewStageId) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} can be accepted only from the governed Review stage.`,
+    };
+  }
+  const effectiveRepo =
+    file.parsed.frontmatter.repo ?? project.parsed.frontmatter.repo;
+  if (effectiveRepo && !file.parsed.frontmatter.pr) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is repository-backed but has no linked review pull request.`,
+    };
+  }
+  if (file.parsed.frontmatter.pr?.state === "closed") {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} has a closed, unmerged pull request. Open and validate a new review PR before acceptance.`,
+    };
+  }
+  const repositoryBound = Boolean(effectiveRepo || file.parsed.frontmatter.pr);
 
   // Supervised (or without the completion capability) → recommend only: post an
   // actionable "accept completion → Done" recommendation card (symmetric with the
   // other stage-transition cards, so the review→done boundary gets the same clear
   // one-click prompt as impl→review) — never move to Done ourselves. A
   // maintainer applies it to accept completion into Done.
-  if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
+  if (
+    repositoryBound ||
+    authority.autonomy !== "full" ||
+    gate(authority, "completion-for-acceptance") !== "direct"
+  ) {
     const doneName = stageNameOf(db, ctx, input.projectSlug, doneStageId);
     await addRecommendation(
       db,
@@ -1200,7 +1729,9 @@ export async function operatorAcceptCompletion(
         toStageId: doneStageId,
         label: `Accept completion — move ${input.taskKey} to ${doneName}`,
       },
-      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
+      repositoryBound
+        ? `The review is clean. A human acceptance may approve completion, but ${input.taskKey} remains in Review until Viberr actually merges its linked pull request.`
+        : `The review is clean and the work meets the goal. Human acceptance moves ${input.taskKey} to ${doneName}.`,
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
@@ -1217,35 +1748,54 @@ export async function operatorAcceptCompletion(
     };
   }
 
-  // FULL autonomy: the operator accepts completion and moves the task to Done.
-  // A REAL PR merge is attributed to a human (mergeTaskPr requires a user
-  // identity), so the operator cannot merge — it records the PR as "accepted"
-  // (merge pending), never a false "merged". A human merges / reconciles later.
-  const hasPr = !!file.parsed.frontmatter.pr;
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.stage = doneStageId;
-    parsed.frontmatter.readiness = "ready";
-    parsed.frontmatter.waiting = "none";
-    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24) — same as the human path
-    // Acceptance consumes any standing recommendations (a leftover transition
-    // card on a Done task would move it back OUT of Done if applied).
-    parsed.frontmatter.recommendations = [];
-    if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "accepted" };
-    }
-    parsed.packet = null;
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "completion",
-      actor: { kind: "operator" },
-      title: "Completion accepted",
-      text: hasPr
-        ? `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-        : `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
-      toAgent: false,
-      evidence: null,
-    });
-  });
+  // FULL autonomy is allowed to finalize only non-repository work. A real PR
+  // merge remains a human-authenticated server action, so every repository
+  // path above produces a recommendation instead of a false Done state.
+  const expectedEvidence = reviewEvidenceFingerprint(
+    file.parsed,
+    project.parsed.frontmatter.repo,
+  );
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      const missing = missingReviewerApprovalProfileIds(
+        parsed,
+        project.parsed.frontmatter.repo,
+      );
+      if (
+        parsed.frontmatter.stage !== reviewStageId ||
+        parsed.frontmatter.validation !== "healthy" ||
+        missing.length > 0 ||
+        reviewEvidenceFingerprint(parsed, project.parsed.frontmatter.repo) !==
+          expectedEvidence ||
+        Boolean(parsed.frontmatter.repo ?? project.parsed.frontmatter.repo)
+      ) {
+        throw new AppError({
+          code: ERROR_CODES.CONFLICT,
+          status: 409,
+          userMessage:
+            "The completion evidence changed before the operator could finalize it. Review the current task state first.",
+          kind: "user",
+        });
+      }
+      parsed.frontmatter.stage = doneStageId;
+      parsed.frontmatter.readiness = "ready";
+      parsed.frontmatter.waiting = "none";
+      // Acceptance consumes any standing recommendations (a leftover transition
+      // card on a Done task would move it back OUT of Done if applied).
+      parsed.frontmatter.recommendations = [];
+      parsed.packet = null;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "completion",
+        actor: { kind: "operator" },
+        title: "Completion accepted",
+        text: `Operator accepted completion under **full-autonomy** policy — ${input.taskKey} moved to Done.`,
+        toAgent: false,
+        evidence: null,
+      });
+    },
+  );
   reproject(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.accepted_completion",
@@ -1256,5 +1806,8 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     details: { autonomy: "full", toStage: doneStageId },
   });
-  return { outcome: "done", message: `Accepted completion — ${input.taskKey} moved to Done.` };
+  return {
+    outcome: "done",
+    message: `Accepted completion — ${input.taskKey} moved to Done.`,
+  };
 }

@@ -2,7 +2,14 @@ import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { ProjectRole } from "~/schemas/project-file.schema";
-import { type RbacAction, ROLE_LABEL, rolesForAction } from "~/shared/rbac";
+import type { UserRole } from "~/shared/mapping/user.server";
+import {
+  authorizeProjectAction,
+  type ProjectAuthoritySource,
+  type RbacAction,
+  ROLE_LABEL,
+  rolesForAction,
+} from "~/shared/rbac";
 
 /**
  * The ONE server-side project-role guard for the config-surface action modules
@@ -17,8 +24,12 @@ export function assertProjectAction(
   projectSlug: string,
   actorUserId: string,
   what: string,
-  opts: { dataRoot?: string } = {},
-): { projectName: string; role: ProjectRole } {
+  opts: { dataRoot?: string; orgRole?: UserRole } = {},
+): {
+  projectName: string;
+  role: ProjectRole;
+  authoritySource: Exclude<ProjectAuthoritySource, "denied">;
+} {
   const file = readProjectFile({
     projectSlug,
     ...(opts.dataRoot !== undefined ? { dataRoot: opts.dataRoot } : {}),
@@ -35,7 +46,8 @@ export function assertProjectAction(
     (m) => m.userId === actorUserId,
   )?.role;
   const allowed = rolesForAction(action);
-  if (!role || !allowed.includes(role)) {
+  const authority = authorizeProjectAction(role, opts.orgRole, action);
+  if (!authority.allowed) {
     const label =
       allowed.length === 1
         ? `${ROLE_LABEL[allowed[0]].toLowerCase()}s`
@@ -47,5 +59,12 @@ export function assertProjectAction(
       kind: "user",
     });
   }
-  return { projectName: file.parsed.frontmatter.name, role };
+  return {
+    projectName: file.parsed.frontmatter.name,
+    role: authority.source === "org_admin_override" ? "admin" : role!,
+    authoritySource: authority.source as Exclude<
+      ProjectAuthoritySource,
+      "denied"
+    >,
+  };
 }

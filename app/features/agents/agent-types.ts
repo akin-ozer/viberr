@@ -62,7 +62,13 @@ export interface AgentProfileView {
   autonomy?: "supervised" | "full";
   /** Display-label buckets (catalog labels + extras) — what CapColumns,
    * pcap counts and the matrix modal render. */
-  actions: { direct: string[]; recommend: string[]; forbidden: string[] };
+  actions: {
+    direct: string[];
+    recommend: string[];
+    forbidden: string[];
+    /** Explicitly withheld; distinct from human-reserved. Optional for old view fixtures. */
+    off?: string[];
+  };
   /** Id-based policy (edit-modal seeding; ruling 7). */
   capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
   /** Bespoke labels with no catalog id — display-only, preserved on save. */
@@ -89,9 +95,21 @@ export function deploymentStatusKind(
   return "neutral";
 }
 
+/** Human-facing status never claims active work from task waiting-state alone.
+ * `running` is the only authoritative live-work signal; the older working /
+ * coordinating values describe which side owns the next turn. */
+export function deploymentStatusLabel(
+  d: Pick<AgentDeploymentView, "status" | "running">,
+): string {
+  if (d.running) return "running";
+  if (d.status === "working") return "awaiting agent";
+  if (d.status === "coordinating") return "engaged";
+  return d.status;
+}
+
 /** Pulsing pill dot: actively-working statuses, plus any engagement with a
  * live run (the agent_runs join — honest enrichment, noted in the phase
  * report). */
 export function deploymentDot(d: Pick<AgentDeploymentView, "status" | "running">): boolean {
-  return d.status === "working" || d.status === "coordinating" || d.running;
+  return d.running;
 }

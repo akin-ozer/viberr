@@ -18,9 +18,19 @@ describe("matchesBoardFilter", () => {
   it('"all" matches everything', () => {
     expect(matchesBoardFilter(base, "all")).toBe(true);
   });
-  it('"human"/"agent" filter on waiting', () => {
-    expect(matchesBoardFilter({ ...base, waiting: "human" }, "human")).toBe(true);
-    expect(matchesBoardFilter({ ...base, waiting: "agent" }, "human")).toBe(false);
+  it('"human" is personalized responsibility; "agent" follows waiting', () => {
+    expect(
+      matchesBoardFilter(
+        { ...base, waiting: "human", waitingOnMe: true },
+        "human",
+      ),
+    ).toBe(true);
+    expect(
+      matchesBoardFilter(
+        { ...base, waiting: "human", waitingOnMe: false },
+        "human",
+      ),
+    ).toBe(false);
     expect(matchesBoardFilter({ ...base, waiting: "agent" }, "agent")).toBe(true);
   });
   it('"risk" = canonical risk/blocked readiness OR failing validation OR urgent (contracts §2.3)', () => {

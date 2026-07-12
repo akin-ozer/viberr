@@ -1,5 +1,6 @@
 import { Icon } from "~/ui/icon";
 import { formatDayTime } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { ntfMeta, plainText } from "./notification-meta";
 
 /**
@@ -29,7 +30,12 @@ export function NotificationItem({
   onOpen: (n: NotificationView) => void;
 }) {
   const m = ntfMeta(n);
-  const metaLine = [n.projectName, n.taskKey, formatDayTime(n.occurredAt)]
+  const timeZone = useViewerTimeZone();
+  const metaLine = [
+    n.projectName,
+    n.taskKey,
+    formatDayTime(n.occurredAt, new Date(), timeZone),
+  ]
     .filter(Boolean)
     .join(" · ");
   return (

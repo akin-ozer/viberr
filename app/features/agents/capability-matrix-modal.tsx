@@ -26,6 +26,7 @@ function modeOf(profile: MatrixProfile, label: string): Mode {
   if (profile.actions.direct.includes(label)) return "direct";
   if (profile.actions.recommend.includes(label)) return "recommend";
   if (profile.actions.forbidden.includes(label)) return "human";
+  if (profile.actions.off?.includes(label)) return "off";
   return "off";
 }
 
@@ -59,6 +60,7 @@ export function CapabilityMatrixModal({
       p.actions.direct,
       p.actions.recommend,
       p.actions.forbidden,
+      p.actions.off ?? [],
     ]) {
       for (const label of bucket) {
         if (!known.has(label)) extras.add(label);

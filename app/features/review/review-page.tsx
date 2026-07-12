@@ -2,29 +2,42 @@ import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
+import type { PrState } from "~/schemas/task-file.schema";
+
+function prPill(
+  state: PrState,
+): { kind: "done" | "info" | "risk" | "input"; label: string } {
+  switch (state) {
+    case "merged":
+      return { kind: "done", label: "merged" };
+    case "closed":
+      return { kind: "risk", label: "closed" };
+    case "accepted":
+      return { kind: "input", label: "merge pending" };
+    default:
+      return { kind: "info", label: "in review" };
+  }
+}
 
 /**
  * Review queue — the human acceptance boundary as a read-only triage list
  * (review-queue.md, ported 1:1 from design/html-app/app/review.jsx).
  *
  * Zero mutations here: rows navigate to task detail (where packet
- * resolution lives, Phase 5), the policy chip navigates to Policy. The
- * split is project-wide per ruling 10 — labels unchanged. Rows leave the
- * queue live via the shell's SSE revalidation (Phase 6).
- *
- * The wait-tag copy is deliberately different from the board ("your
- * acceptance" vs "waiting on you") — do not unify. The subline builder
- * lives in review-helpers.ts (Fast Refresh: components-only module).
+ * resolution lives, Phase 5), the policy chip navigates to Policy. Human
+ * decisions are split into this viewer's responsibility versus the project
+ * team's; agent work and unattended review tasks remain distinct. Rows leave
+ * the queue live via the shell's SSE revalidation (Phase 6).
  */
 
 function RQRow({
   t,
   onOpen,
-  ready,
+  status,
 }: {
   t: ReviewRowView;
   onOpen: (key: string) => void;
-  ready?: boolean;
+  status: "mine" | "other" | "agent" | "none";
 }) {
   const sub = reviewRowSub(t);
   return (
@@ -35,21 +48,34 @@ function RQRow({
         <div className="sub">{sub}</div>
       </span>
       <span className="rq-meta">
-        {t.pr && (
-          <Pill kind={t.pr.state === "merged" ? "done" : "info"} sm>
-            PR #{t.pr.number}
-          </Pill>
-        )}
+        {t.pr && (() => {
+          const meta = prPill(t.pr.state);
+          return (
+            <Pill kind={meta.kind} sm>
+              PR #{t.pr.number} · {meta.label}
+            </Pill>
+          );
+        })()}
         <ValidationPill value={t.validation} sm />
-        {ready ? (
+        {status === "mine" ? (
           <span className="wait-tag human">
             <Icon name="hand" />
-            your acceptance
+            your decision
+          </span>
+        ) : status === "other" ? (
+          <span className="wait-tag human">
+            <Icon name="user" />
+            teammate decision
+          </span>
+        ) : status === "agent" ? (
+          <span className="wait-tag agent">
+            <Icon name="cpu" />
+            waiting on agent
           </span>
         ) : (
-          <span className="wait-tag agent">
-            <span className="working" />
-            agent working
+          <span className="wait-tag">
+            <Icon name="alert" />
+            no active handoff
           </span>
         )}
       </span>
@@ -60,12 +86,16 @@ function RQRow({
 export function ReviewQueuePage({
   projectSlug,
   ready,
+  others = [],
   working,
+  unattended = [],
   total,
 }: {
   projectSlug: string;
   ready: ReviewRowView[];
+  others?: ReviewRowView[];
   working: ReviewRowView[];
+  unattended?: ReviewRowView[];
   total: number;
 }) {
   const navigate = useNavigate();
@@ -80,7 +110,7 @@ export function ReviewQueuePage({
           <h1>Review queue</h1>
           <div className="sub">
             {total} task{total === 1 ? "" : "s"} at the review boundary ·{" "}
-            {ready.length} waiting on your acceptance
+            {ready.length} waiting on your decision
           </div>
         </div>
         <div className="board-tools">
@@ -89,10 +119,10 @@ export function ReviewQueuePage({
             className="hero-file"
             style={{ cursor: "pointer" }}
             onClick={onPolicy}
-            title="Review → Done is locked to humans — see Policy"
+            title="Review → Done follows the configured completion policy — see Policy"
           >
             <Icon name="lock" />
-            <span>Review → Done · human only</span>
+            <span>Review → Done · governed completion</span>
           </button>
         </div>
       </div>
@@ -101,7 +131,7 @@ export function ReviewQueuePage({
         <div className="panel">
           <div className="panel-head">
             <Icon name="hand" />
-            <h2>Waiting on your acceptance</h2>
+            <h2>Waiting on your decision</h2>
             <span
               className="right sub"
               style={{ fontSize: ".76rem", color: "var(--faint)" }}
@@ -112,7 +142,7 @@ export function ReviewQueuePage({
           {ready.length ? (
             <div className="rq-list">
               {ready.map((t) => (
-                <RQRow key={t.key} t={t} onOpen={onOpen} ready />
+                <RQRow key={t.key} t={t} onOpen={onOpen} status="mine" />
               ))}
             </div>
           ) : (
@@ -127,9 +157,11 @@ export function ReviewQueuePage({
           >
             <Icon name="lock" />
             <span>
-              Accepting a completion merges the review PR and moves the task to{" "}
-              <strong>Done</strong> — always a human action, always in the
-              audit log.
+              Acceptance consumes healthy evidence and every required reviewer
+              approval. Repo-less work moves to <strong>Done</strong>. Repository
+              work reaches Done only after its linked PR is truly merged; until
+              then it stays in Review as <strong>merge pending</strong> — every
+              outcome is audited.
             </span>
           </div>
         </div>
@@ -137,7 +169,7 @@ export function ReviewQueuePage({
         <div className="panel">
           <div className="panel-head">
             <Icon name="activity" />
-            <h2>Still with agents</h2>
+            <h2>Waiting on agents</h2>
             <span
               className="right sub"
               style={{ fontSize: ".76rem", color: "var(--faint)" }}
@@ -148,13 +180,43 @@ export function ReviewQueuePage({
           {working.length ? (
             <div className="rq-list">
               {working.map((t) => (
-                <RQRow key={t.key} t={t} onOpen={onOpen} />
+                <RQRow key={t.key} t={t} onOpen={onOpen} status="agent" />
               ))}
             </div>
           ) : (
-            <div className="empty">No review work in flight.</div>
+            <div className="empty">No review tasks are waiting on an agent.</div>
           )}
         </div>
+
+        {others.length > 0 && (
+          <div className="panel">
+            <div className="panel-head">
+              <Icon name="user" />
+              <h2>Waiting on the project team</h2>
+              <span className="right sub">{others.length}</span>
+            </div>
+            <div className="rq-list">
+              {others.map((t) => (
+                <RQRow key={t.key} t={t} onOpen={onOpen} status="other" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {unattended.length > 0 && (
+          <div className="panel">
+            <div className="panel-head">
+              <Icon name="alert" />
+              <h2>No active handoff</h2>
+              <span className="right sub">{unattended.length}</span>
+            </div>
+            <div className="rq-list">
+              {unattended.map((t) => (
+                <RQRow key={t.key} t={t} onOpen={onOpen} status="none" />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

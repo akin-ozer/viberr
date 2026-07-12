@@ -96,6 +96,7 @@ function renderPage(
     <NotificationsPage
       items={items}
       unread={unread}
+      readAllBusy={false}
       onRead={onRead}
       onReadAll={onReadAll}
       onOpen={onOpen}

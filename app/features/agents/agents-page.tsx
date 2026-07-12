@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import type { GagentView } from "~/server/org/gagents.server";
 import {
   deploymentDot,
+  deploymentStatusLabel,
   deploymentStatusKind,
   type AgentDeploymentView,
   type AgentProfileView,
@@ -156,6 +159,104 @@ function ResGroup({
 
 // -------------------------------------------------------- delete confirm
 
+export function DeployGlobalProfileModal({
+  profiles,
+  deployedIds,
+  projectName,
+  busy,
+  error,
+  onClose,
+  onDeploy,
+}: {
+  profiles: GagentView[];
+  deployedIds: readonly string[];
+  projectName: string;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onDeploy: (profileId: string) => void;
+}) {
+  const dialogRef = useDialog(onClose);
+  const deployed = new Set(deployedIds);
+  return (
+    <dialog
+      className="modal-card deploy-global-card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Deploy global profile"
+      ref={dialogRef}
+    >
+      <div className="modal-head">
+        <div className="agent-glyph">
+          <Icon name="agents" />
+        </div>
+        <div>
+          <h2>Deploy a global profile</h2>
+          <div className="mh-sub">
+            Add a shared template to {projectName}'s governed roster
+          </div>
+        </div>
+        <button type="button" className="icon-btn close" aria-label="Close" onClick={onClose}>
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body deploy-global-list">
+        <div className="def-note">
+          <Icon name="shield" />
+          <span>
+            Viberr validates stage and context-resource compatibility, then copies
+            only this project's capability policy. The global template is not changed.
+          </span>
+        </div>
+        {profiles.map((profile) => {
+          const already = deployed.has(profile.id);
+          const resourceCount =
+            profile.skills.length + profile.mcps.length + profile.kbs.length;
+          return (
+            <div className="rsrc-row" key={profile.id}>
+              <AgentGlyph backend={profile.backend} />
+              <span className="rsrc-main">
+                <b>{profile.name}</b>
+                <span className="sub">{profile.summary || "No summary"}</span>
+                <span className="sub mono">
+                  {profile.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
+                  {profile.stages.join(" · ") || "no stages"} · {resourceCount} context
+                  resource{resourceCount === 1 ? "" : "s"}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="btn sm"
+                disabled={busy || already}
+                onClick={() => onDeploy(profile.id)}
+              >
+                {already ? "Deployed" : busy ? "Deploying…" : "Deploy"}
+              </button>
+            </div>
+          );
+        })}
+        {profiles.length === 0 && (
+          <div className="empty">
+            No global specialist profiles exist yet. Create one in Viberr settings.
+          </div>
+        )}
+        {error && (
+          <div className="cred-warn" role="alert">
+            <Icon name="alert" />
+            {error}
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">Global base · project-governed policy</span>
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 function DeleteConfirm({
   a,
   projectName,
@@ -189,11 +290,12 @@ function DeleteConfirm({
         {activeCount > 0 ? (
           <>
             {" "}
-            It is currently engaged on{" "}
+            It is currently assigned on{" "}
             <strong>
-              {activeCount} active task{activeCount > 1 ? "s" : ""}
+              {activeCount} task{activeCount > 1 ? "s" : ""}
             </strong>{" "}
-            — those threads keep running until the operator reassigns them.
+            — existing assignments and any already-started runs remain until
+            the operator reassigns or stops them.
           </>
         ) : (
           <> The global base definition is unaffected.</>
@@ -233,7 +335,10 @@ export function ProfileDetail({
   onDelete: (id: string) => void;
   onEdit: (a: AgentProfileView) => void;
 }) {
-  const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
+  const engagedKeys = [...new Set(insts.map((d) => d.taskKey))];
+  const runningKeys = [
+    ...new Set(insts.filter((deployment) => deployment.running).map((d) => d.taskKey)),
+  ];
   const [confirm, setConfirm] = useState(false);
   const canDelete = a.kind !== "operator" && canManage;
 
@@ -243,7 +348,7 @@ export function ProfileDetail({
         <DeleteConfirm
           a={a}
           projectName={projectName}
-          activeCount={activeKeys.length}
+          activeCount={engagedKeys.length}
           onCancel={() => setConfirm(false)}
           onConfirm={() => {
             setConfirm(false);
@@ -259,11 +364,16 @@ export function ProfileDetail({
             <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
               {a.role}
             </Pill>
-            {activeKeys.length > 0 ? (
+            {runningKeys.length > 0 ? (
               <span className="ag-running">
                 <span className="working" />
-                running on {activeKeys.length}{" "}
-                {activeKeys.length > 1 ? "tasks" : "task"}
+                running on {runningKeys.length}{" "}
+                {runningKeys.length > 1 ? "tasks" : "task"}
+              </span>
+            ) : engagedKeys.length > 0 ? (
+              <span className="ag-idle">
+                engaged on {engagedKeys.length}{" "}
+                {engagedKeys.length > 1 ? "tasks" : "task"} · no live run
               </span>
             ) : (
               <span className="ag-idle">idle · available</span>
@@ -334,6 +444,7 @@ export function ProfileDetail({
           <CapColumn group="direct" items={a.actions.direct} />
           <CapColumn group="recommend" items={a.actions.recommend} />
           <CapColumn group="forbidden" items={a.actions.forbidden} />
+          <CapColumn group="off" items={a.actions.off ?? []} />
         </div>
       </div>
 
@@ -406,7 +517,7 @@ export function ProfileDetail({
       <div className="panel">
         <div className="panel-head">
           <Icon name="activity" />
-          <h2>Active deployments</h2>
+          <h2>Task engagements</h2>
           <span
             className="right sub"
             style={{ fontSize: ".76rem", color: "var(--faint)" }}
@@ -436,7 +547,7 @@ export function ProfileDetail({
                   <BackendChip b={d.backend} />
                 )}
                 <Pill kind={deploymentStatusKind(d.status)} sm dot={deploymentDot(d)}>
-                  {d.status}
+                  {deploymentStatusLabel(d)}
                 </Pill>
               </button>
             ))}
@@ -528,7 +639,7 @@ export function LiveRoster({
               </span>
               <span>
                 <Pill kind={deploymentStatusKind(d.status)} sm dot={deploymentDot(d)}>
-                  {d.status}
+                  {deploymentStatusLabel(d)}
                 </Pill>
               </span>
             </button>
@@ -553,6 +664,8 @@ export function AgentsPage({
   projectName,
   myRole,
   resourceCatalog,
+  globalProfiles = [],
+  readOnly = false,
 }: {
   profiles: AgentProfileView[];
   deployments: AgentDeploymentView[];
@@ -562,26 +675,80 @@ export function AgentsPage({
   myRole: string | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
+  globalProfiles?: GagentView[];
+  /** Archived projects retain profile/live inspection but no profile changes. */
+  readOnly?: boolean;
 }) {
   const navigate = useNavigate();
   const push = useToast();
   const csrf = useCsrfToken();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
-  const canManage = myRole === "admin";
-  const [sel, setSel] = useState<string>(
-    () => searchParams.get("profile") ?? "operator",
-  );
-  const [tab, setTab] = useState<"profiles" | "live">("profiles");
+  const canManage = myRole === "admin" && !readOnly;
   const [creating, setCreating] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const operator = profiles.find((p) => p.kind === "operator") ?? null;
   const specialists = profiles.filter((p) => p.kind !== "operator");
-  const current = profiles.find((a) => a.id === sel) ?? profiles[0] ?? null;
+  const requestedProfile = searchParams.get("profile");
+  const requestedView = searchParams.get("view");
+  const tab: "profiles" | "live" =
+    requestedView === "live" ? "live" : "profiles";
+  const current =
+    profiles.find((a) => a.id === requestedProfile) ??
+    operator ??
+    profiles[0] ??
+    null;
+
+  // Canonicalize missing/unknown query state with REPLACE: initial links and
+  // loader-driven profile deletion get one valid URL without polluting Back.
+  // User tab/profile choices below use PUSH, so Back/Forward restores them.
+  const searchKey = searchParams.toString();
+  useEffect(() => {
+    const next = new URLSearchParams(searchKey);
+    let changed = false;
+    if (requestedView !== tab) {
+      next.set("view", tab);
+      changed = true;
+    }
+    if (current) {
+      if (requestedProfile !== current.id) {
+        next.set("profile", current.id);
+        changed = true;
+      }
+    } else if (requestedProfile !== null) {
+      next.delete("profile");
+      changed = true;
+    }
+    if (changed) setSearchParams(next, { replace: true });
+  }, [
+    current,
+    requestedProfile,
+    requestedView,
+    searchKey,
+    setSearchParams,
+    tab,
+  ]);
+
+  const selectView = (view: "profiles" | "live") => {
+    if (view === tab) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    if (current) next.set("profile", current.id);
+    setSearchParams(next);
+  };
+
+  const selectProfile = (profileId: string) => {
+    if (tab === "profiles" && current?.id === profileId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("view", "profiles");
+    next.set("profile", profileId);
+    setSearchParams(next);
+  };
 
   const counts = useMemo(() => {
     const sets = new Map<string, Set<string>>();
@@ -595,7 +762,9 @@ export function AgentsPage({
   }, [deployments]);
 
   const operators = deployments.filter((d) => d.engagement === "operator").length;
-  const working = deployments.filter((d) => d.status === "working").length;
+  const working = deployments.filter(
+    (d) => d.engagement !== "operator" && d.running,
+  ).length;
   const waiting = deployments.filter(
     (d) => d.status === "waiting on human" || d.status === "packet open",
   ).length;
@@ -614,15 +783,16 @@ export function AgentsPage({
     if (d.ok) {
       push(d.toast);
       setCreating(false);
+      setDeploying(false);
       setEditing(null);
       setFormError(null);
-      if (d.profileId) setSel(d.profileId);
-    } else if (creating || editing) {
+      if (d.profileId) selectProfile(d.profileId);
+    } else if (creating || editing || deploying) {
       setFormError(d.error);
     } else {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
-  }, [fetcher.state, fetcher.data, push, creating, editing]);
+  }, [fetcher.state, fetcher.data, push, creating, editing, deploying]);
 
   const submitProfile = (payload: ProfileFormPayload) => {
     setFormError(null);
@@ -638,9 +808,16 @@ export function AgentsPage({
   };
 
   const deleteProfile = (profileId: string) => {
-    if (sel === profileId) setSel("operator");
     fetcher.submit(
       { intent: "delete-profile", _csrf: csrf, profileId },
+      { method: "post" },
+    );
+  };
+
+  const deployGlobalProfile = (profileId: string) => {
+    setFormError(null);
+    fetcher.submit(
+      { intent: "deploy-global-profile", _csrf: csrf, profileId },
       { method: "post" },
     );
   };
@@ -656,11 +833,12 @@ export function AgentsPage({
           </div>
         </div>
         <div className="board-tools">
+          {readOnly && <ArchivedBadge />}
           <div className="seg">
             <button
               type="button"
               className={tab === "profiles" ? "on" : ""}
-              onClick={() => setTab("profiles")}
+              onClick={() => selectView("profiles")}
             >
               <Icon name="agents" />
               Profiles
@@ -668,7 +846,7 @@ export function AgentsPage({
             <button
               type="button"
               className={tab === "live" ? "on" : ""}
-              onClick={() => setTab("live")}
+              onClick={() => selectView("live")}
             >
               <Icon name="activity" />
               Live<span style={{ opacity: 0.6 }}>· {deployments.length}</span>
@@ -679,10 +857,16 @@ export function AgentsPage({
             Capability matrix
           </button>
           {canManage && (
-            <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
-              <Icon name="plus" />
-              New profile
-            </button>
+            <>
+              <button type="button" className="btn ghost sm" onClick={() => setDeploying(true)}>
+                <Icon name="agents" />
+                Deploy global
+              </button>
+              <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
+                <Icon name="plus" />
+                New profile
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -700,7 +884,7 @@ export function AgentsPage({
           <div className="n" style={{ color: "var(--agent-dark)" }}>
             {working}
           </div>
-          <div className="l">specialists in a working state</div>
+          <div className="l">specialists currently running</div>
         </div>
         <div className="ag-stat">
           <div className="n" style={{ color: "var(--blue-pressed)" }}>
@@ -719,7 +903,7 @@ export function AgentsPage({
                 a={operator}
                 count={counts[operator.id] ?? 0}
                 on={current?.id === operator.id}
-                onClick={() => setSel(operator.id)}
+                onClick={() => selectProfile(operator.id)}
               />
             )}
             <div className="ag-group-label ag-group-row">
@@ -742,7 +926,7 @@ export function AgentsPage({
                 a={p}
                 count={counts[p.id] ?? 0}
                 on={current?.id === p.id}
-                onClick={() => setSel(p.id)}
+                onClick={() => selectProfile(p.id)}
               />
             ))}
             {canManage && (
@@ -769,7 +953,7 @@ export function AgentsPage({
         <LiveRoster deployments={deployments} onOpen={onOpen} />
       )}
 
-      {creating && (
+      {canManage && creating && (
         <CreateProfileModal
           initial={null}
           stages={stages}
@@ -784,7 +968,21 @@ export function AgentsPage({
           onSubmit={submitProfile}
         />
       )}
-      {editing && (
+      {canManage && deploying && (
+        <DeployGlobalProfileModal
+          profiles={globalProfiles}
+          deployedIds={profiles.map((profile) => profile.id)}
+          projectName={projectName}
+          busy={fetcher.state !== "idle"}
+          error={formError}
+          onClose={() => {
+            setDeploying(false);
+            setFormError(null);
+          }}
+          onDeploy={deployGlobalProfile}
+        />
+      )}
+      {canManage && editing && (
         <CreateProfileModal
           key={editing.id}
           initial={editing}

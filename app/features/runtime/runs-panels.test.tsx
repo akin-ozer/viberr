@@ -60,6 +60,16 @@ describe("LiveRunPanel", () => {
     fireEvent.click(getByText("Interrupt"));
     expect(onInterrupt).toHaveBeenCalledWith("primary");
   });
+
+  it("shows an interrupting acknowledgement while the action is pending", () => {
+    const { getByText, getByRole } = render(
+      <LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting />,
+    );
+    expect(getByText("Interrupting…")).toBeTruthy();
+    expect(
+      getByRole("button", { name: "Interrupting…" }).getAttribute("aria-busy"),
+    ).toBe("true");
+  });
 });
 
 describe("AgentLogsPanel", () => {

@@ -13,9 +13,12 @@ Data-root layout (created at boot by `app/server/files/file-store-root.server.ts
 ${VIBERR_DATA_ROOT}/
   projects/<slug>/project.md              ← project truth
   projects/<slug>/tasks/<KEY>/task.md     ← task truth (+ attachments/ later)
+  projects/<slug>/tasks/<KEY>/workspace/  ← primary + reviewer execution workspaces
   agents/profiles/<id>.md                 ← org-level agent profile templates
-  runtimes/                               ← NDJSON run logs (Phase 8)
-  state/projection.sqlite                 ← SQLite (never canonical for tasks)
+  kb/<dir>/                               ← knowledge-base files
+  skills/<name>/SKILL.md                  ← skill files
+  runtimes/                               ← NDJSON run logs + isolated SDK homes
+  state/projection.sqlite                 ← projections + app-owned identity/secrets/audit/runtime state
   cache/  auth/  logs/
 ```
 
@@ -64,12 +67,18 @@ workflow:                         # governed boundaries: auto|approval|human
     locked: true
 members:                          # project roles (4-role system, contracts §3.2)
   - userId: u_abc123
-    role: admin                   # admin | maintainer | reviewer | viewer
+    role: admin                   # admin | maintainer | contributor | viewer
 agents:                           # per-project DEPLOYMENT of profile templates
   - profileId: developer
     capabilities:                 # id-based against CAP_CATALOG (ruling 2)
       - capabilityId: create-task-branch
-        mode: direct              # direct | recommend | human
+        mode: direct              # direct | recommend | human | off
+    definition:                   # optional per-project profile overrides
+      model: gpt-5-codex
+      resources:
+        skills: [repo-write]
+        mcps: [github]
+        kb: [Architecture notes]
     extras:                       # display-only bespoke labels (near-misses)
       - label: Push commits to the branch
         mode: human
@@ -127,22 +136,25 @@ specialist:                       # primary specialist; null in triage
   profileId: developer
   backend: codex                  # codex | claude
   role: Developer                 # display
-consultants: []                   # 0..n, same shape as specialist
+reviewers: []                     # 0..n, same shape as specialist
+reviewerVerdicts: []              # latest real structured verdict per required reviewer
 operator:                         # null in triage (ruling 16: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
+recommendations: []               # pending governed operator recommendations
 urgent: true                      # optional; absent ≡ false
 validation: changed               # healthy | changed | failing | none
 branch: vib-142-attach-workspace  # task-key branch; null before creation
 repo: null                        # per-task override; null → project default
 pr:                               # GitHub projection mirrored into the file
   number: 318                     # (Phase 7 reconciler owns sync)
-  state: review
+  state: review                   # review | accepted | merged | closed
   title: Attach execution workspace
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …" }]
   changed: { files: 9, add: 412, del: 87 }
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:00.000Z
+boardRank: null                   # sparse within-stage board order
 ---
 
 ## Goal
@@ -166,7 +178,6 @@ options:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | custom
-    accept: true                  # acceptance path marker (human-only)
   - kind: request_edit
     t: Request one edit
     d: …
@@ -231,6 +242,24 @@ evidence:
 - Malformed entries are skipped with a warning diagnostic (readiness floors
   at `input_required`) — the task itself is never dropped.
 
+### Reviewer and completion invariants
+
+- Each engaged reviewer has a stable, isolated checkout under
+  `workspace/reviewer-<profileId>/<repo>/`; reviewers never share a mutable working tree.
+- A real reviewer run must end with exactly one single-line
+  `VIBERR_REVIEW_VERDICT: {"verdict":"approve|request_changes","summary":"..."}` marker.
+  Ordinary prose and simulated runs never become governance state.
+- `reviewerVerdicts` stores the latest real verdict per profile with `summary`, exact `runId`, and
+  `reviewedAt`. Entering a new review evidence cycle invalidates prior verdicts. Every currently
+  assigned reviewer must approve; any request-changes sends the task back to the work stage.
+- Completion is accepted only from the governed Review stage with `validation: healthy`. A
+  repository-backed task also requires a linked review PR. If acceptance cannot complete a real
+  merge, it stays in Review with `pr.state: accepted`; only the later real merge moves it to Done.
+  A healthy repo-less task may move directly to Done.
+- Completion authority belongs project-wide to maintainers/admins, task-locally to a current
+  contributor+ owner, and exceptionally to an audited organization-admin override. The override
+  does not alter canonical membership.
+
 ## 3. Actor references (contracts §3.1)
 
 | Actor | File encoding | Render shape |
@@ -270,6 +299,9 @@ Profile description (markdown body).
 
 - Secrets (PATs, session data) — SQLite/env only, never under `projects/`.
 - Notification rows, read state, sessions, users, audit — app-owned SQLite.
+- GitHub PATs, MCP organization secrets/config metadata, backend-health observations, and automatic
+  operator dispatches — app-owned SQLite/process state.
 - Derived readiness — files store the canonical stored readiness; the
   effective value (after diagnostic floors) lives only in the projection.
-  The "accepted" pill is a display state of done-stage tasks, never stored.
+  Completion acceptance while merge is pending is stored as `pr.state: accepted`; a Done-stage
+  accepted/merged pill is otherwise derived display.

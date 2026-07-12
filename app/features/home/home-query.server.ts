@@ -11,16 +11,15 @@ import {
   createActorResolver,
   initialsOfName,
 } from "~/shared/mapping/actor.server";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 
 /**
  * Home (`/`) read models — the project directory + org tile summaries
  * (home spec §3). All aggregates derive from the Phase-3 projections:
  *
- * - `running`: tasks with waiting === "agent" ("agents working") — the
- *   honest Phase-4 stand-in for active runtime runs; Phase 8's run registry
- *   replaces the derivation, not the field.
- * - `waiting`: open decision packets, PROJECT-WIDE (ruling 10 — the
- *   "waiting on you" copy stays, scoping is V1-deliberate).
+ * - `running`: real live runtime rows, excluding simulated/demo sessions.
+ * - `waiting`: human decisions routed to this viewer by explicit project role
+ *   or task ownership. Emergency org-admin access does not inflate the count.
  * - `accent`: stable per-slug hash over the mock palette (the mock's
  *   index-based accents shift when projects are created — spec §8 note 6).
  */
@@ -77,18 +76,34 @@ export function listHomeProjectsForUser(
   viewer: { id: string; role: "admin" | "member" },
 ): HomeProjectCard[] {
   const all = listHomeProjects(db);
-  if (viewer.role === "admin") return all; // org admins see everything
   // Single membership pass (pass-4 WI-9): one query for the slugs this viewer
   // belongs to, instead of re-running listProjectMembers once per project on
   // top of the pass listHomeProjects already made for the member avatars.
-  const memberSlugs = new Set(
-    (
-      db
-        .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
-        .all(viewer.id) as { project_slug: string }[]
-    ).map((r) => r.project_slug),
+  const memberships = db
+    .prepare(`SELECT project_slug, role FROM project_members WHERE user_id = ?`)
+    .all(viewer.id) as { project_slug: string; role: ProjectRole }[];
+  const roleBySlug = new Map(memberships.map((m) => [m.project_slug, m.role]));
+  const visible =
+    viewer.role === "admin"
+      ? all
+      : all.filter((p) => roleBySlug.has(p.slug));
+  const supervisorCount = db.prepare(
+    `SELECT COUNT(*) AS c FROM task_projections
+     WHERE project_slug = ? AND waiting = 'human'`,
   );
-  return all.filter((p) => memberSlugs.has(p.slug));
+  const ownerCount = db.prepare(
+    `SELECT COUNT(*) AS c FROM task_projections
+     WHERE project_slug = ? AND waiting = 'human' AND owner_user_id = ?`,
+  );
+  return visible.map((project) => {
+    const role = roleBySlug.get(project.slug) ?? null;
+    const waiting = roleCan(role, "resolve-packet")
+      ? (supervisorCount.get(project.slug) as { c: number }).c
+      : roleCan(role, "own-task")
+        ? (ownerCount.get(project.slug, viewer.id) as { c: number }).c
+        : 0;
+    return { ...project, waiting };
+  });
 }
 
 /** Per-project task aggregates for the home cards. */
@@ -123,16 +138,19 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     d[r.stage] = r.n;
   }
 
-  // Per-project totals: task count, agents-working (waiting = 'agent'), open
-  // decision packets, and the latest updatedAt. `waiting`/`running` mirror the
-  // prior JS predicates exactly (`t.waiting === "agent"`, `t.packet !== null`
-  // ⇔ a non-empty packet_json).
+  // Per-project totals: task count, REAL active runtime rows, open decision
+  // packets, and latest task update. A task's waiting flag is governance state,
+  // not proof that a process exists; simulated seed rows are demo evidence and
+  // must never inflate Home's "agents running" claim.
   const aggBySlug = new Map<string, HomeTaskAgg>();
   const aggRows = db
     .prepare(
       `SELECT project_slug,
               COUNT(*) AS total,
-              SUM(CASE WHEN waiting = 'agent' THEN 1 ELSE 0 END) AS running,
+              (SELECT COUNT(*) FROM agent_runs r
+                WHERE r.project_slug = task_projections.project_slug
+                  AND r.state = 'running'
+                  AND r.simulated = 0) AS running,
               SUM(CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
                        THEN 1 ELSE 0 END) AS waiting,
               MAX(updated_at) AS updated_at

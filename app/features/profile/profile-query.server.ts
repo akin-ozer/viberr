@@ -15,9 +15,9 @@ import {
  * session id into the display facts the panels need. `passwordHash` never
  * leaves the server; only the derived `hasPassword` boolean ships.
  *
- * `githubConnected` is DERIVED from users.idp (ruling 13 dropped the
- * mock's `ghConnected` pref) — connected means this account currently
- * signs in through the GitHub OAuth whitelist flow.
+ * `githubConnected` is derived from Better Auth's linked-account table, not
+ * the legacy `users.idp` display field. It therefore means a GitHub OAuth
+ * sign-in is actually linked to this workspace account.
  */
 
 export type MotionPreference = "full" | "reduce";
@@ -50,9 +50,8 @@ export interface ProfileView {
   };
   /** All project memberships, most-active project first. */
   memberships: ProfileMembership[];
-  /** Highest project role across memberships (admin > maintainer >
-   * reviewer > viewer); null when the user is in no project. */
-  accessRole: RoleId | null;
+  /** Explicit context for every project-scoped permission and destination. */
+  selectedProject: ProfileMembership | null;
   prefs: {
     notifs: NotifPrefs;
     motion: MotionPreference;
@@ -60,17 +59,9 @@ export interface ProfileView {
   };
 }
 
-const ROLE_RANK: Record<RoleId, number> = {
-  admin: 4,
-  maintainer: 3,
-  contributor: 2,
-  viewer: 1,
-};
-
 /** Memberships ordered most-active project first (task count DESC, then
- * name) — the first entry drives the "visible to X members" toast and the
- * Policy/Settings links, so it should be the project the user actually
- * works in, not an alphabetical accident. */
+ * name). The route may choose one explicitly with `?project=<slug>`; this
+ * ordering is only the initial fallback when the URL has no valid selection. */
 export function listUserMemberships(
   db: Database.Database,
   userId: string,
@@ -133,18 +124,25 @@ export function getTimelineDefaultPref(
 export function getProfileView(
   db: Database.Database,
   userId: string,
+  selectedProjectSlug?: string | null,
 ): ProfileView | null {
   const user = findUserById(db, userId);
   if (!user) return null;
 
   const memberships = listUserMemberships(db, userId);
-  const accessRole =
-    memberships.length === 0
-      ? null
-      : memberships.reduce<RoleId>(
-          (best, m) => (ROLE_RANK[m.role] > ROLE_RANK[best] ? m.role : best),
-          memberships[0]!.role,
-        );
+  const selectedProject =
+    memberships.find((membership) => membership.slug === selectedProjectSlug) ??
+    memberships[0] ??
+    null;
+  const githubConnected = Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM account
+         WHERE userId = ? AND providerId = 'github'
+         LIMIT 1`,
+      )
+      .get(userId),
+  );
 
   return {
     user: {
@@ -156,11 +154,11 @@ export function getProfileView(
       createdAt: user.createdAt,
       avatarTone: user.avatarTone ?? "",
       hasPassword: user.passwordHash !== null,
-      githubConnected: user.idp === "github",
+      githubConnected,
       githubHandle: user.githubHandle,
     },
     memberships,
-    accessRole,
+    selectedProject,
     prefs: {
       notifs: getNotifPrefs(db, userId),
       motion: getMotionPref(db, userId),

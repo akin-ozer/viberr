@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import {
@@ -26,6 +27,16 @@ import {
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
+import {
+  projectFilePath,
+  projectsDir,
+} from "~/server/files/file-store-root.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -310,11 +321,12 @@ export function resetLocalPassword(
  * denormalized actor snapshots (contracts §1.3, events survive member
  * removal), sessions/prefs/PATs cascade via FK.
  */
-export function deleteOrgUser(
+export async function deleteOrgUser(
   db: Database.Database,
   userId: string,
   actor: AuditActor,
-): { user: OrgUserView; toast: string } {
+  ctx: { dataRoot?: string } = {},
+): Promise<{ user: OrgUserView; toast: string }> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.");
   if (
@@ -324,6 +336,90 @@ export function deleteOrgUser(
   ) {
     throw conflict("Cannot remove the last active admin.");
   }
+
+  // Canonical project files outlive SQLite identities. Preflight every
+  // membership before mutating anything so deleting an account can never leave
+  // a project with no explicit project admin. Emergency org authority is a
+  // recovery backstop, not a substitute for the project's normal owner.
+  const root = projectsDir(ctx.dataRoot);
+  const memberships = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+        if (!entry.isDirectory()) return [];
+        const file = readProjectFile({
+          projectSlug: entry.name,
+          ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+        });
+        if (!file) return [];
+        const member = file.parsed.frontmatter.members.find(
+          (candidate) => candidate.userId === userId,
+        );
+        return member
+          ? [
+              {
+                slug: file.parsed.frontmatter.slug,
+                name: file.parsed.frontmatter.name,
+                role: member.role,
+                adminCount: file.parsed.frontmatter.members.filter(
+                  (candidate) => candidate.role === "admin",
+                ).length,
+              },
+            ]
+          : [];
+      })
+    : [];
+  const soleAdminProjects = memberships.filter(
+    (membership) => membership.role === "admin" && membership.adminCount <= 1,
+  );
+  if (soleAdminProjects.length > 0) {
+    throw conflict(
+      `Promote another project admin before removing ${existing.name}: ${soleAdminProjects
+        .map((project) => project.name)
+        .join(", ")}.`,
+    );
+  }
+
+  // Files first, identity last. If one file write fails, the user can still
+  // sign in and an admin can retry; no ghost membership/owner is created.
+  for (const membership of memberships) {
+    const releasedTaskKeys = await releaseProjectOwnerships(
+      db,
+      {
+        projectSlug: membership.slug,
+        targetUserId: userId,
+        targetName: existing.name,
+        reason: "org_user_removed",
+      },
+      { userId: actor.userId ?? "system", label: actor.label ?? "system" },
+      ctx,
+    );
+    await updateProjectFile(
+      {
+        projectSlug: membership.slug,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      },
+      (parsed) => {
+        parsed.frontmatter.members = parsed.frontmatter.members.filter(
+          (member) => member.userId !== userId,
+        );
+      },
+    );
+    rebuildPath(db, projectFilePath(membership.slug, ctx.dataRoot), {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
+    recordAudit(db, {
+      action: "project.member.removed",
+      actor,
+      subjectKind: "project_member",
+      subjectId: userId,
+      projectSlug: membership.slug,
+      details: {
+        reason: "org_user_removed",
+        previousRole: membership.role,
+        releasedTaskKeys,
+      },
+    });
+  }
+
   // Remove the better-auth identity too (user/account/member/session cascade) —
   // otherwise the orphaned `user` row (email is UNIQUE NOT NULL) makes
   // re-creating the same email throw a raw constraint mid-flow (pass-4 WI-3).
@@ -335,7 +431,11 @@ export function deleteOrgUser(
     actor,
     subjectKind: "user",
     subjectId: userId,
-    details: { email: existing.email, name: existing.name },
+    details: {
+      email: existing.email,
+      name: existing.name,
+      removedFromProjects: memberships.map((membership) => membership.slug),
+    },
   });
   return { user: toOrgUserView(existing), toast: `${existing.name} removed` };
 }

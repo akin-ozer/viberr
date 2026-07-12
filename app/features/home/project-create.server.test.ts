@@ -151,6 +151,30 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("direct");
   });
 
+  it("fresh projects do not restore pruned advisory verdict grants (F34)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Clean Capabilities", key: "CAP", owner: "", repoName: "", template: "governed", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    const developer = f.agents.find((a) => a.profileId === "developer")!;
+    const reviewer = f.agents.find((a) => a.profileId === "reviewer")!;
+
+    expect(developer.capabilities.map((c) => c.capabilityId)).not.toContain(
+      "report-validation-verdict",
+    );
+    expect(reviewer.capabilities.map((c) => c.capabilityId)).not.toContain(
+      "approve-review",
+    );
+    expect(reviewer.capabilities.map((c) => c.capabilityId)).not.toContain(
+      "request-changes",
+    );
+  });
+
   it("an EMPTY repo field creates a repo-less project (repo: null) — no fabricated repo (X12)", async () => {
     const store = setupTestStore(ctx);
     vi.stubGlobal("fetch", vi.fn());

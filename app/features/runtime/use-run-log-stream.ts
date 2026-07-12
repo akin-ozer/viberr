@@ -52,6 +52,13 @@ interface ThreadCursor {
   headSeq: number;
 }
 
+interface TailRequest {
+  /** Highest sequence announced while this request (if any) is in flight. */
+  targetSeq: number;
+  inFlight: boolean;
+  controller: AbortController | null;
+}
+
 export function useRunLogStream(input: {
   projectSlug: string;
   taskKey: string;
@@ -71,13 +78,23 @@ export function useRunLogStream(input: {
   // Cursors: highest seq held per run. Loader lines are seq 0..N-1, so the
   // head seq is (lines.length - 1). RunId is needed to fetch the tail.
   const cursorsRef = useRef<Map<string, ThreadCursor>>(new Map());
+  const tailRequestsRef = useRef<Map<string, TailRequest>>(new Map());
+  const seedGenerationRef = useRef(0);
   const threadsKey = input.threads
-    .map((t) => `${t.threadId}:${t.runId ?? ""}:${t.lines.length}`)
+    .map(
+      (t) =>
+        `${t.threadId}:${t.runId ?? ""}:${t.lines.length}:${t.lines.at(-1)?.raw ?? ""}`,
+    )
     .join("|");
 
   useEffect(() => {
     // Re-seed lines + cursors whenever the loader thread-set changes (e.g. a
     // revalidation after a state change delivered new backfill).
+    seedGenerationRef.current += 1;
+    for (const request of tailRequestsRef.current.values()) {
+      request.controller?.abort();
+    }
+    tailRequestsRef.current.clear();
     setLinesByThread(Object.fromEntries(input.threads.map((t) => [t.threadId, t.lines])));
     const map = new Map<string, ThreadCursor>();
     for (const t of input.threads) {
@@ -92,32 +109,96 @@ export function useRunLogStream(input: {
 
     let cancelled = false;
 
-    const fetchTail = async (runId: string, sinceSeq: number) => {
-      try {
-        const res = await fetch(
-          `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
-          { headers: { Accept: "application/json" } },
-        );
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          data?: {
-            threadId: string;
-            lines: { seq: number; display: LogLine; raw: string }[];
-            headSeq: number;
-          };
-        };
-        const data = body.data;
-        if (!data || cancelled || data.lines.length === 0) return;
-        const cursor = cursorsRef.current.get(runId);
-        if (cursor) cursor.headSeq = data.headSeq;
-        setLinesByThread((prev) => {
-          const existing = prev[data.threadId] ?? [];
-          const appended = data.lines.map((l) => ({ display: l.display, raw: l.raw }));
-          return { ...prev, [data.threadId]: [...existing, ...appended] };
-        });
-      } catch {
-        // Network hiccup — the next append or a revalidation recovers state.
+    /**
+     * One serialized tail pump per run. SSE bursts only raise targetSeq while
+     * the current request is in flight. A response is applied against the
+     * cursor that exists *when it resolves*, then sorted/deduped by sequence.
+     */
+    const pumpTail = (runId: string) => {
+      if (cancelled) return;
+      const cursor = cursorsRef.current.get(runId);
+      const request = tailRequestsRef.current.get(runId);
+      if (!cursor || !request || request.inFlight || request.targetSeq <= cursor.headSeq) {
+        return;
       }
+
+      const requestedGeneration = seedGenerationRef.current;
+      const sinceSeq = cursor.headSeq;
+      const controller = new AbortController();
+      request.inFlight = true;
+      request.controller = controller;
+
+      void (async () => {
+        let madeProgress = false;
+        try {
+          const res = await fetch(
+            `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
+            {
+              headers: { Accept: "application/json" },
+              signal: controller.signal,
+            },
+          );
+          if (!res.ok) return;
+          const body = (await res.json()) as {
+            data?: {
+              threadId: string;
+              lines: { seq: number; display: LogLine; raw: string }[];
+              headSeq: number;
+            };
+          };
+          const data = body.data;
+          if (
+            !data ||
+            cancelled ||
+            controller.signal.aborted ||
+            seedGenerationRef.current !== requestedGeneration
+          ) {
+            return;
+          }
+
+          const current = cursorsRef.current.get(runId);
+          if (!current) return;
+          // The route returns ordered rows, but sort and unique here as a
+          // defensive boundary. Only append a contiguous monotonic suffix;
+          // never jump over a missing seq and permanently discard it.
+          const unique = new Map(
+            data.lines.map((line) => [line.seq, line] as const),
+          );
+          const ordered = [...unique.values()].sort((a, b) => a.seq - b.seq);
+          const appended: StreamedLine[] = [];
+          let expected = current.headSeq + 1;
+          for (const line of ordered) {
+            if (line.seq < expected) continue;
+            if (line.seq > expected) break;
+            appended.push({ display: line.display, raw: line.raw });
+            expected += 1;
+          }
+          if (appended.length === 0) return;
+
+          current.headSeq = expected - 1;
+          madeProgress = true;
+          setLinesByThread((prev) => {
+            const existing = prev[current.threadId] ?? [];
+            return {
+              ...prev,
+              [current.threadId]: [...existing, ...appended],
+            };
+          });
+        } catch (error) {
+          if ((error as { name?: string } | null)?.name !== "AbortError") {
+            // Network hiccup — the next append or revalidation recovers state.
+          }
+        } finally {
+          const currentRequest = tailRequestsRef.current.get(runId);
+          if (currentRequest?.controller === controller) {
+            currentRequest.inFlight = false;
+            currentRequest.controller = null;
+            // If more events landed during the request, immediately fetch the
+            // remaining suffix. Do not spin when the server made no progress.
+            if (madeProgress) pumpTail(runId);
+          }
+        }
+      })();
     };
 
     const client = createSseClient({
@@ -128,10 +209,20 @@ export function useRunLogStream(input: {
             const parsed = JSON.parse(event.data) as { data: RunLogAppendedData };
             const d = parsed.data;
             if (d.projectSlug !== projectSlug || d.taskKey !== taskKey) return;
-            const cursor = cursorsRef.current.get(d.runId);
-            const since = cursor ? cursor.headSeq : -1;
-            if (d.seq <= since) return; // already have it
-            void fetchTail(d.runId, since);
+            let cursor = cursorsRef.current.get(d.runId);
+            if (!cursor) {
+              cursor = { runId: d.runId, threadId: d.threadId, headSeq: -1 };
+              cursorsRef.current.set(d.runId, cursor);
+            }
+            if (d.seq <= cursor.headSeq) return;
+            const request = tailRequestsRef.current.get(d.runId) ?? {
+              targetSeq: d.seq,
+              inFlight: false,
+              controller: null,
+            };
+            request.targetSeq = Math.max(request.targetSeq, d.seq);
+            tailRequestsRef.current.set(d.runId, request);
+            pumpTail(d.runId);
           } catch {
             // Malformed frame — ignore.
           }
@@ -150,6 +241,11 @@ export function useRunLogStream(input: {
 
     return () => {
       cancelled = true;
+      seedGenerationRef.current += 1;
+      for (const request of tailRequestsRef.current.values()) {
+        request.controller?.abort();
+      }
+      tailRequestsRef.current.clear();
       client.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -12,6 +12,7 @@ import {
   type DeployedSpecialistView,
   type TaskMemberView,
 } from "./execution-profile";
+import { CompletionAcceptance, GithubTrace } from "./task-detail-page";
 
 afterEach(cleanup);
 
@@ -40,9 +41,25 @@ const packet142: PacketRender = {
     { k: "Validation", v: "unit + integration green", code: false },
   ],
   options: [
-    { kind: "accept_completion", t: "Accept completion", d: "Mark task done.", rec: true, accept: true },
-    { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
-    { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
+    {
+      kind: "accept_completion",
+      t: "Accept completion",
+      d: "Mark task done.",
+      rec: true,
+      accept: true,
+    },
+    {
+      kind: "request_edit",
+      t: "Request one edit",
+      d: "Ask the developer.",
+      rec: false,
+    },
+    {
+      kind: "block_on_policy",
+      t: "Block on policy",
+      d: "Hold until policy updates.",
+      rec: false,
+    },
   ],
 };
 
@@ -51,7 +68,13 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
     id: 1,
     type: "comment",
     occurredAt: todayIso(9, 41),
-    actor: { kind: "human", userId: "u1", name: "Arda Kaya", initials: "AK", tone: "" },
+    actor: {
+      kind: "human",
+      userId: "u1",
+      name: "Arda Kaya",
+      initials: "AK",
+      tone: "",
+    },
     title: null,
     text: "hello",
     toAgent: false,
@@ -65,7 +88,14 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -94,7 +124,14 @@ describe("DecisionPacket", () => {
   it("primary button carries the selected option title and resolves by index", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     expect(primary.textContent).toContain("Accept completion");
@@ -113,14 +150,77 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket
+        packet={blocked}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        onResolve={() => {}}
+        onAsk={onAsk}
+      />,
     );
-    expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
-      container.querySelector('.options [role="radio"]')!.getAttribute("aria-checked"),
+      container.querySelector(".packet")!.classList.contains("blocked"),
+    ).toBe(true);
+    expect(
+      container
+        .querySelector('.options [role="radio"]')!
+        .getAttribute("aria-checked"),
     ).toBe("true");
     fireEvent.click(container.querySelector(".packet-actions .btn.ghost")!);
     expect(onAsk).toHaveBeenCalledOnce();
+  });
+
+  it("archived history keeps decision options readable but exposes no action", () => {
+    const { container, queryByText } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canAsk={false}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(container.querySelectorAll('.options [role="radio"]')).toHaveLength(
+      3,
+    );
+    expect(container.querySelector(".packet-actions .btn.primary")).toBeNull();
+    expect(queryByText("Ask operator")).toBeNull();
+  });
+});
+
+/* ------------------------------------------ Direct completion acceptance */
+
+describe("CompletionAcceptance", () => {
+  it("lets the task owner accept without an operator artifact", () => {
+    const onAccept = vi.fn();
+    const { getByRole, getByText } = render(
+      <CompletionAcceptance
+        taskKey="VIB-151"
+        busy={false}
+        onAccept={onAccept}
+      />,
+    );
+
+    expect(getByRole("region", { name: "Completion acceptance" })).toBeTruthy();
+    expect(getByText("validation healthy")).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Accept completion" }));
+    expect(onAccept).toHaveBeenCalledOnce();
+  });
+
+  it("prevents a duplicate acceptance while the action is pending", () => {
+    const onAccept = vi.fn();
+    const { getByRole } = render(
+      <CompletionAcceptance taskKey="VIB-151" busy onAccept={onAccept} />,
+    );
+    const button = getByRole("button", {
+      name: "Accept completion",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onAccept).not.toHaveBeenCalled();
   });
 });
 
@@ -156,7 +256,12 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "comment",
-          actor: { kind: "agent", backend: "claude", name: "Claude Code", role: "developer" },
+          actor: {
+            kind: "agent",
+            backend: "claude",
+            name: "Claude Code",
+            role: "developer",
+          },
           text: "Re-checked the parser — the edge case is handled now.",
           toAgent: false,
         })}
@@ -204,7 +309,12 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "completion",
-          actor: { kind: "agent", backend: "codex", name: "Codex", role: "Developer" },
+          actor: {
+            kind: "agent",
+            backend: "codex",
+            name: "Codex",
+            role: "Developer",
+          },
           title: "Completion report",
           text: "Implemented repo attach.",
           evidence: [
@@ -262,17 +372,35 @@ describe("TimelineItem", () => {
     const { container } = render(<TimelineItem ev={ev({ type: "mystery" })} />);
     expect(container.querySelector(".comment-card")).toBeNull(); // not a comment…
     // …but gets the neutral typed pill with comment meta's dead label.
-    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("commented");
+    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe(
+      "commented",
+    );
   });
 });
 
 /* ------------------------------------------------------ ReleaseConfirm */
 
 const membersFixture: TaskMemberView[] = [
-  { userId: "u-elif", role: "admin", user: { name: "Elif Demir", initials: "ED", tone: "rose" } },
-  { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
-  { userId: "u-murat", role: "maintainer", user: { name: "Murat Yıldız", initials: "MY", tone: "teal" } },
-  { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "violet" } },
+  {
+    userId: "u-elif",
+    role: "admin",
+    user: { name: "Elif Demir", initials: "ED", tone: "rose" },
+  },
+  {
+    userId: "u-arda",
+    role: "admin",
+    user: { name: "Arda Kaya", initials: "AK", tone: "" },
+  },
+  {
+    userId: "u-murat",
+    role: "maintainer",
+    user: { name: "Murat Yıldız", initials: "MY", tone: "teal" },
+  },
+  {
+    userId: "u-selin",
+    role: "contributor",
+    user: { name: "Selin Aksoy", initials: "SA", tone: "violet" },
+  },
 ];
 
 function taskFixture(ownerId: string, ownerName: string): TaskSummary {
@@ -305,7 +433,9 @@ describe("ReleaseConfirm", () => {
       />,
     );
     const dialog = container.querySelector('[role="alertdialog"]')!;
-    expect(dialog.getAttribute("aria-label")).toBe("Release ownership of VIB-151");
+    expect(dialog.getAttribute("aria-label")).toBe(
+      "Release ownership of VIB-151",
+    );
     const obs = container.querySelectorAll(".packet-obs .obs");
     expect(obs).toHaveLength(3);
     expect(obs[0]!.textContent).toContain("Arda Kaya");
@@ -313,7 +443,9 @@ describe("ReleaseConfirm", () => {
     expect(obs[1]!.textContent).toContain(
       "Agent work in progress — no boundary is waiting",
     );
-    expect(obs[2]!.textContent).toContain("Unowned — review & acceptance stall");
+    expect(obs[2]!.textContent).toContain(
+      "Unowned — review & acceptance stall",
+    );
     // No admin-release pill on a self release.
     expect(container.querySelector(".rel-owner .pill")).toBeNull();
     // Candidates exclude the owner (me) → 3 chips, none marked "· you".
@@ -322,8 +454,12 @@ describe("ReleaseConfirm", () => {
     expect(container.querySelector(".foot-hint")!.textContent).toBe(
       "Recorded as a typed ownership event on the timeline.",
     );
-    expect(container.querySelector(".btn.danger")!.textContent).toContain("Release");
-    expect(container.querySelector(".btn.ghost")!.textContent).toBe("Keep ownership");
+    expect(container.querySelector(".btn.danger")!.textContent).toContain(
+      "Release",
+    );
+    expect(container.querySelector(".btn.ghost")!.textContent).toBe(
+      "Keep ownership",
+    );
   });
 
   it("admin release: pill, distinct hint, named danger button, my chip first", () => {
@@ -401,8 +537,20 @@ describe("ReleaseConfirm", () => {
 /* -------------------------------------------------- ExecutionProfile */
 
 const deployedFixture: DeployedSpecialistView[] = [
-  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
-  { id: "reviewer", name: "Reviewer", role: "Code review", backend: "claude", model: "claude-sonnet" },
+  {
+    id: "developer",
+    name: "Developer",
+    role: "Implementation",
+    backend: "codex",
+    model: "codex-large",
+  },
+  {
+    id: "reviewer",
+    name: "Reviewer",
+    role: "Code review",
+    backend: "claude",
+    model: "claude-sonnet",
+  },
 ];
 
 function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
@@ -416,7 +564,10 @@ function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   } as unknown as TaskSummary;
 }
 
-function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> = {}) {
+function renderExec(
+  task: TaskSummary,
+  props: Partial<Record<string, unknown>> = {},
+) {
   const onAssign = vi.fn();
   const onRun = vi.fn();
   const utils = render(
@@ -440,6 +591,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onRunReviewer={() => {}}
         onRemoveReviewer={() => {}}
         operatorBusy={false}
+        operatorStatus="configured"
         onRunOperator={() => {}}
         {...props}
       />
@@ -448,7 +600,57 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
   return { ...utils, onAssign, onRun };
 }
 
+describe("GithubTrace — accepted completion finalization", () => {
+  for (const state of ["accepted", "merged"] as const) {
+    it(`offers Complete merge for ${state} repository work when authorized`, () => {
+      const onCompleteMerge = vi.fn();
+      const task = execTask({
+        stage: "review",
+        repo: "akin-ozer/viberr",
+        branch: "codex/VIB-151",
+        commits: [],
+        pr: { number: 151, state, title: "Finish VIB-151" },
+      });
+      const { getByRole } = render(
+        <GithubTrace task={task as never} onCompleteMerge={onCompleteMerge} />,
+      );
+      fireEvent.click(getByRole("button", { name: "Complete merge" }));
+      expect(onCompleteMerge).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("keeps the finalization control hidden without task-scoped authority", () => {
+    const task = execTask({
+      repo: "akin-ozer/viberr",
+      branch: "codex/VIB-151",
+      commits: [],
+      pr: {
+        number: 151,
+        state: "accepted",
+        title: "Finish VIB-151",
+      },
+    });
+    const { queryByRole } = render(<GithubTrace task={task as never} />);
+    expect(queryByRole("button", { name: "Complete merge" })).toBeNull();
+  });
+});
+
 describe("ExecutionProfile — assign menu + run button", () => {
+  it("calls only a live operator run active", () => {
+    const configured = renderExec(execTask(), { operatorStatus: "configured" });
+    expect(configured.container.textContent).toContain("configured");
+    expect(configured.container.textContent).not.toContain("operator active");
+    configured.unmount();
+
+    const queued = renderExec(execTask(), { operatorStatus: "queued" });
+    expect(queued.container.textContent).toContain("operator queued");
+    expect(queued.container.textContent).not.toContain("operator active");
+    queued.unmount();
+
+    const running = renderExec(execTask(), { operatorStatus: "running" });
+    expect(running.container.textContent).toContain("operator active");
+  });
+
   it("no specialist + admin: assign menu lists deployed specialists; picking submits", () => {
     const { container, onAssign } = renderExec(execTask());
     const btn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
@@ -467,12 +669,14 @@ describe("ExecutionProfile — assign menu + run button", () => {
 
   it("no deployed specialists: hint links to the Agents page", () => {
     const { container } = renderExec(execTask(), { deployedSpecialists: [] });
-    const link = container.querySelector('a[href="/projects/viberr-core/agents"]');
+    const link = container.querySelector(
+      'a[href="/projects/viberr-core/agents"]',
+    );
     expect(link).not.toBeNull();
     // No "Assign specialist" trigger when there is nothing to assign (the
     // owner "Manage" button is a separate .own-btn and may still be present).
-    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign specialist"),
+    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find(
+      (b) => b.textContent?.includes("Assign specialist"),
     );
     expect(assignBtn).toBeUndefined();
   });
@@ -489,8 +693,11 @@ describe("ExecutionProfile — assign menu + run button", () => {
     } as unknown as Partial<TaskSummary>);
     const { container, onRun } = renderExec(task);
     // The primary specialist's Run button — not the operator "Run operator" one.
-    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
-      (b) => b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
+    const runBtn = Array.from(
+      container.querySelectorAll("button.btn.primary"),
+    ).find(
+      (b) =>
+        b.textContent?.includes("Run") && !b.textContent?.includes("operator"),
     ) as HTMLButtonElement;
     expect(runBtn).toBeDefined();
     expect(runBtn.disabled).toBe(false);
@@ -509,9 +716,9 @@ describe("ExecutionProfile — assign menu + run button", () => {
       },
     } as unknown as Partial<TaskSummary>);
     const { container } = renderExec(task, { runActive: true });
-    const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
-      (b) => b.textContent?.includes("Running"),
-    ) as HTMLButtonElement;
+    const runBtn = Array.from(
+      container.querySelectorAll("button.btn.primary"),
+    ).find((b) => b.textContent?.includes("Running")) as HTMLButtonElement;
     expect(runBtn.disabled).toBe(true);
   });
 
@@ -520,8 +727,8 @@ describe("ExecutionProfile — assign menu + run button", () => {
       myRole: "contributor",
       canRunAgents: false,
     });
-    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign specialist"),
+    const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find(
+      (b) => b.textContent?.includes("Assign specialist"),
     );
     expect(assignBtn).toBeUndefined();
     expect(
@@ -538,14 +745,23 @@ describe("ExecutionProfile — reviewers", () => {
   const reviewerTask = () =>
     execTask({
       reviewers: [
-        { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude Code", role: "Code review" },
+        {
+          kind: "agent",
+          profileId: "reviewer",
+          backend: "claude",
+          name: "Claude Code",
+          role: "Code review",
+        },
       ],
     } as unknown as Partial<TaskSummary>);
 
   it("labels the cell 'Reviewers' and renders a row with Run + remove", () => {
     const onRunReviewer = vi.fn();
     const onRemoveReviewer = vi.fn();
-    const { container } = renderExec(reviewerTask(), { onRunReviewer, onRemoveReviewer });
+    const { container } = renderExec(reviewerTask(), {
+      onRunReviewer,
+      onRemoveReviewer,
+    });
     expect(container.textContent).toContain("Reviewers");
     const chip = container.querySelector(".rev-agent")!;
     expect(chip).not.toBeNull();
@@ -560,8 +776,8 @@ describe("ExecutionProfile — reviewers", () => {
     const onAssignReviewer = vi.fn();
     // 'reviewer' is already engaged → only 'developer' remains available.
     const { container } = renderExec(reviewerTask(), { onAssignReviewer });
-    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
-      b.textContent?.includes("Add reviewer"),
+    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find(
+      (b) => b.textContent?.includes("Add reviewer"),
     ) as HTMLButtonElement;
     expect(addBtn).toBeDefined();
     fireEvent.click(addBtn);
@@ -575,7 +791,9 @@ describe("ExecutionProfile — reviewers", () => {
 
   it("reviewer Run buttons are disabled while a run is active", () => {
     const { container } = renderExec(reviewerTask(), { runActive: true });
-    const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
+    const runBtn = container.querySelector(
+      ".rev-agent .btn.primary",
+    ) as HTMLButtonElement;
     expect(runBtn.disabled).toBe(true);
     expect(runBtn.textContent).toContain("Running");
   });

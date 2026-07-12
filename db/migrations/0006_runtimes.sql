@@ -75,3 +75,28 @@ CREATE TABLE run_log_lines (
 );
 
 CREATE UNIQUE INDEX idx_run_log_lines__run_seq ON run_log_lines (run_id, seq);
+
+-- Durable, visible queue for automatic operator assessments. Task creation and
+-- lifecycle triggers enqueue here instead of fanning out unbounded paid runs.
+-- Manual "Run operator" actions bypass this dispatcher and remain explicit.
+CREATE TABLE operator_dispatches (
+  id TEXT PRIMARY KEY,
+  project_slug TEXT NOT NULL,
+  task_key TEXT NOT NULL,
+  trigger TEXT NOT NULL CHECK (trigger IN ('create', 'transition')),
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'finished', 'failed')),
+  run_id TEXT,
+  estimated_cost_usd REAL NOT NULL,
+  error_code TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+
+CREATE INDEX idx_operator_dispatches__state_created
+  ON operator_dispatches (state, created_at);
+CREATE INDEX idx_operator_dispatches__task
+  ON operator_dispatches (project_slug, task_key, created_at);
+CREATE UNIQUE INDEX idx_operator_dispatches__active_task
+  ON operator_dispatches (project_slug, task_key)
+  WHERE state IN ('queued', 'running');

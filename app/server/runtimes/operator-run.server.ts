@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import {
   gate,
   operatorAcceptCompletion,
+  operatorAssessReadiness,
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorOpenPacket,
@@ -35,7 +36,6 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
-import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
@@ -174,6 +174,7 @@ function releaseOperatorLease(
   const queued = state.pending.get(key);
   if (!queued) return;
   state.pending.delete(key);
+  if (!db.open) return;
   logger.info("operator lease released — firing the queued trigger", {
     key,
     trigger: queued.trigger ?? "manual",
@@ -237,8 +238,16 @@ export async function runOperator(
   const inflight = inFlightOperatorRun(db, input.projectSlug, input.taskKey);
   if (inflight) {
     lease.pending.set(leaseKey, input);
+    const recoveryToken = {
+      runId: inflight.id,
+      backend: inflight.backend,
+      autonomy: authority.autonomy,
+    };
+    lease.held.set(leaseKey, recoveryToken);
     const { chainRunCompletion } = await import("./run-service.server");
-    chainRunCompletion(inflight.id, () => releaseOperatorLease(db, leaseKey));
+    chainRunCompletion(inflight.id, () =>
+      releaseOperatorLease(db, leaseKey, recoveryToken),
+    );
     logger.info("operator run queued — DB row already in flight", {
       taskKey: input.taskKey,
       runId: inflight.id,
@@ -310,6 +319,7 @@ export async function runOperator(
  */
 const OPERATOR_PLAN_TOOLS = [
   "post_comment",
+  "assess_readiness",
   "open_packet",
   "assign_specialist",
   "run_specialist",
@@ -345,10 +355,11 @@ const OPERATOR_PLAN_SCHEMA = {
           profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
+          readiness: { type: ["string", "null"], enum: ["ready", "input_required", null], description: "For assess_readiness, else null." },
           text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
         },
-        required: ["tool", "profileId", "toStageId", "packetType", "text", "reason"],
+        required: ["tool", "profileId", "toStageId", "packetType", "readiness", "text", "reason"],
       },
     },
   },
@@ -367,6 +378,7 @@ const operatorPlanActionSchema = z
     profileId: z.string().nullable(),
     toStageId: z.string().nullable(),
     packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
+    readiness: z.enum(["ready", "input_required"]).nullable(),
     text: z.string().nullable(),
     reason: z.string().nullable(),
   })
@@ -402,6 +414,32 @@ function defaultPacketOptions(
       ];
 }
 
+/** A fresh, repo-free cwd for one operator turn. Operators coordinate through
+ * Viberr actions; they never need the task directory (which may sit inside the
+ * app checkout). A unique directory also prevents Codex from inheriting files
+ * left by an earlier turn. */
+function createOperatorWorkdir(
+  projectSlug: string,
+  taskKey: string,
+  dataRoot?: string,
+): { workdir: string; env: Record<string, string> } {
+  const parent = path.join(
+    getDataRoot(dataRoot),
+    "runtimes",
+    "operator-workspaces",
+    projectSlug,
+    taskKey,
+  );
+  const workdir = path.join(parent, newId("opw"));
+  mkdirSync(workdir, { recursive: true });
+  return {
+    workdir,
+    // The ceiling is the strict parent of cwd, so git cannot walk upward and
+    // discover Viberr's own checkout even if a backend ignores the prompt.
+    env: { GIT_CEILING_DIRECTORIES: parent },
+  };
+}
+
 async function startCodexOperatorRun(
   db: Database.Database,
   ctx: TaskMutationContext,
@@ -416,6 +454,11 @@ async function startCodexOperatorRun(
     snapshot,
     input.trigger ?? "manual",
     input.humanComment,
+  );
+  const isolated = createOperatorWorkdir(
+    input.projectSlug,
+    input.taskKey,
+    input.dataRoot,
   );
 
   const { runId } = await startRun(db, {
@@ -432,7 +475,10 @@ async function startCodexOperatorRun(
     prompt,
     systemPrompt,
     outputSchema: OPERATOR_PLAN_SCHEMA,
-    autonomous: true,
+    // The structured-output operator needs no shell/repository mutation.
+    autonomous: false,
+    workdir: isolated.workdir,
+    env: isolated.env,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   });
@@ -452,10 +498,11 @@ async function startCodexOperatorRun(
       finished.state === "finished"
         ? executeCodexPlan(db, ctx, input, authority, finished.id)
         : finished.state === "error"
-          ? escalateFailedOperatorRun(db, ctx, input, authority, finished.id)
+          ? escalateFailedOperatorRun(db, ctx, input, finished.id)
           : Promise.resolve();
     void completion
       .catch((error) => {
+        if (!db.open) return;
         logger.error("codex operator completion handling failed", {
           taskKey: input.taskKey,
           err: error instanceof Error ? error : new Error(String(error)),
@@ -492,6 +539,9 @@ async function executeCodexPlan(
   authority: OperatorAuthority,
   runId: string,
 ): Promise<void> {
+  const readinessOnly =
+    operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority).readiness !==
+    "ready";
   // This is machine-readable control data, not a timeline preview: use the
   // complete reply. replyTextForRun intentionally truncates at 1,200 chars and
   // appends prose, which corrupts otherwise-valid larger JSON plans.
@@ -501,26 +551,29 @@ async function executeCodexPlan(
     // An empty or unparseable plan is a HUMAN-VISIBLE failure, not a silent
     // no-op: nothing else covers an operator's own run (recovery only watches
     // specialist/reviewer runs), so without this the task simply sits with no
-    // signal. Raise a blocked recovery packet through the operator's own gate.
+    // signal. Raise a system-owned recovery packet independent of the
+    // operator's own `generate-packets` capability.
     logger.warn("codex operator produced no usable plan — escalating", {
       taskKey: input.taskKey,
       runId,
       hadText: !!text,
     });
-    await operatorOpenPacket(
+    const { openSystemRecovery } = await import(
+      "~/server/tasks/task-recovery.server"
+    );
+    await openSystemRecovery(
       db,
-      ctx,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        packetType: "blocked",
+        code: "operator_plan_invalid",
         title: "Operator turn produced no actionable plan",
         body: text
           ? "The coordinating run replied, but its output was not a valid decision plan. Coordination is paused until a human re-engages the operator or redirects the task."
           : "The coordinating run finished without producing any output. Coordination is paused until a human re-engages the operator or redirects the task.",
-        options: defaultPacketOptions("blocked"),
+        observations: [{ k: "Run", v: runId, code: true }],
       },
-      authority,
+      ctx,
     ).catch((error) => {
       logger.error("codex no-plan escalation failed", {
         taskKey: input.taskKey,
@@ -549,9 +602,57 @@ async function executeCodexPlan(
     await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
     postedComments.add(commentKey(plan.reasoning));
   }
+  if (readinessOnly) {
+    // The set of executable actions is frozen at turn start, matching Claude's
+    // toolkit. A readiness verdict is a complete turn: later assignment or
+    // transition actions in the same model response are ignored server-side.
+    const assessment = plan.actions.find((action) => action.tool === "assess_readiness");
+    if (assessment?.readiness && assessment.reason) {
+      await operatorAssessReadiness(
+        db,
+        ctx,
+        {
+          ...base,
+          verdict: assessment.readiness,
+          rationale: assessment.reason,
+          ...(assessment.readiness === "input_required" && assessment.text
+            ? { missingInformation: assessment.text }
+            : {}),
+        },
+        authority,
+      );
+    } else {
+      await operatorPostComment(
+        db,
+        ctx,
+        {
+          ...base,
+          text: "Coordination stopped: readiness was unresolved and this turn did not return a valid readiness assessment. No assignment, run, prompt, or transition was executed.",
+        },
+        authority,
+      );
+    }
+    return;
+  }
   for (const a of plan.actions) {
     try {
       switch (a.tool) {
+        case "assess_readiness":
+          if (a.readiness && a.reason)
+            await operatorAssessReadiness(
+              db,
+              ctx,
+              {
+                ...base,
+                verdict: a.readiness,
+                rationale: a.reason,
+                ...(a.readiness === "input_required" && a.text
+                  ? { missingInformation: a.text }
+                  : {}),
+              },
+              authority,
+            );
+          break;
         case "post_comment":
           if (a.text && !postedComments.has(commentKey(a.text))) {
             await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
@@ -592,7 +693,12 @@ async function executeCodexPlan(
             await operatorPromptSpecialist(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                ...(a.text ? { directive: a.text } : {}),
+                ...(a.reason ? { reason: a.reason } : {}),
+              },
               authority,
             );
           break;
@@ -613,7 +719,12 @@ async function executeCodexPlan(
             await operatorPromptReviewer(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                ...(a.text ? { directive: a.text } : {}),
+                ...(a.reason ? { reason: a.reason } : {}),
+              },
               authority,
             );
           break;
@@ -708,7 +819,7 @@ async function startRealOperatorRun(
     // lease, so nothing reached the human (contrast the Codex no-plan
     // escalation and the specialist F8 path). Escalate it the same way (F-OP1).
     if (finished.state === "error") {
-      void escalateFailedOperatorRun(db, ctx, input, authority, runId);
+      if (db.open) void escalateFailedOperatorRun(db, ctx, input, runId);
     }
   });
 
@@ -727,11 +838,10 @@ async function startRealOperatorRun(
  * task sitting with no timeline entry, packet, or notification. Raise a blocked
  * recovery packet through the operator's own gate, with quota/auth-aware copy.
  */
-async function escalateFailedOperatorRun(
+export async function escalateFailedOperatorRun(
   db: Database.Database,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
-  authority: OperatorAuthority,
   runId: string,
 ): Promise<void> {
   try {
@@ -748,21 +858,26 @@ async function escalateFailedOperatorRun(
       runId,
       kind: reason?.kind ?? "unknown",
     });
-    await operatorOpenPacket(
+    const { openSystemRecovery } = await import(
+      "~/server/tasks/task-recovery.server"
+    );
+    await openSystemRecovery(
       db,
-      ctx,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        packetType: "blocked",
+        code: "operator_run_failed",
         title: "Operator run failed — pick a recovery path",
         body:
           `The operator run did not complete — ${detail}. No coordination was ` +
           `performed. Retry on the other backend, fix the credential, or redirect ` +
           `the task.`,
-        options: defaultPacketOptions("blocked"),
+        observations: [
+          { k: "Run", v: runId, code: true },
+          { k: "Failure", v: detail, code: false },
+        ],
       },
-      authority,
+      ctx,
     );
   } catch (error) {
     logger.error("operator-run failure escalation failed", {
@@ -821,6 +936,24 @@ async function runScriptedOperatorDrive(
       for (let step = 0; step < 8; step++) {
         snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
         if (snap.stage === doneStageId) return;
+        if (snap.readiness !== "ready") {
+          const assessment = await operatorAssessReadiness(
+            db,
+            ctx,
+            {
+              projectSlug,
+              taskKey,
+              verdict: "input_required",
+              rationale:
+                "No intelligent backend is available to verify that the canonical goal contains concrete implementation intent; deterministic fallback will not invent or approve scope.",
+              missingInformation:
+                "Confirm the concrete product or repository outcome and its verification boundary, then run an intelligent operator backend.",
+            },
+            authority,
+          );
+          say(assessment.message);
+          return;
+        }
         if (snap.stage === reviewStageId) {
           // Prompt EVERY engaged reviewer (not just the first) so each records a
           // verdict; a single engaged/picked reviewer keeps the common case.
@@ -832,33 +965,102 @@ async function runScriptedOperatorDrive(
             const d = snap.deployedSpecialists.find((s) => s.id === id);
             return !d || d.eligibleForCurrentStage;
           };
-          const revIds = (
-            snap.reviewers.length
-              ? snap.reviewers.map((r) => r.profileId)
-              : [pickReviewer(snap)?.id].filter((x): x is string => !!x)
-          ).filter(eligibleHere);
+          const revIds = snap.reviewers.map((r) => r.profileId).filter(eligibleHere);
+          const candidates = snap.routingCandidates.reviewer;
+          if (revIds.length === 0) {
+            const result = await operatorOpenPacket(
+              db,
+              ctx,
+              {
+                projectSlug,
+                taskKey,
+                packetType: candidates.length === 0 ? "blocked" : "input",
+                title:
+                  candidates.length === 0
+                    ? "No hard-eligible reviewer is available"
+                    : "An intelligent reviewer-routing decision is required",
+                body:
+                  candidates.length === 0
+                    ? "Every reviewer candidate failed a hard stage or MCP compatibility constraint."
+                    : `The deterministic fallback will not select among ${candidates.length} eligible reviewer${candidates.length === 1 ? "" : "s"}. Run Claude/Codex Operator or assign a reviewer explicitly.`,
+                options: defaultPacketOptions(candidates.length === 0 ? "blocked" : "input"),
+              },
+              authority,
+            );
+            say(result.message);
+            return;
+          }
           if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
             for (const rev of revIds) {
               say(
-                (await operatorPromptReviewer(db, ctx, { projectSlug, taskKey, profileId: rev }, authority)).message,
+                (
+                  await operatorPromptReviewer(
+                    db,
+                    ctx,
+                    {
+                      projectSlug,
+                      taskKey,
+                      profileId: rev,
+                      reason: snap.reviewers.some((r) => r.profileId === rev)
+                        ? "This reviewer was already explicitly engaged; no new ranking decision was made."
+                        : "This reviewer was explicitly selected before the deterministic fallback turn.",
+                    },
+                    authority,
+                  )
+                ).message,
               );
             }
           }
           return;
         }
         if (snap.stage === workStageId || !workStageId) {
-          // Only re-run the assigned specialist if it's ELIGIBLE for the current
-          // stage (F1); otherwise fall back to an eligible pick (pickSpecialist
-          // already filters by eligibility) so an assigned-but-now-ineligible
-          // specialist doesn't throw and halt coordination.
+          // A prior explicit assignment may be resumed. With no assignment the
+          // deterministic fallback may use a sole hard-eligible candidate, but
+          // it never ranks several candidates with a hidden static preference.
           const assigned = snap.specialist
             ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
             : undefined;
-          const pick =
-            assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
+          const candidates = snap.routingCandidates.primary;
+          if (!assigned || !assigned.eligibleForCurrentStage) {
+            const result = await operatorOpenPacket(
+              db,
+              ctx,
+              {
+                projectSlug,
+                taskKey,
+                packetType: candidates.length === 0 ? "blocked" : "input",
+                title:
+                  candidates.length === 0
+                    ? "No hard-eligible specialist is available"
+                    : "An intelligent specialist-routing decision is required",
+                body:
+                  candidates.length === 0
+                    ? "Every specialist candidate failed a hard stage or MCP compatibility constraint."
+                    : `The deterministic fallback will not select among ${candidates.length} eligible specialist${candidates.length === 1 ? "" : "s"}. Run Claude/Codex Operator or assign a specialist explicitly.`,
+                options: defaultPacketOptions(candidates.length === 0 ? "blocked" : "input"),
+              },
+              authority,
+            );
+            say(result.message);
+            return;
+          }
+          const pick = assigned && assigned.eligibleForCurrentStage ? assigned : undefined;
           if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
             say(
-              (await operatorPromptSpecialist(db, ctx, { projectSlug, taskKey, profileId: pick.id }, authority)).message,
+              (
+                await operatorPromptSpecialist(
+                  db,
+                  ctx,
+                  {
+                    projectSlug,
+                    taskKey,
+                    profileId: pick.id,
+                    reason:
+                      "This specialist was already explicitly assigned; no new ranking decision was made.",
+                  },
+                  authority,
+                )
+              ).message,
             );
           }
           return;
@@ -970,42 +1172,6 @@ async function runScriptedOperatorDrive(
   return { runId, backend: authority.backend, mode: "scripted", autonomy: authority.autonomy };
 }
 
-// ------------------------------------------------------- specialist picks
-
-/**
- * Pick an implementation specialist ELIGIBLE for the current stage (F1 — stage
- * eligibility is now real). Filters to specialists whose declared stages include
- * `snap.stage` (spanAll / no-stages count as eligible), then prefers an
- * implementation role. Returns null when no eligible specialist exists rather
- * than silently assigning one that can't work this stage.
- */
-function pickSpecialist(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter((s) =>
-    specialistEligibleForStage(s, snap.stage),
-  );
-  return (
-    specs.find((s) => /develop|implement/i.test(s.role) || s.id === "developer") ??
-    specs.find((s) => !/review/i.test(s.role)) ??
-    specs[0] ??
-    null
-  );
-}
-
-/** Prefer a stage-eligible review specialist to engage before acceptance (F1). */
-function pickReviewer(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter(
-    (s) =>
-      specialistEligibleForStage(s, snap.stage) &&
-      !snap.reviewers.some((r) => r.profileId === s.id) &&
-      s.id !== snap.specialist?.profileId,
-  );
-  return (
-    specs.find((s) => /review/i.test(s.role) || s.id === "reviewer") ??
-    specs[0] ??
-    null
-  );
-}
-
 // ------------------------------------------------------- system prompt
 
 /** Baked-in fallback persona when the store has no operator definition file. */
@@ -1085,6 +1251,8 @@ export function buildOperatorSystemPrompt(
       "- `direct` capabilities: act via the matching tool.\n" +
       "- `recommend` capabilities: under supervised autonomy the tool posts a recommendation and you must stop; under FULL autonomy it acts directly.\n" +
       "- `human` / `off` / withheld: the tool is not offered — never attempt it.\n" +
+      "- If readiness is not `ready`, call assess_readiness FIRST and STOP. Mark ready only when the canonical goal names a concrete outcome and verification boundary. Otherwise keep input_required and ask for missing intent. Never invent a product/repository change.\n" +
+      "- When routing, choose ONLY from the hard-eligible routingCandidates for that purpose. Compare declared scope, skills, KBs, MCP fit/health, backend health, current workload, and observed cost. You make the final decision; Viberr provides no score. Always give a concrete reason so the decision is persisted and auditable.\n" +
       "- When a task is at (or enters) a stage, TRIGGER its agent with a task-related prompt: prompt_specialist for a working stage, prompt_reviewer for the review stage. The prompt is the agent's directive — make it specific to this task and stage, never a bare 'proceed'.\n" +
       "- Reach Done ONLY via accept_completion, and only under full autonomy; otherwise recommend acceptance.\n" +
       "- Never write code, run shell commands, or touch the repository — those tools are withheld from you. Coordinate ONLY through the `mcp__viberr__*` governance tools (you may also read files and search to inform a decision).",
@@ -1105,7 +1273,10 @@ export function buildCodexOperatorPrompt(
   trigger: "create" | "transition" | "agent-reply" | "manual",
   humanComment?: string,
 ): string {
-  const decision = humanComment?.trim()
+  const decision = snapshot.readiness !== "ready"
+    ? "READINESS GATE: return exactly one assess_readiness action and no assignment, run, prompt, or transition. " +
+      "Use ready only if the canonical goal itself states a concrete outcome and verification boundary; otherwise use input_required and name the missing intent. Never invent a repository change."
+    : humanComment?.trim()
     ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
     : trigger === "agent-reply"
       ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
@@ -1116,7 +1287,8 @@ export function buildCodexOperatorPrompt(
       : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
         "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
         "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
-        "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
+        "the agent reports back. Choose profileId only from the matching hard-eligible routingCandidates list after comparing " +
+        "scope, skills, KB/MCP fit, backend health, workload, and observed cost. Put your concrete selection explanation in reason.";
   return (
     "# This task\n\n" +
     "```json\n" +
@@ -1129,7 +1301,7 @@ export function buildCodexOperatorPrompt(
     "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
     "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
     "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
+    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "text": "<task-related directive>", "reason": "why this candidate fits the supplied context" } ] }. ` +
     "Include a short reason on each governed action (it is shown on the recommendation card)."
   );
 }
@@ -1149,7 +1321,18 @@ export function buildOperatorTurnPrompt(
   const header =
     `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
     `Goal: ${snapshot.goal}\n\n` +
-    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+      `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+
+  if (snapshot.readiness !== "ready") {
+    return (
+      header +
+      `Readiness is ${snapshot.readiness}. Do this now:\n` +
+      "1. Call get_task and inspect the canonical goal.\n" +
+      "2. Call assess_readiness exactly once. Mark ready only when the goal states a concrete outcome and verification boundary.\n" +
+      "3. If intent is missing, keep input_required and name what the human must add.\n" +
+      "4. STOP. Do not assign, run, prompt, or transition in the same turn. Never invent a product or repository change."
+    );
+  }
 
   // A human is talking to you directly (@operator). Answer them first, then take
   // any coordination action that their message warrants.
@@ -1186,14 +1369,15 @@ export function buildOperatorTurnPrompt(
     "Do this now:\n" +
     "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
     "2. Post a brief plan comment.\n" +
-    "3. TRIGGER the right agent for THIS stage with a concrete, task-related directive, addressed to it by name (\"@dev implement …\"):\n" +
+    "3. Compare the matching hard-eligible routingCandidates by declared scope, skills, KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score candidates.\n" +
+    "4. TRIGGER the chosen agent with a concrete, goal-grounded directive and a persisted routing reason:\n" +
     "   · a working stage (before review) → prompt_specialist(profileId, prompt) — assigns the\n" +
     "     specialist, posts your \"@name …\" prompt to it, and starts its run on your directive;\n" +
     "   · the review stage → prompt_reviewer(profileId, prompt) — engages + prompts + runs a reviewer.\n" +
     "   Write the prompt about THIS task (its goal and what to do at this stage), not a generic 'go'.\n" +
-    "4. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +
+    "5. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +
     "   will be re-invoked to read its report and propose the next state change.\n" +
-    "   (Only advance a PRE-work stage, e.g. triage → ready, if no implementation is needed there yet.)\n\n" +
+    "   Never ask an agent to choose or invent work outside the canonical goal.\n\n" +
     "Respect your capability policy at every step. Keep comments concise."
   );
 }

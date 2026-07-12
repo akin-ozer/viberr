@@ -7,6 +7,9 @@ services:
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
       NODE_ENV: production
       VIBERR_DATA_ROOT: /data
+      # Local Compose has a stable public origin. Production deployments still
+      # override this with BETTER_AUTH_URL from .env/reverse-proxy config.
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:-http://127.0.0.1:${PORT:-3000}}"
       # --- Run agents on a SUBSCRIPTION (no per-token API key) ---
       # Claude (Claude Pro/Max): run `claude setup-token` once on any machine,
       # put the token in .env as CLAUDE_CODE_OAUTH_TOKEN=... (env_file injects it).

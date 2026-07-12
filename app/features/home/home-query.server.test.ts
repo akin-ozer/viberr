@@ -1,11 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
 import { createPat } from "~/server/secrets/pat-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   getHomeOrgSummary,
+  listHomeProjects,
   listHomeProjectsForUser,
 } from "./home-query.server";
 
@@ -64,5 +70,79 @@ describe("listHomeProjectsForUser — membership scoping (D10/Q6)", () => {
       role: "admin", // ...but org admin
     });
     expect(all.length).toBeGreaterThan(0);
+  });
+
+  it("counts only explicit supervision or owned work as waiting on you", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        waiting: "human",
+        ownerUserId: store.users.selin.id,
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const contributor = listHomeProjectsForUser(store.db, {
+      id: store.users.selin.id,
+      role: "member",
+    });
+    expect(contributor[0]?.waiting).toBe(1);
+
+    const supervisor = listHomeProjectsForUser(store.db, {
+      id: store.users.arda.id,
+      role: "member",
+    });
+    expect(supervisor[0]?.waiting).toBe(2);
+
+    const nonmemberOrgAdmin = listHomeProjectsForUser(store.db, {
+      id: store.users.deniz.id,
+      role: "admin",
+    });
+    expect(nonmemberOrgAdmin[0]?.waiting).toBe(0);
+  });
+});
+
+describe("listHomeProjects — real active runs", () => {
+  it("does not call waiting-agent tasks or simulated seed sessions live work", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(listHomeProjects(store.db)[0]?.running).toBe(0);
+
+    const base = {
+      projectSlug: store.slug,
+      taskKey: "VIB-9",
+      role: "Implementation",
+      kind: "primary" as const,
+      backend: "simulated" as const,
+      model: "fixture",
+      sdk: "fixture",
+      state: "running" as const,
+      startedAt: new Date().toISOString(),
+    };
+    upsertRun(store.db, {
+      ...base,
+      id: "run_demo",
+      threadId: "demo-thread",
+      simulated: true,
+    });
+    expect(listHomeProjects(store.db)[0]?.running).toBe(0);
+
+    upsertRun(store.db, {
+      ...base,
+      id: "run_real",
+      threadId: "real-thread",
+      backend: "claude",
+      simulated: false,
+    });
+    expect(listHomeProjects(store.db)[0]?.running).toBe(1);
   });
 });

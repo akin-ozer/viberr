@@ -117,7 +117,7 @@ interface GhPull {
 export async function openTaskPr(
   db: Database.Database,
   input: { projectSlug: string; taskKey: string },
-  actor: AuditActor & { userId?: string },
+  actor: AuditActor,
   ctx: OpenTaskPrContext = {},
 ): Promise<OpenTaskPrResult> {
   const ref = {
@@ -259,7 +259,7 @@ async function writePrToTask(
   input: { projectSlug: string; taskKey: string },
   gh: { repo: string },
   pr: GhPull,
-  actor: AuditActor & { userId?: string },
+  actor: AuditActor,
   created: boolean,
   ctx: OpenTaskPrContext,
   existingPr: PrRef | null,

@@ -71,6 +71,14 @@ function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
     if (!name || !isRecord(value) || value.type === "sdk") continue;
 
     if (value.type === "http" && typeof value.url === "string") {
+      // The Codex CLI supports a bearer-token env setting, not Viberr's
+      // explicit arbitrary header-name -> secret mapping. Routing rejects
+      // these configs before start; keep the adapter fail-closed as well.
+      if (isRecord(value.headers) && Object.keys(value.headers).length > 0) {
+        throw new Error(
+          `MCP server ${name} uses HTTP header authentication unsupported by Codex.`,
+        );
+      }
       translated[name] = {
         url: value.url,
         default_tools_approval_mode: "approve",
@@ -87,10 +95,21 @@ function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
       if (Array.isArray(value.args) && args.length !== value.args.length) {
         continue;
       }
+      const env = isRecord(value.env)
+        ? Object.fromEntries(
+            Object.entries(value.env).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string",
+            ),
+          )
+        : {};
+      if (isRecord(value.env) && Object.keys(env).length !== Object.keys(value.env).length) {
+        continue;
+      }
       translated[name] = {
         command: value.command,
         default_tools_approval_mode: "approve",
         ...(args.length ? { args } : {}),
+        ...(Object.keys(env).length ? { env } : {}),
       };
     }
   }
@@ -208,6 +227,58 @@ function safeCodexFailureMessage(
     : "Codex execution failed. Review its authentication and runtime configuration.";
 }
 
+/** Map provider events to stable live phases. Tool inputs/commands are omitted:
+ * the run log owns that detail, while the compact run strip only needs to say
+ * which kind of work is currently happening. */
+function phaseForCodexEvent(event: unknown): [string, string] | null {
+  if (!event || typeof event !== "object") return null;
+  const envelope = event as {
+    type?: unknown;
+    item?: { type?: unknown; tool?: unknown; server?: unknown };
+  };
+  switch (envelope.type) {
+    case "thread.started":
+      return ["Initializing", "Codex thread ready"];
+    case "turn.started":
+      return ["Working", "Codex turn started"];
+    case "turn.completed":
+      return ["Finalizing", "Codex turn completed"];
+    case "turn.failed":
+    case "error":
+      return ["Finalizing", "Codex reported a failed turn"];
+    case "item.started":
+    case "item.updated":
+    case "item.completed": {
+      const itemType = envelope.item?.type;
+      if (itemType === "command_execution") {
+        return ["Using tools", "Executing a command"];
+      }
+      if (itemType === "mcp_tool_call") {
+        const server =
+          typeof envelope.item?.server === "string" ? envelope.item.server : "MCP";
+        const tool =
+          typeof envelope.item?.tool === "string" ? ` · ${envelope.item.tool}` : "";
+        return ["Using tools", `${server}${tool}`];
+      }
+      if (itemType === "web_search") {
+        return ["Using tools", "Searching the web"];
+      }
+      if (itemType === "file_change") {
+        return ["Using tools", "Updating workspace files"];
+      }
+      if (itemType === "reasoning") {
+        return ["Working", "Codex is reasoning"];
+      }
+      if (itemType === "agent_message") {
+        return ["Working", "Codex is preparing a response"];
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
@@ -230,6 +301,8 @@ export function createCodexAdapter(
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
       const abort = new AbortController();
+
+      cb.onPhase?.("Initializing", "Starting Codex runtime");
 
       // IDLE (inactivity) timeout, not a wall-clock cap (owner ruling A8): a
       // codex run may legitimately take much longer than the window overall,
@@ -375,6 +448,8 @@ export function createCodexAdapter(
               event,
               occurredAt,
             );
+            const phase = phaseForCodexEvent(event);
+            if (phase) cb.onPhase?.(...phase);
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = event.type;
             if (type === "turn.completed") {

@@ -1,8 +1,13 @@
 import type Database from "better-sqlite3";
+import type { UserRole } from "~/shared/mapping/user.server";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
 import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import {
+  recordAudit,
+  withProjectAuditAuthority,
+} from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -13,7 +18,9 @@ import {
   defaultEffortFor,
   defaultModelFor,
 } from "~/server/runtimes/model-catalog.server";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
+import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
 import {
   effectiveProfileView,
   type AgentDeploymentDefinition,
@@ -45,6 +52,7 @@ import {
 export interface ProfileActor {
   userId: string;
   label: string;
+  orgRole?: UserRole;
 }
 
 export interface ProfileMutationContext {
@@ -92,18 +100,30 @@ function forbidden(userMessage: string): AppError {
   });
 }
 
+function conflict(userMessage: string): AppError {
+  return new AppError({
+    code: ERROR_CODES.CONFLICT,
+    status: 409,
+    userMessage,
+    kind: "user",
+  });
+}
+
 function requireProjectAdmin(
   ctx: ProfileMutationContext,
   projectSlug: string,
   actor: ProfileActor,
-): { projectName: string } {
+): ReturnType<typeof assertProjectAction> {
   // Single canonical guard: agent profile CRUD is admin-only (`manage-agents`).
   return assertProjectAction(
     "manage-agents",
     projectSlug,
     actor.userId,
     "change agent capability policy",
-    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(actor.orgRole !== undefined ? { orgRole: actor.orgRole } : {}),
+    },
   );
 }
 
@@ -187,6 +207,117 @@ function slugifyProfileId(name: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
+// ----------------------------------------------------- deploy global template
+
+/**
+ * Deploy an existing org template by reference. The project receives only a
+ * deployment entry (`profileId` + a copied governed capability policy); no
+ * `definition` override is written, so the global template remains the live
+ * base and is never mutated by this action.
+ */
+export async function deployGlobalAgentProfile(
+  db: Database.Database,
+  input: { projectSlug: string; profileId: string },
+  actor: ProfileActor,
+  ctx: ProfileMutationContext = {},
+): Promise<{ profileId: string; name: string }> {
+  const { projectName, authoritySource } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+  );
+  const abs = agentProfileFilePath(input.profileId, ctx.dataRoot);
+  if (!existsSync(abs)) throw AppError.notFound("No such global agent profile.");
+  const { parsed: template } = parseAgentProfileContent(
+    readFileSync(abs, "utf8"),
+    { fallbackId: input.profileId },
+  );
+  if (!template || template.frontmatter.kind !== "specialist") {
+    throw AppError.validation("Only global specialist profiles can be deployed.");
+  }
+
+  // Validate every referenced context resource against the same live catalog
+  // the project editor exposes. A deploy never creates a knowingly broken
+  // agent that will fail only when its first run starts.
+  const catalog = new Map(
+    buildResourceCatalog(db, ctx.dataRoot).map((group) => [
+      group.key,
+      new Set(group.items.map((item) => item.id)),
+    ]),
+  );
+  const missing = [
+    ...template.frontmatter.resources.skills
+      .filter((ref) => !catalog.get("skills")?.has(ref))
+      .map((ref) => `skill ${ref}`),
+    ...template.frontmatter.resources.mcps
+      .filter((ref) => !catalog.get("mcps")?.has(ref))
+      .map((ref) => `MCP ${ref}`),
+    ...template.frontmatter.resources.kb
+      .filter((ref) => !catalog.get("kb")?.has(ref))
+      .map((ref) => `knowledge base ${ref}`),
+  ];
+  if (missing.length > 0) {
+    throw AppError.validation(
+      `Can't deploy ${template.frontmatter.name}; unavailable context: ${missing.join(", ")}.`,
+    );
+  }
+
+  const ref = {
+    projectSlug: input.projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  };
+  await updateProjectFile(ref, (project) => {
+    if (
+      project.frontmatter.agents.some(
+        (deployment) => deployment.profileId === input.profileId,
+      )
+    ) {
+      throw conflict(
+        `${template.frontmatter.name} is already deployed in ${project.frontmatter.name}.`,
+      );
+    }
+    const stageIds = new Set(project.frontmatter.stages.map((stage) => stage.id));
+    const invalidStages = template.frontmatter.stages.filter(
+      (stage) => !stageIds.has(stage),
+    );
+    const terminalId = resolveStageRoles(
+      project.frontmatter.stages,
+      project.frontmatter.workflow,
+    ).terminalId;
+    if (template.frontmatter.stages.length === 0 || invalidStages.length > 0) {
+      throw AppError.validation(
+        `Can't deploy ${template.frontmatter.name}; its eligible stages don't match this project${
+          invalidStages.length ? ` (${invalidStages.join(", ")})` : ""
+        }.`,
+      );
+    }
+    if (terminalId && template.frontmatter.stages.includes(terminalId)) {
+      throw AppError.validation(
+        `Can't deploy ${template.frontmatter.name}; specialist profiles can't be eligible for the terminal stage (${terminalId}).`,
+      );
+    }
+    project.frontmatter.agents.push({
+      profileId: input.profileId,
+      capabilities: template.frontmatter.capabilities.map((grant) => ({
+        capabilityId: grant.capabilityId,
+        mode: ALWAYS_HUMAN.has(grant.capabilityId) ? "human" : grant.mode,
+      })),
+      extras: template.frontmatter.extras.map((extra) => ({ ...extra })),
+    });
+  });
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.agent_profile.deployed",
+    actor: withProjectAuditAuthority(actor, authoritySource),
+    subjectKind: "agent_profile",
+    subjectId: input.profileId,
+    projectSlug: input.projectSlug,
+    details: { name: template.frontmatter.name, projectName, source: "global" },
+  });
+  return { profileId: input.profileId, name: template.frontmatter.name };
+}
+
 // ------------------------------------------------------------------ create
 
 export async function createAgentProfile(
@@ -195,8 +326,13 @@ export async function createAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  const { projectName } = requireProjectAdmin(ctx, input.projectSlug, actor);
+  const { projectName, authoritySource } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+  );
   const form = parseForm(input.form);
+  const auditActor = withProjectAuditAuthority(actor, authoritySource);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -250,11 +386,16 @@ export async function createAgentProfile(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.agent_profile.created",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: { name: form.name, role: form.role, backend: form.backend, projectName },
+    details: {
+      name: form.name,
+      role: form.role,
+      backend: form.backend,
+      projectName,
+    },
   });
   return { profileId, name: form.name };
 }
@@ -267,8 +408,13 @@ export async function updateAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  const { authoritySource } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+  );
   const form = parseForm(input.form);
+  const auditActor = withProjectAuditAuthority(actor, authoritySource);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -328,11 +474,15 @@ export async function updateAgentProfile(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.agent_profile.updated",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "agent_profile",
     subjectId: input.profileId,
     projectSlug: input.projectSlug,
-    details: { name: form.name, role: form.role, backend: form.backend },
+    details: {
+      name: form.name,
+      role: form.role,
+      backend: form.backend,
+    },
   });
   return { profileId: input.profileId, name: form.name };
 }
@@ -345,7 +495,12 @@ export async function deleteAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  const { authoritySource } = requireProjectAdmin(
+    ctx,
+    input.projectSlug,
+    actor,
+  );
+  const auditActor = withProjectAuditAuthority(actor, authoritySource);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -375,7 +530,7 @@ export async function deleteAgentProfile(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.agent_profile.deleted",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: auditActor,
     subjectKind: "agent_profile",
     subjectId: input.profileId,
     projectSlug: input.projectSlug,

@@ -15,8 +15,10 @@ import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
 import { recoverUnreactedAgentRuns } from "./runtimes/run-recovery.server";
+import { recoverAutoOperatorQueue } from "./runtimes/operator-dispatch.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
+import { ProjectionIntegrityError } from "./db/database-integrity.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -77,7 +79,22 @@ export function bootServer(): void {
   // them — before anything reads them. Idempotent and best-effort (never blocks
   // boot).
   seedDefaultAgentAssets();
-  const db = getDb();
+  let db: Database.Database;
+  try {
+    db = getDb();
+  } catch (error) {
+    if (error instanceof ProjectionIntegrityError) {
+      // Keep the HTTP process alive so /resources/health can expose the
+      // operator-facing recovery contract. No watcher/runtime starts against a
+      // malformed projection.
+      logger.error("viberr boot paused — projection recovery required", {
+        faults: error.report.messages.slice(0, 5),
+      });
+      cache[BOOT_KEY] = true;
+      return;
+    }
+    throw error;
+  }
 
   seedInitialAdmin(db, {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
@@ -125,6 +142,10 @@ export function bootServer(): void {
   // runs' live lines in THIS process so the first client subscribe drips
   // them over SSE (the seed's own registration ran in a separate process).
   registerSeededLiveFromData(db);
+
+  // Resume automatic Triage assessments that were queued (or whose process
+  // died mid-dispatch) under the same concurrency/cost limits.
+  recoverAutoOperatorQueue(db);
 
   // Recover dropped agent-reply reactions (NFR17, B9): if the server restarted
   // after a specialist/reviewer run finished but before its in-process reply

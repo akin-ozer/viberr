@@ -25,8 +25,12 @@ export function splitNotifications(
 
 /** Needs-you card time: today → "10:31", else lowercased day + time
  * ("yesterday 16:04", "mar 30 14:00" — the mock lowercases the day). */
-export function needsYouTime(iso: string, now: Date = new Date()): string {
-  const bucket = formatDayBucket(iso, now);
-  const clock = formatClock(iso);
+export function needsYouTime(
+  iso: string,
+  now: Date = new Date(),
+  timeZone?: string,
+): string {
+  const bucket = formatDayBucket(iso, now, timeZone);
+  const clock = formatClock(iso, timeZone);
   return bucket === "Today" ? clock : bucket.toLowerCase() + " " + clock;
 }

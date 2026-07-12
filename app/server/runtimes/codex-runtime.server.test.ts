@@ -130,6 +130,36 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
   });
 
+  it("emits live init/tool/work/finalize phases from real stream events", async () => {
+    const events = [
+      { type: "thread.started", thread_id: "0199abc" },
+      { type: "turn.started" },
+      { type: "item.started", item: { type: "command_execution", command: "secret detail stays out of the phase" } },
+      { type: "item.completed", item: { type: "reasoning", text: "thinking" } },
+      { type: "item.completed", item: { type: "agent_message", text: "done" } },
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+    const { factory } = fakeCodex(events);
+    const phases: Array<[string | null, string | null]> = [];
+    createCodexAdapter({ codexFactory: factory }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+      onPhase: (phase, step) => phases.push([phase, step]),
+    });
+    await drain();
+
+    expect(phases).toEqual([
+      ["Initializing", "Starting Codex runtime"],
+      ["Initializing", "Codex thread ready"],
+      ["Working", "Codex turn started"],
+      ["Using tools", "Executing a command"],
+      ["Working", "Codex is reasoning"],
+      ["Working", "Codex is preparing a response"],
+      ["Finalizing", "Codex turn completed"],
+    ]);
+    expect(JSON.stringify(phases)).not.toContain("secret detail");
+  });
+
   it("threads spec.effort into startThread modelReasoningEffort (omits when absent)", async () => {
     const events = [
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
@@ -214,7 +244,11 @@ describe("codex adapter (SDK, injected fake client)", () => {
         env: { GIT_CEILING_DIRECTORIES: "/safe/task" },
         mcpServers: {
           docs: { type: "http", url: "https://mcp.example.test" },
-          local: { command: "npx", args: ["-y", "example-mcp"] },
+          local: {
+            command: "npx",
+            args: ["-y", "example-mcp"],
+            env: { MCP_TOKEN: "resolved-secret" },
+          },
           viberr: { type: "sdk", instance: {} },
           malformed: { command: "npx", args: ["ok", 42] },
         },
@@ -244,6 +278,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
         local: {
           command: "npx",
           args: ["-y", "example-mcp"],
+          env: { MCP_TOKEN: "resolved-secret" },
           default_tools_approval_mode: "approve",
         },
       },
@@ -264,9 +299,34 @@ describe("codex adapter (SDK, injected fake client)", () => {
       local: {
         command: "npx",
         args: ["-y", "example-mcp"],
+        env: { MCP_TOKEN: "resolved-secret" },
         default_tools_approval_mode: "approve",
       },
     });
+  });
+
+  it("fails closed for authenticated HTTP MCP because Codex cannot express arbitrary headers", async () => {
+    const run = fakeCodex([]);
+    const exits: string[] = [];
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      {
+        ...SPEC,
+        mcpServers: {
+          private: {
+            type: "http",
+            url: "https://mcp.example.test",
+            headers: { "X-API-Key": "resolved-secret" },
+          },
+        },
+      },
+      {
+        onLine: () => {},
+        onExit: (exit) => exits.push(exit.outcome),
+      },
+    );
+    await drain();
+    expect(exits).toEqual(["error"]);
+    expect(run.factoryOptions()).toBeUndefined();
   });
 
   it("overlays spec.env on a COMPLETE base env, never on {} (#3)", async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { createRoutesStub, useFetcher } from "react-router";
+import { createRoutesStub, useFetcher, useLocation } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
 import { ProfilePage, type ProfileData } from "./profile-page";
@@ -22,7 +22,11 @@ const BASE: ProfileData = {
     githubHandle: null,
   },
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
-  accessRole: "maintainer",
+  selectedProject: {
+    slug: "viberr-core",
+    name: "Viberr Core",
+    role: "maintainer",
+  },
   prefs: { notifs: DEFAULT_NOTIF_PREFS, motion: "full", tlDefault: "all" },
 };
 
@@ -39,18 +43,19 @@ function renderProfile(data: ProfileData = BASE) {
         const identity = useFetcher();
         const prefs = useFetcher();
         const password = useFetcher();
-        const github = useFetcher();
+        const location = useLocation();
         return (
           <ToastProvider>
+            <output data-testid="profile-location">
+              {location.pathname + location.search}
+            </output>
             <ProfilePage
               data={data}
               theme="system"
               onTheme={(v) => {
                 lastTheme = v;
               }}
-              fetchers={
-                { identity, prefs, password, github } as never
-              }
+              fetchers={{ identity, prefs, password } as never}
               submitWith={() => (fields) => {
                 lastSubmit = fields;
               }}
@@ -59,8 +64,22 @@ function renderProfile(data: ProfileData = BASE) {
         );
       },
     },
+    {
+      path: "/projects/:slug/:view",
+      Component: () => {
+        const location = useLocation();
+        return <output data-testid="destination">{location.pathname}</output>;
+      },
+    },
   ]);
-  return render(<Stub initialEntries={["/profile"]} />);
+  const selected = data.selectedProject?.slug;
+  return render(
+    <Stub
+      initialEntries={[
+        selected ? `/profile?project=${encodeURIComponent(selected)}` : "/profile",
+      ]}
+    />,
+  );
 }
 
 describe("ProfilePage", () => {
@@ -140,7 +159,7 @@ describe("ProfilePage", () => {
     expect(getByText("Timeline opens on “Important”")).toBeTruthy();
   });
 
-  it("Your access renders the shared RBAC table for the REAL role", () => {
+  it("Your access renders the shared RBAC table for the selected project's role", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("Your access")).toBeTruthy();
     // Maintainer holds 9 of 12 rows (all but release-any-owner, manage
@@ -149,6 +168,39 @@ describe("ProfilePage", () => {
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(3);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();
+  });
+
+  it("keeps a mixed-membership role, selector, and links on one project context", () => {
+    const data: ProfileData = {
+      ...BASE,
+      memberships: [
+        { slug: "alpha", name: "Alpha", role: "admin" },
+        { slug: "beta", name: "Beta", role: "viewer" },
+      ],
+      selectedProject: { slug: "beta", name: "Beta", role: "viewer" },
+    };
+    const { getByLabelText, getByText, getByTestId } = renderProfile(data);
+    const accessPanel = getByText("Your access").closest(".panel")!;
+    expect(accessPanel.querySelector(".pill.info")!.textContent).toBe("viewer");
+    expect((getByLabelText("Project context") as HTMLSelectElement).value).toBe(
+      "beta",
+    );
+
+    fireEvent.change(getByLabelText("Project context"), {
+      target: { value: "alpha" },
+    });
+    expect(getByTestId("profile-location").textContent).toBe(
+      "/profile?project=alpha",
+    );
+
+    // Re-render the server-selected beta context and prove the permission link
+    // cannot accidentally use the higher-role alpha membership.
+    cleanup();
+    const beta = renderProfile(data);
+    fireEvent.click(beta.getByText("Policy → Human access"));
+    expect(beta.getByTestId("destination").textContent).toBe(
+      "/projects/beta/policy",
+    );
   });
 
   it("GitHub identity: not-connected card with missing chips and a real Connect button", () => {
@@ -167,15 +219,17 @@ describe("ProfilePage", () => {
     expect(container.querySelector(".cred-warn a.btn")).toBeNull();
   });
 
-  it("GitHub identity: connected card offers Disconnect", () => {
-    const { container } = renderProfile({
+  it("GitHub identity: connected card is truthful about sign-in and audit identity", () => {
+    const { container, queryByText } = renderProfile({
       ...BASE,
       user: { ...BASE.user, githubConnected: true, idp: "github" },
     });
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
-    fireEvent.click(container.querySelector(".cred-ok button")!);
-    expect(lastSubmit).toEqual({ intent: "github-disconnect" });
+    expect(container.querySelector(".cred-ok")!.textContent).toContain(
+      "Viberr audit records continue to use your workspace identity",
+    );
+    expect(queryByText("Disconnect")).toBeNull();
   });
 
   it("Change password panel: client-side validation copy before any submit", () => {
@@ -219,7 +273,7 @@ describe("ProfilePage", () => {
     const { container, getByText } = renderProfile({
       ...BASE,
       memberships: [],
-      accessRole: null,
+      selectedProject: null,
     });
     expect(getByText("No project membership yet.")).toBeTruthy();
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(0);

@@ -12,6 +12,7 @@ import {
 } from "~/features/policy/policy-actions.server";
 import { getPolicyViewData } from "~/features/policy/policy-query.server";
 import { PolicyPage } from "~/features/policy/policy-page";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
 
 /**
  * /projects/:slug/policy — the governance surface (policy spec), replacing
@@ -38,10 +39,15 @@ export async function action({ request, params }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const actor = {
+    userId: ctx.user.id,
+    label: ctx.user.email,
+    orgRole: ctx.user.role,
+  };
   const intent = String(formData.get("intent") ?? "");
 
   try {
+    assertProjectActive(db, params.slug);
     if (intent === "set-role") {
       const result = await setMemberRole(
         db,
@@ -89,6 +95,7 @@ export default function PolicyView({ loaderData }: Route.ComponentProps) {
       data={loaderData.view}
       projectSlug={layout?.board.project.slug ?? ""}
       myRole={layout?.myRole ?? null}
+      readOnly={Boolean(layout?.board.project.archived)}
     />
   );
 }

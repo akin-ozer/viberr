@@ -3,6 +3,7 @@ import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { formatClock, formatDayBucket } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { ntfMeta, ntfPill } from "./notification-meta";
 import {
   needsYouTime,
@@ -31,10 +32,14 @@ function keybtnLabel(n: NotificationPageItem): string {
 
 function NtfNeedsYou({
   items,
+  now,
+  timeZone,
   onRead,
   onOpen,
 }: {
   items: NotificationPageItem[];
+  now: Date;
+  timeZone: string;
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
@@ -86,7 +91,9 @@ function NtfNeedsYou({
                 <Pill kind={p.kind} sm>
                   {p.label}
                 </Pill>
-                <span className="pev-t">{needsYouTime(n.occurredAt)}</span>
+                <span className="pev-t">
+                  {needsYouTime(n.occurredAt, now, timeZone)}
+                </span>
               </span>
             </button>
           );
@@ -101,15 +108,22 @@ function NtfNeedsYou({
 
 function NtfStream({
   items,
+  now,
+  timeZone,
   onRead,
   onOpen,
 }: {
   items: NotificationPageItem[];
+  now: Date;
+  timeZone: string;
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
-  const now = new Date();
-  const days = [...new Set(items.map((n) => formatDayBucket(n.occurredAt, now)))];
+  const days = [
+    ...new Set(
+      items.map((n) => formatDayBucket(n.occurredAt, now, timeZone)),
+    ),
+  ];
   return (
     <div className="panel">
       <div className="panel-head">
@@ -120,7 +134,7 @@ function NtfStream({
         <div key={day}>
           <div className="act-day">{day}</div>
           {items.flatMap((n) => {
-            if (formatDayBucket(n.occurredAt, now) !== day) return [];
+            if (formatDayBucket(n.occurredAt, now, timeZone) !== day) return [];
             const m = ntfMeta(n);
             return (
               <div
@@ -159,7 +173,9 @@ function NtfStream({
                   </button>
                 </span>
                 {n.unread && <span className="unread-dot" />}
-                <span className="pev-t">{formatClock(n.occurredAt)}</span>
+                <span className="pev-t">
+                  {formatClock(n.occurredAt, timeZone)}
+                </span>
               </div>
             );
           })}
@@ -173,17 +189,21 @@ function NtfStream({
 export function NotificationsPage({
   items,
   unread,
+  readAllBusy,
   onRead,
   onReadAll,
   onOpen,
 }: {
   items: NotificationPageItem[];
   unread: number;
+  readAllBusy: boolean;
   onRead: (id: string) => void;
   onReadAll: () => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
   const [f, setF] = useState<NotificationFilter>("all");
+  const timeZone = useViewerTimeZone();
+  const now = new Date();
   const { needs, rest } = splitNotifications(items, f);
 
   return (
@@ -219,16 +239,34 @@ export function NotificationsPage({
             ))}
           </div>
           {unread > 0 && (
-            <button type="button" className="btn ghost sm" onClick={onReadAll}>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={onReadAll}
+              disabled={readAllBusy}
+              aria-busy={readAllBusy || undefined}
+            >
               <Icon name="check" />
-              Mark all read
+              {readAllBusy ? "Marking…" : "Mark all read"}
             </button>
           )}
         </div>
       </div>
       <div className="policy-wrap">
-        <NtfNeedsYou items={needs} onRead={onRead} onOpen={onOpen} />
-        <NtfStream items={rest} onRead={onRead} onOpen={onOpen} />
+        <NtfNeedsYou
+          items={needs}
+          now={now}
+          timeZone={timeZone}
+          onRead={onRead}
+          onOpen={onOpen}
+        />
+        <NtfStream
+          items={rest}
+          now={now}
+          timeZone={timeZone}
+          onRead={onRead}
+          onOpen={onOpen}
+        />
       </div>
     </div>
   );

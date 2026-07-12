@@ -1,40 +1,140 @@
 import path from "node:path";
 import type Database from "better-sqlite3";
-import { watch, type FSWatcher } from "chokidar";
+import { watch, type ChokidarOptions, type FSWatcher } from "chokidar";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
-import { createPathDebouncer, type PathDebouncer } from "./path-debounce.server";
+import {
+  createPathDebouncer,
+  type PathDebouncer,
+  type TimerScheduler,
+} from "./path-debounce.server";
 
 /**
- * File watcher: chokidar (v5) on the ${dataRoot}/projects tree, driving
+ * File watcher: chokidar (v5) on the data-root projects tree, driving
  * single-file incremental projection rebuilds.
  *
- * - 250 ms trailing debounce per path (editors fire bursts of events);
- * - ignores dotfiles and `*.tmp` (our atomic-write staging files);
- * - handles `unlinkDir` (E13): a recursive rm can delete a task/project
- *   directory faster than chokidar reports the per-file unlinks, which used
- *   to leave orphaned projection rows until the next manual rescan. A
- *   removed task dir reprojects that task (→ removed); a removed project
- *   dir (or tasks/ dir) reconciles the whole project against disk;
- * - a chokidar `error` CLEARS the cached handle (E8): the watcher is no
- *   longer trusted to deliver events, so `isFileWatcherAlive` — and the
- *   /resources/health `watcher` field — reports false instead of a zombie;
- * - started from server boot in dev AND prod;
- * - HMR-safe: the watcher handle lives behind a global symbol — a module
- *   reload reuses the running watcher instead of stacking a duplicate.
+ * The lifecycle is generation-bound. A replaced or stopped generation may
+ * still emit a late chokidar event, but it cannot clear, retry, or otherwise
+ * mutate the current watcher. Retry timers and debounce timers use the same
+ * injectable clock and are always cancelled by stop/replacement.
  */
 
 export const WATCH_DEBOUNCE_MS = 250;
+export const WATCH_RETRY_MS = 2_000;
 
-const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
+const WATCHER_LIFECYCLE_KEY = Symbol.for("viberr.fileWatcher.lifecycle.v2");
+const TRANSIENT_WATCH_ERRORS = new Set([
+  "EMFILE",
+  "ENFILE",
+  "ENOSPC",
+  "EPERM",
+  "EACCES",
+]);
+
+export interface FileWatcherRuntime {
+  createWatcher?: (watchedDir: string, options: ChokidarOptions) => FSWatcher;
+  timers?: TimerScheduler;
+  retryDelayMs?: number;
+}
+
+export interface FileWatcherOptions {
+  dataRoot?: string;
+  db?: Database.Database;
+  /** Environment seams for deterministic lifecycle tests. */
+  runtime?: FileWatcherRuntime;
+}
+
+export interface FileWatcherReadyOptions extends FileWatcherOptions {
+  /** Readiness never resolves by timeout: expiry rejects with a diagnostic. */
+  readyTimeoutMs?: number;
+}
+
+interface ResolvedRuntime {
+  createWatcher: (watchedDir: string, options: ChokidarOptions) => FSWatcher;
+  timers: TimerScheduler;
+  retryDelayMs: number;
+}
 
 interface WatcherHandle {
   watcher: FSWatcher;
   debouncer: PathDebouncer;
   dirDebouncer: PathDebouncer;
   root: string;
+  generation: number;
+  runtime: ResolvedRuntime;
+  ready: Promise<FSWatcher>;
+  resolveReady: (watcher: FSWatcher) => void;
+  rejectReady: (error: Error) => void;
+  readinessSettled: boolean;
+}
+
+interface WatcherLifecycle {
+  generation: number;
+  handle?: WatcherHandle;
+  desiredOptions?: FileWatcherOptions;
+  retryTimer: unknown | null;
+  retryTimers?: TimerScheduler;
+  closing: Set<Promise<void>>;
+}
+
+const systemTimers: TimerScheduler = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+};
+
+function lifecycle(): WatcherLifecycle {
+  const cache = globalThis as unknown as Record<symbol, WatcherLifecycle | undefined>;
+  return (cache[WATCHER_LIFECYCLE_KEY] ??= {
+    generation: 0,
+    retryTimer: null,
+    closing: new Set<Promise<void>>(),
+  });
+}
+
+function resolveRuntime(runtime: FileWatcherRuntime | undefined): ResolvedRuntime {
+  return {
+    createWatcher: runtime?.createWatcher ?? ((dir, options) => watch(dir, options)),
+    timers: runtime?.timers ?? systemTimers,
+    retryDelayMs: runtime?.retryDelayMs ?? WATCH_RETRY_MS,
+  };
+}
+
+function cancelRetry(state: WatcherLifecycle): void {
+  if (state.retryTimer !== null) {
+    state.retryTimers?.clearTimeout(state.retryTimer);
+  }
+  state.retryTimer = null;
+  state.retryTimers = undefined;
+}
+
+function rejectReadiness(handle: WatcherHandle, error: Error): void {
+  if (handle.readinessSettled) return;
+  handle.readinessSettled = true;
+  handle.rejectReady(error);
+}
+
+function trackClose(state: WatcherLifecycle, handle: WatcherHandle): Promise<void> {
+  handle.debouncer.cancelAll();
+  handle.dirDebouncer.cancelAll();
+  rejectReadiness(handle, new Error("File watcher stopped before it became ready."));
+
+  let closePromise: Promise<void>;
+  try {
+    closePromise = Promise.resolve(handle.watcher.close());
+  } catch (error) {
+    closePromise = Promise.reject(error);
+  }
+  const tracked = closePromise
+    .catch((error) => {
+      logger.error("file watcher close failed", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    })
+    .finally(() => state.closing.delete(tracked));
+  state.closing.add(tracked);
+  return tracked;
 }
 
 function shouldIgnore(candidate: string): boolean {
@@ -43,174 +143,248 @@ function shouldIgnore(candidate: string): boolean {
 }
 
 /** Starts (or returns the already-running) projects-tree watcher. */
-export function startFileWatcher(
-  options: { dataRoot?: string; db?: Database.Database } = {},
-): FSWatcher {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
+export function startFileWatcher(options: FileWatcherOptions = {}): FSWatcher {
+  const state = lifecycle();
   const root = getDataRoot(options.dataRoot);
-  const existing = cache[WATCHER_KEY];
+  const existing = state.handle;
   if (existing && existing.root === root) return existing.watcher;
+
+  // A direct start supersedes both a pending transient retry and an older
+  // generation. Late events from the retired watcher are ignored below.
+  cancelRetry(state);
+  state.desiredOptions = options;
+  state.generation += 1;
+  const generation = state.generation;
   if (existing) {
-    // Data root changed (tests) — retire the old watcher first.
-    existing.debouncer.cancelAll();
-    existing.dirDebouncer.cancelAll();
-    void existing.watcher.close();
+    state.handle = undefined;
+    void trackClose(state, existing);
   }
 
+  const runtime = resolveRuntime(options.runtime);
   const resolveDb = () => options.db ?? getDb();
   const watchedDir = projectsDir(options.dataRoot);
-  const debouncer = createPathDebouncer(WATCH_DEBOUNCE_MS, (absPath) => {
-    try {
-      const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
-      if (result.action !== "ignored" && result.action !== "unchanged") {
-        logger.info("watcher reprojected file", {
+  const debouncer = createPathDebouncer(
+    WATCH_DEBOUNCE_MS,
+    (absPath) => {
+      try {
+        const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
+        if (result.action !== "ignored" && result.action !== "unchanged") {
+          logger.info("watcher reprojected file", {
+            path: absPath,
+            action: result.action,
+            projectSlug: result.projectSlug,
+            taskKey: result.taskKey,
+          });
+        }
+      } catch (error) {
+        logger.error("watcher rebuild failed", {
           path: absPath,
-          action: result.action,
-          projectSlug: result.projectSlug,
-          taskKey: result.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
         });
       }
-    } catch (error) {
-      logger.error("watcher rebuild failed", {
-        path: absPath,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-    }
-  });
+    },
+    runtime.timers,
+  );
 
   /**
-   * E13 — a directory vanished. Map it onto the projection rows it backed:
-   *   projects/<slug>                → reconcile the whole project
-   *   projects/<slug>/tasks          → reconcile the whole project
-   *   projects/<slug>/tasks/<KEY>    → reproject that task (file gone → removed)
-   * Deeper paths (a task's workspace/, attachments/…) carry no projection
-   * rows — ignored. The projects ROOT itself unlinking reconciles every
-   * projected project.
+   * A directory vanished. Map it onto the projection rows it backed:
+   * projects/<slug>, projects/<slug>/tasks -> reconcile project;
+   * projects/<slug>/tasks/<KEY> -> reproject that task as removed.
    */
-  const dirDebouncer = createPathDebouncer(WATCH_DEBOUNCE_MS, (absDir) => {
-    try {
-      const db = resolveDb();
-      const rel = path.relative(watchedDir, absDir);
-      if (rel.startsWith("..")) return;
-      const segments = rel === "" ? [] : rel.split(path.sep);
+  const dirDebouncer = createPathDebouncer(
+    WATCH_DEBOUNCE_MS,
+    (absDir) => {
+      try {
+        const db = resolveDb();
+        const rel = path.relative(watchedDir, absDir);
+        if (rel.startsWith("..")) return;
+        const segments = rel === "" ? [] : rel.split(path.sep);
 
-      const reconcileProject = (slug: string) => {
-        // project.md path routes through the normal removal handling…
-        rebuildPath(db, projectFilePath(slug, root), { dataRoot: root });
-        // …and every projected task is checked against disk (a project-row
-        // removal does NOT cascade to task rows — prune them explicitly).
-        const tasks = db
-          .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
-          .all(slug) as { task_key: string }[];
-        for (const t of tasks) {
-          rebuildTaskFile(db, slug, t.task_key, { dataRoot: root });
+        const reconcileProject = (slug: string) => {
+          rebuildPath(db, projectFilePath(slug, root), { dataRoot: root });
+          const tasks = db
+            .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
+            .all(slug) as { task_key: string }[];
+          for (const task of tasks) {
+            rebuildTaskFile(db, slug, task.task_key, { dataRoot: root });
+          }
+          logger.info("watcher reconciled removed directory", {
+            path: absDir,
+            projectSlug: slug,
+          });
+        };
+
+        if (segments.length === 0) {
+          const slugs = db.prepare(`SELECT slug FROM projects`).all() as {
+            slug: string;
+          }[];
+          for (const row of slugs) reconcileProject(row.slug);
+          return;
         }
-        logger.info("watcher reconciled removed directory", {
+        const slug = segments[0]!;
+        if (segments.length === 1) return reconcileProject(slug);
+        if (segments[1] !== "tasks") return;
+        if (segments.length === 2) return reconcileProject(slug);
+        if (segments.length === 3) {
+          debouncer.schedule(path.resolve(taskFilePath(slug, segments[2]!, root)));
+        }
+      } catch (error) {
+        logger.error("watcher directory reconcile failed", {
           path: absDir,
-          projectSlug: slug,
+          err: error instanceof Error ? error : new Error(String(error)),
         });
-      };
-
-      if (segments.length === 0) {
-        // The projects root itself vanished — reconcile everything projected.
-        const slugs = db.prepare(`SELECT slug FROM projects`).all() as {
-          slug: string;
-        }[];
-        for (const row of slugs) reconcileProject(row.slug);
-        return;
       }
-      const slug = segments[0]!;
-      if (segments.length === 1) return reconcileProject(slug);
-      if (segments[1] !== "tasks") return; // non-store subtree
-      if (segments.length === 2) return reconcileProject(slug);
-      if (segments.length === 3) {
-        // Single task dir: task.md is gone with it → projects the removal.
-        debouncer.schedule(path.resolve(taskFilePath(slug, segments[2]!, root)));
-      }
-      // Deeper than the task dir: nothing projected lives there.
-    } catch (error) {
-      logger.error("watcher directory reconcile failed", {
-        path: absDir,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-    }
-  });
+    },
+    runtime.timers,
+  );
 
-  const watcher = watch(watchedDir, {
+  const watcher = runtime.createWatcher(watchedDir, {
     ignoreInitial: true,
     ignored: (candidate: string) => shouldIgnore(candidate),
   });
 
+  let resolveReady!: (watcher: FSWatcher) => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<FSWatcher>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  // startFileWatcher() does not itself await readiness. Install a rejection
+  // observer so a boot-time error is logged/handled without an unhandled
+  // promise while startFileWatcherReady() callers still receive rejection.
+  void ready.catch(() => undefined);
+
+  const handle: WatcherHandle = {
+    watcher,
+    debouncer,
+    dirDebouncer,
+    root,
+    generation,
+    runtime,
+    ready,
+    resolveReady,
+    rejectReady,
+    readinessSettled: false,
+  };
+  state.handle = handle;
+
+  const isCurrent = () =>
+    state.generation === generation && state.handle === handle;
+
   const schedule = (absPath: string) => {
-    if (shouldIgnore(absPath)) return;
+    if (!isCurrent() || shouldIgnore(absPath)) return;
     const base = path.basename(absPath);
     if (base !== "project.md" && base !== "task.md") return;
     debouncer.schedule(path.resolve(absPath));
   };
 
+  watcher.on("ready", () => {
+    if (!isCurrent() || handle.readinessSettled) return;
+    handle.readinessSettled = true;
+    handle.resolveReady(watcher);
+  });
   watcher.on("add", schedule);
   watcher.on("change", schedule);
   watcher.on("unlink", schedule);
   watcher.on("unlinkDir", (absDir: string) => {
-    if (shouldIgnore(absDir)) return;
+    if (!isCurrent() || shouldIgnore(absDir)) return;
     dirDebouncer.schedule(path.resolve(absDir));
   });
   watcher.on("error", (error) => {
-    // E8: the handle can no longer be trusted to deliver events — clear it so
-    // isFileWatcherAlive() (and /resources/health) reports the truth instead
-    // of a zombie watcher.
+    // A retired generation may emit after close; it has no authority over the
+    // current handle and, critically, may not schedule a resurrection.
+    if (!isCurrent()) return;
+    const normalized = error instanceof Error ? error : new Error(String(error));
     const code = (error as { code?: string } | null)?.code;
-    logger.error("file watcher error — clearing watcher handle", {
-      err: error instanceof Error ? error : new Error(String(error)),
+    logger.error("file watcher error — retiring watcher generation", {
+      err: normalized,
       code,
+      generation,
     });
-    const current = cache[WATCHER_KEY];
-    if (current && current.watcher === watcher) {
-      current.debouncer.cancelAll();
-      current.dirDebouncer.cancelAll();
-      cache[WATCHER_KEY] = undefined;
-    }
-    void watcher.close();
-    // Self-heal (adversarial-review #16): transient FS-pressure errors
-    // (EMFILE / ENFILE / ENOSPC / EPERM / EACCES) should not permanently kill
-    // watching — re-arm after a short backoff instead of requiring a full
-    // server restart. Only re-arm when no other watcher has taken over.
-    const TRANSIENT = new Set(["EMFILE", "ENFILE", "ENOSPC", "EPERM", "EACCES"]);
-    if (code && TRANSIENT.has(code)) {
-      setTimeout(() => {
-        if (cache[WATCHER_KEY] === undefined) {
-          logger.info("file watcher re-arming after a transient error", { code });
-          try {
-            startFileWatcher(options);
-          } catch (reErr) {
-            logger.error("file watcher re-arm failed", {
-              err: reErr instanceof Error ? reErr : new Error(String(reErr)),
-            });
-          }
-        }
-      }, 2_000).unref?.();
-    }
+
+    state.handle = undefined;
+    rejectReadiness(handle, normalized);
+    void trackClose(state, handle);
+
+    if (!code || !TRANSIENT_WATCH_ERRORS.has(code)) return;
+    const retryGeneration = generation;
+    state.retryTimers = runtime.timers;
+    const timer = runtime.timers.setTimeout(() => {
+      if (state.retryTimer !== timer) return;
+      state.retryTimer = null;
+      state.retryTimers = undefined;
+      if (
+        state.generation !== retryGeneration ||
+        state.handle !== undefined ||
+        state.desiredOptions === undefined
+      ) {
+        return;
+      }
+      logger.info("file watcher re-arming after a transient error", { code });
+      try {
+        startFileWatcher(state.desiredOptions);
+      } catch (retryError) {
+        logger.error("file watcher re-arm failed", {
+          err:
+            retryError instanceof Error
+              ? retryError
+              : new Error(String(retryError)),
+        });
+      }
+    }, runtime.retryDelayMs);
+    state.retryTimer = timer;
   });
 
-  cache[WATCHER_KEY] = { watcher, debouncer, dirDebouncer, root };
-  logger.info("file watcher started", { dir: watchedDir, debounceMs: WATCH_DEBOUNCE_MS });
+  logger.info("file watcher started", {
+    dir: watchedDir,
+    debounceMs: WATCH_DEBOUNCE_MS,
+    generation,
+  });
   return watcher;
 }
 
-/** True while a store watcher is running in this process (health route).
- * A chokidar error clears the handle, so this reflects real liveness. */
-export function isFileWatcherAlive(): boolean {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
-  return cache[WATCHER_KEY] !== undefined;
+/**
+ * Starts the watcher and waits for chokidar's real `ready` event. Errors and
+ * timeouts reject; a timeout is never treated as a successful ready state.
+ */
+export async function startFileWatcherReady(
+  options: FileWatcherReadyOptions = {},
+): Promise<FSWatcher> {
+  const watcher = startFileWatcher(options);
+  const state = lifecycle();
+  const handle = state.handle;
+  if (!handle || handle.watcher !== watcher) {
+    throw new Error("File watcher was retired while waiting for readiness.");
+  }
+
+  const timeoutMs = options.readyTimeoutMs ?? 10_000;
+  let timeout: unknown | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = handle.runtime.timers.setTimeout(
+        () => reject(new Error(`File watcher did not become ready within ${timeoutMs} ms.`)),
+        timeoutMs,
+      );
+    });
+    return await Promise.race([handle.ready, timeoutPromise]);
+  } finally {
+    if (timeout !== null) handle.runtime.timers.clearTimeout(timeout);
+  }
 }
 
-/** Test-only: stop and forget the running watcher. */
-export function stopFileWatcherForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
-  const existing = cache[WATCHER_KEY];
-  if (!existing) return;
-  existing.debouncer.cancelAll();
-  existing.dirDebouncer.cancelAll();
-  void existing.watcher.close();
-  cache[WATCHER_KEY] = undefined;
+/** True while the current generation has a trusted watcher handle. */
+export function isFileWatcherAlive(): boolean {
+  return lifecycle().handle !== undefined;
+}
+
+/** Test-only: stop, cancel retries/debounces, and await every watcher close. */
+export async function stopFileWatcherForTests(): Promise<void> {
+  const state = lifecycle();
+  state.generation += 1;
+  state.desiredOptions = undefined;
+  cancelRetry(state);
+  const existing = state.handle;
+  state.handle = undefined;
+  if (existing) void trackClose(state, existing);
+  await Promise.all([...state.closing]);
 }

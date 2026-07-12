@@ -3,17 +3,20 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
+  applyRecommendation,
   completeTaskMerge,
   reorderTask,
   resolvePacket,
@@ -36,10 +39,27 @@ const PACKET: TaskPacket = {
   body: "Body.",
   observations: [],
   options: [
-    { kind: "accept_completion", t: "Accept completion", d: "", rec: true, accept: true },
-    { kind: "request_edit", t: "Request one edit", d: "", rec: false, ev: "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance." },
+    {
+      kind: "accept_completion",
+      t: "Accept completion",
+      d: "",
+      rec: true,
+      accept: true,
+    },
+    {
+      kind: "request_edit",
+      t: "Request one edit",
+      d: "",
+      rec: false,
+      ev: "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance.",
+    },
     { kind: "block_on_policy", t: "Block on policy", d: "", rec: false },
-    { kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false },
+    {
+      kind: "hold_runtime_debug",
+      t: "Hold for runtime debug",
+      d: "",
+      rec: false,
+    },
     { kind: "redirect", t: "Start a fresh specialist", d: "", rec: false },
   ],
 };
@@ -58,11 +78,22 @@ function withTask(
 
 function prepared(): TestStore {
   const store = setupTestStore(ctx);
+  const project = readProjectFile({
+    projectSlug: store.slug,
+    dataRoot: store.dataRoot,
+  })!;
+  writeProject(store.dataRoot, {
+    ...project.parsed.frontmatter,
+    repo: null,
+  });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
   return store;
 }
 
-function seedTasks(store: TestStore, tasks: { key: string; stage: string }[]): void {
+function seedTasks(
+  store: TestStore,
+  tasks: { key: string; stage: string }[],
+): void {
   for (const t of tasks) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(t.key, { stage: t.stage }),
@@ -73,7 +104,9 @@ function seedTasks(store: TestStore, tasks: { key: string; stage: string }[]): v
 
 function stageOrder(store: TestStore, stageId: string): string[] {
   const board = getBoard(store.db, store.slug)!;
-  return board.columns.find((c) => c.stage.id === stageId)!.tasks.map((t) => t.key);
+  return board.columns
+    .find((c) => c.stage.id === stageId)!
+    .tasks.map((t) => t.key);
 }
 
 describe("P3.7 governance & lifecycle fixes", () => {
@@ -97,7 +130,11 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
   it("packet: a non-owner contributor is still forbidden (C3)", async () => {
     const store = prepared();
-    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      PACKET,
+    );
     await expect(
       resolvePacket(
         store.db,
@@ -108,21 +145,111 @@ describe("P3.7 governance & lifecycle fixes", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it("packet: the OWNER cannot accept_completion — that stays admin|maintainer (C3)", async () => {
+  it("packet: the contributor OWNER may accept_completion task-scoped", async () => {
     const store = prepared();
     withTask(
       store,
-      { stage: "review", ownerUserId: store.users.selin.id },
+      {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "healthy",
+      },
+      PACKET,
+    );
+    const result = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.task.stage).toBe("done");
+    const audit = store.db
+      .prepare(
+        `SELECT details_json FROM audit_events
+         WHERE action = 'task.packet.resolved' ORDER BY occurred_at DESC LIMIT 1`,
+      )
+      .get() as { details_json: string };
+    expect(JSON.parse(audit.details_json)).toMatchObject({
+      optionKind: "accept_completion",
+      authoritySource: "task_owner",
+    });
+  });
+
+  it("packet: a non-owner contributor still cannot accept_completion", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.arda.id },
       PACKET,
     );
     await expect(
       resolvePacket(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, // accept_completion
-        actor(store.users.selin), // contributor owner
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("packet: a nonmember org admin may accept through the emergency override", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "healthy",
+      },
+      PACKET,
+    );
+    const result = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      {
+        ...actor(store.users.deniz),
+        orgRole: "admin",
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.task.stage).toBe("done");
+    const audit = store.db
+      .prepare(
+        `SELECT details_json FROM audit_events
+         WHERE action = 'task.packet.resolved' ORDER BY occurred_at DESC LIMIT 1`,
+      )
+      .get() as { details_json: string };
+    expect(JSON.parse(audit.details_json)).toMatchObject({
+      authoritySource: "org_admin_override",
+    });
+  });
+
+  it("a contributor owner may apply an accept-completion recommendation", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "review",
+      ownerUserId: store.users.selin.id,
+      validation: "healthy",
+      recommendations: [
+        {
+          id: "rec_accept",
+          kind: "accept_completion",
+          label: "Accept completion",
+          detail: "Review is healthy.",
+        },
+      ],
+    });
+    const result = await applyRecommendation(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        recId: "rec_accept",
+      },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.task.stage).toBe("done");
   });
 
   it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
@@ -149,13 +276,21 @@ describe("P3.7 governance & lifecycle fixes", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "review",
+        manual: true,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // No rework → failing must survive the re-entry (not laundered to changed).
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
     expect(fm.validation).toBe("failing");
   });
 
@@ -163,7 +298,11 @@ describe("P3.7 governance & lifecycle fixes", () => {
     const store = prepared();
     withTask(
       store,
-      { stage: "review", ownerUserId: store.users.arda.id, validation: "failing" },
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        validation: "failing",
+      },
       PACKET,
     );
     await expect(
@@ -176,12 +315,135 @@ describe("P3.7 governance & lifecycle fixes", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  it("completion refuses an unknown validation verdict even for a non-repository task", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.arda.id, validation: "none" },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("repository-backed completion requires a linked review PR", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        validation: "healthy",
+        repo: "akin-ozer/viberr",
+      },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("a closed, unmerged PR cannot be laundered into merge-pending acceptance", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        validation: "healthy",
+        repo: "akin-ozer/viberr",
+        pr: { number: 318, state: "closed", title: "Closed PR" },
+      },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.pr?.state,
+    ).toBe("closed");
+  });
+
+  it("a repository task with an already-merged healthy PR may finish", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        validation: "healthy",
+        repo: "akin-ozer/viberr",
+        pr: { number: 318, state: "merged", title: "PR" },
+      },
+      PACKET,
+    );
+    const result = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.completion).toEqual({ completed: true, mergePending: false });
+    expect(result.task).toMatchObject({ stage: "done", validation: "healthy" });
+    expect(result.task.pr).toMatchObject({ state: "merged" });
+  });
+
+  it("completion cannot skip directly from implementation to Done", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        validation: "healthy",
+      },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
   it("dragging a card into Done reports acceptance, not a bare move (C4)", async () => {
     const store = prepared();
-    withTask(store, { stage: "review", ownerUserId: store.users.arda.id, validation: "healthy" });
+    withTask(store, {
+      stage: "review",
+      ownerUserId: store.users.arda.id,
+      validation: "healthy",
+    });
     const res = await reorderTask(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", beforeKey: null },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        beforeKey: null,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -194,13 +456,24 @@ describe("P3.7 governance & lifecycle fixes", () => {
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id });
     await updateTaskGoal(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", goal: "New acceptance criteria: must contain a test." },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        goal: "New acceptance criteria: must contain a test.",
+      },
       actor(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
-    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
     expect(file.parsed.goal).toContain("must contain a test");
-    expect(file.parsed.timeline[0]).toMatchObject({ type: "policy", title: "Goal updated" });
+    expect(file.parsed.timeline[0]).toMatchObject({
+      type: "policy",
+      title: "Goal updated",
+    });
   });
 
   it("updateTaskGoal is forbidden for a contributor (X11 RBAC)", async () => {
@@ -334,7 +607,11 @@ describe("transitionStage boundary enforcement", () => {
 
   it("human boundary (review→done locked): reviewer forbidden, admin ok, waiting→none", async () => {
     const store = prepared();
-    withTask(store, { stage: "review", waiting: "human" });
+    withTask(store, {
+      stage: "review",
+      waiting: "human",
+      validation: "healthy",
+    });
     await expect(
       transitionStage(
         store.db,
@@ -357,14 +634,17 @@ describe("transitionStage boundary enforcement", () => {
   it("is idempotent — transitioning to the current stage writes nothing", async () => {
     const store = prepared();
     withTask(store, { stage: "ready" });
-    const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.length;
+    const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline
+      .length;
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(
+      before,
+    );
   });
 
   it("marks the task's approval notifications read on transition", async () => {
@@ -409,7 +689,12 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          toStageId: "impl",
+          manual: true,
+        },
         actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
@@ -418,14 +703,21 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     // An admin can — and it lands + posts a transition timeline comment.
     const task = await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "impl",
+        manual: true,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("impl");
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
-    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Triage to In Progress");
+    expect(detail?.timeline[0]?.text).toContain(
+      "moved VIB-1 from Triage to In Progress",
+    );
   });
 
   it("allows a BACKWARD manual move (review→ready) for a maintainer", async () => {
@@ -433,7 +725,12 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     withTask(store, { stage: "review" });
     const task = await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "ready",
+        manual: true,
+      },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
@@ -446,7 +743,12 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "nope", manual: true },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          toStageId: "nope",
+          manual: true,
+        },
         actor(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
@@ -467,7 +769,12 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     // Move VIB-1 to the end of the column (beforeKey null → append).
     await reorderTask(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "impl",
+        beforeKey: null,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -498,7 +805,12 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     // Move VIB-3 before VIB-2 → VIB-1, VIB-3, VIB-2.
     await reorderTask(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-3", toStageId: "impl", beforeKey: "VIB-2" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        toStageId: "impl",
+        beforeKey: "VIB-2",
+      },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
@@ -513,7 +825,12 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     ]);
     const res = await reorderTask(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "impl",
+        beforeKey: null,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -532,7 +849,12 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     await expect(
       reorderTask(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: "VIB-2" },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          toStageId: "impl",
+          beforeKey: "VIB-2",
+        },
         actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
@@ -541,9 +863,19 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
 });
 
 describe("resolvePacket kind matrix", () => {
-  it("accept_completion is human-acceptance-gated (admin|maintainer only)", async () => {
+  it("accept_completion is human-acceptance-gated (admin|maintainer or task owner)", async () => {
     const store = prepared();
-    withTask(store, { stage: "review", waiting: "human", pr: { number: 318, state: "review", title: "PR" } }, PACKET);
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        validation: "healthy",
+        repo: "akin-ozer/viberr",
+        pr: { number: 318, state: "review", title: "PR" },
+      },
+      PACKET,
+    );
     await expect(
       resolvePacket(
         store.db,
@@ -559,20 +891,20 @@ describe("resolvePacket kind matrix", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(task.stage).toBe("done");
-    expect(task.waiting).toBe("none");
-    expect(task.displayReadiness).toBe("accepted");
-    expect(task.validation).toBe("healthy"); // accepted work is validated (FR24)
-    // D3: no reachable GitHub merge in the test env, so the PR is recorded as
-    // "accepted" (merge pending) — NEVER a false "merged".
+    // Repository-backed completion is accepted, but the task remains in Review
+    // until the linked PR is truly merged.
+    expect(task.stage).toBe("review");
+    expect(task.waiting).toBe("human");
+    expect(task.displayReadiness).toBe("ready");
+    expect(task.validation).toBe("healthy");
     expect(task.pr).toMatchObject({ state: "accepted" });
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "completion",
-      title: "Completion accepted",
+      title: "Completion accepted · merge pending",
     });
-    expect(detail?.timeline[0]!.text).toContain("accepted, merge pending");
+    expect(detail?.timeline[0]!.text).toContain("remains in **Review**");
   });
 
   it("request_edit: contributor forbidden, maintainer ok — waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {
@@ -680,12 +1012,21 @@ describe("resolvePacket kind matrix", () => {
     const store = prepared();
     withTask(store, { stage: "review" }, PACKET);
     createNotification(store.db, {
-      id: "n-test-packet", userId: store.users.arda.id, kind: "packet",
-      ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-1",
+      id: "n-test-packet",
+      userId: store.users.arda.id,
+      kind: "packet",
+      ptype: "input",
+      text: "t",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
     });
     createNotification(store.db, {
-      id: "n-test-mention", userId: store.users.arda.id, kind: "mention",
-      text: "t", projectSlug: store.slug, taskKey: "VIB-1",
+      id: "n-test-mention",
+      userId: store.users.arda.id,
+      kind: "mention",
+      text: "t",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
     });
     await resolvePacket(
       store.db,
@@ -722,56 +1063,44 @@ describe("resolvePacket kind matrix", () => {
 });
 
 describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)", () => {
-  it("detects request-changes / failing signals", () => {
-    expect(classifyReviewerVerdict("Requesting changes: the tests fail.")).toBe("request_changes");
-    expect(classifyReviewerVerdict("This is a no-op — nothing was implemented.")).toBe("request_changes");
-    expect(classifyReviewerVerdict("Found a blocker in the migration.")).toBe("request_changes");
-  });
-
-  it("detects approve / pass signals", () => {
-    expect(classifyReviewerVerdict("LGTM — approved.")).toBe("approve");
-    expect(classifyReviewerVerdict("No blocking issues, ready to accept.")).toBe("approve");
-  });
-
-  it("does NOT misread a clean APPROVE that mentions negated fail/blocker words", () => {
-    // The live VSW-3 bug: a thorough approval that says "no blockers" / "no
-    // tests fail" must classify as approve, not request_changes.
+  it("accepts exactly one valid structured marker", () => {
     expect(
       classifyReviewerVerdict(
-        "## Review verdict — **APPROVE**. Verified the diff; no blockers, no tests fail. Ready to accept.",
+        'Detailed evidence.\nVIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"The diff and tests satisfy the goal."}',
       ),
     ).toBe("approve");
     expect(
-      classifyReviewerVerdict("Verdict: PASS. The change is clean and nothing fails."),
-    ).toBe("approve");
-    expect(
-      classifyReviewerVerdict("Approve — checks don't fail and there are zero blockers."),
-    ).toBe("approve");
-  });
-
-  it("still catches an assertive failure even alongside an explicit reject verdict", () => {
-    expect(
-      classifyReviewerVerdict("Verdict: request changes — the new test fails on empty input."),
+      classifyReviewerVerdict(
+        'VIBERR_REVIEW_VERDICT: {"verdict":"request_changes","summary":"The empty-input test fails."}',
+      ),
     ).toBe("request_changes");
-    expect(classifyReviewerVerdict("The build fails on CI.")).toBe("request_changes");
   });
 
-  it("returns null on an unclear verdict", () => {
+  it("never infers governance state from prose", () => {
+    expect(
+      classifyReviewerVerdict("LGTM — approved and ready to merge."),
+    ).toBeNull();
+    expect(
+      classifyReviewerVerdict("Requesting changes: the tests fail."),
+    ).toBeNull();
     expect(classifyReviewerVerdict("I looked at the diff.")).toBeNull();
     expect(classifyReviewerVerdict(null)).toBeNull();
-    expect(classifyReviewerVerdict("")).toBeNull();
   });
 
-  it("treats none/nothing as negators and catches the failure(s) noun (F3)", () => {
+  it("rejects malformed, unsupported, or ambiguous structured markers", () => {
     expect(
-      classifyReviewerVerdict("Approve — none of the tests fail; nothing fails."),
-    ).toBe("approve");
-    expect(classifyReviewerVerdict("The suite has failures on CI.")).toBe(
-      "request_changes",
-    );
-    expect(classifyReviewerVerdict("Approved. No failures were observed.")).toBe(
-      "approve",
-    );
+      classifyReviewerVerdict(
+        'VIBERR_REVIEW_VERDICT: {"verdict":"pass","summary":"Looks good."}',
+      ),
+    ).toBeNull();
+    expect(
+      classifyReviewerVerdict('VIBERR_REVIEW_VERDICT: {"verdict":"approve"}'),
+    ).toBeNull();
+    expect(
+      classifyReviewerVerdict(
+        'VIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"One"}\nVIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"Two"}',
+      ),
+    ).toBeNull();
   });
 });
 
@@ -808,7 +1137,9 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
   it("is admin|maintainer only (contributor forbidden)", async () => {
     const store = prepared();
     withTask(store, {
-      stage: "done",
+      stage: "review",
+      validation: "healthy",
+      repo: "akin-ozer/viberr",
       pr: { number: 7, state: "accepted", title: "PR" },
     });
     await expect(
@@ -824,7 +1155,9 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
   it("reports an honest failure (not a fake merge) when no credential is configured", async () => {
     const store = prepared();
     withTask(store, {
-      stage: "done",
+      stage: "review",
+      validation: "healthy",
+      repo: "akin-ozer/viberr",
       pr: { number: 7, state: "accepted", title: "PR" },
     });
     const result = await completeTaskMerge(

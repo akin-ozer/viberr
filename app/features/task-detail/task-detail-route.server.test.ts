@@ -360,6 +360,10 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
 
 describe("ownership actions", () => {
   it("take on VIB-148 fires the REAL operator reaction (no simulated stand-in)", async () => {
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    configureRunServiceForTests();
     const result = (await postIntent("VIB-148", ids.arda, {
       intent: "owner-take",
     })) as { ok: true; toast: string };
@@ -367,9 +371,20 @@ describe("ownership actions", () => {
 
     const after = await runLoader("VIB-148", ids.arda);
     expect(after.task.owner).toMatchObject({ kind: "human", name: "Arda Kaya" });
-    // Operator reaction: waiting flips to agent, readiness to ready…
-    expect(after.task.waiting).toBe("agent");
+    // The readiness gate is resolved, but the offline fallback refuses to rank
+    // several eligible profiles with a hidden Developer preference. It opens a
+    // human-visible routing decision instead of inventing a choice.
+    expect(["agent", "human"]).toContain(after.task.waiting);
     expect(after.task.readiness).toBe("ready");
+    // The loader may race the short simulated operator turn. Before completion
+    // it is honestly agent-waiting; after completion it is human-waiting on the
+    // routing packet. Neither state may contain a hidden specialist choice.
+    expect(after.task.specialist).toBeNull();
+    if (after.task.waiting === "human") {
+      expect(after.task.packet?.title).toBe(
+        "An intelligent specialist-routing decision is required",
+      );
+    }
     // …and the operator genuinely coordinated (the same runOperator path every
     // lifecycle trigger uses — the legacy scheduleOperatorRun narration is
     // gone): its activity lands ABOVE the assign event.
@@ -559,8 +574,10 @@ describe("assign-specialist + run-specialist intents", () => {
       profileId: "developer",
       role: "Implementation",
     });
-    expect(after.task.timeline[0]).toMatchObject({ type: "agent" });
-    expect(after.task.timeline[0]!.text).toContain("Deployed **Developer**");
+    const deploymentEvent = after.task.timeline.find(
+      (event) => event.type === "agent" && event.text.includes("Deployed **Developer**"),
+    );
+    expect(deploymentEvent).toBeDefined();
   });
 
   it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {
@@ -597,9 +614,14 @@ describe("assign-specialist + run-specialist intents", () => {
   });
 
   it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    configureRunServiceForTests();
     // VIB-166 now has the developer specialist assigned (from the earlier test).
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "run-specialist",
+      backend: "claude",
     })) as { ok: true; toast: string };
     expect(result.ok).toBe(true);
     expect(result.toast).toContain("run started · streaming to agent logs");

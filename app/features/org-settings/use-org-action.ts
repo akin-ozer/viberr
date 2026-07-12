@@ -44,7 +44,7 @@ export function useOrgAction(options?: {
     if (d.ok) {
       if (d.toast) push(d.toast);
     } else if (d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [fetcher.state, fetcher.data, push]);
 

@@ -7,6 +7,17 @@ import {
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { SettingsViewData } from "./settings-query.server";
+import {
+  baseTaskFrontmatter,
+  writeTask,
+} from "../../../test-support/test-store";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { createNotification } from "~/server/projections/notifications.server";
+import {
+  insertUser,
+  updateUserFields,
+} from "~/server/auth/user-store.server";
 
 /**
  * Route-level tests for /projects/:slug/settings: loader read model,
@@ -160,7 +171,7 @@ describe("stage editor", () => {
       stageId: string;
     };
     expect(result.ok).toBe(true);
-    expect(result.toast).toBe("Stage added — it appears on the board immediately");
+    expect(result.toast).toBe("Stage added — board and workflow updated");
     newStageId = result.stageId;
 
     const { view } = await runLoader(ids.arda);
@@ -174,6 +185,21 @@ describe("stage editor", () => {
     expect(JSON.parse(row.stages_json).map((s: { id: string }) => s.id)).toEqual(
       ["triage", "ready", "impl", "review", newStageId, "done"],
     );
+    const project = app.db
+      .prepare(`SELECT workflow_json FROM projects WHERE slug = 'viberr-core'`)
+      .get() as { workflow_json: string };
+    expect(
+      JSON.parse(project.workflow_json).map(
+        (edge: { from: string; to: string; boundary: string }) =>
+          `${edge.from}->${edge.to}:${edge.boundary}`,
+      ),
+    ).toEqual([
+      "triage->ready:auto",
+      "ready->impl:auto",
+      "impl->review:approval",
+      `review->${newStageId}:approval`,
+      `${newStageId}->done:human`,
+    ]);
   });
 
   it("rename-stage commits with the verbatim toast", async () => {
@@ -204,12 +230,23 @@ describe("stage editor", () => {
       intent: "reorder-stages",
       orderedIds: shuffled.join(","),
     })) as { ok: boolean; toast: string };
-    expect(result.toast).toBe("Stage order updated — board columns follow");
+    expect(result.toast).toBe("Stage order updated — board and workflow follow");
     const after = await runLoader(ids.arda);
     const orderedIds = after.view.stages.map((s) => s.id);
     expect(orderedIds[0]).toBe("triage");
     expect(orderedIds[orderedIds.length - 1]).toBe("done");
     expect(orderedIds).toContain(newStageId);
+    const workflow = (
+      app.db
+        .prepare(`SELECT workflow_json FROM projects WHERE slug = 'viberr-core'`)
+        .get() as { workflow_json: string }
+    ).workflow_json;
+    expect(
+      JSON.parse(workflow).map((edge: { from: string; to: string }) => [
+        edge.from,
+        edge.to,
+      ]),
+    ).toEqual(orderedIds.slice(0, -1).map((id, i) => [id, orderedIds[i + 1]]));
     // Restore the canonical order for later tests.
     await postAction(ids.arda, {
       intent: "reorder-stages",
@@ -252,15 +289,16 @@ describe("stage editor", () => {
 });
 
 describe("members", () => {
-  it("invites a registered user as Viewer — an invite IS the membership (X15: no decorative status)", async () => {
+  it("grants a registered user Viewer access without claiming email delivery", async () => {
     const result = (await postAction(ids.arda, {
-      intent: "invite",
+      intent: "grant-access",
       name: "Deniz Şahin",
       email: "deniz@viberr.dev",
     })) as { ok: boolean; toast: string };
     expect(result).toEqual({
       ok: true,
-      toast: "Invite sent to deniz@viberr.dev · joins as Viewer",
+      toast:
+        "Access granted to deniz@viberr.dev as Viewer · sign in with the existing account",
     });
     const { view } = await runLoader(ids.arda);
     const deniz = view.members.find((m) => m.userId === ids.deniz)!;
@@ -271,7 +309,7 @@ describe("members", () => {
 
   it("rejects a duplicate invite", async () => {
     const result = (await postAction(ids.arda, {
-      intent: "invite",
+      intent: "grant-access",
       name: "Deniz Şahin",
       email: "deniz@viberr.dev",
     })) as { init?: { status?: number }; data?: { error?: string } };
@@ -279,27 +317,61 @@ describe("members", () => {
     expect(result.data?.error).toBe("deniz@viberr.dev is already a member");
   });
 
-  it("invites an unregistered email by creating a passwordless whitelist user", async () => {
+  it("refuses to create an unusable passwordless user when OAuth is unconfigured", async () => {
     const result = (await postAction(ids.arda, {
-      intent: "invite",
+      intent: "grant-access",
       name: "Yeni Kişi",
       email: "yeni@viberr.dev",
-    })) as { ok: boolean; toast: string };
-    expect(result.ok).toBe(true);
+    })) as { init?: { status?: number }; data?: { error?: string } };
+    expect(result.init?.status).toBe(400);
+    expect(result.data?.error).toMatch(/Configure GitHub or Google OAuth/);
     const { findUserByEmail } = await import(
       "~/server/auth/user-store.server"
     );
     const created = findUserByEmail(app.db, "yeni@viberr.dev");
-    expect(created).not.toBeNull();
-    const { view } = await runLoader(ids.arda);
-    expect(
-      view.members.find((m) => m.userId === created!.id),
-    ).toMatchObject({ role: "viewer", name: "Yeni Kişi" });
-    // Clean up the seat.
-    await postAction(ids.arda, {
-      intent: "remove-member",
-      userId: created!.id,
+    expect(created).toBeNull();
+  });
+
+  it("refuses access for an existing disabled account", async () => {
+    insertUser(app.db, {
+      id: "u_disabled_access_fixture",
+      email: "disabled-access@viberr.dev",
+      name: "Disabled Access",
+      role: "member",
+      passwordHash: "local-password-fixture",
     });
+    updateUserFields(app.db, "u_disabled_access_fixture", { disabled: true });
+
+    const result = (await postAction(ids.arda, {
+      intent: "grant-access",
+      name: "Disabled Access",
+      email: "disabled-access@viberr.dev",
+    })) as { init?: { status?: number }; data?: { error?: string } };
+
+    expect(result.init?.status).toBe(400);
+    expect(result.data?.error).toContain("Re-enable the account");
+    expect(projectMd()).not.toContain("u_disabled_access_fixture");
+  });
+
+  it("refuses access for an existing OAuth-only account whose provider is unavailable", async () => {
+    insertUser(app.db, {
+      id: "u_google_access_fixture",
+      email: "google-access@viberr.dev",
+      name: "Google Access",
+      role: "member",
+      passwordHash: null,
+      idp: "google",
+    });
+
+    const result = (await postAction(ids.arda, {
+      intent: "grant-access",
+      name: "Google Access",
+      email: "google-access@viberr.dev",
+    })) as { init?: { status?: number }; data?: { error?: string } };
+
+    expect(result.init?.status).toBe(400);
+    expect(result.data?.error).toContain("Configure Google OAuth");
+    expect(projectMd()).not.toContain("u_google_access_fixture");
   });
 
   it("removing an invited member uses the standard removed toast (X15)", async () => {
@@ -321,6 +393,37 @@ describe("members", () => {
   });
 
   it("removing an active member works with the removal toast + audit", async () => {
+    writeTask(app.dataRoot, "viberr-core", {
+      frontmatter: baseTaskFrontmatter("VIB-999", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: ids.selin,
+      }),
+      packet: {
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Accept completion?",
+        body: "The pending decision must survive membership cleanup.",
+        observations: [],
+        options: [
+          {
+            kind: "accept_completion",
+            t: "Accept completion",
+            d: "",
+            rec: true,
+          },
+        ],
+      },
+    });
+    rebuildAll(app.db, { dataRoot: app.dataRoot, force: true });
+    createNotification(app.db, {
+      userId: ids.selin,
+      kind: "approval",
+      text: "Decision is waiting",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-999",
+    });
     const remove = (await postAction(ids.arda, {
       intent: "remove-member",
       userId: ids.selin,
@@ -332,10 +435,27 @@ describe("members", () => {
     expect(
       listAuditEvents(app.db, { action: "project.member.removed" })[0],
     ).toMatchObject({ subjectId: ids.selin, projectSlug: "viberr-core" });
+    const cleaned = readTaskFile({
+      projectSlug: "viberr-core",
+      taskKey: "VIB-999",
+      dataRoot: app.dataRoot,
+    })!;
+    expect(cleaned.parsed.frontmatter.ownerUserId).toBeNull();
+    expect(cleaned.parsed.packet?.options[0]?.kind).toBe(
+      "accept_completion",
+    );
+    expect(cleaned.parsed.timeline[0]?.type).toBe("assign");
+    const notice = app.db
+      .prepare(
+        `SELECT read_at FROM notifications
+         WHERE user_id = ? AND task_key = 'VIB-999'`,
+      )
+      .get(ids.selin) as { read_at: string | null };
+    expect(notice.read_at).not.toBeNull();
     // Restore Selin via invite + role change back to reviewer (Policy owns
     // roles; the settings invite always lands on Viewer).
     await postAction(ids.arda, {
-      intent: "invite",
+      intent: "grant-access",
       name: "Selin Aksoy",
       email: "selin@viberr.dev",
     });
@@ -343,7 +463,7 @@ describe("members", () => {
 
   it("membership CRUD is admin-only", async () => {
     const result = (await postAction(ids.murat, {
-      intent: "invite",
+      intent: "grant-access",
       name: "X Y",
       email: "x@viberr.dev",
     })) as { init?: { status?: number } };
@@ -459,6 +579,25 @@ describe("archive-project", () => {
       ).archived,
     ).toBe(1);
     expect((await runLoader(ids.arda)).view.project.archived).toBe(true);
+    expect(
+      (
+        app.db
+          .prepare(
+            `SELECT count(*) AS n FROM agent_runs
+             WHERE project_slug = 'viberr-core' AND state IN ('queued', 'running')`,
+          )
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
+
+    const blocked = (await postAction(ids.arda, {
+      intent: "save-project",
+      name: "Should not save",
+      prefix: "VIB",
+      description: "archived",
+    })) as { init?: { status?: number }; data?: { error?: string } };
+    expect(blocked.init?.status).toBe(409);
+    expect(blocked.data?.error).toContain("archived and read-only");
 
     expect(
       listAuditEvents(app.db, { action: "project.archived" })[0],

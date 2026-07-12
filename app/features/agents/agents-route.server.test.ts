@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   setupAppTest,
@@ -7,6 +7,11 @@ import {
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { AgentProfileView, AgentDeploymentView } from "./agent-types";
+import type { GagentView } from "~/server/org/gagents.server";
+import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
+import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { agentProfileFilePath } from "~/server/files/file-store-root.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 
 /**
  * Route-level tests for /projects/:slug/agents: roster assembly from the
@@ -24,6 +29,7 @@ type LoaderData = {
   deployments: AgentDeploymentView[];
   stages: { id: string; name: string; color: string }[];
   projectName: string;
+  globalProfiles: GagentView[];
 };
 
 beforeAll(async () => {
@@ -39,12 +45,12 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function runLoader(userId?: string): Promise<LoaderData> {
+async function runLoader(userId?: string, search = ""): Promise<LoaderData> {
   const { loader } = await import("~/routes/project.agents");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
   return (await loader({
     request: app.request(
-      "/projects/viberr-core/agents",
+      `/projects/viberr-core/agents${search}`,
       cookie ? { cookie } : {},
     ),
     params: { slug: "viberr-core" },
@@ -76,6 +82,39 @@ const FORM = {
   resources: { skills: ["repo-write"], mcps: ["github"], kb: [] },
 };
 
+function writeGlobalTemplate(
+  id: string,
+  patch: {
+    name?: string;
+    stages?: string[];
+    resources?: { skills: string[]; mcps: string[]; kb: string[] };
+  } = {},
+) {
+  writeFileAtomic(
+    agentProfileFilePath(id, app.dataRoot),
+    serializeAgentProfile({
+      frontmatter: {
+        id,
+        kind: "specialist",
+        name: patch.name ?? "Global Advisor",
+        role: "Advice",
+        icon: "agents",
+        backends: ["codex"],
+        model: "",
+        scope: "Global base",
+        stages: patch.stages ?? ["impl"],
+        spanAll: false,
+        capabilities: [
+          { capabilityId: "comment-on-task", mode: "recommend" },
+        ],
+        extras: [],
+        resources: patch.resources ?? { skills: [], mcps: [], kb: [] },
+      },
+      description: "Provides focused advice.",
+    }),
+  );
+}
+
 describe("loader", () => {
   it("redirects signed-out users to /login", async () => {
     const thrown = await runLoader().catch((e) => e);
@@ -90,6 +129,17 @@ describe("loader", () => {
     const thrown = await runLoader(ids.deniz).catch((e) => e);
     // requireProjectMember throws react-router `data(msg, { status: 403 })`.
     expect((thrown as { init?: { status?: number } }).init?.status).toBe(403);
+  });
+
+  it("serves a deep-linked Live/profile URL from the same governed roster", async () => {
+    const data = await runLoader(
+      ids.arda,
+      "?view=live&profile=reviewer",
+    );
+    expect(data.profiles.some((profile) => profile.id === "reviewer")).toBe(
+      true,
+    );
+    expect(data.deployments.length).toBeGreaterThan(0);
   });
 
   it("assembles the seeded roster: operator first, template fields + id-based actions", async () => {
@@ -131,9 +181,12 @@ describe("loader", () => {
       "review",
       "done",
     ]);
+    expect(data.globalProfiles.map((profile) => profile.id)).toEqual(
+      expect.arrayContaining(["developer", "reviewer"]),
+    );
   });
 
-  it("derives live deployments from the seed — VIB-151 crew incl. its running runs", async () => {
+  it("derives deployments without presenting simulated seed sessions as live", async () => {
     const data = await runLoader(ids.arda);
     const vib151 = data.deployments.filter((d) => d.taskKey === "VIB-151");
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
@@ -141,9 +194,9 @@ describe("loader", () => {
       ["developer", "primary", "working"],
       ["reviewer", "reviewer", "anchored · on call"],
     ]);
-    // Phase-8 seeds VIB-151 with a running claude primary + codex c0.
-    expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
-    expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
+    // Phase-8's permanent rows are simulated demo evidence, not real work.
+    expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(false);
+    expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(false);
 
     // Done tasks contribute nothing; triage tasks have no operator.
     expect(data.deployments.some((d) => d.taskKey === "VIB-139")).toBe(false);
@@ -164,6 +217,14 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
     const result = (await postAction(ids.selin, {
       intent: "create-profile",
       payload: JSON.stringify(FORM),
+    })) as { init?: { status?: number } };
+    expect(result.init?.status).toBe(403);
+  });
+
+  it("rejects a reviewer from deploying a global profile", async () => {
+    const result = (await postAction(ids.selin, {
+      intent: "deploy-global-profile",
+      profileId: "reviewer",
     })) as { init?: { status?: number } };
     expect(result.init?.status).toBe(403);
   });
@@ -194,6 +255,61 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
 });
 
 describe("profile CRUD round trip (project.md writers + audit)", () => {
+  it("lets an org admin use emergency project-admin authority to deploy", async () => {
+    writeGlobalTemplate("global-advisor");
+    app.db.prepare(`UPDATE users SET role = 'admin' WHERE id = ?`).run(ids.deniz);
+    try {
+      const result = (await postAction(ids.deniz, {
+        intent: "deploy-global-profile",
+        profileId: "global-advisor",
+      })) as { ok: boolean; profileId: string };
+      expect(result).toMatchObject({ ok: true, profileId: "global-advisor" });
+      expect((await runLoader(ids.deniz)).profiles).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "global-advisor", source: "template" }),
+        ]),
+      );
+      const removed = (await postAction(ids.deniz, {
+        intent: "delete-profile",
+        profileId: "global-advisor",
+      })) as { ok: boolean };
+      expect(removed.ok).toBe(true);
+    } finally {
+      app.db.prepare(`UPDATE users SET role = 'member' WHERE id = ?`).run(ids.deniz);
+      rmSync(agentProfileFilePath("global-advisor", app.dataRoot), { force: true });
+    }
+  });
+
+  it("rejects global deploys with incompatible stages or missing resources", async () => {
+    writeGlobalTemplate("broken-global", {
+      name: "Broken global",
+      stages: ["unknown-stage"],
+    });
+    try {
+      const badStage = (await postAction(ids.arda, {
+        intent: "deploy-global-profile",
+        profileId: "broken-global",
+      })) as { init?: { status?: number }; data?: { error?: string } };
+      expect(badStage.init?.status).toBe(400);
+      expect(badStage.data?.error).toContain("eligible stages don't match");
+
+      writeGlobalTemplate("broken-global", {
+        name: "Broken global",
+        resources: { skills: ["not-installed"], mcps: [], kb: [] },
+      });
+      const badResource = (await postAction(ids.arda, {
+        intent: "deploy-global-profile",
+        profileId: "broken-global",
+      })) as { init?: { status?: number }; data?: { error?: string } };
+      expect(badResource.init?.status).toBe(400);
+      expect(badResource.data?.error).toContain(
+        "unavailable context: skill not-installed",
+      );
+    } finally {
+      rmSync(agentProfileFilePath("broken-global", app.dataRoot), { force: true });
+    }
+  });
+
   it("create → deployment entry with inline definition; server-generated slug id", async () => {
     const result = (await postAction(ids.arda, {
       intent: "create-profile",
@@ -495,10 +611,62 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const after = await runLoader(ids.arda);
     expect(after.profiles.map((p) => p.id)).not.toContain("reviewer");
     // "The global base definition is unaffected."
+    const templatePath = path.join(app.dataRoot, "agents/profiles/reviewer.md");
     const template = readFileSync(
-      path.join(app.dataRoot, "agents/profiles/reviewer.md"),
+      templatePath,
       "utf8",
     );
     expect(template).toContain("name: Reviewer");
+
+    // F15: attach another existing template. Only a project deployment
+    // reference/policy is written; the shared template bytes stay untouched.
+    writeGlobalTemplate("redeployable-global", { name: "Redeployable global" });
+    const deployTemplatePath = agentProfileFilePath(
+      "redeployable-global",
+      app.dataRoot,
+    );
+    const deployTemplate = readFileSync(deployTemplatePath, "utf8");
+    try {
+      const deployed = (await postAction(ids.arda, {
+        intent: "deploy-global-profile",
+        profileId: "redeployable-global",
+      })) as { ok: boolean; profileId: string; toast: string };
+      expect(deployed).toMatchObject({
+        ok: true,
+        profileId: "redeployable-global",
+      });
+      expect(deployed.toast).toContain("template remains shared");
+      const project = readProjectFile({
+        projectSlug: "viberr-core",
+        dataRoot: app.dataRoot,
+      })!;
+      const deployment = project.parsed.frontmatter.agents.find(
+        (agent) => agent.profileId === "redeployable-global",
+      )!;
+      expect(deployment.definition).toBeUndefined();
+      expect(deployment.capabilities.length).toBeGreaterThan(0);
+      expect(readFileSync(deployTemplatePath, "utf8")).toBe(deployTemplate);
+      expect((await runLoader(ids.arda)).profiles).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "redeployable-global",
+            source: "template",
+          }),
+        ]),
+      );
+
+      const duplicate = (await postAction(ids.arda, {
+        intent: "deploy-global-profile",
+        profileId: "redeployable-global",
+      })) as { init?: { status?: number }; data?: { error?: string } };
+      expect(duplicate.init?.status).toBe(409);
+      expect(duplicate.data?.error).toContain("already deployed");
+      await postAction(ids.arda, {
+        intent: "delete-profile",
+        profileId: "redeployable-global",
+      });
+    } finally {
+      rmSync(deployTemplatePath, { force: true });
+    }
   });
 });

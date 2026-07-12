@@ -39,6 +39,7 @@ export function DecisionPacket({
   busy,
   canResolve,
   canResolveCompletion,
+  canAsk = true,
   onResolve,
   onAsk,
 }: {
@@ -48,11 +49,11 @@ export function DecisionPacket({
    *  owner for non-completion options — M2). "Ask operator" stays open to all
    *  (commenting is app-wide). */
   canResolve: boolean;
-  /** Whether the viewer may resolve the ACCEPT_COMPLETION option specifically —
-   *  admin|maintainer only (the always-human Done authority). An owner-only
-   *  viewer has canResolve but not this, so the button is blocked while that
-   *  option is selected rather than 403ing on click (adversarial-review #15). */
+  /** Whether the viewer may resolve ACCEPT_COMPLETION specifically — a project
+   *  supervisor, org-admin override, or the active contributor+ task owner. */
   canResolveCompletion: boolean;
+  /** Archived task history keeps option inspection but closes commenting. */
+  canAsk?: boolean;
   onResolve: (optionIndex: number) => void;
   onAsk: () => void;
 }) {
@@ -147,9 +148,8 @@ export function DecisionPacket({
         <div className="packet-actions">
           {(() => {
             const selected = p.options[sel];
-            // The accept_completion option is admin|maintainer only; an
-            // owner-only viewer can't resolve it (the server 403s), so block the
-            // button while it's selected rather than let them click into a 403.
+            // Completion is task-scoped for owners; stale/viewer owners remain
+            // blocked by the same capability boolean the server computes.
             const completionBlocked =
               selected?.kind === "accept_completion" && !canResolveCompletion;
             if (!canResolve) return null;
@@ -161,7 +161,7 @@ export function DecisionPacket({
                 aria-busy={busy}
                 title={
                   completionBlocked
-                    ? "Accepting completion is reserved for maintainers"
+                    ? "Only this task's owner or a project supervisor can accept completion"
                     : undefined
                 }
                 onClick={() => onResolve(sel)}
@@ -171,10 +171,12 @@ export function DecisionPacket({
               </button>
             );
           })()}
-          <button type="button" className="btn ghost" onClick={onAsk}>
-            <Icon name="message" />
-            Ask operator
-          </button>
+          {canAsk && (
+            <button type="button" className="btn ghost" onClick={onAsk}>
+              <Icon name="message" />
+              Ask operator
+            </button>
+          )}
         </div>
       </div>
     </div>

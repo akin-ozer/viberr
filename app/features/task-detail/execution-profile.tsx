@@ -17,6 +17,37 @@ export interface DeployedSpecialistView {
   model: string;
 }
 
+export type OperatorExecutionStatus =
+  | "not_configured"
+  | "configured"
+  | "engaged"
+  | "queued"
+  | "running"
+  | "finished"
+  | "failed"
+  | "interrupted";
+
+function operatorStatusCopy(status: OperatorExecutionStatus): string {
+  switch (status) {
+    case "not_configured":
+      return "not configured";
+    case "configured":
+      return "configured";
+    case "engaged":
+      return "engaged";
+    case "queued":
+      return "operator queued";
+    case "running":
+      return "operator active";
+    case "finished":
+      return "last run finished";
+    case "failed":
+      return "last run failed";
+    case "interrupted":
+      return "last run interrupted";
+  }
+}
+
 /**
  * Execution profile panel + OwnerControl — 1:1 port of task.jsx §4.3/§4.4.
  *
@@ -42,6 +73,7 @@ function OwnerControl({
   task,
   meId,
   myRole,
+  canOwnTasks,
   members,
   busy,
   onOwner,
@@ -50,6 +82,7 @@ function OwnerControl({
   task: TaskSummary;
   meId: string;
   myRole: string | null;
+  canOwnTasks?: boolean;
   members: TaskMemberView[];
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
@@ -61,7 +94,8 @@ function OwnerControl({
   // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
   // read + comment only, so its take/hand-off buttons would just 403. Gate the
   // controls the same way the server does rather than render a button that fails.
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  const canOwn =
+    canOwnTasks ?? roleCan(myRole as ProjectRole | null, "own-task");
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -106,7 +140,12 @@ function OwnerControl({
   const canHandOff = mine || admin;
   // Hand-off candidates: active members minus the current owner and me.
   const candidates = canHandOff
-    ? members.filter((m) => m.userId !== o.userId && m.userId !== meId)
+    ? members.filter(
+        (m) =>
+          m.userId !== o.userId &&
+          m.userId !== meId &&
+          roleCan(m.role as ProjectRole, "own-task"),
+      )
     : [];
 
   // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
@@ -446,6 +485,7 @@ export function ExecutionProfile({
   task,
   meId,
   myRole,
+  canOwnTasks,
   members,
   busy,
   onOwner,
@@ -461,11 +501,13 @@ export function ExecutionProfile({
   onRunReviewer,
   onRemoveReviewer,
   operatorBusy,
+  operatorStatus,
   onRunOperator,
 }: {
   task: TaskSummary;
   meId: string;
   myRole: string | null;
+  canOwnTasks?: boolean;
   members: TaskMemberView[];
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
@@ -487,6 +529,8 @@ export function ExecutionProfile({
   onRemoveReviewer: (profileId: string) => void;
   /** The operator-run fetcher is in flight. */
   operatorBusy: boolean;
+  /** Configuration/engagement and actual run lifecycle are separate facts. */
+  operatorStatus: OperatorExecutionStatus;
   /** Run the operator agent with a chosen backend + autonomy. */
   onRunOperator: (backend: string, autonomy: string) => void;
 }) {
@@ -512,16 +556,27 @@ export function ExecutionProfile({
       <div className="panel-head">
         <Icon name="agents" />
         <h2>Execution profile</h2>
-        {(closed || task.operator) && (
+        {(closed || operatorStatus !== "not_configured") && (
           <span className="right">
             {closed && (
               <Pill kind="done" sm>
                 task closed
               </Pill>
             )}
-            {task.operator && (
-              <Pill kind="agent" dot>
-                operator active
+            {operatorStatus !== "not_configured" && (
+              <Pill
+                kind={
+                  operatorStatus === "running"
+                    ? "agent"
+                    : operatorStatus === "failed"
+                      ? "blocked"
+                      : operatorStatus === "queued"
+                        ? "info"
+                        : "neutral"
+                }
+                dot={operatorStatus === "running"}
+              >
+                {operatorStatusCopy(operatorStatus)}
               </Pill>
             )}
           </span>
@@ -538,7 +593,11 @@ export function ExecutionProfile({
               <span>
                 <div className="nm">Operator</div>
                 <div className="sub">
-                  coordinator · {task.operator ? task.operator.sinceLabel : "—"}
+                  {operatorStatus === "not_configured"
+                    ? "not deployed to this project"
+                    : task.operator
+                      ? `engaged · ${task.operator.sinceLabel}`
+                      : "project profile configured · not yet engaged"}
                 </div>
               </span>
             </div>
@@ -684,6 +743,7 @@ export function ExecutionProfile({
                 task={task}
                 meId={meId}
                 myRole={myRole}
+                canOwnTasks={canOwnTasks}
                 members={members}
                 busy={busy}
                 onOwner={onOwner}

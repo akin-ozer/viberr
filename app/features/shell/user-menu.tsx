@@ -73,6 +73,10 @@ export function UserMenu({
   }, [menu]);
 
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
+  const projectSlug = location.pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  const profilePath = projectSlug
+    ? `/profile?project=${encodeURIComponent(projectSlug)}`
+    : "/profile";
 
   const cycleTheme = () => {
     const next = NEXT_THEME[theme] ?? "light";
@@ -110,7 +114,7 @@ export function UserMenu({
               role="menuitem"
               onClick={() => {
                 setMenu(false);
-                navigate("/profile", {
+                navigate(profilePath, {
                   state: { returnTo: location.pathname + location.search },
                 });
               }}

@@ -8,6 +8,12 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { PolicyViewData } from "./policy-query.server";
 import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
+import {
+  baseTaskFrontmatter,
+  writeTask,
+} from "../../../test-support/test-store";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 
 /**
  * Route-level tests for /projects/:slug/policy: loader read model from the
@@ -67,7 +73,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Take / release own task ownership",
       "Approve stage transitions",
       "Resolve decision packets",
-      "Accept completion → Done",
+      "Accept completion (task owner also allowed; repo merge required for Done)",
       "Edit the task goal",
       "Run agents & reorder the board",
       "Release any task owner",
@@ -122,6 +128,14 @@ describe("set-role", () => {
   });
 
   it("round trip: project.md → projection → audit → toast, chip appears", async () => {
+    writeTask(app.dataRoot, "viberr-core", {
+      frontmatter: baseTaskFrontmatter("VIB-998", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: ids.selin,
+      }),
+    });
+    rebuildAll(app.db, { dataRoot: app.dataRoot, force: true });
     const result = (await postAction(ids.arda, {
       intent: "set-role",
       userId: ids.selin,
@@ -153,8 +167,19 @@ describe("set-role", () => {
       actorUserId: ids.arda,
       subjectId: ids.selin,
       projectSlug: "viberr-core",
-      details: { from: "contributor", to: "viewer" },
+      details: {
+        from: "contributor",
+        to: "viewer",
+        releasedTaskKeys: expect.arrayContaining(["VIB-998"]),
+      },
     });
+    expect(
+      readTaskFile({
+        projectSlug: "viberr-core",
+        taskKey: "VIB-998",
+        dataRoot: app.dataRoot,
+      })!.parsed.frontmatter.ownerUserId,
+    ).toBeNull();
     // …and the last-change chip now derives from it.
     const { view } = await runLoader(ids.arda);
     expect(view.edited).toEqual({ by: "Arda Kaya", t: "Today" });
@@ -248,8 +273,8 @@ describe("set-boundary", () => {
       boundary: "auto",
     })) as { init?: { status?: number }; data?: { error?: string } };
     expect(result.init?.status).toBe(403);
-    expect(result.data?.error).toBe(
-      "Completion is human-authorized in V1 — this boundary can't be delegated",
+    expect(result.data?.error).toContain(
+      "Eligible full-autonomy operators can finalize healthy repo-less work",
     );
     const { view } = await runLoader(ids.arda);
     expect(

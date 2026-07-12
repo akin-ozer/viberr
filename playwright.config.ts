@@ -19,6 +19,7 @@ const E2E_DATA_ROOT = path.resolve(import.meta.dirname, "e2e/.tmp-data");
 const E2E_ENV = {
   PORT: String(E2E_PORT),
   NODE_ENV: "development",
+  BETTER_AUTH_URL: `http://localhost:${E2E_PORT}`,
   VIBERR_DATA_ROOT: E2E_DATA_ROOT,
   VIBERR_SESSION_SECRET: "e2e-session-secret-0123456789abcdefghijklmnop",
   // base64 of 32 bytes (0x00 * 32) — fine for an ephemeral test store.
@@ -67,7 +68,8 @@ export default defineConfig({
 
   webServer: {
     // Fresh store every run: wipe → seed demo dataset → dev server.
-    command: "rm -rf e2e/.tmp-data && npm run seed && npm run dev",
+    command:
+      "rm -rf e2e/.tmp-data && npm run seed && tsx e2e/setup-fixtures.ts && npm run dev",
     url: `http://localhost:${E2E_PORT}/resources/health`,
     reuseExistingServer: false,
     timeout: 120_000,

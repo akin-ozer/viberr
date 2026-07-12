@@ -62,13 +62,18 @@ export function fmtTok(n: number): string {
  * no start time. Never trusts a shipped seconds count.
  */
 export function useElapsed(startedAt: string | null, active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+  // SSR and the client's first hydration render must agree exactly. Reading
+  // Date.now() in the state initializer lets the clock cross a second between
+  // those two renders and produces a hydration mismatch. Start from a stable
+  // sentinel, then activate the client clock after hydration.
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    setNow(Date.now());
     if (!active) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [active]);
-  if (!startedAt) return 0;
+  }, [active, startedAt]);
+  if (!startedAt || now === null) return 0;
   const started = new Date(startedAt).getTime();
   if (!Number.isFinite(started)) return 0;
   return Math.max(0, Math.floor((now - started) / 1000));

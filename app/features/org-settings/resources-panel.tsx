@@ -8,6 +8,11 @@ import type {
   SkillView,
 } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
+import type { OrgSecretMetadata } from "~/server/secrets/org-secret-store.server";
+import type {
+  AgentResourceKind,
+  AgentResourceUsage,
+} from "~/server/org/resource-dependencies.server";
 import { formatRelative } from "~/shared/dates/format";
 import { slugify } from "~/shared/ids/slugify";
 import { Icon } from "~/ui/icon";
@@ -17,12 +22,12 @@ import { ConfirmDelete, EditIco, MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-action";
 
 /**
- * Agent resources tab (org-settings spec §4.3/§4.4): four CRUD panels —
- * knowledge bases, MCP servers, skills, global agent profiles (the org
+ * Agent resources tab: knowledge bases, MCP servers, encrypted org secrets,
+ * skills, and global agent profiles (the org
  * TEMPLATE layer 9A's project roster consumes) — plus the StoreBrowser
  * popup over the real store folders. Honest deltas: re-index re-scans the
- * real folder (doc counts are real), MCP "test" is a real reachability
- * probe (tool counts are never fabricated), timestamps render relative
+ * real folder (doc counts are real), MCP "test" is a real initialize +
+ * tools/list handshake (tool counts are never fabricated), timestamps render relative
  * from ISO. The skill-delete confirm uses the folder form of the copy
  * (spec §8.6 recommendation).
  */
@@ -126,9 +131,34 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
     initial ? initial.transport : "HTTP",
   );
   const [target, setTarget] = useState(initial ? initial.target : "");
-  const [cred, setCred] = useState(initial ? (initial.cred ?? "") : "");
+  const [authText, setAuthText] = useState(
+    initial
+      ? Object.entries(initial.auth)
+          .map(([name, ref]) => `${name}=${ref}`)
+          .join("\n")
+      : "",
+  );
   const { action, err, setErr } = useModalAction(() => onClose());
-  const canSave = !action.busy && slugify(name).length > 1 && target.trim().length > 3;
+  const auth = Object.fromEntries(
+    authText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const split = line.indexOf("=");
+        return split > 0
+          ? [line.slice(0, split).trim(), line.slice(split + 1).trim()]
+          : ["", ""];
+      }),
+  );
+  const validAuth = Object.entries(auth).every(
+    ([key, ref]) => Boolean(key) && /^secret:\/\/org\/[a-z0-9-]+$/.test(ref),
+  );
+  const canSave =
+    !action.busy &&
+    slugify(name).length > 1 &&
+    target.trim().length > 3 &&
+    validAuth;
   return (
     <MiniModal
       icon={<Icon name="cpu" />}
@@ -153,7 +183,7 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           name: slugify(name),
           transport,
           target: target.trim(),
-          cred: cred.trim(),
+          auth: JSON.stringify(auth),
         });
       }}
     >
@@ -207,22 +237,114 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
         />
       </div>
       <div className="field">
-        <label className="flabel" htmlFor="mcp-cred">
-          Credential <span className="fhint">optional · secret reference</span>
+        <label className="flabel" htmlFor="mcp-auth">
+          Authentication mappings <span className="fhint">optional · one per line</span>
         </label>
-        <input
-          id="mcp-cred"
-          type="text"
+        <textarea
+          id="mcp-auth"
           className="mono"
-          value={cred}
-          placeholder="secret://mcp/…"
-          onChange={(e) => setCred(e.target.value)}
+          rows={3}
+          value={authText}
+          placeholder={
+            transport === "stdio"
+              ? "GITHUB_TOKEN=secret://org/github-token"
+              : "Authorization=secret://org/mcp-token\nX-Account=secret://org/account-id"
+          }
+          onChange={(e) => {
+            setAuthText(e.target.value);
+            setErr(null);
+          }}
         />
         <div className="def-note">
           <Icon name="lock" />
           <span>
-            Referenced at runtime only. Secrets never appear in task timelines, comments,
-            or audit records.
+            {transport === "HTTP" ? "Header name" : "Environment variable"} =
+            secret reference. Values resolve only for a connection test or specialist
+            spawn and never enter loaders, timelines, or audit records.
+            {transport === "HTTP" && Object.keys(auth).length > 0
+              ? " Authenticated HTTP MCP is Claude-only because Codex cannot express arbitrary header mappings."
+              : ""}
+          </span>
+        </div>
+      </div>
+      {err && (
+        <div className="cred-warn">
+          <Icon name="alert" />
+          {err}
+        </div>
+      )}
+    </MiniModal>
+  );
+}
+
+function SecretModal({
+  initial,
+  onClose,
+}: {
+  initial: OrgSecretMetadata | null;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [value, setValue] = useState("");
+  const { action, err, setErr } = useModalAction(() => onClose());
+  const canSave =
+    !action.busy && slugify(name).length > 1 && value.length > 0;
+  return (
+    <MiniModal
+      icon={<Icon name="lock" />}
+      title={initial ? "Rotate org secret" : "Store org secret"}
+      sub="Encrypted at rest; only its reference and suffix are visible later"
+      onClose={onClose}
+      canSave={canSave}
+      saveLabel={initial ? "Rotate value" : "Store secret"}
+      footHint={"secret://org/" + (slugify(name) || "name")}
+      onSave={() => {
+        if (!canSave) return;
+        setErr(null);
+        action.submit({
+          intent: "secret-save",
+          ...(initial ? { secretId: initial.id } : {}),
+          name: slugify(name),
+          value,
+        });
+      }}
+    >
+      <div className="field">
+        <label className="flabel" htmlFor="secret-name">
+          Name<span className="req">*</span>
+        </label>
+        <input
+          id="secret-name"
+          className="mono"
+          value={name}
+          disabled={Boolean(initial)}
+          placeholder="e.g. billing-api-token"
+          onChange={(event) => setName(event.target.value)}
+          autoFocus={!initial}
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="secret-value">
+          {initial ? "Replacement value" : "Secret value"}
+          <span className="req">*</span>
+        </label>
+        <input
+          id="secret-value"
+          type="password"
+          className="mono"
+          value={value}
+          autoComplete="new-password"
+          onChange={(event) => {
+            setValue(event.target.value);
+            setErr(null);
+          }}
+          autoFocus={Boolean(initial)}
+        />
+        <div className="def-note">
+          <Icon name="lock" />
+          <span>
+            Viberr will not show this value again. Rotate it here, then use the
+            stable secret:// reference in MCP authentication mappings.
           </span>
         </div>
       </div>
@@ -352,7 +474,9 @@ function AgentModal({
 }) {
   const skillNames = skills.map((s) => s.name);
   const mcpNames = mcps.map((m) => m.name);
-  const kbNames = kbs.map((k) => k.name);
+  // KB references are canonical folder ids (the runtime/catalog resolve
+  // `store://kb/<dir>`), while the chip still renders the friendly name.
+  const kbNames = kbs.map((k) => k.dir);
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
@@ -538,8 +662,8 @@ function AgentModal({
                 <button
                   type="button"
                   key={k.id}
-                  className={"pick-chip" + (selKbSet.has(k.name) ? " on" : "")}
-                  onClick={() => toggle(selKbs, setSelKbs, k.name)}
+                  className={"pick-chip" + (selKbSet.has(k.dir) ? " on" : "")}
+                  onClick={() => toggle(selKbs, setSelKbs, k.dir)}
                 >
                   {k.name}
                 </button>
@@ -564,12 +688,14 @@ function AgentModal({
 type ResourceConfirm =
   | { kind: "kb"; item: KbView }
   | { kind: "mcp"; item: McpView }
+  | { kind: "secret"; item: OrgSecretMetadata }
   | { kind: "skill"; item: SkillView }
   | { kind: "agent"; item: GagentView };
 
 type ResourceModal =
   | { kind: "kb"; item: KbView | null }
   | { kind: "mcp"; item: McpView | null }
+  | { kind: "secret"; item: OrgSecretMetadata | null }
   | { kind: "skill"; item: SkillView | null }
   | { kind: "agent"; item: GagentView | null };
 
@@ -591,7 +717,7 @@ function KbPanel({
   onDelete,
 }: {
   kbs: KbView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (id: string, name: string) => AgentResourceUsage[];
   reindexing: string | null;
   onNew: () => void;
   onBrowse: (kb: KbView) => void;
@@ -612,8 +738,10 @@ function KbPanel({
         </span>
       </div>
       <div className="rsrc-list">
-        {kbs.map((kb) => (
-          <div className="rsrc-row" key={kb.id}>
+        {kbs.map((kb) => {
+          const usages = usedBy(kb.id, kb.name);
+          return (
+            <div className="rsrc-row" key={kb.id}>
             <span className="rsrc-main">
               <b>
                 <button type="button" className="linkish" onClick={() => onBrowse(kb)}>
@@ -625,10 +753,15 @@ function KbPanel({
               </span>
               <span className="sub">
                 read live · re-scanned {rel(kb.lastIndexedAt)}
-                {usedBy(kb.id, kb.name) > 0
-                  ? " · " + usedBy(kb.id, kb.name) + " profiles"
+                {usages.length > 0
+                  ? " · " + usages.length + " reference" + (usages.length === 1 ? "" : "s")
                   : ""}
               </span>
+              {usages.length > 0 && (
+                <span className="sub resource-used-by">
+                  used by {usages.map((usage) => usage.label).join(" · ")}
+                </span>
+              )}
             </span>
             <span className="rsrc-acts">
               <button
@@ -668,9 +801,73 @@ function KbPanel({
                 <Icon name="x" />
               </button>
             </span>
+            </div>
+          );
+        })}
+        {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
+      </div>
+    </section>
+  );
+}
+
+function SecretPanel({
+  secrets,
+  onNew,
+  onRotate,
+  onDelete,
+}: {
+  secrets: OrgSecretMetadata[];
+  onNew: () => void;
+  onRotate: (secret: OrgSecretMetadata) => void;
+  onDelete: (secret: OrgSecretMetadata) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Icon name="lock" />
+        <h2>Org secrets</h2>
+        <span className="right">
+          <button type="button" className="btn sm" onClick={onNew}>
+            <Icon name="plus" />
+            Add
+          </button>
+        </span>
+      </div>
+      <div className="rsrc-list">
+        {secrets.map((secret) => (
+          <div className="rsrc-row" key={secret.id}>
+            <span className="rsrc-main">
+              <b className="mono-b">{secret.name}</b>
+              <span className="sub mono">{secret.ref}</span>
+              <span className="sub">
+                {secret.masked} · rotated {rel(secret.updatedAt)}
+              </span>
+            </span>
+            <span className="rsrc-acts">
+              <button
+                type="button"
+                className="stg-x"
+                title="Rotate value"
+                aria-label={"Rotate " + secret.name}
+                onClick={() => onRotate(secret)}
+              >
+                <Icon name="refresh" />
+              </button>
+              <button
+                type="button"
+                className="stg-x"
+                title="Delete"
+                aria-label={"Delete " + secret.name}
+                onClick={() => onDelete(secret)}
+              >
+                <Icon name="x" />
+              </button>
+            </span>
           </div>
         ))}
-        {kbs.length === 0 && <div className="empty">No knowledge bases yet.</div>}
+        {secrets.length === 0 && (
+          <div className="empty">No org secrets yet.</div>
+        )}
       </div>
     </section>
   );
@@ -678,6 +875,7 @@ function KbPanel({
 
 function McpPanel({
   mcps,
+  usedBy,
   testing,
   onNew,
   onTest,
@@ -685,6 +883,7 @@ function McpPanel({
   onDelete,
 }: {
   mcps: McpView[];
+  usedBy: (id: string, name: string) => AgentResourceUsage[];
   testing: string | null;
   onNew: () => void;
   onTest: (m: McpView) => void;
@@ -704,8 +903,10 @@ function McpPanel({
         </span>
       </div>
       <div className="rsrc-list">
-        {mcps.map((m) => (
-          <div className="rsrc-row" key={m.id}>
+        {mcps.map((m) => {
+          const usages = usedBy(m.id, m.name);
+          return (
+            <div className="rsrc-row" key={m.id}>
             <span
               className={"stat-dot" + (m.up === true ? " up" : m.up === false ? " down" : "")}
               title={m.up === true ? "connected" : m.up === false ? "unreachable" : "not health-checked"}
@@ -715,14 +916,25 @@ function McpPanel({
               <span className="sub mono">
                 {m.transport} · {m.target}
               </span>
+              {usages.length > 0 && (
+                <span className="sub resource-used-by">
+                  used by {usages.map((usage) => usage.label).join(" · ")}
+                </span>
+              )}
               <span className="sub">
                 {m.up === true
-                  ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
+                  ? (m.tools !== null ? m.tools + " tools · " : "healthy · ") +
                     "checked " + rel(m.lastCheckedAt)
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
                     : "not health-checked yet"}
-                {m.cred ? " · auth: " + m.cred : ""}
+                {Object.keys(m.auth).length
+                  ? " · auth: " +
+                    Object.entries(m.auth)
+                      .map(([name, ref]) => name + "→" + ref)
+                      .join(", ")
+                  : ""}
+                {" · " + (m.codexSupported ? "Claude + Codex" : "Claude only")}
               </span>
             </span>
             <span className="rsrc-acts">
@@ -754,8 +966,9 @@ function McpPanel({
                 <Icon name="x" />
               </button>
             </span>
-          </div>
-        ))}
+            </div>
+          );
+        })}
         {mcps.length === 0 && <div className="empty">No MCP servers yet.</div>}
       </div>
     </section>
@@ -771,7 +984,7 @@ function SkillPanel({
   onDelete,
 }: {
   skills: SkillView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (id: string, name: string) => AgentResourceUsage[];
   onNew: () => void;
   onBrowse: (s: SkillView) => void;
   onEdit: (s: SkillView) => void;
@@ -790,8 +1003,10 @@ function SkillPanel({
         </span>
       </div>
       <div className="rsrc-list">
-        {skills.map((s) => (
-          <div className="rsrc-row" key={s.id}>
+        {skills.map((s) => {
+          const usages = usedBy(s.id, s.name);
+          return (
+            <div className="rsrc-row" key={s.id}>
             <span className="rsrc-main">
               <b className="mono-b">
                 <button
@@ -806,10 +1021,15 @@ function SkillPanel({
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
-                {usedBy(s.id, s.name) > 0
-                  ? " · " + usedBy(s.id, s.name) + " profiles"
+                {usages.length > 0
+                  ? " · " + usages.length + " reference" + (usages.length === 1 ? "" : "s")
                   : ""}
               </span>
+              {usages.length > 0 && (
+                <span className="sub resource-used-by">
+                  used by {usages.map((usage) => usage.label).join(" · ")}
+                </span>
+              )}
             </span>
             <span className="rsrc-acts">
               <button
@@ -840,8 +1060,9 @@ function SkillPanel({
                 <Icon name="x" />
               </button>
             </span>
-          </div>
-        ))}
+            </div>
+          );
+        })}
         {skills.length === 0 && <div className="empty">No skills yet.</div>}
       </div>
     </section>
@@ -925,15 +1146,19 @@ function AgentPanel({
 export function ResourcesPanel({
   kbs,
   mcps,
+  secrets,
   skills,
   gagents,
   stages,
+  resourceUsages,
 }: {
   kbs: KbView[];
   mcps: McpView[];
+  secrets: OrgSecretMetadata[];
   skills: SkillView[];
   gagents: GagentView[];
   stages: StageDef[];
+  resourceUsages?: AgentResourceUsage[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);
   const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(null);
@@ -945,14 +1170,58 @@ export function ResourcesPanel({
   const [reindexing, setReindexing] = useBusyRow(reindexAction);
   const [testing, setTesting] = useBusyRow(testAction);
 
-  const usedBy = (key: "skills" | "mcps" | "kbs", id: string, name: string) =>
-    gagents.filter((a) => a[key].includes(id) || a[key].includes(name)).length;
+  // Older render fixtures do not carry the dependency projection; retain a
+  // template-only fallback there. Production always supplies the complete
+  // global-template + project-deployment index from the loader.
+  const fallbackUsages: AgentResourceUsage[] = gagents.flatMap((agent) =>
+    ([
+      ["skill", agent.skills],
+      ["mcp", agent.mcps],
+      ["kb", agent.kbs],
+    ] as const).flatMap(([kind, refs]) =>
+      refs.map((ref) => ({
+        kind,
+        ref,
+        source: "global-template" as const,
+        profileId: agent.id,
+        profileName: agent.name,
+        label: `Global profile · ${agent.name}`,
+      })),
+    ),
+  );
+  const dependencyIndex = resourceUsages ?? fallbackUsages;
+  const usedBy = (
+    kind: AgentResourceKind,
+    aliases: readonly string[],
+  ): AgentResourceUsage[] => {
+    const wanted = new Set(aliases);
+    return dependencyIndex.filter(
+      (usage) => usage.kind === kind && wanted.has(usage.ref),
+    );
+  };
+  const blockReferencedDelete = (
+    kind: AgentResourceKind,
+    aliases: readonly string[],
+    label: string,
+  ): boolean => {
+    const usages = usedBy(kind, aliases);
+    if (usages.length === 0) return false;
+    push({
+      kind: "error",
+      text: `Can't delete ${label}; used by: ${[
+        ...new Set(usages.map((usage) => usage.label)),
+      ].join(", ")}.`,
+    });
+    return true;
+  };
 
   const doDelete = () => {
     if (!confirm) return;
     const { kind, item } = confirm;
     if (kind === "kb") rowAction.submit({ intent: "kb-delete", kbId: item.id });
     if (kind === "mcp") rowAction.submit({ intent: "mcp-delete", mcpId: item.id });
+    if (kind === "secret")
+      rowAction.submit({ intent: "secret-delete", secretId: item.id });
     if (kind === "skill") rowAction.submit({ intent: "skill-delete", skillId: item.id });
     if (kind === "agent") rowAction.submit({ intent: "agent-delete", profileId: item.id });
     setConfirm(null);
@@ -967,7 +1236,10 @@ export function ResourcesPanel({
       <div className="rsrc-grid">
         <KbPanel
           kbs={kbs}
-          usedBy={(id, name) => usedBy("kbs", id, name)}
+          usedBy={(id, name) => {
+            const kb = kbs.find((item) => item.id === id);
+            return usedBy("kb", [id, name, kb?.dir ?? ""]);
+          }}
           reindexing={reindexing}
           onNew={() => setModal({ kind: "kb", item: null })}
           onBrowse={(kb) => setBrowsing({ kind: "kb", id: kb.id })}
@@ -976,11 +1248,15 @@ export function ResourcesPanel({
             reindexAction.submit({ intent: "kb-reindex", kbId: kb.id });
           }}
           onEdit={(kb) => setModal({ kind: "kb", item: kb })}
-          onDelete={(kb) => setConfirm({ kind: "kb", item: kb })}
+          onDelete={(kb) => {
+            if (blockReferencedDelete("kb", [kb.id, kb.name, kb.dir], `knowledge base ${kb.name}`)) return;
+            setConfirm({ kind: "kb", item: kb });
+          }}
         />
 
         <McpPanel
           mcps={mcps}
+          usedBy={(id, name) => usedBy("mcp", [id, name])}
           testing={testing}
           onNew={() => setModal({ kind: "mcp", item: null })}
           onTest={(m) => {
@@ -988,16 +1264,29 @@ export function ResourcesPanel({
             testAction.submit({ intent: "mcp-test", mcpId: m.id });
           }}
           onEdit={(m) => setModal({ kind: "mcp", item: m })}
-          onDelete={(m) => setConfirm({ kind: "mcp", item: m })}
+          onDelete={(m) => {
+            if (blockReferencedDelete("mcp", [m.id, m.name], `MCP server ${m.name}`)) return;
+            setConfirm({ kind: "mcp", item: m });
+          }}
+        />
+
+        <SecretPanel
+          secrets={secrets}
+          onNew={() => setModal({ kind: "secret", item: null })}
+          onRotate={(secret) => setModal({ kind: "secret", item: secret })}
+          onDelete={(secret) => setConfirm({ kind: "secret", item: secret })}
         />
 
         <SkillPanel
           skills={skills}
-          usedBy={(id, name) => usedBy("skills", id, name)}
+          usedBy={(id, name) => usedBy("skill", [id, name])}
           onNew={() => setModal({ kind: "skill", item: null })}
           onBrowse={(s) => setBrowsing({ kind: "skill", id: s.id })}
           onEdit={(s) => setModal({ kind: "skill", item: s })}
-          onDelete={(s) => setConfirm({ kind: "skill", item: s })}
+          onDelete={(s) => {
+            if (blockReferencedDelete("skill", [s.id, s.name], `skill ${s.name}`)) return;
+            setConfirm({ kind: "skill", item: s });
+          }}
         />
 
         <AgentPanel
@@ -1008,8 +1297,16 @@ export function ResourcesPanel({
           onDelete={(a) => {
             if (a.used > 0) {
               push(
-                "Detach " + a.name + " from its " + a.used + " project" +
-                  (a.used === 1 ? "" : "s") + " first",
+                a.usedBy?.length
+                  ? "Detach " +
+                    a.name +
+                    " from: " +
+                    a.usedBy
+                      .map((project) => `${project.name} (${project.slug})`)
+                      .join(", ") +
+                    " first"
+                  : "Detach " + a.name + " from its " + a.used + " project" +
+                    (a.used === 1 ? "" : "s") + " first",
               );
               return;
             }
@@ -1031,6 +1328,13 @@ export function ResourcesPanel({
       )}
       {modal && modal.kind === "mcp" && (
         <McpModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
+      )}
+      {modal && modal.kind === "secret" && (
+        <SecretModal
+          key={modal.item?.id ?? "new"}
+          initial={modal.item}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal && modal.kind === "skill" && (
         <SkillModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
@@ -1076,6 +1380,8 @@ export function ResourcesPanel({
               ? "The index is removed from the store. Profiles referencing it simply stop loading it — nothing else breaks."
               : confirm.kind === "mcp"
                 ? "Profiles referencing this server lose its tools on their next run."
+                : confirm.kind === "secret"
+                  ? "Deletion is allowed only after every MCP authentication mapping stops referencing it."
                 : confirm.kind === "skill"
                   ? "store://skills/" + confirm.item.name + "/ is deleted. Profiles referencing it stop loading it."
                   : "The base definition is deleted. It isn't deployed anywhere."

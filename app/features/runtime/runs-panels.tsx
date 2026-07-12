@@ -210,10 +210,11 @@ export function LiveRunPanel({
               type="button"
               className="btn ghost sm"
               disabled={interrupting}
+              aria-busy={interrupting}
               onClick={() => onInterrupt(run.id)}
             >
               <Icon name="hand" />
-              Interrupt
+              {interrupting ? "Interrupting…" : "Interrupt"}
             </button>
           )}
         </div>

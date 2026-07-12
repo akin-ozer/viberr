@@ -15,9 +15,7 @@ import {
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
-import {
-  findOpenScopeViolation,
-} from "~/server/projections/policy-violations.server";
+import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   deriveSyncState,
@@ -37,6 +35,7 @@ import {
   policyViolationText,
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
+import { reviewEvidenceFingerprint } from "~/server/tasks/review-evidence.server";
 
 /**
  * GitHub reconciler (Phase 7): given a task, fetches live GitHub facts
@@ -97,8 +96,7 @@ function recordGithubProvenance(
 
 function userName(db: Database.Database, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
+    { name: string } | undefined;
   return row?.name ?? userId;
 }
 
@@ -121,7 +119,12 @@ export type TaskReconcileResult =
   | { status: "no_branch"; taskKey: string }
   | { status: "task_not_found"; taskKey: string }
   | GithubContextFailure
-  | { status: "scope_violation"; taskKey: string; scope: string; violationId: string }
+  | {
+      status: "scope_violation";
+      taskKey: string;
+      scope: string;
+      violationId: string;
+    }
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
 
@@ -213,6 +216,7 @@ export async function reconcileTask(
         number: pr.number,
         state: liveState ?? pr.state,
         title: pr.title,
+        ...(pr.headSha ? { headSha: pr.headSha } : {}),
         ...(pr.checks ? { checks: pr.checks } : {}),
       }
     : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
@@ -225,7 +229,9 @@ export async function reconcileTask(
   const prefixCommits = compare ? taskCommits(compare.commits, fm.key) : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
-    prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
+    prefixCommits !== null &&
+    prefixCommits.length === 0 &&
+    existingCommits.length > 0
       ? existingCommits
       : prefixCommits;
   const newGithub: GithubCache | null =
@@ -243,12 +249,23 @@ export async function reconcileTask(
     newPr?.state === "closed" &&
     fm.pr.number === newPr.number;
 
+  const oldEvidence = reviewEvidenceFingerprint(file.parsed, gh.repo);
+  const nextTask = {
+    ...file.parsed,
+    frontmatter: { ...fm, pr: newPr, github: newGithub },
+  };
+  const evidenceChanged =
+    oldEvidence !== reviewEvidenceFingerprint(nextTask, gh.repo);
   const changed =
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
     JSON.stringify({ pr: newPr, github: newGithub });
 
   if (changed) {
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
+    if (evidenceChanged) {
+      patch.reviewerVerdicts = [];
+      if (fm.validation !== "failing") patch.validation = "changed";
+    }
     await patchTaskFrontmatter(ref, patch);
     if (acceptedClosedExternally) {
       await appendTimelineEvent(ref, {
@@ -336,7 +353,13 @@ export async function reconcileProject(
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") {
-    return { status: gh.status, results: [], reconciled: 0, changed: 0, failed: 0 };
+    return {
+      status: gh.status,
+      results: [],
+      reconciled: 0,
+      changed: 0,
+      failed: 0,
+    };
   }
 
   const rows = db
@@ -441,7 +464,7 @@ export async function mergeTaskPr(
   const merge = await gh.client.request<GhMergeResponse>(
     "PUT",
     `/repos/${gh.repo}/pulls/${prNumber}/merge`,
-    { body: {} },
+    { body: fm.pr.headSha ? { sha: fm.pr.headSha } : {} },
   );
 
   if (merge.ok) {

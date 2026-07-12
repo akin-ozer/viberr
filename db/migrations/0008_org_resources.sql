@@ -16,9 +16,9 @@
 -- agent-resource panels (§3.4–3.6). The kb/skill CONTENT is file-native —
 -- real directories under ${VIBERR_DATA_ROOT}/kb/<dir>/ and /skills/<name>/
 -- scanned from disk; only cadence/summary/timestamps live here. MCP
--- servers are pure config; `up` is the last health-probe verdict
--- (NULL = never probed / not probeable), `cred_ref` is a secret REFERENCE
--- string, never a secret.
+-- servers are pure config; `up` is the last initialize + tools/list verdict.
+-- org_secrets holds encrypted values; MCP auth_json stores only explicit
+-- HTTP-header / stdio-env names mapped to secret://org/<name> references.
 --
 -- Global agent profiles need NO table — they are the phase-3 template
 -- files under agents/profiles/*.md (the org-template layer 9A consumes).
@@ -60,10 +60,22 @@ CREATE TABLE org_mcp_servers (
   name TEXT NOT NULL UNIQUE,          -- slug
   transport TEXT NOT NULL CHECK (transport IN ('HTTP', 'stdio')),
   target TEXT NOT NULL,               -- endpoint (HTTP) or command (stdio)
-  cred_ref TEXT,                      -- optional secret:// reference only
+  auth_json TEXT NOT NULL DEFAULT '{}', -- HTTP header / stdio env name -> secret://org/<name>
   tools_count INTEGER,                -- discovered tool count (NULL unknown)
   up INTEGER,                         -- 1 up · 0 down · NULL never probed
   last_checked_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Org-owned encrypted values referenced by MCP auth mappings. Loaders expose
+-- only id/name/ref/suffix metadata; encrypted_value is opened only at the
+-- execution boundary (an explicit MCP connection test or specialist spawn).
+CREATE TABLE org_secrets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  encrypted_value TEXT NOT NULL,
+  value_suffix TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

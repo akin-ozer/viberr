@@ -1,4 +1,5 @@
 import { PROJECT_ROLES, type ProjectRole } from "~/schemas/project-file.schema";
+import type { UserRole } from "~/shared/mapping/user.server";
 
 /**
  * THE single source of truth for project-role authorization.
@@ -100,6 +101,63 @@ export function roleCan(role: ProjectRole | null | undefined, action: RbacAction
   return ACTION_ROLES[action].includes(role);
 }
 
+/**
+ * One governed project-action decision. Organization admins are the emergency
+ * backstop for every project-admin capability, but the fallback never creates a
+ * project membership. `source` lets mutations make that exceptional authority
+ * visible in their audit record instead of silently pretending the user was a
+ * project admin.
+ */
+export type ProjectAuthoritySource =
+  | "project_role"
+  | "org_admin_override"
+  | "denied";
+
+export interface ProjectActionAuthority {
+  allowed: boolean;
+  source: ProjectAuthoritySource;
+  projectRole: ProjectRole | null;
+}
+
+export function authorizeProjectAction(
+  projectRole: ProjectRole | null | undefined,
+  orgRole: UserRole | null | undefined,
+  action: RbacAction,
+): ProjectActionAuthority {
+  const role = projectRole ?? null;
+  if (roleCan(role, action)) {
+    return { allowed: true, source: "project_role", projectRole: role };
+  }
+  if (orgRole === "admin") {
+    return {
+      allowed: true,
+      source: "org_admin_override",
+      projectRole: role,
+    };
+  }
+  return { allowed: false, source: "denied", projectRole: role };
+}
+
+/**
+ * Responsibility is deliberately narrower than authorization. An org admin
+ * can intervene anywhere, but an emergency override must not make every task
+ * appear in that person's "Waiting on me" queue. Human work is routed to the
+ * explicit project supervisors, or to the active contributor+ who owns it.
+ */
+export function taskWaitsOnUser(input: {
+  waiting: string;
+  viewerUserId: string;
+  projectRole: ProjectRole | null | undefined;
+  ownerUserId: string | null | undefined;
+}): boolean {
+  if (input.waiting !== "human") return false;
+  const role = input.projectRole ?? null;
+  if (roleCan(role, "resolve-packet")) return true;
+  return (
+    input.ownerUserId === input.viewerUserId && roleCan(role, "own-task")
+  );
+}
+
 /** The roles that hold an action (for rendering + for building guard allow-lists). */
 export function rolesForAction(action: RbacAction): readonly ProjectRole[] {
   return ACTION_ROLES[action];
@@ -117,7 +175,11 @@ export const RBAC_TABLE: readonly { action: string; roles: readonly ProjectRole[
   { action: "Take / release own task ownership", roles: ACTION_ROLES["own-task"] },
   { action: "Approve stage transitions", roles: ACTION_ROLES["approve-transition"] },
   { action: "Resolve decision packets", roles: ACTION_ROLES["resolve-packet"] },
-  { action: "Accept completion → Done", roles: ACTION_ROLES["accept-completion"] },
+  {
+    action:
+      "Accept completion (task owner also allowed; repo merge required for Done)",
+    roles: ACTION_ROLES["accept-completion"],
+  },
   { action: "Edit the task goal", roles: ACTION_ROLES["update-goal"] },
   { action: "Run agents & reorder the board", roles: ACTION_ROLES["run-agents"] },
   { action: "Release any task owner", roles: ACTION_ROLES["release-any-ownership"] },

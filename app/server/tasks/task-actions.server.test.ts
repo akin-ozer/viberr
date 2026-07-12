@@ -8,22 +8,34 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  readTaskFile,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
   appendComment,
+  completeTaskMerge,
   createTask,
   DEFAULT_GOAL,
   notifyTaskWatchers,
   postAgentReplyComment,
   recordReviewerVerdict,
+  resolvePacket,
   releaseOwner,
   setOwner,
   transitionStage,
+  updateTaskGoal,
 } from "./task-actions.server";
+import { reviewEvidenceFingerprint } from "./review-evidence.server";
+import {
+  createPat,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -36,6 +48,31 @@ function prepared(): TestStore {
   const store = setupTestStore(ctx);
   rebuildAll(store.db, { dataRoot: store.dataRoot });
   return store;
+}
+
+const REVIEWER_A = {
+  profileId: "reviewer-a",
+  backend: "claude" as const,
+  role: "Reviewer A",
+};
+const REVIEWER_B = {
+  profileId: "reviewer-b",
+  backend: "codex" as const,
+  role: "Reviewer B",
+};
+
+function reviewerResult(
+  profileId: string,
+  runId: string,
+  verdict: "approve" | "request_changes",
+  summary: string,
+) {
+  return {
+    profileId,
+    runId,
+    simulated: false,
+    replyText: `Review notes.\nVIBERR_REVIEW_VERDICT: ${JSON.stringify({ verdict, summary })}`,
+  };
 }
 
 describe("createTask", () => {
@@ -196,7 +233,11 @@ describe("appendComment", () => {
     withTask(store);
     const result = await appendComment(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator widen the PAT scope please" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "@operator widen the PAT scope please",
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -210,7 +251,11 @@ describe("appendComment", () => {
     withTask(store);
     await appendComment(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: "Following from the platform team." },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "Following from the platform team.",
+      },
       actor(store.users.deniz),
       { dataRoot: store.dataRoot },
     );
@@ -224,14 +269,23 @@ describe("appendComment", () => {
     const handle = store.users.selin.email.split("@")[0];
     const result = await appendComment(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: `@${handle} can you take the acceptance gate? @operator fyi` },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${handle} can you take the acceptance gate? @operator fyi`,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.mentionedUserIds).toEqual([store.users.selin.id]);
     const rows = store.db
       .prepare(`SELECT user_id, kind, task_key, read_at FROM notifications`)
-      .all() as { user_id: string; kind: string; task_key: string; read_at: string | null }[];
+      .all() as {
+      user_id: string;
+      kind: string;
+      task_key: string;
+      read_at: string | null;
+    }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       user_id: store.users.selin.id,
@@ -255,7 +309,11 @@ describe("ownership", () => {
     withTask(store);
     const task = await setOwner(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        targetUserId: store.users.selin.id,
+      },
       actor(store.users.selin),
       { dataRoot: store.dataRoot },
     );
@@ -272,7 +330,11 @@ describe("ownership", () => {
     withTask(store, store.users.murat.id);
     await setOwner(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        targetUserId: store.users.arda.id,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -289,7 +351,11 @@ describe("ownership", () => {
     await expect(
       setOwner(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          targetUserId: store.users.arda.id,
+        },
         actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
@@ -298,7 +364,11 @@ describe("ownership", () => {
     await expect(
       setOwner(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.deniz.id },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          targetUserId: store.users.deniz.id,
+        },
         actor(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
@@ -306,7 +376,11 @@ describe("ownership", () => {
     // owner hands off to a member — exact copy
     await setOwner(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        targetUserId: store.users.selin.id,
+      },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
@@ -347,14 +421,17 @@ describe("ownership", () => {
     expect(audit[0]?.details).toMatchObject({ forced: true });
 
     // releasing an unowned task is an idempotent no-op (no duplicate event)
-    const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.length;
+    const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline
+      .length;
     await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(
+      before,
+    );
 
     // self release copy
     withTask(store, store.users.selin.id);
@@ -364,7 +441,9 @@ describe("ownership", () => {
       actor(store.users.selin),
       { dataRoot: store.dataRoot },
     );
-    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
+    expect(
+      getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text,
+    ).toBe(
       "Released task ownership — review & acceptance stall until another member takes the seat.",
     );
   });
@@ -386,7 +465,12 @@ describe("notification routing (FIX #4)", () => {
     withOwnedTask(store);
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        kind: "approval",
+        text: "operator recommends",
+      },
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) + selin (owner); nobody silenced.
@@ -399,10 +483,17 @@ describe("notification routing (FIX #4)", () => {
     const store = prepared();
     withOwnedTask(store);
     // murat silences approvals; arda + selin keep the default.
-    setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
+    setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, {
+      approvals: { app: false },
+    });
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        kind: "approval",
+        text: "operator recommends",
+      },
       { dataRoot: store.dataRoot },
     );
     expect(notified.sort()).toEqual(
@@ -423,6 +514,7 @@ describe("reviewer quality notification (FIX #6)", () => {
         stage: "review",
         ownerUserId: store.users.selin.id,
         validation: "changed",
+        reviewers: [REVIEWER_A],
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -432,7 +524,12 @@ describe("reviewer quality notification (FIX #6)", () => {
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Requesting changes — the tests fail.",
+      reviewerResult(
+        REVIEWER_A.profileId,
+        "run_reject_a",
+        "request_changes",
+        "The tests fail on the boundary case.",
+      ),
     );
 
     // Validation health flipped on the canonical file.
@@ -459,10 +556,25 @@ describe("reviewer quality notification (FIX #6)", () => {
     );
   });
 
-  it("an unclear reviewer reply emits neither event nor notification", async () => {
+  it("an unstructured reviewer reply is surfaced but never counts as a verdict", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.selin.id }),
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        reviewers: [REVIEWER_A],
+        reviewerVerdicts: [
+          {
+            profileId: REVIEWER_A.profileId,
+            verdict: "approve",
+            summary: "Older approval.",
+            runId: "run_old_approval",
+            reviewedAt: "2026-07-01T09:00:00.000Z",
+            evidenceFingerprint: "superseded-test-evidence",
+          },
+        ],
+        validation: "healthy",
+      }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
@@ -471,12 +583,222 @@ describe("reviewer quality notification (FIX #6)", () => {
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Here are some thoughts on the structure.",
+      {
+        profileId: REVIEWER_A.profileId,
+        runId: "run_unstructured",
+        replyText: "LGTM. Here are some thoughts on the structure.",
+        simulated: false,
+      },
     );
     const quality = store.db
       .prepare(`SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`)
       .get() as { c: number };
-    expect(quality.c).toBe(0);
+    expect(quality.c).toBeGreaterThan(0);
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.reviewerVerdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
+  });
+
+  it("blocks completion until every assigned reviewer has explicitly approved", async () => {
+    const store = prepared();
+    const packet = {
+      type: "input",
+      kind: "Completion report",
+      from: "operator",
+      title: "Accept completion?",
+      body: "All required review evidence must be present.",
+      observations: [],
+      options: [
+        {
+          kind: "accept_completion",
+          t: "Accept completion",
+          d: "",
+          rec: true,
+        },
+      ],
+    } satisfies TaskPacket;
+    const frontmatter = baseTaskFrontmatter("VIB-1", {
+      stage: "review",
+      ownerUserId: store.users.arda.id,
+      reviewers: [REVIEWER_A, REVIEWER_B],
+      reviewerVerdicts: [
+        {
+          profileId: REVIEWER_A.profileId,
+          verdict: "approve",
+          summary: "Reviewer A approved.",
+          runId: "run_approve_a",
+          reviewedAt: "2026-07-01T09:00:00.000Z",
+          evidenceFingerprint: "test-evidence",
+        },
+      ],
+      validation: "healthy",
+      pr: { number: 42, state: "merged", title: "Review fixture" },
+    });
+    frontmatter.reviewerVerdicts[0]!.evidenceFingerprint =
+      reviewEvidenceFingerprint(
+        { goal: "Test goal.", frontmatter },
+        "akin-ozer/viberr",
+      );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      packet,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      reviewerResult(
+        REVIEWER_B.profileId,
+        "run_approve_b",
+        "approve",
+        "Reviewer B independently approved.",
+      ),
+    );
+    const result = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.task.stage).toBe("done");
+  });
+
+  it("invalidates reviewer approval when the canonical goal changes", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        reviewers: [REVIEWER_A],
+        validation: "changed",
+        pr: { number: 42, state: "merged", title: "Review fixture" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      reviewerResult(
+        REVIEWER_A.profileId,
+        "run_approve_before_goal_edit",
+        "approve",
+        "The original goal is satisfied.",
+      ),
+    );
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.validation,
+    ).toBe("healthy");
+
+    await updateTaskGoal(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        goal: "A materially different acceptance goal.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const changed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(changed.reviewerVerdicts).toEqual([]);
+    expect(changed.validation).toBe("changed");
+  });
+
+  it("revalidates completion atomically after GitHub returns", async () => {
+    const store = prepared();
+    const owner = actor(store.users.selin);
+    const pat = createPat(
+      store.db,
+      {
+        userId: store.users.arda.id,
+        label: "Race test",
+        token: "ghp_race_test_token",
+      },
+      actor(store.users.arda),
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor(store.users.arda),
+    );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "healthy",
+        pr: {
+          number: 42,
+          state: "accepted",
+          title: "Race fixture",
+          headSha: "reviewed-head",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const githubFetchImpl: typeof fetch = async (_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ sha: "reviewed-head" });
+      await updateTaskFile(
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          dataRoot: store.dataRoot,
+        },
+        (parsed) => {
+          parsed.goal = "Goal changed while GitHub was merging.";
+        },
+      );
+      return new Response(
+        JSON.stringify({ merged: true, sha: "merge-sha", message: "Merged" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    await expect(
+      completeTaskMerge(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        owner,
+        { dataRoot: store.dataRoot, githubFetchImpl },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+
+    const after = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(after.frontmatter.stage).toBe("review");
+    expect(after.frontmatter.pr?.state).toBe("merged");
+    expect(after.goal).toBe("Goal changed while GitHub was merging.");
   });
 });
 
@@ -488,6 +810,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
         stage: "review",
         ownerUserId: store.users.selin.id,
         validation: "changed",
+        reviewers: [REVIEWER_A],
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -498,20 +821,45 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Verdict: request changes — the diff violates the spec.",
+      reviewerResult(
+        REVIEWER_A.profileId,
+        "run_reject_a",
+        "request_changes",
+        "The diff violates the spec.",
+      ),
     );
-    let fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
-    expect(fm.validation).toBe("failing");
-
-    // 2. The developer reworks (a primary-specialist reply lands on the timeline).
-    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+    let fm = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
-      runId: "run_rework",
-      actorRef: { kind: "agent", backend: "claude", role: "developer" },
-      replyText: "Fixed the violation and pushed a new commit.",
-    });
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+
+    expect(fm.stage).toBe("impl");
+
+    // 2. The developer reworks and the task begins a fresh review cycle.
+    await postAgentReplyComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        runId: "run_rework",
+        actorRef: { kind: "agent", backend: "claude", role: "developer" },
+        replyText: "Fixed the violation and pushed a new commit.",
+      },
+    );
+    await transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "review",
+        manual: true,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
 
     // 3. Re-review approves → the rework evidence lets the approve clear failing.
     await recordReviewerVerdict(
@@ -519,10 +867,18 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Verdict: approve — the fix restores spec compliance.",
+      reviewerResult(
+        REVIEWER_A.profileId,
+        "run_approve_a",
+        "approve",
+        "The fix restores spec compliance.",
+      ),
     );
-    fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
+    fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
     expect(fm.validation).toBe("healthy");
   });
 
@@ -533,6 +889,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
         stage: "review",
         ownerUserId: store.users.selin.id,
         validation: "changed",
+        reviewers: [REVIEWER_A, REVIEWER_B],
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -542,7 +899,12 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Verdict: request changes — missing error handling.",
+      reviewerResult(
+        REVIEWER_A.profileId,
+        "run_reject_a",
+        "request_changes",
+        "Error handling is missing.",
+      ),
     );
     // A second reviewer approves with NO rework in between → failing sticks.
     await recordReviewerVerdict(
@@ -550,10 +912,18 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      "Verdict: approve — looks fine to me.",
+      reviewerResult(
+        REVIEWER_B.profileId,
+        "run_approve_b",
+        "approve",
+        "The paths I checked look correct.",
+      ),
     );
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
     expect(fm.validation).toBe("failing");
   });
 
@@ -570,12 +940,20 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
 
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "review",
+        manual: true,
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
     expect(fm.validation).toBe("changed");
   });
 });
@@ -608,7 +986,11 @@ describe("owner-assign scheduling routes through the real operator (FIX #9)", ()
 
     await setOwner(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        targetUserId: store.users.selin.id,
+      },
       actor(store.users.selin),
       { dataRoot: store.dataRoot },
     );

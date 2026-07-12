@@ -83,6 +83,34 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "finished", simulated: false, effectiveBackend: "claude", sessionId: "sess-1" });
   });
 
+  it("emits live init/tool/work/finalize phases from real stream envelopes", async () => {
+    const messages = [
+      { type: "system", subtype: "init", session_id: "sess-1" },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "secret detail stays out of the phase" } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "done" }] } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: {} },
+    ];
+    const { q } = fakeQuery(messages);
+    const phases: Array<[string | null, string | null]> = [];
+    createClaudeAdapter({ queryFn: () => q }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+      onPhase: (phase, step) => phases.push([phase, step]),
+    });
+    await drain();
+
+    expect(phases).toEqual([
+      ["Initializing", "Starting Claude runtime"],
+      ["Initializing", "Claude session ready"],
+      ["Using tools", "Bash"],
+      ["Using tools", "Processing tool results"],
+      ["Working", "Claude is preparing a response"],
+      ["Finalizing", "Claude result received"],
+    ]);
+    expect(JSON.stringify(phases)).not.toContain("secret detail");
+  });
+
   it("accumulates live usage + turns from assistant messages so the counter grows during the run", async () => {
     const messages = [
       { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
@@ -159,10 +187,18 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.effort).toBeUndefined();
   });
 
-  it("isolates every run from the host ~/.claude (settingSources + skills empty)", async () => {
+  it("isolates every run from host settings, skills, plugins, agents, and MCP discovery", async () => {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: { settingSources?: string[]; skills?: string[] } | undefined;
-    const queryFn = (params: { options?: { settingSources?: string[]; skills?: string[] } }) => {
+    let captured:
+      | {
+          settingSources?: string[];
+          skills?: string[];
+          plugins?: unknown[];
+          agents?: Record<string, unknown>;
+          strictMcpConfig?: boolean;
+        }
+      | undefined;
+    const queryFn = (params: { options?: typeof captured }) => {
       captured = params.options;
       const { q } = fakeQuery(result);
       return q;
@@ -173,6 +209,38 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // sees NONE of the operator-user's personal Claude Code skills/plugins.
     expect(captured?.settingSources).toEqual([]);
     expect(captured?.skills).toEqual([]);
+    expect(captured?.plugins).toEqual([]);
+    expect(captured?.agents).toEqual({});
+    expect(captured?.strictMcpConfig).toBe(true);
+  });
+
+  it("fails closed without persisting account-managed resource names from init", async () => {
+    const leaked = [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "leaked",
+        skills: ["private-account-skill"],
+        plugins: [{ name: "private-plugin", path: "/private/plugin" }],
+      },
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
+    ];
+    const { q } = fakeQuery(leaked);
+    const lines: { raw: string; display: { text: string } | null }[] = [];
+    let outcome = "";
+    createClaudeAdapter({ queryFn: (() => q) as never }).start(SPEC, {
+      onLine: (line) => lines.push(line as never),
+      onExit: (exit) => {
+        outcome = exit.outcome;
+      },
+    });
+    await drain();
+
+    expect(outcome).toBe("error");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.display?.text).toContain("did not declare");
+    expect(lines[0]?.raw).not.toContain("private-account-skill");
+    expect(lines[0]?.raw).not.toContain("private-plugin");
   });
 
   it("denies the repo-mutation built-ins for an operator run, leaving specialists unconfined", async () => {

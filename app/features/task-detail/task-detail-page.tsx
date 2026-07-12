@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
-import type { DiagnosticRecord, TaskDetail } from "~/server/projections/task-query.server";
+import {
+  Link,
+  useFetcher,
+  useNavigate,
+  type FetcherWithComponents,
+} from "react-router";
+import type {
+  DiagnosticRecord,
+  TaskDetail,
+} from "~/server/projections/task-query.server";
 import { Avatar } from "~/ui/avatar";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
@@ -9,6 +18,7 @@ import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { DecisionPacket } from "./decision-packet";
 import {
+  type OperatorExecutionStatus,
   ExecutionProfile,
   type DeployedSpecialistView,
   type OwnerAction,
@@ -36,7 +46,12 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
  */
 
 type ActionResult =
-  | { ok: true; toast?: string; navigateTo?: string }
+  | {
+      ok: true;
+      toast?: string;
+      toastKind?: "success" | "info";
+      navigateTo?: string;
+    }
   | { ok: false; error: string };
 
 /** Toast + optional redirect once per completed fetcher submission. */
@@ -50,24 +65,24 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
     handled.current = fetcher.data;
     const d = fetcher.data;
     if (d.ok) {
-      if (d.toast) push(d.toast);
+      if (d.toast) push({ kind: d.toastKind ?? "success", text: d.toast });
       if (d.navigateTo) navigate(d.navigateTo);
     } else if (d.error) {
       // E.g. "This packet was already resolved." — revalidation has already
       // refreshed the panel; surface the reason, never crash (spec §7).
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
 
-function GithubTrace({
+export function GithubTrace({
   task,
   githubHost,
   onCompleteMerge,
   merging,
 }: {
   task: TaskDetail;
-  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  /** github.com web host for browse links. */
   githubHost?: string;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
@@ -88,7 +103,7 @@ function GithubTrace({
   }
   // Real external link (spec §4.9: the prototype toast goes away): the PR
   // when one exists, else the branch tree. Host comes from the loader
-  // (connection-derived), never hardcoded — GHE deployments keep working.
+  // supplied by the server so every GitHub browse link shares one host.
   const host = githubHost ?? "https://github.com";
   const ghHref = task.repo
     ? task.pr
@@ -129,8 +144,12 @@ function GithubTrace({
             <span className="k">Diff</span>
             <span className="v mono">
               {task.changed.files} files ·{" "}
-              <span style={{ color: "var(--teal-dark)" }}>+{task.changed.add}</span>{" "}
-              <span style={{ color: "var(--coral-dark)" }}>−{task.changed.del}</span>
+              <span style={{ color: "var(--teal-dark)" }}>
+                +{task.changed.add}
+              </span>{" "}
+              <span style={{ color: "var(--coral-dark)" }}>
+                −{task.changed.del}
+              </span>
             </span>
           </div>
         )}
@@ -157,19 +176,24 @@ function GithubTrace({
             ))}
           </div>
         )}
-        {task.pr?.state === "accepted" && onCompleteMerge && (
-          <button
-            type="button"
-            className="btn primary sm"
-            style={{ marginTop: ".8rem", width: "100%" }}
-            disabled={merging}
-            onClick={onCompleteMerge}
-            title="Run the real GitHub merge for this accepted PR (needs a valid project credential)"
-          >
-            <Icon name="check" />
-            Complete merge
-          </button>
-        )}
+        {(task.pr?.state === "accepted" || task.pr?.state === "merged") &&
+          onCompleteMerge && (
+            <button
+              type="button"
+              className="btn primary sm"
+              style={{ marginTop: ".8rem", width: "100%" }}
+              disabled={merging}
+              onClick={onCompleteMerge}
+              title={
+                task.pr.state === "merged"
+                  ? "Finalize this externally merged, accepted completion"
+                  : "Run the real GitHub merge for this accepted PR (needs a valid project credential)"
+              }
+            >
+              <Icon name="check" />
+              Complete merge
+            </button>
+          )}
         {ghHref && (
           <a
             className="btn ghost sm"
@@ -190,17 +214,27 @@ function GithubTrace({
 function PolicyPanel({
   projectSlug,
   myRole,
+  canAcceptCompletion,
 }: {
   projectSlug: string;
   myRole: string | null;
+  canAcceptCompletion: boolean;
 }) {
   const admin = myRole === "admin";
   const r = (myRole as ProjectRole | null) ?? null;
   const role = myRole || "viewer";
   // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
   // THIS viewer's role — no aspirational copy that the server would 403.
-  const rows: { k: string; v: string; icon: "user" | "flag" | "plus" | "message" | "cpu" | "lock" }[] = [
-    { k: "Your role", v: role.charAt(0).toUpperCase() + role.slice(1), icon: "user" },
+  const rows: {
+    k: string;
+    v: string;
+    icon: "user" | "flag" | "plus" | "message" | "cpu" | "lock";
+  }[] = [
+    {
+      k: "Your role",
+      v: role.charAt(0).toUpperCase() + role.slice(1),
+      icon: "user",
+    },
     { k: "Comments", v: "Every registered user", icon: "message" },
     {
       k: "Task ownership",
@@ -213,17 +247,25 @@ function PolicyPanel({
     },
     {
       k: "Accept completion",
-      v: roleCan(r, "accept-completion")
-        ? "You can accept → Done"
+      v: canAcceptCompletion
+        ? roleCan(r, "accept-completion")
+          ? "You can accept → Done"
+          : "You can accept tasks you own → Done"
         : "Maintainer or admin only",
       icon: "flag",
     },
     {
       k: "Run agents",
-      v: roleCan(r, "run-agents") ? "You can run agents" : "Maintainer or admin only",
+      v: roleCan(r, "run-agents")
+        ? "You can run agents"
+        : "Maintainer or admin only",
       icon: "cpu",
     },
-    { k: "Review → Done", v: "Human decision, locked at the review boundary", icon: "lock" },
+    {
+      k: "Review → Done",
+      v: "Human decision, locked at the review boundary",
+      icon: "lock",
+    },
   ];
   return (
     <div className="panel">
@@ -269,14 +311,70 @@ function PolicyPanel({
   );
 }
 
+/** Packet-independent acceptance control for a healthy task at the governed
+ * Review boundary. Operator packets and recommendations can still offer the
+ * same decision, but they are not required for an owner to act. */
+export function CompletionAcceptance({
+  taskKey,
+  busy,
+  onAccept,
+}: {
+  taskKey: string;
+  busy: boolean;
+  onAccept: () => void;
+}) {
+  return (
+    <section
+      className="panel completion-acceptance"
+      aria-label="Completion acceptance"
+    >
+      <div className="panel-head">
+        <Icon name="check" />
+        <h2>Ready for acceptance</h2>
+        <span className="right">
+          <Pill kind="done" dot>
+            validation healthy
+          </Pill>
+        </span>
+      </div>
+      <div className="completion-acceptance-body">
+        <div>
+          <strong>The Review boundary is ready.</strong>
+          <p>
+            Accept {taskKey} directly. Repository-backed work stays in Review
+            until the linked pull request is merged.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy}
+          onClick={onAccept}
+        >
+          <Icon name="check" />
+          Accept completion
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /** Diagnostic severity → pill kind (pure; module scope so it isn't rebuilt per render). */
 const kind = (severity: string) =>
-  severity === "error" ? "blocked" : severity === "warning" ? "input" : "neutral";
+  severity === "error"
+    ? "blocked"
+    : severity === "warning"
+      ? "input"
+      : "neutral";
 
 /** Parse/inconsistency findings from the projection (tolerant-parsing
  * contract) — compact list, only when the projection carries any. The full
  * diagnostics console arrives in Phase 10. */
-function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) {
+function DiagnosticsPanel({
+  diagnostics,
+}: {
+  diagnostics: DiagnosticRecord[];
+}) {
   if (diagnostics.length === 0) return null;
   return (
     <div className="panel">
@@ -354,7 +452,7 @@ function TaskHero({
           <span>{task.filePath}</span>
         </span>
       </div>
-      {editing ? (
+      {editing && canEditGoal ? (
         <goalFetcher.Form
           method="post"
           className="goal-edit"
@@ -416,9 +514,11 @@ function TaskHero({
 function RecommendationsSection({
   recommendations,
   canApply,
+  canApplyCompletion,
 }: {
   recommendations: RecommendationView[];
   canApply: boolean;
+  canApplyCompletion: boolean;
 }) {
   const csrf = useCsrfToken();
   const recFetcher = useFetcher<ActionResult>();
@@ -448,6 +548,7 @@ function RecommendationsSection({
     <OperatorRecommendations
       recommendations={recommendations}
       canApply={canApply}
+      canApplyCompletion={canApplyCompletion}
       busy={recBusy}
       onApply={onApplyRec}
       onDismiss={onDismissRec}
@@ -460,6 +561,7 @@ function ExecutionSection({
   task,
   meId,
   myRole,
+  canOwnTasks,
   members,
   ownerBusy,
   onOwner,
@@ -467,10 +569,12 @@ function ExecutionSection({
   deployedSpecialists,
   canRunAgents,
   runActive,
+  operatorStatus,
 }: {
   task: TaskDetail;
   meId: string;
   myRole: string | null;
+  canOwnTasks: boolean;
   members: TaskMemberView[];
   ownerBusy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
@@ -478,6 +582,7 @@ function ExecutionSection({
   deployedSpecialists: DeployedSpecialistView[];
   canRunAgents: boolean;
   runActive: boolean;
+  operatorStatus: OperatorExecutionStatus;
 }) {
   const csrf = useCsrfToken();
   const specialistFetcher = useFetcher<ActionResult>();
@@ -555,6 +660,7 @@ function ExecutionSection({
       task={task}
       meId={meId}
       myRole={myRole}
+      canOwnTasks={canOwnTasks}
       members={members}
       busy={ownerBusy}
       onOwner={onOwner}
@@ -569,7 +675,12 @@ function ExecutionSection({
       onAssignReviewer={onAssignReviewer}
       onRunReviewer={onRunReviewer}
       onRemoveReviewer={onRemoveReviewer}
-      operatorBusy={operatorBusy}
+      operatorBusy={
+        operatorBusy ||
+        operatorStatus === "queued" ||
+        operatorStatus === "running"
+      }
+      operatorStatus={operatorStatus}
       onRunOperator={onRunOperator}
     />
   );
@@ -582,6 +693,7 @@ function CurrentStatePanel({
   stage,
   meId,
   myRole,
+  projectRole,
   ownerBusy,
   onOwner,
   onRelease,
@@ -590,6 +702,7 @@ function CurrentStatePanel({
   stage: TaskDetail["stages"][number] | undefined;
   meId: string;
   myRole: string | null;
+  projectRole: string | null;
   ownerBusy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   onRelease: () => void;
@@ -602,8 +715,11 @@ function CurrentStatePanel({
   // server re-checks). Goes through the same governed transition that an applied
   // operator recommendation does, so it posts the **Transition:** timeline
   // comment and hands the task to the operator at its new stage.
-  const canTransition = roleCan(myRole as ProjectRole | null, "approve-transition");
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  const canTransition = roleCan(
+    myRole as ProjectRole | null,
+    "approve-transition",
+  );
+  const canOwn = roleCan(projectRole as ProjectRole | null, "own-task");
   const transitionBusy = transitionFetcher.state !== "idle";
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
@@ -653,7 +769,9 @@ function CurrentStatePanel({
           <span className="k">Waiting on</span>
           <span className="v">
             {task.waiting === "human" ? (
-              <span style={{ color: "var(--blue-pressed)" }}>Human decision</span>
+              <span style={{ color: "var(--blue-pressed)" }}>
+                Human decision
+              </span>
             ) : task.waiting === "agent" ? (
               <span style={{ color: "var(--agent-dark)" }}>Agent work</span>
             ) : (
@@ -722,6 +840,7 @@ export function TaskDetailPage({
   runtime,
   deployedSpecialists,
   runActive,
+  operatorStatus,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -729,9 +848,12 @@ export function TaskDetailPage({
   members,
   me,
   myRole,
+  projectRole,
   mentionables,
   recommendations,
+  reviewStageId,
   githubHost,
+  readOnly = false,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -741,6 +863,8 @@ export function TaskDetailPage({
   deployedSpecialists: DeployedSpecialistView[];
   /** A run for this task is currently running — disables the Run button. */
   runActive: boolean;
+  /** Configured/engaged is not active; only a live run receives that label. */
+  operatorStatus: OperatorExecutionStatus;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -748,12 +872,18 @@ export function TaskDetailPage({
   members: TaskMemberView[];
   me: { id: string; name: string };
   myRole: string | null;
+  /** Explicit membership role; unlike myRole it never includes org override. */
+  projectRole?: string | null;
   /** @-mention autocomplete directory for the comment composer (loader). */
   mentionables: Mentionables;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
-  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  /** Governed stage whose workflow edge enters the terminal stage. */
+  reviewStageId: string | null;
+  /** github.com web host for browse links. */
   githubHost?: string;
+  /** Archived task history stays navigable but exposes no mutations. */
+  readOnly?: boolean;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [logSel, setLogSel] = useState<string | null>(null);
@@ -784,18 +914,39 @@ export function TaskDetailPage({
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
   // RBAC. The mutations themselves live in ExecutionSection /
   // RecommendationsSection below.
-  const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  const explicitProjectRole = projectRole === undefined ? myRole : projectRole;
+  const canRunAgents =
+    !readOnly && roleCan(myRole as ProjectRole | null, "run-agents");
+  const canOwn =
+    roleCan(explicitProjectRole as ProjectRole | null, "own-task") && !readOnly;
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
-  // task owner (M2 / owner ruling Q2). accept_completion is additionally
-  // re-gated to admin|maintainer on the server — an owner-only viewer who
-  // picks it gets a friendly 409, but the common non-completion options work.
+  // task owner (M2 / owner ruling Q2). Completion is also task-scoped: the
+  // active contributor+ owner may accept this task, but no other contributor
+  // gains project-wide completion authority.
   // The owner bypass requires `own-task` (contributor+): the server's owner
   // check does too, so a demoted viewer-owner must NOT be shown resolve options
   // that would 403 (matches releaseOwner's own-task gate).
   const isOwner =
     task.owner?.kind === "human" && task.owner.userId === me.id && canOwn;
   const canResolvePacket = canRunAgents || isOwner;
+  const canAcceptCompletion = canRunAgents || isOwner;
+  const atCompletionBoundary =
+    reviewStageId !== null && task.stage === reviewStageId;
+  const hasAcceptanceArtifact =
+    task.packet?.options.some(
+      (option) => option.kind === "accept_completion",
+    ) ||
+    recommendations.some(
+      (recommendation) => recommendation.kind === "accept_completion",
+    );
+  const completionAlreadyAccepted =
+    task.pr?.state === "accepted" || task.pr?.state === "merged";
+  const offerDirectAcceptance =
+    canAcceptCompletion &&
+    atCompletionBoundary &&
+    task.validation === "healthy" &&
+    !hasAcceptanceArtifact &&
+    !completionAlreadyAccepted;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -812,7 +963,7 @@ export function TaskDetailPage({
 
   // Interrupt is admin|maintainer (contracts §3.2); the button hides for
   // everyone else. Server re-checks RBAC regardless.
-  const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
+  const canInterrupt = canRunAgents;
   const onInterrupt = (runThreadId: string) => {
     if (runBusy) return;
     const run = runtime.find((r) => r.id === runThreadId);
@@ -836,9 +987,10 @@ export function TaskDetailPage({
           runFetcher.submit(fd, { method: "post" });
         }
       : undefined;
-  // Complete the real merge of an accepted (merge-pending) PR (S2).
-  // admin|maintainer only; server re-checks.
-  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
+  // Complete/finalize accepted repository work. The same task-scoped owner
+  // authority that accepts completion also applies after a merge is pending or
+  // GitHub reports that the accepted PR was merged externally.
+  const canMerge = canAcceptCompletion && atCompletionBoundary;
   const onCompleteMerge = canMerge
     ? () => {
         if (runBusy) return;
@@ -909,6 +1061,14 @@ export function TaskDetailPage({
     resolveFetcher.submit(fd, { method: "post" });
   };
 
+  const onAcceptCompletion = () => {
+    if (resolveBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "accept-completion");
+    resolveFetcher.submit(fd, { method: "post" });
+  };
+
   return (
     <div
       className="detail"
@@ -917,6 +1077,7 @@ export function TaskDetailPage({
       data-screen-label={"Task " + task.key}
     >
       <div className="detail-main">
+        {readOnly && <ArchivedBadge />}
         <TaskHero task={task} stage={stage} canEditGoal={canRunAgents} />
 
         <LiveRunSlot
@@ -934,21 +1095,32 @@ export function TaskDetailPage({
             packet={task.packet}
             busy={resolveBusy}
             canResolve={canResolvePacket}
-            canResolveCompletion={canRunAgents}
+            canResolveCompletion={canRunAgents || isOwner}
+            canAsk={!readOnly}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
+          />
+        )}
+
+        {offerDirectAcceptance && (
+          <CompletionAcceptance
+            taskKey={task.key}
+            busy={resolveBusy}
+            onAccept={onAcceptCompletion}
           />
         )}
 
         <RecommendationsSection
           recommendations={recommendations}
           canApply={canRunAgents}
+          canApplyCompletion={isOwner}
         />
 
         <ExecutionSection
           task={task}
           meId={me.id}
-          myRole={myRole}
+          myRole={readOnly ? null : myRole}
+          canOwnTasks={canOwn}
           members={members}
           ownerBusy={ownerBusy}
           onOwner={onOwner}
@@ -956,6 +1128,7 @@ export function TaskDetailPage({
           deployedSpecialists={deployedSpecialists}
           canRunAgents={canRunAgents}
           runActive={runActive}
+          operatorStatus={operatorStatus}
         />
 
         <AgentLogsSlot
@@ -976,6 +1149,7 @@ export function TaskDetailPage({
           ask={ask}
           mentionables={mentionables}
           onAgentLog={onAgentLog}
+          readOnly={readOnly}
         />
       </div>
 
@@ -990,15 +1164,20 @@ export function TaskDetailPage({
           task={task}
           stage={stage}
           meId={me.id}
-          myRole={myRole}
+          myRole={readOnly ? null : myRole}
+          projectRole={readOnly ? null : explicitProjectRole}
           ownerBusy={ownerBusy}
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
         />
-        <PolicyPanel projectSlug={task.projectSlug} myRole={myRole} />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          canAcceptCompletion={!readOnly && canAcceptCompletion}
+        />
       </div>
 
-      {releasing && (
+      {releasing && !readOnly && (
         <ReleaseConfirm
           task={task}
           me={me}

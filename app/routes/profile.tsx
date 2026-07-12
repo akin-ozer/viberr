@@ -15,7 +15,6 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { getProfileView } from "~/features/profile/profile-query.server";
 import {
   changeOwnPassword,
-  disconnectGithubIdentity,
   setMotionPref,
   setNotifRoutingPref,
   setTimelineDefaultPref,
@@ -48,7 +47,8 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
-  const profile = getProfileView(db, user.id);
+  const selectedProject = new URL(request.url).searchParams.get("project");
+  const profile = getProfileView(db, user.id, selectedProject);
   if (!profile) throw data("Account not found.", { status: 404 });
   return { profile };
 }
@@ -103,10 +103,6 @@ export async function action({ request }: Route.ActionArgs) {
         );
         return { ok: true as const, intent, toast };
       }
-      case "github-disconnect": {
-        const { toast } = disconnectGithubIdentity(db, actor);
-        return { ok: true as const, intent, toast };
-      }
       default:
         return data(
           { ok: false as const, intent, error: "Unknown action." },
@@ -140,7 +136,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const identityFetcher = useFetcher<ProfileActionData>();
   const prefsFetcher = useFetcher<ProfileActionData>();
   const passwordFetcher = useFetcher<ProfileActionData>();
-  const githubFetcher = useFetcher<ProfileActionData>();
 
   const close = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
@@ -175,7 +170,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
           identity: identityFetcher,
           prefs: prefsFetcher,
           password: passwordFetcher,
-          github: githubFetcher,
         }}
         submitWith={submitWith}
       />

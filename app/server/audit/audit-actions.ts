@@ -32,7 +32,6 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "auth.password.changed": "auth",
   "auth.password.reset": "auth",
   "auth.password.forced_reset_completed": "auth",
-  "identity.github.disconnected": "auth",
   "profile.updated": "auth",
 
   // -- org administration (phases 2 + 9B) ---------------------------------
@@ -55,6 +54,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "org.mcp.added": "org",
   "org.mcp.updated": "org",
   "org.mcp.removed": "org",
+  "org.secret.created": "org",
+  "org.secret.rotated": "org",
+  "org.secret.deleted": "org",
   "org.skill.created": "org",
   "org.skill.updated": "org",
   "org.skill.deleted": "org",
@@ -78,11 +80,12 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "project.stage.renamed": "project",
   "project.stage.removed": "project",
   "project.stage.reordered": "project",
-  "project.member.invited": "project",
+  "project.member.access_granted": "project",
   "project.member.removed": "project",
   "project.member.role_changed": "project",
   "project.policy.boundary_changed": "project",
   "project.agent_profile.created": "project",
+  "project.agent_profile.deployed": "project",
   "project.agent_profile.updated": "project",
   "project.agent_profile.deleted": "project",
 
@@ -90,7 +93,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.created": "task",
   "task.comment": "task",
   "task.transition": "task",
+  "task.board.reordered": "task",
   "task.packet.resolved": "task",
+  "task.completion.accepted_merge_pending": "task",
   "task.ownership.taken": "task",
   "task.ownership.handed_off": "task",
   "task.ownership.released": "task",
@@ -102,6 +107,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.reviewer.run_started": "task",
   "task.agent.replied": "task",
   "task.quality.flagged": "task",
+  "task.recovery.opened": "task",
   "task.goal.updated": "task",
   // Operator-authored governance actions (operator-actions.server).
   "task.operator.commented": "task",
@@ -109,6 +115,12 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.operator.recommended_completion": "task",
   "task.operator.accepted_completion": "task",
   "task.operator.packet_opened": "task",
+  "task.operator.routing_decided": "task",
+  "task.operator.readiness_assessed": "task",
+  "task.operator.auto_queued": "task",
+  "task.operator.auto_finished": "task",
+  "task.operator.auto_failed": "task",
+  "task.operator.auto_skipped_missing_intent": "task",
   // Human resolution of operator recommendation cards.
   "task.recommendation.applied": "task",
   "task.recommendation.dismissed": "task",
@@ -129,6 +141,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // Agent-side delivery reconciled from the specialist workspace (NFR15):
   // branch/PR the agent created with its own credentials, captured into task.md.
   "github.workspace.branch_reconciled": "task",
+  "github.workspace.branch_pushed": "task",
   "github.workspace.pr_linked": "task",
   // scope-violation rows may be project-wide (taskKey nullable).
   "github.scope_violation.opened": "project",

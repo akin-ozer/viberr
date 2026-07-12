@@ -1,6 +1,11 @@
 import { existsSync, rmSync } from "node:fs";
 import type Database from "better-sqlite3";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import type { UserRole } from "~/shared/mapping/user.server";
+import {
+  recordAudit,
+  withProjectAuditAuthority,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -10,9 +15,21 @@ import {
   projectDir,
   projectFilePath,
 } from "~/server/files/file-store-root.server";
-import { updateProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
+import { authorizeProjectAction } from "~/shared/rbac";
+import { purgeProjectOperationalState } from "~/server/projects/project-operational-state.server";
+import type {
+  StageDef,
+  WorkflowBoundary,
+} from "~/schemas/project-file.schema";
+import { stopProjectRuns } from "~/server/runtimes/run-service.server";
+import { getEnv } from "~/server/config/env.server";
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -33,6 +50,7 @@ import { newId } from "~/shared/ids/new-id.server";
 export interface SettingsActor {
   userId: string;
   label: string;
+  orgRole?: UserRole;
 }
 
 export interface SettingsMutationContext {
@@ -64,6 +82,48 @@ export const NEW_STAGE_COLORS = [
   "var(--teal-dark)",
 ] as const;
 
+/**
+ * The settings editor presents one ordered stage path, so that order is the
+ * canonical workflow graph. Entering a destination inherits that
+ * destination's prior boundary when possible; a new intermediate destination
+ * defaults to approval. The terminal edge is always human and locked.
+ */
+export function workflowForStageOrder(
+  stages: readonly StageDef[],
+  previous: readonly WorkflowBoundary[],
+): WorkflowBoundary[] {
+  return stages.slice(0, -1).map((from, index) => {
+    const to = stages[index + 1]!;
+    const entering =
+      previous.find((edge) => edge.from === from.id && edge.to === to.id) ??
+      previous.find((edge) => edge.to === to.id);
+    const terminal = index === stages.length - 2;
+    if (terminal) {
+      return {
+        from: from.id,
+        to: to.id,
+        boundary: "human",
+        by:
+          entering?.by ??
+          "Human acceptance of the completion report",
+        locked: true,
+      };
+    }
+    return {
+      from: from.id,
+      to: to.id,
+      boundary:
+        entering?.boundary === "human"
+          ? "approval"
+          : (entering?.boundary ?? "approval"),
+      by:
+        entering?.by ??
+        "Operator transition request under the configured project policy",
+      locked: false,
+    };
+  });
+}
+
 function forbidden(userMessage: string): AppError {
   return new AppError({
     code: ERROR_CODES.FORBIDDEN,
@@ -87,11 +147,12 @@ function requireProjectAdmin(
   projectSlug: string,
   actor: SettingsActor,
   what: string,
-): { projectName: string } {
+): ReturnType<typeof assertProjectAction> {
   // Single canonical guard: project settings (identity/stages/repo/members/
   // archive/delete) are admin-only (`edit-policy` tier in ACTION_ROLES).
   return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    ...(actor.orgRole !== undefined ? { orgRole: actor.orgRole } : {}),
   });
 }
 
@@ -100,6 +161,21 @@ function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   };
+}
+
+function settingsAuditActor(
+  ctx: SettingsMutationContext,
+  projectSlug: string,
+  actor: SettingsActor,
+): AuditActor {
+  const project = readProjectFile(projectRef(ctx, projectSlug));
+  const projectRole = project?.parsed.frontmatter.members.find(
+    (member) => member.userId === actor.userId,
+  )?.role;
+  return withProjectAuditAuthority(
+    actor,
+    authorizeProjectAction(projectRole, actor.orgRole, "edit-policy").source,
+  );
 }
 
 function reprojectProject(
@@ -154,7 +230,7 @@ export async function updateProjectIdentity(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.settings.updated",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
@@ -189,7 +265,7 @@ export async function renameStage(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.renamed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
@@ -219,18 +295,22 @@ export async function addStage(
     // whatever its id.
     const insertIdx = stages.length > 0 ? stages.length - 1 : 0;
     stages.splice(insertIdx, 0, stage);
+    parsed.frontmatter.workflow = workflowForStageOrder(
+      stages,
+      parsed.frontmatter.workflow,
+    );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.added",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: stageId,
     projectSlug: input.projectSlug,
     details: {},
   });
-  return { toast: "Stage added — it appears on the board immediately", stageId };
+  return { toast: "Stage added — board and workflow updated", stageId };
 }
 
 export async function removeStage(
@@ -269,17 +349,16 @@ export async function removeStage(
     parsed.frontmatter.stages = parsed.frontmatter.stages.filter(
       (s) => s.id !== input.stageId,
     );
-    // Transition rules referencing a removed stage are dropped with it
-    // (spec §7.4 decision — documented in the phase report).
-    parsed.frontmatter.workflow = parsed.frontmatter.workflow.filter(
-      (w) => w.from !== input.stageId && w.to !== input.stageId,
+    parsed.frontmatter.workflow = workflowForStageOrder(
+      parsed.frontmatter.stages,
+      parsed.frontmatter.workflow,
     );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.removed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
@@ -320,18 +399,22 @@ export async function reorderStages(
       ...middle,
       byId.get(terminalId)!,
     ];
+    parsed.frontmatter.workflow = workflowForStageOrder(
+      parsed.frontmatter.stages,
+      parsed.frontmatter.workflow,
+    );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.reordered",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
     details: { order: input.orderedIds },
   });
-  return { toast: "Stage order updated — board columns follow" };
+  return { toast: "Stage order updated — board and workflow follow" };
 }
 
 // ------------------------------------------------------------------ members
@@ -339,12 +422,12 @@ export async function reorderStages(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Invite (spec §5.3): registered email → membership entry (role viewer,
- * status invited). Unregistered email → a passwordless whitelist user row
- * is created first (phase-2 model: the user row IS the whitelist entry;
- * they sign in via OAuth — no mailer in V1, ruling 13), then the entry.
+ * Grant project access (spec §5.3): registered email → membership entry.
+ * Unregistered email → an OAuth whitelist user row is created first, then the
+ * entry. Viberr has no mailer, so this must never claim that an invitation was
+ * delivered: the administrator is told exactly how the member can sign in.
  */
-export async function inviteMember(
+export async function grantMemberAccess(
   db: Database.Database,
   input: { projectSlug: string; name: string; email: string },
   actor: SettingsActor,
@@ -360,12 +443,70 @@ export async function inviteMember(
 
   const auditActor = { userId: actor.userId, label: actor.label };
   let user = findUserByEmail(db, email);
+  const runtimeEnv = getEnv();
+  const githubOAuthConfigured = Boolean(
+    runtimeEnv.GITHUB_OAUTH_CLIENT_ID && runtimeEnv.GITHUB_OAUTH_CLIENT_SECRET,
+  );
+  const googleOAuthConfigured = Boolean(
+    runtimeEnv.GOOGLE_OAUTH_CLIENT_ID && runtimeEnv.GOOGLE_OAUTH_CLIENT_SECRET,
+  );
+  let provisionedProvider: "GitHub" | "Google" | null = null;
   if (!user) {
+    provisionedProvider =
+      githubOAuthConfigured
+        ? "GitHub"
+        : googleOAuthConfigured
+          ? "Google"
+          : null;
+    if (!provisionedProvider) {
+      throw AppError.validation(
+        "Configure GitHub or Google OAuth before granting a new passwordless account. Existing Viberr users can still be added directly.",
+      );
+    }
     user = createUser(
       db,
       { email, name, role: "member", tempPassword: null },
       auditActor,
     );
+  } else {
+    if (user.disabled) {
+      throw AppError.validation(
+        `${email} belongs to a disabled Viberr account. Re-enable the account before granting project access.`,
+      );
+    }
+    // Existing passwordless rows are usable only through their configured
+    // identity provider. Do not turn a historical whitelist row into a project
+    // membership while claiming the user can sign in when that provider is off.
+    if (!user.passwordHash) {
+      if (user.idp === "github" && !githubOAuthConfigured) {
+        throw AppError.validation(
+          `Configure GitHub OAuth before granting access to this passwordless GitHub account.`,
+        );
+      }
+      if (user.idp === "google" && !googleOAuthConfigured) {
+        throw AppError.validation(
+          `Configure Google OAuth before granting access to this passwordless Google account.`,
+        );
+      }
+      if (
+        user.idp !== "github" &&
+        user.idp !== "google" &&
+        !githubOAuthConfigured &&
+        !googleOAuthConfigured
+      ) {
+        throw AppError.validation(
+          `Configure GitHub or Google OAuth before granting access to this passwordless account.`,
+        );
+      }
+      provisionedProvider =
+        user.idp === "github"
+          ? "GitHub"
+          : user.idp === "google"
+            ? "Google"
+            : githubOAuthConfigured
+              ? "GitHub"
+              : "Google";
+    }
   }
   const userId = user.id;
 
@@ -382,14 +523,22 @@ export async function inviteMember(
 
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
-    action: "project.member.invited",
-    actor: auditActor,
+    action: "project.member.access_granted",
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "user",
     subjectId: userId,
     projectSlug: input.projectSlug,
-    details: { email, role: "viewer" },
+    details: {
+      email,
+      role: "viewer",
+    },
   });
-  return { toast: `Invite sent to ${email} · joins as Viewer`, userId };
+  return {
+    toast: provisionedProvider
+      ? `Access granted to ${email} as Viewer · sign in with ${provisionedProvider} using this email`
+      : `Access granted to ${email} as Viewer · sign in with the existing account`,
+    userId,
+  };
 }
 
 export async function removeMember(
@@ -398,7 +547,7 @@ export async function removeMember(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName, authoritySource } = requireProjectAdmin(
     ctx,
     input.projectSlug,
     actor,
@@ -437,13 +586,31 @@ export async function removeMember(
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+  const releasedTaskKeys = await releaseProjectOwnerships(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      targetUserId: input.targetUserId,
+      targetName: displayName,
+      reason: "member_removed",
+    },
+    withProjectAuditAuthority(actor, authoritySource),
+    {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    },
+  );
+  db.prepare(
+    `UPDATE notifications
+     SET read_at = COALESCE(read_at, ?)
+     WHERE user_id = ? AND project_slug = ?`,
+  ).run(new Date().toISOString(), input.targetUserId, input.projectSlug);
   recordAudit(db, {
     action: "project.member.removed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: withProjectAuditAuthority(actor, authoritySource),
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
-    details: {},
+    details: { releasedTaskKeys },
   });
   return {
     toast: `${displayName} removed from ${projectName}`,
@@ -467,7 +634,7 @@ export async function setRepoOverride(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.repo_override.changed",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: settingsAuditActor(ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
@@ -494,7 +661,7 @@ export async function setProjectArchived(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; archived: boolean }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName, authoritySource } = requireProjectAdmin(
     ctx,
     input.projectSlug,
     actor,
@@ -505,18 +672,22 @@ export async function setProjectArchived(
     parsed.frontmatter.archived = input.archived;
   });
 
+  const stoppedRuns = input.archived
+    ? stopProjectRuns(db, input.projectSlug)
+    : 0;
+
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: input.archived ? "project.archived" : "project.unarchived",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: withProjectAuditAuthority(actor, authoritySource),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
-    details: { name: projectName },
+    details: { name: projectName, stoppedRuns },
   });
   return {
     toast: input.archived
-      ? `Project "${projectName}" archived — find it under Archived on Home`
+      ? `Project "${projectName}" archived read-only — ${stoppedRuns} active ${stoppedRuns === 1 ? "run" : "runs"} stopped`
       : `Project "${projectName}" restored`,
     archived: input.archived,
   };
@@ -525,8 +696,9 @@ export async function setProjectArchived(
 /**
  * Delete project (spec §5.6): destructive, typed-name confirmation
  * required, admin-only. Removes the project directory (project.md + every
- * task file), then a full rescan prunes all derived rows. Audit logs keep
- * the trail (audit_events are app-owned, not store-derived).
+ * task file), then purges every project-keyed operational row and runtime log.
+ * The deletion fact remains in the organization audit, but is intentionally
+ * not scoped to the deleted slug so a future project cannot inherit it.
  */
 export async function deleteProject(
   db: Database.Database,
@@ -534,7 +706,7 @@ export async function deleteProject(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName, authoritySource } = requireProjectAdmin(
     ctx,
     input.projectSlug,
     actor,
@@ -549,20 +721,14 @@ export async function deleteProject(
   rebuildAll(db, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  // Notifications are app-owned (no FK cascade to projects), so a deleted
-  // project used to leave orphaned "waiting on you" rows that dead-ended on a
-  // 404 when opened (F2). Clean them up with the project.
-  db.prepare(`DELETE FROM notifications WHERE project_slug = ?`).run(
-    input.projectSlug,
-  );
+  purgeProjectOperationalState(db, input.projectSlug, ctx.dataRoot);
 
   recordAudit(db, {
     action: "project.deleted",
-    actor: { userId: actor.userId, label: actor.label },
+    actor: withProjectAuditAuthority(actor, authoritySource),
     subjectKind: "project",
     subjectId: input.projectSlug,
-    projectSlug: input.projectSlug,
-    details: { name: projectName },
+    details: { name: projectName, formerProjectSlug: input.projectSlug },
   });
   return { toast: `Project "${projectName}" deleted` };
 }

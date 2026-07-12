@@ -10,6 +10,7 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import type { HomePrefs } from "~/server/prefs/user-prefs.server";
 import { formatRelative } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -165,6 +166,7 @@ function ProjectCard({
   onStar: (slug: string) => void;
   showDesc?: boolean;
 }) {
+  const timeZone = useViewerTimeZone();
   return (
     <article className="pj-card" data-screen-label={"Project card — " + p.name}>
       <Link
@@ -196,7 +198,10 @@ function ProjectCard({
         <div className="pj-foot">
           <MemberStack members={p.members} />
           <span className="upd">
-            updated {p.updatedAt ? formatRelative(p.updatedAt) : "—"}
+            updated{" "}
+            {p.updatedAt
+              ? formatRelative(p.updatedAt, new Date(), timeZone)
+              : "—"}
           </span>
         </div>
       </Link>

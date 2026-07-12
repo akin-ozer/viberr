@@ -16,7 +16,7 @@ import {
   addStage,
   deleteProject,
   setProjectArchived,
-  inviteMember,
+  grantMemberAccess,
   removeMember,
   removeStage,
   renameStage,
@@ -26,7 +26,12 @@ import {
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
 import { SettingsPage } from "~/features/project-settings/settings-page";
-import { type ProjectRole, roleCan } from "~/shared/rbac";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
+import {
+  authorizeProjectAction,
+  type ProjectRole,
+} from "~/shared/rbac";
+import { withProjectAuditAuthority } from "~/server/audit/audit-recorder.server";
 
 /** This member's project role (null when not a member) — for ACTION_ROLES guards. */
 function myRoleFor(
@@ -67,12 +72,19 @@ export async function action({ request, params }: Route.ActionArgs) {
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const actor = {
+    userId: ctx.user.id,
+    label: ctx.user.email,
+    orgRole: ctx.user.role,
+  };
   const intent = String(formData.get("intent") ?? "");
   const field = (name: string) => String(formData.get(name) ?? "");
   const slug = params.slug;
 
   try {
+    const restoring =
+      intent === "archive-project" && field("archived") === "false";
+    if (!restoring) assertProjectActive(db, slug);
     switch (intent) {
       case "save-project": {
         const result = await updateProjectIdentity(
@@ -122,8 +134,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      case "invite": {
-        const result = await inviteMember(
+      case "grant-access": {
+        const result = await grantMemberAccess(
           db,
           { projectSlug: slug, name: field("name"), email: field("email") },
           actor,
@@ -149,26 +161,48 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "grant-scope": {
         // Consult the single ACTION_ROLES source: `grant-github-scope`
         // (maintainer+), same as the GitHub view's action (pass-4 XS-10).
-        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
+        const authority = authorizeProjectAction(
+          myRoleFor(db, slug, ctx.user.id),
+          ctx.user.role,
+          "grant-github-scope",
+        );
+        if (!authority.allowed) {
           return data(
             { ok: false as const, error: "Your role can't re-check the credential." },
             { status: 403 },
           );
         }
-        return await runGrantScope(db, slug, actor);
+        return await runGrantScope(
+          db,
+          slug,
+          withProjectAuditAuthority(actor, authority.source),
+        );
       }
       case "set-credential":
       case "clear-credential": {
         // Attach/rotate + remove the credential — `grant-github-scope` tier.
-        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
+        const authority = authorizeProjectAction(
+          myRoleFor(db, slug, ctx.user.id),
+          ctx.user.role,
+          "grant-github-scope",
+        );
+        if (!authority.allowed) {
           return data(
             { ok: false as const, error: "Your role can't change the credential." },
             { status: 403 },
           );
         }
         return intent === "set-credential"
-          ? runSetCredential(db, slug, actor)
-          : runClearCredential(db, slug, actor);
+          ? runSetCredential(
+              db,
+              slug,
+              withProjectAuditAuthority(actor, authority.source),
+            )
+          : runClearCredential(
+              db,
+              slug,
+              withProjectAuditAuthority(actor, authority.source),
+            );
       }
       case "archive-project": {
         const result = await setProjectArchived(

@@ -26,8 +26,8 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     const now = new Date().toISOString();
     store.db
       .prepare(
-        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
-         VALUES ('mcp_x', 'github-mcp', 'HTTP', 'https://mcp.example/sse', NULL, ?, ?)`,
+        `INSERT INTO org_mcp_servers (id, name, transport, target, auth_json, created_at, updated_at)
+         VALUES ('mcp_x', 'github-mcp', 'HTTP', 'https://mcp.example/sse', '{}', ?, ?)`,
       )
       .run(now, now);
 

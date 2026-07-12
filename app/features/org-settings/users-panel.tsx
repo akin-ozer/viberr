@@ -337,7 +337,7 @@ function EditUserModal({
   const save = () => {
     if (!canSave) return;
     if (isYou && role !== "admin") {
-      push("You can't demote yourself");
+      push({ kind: "error", text: "You can't demote yourself" });
       return;
     }
     setErr(null);
@@ -527,7 +527,7 @@ export function UsersPanel({
 
   const setRole = (u: OrgUserView, role: "admin" | "member") => {
     if (u.id === meId && role !== "admin") {
-      push("You can't demote yourself");
+      push({ kind: "error", text: "You can't demote yourself" });
       return;
     }
     if (u.role === role) return;
@@ -682,7 +682,10 @@ export function UsersPanel({
                   aria-label={"Disable " + u.name}
                   onClick={() => {
                     if (you) {
-                      push("You can't disable your own account");
+                      push({
+                        kind: "error",
+                        text: "You can't disable your own account",
+                      });
                       return;
                     }
                     setDisabling(u);
@@ -697,7 +700,10 @@ export function UsersPanel({
                 aria-label={"Remove " + u.name}
                 onClick={() => {
                   if (you) {
-                    push("You can't remove your own account");
+                    push({
+                      kind: "error",
+                      text: "You can't remove your own account",
+                    });
                     return;
                   }
                   setConfirm({ kind: "user", item: u });

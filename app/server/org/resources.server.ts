@@ -27,7 +27,18 @@ import {
 } from "~/server/files/file-store-root.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
+import { parseCommandLine } from "~/server/mcp/command-line.server";
+import {
+  isOrgSecretRef,
+  resolveOrgSecretRef,
+} from "~/server/secrets/org-secret-store.server";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
+import {
+  findAgentResourceUsages,
+  listAgentResourceUsages,
+  resourceUsageLabels,
+  type AgentResourceKind,
+} from "./resource-dependencies.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -45,11 +56,10 @@ import { scanStoreTree, type StoreTarget } from "./store-files.server";
  * metadata under a synthetic `disk:<name>` id; editing/re-indexing it adopts
  * it into a real row, and delete removes both the folder and any row.
  *
- * MCP health is HONEST: HTTP targets get a real reachability probe (any HTTP
- * response = up); stdio targets get a real, best-effort tool-count discovery
- * (a minimal JSON-RPC initialize + tools/list over the spawned command's
- * stdio, short timeout). Tool counts are never fabricated — discovery success
- * stores the real count + up=1, failure leaves up=0 / count null.
+ * MCP health is HONEST: both HTTP and stdio targets must complete a real
+ * JSON-RPC initialize + tools/list handshake. Auth references are resolved
+ * only for that execution boundary and plaintext never enters a row, loader,
+ * audit record, toast, or error.
  */
 
 function conflict(userMessage: string): AppError {
@@ -59,6 +69,27 @@ function conflict(userMessage: string): AppError {
     userMessage,
     kind: "user",
   });
+}
+
+/** D9: never strand a profile/deployment by mutating a referenced resource. */
+function assertResourceUnused(
+  db: Database.Database,
+  kind: AgentResourceKind,
+  aliases: readonly string[],
+  resourceLabel: string,
+  operation: "rename" | "delete",
+  ctx: OrgSeedContext = {},
+): void {
+  const usedBy = findAgentResourceUsages(
+    listAgentResourceUsages(db, ctx),
+    kind,
+    aliases,
+  );
+  if (usedBy.length === 0) return;
+  const labels = resourceUsageLabels(usedBy);
+  throw conflict(
+    `Can't ${operation} ${resourceLabel} while it is used by: ${labels.join(", ")}. Detach or edit those profiles first.`,
+  );
 }
 
 export interface OrgSeedContext {
@@ -248,6 +279,14 @@ export function saveKnowledgeBase(
   }
 
   if (oldDir && dir !== oldDir) {
+    assertResourceUnused(
+      db,
+      "kb",
+      [input.id ?? "", oldDir, existing?.name ?? ""],
+      `knowledge base ${existing?.name ?? oldDir}`,
+      "rename",
+      ctx,
+    );
     // Rename ⇒ real folder move (spec §7.3); collision refused.
     const clash = db
       .prepare(`SELECT id FROM org_knowledge_bases WHERE dir = ? AND id != ?`)
@@ -315,6 +354,14 @@ export function deleteKnowledgeBase(
 ): { toast: string } {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
+  assertResourceUnused(
+    db,
+    "kb",
+    [kb.id, kb.dir, kb.name],
+    `knowledge base ${kb.name}`,
+    "delete",
+    ctx,
+  );
   rmSync(kbDirPath(kb.dir, ctx.dataRoot), { recursive: true, force: true });
   // Key on the folder (dir is UNIQUE) so a disk-only synthetic id also clears
   // any metadata row that happens to exist.
@@ -375,11 +422,14 @@ export interface McpView {
   name: string;
   transport: "HTTP" | "stdio";
   target: string;
-  cred: string | null;
+  /** HTTP header name / stdio env var name -> secret reference. */
+  auth: Record<string, string>;
   tools: number | null;
-  /** true up · false down · null never probed / not probeable (stdio). */
+  /** true up · false down · null never probed. */
   up: boolean | null;
   lastCheckedAt: string | null;
+  /** Codex cannot express arbitrary HTTP headers; Claude can. */
+  codexSupported: boolean;
 }
 
 interface McpRow {
@@ -387,10 +437,24 @@ interface McpRow {
   name: string;
   transport: string;
   target: string;
-  cred_ref: string | null;
+  auth_json: string;
   tools_count: number | null;
   up: number | null;
   last_checked_at: string | null;
+}
+
+function parseAuthJson(raw: string): Record<string, string> {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
 }
 
 function mapMcp(row: McpRow): McpView {
@@ -399,14 +463,16 @@ function mapMcp(row: McpRow): McpView {
     name: row.name,
     transport: row.transport === "stdio" ? "stdio" : "HTTP",
     target: row.target,
-    cred: row.cred_ref,
+    auth: parseAuthJson(row.auth_json),
     tools: row.tools_count,
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
+    codexSupported:
+      row.transport === "stdio" || Object.keys(parseAuthJson(row.auth_json)).length === 0,
   };
 }
 
-const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
+const MCP_SQL = `SELECT id, name, transport, target, auth_json, tools_count,
                         up, last_checked_at FROM org_mcp_servers`;
 
 export function listMcpServers(db: Database.Database): McpView[] {
@@ -427,9 +493,10 @@ export function getMcpServer(
 }
 
 export type McpProbeOutcome =
-  | { kind: "up"; latencyMs: number }
+  | { kind: "up"; latencyMs: number; tools: number }
   | { kind: "down"; reason: string }
   | { kind: "skipped" };
+type HttpDiscovery = Exclude<McpProbeOutcome, { kind: "skipped" }>;
 
 /**
  * Minimal child-process surface the stdio discovery needs — real
@@ -443,18 +510,25 @@ export interface McpChild {
   kill(signal?: string): void;
 }
 
-export type McpSpawn = (command: string, args: string[]) => McpChild;
+export type McpSpawn = (
+  command: string,
+  args: string[],
+  options?: { env?: Record<string, string> },
+) => McpChild;
 
 export interface McpProbeOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   /** Injected spawn for stdio tool-count discovery (tests supply a fake). */
   spawnImpl?: McpSpawn;
+  /** File-native agent/project store used by mutation dependency guards. */
+  dataRoot?: string;
 }
 
-const defaultSpawn: McpSpawn = (command, args) =>
+const defaultSpawn: McpSpawn = (command, args, options) =>
   spawn(command, args, {
     stdio: ["pipe", "pipe", "ignore"],
+    env: options?.env,
   }) as unknown as McpChild;
 
 export type StdioDiscovery =
@@ -471,9 +545,14 @@ export type StdioDiscovery =
  */
 export async function discoverStdioMcpTools(
   command: string,
-  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+  options: {
+    spawnImpl?: McpSpawn;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+  } = {},
 ): Promise<StdioDiscovery> {
-  const parts = command.trim().split(/\s+/).filter(Boolean);
+  const parts = parseCommandLine(command);
+  if (!parts) return { kind: "down", reason: "invalid command quoting" };
   if (parts.length === 0) return { kind: "down", reason: "no command" };
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
   const timeoutMs = options.timeoutMs ?? 5000;
@@ -482,7 +561,9 @@ export async function discoverStdioMcpTools(
   return new Promise<StdioDiscovery>((resolve) => {
     let child: McpChild;
     try {
-      child = spawnImpl(parts[0]!, parts.slice(1));
+      child = spawnImpl(parts[0]!, parts.slice(1), {
+        env: { ...process.env, ...(options.env ?? {}) } as Record<string, string>,
+      });
     } catch {
       resolve({ kind: "down", reason: "command not found" });
       return;
@@ -567,17 +648,53 @@ export async function discoverStdioMcpTools(
   });
 }
 
+const MCP_PROTOCOL_VERSION = "2025-11-25";
+
+type RpcMessage = {
+  id?: unknown;
+  result?: { tools?: unknown; protocolVersion?: unknown };
+  error?: unknown;
+};
+
+async function responseMessage(response: Response): Promise<RpcMessage | null> {
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+  const candidates = contentType.includes("text/event-stream")
+    ? text
+        .split(/\r?\n\r?\n/)
+        .flatMap((event) =>
+          event
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim()),
+        )
+    : [text.trim()];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const value = JSON.parse(candidate) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value as RpcMessage;
+      }
+    } catch {
+      // Try the next SSE event. No raw response content enters the result.
+    }
+  }
+  return null;
+}
+
 /**
- * Honest reachability probe: HTTP targets only; ANY HTTP response counts
- * as reachable (the server exists — tool discovery is a real MCP handshake
- * we don't fake). stdio targets are spawned per run → skipped.
+ * Real Streamable HTTP MCP discovery: initialize, initialized notification,
+ * then tools/list. A web page, 401, 404 or arbitrary JSON is down—not healthy.
  */
-export async function probeMcpTarget(
-  transport: "HTTP" | "stdio",
+export async function discoverHttpMcpTools(
   target: string,
-  options: McpProbeOptions = {},
-): Promise<McpProbeOutcome> {
-  if (transport !== "HTTP") return { kind: "skipped" };
+  options: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<HttpDiscovery> {
   let url: URL;
   try {
     url = new URL(target);
@@ -587,24 +704,147 @@ export async function probeMcpTarget(
   } catch {
     return { kind: "down", reason: "endpoint is not a valid URL" };
   }
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const started = Date.now();
-  try {
-    const res = await fetchImpl(url.toString(), {
-      method: "GET",
-      headers: { accept: "text/event-stream, application/json" },
-      signal: AbortSignal.timeout(options.timeoutMs ?? 2500),
+  const request = async (
+    payload: unknown,
+    sessionId?: string | null,
+    protocolVersion?: string | null,
+  ): Promise<Response> =>
+    fetchImpl(url.toString(), {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        ...(options.headers ?? {}),
+        ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+        ...(protocolVersion ? { "mcp-protocol-version": protocolVersion } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 5000),
     });
-    // Headers arrived → the endpoint exists; don't hold an SSE body open.
-    res.body?.cancel().catch(() => {});
-    return { kind: "up", latencyMs: Date.now() - started };
+
+  try {
+    const initialized = await request({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "viberr", version: "1" },
+      },
+    });
+    if (!initialized.ok) {
+      return { kind: "down", reason: `initialize returned HTTP ${initialized.status}` };
+    }
+    const initMessage = await responseMessage(initialized);
+    if (!initMessage?.result || initMessage.error) {
+      return { kind: "down", reason: "initialize rejected" };
+    }
+    const sessionId = initialized.headers.get("mcp-session-id");
+    const protocolVersion =
+      typeof initMessage.result.protocolVersion === "string"
+        ? initMessage.result.protocolVersion
+        : MCP_PROTOCOL_VERSION;
+    const notice = await request(
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      sessionId,
+      protocolVersion,
+    );
+    // Notifications commonly return 202/204 and no JSON body.
+    if (!notice.ok) {
+      return { kind: "down", reason: `initialized notification returned HTTP ${notice.status}` };
+    }
+    await notice.body?.cancel().catch(() => {});
+    const listed = await request(
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      sessionId,
+      protocolVersion,
+    );
+    if (!listed.ok) {
+      return { kind: "down", reason: `tools/list returned HTTP ${listed.status}` };
+    }
+    const listMessage = await responseMessage(listed);
+    const tools = listMessage?.result?.tools;
+    if (!Array.isArray(tools) || listMessage?.error) {
+      return { kind: "down", reason: "tools/list returned no tools array" };
+    }
+    return {
+      kind: "up",
+      latencyMs: Date.now() - started,
+      tools: tools.length,
+    };
   } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "TimeoutError"
-        ? "connection timed out"
-        : "connection refused";
-    return { kind: "down", reason };
+    const name = error instanceof Error ? error.name : "";
+    return {
+      kind: "down",
+      reason: name === "TimeoutError" ? "connection timed out" : "connection failed",
+    };
   }
+}
+
+/** Backward-named public probe now performs a full MCP handshake for HTTP. */
+export async function probeMcpTarget(
+  transport: "HTTP" | "stdio",
+  target: string,
+  options: McpProbeOptions = {},
+): Promise<McpProbeOutcome> {
+  if (transport !== "HTTP") return { kind: "skipped" };
+  return discoverHttpMcpTools(target, options);
+}
+
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const RESERVED_HTTP_HEADERS = new Set([
+  "accept",
+  "content-type",
+  "content-length",
+  "host",
+  "mcp-session-id",
+]);
+
+function validateMcpAuth(
+  db: Database.Database,
+  transport: "HTTP" | "stdio",
+  raw: Record<string, string>,
+): Record<string, string> {
+  const auth: Record<string, string> = {};
+  for (const [rawKey, rawRef] of Object.entries(raw)) {
+    const key = rawKey.trim();
+    const ref = rawRef.trim();
+    const validName =
+      transport === "HTTP"
+        ? HEADER_NAME.test(key) && !RESERVED_HTTP_HEADERS.has(key.toLowerCase())
+        : ENV_NAME.test(key);
+    if (!validName) {
+      throw AppError.validation(
+        transport === "HTTP"
+          ? `Invalid or reserved MCP HTTP header name: ${key || "(empty)"}.`
+          : `Invalid MCP environment variable name: ${key || "(empty)"}.`,
+      );
+    }
+    if (!isOrgSecretRef(ref)) {
+      throw AppError.validation(
+        `MCP authentication values must use secret://org/<name> references.`,
+      );
+    }
+    // Validate existence/decryptability now, but never retain or return value.
+    void resolveOrgSecretRef(db, ref);
+    auth[key] = ref;
+  }
+  return auth;
+}
+
+/** Resolve auth only for an explicit connection test or specialist spawn. */
+export function resolveMcpAuth(
+  db: Database.Database,
+  auth: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(auth).map(([name, ref]) => [name, resolveOrgSecretRef(db, ref)]),
+  );
 }
 
 export async function saveMcpServer(
@@ -614,7 +854,7 @@ export async function saveMcpServer(
     name: string;
     transport: string;
     target: string;
-    cred: string;
+    auth: Record<string, string>;
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
@@ -622,11 +862,25 @@ export async function saveMcpServer(
   const name = slugify(input.name);
   const target = input.target.trim();
   const transport = input.transport === "stdio" ? "stdio" : "HTTP";
-  const cred = input.cred.trim() || null;
+  const auth = validateMcpAuth(db, transport, input.auth);
+  const resolvedAuth = resolveMcpAuth(db, auth);
   if (name.length < 2) throw AppError.validation("Give the server a name.");
   if (target.length < 4) {
     throw AppError.validation(
       transport === "stdio" ? "Enter the command." : "Enter the endpoint.",
+    );
+  }
+
+  const existing = input.id ? getMcpServer(db, input.id) : null;
+  if (input.id && !existing) throw AppError.notFound("No such MCP server.");
+  if (existing && existing.name !== name) {
+    assertResourceUnused(
+      db,
+      "mcp",
+      [existing.id, existing.name],
+      `MCP server ${existing.name}`,
+      "rename",
+      options,
     );
   }
 
@@ -644,7 +898,10 @@ export async function saveMcpServer(
   let tools: number | null; // value to store; HTTP keeps the existing column
   let toast: string;
   if (transport === "stdio") {
-    const disc = await discoverStdioMcpTools(target, options);
+    const disc = await discoverStdioMcpTools(target, {
+      ...options,
+      env: resolvedAuth,
+    });
     checkedAt = now;
     if (disc.kind === "up") {
       up = 1;
@@ -656,38 +913,51 @@ export async function saveMcpServer(
       toast = `${name} saved — command didn't respond (${disc.reason}); check it`;
     }
   } else {
-    const probe = await probeMcpTarget(transport, target, options);
+    const probe = await discoverHttpMcpTools(target, {
+      ...options,
+      headers: resolvedAuth,
+    });
     up = probe.kind === "up" ? 1 : 0;
     checkedAt = now;
-    tools = null;
+    tools = probe.kind === "up" ? probe.tools : null;
     toast =
       probe.kind === "up"
-        ? `${name} saved — endpoint reachable (${(probe as { latencyMs: number }).latencyMs}ms)`
-        : `${name} saved — endpoint unreachable, check the target`;
+        ? `${name} saved — ${probe.tools} tool${probe.tools === 1 ? "" : "s"} discovered · ${probe.latencyMs}ms`
+        : `${name} saved — handshake failed (${probe.reason}); check it`;
+  }
+
+  // The probe above yields to the event loop. Re-check immediately before the
+  // row mutation so a project/profile that began referencing the old name
+  // during that handshake cannot be stranded by the rename.
+  if (existing && existing.name !== name) {
+    assertResourceUnused(
+      db,
+      "mcp",
+      [existing.id, existing.name],
+      `MCP server ${existing.name}`,
+      "rename",
+      options,
+    );
   }
 
   let id = input.id ?? null;
   if (id) {
-    const existing = getMcpServer(db, id);
-    if (!existing) throw AppError.notFound("No such MCP server.");
-    // stdio updates the discovered count; HTTP has no local discovery, so it
-    // CLEARS the count (leaving it would keep a stale stdio tool count showing
-    // after a server is edited from stdio → HTTP).
-    if (transport === "stdio") {
-      db.prepare(
-        `UPDATE org_mcp_servers
-         SET name = ?, transport = ?, target = ?, cred_ref = ?,
-             tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
-    } else {
-      db.prepare(
-        `UPDATE org_mcp_servers
-         SET name = ?, transport = ?, target = ?, cred_ref = ?,
-             tools_count = NULL, up = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(name, transport, target, cred, up, checkedAt, now, id);
-    }
+    db.prepare(
+      `UPDATE org_mcp_servers
+       SET name = ?, transport = ?, target = ?, auth_json = ?,
+           tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      name,
+      transport,
+      target,
+      JSON.stringify(auth),
+      tools,
+      up,
+      checkedAt,
+      now,
+      id,
+    );
     recordAudit(db, {
       action: "org.mcp.updated",
       actor,
@@ -699,10 +969,21 @@ export async function saveMcpServer(
     id = newId("mcp");
     db.prepare(
       `INSERT INTO org_mcp_servers
-         (id, name, transport, target, cred_ref, tools_count, up,
+         (id, name, transport, target, auth_json, tools_count, up,
           last_checked_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, name, transport, target, cred, tools, up, checkedAt, now, now);
+    ).run(
+      id,
+      name,
+      transport,
+      target,
+      JSON.stringify(auth),
+      tools,
+      up,
+      checkedAt,
+      now,
+      now,
+    );
     recordAudit(db, {
       action: "org.mcp.added",
       actor,
@@ -724,10 +1005,14 @@ export async function testMcpServer(
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
   const now = new Date().toISOString();
+  const resolvedAuth = resolveMcpAuth(db, existing.auth);
 
-  // stdio → real tool-count discovery; HTTP → reachability probe.
+  // Both transports perform initialize + tools/list with resolved auth.
   if (existing.transport === "stdio") {
-    const disc = await discoverStdioMcpTools(existing.target, options);
+    const disc = await discoverStdioMcpTools(existing.target, {
+      ...options,
+      env: resolvedAuth,
+    });
     if (disc.kind === "up") {
       db.prepare(
         `UPDATE org_mcp_servers
@@ -749,17 +1034,25 @@ export async function testMcpServer(
     return { mcp: fresh, toast: `${fresh.name} unreachable — ${disc.reason}` };
   }
 
-  const probe = await probeMcpTarget(existing.transport, existing.target, options);
+  const probe = await discoverHttpMcpTools(existing.target, {
+    ...options,
+    headers: resolvedAuth,
+  });
   db.prepare(
-    `UPDATE org_mcp_servers SET up = ?, last_checked_at = ?, updated_at = ?
+    `UPDATE org_mcp_servers
+     SET up = ?, tools_count = ?, last_checked_at = ?, updated_at = ?
      WHERE id = ?`,
-  ).run(probe.kind === "up" ? 1 : 0, now, now, id);
+  ).run(
+    probe.kind === "up" ? 1 : 0,
+    probe.kind === "up" ? probe.tools : null,
+    now,
+    now,
+    id,
+  );
   const fresh = getMcpServer(db, id)!;
   const toast =
     probe.kind === "up"
-      ? fresh.tools !== null
-        ? `${fresh.name} healthy — ${fresh.tools} tools · ${probe.latencyMs}ms`
-        : `${fresh.name} reachable — ${probe.latencyMs}ms`
+      ? `${fresh.name} healthy — ${probe.tools} tool${probe.tools === 1 ? "" : "s"} · ${probe.latencyMs}ms`
       : probe.kind === "down"
         ? `${fresh.name} unreachable — ${probe.reason}`
         : `${fresh.name} — probe skipped`;
@@ -770,9 +1063,18 @@ export function deleteMcpServer(
   db: Database.Database,
   id: string,
   actor: AuditActor,
+  ctx: OrgSeedContext = {},
 ): { toast: string } {
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
+  assertResourceUnused(
+    db,
+    "mcp",
+    [existing.id, existing.name],
+    `MCP server ${existing.name}`,
+    "delete",
+    ctx,
+  );
   db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run(id);
   recordAudit(db, {
     action: "org.mcp.removed",
@@ -959,6 +1261,14 @@ export function saveSkill(
   }
 
   if (oldName && name !== oldName) {
+    assertResourceUnused(
+      db,
+      "skill",
+      [input.id ?? "", oldName],
+      `skill ${oldName}`,
+      "rename",
+      ctx,
+    );
     const clash = db
       .prepare(`SELECT id FROM org_skills WHERE name = ? AND id != ?`)
       .get(name, existing?.id ?? "");
@@ -1026,6 +1336,14 @@ export function deleteSkill(
 ): { toast: string } {
   const skill = getSkill(db, id, ctx);
   if (!skill) throw AppError.notFound("No such skill.");
+  assertResourceUnused(
+    db,
+    "skill",
+    [skill.id, skill.name],
+    `skill ${skill.name}`,
+    "delete",
+    ctx,
+  );
   rmSync(skillDirPath(skill.name, ctx.dataRoot), {
     recursive: true,
     force: true,

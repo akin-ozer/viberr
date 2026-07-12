@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  BACKEND_HEALTH_SIGNAL_TTL_MS,
   codexSpawnEnv,
   createAdapters,
+  getBackendHealth,
   isBackendAvailable,
+  recordBackendRunResult,
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
@@ -59,6 +62,62 @@ describe("runtime-registry — detection & fallback", () => {
     expect(isBackendAvailable("claude")).toBe(false);
     process.env.ANTHROPIC_API_KEY = "sk-ant-test"; // set AFTER first probe
     expect(isBackendAvailable("claude")).toBe(false); // still cached false
+  });
+
+  it("separates configured presence from recent verified/degraded run evidence", () => {
+    setBackendAvailability("claude", true);
+    const start = new Date("2026-07-13T08:00:00.000Z");
+
+    expect(getBackendHealth("claude", start)).toMatchObject({
+      status: "unknown",
+      configured: true,
+      verified: false,
+      degraded: false,
+      unknown: true,
+      lastCheckedAt: null,
+    });
+
+    recordBackendRunResult("claude", "success", start);
+    expect(getBackendHealth("claude", new Date(start.getTime() + 1))).toMatchObject({
+      status: "verified",
+      configured: true,
+      verified: true,
+      degraded: false,
+      unknown: false,
+      lastSuccessAt: start.toISOString(),
+    });
+
+    const failedAt = new Date(start.getTime() + 1_000);
+    recordBackendRunResult("claude", "failure", failedAt);
+    expect(getBackendHealth("claude", failedAt)).toMatchObject({
+      status: "degraded",
+      verified: false,
+      degraded: true,
+      lastCheckedAt: failedAt.toISOString(),
+      lastSuccessAt: start.toISOString(),
+      lastFailureAt: failedAt.toISOString(),
+    });
+
+    expect(
+      getBackendHealth(
+        "claude",
+        new Date(failedAt.getTime() + BACKEND_HEALTH_SIGNAL_TTL_MS + 1),
+      ),
+    ).toMatchObject({ status: "unknown", unknown: true, degraded: false });
+  });
+
+  it("reports absent configuration as unconfigured even if an old run signal exists", () => {
+    const at = new Date("2026-07-13T08:00:00.000Z");
+    recordBackendRunResult("codex", "success", at);
+    setBackendAvailability("codex", false);
+    expect(getBackendHealth("codex", at)).toMatchObject({
+      status: "unconfigured",
+      configured: false,
+      verified: false,
+      degraded: false,
+      unknown: false,
+      lastSuccessAt: at.toISOString(),
+    });
   });
 
   it("selectAdapter returns the real adapter when available", () => {

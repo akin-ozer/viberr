@@ -92,7 +92,7 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
         if (typeof f.costUsd === "number") totalCostUsd = f.costUsd;
 
         // 1. Raw truth (append-only .jsonl).
-        appendRawLine(effectiveBackend, spec.runId, line.raw);
+        appendRawLine(effectiveBackend, spec.runId, line.raw, spec.dataRoot);
 
         // 2. DB projection row.
         const seq = nextSeq(db, spec.runId);

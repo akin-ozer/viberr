@@ -12,7 +12,9 @@ import { getProject } from "./board-query.server";
  * engagement instances derived from task assignment records (operator /
  * specialist / reviewers in task_projections — PROFILE-ID keyed, never the
  * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so
- * an engagement with a live run is honestly marked `running`.
+ * an engagement with a real live run is honestly marked `running`. Simulated
+ * seed/demo rows remain inspectable on task logs but never masquerade as an
+ * active deployment.
  *
  * Status vocabulary is the mock's, derived from real waiting state
  * (contracts §2.4):
@@ -79,7 +81,7 @@ export function listAgentDeployments(
     .prepare(
       `SELECT task_key, kind, thread_id
          FROM agent_runs
-        WHERE project_slug = ? AND state = 'running'`,
+        WHERE project_slug = ? AND state = 'running' AND simulated = 0`,
     )
     .all(projectSlug) as RunningRunRow[];
   const running = new Map<string, Set<string>>();

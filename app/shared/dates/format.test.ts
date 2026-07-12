@@ -68,3 +68,18 @@ describe("formatRelative (home cards)", () => {
     expect(formatRelative(at(2026, 2, 30, 12, 0), NOW)).toBe("Mar 30");
   });
 });
+
+describe("explicit IANA time zones", () => {
+  const instant = "2026-07-12T22:30:00.000Z";
+  const now = new Date("2026-07-13T00:00:00.000Z");
+
+  it("keeps clock and calendar buckets deterministic across server/browser zones", () => {
+    expect(formatClock(instant, "UTC")).toBe("22:30");
+    expect(formatDayBucket(instant, now, "UTC")).toBe("Yesterday");
+    expect(formatDayTime(instant, now, "UTC")).toBe("Yesterday 22:30");
+
+    expect(formatClock(instant, "Europe/Istanbul")).toBe("1:30");
+    expect(formatDayBucket(instant, now, "Europe/Istanbul")).toBe("Today");
+    expect(formatDayTime(instant, now, "Europe/Istanbul")).toBe("1:30");
+  });
+});

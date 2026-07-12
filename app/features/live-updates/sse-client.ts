@@ -31,12 +31,24 @@ export interface SseClientOptions {
   maxDelayMs?: number;
   /** Jitter source, [0,1). */
   random?: () => number;
+  /** Connection lifecycle for truthful shell status. */
+  onStatus?: (status: SseConnectionStatus) => void;
 }
+
+export type SseConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "paused"
+  | "closed";
 
 export interface SseClient {
   close(): void;
+  /** Drop any backoff and establish a fresh stream now (e.g. browser online). */
+  reconnect(): void;
   /** Introspection (tests/devtools). */
   readonly lastEventId: string | null;
+  readonly status: SseConnectionStatus;
 }
 
 export function createSseClient(options: SseClientOptions): SseClient {
@@ -53,6 +65,14 @@ export function createSseClient(options: SseClientOptions): SseClient {
   let attempts = 0;
   let lastEventId: string | null = null;
   let closed = false;
+  let status: SseConnectionStatus = "connecting";
+
+  const setStatus = (next: SseConnectionStatus) => {
+    if (status === next) return;
+    status = next;
+    options.onStatus?.(next);
+  };
+  options.onStatus?.(status);
 
   const urlWithPosition = () => {
     if (lastEventId === null) return options.url;
@@ -74,6 +94,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
   const scheduleReconnect = () => {
     if (closed || reconnectTimer !== null) return;
     if (doc && doc.visibilityState === "hidden") return; // resume reconnects
+    setStatus("reconnecting");
     // Exponential backoff with 50–150 % jitter so tab herds don't stampede.
     const exp = Math.min(maxDelayMs, baseDelayMs * 2 ** attempts);
     const delay = Math.round(exp * (0.5 + random()));
@@ -87,10 +108,12 @@ export function createSseClient(options: SseClientOptions): SseClient {
   const connect = () => {
     if (closed) return;
     teardownSource();
+    setStatus("connecting");
     const source = create(urlWithPosition());
     es = source;
     source.onopen = () => {
       attempts = 0;
+      setStatus("connected");
     };
     source.onerror = () => {
       if (es !== source) return;
@@ -111,6 +134,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
     if (doc.visibilityState === "hidden") {
       clearTimer();
       teardownSource();
+      setStatus("paused");
     } else if (!es) {
       attempts = 0;
       connect();
@@ -120,6 +144,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
   doc?.addEventListener("visibilitychange", onVisibilityChange);
   if (doc && doc.visibilityState === "hidden") {
     // Opened in a background tab — connect on first visibility instead.
+    setStatus("paused");
   } else {
     connect();
   }
@@ -129,10 +154,25 @@ export function createSseClient(options: SseClientOptions): SseClient {
       closed = true;
       clearTimer();
       teardownSource();
+      setStatus("closed");
       doc?.removeEventListener("visibilitychange", onVisibilityChange);
+    },
+    reconnect() {
+      if (closed) return;
+      clearTimer();
+      attempts = 0;
+      if (doc?.visibilityState === "hidden") {
+        teardownSource();
+        setStatus("paused");
+        return;
+      }
+      connect();
     },
     get lastEventId() {
       return lastEventId;
+    },
+    get status() {
+      return status;
     },
   };
 }

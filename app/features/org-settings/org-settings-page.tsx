@@ -38,7 +38,11 @@ export function OrgSettingsPage({
     connections: view.connections.length,
     users: view.users.length,
     resources:
-      view.kbs.length + view.mcps.length + view.skills.length + view.gagents.length,
+      view.kbs.length +
+      view.mcps.length +
+      view.secrets.length +
+      view.skills.length +
+      view.gagents.length,
   };
 
   return (
@@ -81,9 +85,11 @@ export function OrgSettingsPage({
             <ResourcesPanel
               kbs={view.kbs}
               mcps={view.mcps}
+              secrets={view.secrets}
               skills={view.skills}
               gagents={view.gagents}
               stages={view.stages}
+              resourceUsages={view.resourceUsages}
             />
           )}
         </div>

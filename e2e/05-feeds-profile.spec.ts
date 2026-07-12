@@ -6,20 +6,20 @@ import { expect, test } from "@playwright/test";
  * profile theme switch persists across a reload.
  */
 
-test("review queue shows VIB-142 with the agents after the request-edit decision", async ({
+test("review queue shows VIB-142 waiting on agents after the request-edit decision", async ({
   page,
 }) => {
   await page.goto("/projects/viberr-core/review");
 
   const waitingPanel = page.locator(".panel", {
-    hasText: "Waiting on your acceptance",
+    hasText: "Waiting on your decision",
   });
-  const agentsPanel = page.locator(".panel", { hasText: "Still with agents" });
+  const agentsPanel = page.locator(".panel", { hasText: "Waiting on agents" });
   await expect(waitingPanel).toBeVisible();
   await expect(agentsPanel).toBeVisible();
 
   // Spec 02 resolved VIB-142 with request_edit → waiting flipped to agent,
-  // so the row left "Waiting on your acceptance" and sits with the agents.
+  // so the row left "Waiting on your decision" and awaits the agent turn.
   await expect(waitingPanel.getByText("VIB-142")).toHaveCount(0);
   await expect(agentsPanel.getByText("VIB-142")).toBeVisible();
 });
@@ -63,9 +63,8 @@ test("profile theme switch persists after reload", async ({ page }) => {
   await expect
     .poll(
       async () =>
-        (await page.context().cookies()).find(
-          (c) => c.name === "viberr_theme",
-        )?.value,
+        (await page.context().cookies()).find((c) => c.name === "viberr_theme")
+          ?.value,
       { timeout: 10_000 },
     )
     .toBe("dark");

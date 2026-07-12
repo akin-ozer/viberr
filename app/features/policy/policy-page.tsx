@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
+import { ArchivedBadge } from "~/ui/archived-badge";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -45,7 +46,7 @@ function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
     if (d.ok) {
       if (d.toast) push(d.toast);
     } else if (d.error) {
-      push(d.error);
+      push({ kind: "error", text: d.error });
     }
   }, [fetcher.state, fetcher.data, push]);
 }
@@ -172,7 +173,9 @@ export function HumanAccess({
           read + comment only; the owner is the task's human reviewer and
           acceptance authority, scoped to that task); and{" "}
           <strong>admins may release any owner</strong> — recorded in the audit
-          trail.
+          trail. An <strong>organization admin</strong> may intervene with
+          audited emergency project-admin authority even without membership;
+          that override does not add every task to their personal queue.
         </span>
       </div>
     </div>
@@ -238,6 +241,10 @@ export function AgentCapability({
               <span className="cs">
                 <span className="d" style={{ background: "var(--coral-dark)" }}></span>
                 {p.actions.forbidden.length} human
+              </span>
+              <span className="cs">
+                <span className="d" style={{ background: "var(--ring)" }}></span>
+                {p.actions.off?.length ?? 0} off
               </span>
             </span>
           </button>
@@ -338,7 +345,7 @@ export function WorkflowRules({
                 aria-label={`Boundary for ${f.name} → ${o.name}`}
                 title={
                   t.locked
-                    ? "Completion is human-authorized in V1 — this boundary can't be delegated"
+                    ? "The human Review → Done path stays locked. Eligible full-autonomy operators use their separate completion capability for healthy repo-less work."
                     : undefined
                 }
               >
@@ -361,7 +368,7 @@ export function WorkflowRules({
               {t.locked && (
                 <span className="trans-lock">
                   <Icon name="lock" />
-                  locked · V1
+                  human path locked · V1
                 </span>
               )}
             </div>
@@ -377,7 +384,9 @@ export function WorkflowRules({
           exception is an operator running at <strong>full autonomy</strong> with{" "}
           <strong>Completion for human acceptance</strong> set to{" "}
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
-          close a task itself (it still refuses a failing-validation task). The
+          finalize healthy <strong>repo-less</strong> work only after every
+          assigned reviewer explicitly approves. Repository work still requires
+          a real merged PR and remains on the human merge path. The
           per-transition <strong>Human approval / Human only</strong> boundaries
           below govern <strong>human</strong> actors; an operator granted{" "}
           <em>Direct</em> stage transitions crosses them itself, so treat those
@@ -394,10 +403,13 @@ export function PolicyPage({
   data,
   projectSlug,
   myRole,
+  readOnly = false,
 }: {
   data: PolicyViewData;
   projectSlug: string;
   myRole: string | null;
+  /** Archived projects retain policy inspection and navigation only. */
+  readOnly?: boolean;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -407,7 +419,7 @@ export function PolicyPage({
   useActionToast(boundaryFetcher);
   const [matrixOpen, setMatrixOpen] = useState(false);
 
-  const canManage = myRole === "admin";
+  const canManage = myRole === "admin" && !readOnly;
   const busy =
     roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
 
@@ -438,6 +450,7 @@ export function PolicyPage({
           </div>
         </div>
         <div className="board-tools">
+          {readOnly && <ArchivedBadge />}
           {data.edited && (
             <span className="hero-file">
               <Icon name="clock" />

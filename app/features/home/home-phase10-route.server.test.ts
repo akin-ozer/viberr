@@ -127,15 +127,43 @@ describe("/resources/health (Phase 10 ops probe)", () => {
   it("returns ok + projection counts + watcher liveness, no auth required", async () => {
     const { loader } = await import("~/routes/resources.health");
     const response = (await loader()) as {
-      data: { ok: boolean; projections: { projects: number; tasks: number }; watcher: boolean };
+      data: {
+        ok: boolean;
+        projections: { projects: number; tasks: number };
+        watcher: boolean;
+        backends: Record<string, {
+          status: string;
+          configured: boolean;
+          verified: boolean;
+          degraded: boolean;
+          unknown: boolean;
+        }>;
+      };
       init?: { status?: number };
     };
     // react-router data() wrapper — unwrap tolerantly.
     const body = (response as { data?: unknown }).data ?? response;
     expect(body).toMatchObject({
       ok: true,
+      integrity: { ok: true, recoveryRequired: false },
       projections: { projects: 3, tasks: 12 },
     });
     expect(typeof (body as { watcher: boolean }).watcher).toBe("boolean");
+    expect((body as { backends: Record<string, unknown> }).backends).toMatchObject({
+      claude: {
+        status: expect.stringMatching(/^(unconfigured|unknown|verified|degraded)$/),
+        configured: expect.any(Boolean),
+        verified: expect.any(Boolean),
+        degraded: expect.any(Boolean),
+        unknown: expect.any(Boolean),
+      },
+      codex: {
+        status: expect.stringMatching(/^(unconfigured|unknown|verified|degraded)$/),
+        configured: expect.any(Boolean),
+        verified: expect.any(Boolean),
+        degraded: expect.any(Boolean),
+        unknown: expect.any(Boolean),
+      },
+    });
   });
 });

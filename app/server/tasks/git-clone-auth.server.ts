@@ -24,6 +24,13 @@ export interface GitHubClonePlan {
   dispose(): void;
 }
 
+export interface GitHubAuthPlan {
+  /** Pass only to the one server-owned git child that needs authentication. */
+  env: NodeJS.ProcessEnv;
+  /** Erases the token reference and removes the temporary askpass program. */
+  dispose(): void;
+}
+
 /** The credential-free URL that Git persists as `remote.origin.url`. */
 export function githubRepositoryUrl(repo: string): string {
   return `https://github.com/${repo}.git`;
@@ -64,6 +71,27 @@ export function createGitHubClonePlan(input: {
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubClonePlan {
   const url = githubRepositoryUrl(input.repo);
+  const auth = createGitHubAuthPlan({
+    ...(input.token ? { token: input.token } : {}),
+    ...(input.baseEnv ? { baseEnv: input.baseEnv } : {}),
+  });
+  return {
+    args: ["clone", "--depth", "1", url, input.destination],
+    env: auth.env,
+    dispose: auth.dispose,
+  };
+}
+
+/**
+ * One-command Git authentication plan shared by clone and server-owned push.
+ * The token exists only in the child environment; argv, remote URLs, helper
+ * files, logs, prompts and task records remain credential-free.
+ */
+export function createGitHubAuthPlan(input: {
+  token?: string;
+  /** Test seam; production callers inherit the server process environment. */
+  baseEnv?: NodeJS.ProcessEnv;
+}): GitHubAuthPlan {
   const env: NodeJS.ProcessEnv = {
     ...(input.baseEnv ?? process.env),
     GIT_TERMINAL_PROMPT: "0",
@@ -95,7 +123,6 @@ export function createGitHubClonePlan(input: {
 
   let disposed = false;
   return {
-    args: ["clone", "--depth", "1", url, input.destination],
     env,
     dispose() {
       if (disposed) return;

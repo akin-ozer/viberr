@@ -5,6 +5,11 @@ import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import { runMigrations } from "./migration-runner.server";
 import { reconcileSchemaFromMigrations } from "./schema-reconcile.server";
+import {
+  checkDatabaseIntegrity,
+  ProjectionIntegrityError,
+  setDatabaseIntegrityIncident,
+} from "./database-integrity.server";
 
 /**
  * Opens (creating parent directories as needed) a better-sqlite3 database
@@ -42,6 +47,18 @@ export function getDb(): Database.Database {
   if (!db || !db.open) {
     const dbPath = getProjectionDbPath();
     db = openDatabase(dbPath);
+    const integrity = checkDatabaseIntegrity(db);
+    if (!integrity.ok) {
+      const incident = new ProjectionIntegrityError(integrity);
+      setDatabaseIntegrityIncident(incident);
+      db.close();
+      logger.error("sqlite projection integrity check failed", {
+        dbPath,
+        faults: integrity.messages.slice(0, 5),
+      });
+      throw incident;
+    }
+    setDatabaseIntegrityIncident(null);
     const result = runMigrations(db);
     // Heal added-column drift from edited migrations before any projection
     // rebuild reads/writes the schema (pass-4 F-MIG1).

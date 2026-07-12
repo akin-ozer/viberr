@@ -28,7 +28,7 @@ export function buildResourceCatalog(
   dataRoot?: string,
 ): ResCatalogGroup[] {
   const skillIds = new Set<string>(dirNames(skillsRootDir(dataRoot)));
-  for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
+  for (const s of safe(() => listSkills(db, { dataRoot }))) skillIds.add(s.name);
 
   const kbIds = new Set<string>(dirNames(kbRootDir(dataRoot)));
   for (const row of safe(() =>

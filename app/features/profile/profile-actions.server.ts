@@ -39,8 +39,7 @@ export interface ProfileActor {
   label: string;
 }
 
-/** Name/Title blur-commit. Toast copy is the mock's, parameterized with
- * the first membership's project name (single-project mock literal). */
+/** Name/Title blur-commit. The profile is account-wide across memberships. */
 export function updateProfileIdentity(
   db: Database.Database,
   actor: ProfileActor,
@@ -59,10 +58,10 @@ export function updateProfileIdentity(
     subjectId: actor.userId,
     details: { fields: ["name", "title"] },
   });
-  const first = listUserMemberships(db, actor.userId)[0];
+  const memberships = listUserMemberships(db, actor.userId);
   return {
-    toast: first
-      ? `Profile saved — visible to ${first.name} members`
+    toast: memberships.length
+      ? "Profile saved — visible across your projects"
       : "Profile saved",
   };
 }
@@ -154,36 +153,4 @@ export function changeOwnPassword(
     subjectId: actor.userId,
   });
   return { toast: "Password updated — other sessions were signed out" };
-}
-
-/**
- * GitHub identity disconnect (attribution only). Connected state is
- * derived from users.idp (ruling 13); disconnecting flips sign-in back to
- * the local account — refused when no password exists (the account would
- * lock itself out). Audit-relevant per profile.md §5.
- */
-export function disconnectGithubIdentity(
-  db: Database.Database,
-  actor: ProfileActor,
-): { toast: string } {
-  const user = findUserById(db, actor.userId);
-  if (!user) throw AppError.notFound("Account not found.");
-  if (user.idp !== "github") {
-    throw AppError.validation("GitHub isn't connected on this account.");
-  }
-  if (!user.passwordHash) {
-    throw AppError.validation(
-      "Set a password first — this account signs in only through GitHub.",
-    );
-  }
-  updateUserFields(db, actor.userId, { idp: "local" });
-  recordAudit(db, {
-    action: "identity.github.disconnected",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "user",
-    subjectId: actor.userId,
-  });
-  return {
-    toast: "GitHub disconnected — audit falls back to your workspace identity",
-  };
 }

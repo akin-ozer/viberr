@@ -29,7 +29,8 @@ export async function recoverUnreactedAgentRuns(
 ): Promise<{ recovered: number }> {
   const rows = db
     .prepare(
-      `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind
+      `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind,
+              r.agent_profile_id
          FROM agent_runs r
          JOIN task_projections t
            ON t.project_slug = r.project_slug AND t.task_key = r.task_key
@@ -50,6 +51,7 @@ export async function recoverUnreactedAgentRuns(
     backend: string;
     role: string;
     kind: string;
+    agent_profile_id: string | null;
   }[];
 
   if (rows.length === 0) return { recovered: 0 };
@@ -82,8 +84,13 @@ export async function recoverUnreactedAgentRuns(
           backend: row.backend as RealBackend,
           role: row.role,
           kind: row.kind === "reviewer" ? "reviewer" : "primary",
+          ...(row.agent_profile_id ? { profileId: row.agent_profile_id } : {}),
           workdir: null,
-          agentHandle: row.role.trim().split(/[\s/&]+/)[0]?.toLowerCase() ?? row.role,
+          agentHandle:
+            row.role
+              .trim()
+              .split(/[\s/&]+/)[0]
+              ?.toLowerCase() ?? row.role,
         },
         { id: row.id, state: "finished", simulated: false },
       );
