@@ -18,13 +18,14 @@ test("taking ownership of VIB-148 triggers the operator reaction", async ({
     page.locator(".toast", { hasText: "You own VIB-148" }),
   ).toBeVisible();
 
-  // Operator scheduling stand-in: the operator agent event lands on top of
-  // the timeline (above the assign event) and flips waiting → agent.
-  const newest = page.locator(".tl-item").first();
-  await expect(newest.locator(".tl-text")).toContainText(
-    "Acceptance boundary now owned by",
-  );
-  await expect(newest.getByText("agent", { exact: true })).toBeVisible();
+  // Operator scheduling stand-in: the operator agent reaction lands on the
+  // timeline and flips waiting → agent. Assert the reaction is PRESENT (not
+  // strictly newest — the operator may post further reactions on top).
+  const reaction = page
+    .locator(".tl-item")
+    .filter({ hasText: "Acceptance boundary now owned by" });
+  await expect(reaction.first()).toBeVisible();
+  await expect(reaction.first().getByText("agent", { exact: true })).toBeVisible();
 });
 
 test("commenting with @operator routes the comment", async ({ page }) => {
@@ -38,8 +39,11 @@ test("commenting with @operator routes the comment", async ({ page }) => {
   await page.getByRole("button", { name: "Comment", exact: true }).click();
 
   // Assert on the durable routed comment card (the success toast is transient).
-  // toagent tint on the card + the @operator mention chip.
-  const routed = page.locator(".comment-card.toagent").first();
-  await expect(routed).toBeVisible();
-  await expect(routed.locator("span.mention")).toHaveText("@operator");
+  // Find THIS comment by its text (the operator's own reaction comments also
+  // appear), then assert it carries the routed tint + @operator mention chip.
+  const routed = page
+    .locator(".comment-card.toagent")
+    .filter({ hasText: "re-run the quality gate" });
+  await expect(routed.first()).toBeVisible();
+  await expect(routed.first().locator("span.mention")).toHaveText("@operator");
 });

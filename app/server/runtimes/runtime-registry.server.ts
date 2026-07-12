@@ -58,6 +58,11 @@ function getState(): RegistryState {
  * When none is present the registry falls back to the simulated backend.
  */
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Explicit override: force the deterministic simulated engine regardless of
+  // any ambient credential (e.g. a developer's `.env` re-loaded by dotenv). The
+  // e2e harness sets this so the golden-path specs run against the synchronous
+  // scripted operator instead of live, non-deterministic agent runs.
+  if (isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME)) return false;
   if (backend === "claude") {
     return !!(
       env.ANTHROPIC_API_KEY ||
