@@ -34,6 +34,7 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { replyTextForRun } from "~/server/tasks/agent-reply.server";
+import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
@@ -860,9 +861,17 @@ async function runScriptedOperatorDrive(
 
 // ------------------------------------------------------- specialist picks
 
-/** Prefer an implementation specialist eligible for the current stage. */
+/**
+ * Pick an implementation specialist ELIGIBLE for the current stage (F1 — stage
+ * eligibility is now real). Filters to specialists whose declared stages include
+ * `snap.stage` (spanAll / no-stages count as eligible), then prefers an
+ * implementation role. Returns null when no eligible specialist exists rather
+ * than silently assigning one that can't work this stage.
+ */
 function pickSpecialist(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists;
+  const specs = snap.deployedSpecialists.filter((s) =>
+    specialistEligibleForStage(s, snap.stage),
+  );
   return (
     specs.find((s) => /develop|implement/i.test(s.role) || s.id === "developer") ??
     specs.find((s) => !/review/i.test(s.role)) ??
@@ -871,10 +880,13 @@ function pickSpecialist(snap: OperatorTaskSnapshot) {
   );
 }
 
-/** Prefer a review specialist to engage before acceptance. */
+/** Prefer a stage-eligible review specialist to engage before acceptance (F1). */
 function pickReviewer(snap: OperatorTaskSnapshot) {
   const specs = snap.deployedSpecialists.filter(
-    (s) => !snap.reviewers.some((r) => r.profileId === s.id) && s.id !== snap.specialist?.profileId,
+    (s) =>
+      specialistEligibleForStage(s, snap.stage) &&
+      !snap.reviewers.some((r) => r.profileId === s.id) &&
+      s.id !== snap.specialist?.profileId,
   );
   return (
     specs.find((s) => /review/i.test(s.role) || s.id === "reviewer") ??

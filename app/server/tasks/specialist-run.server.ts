@@ -111,6 +111,11 @@ export interface ResolvedSpecialist {
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
   capabilities: CapabilityGrant[];
+  /** Stage ids this profile may work (F1 — enforced by the assign/run guards
+   *  and the operator picker). Empty when spanAll or unset. */
+  stages: string[];
+  /** When true the profile is eligible across every stage. */
+  spanAll: boolean;
 }
 
 /** First runnable backend for a profile (codex|claude), defaulting to claude
@@ -136,6 +141,8 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     kb: view.resources.kb ?? [],
     mcps: view.resources.mcps ?? [],
     capabilities: [],
+    stages: view.stages ?? [],
+    spanAll: view.spanAll ?? false,
   };
 }
 
@@ -233,6 +240,7 @@ export async function assignSpecialist(
     input.projectSlug,
     input.profileId,
   );
+  assertStageEligible(specialist, existing.parsed.frontmatter.stage);
 
   const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
   const ref: AgentRef = {
@@ -317,6 +325,7 @@ export async function assignReviewer(
     input.projectSlug,
     input.profileId,
   );
+  assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
 
   const alreadyEngaged = existing.parsed.frontmatter.reviewers.some(
     (r) => r.profileId === reviewer.profileId,
@@ -1336,6 +1345,43 @@ export interface DeployedSpecialistView {
   /** Reasoning effort (empty when unset) — carried so a comment-resume can
    *  apply the agent's current effort, not the prior run's. */
   effort: string;
+  /** Stage ids this profile is eligible to work (F1 — now enforced, not just
+   *  displayed). Empty when spanAll. */
+  stages: string[];
+  /** When true the profile is eligible across every stage. */
+  spanAll: boolean;
+}
+
+/**
+ * True when a specialist may work a task at `stageId`: it spans all stages, OR
+ * declares no eligible stages (treated as unrestricted, back-compat), OR lists
+ * this stage. Consumed by the operator picker and the assign/run guards (F1).
+ */
+export function specialistEligibleForStage(
+  spec: { stages: string[]; spanAll: boolean },
+  stageId: string,
+): boolean {
+  if (spec.spanAll) return true;
+  if (spec.stages.length === 0) return true;
+  return spec.stages.includes(stageId);
+}
+
+/**
+ * Enforce agent stage eligibility (F1): reject assigning/running a specialist on
+ * a task whose current stage the specialist isn't eligible for. The Agents UI
+ * shows "N of M stages" per profile; this makes that promise real instead of
+ * decorative. `spanAll` and no-declared-stages profiles are always eligible.
+ */
+function assertStageEligible(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  stageId: string,
+): void {
+  if (specialistEligibleForStage(spec, stageId)) return;
+  throw AppError.validation(
+    `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+      spec.stages.join(", ") || "no stages"
+    }. Change the task's stage or the profile's eligible stages.`,
+  );
 }
 
 /**
@@ -1366,6 +1412,8 @@ export function listDeployedSpecialists(
       backend: resolved.backend,
       model: resolved.model,
       effort: resolved.effort,
+      stages: resolved.stages,
+      spanAll: resolved.spanAll,
     });
   }
   return out;
