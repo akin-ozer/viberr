@@ -40,8 +40,8 @@ export function resolveStageRoles(
   // stage positionally before terminal so a workflow-less project still resolves.
   const reviewId =
     (terminalId != null
-      ? (workflow.find((w) => w.to === terminalId)?.from ?? null)
-      : null) ??
+      ? workflow.find((w) => w.to === terminalId)?.from
+      : undefined) ??
     (stages.length >= 2 ? (stages[stages.length - 2]?.id ?? null) : null);
 
   // work = the (first) stage with an edge into review; fall back to the stage
