@@ -82,3 +82,24 @@ fixed, all with new regression tests (suite 1136 → 1153):
 Reviewer LOW/informational notes NOT changed (all fail-safe / by-design): releaseOwner 404-vs-403
 ordering (board is app-wide readable — no new leak), demoted-viewer-owner can't self-release
 (fail-closed; admin releases), policy module gating members under `edit-policy` (both admin today).
+
+## Addendum 3: exhaustive multi-agent review workflow (2026-07-12)
+Ran a Workflow: 6 dimension finders (rbac-authz, capability-system, runtime-operator, test-coverage,
+ui-behavioral, consistency-honesty) → a 3-skeptic adversarial panel per candidate (majority-refute
+kills) → synthesis. 25 agents, 6 candidates, **5 confirmed / 1 rejected**. All 5 fixed (suite 1153 →
+1156):
+1. **MEDIUM (real regression from my own F1 run-boundary fix)** — the SCRIPTED operator drive
+   re-prompted an already-engaged reviewer/specialist without an eligibility filter; if that agent's
+   profile was now stage-ineligible, assertStageEligible threw and the outer catch posted "Operator
+   halted on an error", permanently stalling the task. Fixed: coordinate() now filters engaged
+   reviewers by `eligibleForCurrentStage` and only re-runs the assigned specialist if eligible (else
+   falls back to an eligible pick) — it SKIPS the ineligible agent instead of halting. + regression test.
+2/3. **MEDIUM (test gaps)** — hand-off-to-a-viewer rejection and reviewer stage-eligibility were
+   enforced but untested. Added both (policy-rbac + specialist-run).
+4/5. **LOW (UI/server mismatch)** — a contributor who owned a task then got demoted to viewer still
+   saw the Release-ownership button and packet-resolve options (identity-gated), which now 403.
+   Gated both on `own-task` (canOwn) so the UI matches the server. Also strengthened the F8 test to
+   assert the recovery packet opens + watchers are notified (deploying an operator so the full path runs).
+
+Rejected by the panel (1): a claimed issue that didn't reproduce. The workflow caught a regression
+my earlier 3-reviewer manual pass and the whole suite had missed — the value of the adversarial net.

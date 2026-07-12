@@ -489,6 +489,62 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
     expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
     interruptRunningRuns("VIB-1");
   });
+
+  it("SKIPS a stage-ineligible engaged reviewer instead of hard-halting coordination (F1 regression)", async () => {
+    // Deploy a reviewer scoped to `impl` only, engage it, then put the task at
+    // `review` — where that reviewer is NOT eligible. The scripted operator
+    // drive re-prompts every engaged reviewer at review; before the fix, the
+    // run-boundary eligibility throw would propagate and post "Operator halted
+    // on an error", permanently stalling the task. It must skip the ineligible
+    // reviewer instead.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: DEFAULT_POLICY,
+          extras: [],
+          definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
+        },
+        {
+          profileId: "reviewer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "Rev", role: "Code review",
+            backends: ["claude"], model: "sonnet", stages: ["impl"],
+          },
+        },
+      ] as never,
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Ineligible engaged reviewer",
+        reviewers: [{ profileId: "reviewer", backend: "claude", role: "Code review" }],
+      }),
+      goal: "Prove the operator skips an ineligible engaged reviewer.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    await runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "manual",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+    await waitForFinishedRun("VIB-1", (r) => r.op === true);
+    // The operator must NOT have hard-halted on the eligibility throw.
+    const halted = task().timeline.some((e) => /halted on an error/i.test(e.text));
+    expect(halted, "operator must skip the ineligible reviewer, not hard-halt").toBe(false);
+    interruptRunningRuns("VIB-1");
+  });
 });
 
 describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {

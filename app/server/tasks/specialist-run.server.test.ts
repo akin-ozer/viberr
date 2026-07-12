@@ -411,6 +411,31 @@ describe("assignReviewer / removeReviewer", () => {
       ).rejects.toMatchObject({ status: 403 });
     }
   });
+
+  it("rejects engaging a reviewer whose profile isn't eligible for the current stage (F1)", async () => {
+    // Re-deploy `dev` scoped to REVIEW only; VIB-1 is at impl → ineligible.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "sonnet", effort: "xhigh",
+            stages: ["review"],
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+    ).rejects.toThrow(/not eligible/i);
+  });
 });
 
 describe("startReviewerRun", () => {

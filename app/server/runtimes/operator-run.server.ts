@@ -732,9 +732,19 @@ async function runScriptedOperatorDrive(
         if (snap.stage === reviewStageId) {
           // Prompt EVERY engaged reviewer (not just the first) so each records a
           // verdict; a single engaged/picked reviewer keeps the common case.
-          const revIds = snap.reviewers.length
-            ? snap.reviewers.map((r) => r.profileId)
-            : [pickReviewer(snap)?.id].filter((x): x is string => !!x);
+          // FILTER by stage eligibility (F1): re-prompting an engaged reviewer
+          // whose profile isn't eligible for THIS stage would throw in
+          // assertStageEligible and hard-halt the whole coordination turn — skip
+          // the ineligible one instead (the snapshot precomputes eligibility).
+          const eligibleHere = (id: string) => {
+            const d = snap.deployedSpecialists.find((s) => s.id === id);
+            return !d || d.eligibleForCurrentStage;
+          };
+          const revIds = (
+            snap.reviewers.length
+              ? snap.reviewers.map((r) => r.profileId)
+              : [pickReviewer(snap)?.id].filter((x): x is string => !!x)
+          ).filter(eligibleHere);
           if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
             for (const rev of revIds) {
               say(
@@ -745,10 +755,15 @@ async function runScriptedOperatorDrive(
           return;
         }
         if (snap.stage === workStageId || !workStageId) {
-          const pick = snap.specialist
-            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId) ??
-              pickSpecialist(snap)
-            : pickSpecialist(snap);
+          // Only re-run the assigned specialist if it's ELIGIBLE for the current
+          // stage (F1); otherwise fall back to an eligible pick (pickSpecialist
+          // already filters by eligibility) so an assigned-but-now-ineligible
+          // specialist doesn't throw and halt coordination.
+          const assigned = snap.specialist
+            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
+            : undefined;
+          const pick =
+            assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
           if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
             say(
               (await operatorPromptSpecialist(db, ctx, { projectSlug, taskKey, profileId: pick.id }, authority)).message,

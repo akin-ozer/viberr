@@ -190,4 +190,26 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
       assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "does-not-exist" }, actor, { dataRoot: store.dataRoot }),
     );
   });
+
+  it("ownership hand-off REQUIRES the target can own (contributor+) — a viewer target is rejected", async () => {
+    // Clean tiering: a viewer can't hold the owner seat, so an admin can't hand
+    // ownership TO a viewer (elif) even though the admin may otherwise assign it.
+    const admin = actorOf(store.users.arda);
+    await expect(
+      setOwner(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.elif.id },
+        admin,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    // But handing off to a contributor (selin) is allowed.
+    const ok = await setOwner(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
+      admin,
+      { dataRoot: store.dataRoot },
+    );
+    expect(ok).toBeTruthy();
+  });
 });

@@ -672,7 +672,7 @@ function CurrentStatePanel({
                   {owner.name.split(" ")[0]}
                   {ownerMine ? " (you)" : ""}
                 </span>
-                {(ownerMine || myRole === "admin") && (
+                {((ownerMine && canOwn) || myRole === "admin") && (
                   <button
                     type="button"
                     className="own-x"
@@ -783,12 +783,16 @@ export function TaskDetailPage({
   // RBAC. The mutations themselves live in ExecutionSection /
   // RecommendationsSection below.
   const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
+  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
   // task owner (M2 / owner ruling Q2). accept_completion is additionally
   // re-gated to admin|maintainer on the server — an owner-only viewer who
   // picks it gets a friendly 409, but the common non-completion options work.
+  // The owner bypass requires `own-task` (contributor+): the server's owner
+  // check does too, so a demoted viewer-owner must NOT be shown resolve options
+  // that would 403 (matches releaseOwner's own-task gate).
   const isOwner =
-    task.owner?.kind === "human" && task.owner.userId === me.id;
+    task.owner?.kind === "human" && task.owner.userId === me.id && canOwn;
   const canResolvePacket = canRunAgents || isOwner;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
