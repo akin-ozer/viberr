@@ -106,3 +106,27 @@ at boundaries. GitHub is the execution surface: task-key branch → commits → 
 14. **Role-bindings phase** started 2026-07-12 in a dedicated session: D2/D5 matrix-as-runtime-source +
     guard consolidation, deep capability prune, full D9 SSE membership, Q5 contributor-vs-viewer
     (ruling still open — ask the owner), S3. Base: `viberr-selftest-implementation` (PR #7).
+
+## Pass-3 owner rulings — DONE (2026-07-12, PR #14; details `../discovery-2026-07-12/owner-rulings.md`)
+
+15. **Q5 resolved → CLEAN TIERING**: viewer = strictly read + comment. Contributor adds create-task
+    + take/release own ownership + owner-resolve of non-completion packets. Admin/maintainer unchanged.
+    (The old "viewer can own a task" behavior is gone — names now mean what they say.)
+16. **Agent eligible stages → WIRE IT**: `stages`/`spanAll` are enforced now (operator picks + assign/run
+    validate by the task's current stage), not decorative. The scripted operator drive skips a
+    stage-ineligible engaged agent rather than halting.
+17. **Review queue + Activity → MEMBERSHIP-GATED** (like policy/agents/settings/github). Board + task
+    detail stay app-wide readable per FR4.
+18. **S3 → HONEST LABELING ONLY** (no Codex enforcement this pass): the capability matrix marks the
+    specialist tool-denylist caps "Claude-enforced · advisory on Codex"; structural always-human caps
+    (merge-PR) are "both". Codex tool confinement itself remains a documented gap.
+19. **Delivery unblocked (F11)**: the `edit-other-task-branch` capability was removed — its broad git
+    deny had silently blocked every Claude specialist from creating its own task branch. Under per-task
+    workspace isolation (Q7) it was moot as well as harmful.
+
+## Known boundary (documented, not a defect)
+- **Skill/plugin isolation**: viberr sets `settingSources:[]` + `skills:[]` + `plugins:[]` on Claude
+  runs, so a standalone deployment injects ONLY the agent's declared skills. The ONE case it can't
+  cover is running the server from INSIDE an active Claude Code/Desktop session — the spawned `claude`
+  subprocess inherits that parent's managed toolset at the process level (a dev-only condition,
+  impossible in a Docker/systemd deployment). Not the same as a leak in the product.

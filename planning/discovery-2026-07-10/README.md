@@ -35,5 +35,13 @@ All findings + decisions from THIS pass implemented; nothing deferred except **c
 cycle landed on PR #7 (`viberr-selftest-implementation`, 21 commits, CI green, mergeable) — ~55 more
 findings + 8 owner rulings + 16 adversarial-review fixes + 2 CI fixes + 19 current-state findings
 (incl. the **honest-empty-slate** seed ruling: 0 fabricated MCP/connections/PATs; and the KB
-recursive-injection HIGH fix). **1130 tests pass.** The dedicated **role-bindings phase started
-2026-07-12** in a separate session (D2/D5 matrix-as-source, deep prune, full D9, Q5, S3).
+recursive-injection HIGH fix). **1130 tests pass.**
+
+**Pass 3 (`../discovery-2026-07-12/`) — ✅ COMPLETE (2026-07-12, PR #14, 1156 tests):** the dedicated
+**role-bindings rework** shipped — D2/D5 matrix-as-source (`app/shared/rbac.ts`), guard consolidation,
+capability prune (30→26), full D9 SSE membership, review/activity gating, **Q5 → clean tiering**, S3
+honest labeling — plus all 13 fresh findings resolved (incl. **F11 HIGH**, the `edit-other-task-branch`
+deny that had blocked ALL Claude delivery) and two adversarial review rounds (manual + a 25-agent
+verified Workflow) that caught 9 more defects the tests missed. Start at
+`../discovery-2026-07-12/implementation-ledger.md`; the `app-reference.md` + `product-intent.md` in
+THIS folder carry pass-3 update banners.

@@ -15,9 +15,9 @@ architecture reference `app-reference.md` + product intent `product-intent.md` �
   (16 adversarial fixes, 2 CI fixes, 19 fresh current-state findings).
 - **current-state-findings.md** — the post-implementation 6-reader sweep: 19 net-new findings
   (1 HIGH KB-injection, 7 MED seed-fabrication/dead-end, 11 LOW honesty) — **all closed**.
-- **role-bindings-map.md** — the two-system authorization map + rework plan. Feeds the dedicated
-  role-bindings phase (**in progress as of 2026-07-12 in a separate session**). Read its
-  "Updates since this map" addendum first — several rows changed post-map.
+- **role-bindings-map.md** — the two-system authorization map + rework plan. **✅ The role-bindings
+  phase is now DONE (2026-07-12, PR #14) — see `../discovery-2026-07-12/`.** Read this map's top
+  banner + its "Updates since this map" addendum for what changed.
 - **ui-walkthrough-notes.md** — page-by-page live walkthrough notes (this pass).
 - **test-plan-v2.md** / **test-results-v2.md** — the 25-case campaign on the first selftest project
   (real PRs #4 merged, #5/#6 closed).
@@ -35,4 +35,5 @@ Security explicitly deprioritized by owner (S3 codex confinement stays documente
 Q1 acceptance requires explicit `direct` · Q2 owner-or-maintainer packet resolve · Q3 real guardrails ·
 Q4 prune+wire capabilities · Q6 membership-scoped Home · Q7 full workspace isolation · Q8 codex idle
 timeout · **honest empty slate** (seed ships no fabricated credentials/MCP health) · LOW-nit cleanup.
-Open: **Q5** contributor-vs-viewer split → the role-bindings phase.
+Open at the time: **Q5** contributor-vs-viewer split → resolved in pass 3 as **clean tiering**
+(viewer = read+comment; ownership → contributor+). See `../discovery-2026-07-12/owner-rulings.md`.

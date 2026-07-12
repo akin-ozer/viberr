@@ -1,9 +1,27 @@
 # Role-bindings ground truth — verified vs `main` 2026-07-12
 
-Every anchor re-verified this pass against main @ 7c064cd (post-PR#7). Supersedes
-`../discovery-2026-07-11/role-bindings-map.md`. Module reality: task/specialist/operator actions
-live under `app/server/tasks/`, runtime under `app/server/runtimes/`, auth helpers under
-`app/server/auth/` (the old map's `app/features/task-detail/*` paths were stale).
+> ## ✅ THE REWORK IN §5 IS DONE (PR #14). This doc captured the DISCOVERY-time state (the problem);
+> the fixes shipped. For the CURRENT state read `app/shared/rbac.ts` + the pass-3 banner in
+> `../discovery-2026-07-10/app-reference.md`. Backlog outcomes (see §5 at the bottom):
+> 1. **Matrix-as-source (D2/D5) — DONE.** `app/shared/rbac.ts` `ACTION_ROLES` is the single source;
+>    `requireAction` (task-actions) + `assertProjectAction` (`app/server/auth/project-role-guard.server.ts`,
+>    replaced the 3 `requireProjectAdmin` copies) consume it; the Policy page renders the same object;
+>    `policy-rbac.server.test.ts` binds guards↔matrix. (Some inline/route guards remain as thin
+>    role-floor checks by design — comment(FR4), org-level, operator-on-behalf, the release/reconcile
+>    inline checks — all now reference the same role sets.)
+> 2. **Capability prune — DONE.** 30→26 ids; the 4 harmful/dead removed. Advisory reviewer labels kept
+>    but honestly marked advisory vs Claude-enforced (S3).
+> 3. **Full D9 SSE — DONE** (membership check on explicit scope subscribe; org-admin bypass).
+> 4. **Q5 — DONE (clean tiering).** Viewer = read+comment; ownership + owner-packet-resolve = contributor+.
+> 5. **Review + Activity — DONE** (members-only, owner ruling).
+> 6. **F11 delivery blocker — DONE** (edit-other-task-branch removed). **S3 — honest labeling done;**
+>    Codex tool confinement itself still a documented gap (owner-deferred).
+
+Every anchor below was re-verified this pass against main @ 7c064cd (post-PR#7) — it is the
+PRE-rework map. Supersedes `../discovery-2026-07-11/role-bindings-map.md`. Module reality:
+task/specialist/operator actions live under `app/server/tasks/`, runtime under
+`app/server/runtimes/`, auth helpers under `app/server/auth/` (the old map's
+`app/features/task-detail/*` paths were stale).
 
 ## 1. Human RBAC — current enforcement table
 
