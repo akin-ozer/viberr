@@ -23,7 +23,7 @@ import {
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { readKbBody } from "~/server/files/kb-injection.server";
+import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -951,10 +951,16 @@ export function buildSpecialistPersona(input: {
   }
   // Inject declared knowledge-base docs (F6, FR9): the KB leg was decorative for
   // specialists — no run received KB content. Load each declared KB folder that
-  // exists in the store, same as skills.
+  // exists in the store. KB_INJECTION_BUDGET is a GLOBAL cap across all declared
+  // KBs (F9) — a specialist with many KBs can't blow the prompt with N × 24k.
+  let kbBudget = KB_INJECTION_BUDGET;
   for (const name of input.kb ?? []) {
-    const body = readKbBody(name, input.dataRoot);
-    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+    if (kbBudget <= 0) break;
+    const body = readKbBody(name, input.dataRoot, kbBudget);
+    if (body) {
+      parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+      kbBudget -= body.length;
+    }
   }
   return parts.join("");
 }

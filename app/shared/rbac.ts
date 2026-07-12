@@ -123,6 +123,7 @@ export const RBAC_TABLE: readonly { action: string; roles: readonly ProjectRole[
   { action: "Approve stage transitions", roles: ACTION_ROLES["approve-transition"] },
   { action: "Resolve decision packets", roles: ACTION_ROLES["resolve-packet"] },
   { action: "Accept completion → Done", roles: ACTION_ROLES["accept-completion"] },
+  { action: "Edit the task goal", roles: ACTION_ROLES["update-goal"] },
   { action: "Run agents & reorder the board", roles: ACTION_ROLES["run-agents"] },
   { action: "Release any task owner", roles: ACTION_ROLES["release-any-ownership"] },
   { action: "Manage members & roles", roles: ACTION_ROLES["manage-members"] },

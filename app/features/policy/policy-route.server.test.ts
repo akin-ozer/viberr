@@ -68,6 +68,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Approve stage transitions",
       "Resolve decision packets",
       "Accept completion → Done",
+      "Edit the task goal",
       "Run agents & reorder the board",
       "Release any task owner",
       "Manage members & roles",
@@ -77,9 +78,9 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
     // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
     // comment; the contributor tier adds "Create tasks" AND task ownership.
     expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
   });
 });
 

@@ -7,7 +7,7 @@ import {
   agentProfilesDir,
   skillDirPath,
 } from "~/server/files/file-store-root.server";
-import { readKbBody } from "~/server/files/kb-injection.server";
+import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -957,10 +957,17 @@ export function buildOperatorSystemPrompt(
   }
   // Inject declared knowledge-base docs into context (F6, FR9): the KB leg was
   // decorative — no run ever received KB content. Load every declared KB folder
-  // that exists in the store, same as skills.
+  // that exists in the store, same as skills. The KB_INJECTION_BUDGET is a GLOBAL
+  // cap shared across ALL declared KBs (F9) — an agent with many KBs can't blow
+  // the prompt with N × 24k; each KB draws from the remaining budget.
+  let kbBudget = KB_INJECTION_BUDGET;
   for (const name of authority.kb) {
-    const body = readKbBody(name, dataRoot);
-    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+    if (kbBudget <= 0) break;
+    const body = readKbBody(name, dataRoot, kbBudget);
+    if (body) {
+      parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+      kbBudget -= body.length;
+    }
   }
   parts.push(
     "\n\n---\n# Your authority for this task\n\n" +
