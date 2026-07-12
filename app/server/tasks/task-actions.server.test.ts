@@ -18,9 +18,11 @@ import {
   createTask,
   DEFAULT_GOAL,
   notifyTaskWatchers,
+  postAgentReplyComment,
   recordReviewerVerdict,
   releaseOwner,
   setOwner,
+  transitionStage,
 } from "./task-actions.server";
 
 const ctx = createTestDbContext();
@@ -475,6 +477,106 @@ describe("reviewer quality notification (FIX #6)", () => {
       .prepare(`SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`)
       .get() as { c: number };
     expect(quality.c).toBe(0);
+  });
+});
+
+describe("validation state machine (A3 — a rejection is not a life sentence)", () => {
+  it("an approve AFTER developer rework clears a standing failing", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "changed",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // 1. Reviewer rejects → failing.
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Verdict: request changes — the diff violates the spec.",
+    );
+    let fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+
+    // 2. The developer reworks (a primary-specialist reply lands on the timeline).
+    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_rework",
+      actorRef: { kind: "agent", backend: "claude", role: "developer" },
+      replyText: "Fixed the violation and pushed a new commit.",
+    });
+
+    // 3. Re-review approves → the rework evidence lets the approve clear failing.
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Verdict: approve — the fix restores spec compliance.",
+    );
+    fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("healthy");
+  });
+
+  it("a same-round approve does NOT mask another reviewer's rejection", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        validation: "changed",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Verdict: request changes — missing error handling.",
+    );
+    // A second reviewer approves with NO rework in between → failing sticks.
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Verdict: approve — looks fine to me.",
+    );
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+  });
+
+  it("re-entering review resets ANY stale validation to 'changed'", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        validation: "failing",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("changed");
   });
 });
 

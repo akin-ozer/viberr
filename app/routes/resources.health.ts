@@ -11,8 +11,10 @@ import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
  *
  * 200 `{ ok, projections: { projects, tasks }, watcher, backends }` when the
  * database answers; `watcher` is true while the in-process store watcher is
- * running. `backends.{claude,codex}` reports whether a real credential is
- * configured (env-presence only — NOT a validity check): "real" means runs
+ * running — a chokidar error clears the watcher handle (E8), so false here
+ * is REAL (dead watcher), not just "never started". `backends.{claude,codex}`
+ * reports whether a real credential is configured (env-presence only — NOT a
+ * validity check; an expired token still reads "real"): "real" means runs
  * execute the SDK, "simulated" means the built-in demo engine runs. This is
  * how you confirm, e.g. via `docker compose logs` / a curl, that a Claude
  * key/token reached the container.
@@ -34,6 +36,7 @@ export async function loader() {
       projections: { projects, tasks },
       watcher: isFileWatcherAlive(),
       backends: {
+        // Env-presence only — never probes token validity (see docblock).
         claude: isBackendAvailable("claude") ? "real" : "simulated",
         codex: isBackendAvailable("codex") ? "real" : "simulated",
       },

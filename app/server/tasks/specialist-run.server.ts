@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
@@ -20,10 +20,10 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   agentProfilesDir,
-  kbDirPath,
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
+import { readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -38,7 +38,9 @@ import { isBackendAvailable, type RealBackend } from "~/server/runtimes/runtime-
 import {
   defaultModelFor,
   resolveRunModel,
+  resolveRunEffort,
 } from "~/server/runtimes/model-catalog.server";
+import { taskBranchName } from "~/server/github/branch-sync.server";
 import {
   buildScript,
   type SimulatedScript,
@@ -507,13 +509,23 @@ export async function startSpecialistRun(
   let disallowedTools: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
-    model = resolved.model;
-    effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
     mcpNames = resolved.mcps;
     disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
+    // The profile's model/effort are specific to ITS native backend. When this
+    // run overrides to a DIFFERENT backend (D4 retry-on-other-backend), the
+    // native model id is invalid there (e.g. Claude's "opus" sent to Codex) —
+    // re-resolve model + effort for the actual run backend so the retry works
+    // instead of hard-failing. Same-backend runs keep the profile's exact values.
+    if (backend === resolved.backend) {
+      model = resolved.model;
+      effort = resolved.effort;
+    } else {
+      model = resolveRunModel(backend, undefined); // backend default
+      effort = resolveRunEffort(backend, resolved.effort);
+    }
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
   }
@@ -538,8 +550,9 @@ export async function startSpecialistRun(
   // working tree. With no credential the simulated engine carries the run and
   // needs no checkout, so we skip the network clone entirely (keeps the demo
   // and the test suite fast + offline). Still best-effort even when real.
+  const realBackend = isBackendAvailable(backend);
   const clone =
-    repo && isBackendAvailable(backend)
+    repo && realBackend
       ? await cloneRepo(db, {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
@@ -547,6 +560,19 @@ export async function startSpecialistRun(
           dataRoot: ctx.dataRoot,
         })
       : null;
+  // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
+  // the clone when it succeeded, else an empty workspace root the agent clones
+  // into. NEVER the task dir (which sits inside the data root, which may live
+  // inside a host git repo). Confine git with GIT_CEILING (workspaceRunEnv).
+  const workspaceRoot = taskWorkspaceRoot(
+    input.projectSlug,
+    input.taskKey,
+    ctx.dataRoot,
+  );
+  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
+  if (runWorkdir && !existsSync(runWorkdir)) {
+    mkdirSync(runWorkdir, { recursive: true });
+  }
 
   const analyzePrompt = buildAnalyzePrompt({
     role: sp.role,
@@ -554,10 +580,11 @@ export async function startSpecialistRun(
     title,
     goal,
     repo,
+    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
     cloned: !!clone,
     ...(input.directive ? { directive: input.directive } : {}),
   });
-  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt);
+  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
 
   const script = buildAnalyzeScript({
     backend,
@@ -593,7 +620,10 @@ export async function startSpecialistRun(
     // Wire the profile's declared MCP servers into the run (item-1/FR9): a
     // profile that declares an org MCP now actually gets it (Claude only).
     ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
-    ...(clone ? { workdir: clone } : {}),
+    ...(runWorkdir ? { workdir: runWorkdir } : {}),
+    ...(realBackend
+      ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
+      : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
@@ -626,20 +656,27 @@ export async function startSpecialistRun(
     },
   });
 
-  // Every specialist run reports back AND has its agent-side delivery
-  // reconciled: register the default reply hook + a workspace-delivery
-  // reconciliation so the agent posts its result as a comment and the task
-  // record picks up the real branch/PR the agent created in its workspace,
-  // even when started from the UI "Run" button. Richer callers (operator
-  // prompt / @mention) overwrite this.
-  await registerReplyAndReconcile(db, ctx, {
+  const { registerAgentCompletion, markWaitingAgent } = await import(
+    "./task-actions.server"
+  );
+  // The board reads "agent working" while the run is in flight.
+  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
+
+  // ONE canonical completion handler for EVERY start path (UI "Run", @mention,
+  // operator prompt): reply → reconcile agent-side delivery → (reviewer) verdict
+  // → re-invoke the operator to react. `ctx.operatorRun` (set when this run is
+  // inside an operator react loop) continues the chain at depth+1; otherwise a
+  // fresh chain starts against the deployed operator.
+  await registerAgentCompletion(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
     backend,
     role: sp.role,
     kind: "primary",
-    workdir: clone,
+    workdir: runWorkdir,
+    agentHandle: agentHandleFor(sp.role),
+    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
   return { runId, backend, simulated, role: sp.role };
@@ -697,13 +734,19 @@ export async function startReviewerRun(
   let disallowedTools: string[] = [];
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
-    model = resolved.model;
-    effort = resolved.effort;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
     mcpNames = resolved.mcps;
     disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
+    // Cross-backend retry (D4): re-resolve model + effort for the run backend.
+    if (backend === resolved.backend) {
+      model = resolved.model;
+      effort = resolved.effort;
+    } else {
+      model = resolveRunModel(backend, undefined);
+      effort = resolveRunEffort(backend, resolved.effort);
+    }
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
   }
@@ -719,8 +762,9 @@ export async function startReviewerRun(
   const goal = existing.parsed.goal;
   const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
 
+  const realBackend = isBackendAvailable(backend);
   const clone =
-    repo && isBackendAvailable(backend)
+    repo && realBackend
       ? await cloneRepo(db, {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
@@ -728,6 +772,15 @@ export async function startReviewerRun(
           dataRoot: ctx.dataRoot,
         })
       : null;
+  const workspaceRoot = taskWorkspaceRoot(
+    input.projectSlug,
+    input.taskKey,
+    ctx.dataRoot,
+  );
+  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
+  if (runWorkdir && !existsSync(runWorkdir)) {
+    mkdirSync(runWorkdir, { recursive: true });
+  }
 
   const analyzePrompt = buildAnalyzePrompt({
     role: rev.role,
@@ -735,10 +788,11 @@ export async function startReviewerRun(
     title,
     goal,
     repo,
+    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
     cloned: !!clone,
     ...(input.directive ? { directive: input.directive } : {}),
   });
-  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt);
+  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
 
   const script = buildAnalyzeScript({
     backend,
@@ -768,7 +822,10 @@ export async function startReviewerRun(
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
     ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
-    ...(clone ? { workdir: clone } : {}),
+    ...(runWorkdir ? { workdir: runWorkdir } : {}),
+    ...(realBackend
+      ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
+      : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
@@ -801,17 +858,22 @@ export async function startReviewerRun(
     },
   });
 
-  // A reviewer reports back too: register the default reply hook + workspace
-  // reconciliation so its verdict posts as a comment and any real branch/PR it
-  // produced is reconciled, even when started from the UI "Run" button.
-  await registerReplyAndReconcile(db, ctx, {
+  const { registerAgentCompletion, markWaitingAgent } = await import(
+    "./task-actions.server"
+  );
+  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
+
+  // Same canonical handler — a reviewer additionally records its verdict.
+  await registerAgentCompletion(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
     backend,
     role: rev.role,
     kind: "reviewer",
-    workdir: clone,
+    workdir: runWorkdir,
+    agentHandle: agentHandleFor(rev.role),
+    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
   return { runId, backend, simulated, role: rev.role };
@@ -887,30 +949,10 @@ export function buildSpecialistPersona(input: {
   return parts.join("");
 }
 
-/** Read a knowledge base's docs from the store (every `.md` under
- *  `data/kb/<dir>/`), bounded so a large KB can't blow the context window.
- *  Returns "" when the folder is absent. */
-function readKbBody(name: string, dataRoot?: string): string {
-  try {
-    const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir)) return "";
-    const docs: string[] = [];
-    let budget = 24_000;
-    for (const entry of readdirSync(dir).sort()) {
-      if (!entry.endsWith(".md") || budget <= 0) continue;
-      try {
-        const slice = readFileSync(path.join(dir, entry), "utf8").trim().slice(0, budget);
-        budget -= slice.length;
-        docs.push(`### ${entry}\n\n${slice}`);
-      } catch {
-        // unreadable doc — skip
-      }
-    }
-    return docs.join("\n\n");
-  } catch {
-    return "";
-  }
-}
+// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
+// operator runtime): it walks the KB tree recursively and matches every text-doc
+// extension, so GitHub-imported / folder-uploaded / non-.md docs actually reach
+// the agent instead of being silently dropped.
 
 /**
  * Fold the persona into the turn prompt for Codex (which has no system-prompt
@@ -922,9 +964,20 @@ function foldPersonaForCodex(
   persona: string,
   backend: RealBackend,
   prompt: string,
+  /** MCP server names declared on the profile — surfaced as unavailable on
+   *  Codex (the Codex SDK has no mcpServers channel, so a profile that declares
+   *  an org MCP silently gets nothing there; F2). */
+  mcpNames: string[] = [],
 ): string {
-  if (!persona || backend !== "codex") return prompt;
-  return `${persona}\n\n---\n# Your task\n\n${prompt}`;
+  let out = prompt;
+  if (backend === "codex" && mcpNames.length) {
+    out +=
+      `\n\n_Note: the MCP server(s) ${mcpNames.map((n) => `\`${n}\``).join(", ")} ` +
+      `declared on your profile are not available on the Codex backend — proceed ` +
+      `with your built-in tools._`;
+  }
+  if (!persona || backend !== "codex") return out;
+  return `${persona}\n\n---\n# Your task\n\n${out}`;
 }
 
 // ----------------------------------------------------------------- prompt/script
@@ -935,6 +988,8 @@ function buildAnalyzePrompt(input: {
   title: string;
   goal: string;
   repo: string | null;
+  /** The task-key branch the delivery must land on. */
+  branch: string;
   cloned: boolean;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
@@ -944,8 +999,22 @@ function buildAnalyzePrompt(input: {
     `"${input.title}". Goal: ${input.goal}. Analyze the repository and report ` +
     `your findings (structure, dependencies, architecture, notable risks/gaps) ` +
     `as a concise summary.`;
-  if (input.repo && !input.cloned) {
-    prompt += ` Clone the repo yourself from https://github.com/${input.repo} if needed.`;
+  // Workspace + delivery CONTRACT (NFR15 traceability). The run's cwd is an
+  // isolated per-task workspace; git is ceiling-confined to it, so the agent
+  // must work ONLY inside the current directory and never touch a parent repo.
+  if (input.repo) {
+    prompt +=
+      `\n\n## Workspace & delivery contract (follow exactly)\n` +
+      `- Work ONLY inside the current working directory — it is an isolated ` +
+      `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
+      `repository outside it.\n` +
+      (input.cloned
+        ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
+        : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`) +
+      `- Do all work on the branch \`${input.branch}\` (create it from the default branch if it does not exist): \`git checkout -B ${input.branch}\`.\n` +
+      `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
+      `- Push the branch and open a pull request that references ${input.taskKey} in its title/body.\n` +
+      `- Report the exact branch name, commit SHAs, and PR URL back in your reply.`;
   }
   if (input.directive?.trim()) {
     prompt +=
@@ -1109,6 +1178,43 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
  *
  * Never throws — clone failure must not break starting the run.
  */
+/**
+ * The isolated per-task workspace directory (`<taskDir>/workspace`). A
+ * specialist run's cwd is ALWAYS inside here — NEVER the task dir itself —
+ * and `GIT_CEILING_DIRECTORIES` is pinned to it, so an agent's git can never
+ * walk UP to a host checkout even when `VIBERR_DATA_ROOT` lives inside a git
+ * repo (the dogfooding hazard: a run once switched the running app's own
+ * source onto its task branch). Combined with the run env below, the agent is
+ * confined to its own directory regardless of backend.
+ */
+function taskWorkspaceRoot(
+  projectSlug: string,
+  taskKey: string,
+  dataRoot?: string,
+): string {
+  return path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
+}
+
+/** The per-run env that confines a specialist's git to its own workspace. */
+function workspaceRunEnv(
+  projectSlug: string,
+  taskKey: string,
+  dataRoot?: string,
+): Record<string, string> {
+  // The ceiling must be a STRICT ANCESTOR of the run cwd — `GIT_CEILING` only
+  // blocks git from ascending INTO a listed dir, so a ceiling EQUAL to cwd is a
+  // no-op (git's first step up lands in the ceiling's unblocked parent). The
+  // empty-workspace run has cwd == the workspace root, so we pin the ceiling to
+  // the TASK dir (its parent). That stops git-repo discovery for BOTH cwd
+  // shapes — `<taskDir>/workspace` (empty) and `<taskDir>/workspace/<repo>`
+  // (cloned) — before it can reach a host `.git` above the data root
+  // (adversarial-review HIGH #2).
+  const ceiling = taskDir(projectSlug, taskKey, dataRoot);
+  return {
+    GIT_CEILING_DIRECTORIES: ceiling,
+  };
+}
+
 async function cloneRepo(
   db: Database.Database,
   input: {
@@ -1121,8 +1227,7 @@ async function cloneRepo(
   try {
     const name = input.repo.split("/").pop() ?? input.repo;
     const dir = path.join(
-      taskDir(input.projectSlug, input.taskKey, input.dataRoot),
-      "workspace",
+      taskWorkspaceRoot(input.projectSlug, input.taskKey, input.dataRoot),
       name,
     );
     if (existsSync(path.join(dir, ".git"))) {
@@ -1157,99 +1262,13 @@ async function cloneRepo(
   }
 }
 
-// ------------------------------------------------------- reply + reconcile
+// ------------------------------------------------------- completion hook
 
-/**
- * The completion hook every specialist/reviewer run started here gets: post
- * the agent's reply as a comment (the prior default behavior — see
- * `registerAgentReply`), AND reconcile the task record from what the agent
- * actually did in its workspace (finding #31 — a real coding agent branches /
- * pushes / opens a PR through its OWN git/gh creds, entirely outside viberr's
- * stored-PAT delivery path, leaving task.md `branch`/`pr` null).
- *
- * Both legs are best-effort and never block or throw. The reconciliation is
- * the COMPLEMENT to the server-side `ensureTaskBranch`/`openTaskPr`: it only
- * runs for REAL (non-simulated) runs, is idempotent, and confirms-and-leaves
- * values the server already set instead of clobbering them.
- *
- * Registration is last-writer-wins per run id (run-service), so a richer
- * caller (operator prompt / @mention resume) may overwrite this with its own
- * reply+react callback — same as the prior default hook.
- */
-async function registerReplyAndReconcile(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    runId: string;
-    backend: RealBackend;
-    role: string;
-    /** "reviewer" runs additionally record a verdict (validation + quality
-     *  event + notification) so it fires on EVERY reviewer path, not only when
-     *  the operator prompts one (the operator-prompt path installs its own
-     *  richer callback that already does this). */
-    kind?: "primary" | "reviewer";
-    /** The run's workspace clone dir (null when no real clone happened). */
-    workdir: string | null;
-  },
-): Promise<void> {
-  const [
-    { registerRunCompletion },
-    { postAgentReplyComment, recordReviewerVerdict },
-    { replyTextForRun },
-    { reconcileWorkspaceDelivery },
-  ] = await Promise.all([
-    import("~/server/runtimes/run-service.server"),
-    import("./task-actions.server"),
-    import("./agent-reply.server"),
-    import("~/server/github/workspace-delivery.server"),
-  ]);
-  const actorRef: FileActorRef = {
-    kind: "agent",
-    backend: input.backend,
-    role: input.role,
-  };
-  registerRunCompletion(input.runId, (finished) => {
-    void (async () => {
-      // 1. Default reply (unchanged behavior). Await so the reply lands before
-      //    the verdict's quality event, keeping the timeline ordered.
-      await postAgentReplyComment(db, ctx, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        runId: finished.id,
-        actorRef,
-        replyText: replyTextForRun(db, finished.id),
-      });
-      // 1b. A REVIEWER's verdict drives the board's validation health + a typed
-      //     quality event + an owner/supervisor notification — on ALL reviewer
-      //     paths (UI "Run reviewer", @mention, operator run_reviewer), not just
-      //     the operator-prompt loop (FIX: hunt finding).
-      if (input.kind === "reviewer" && finished.state === "finished") {
-        await recordReviewerVerdict(
-          db,
-          ctx,
-          input.projectSlug,
-          input.taskKey,
-          replyTextForRun(db, finished.id),
-        );
-      }
-    })();
-    // 2. Reconcile agent-side delivery — best-effort, never blocks the run.
-    //    Skipped for simulated runs (no real git work was done).
-    void reconcileWorkspaceDelivery({
-      db,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      ...(input.workdir ? { workdir: input.workdir } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-      backend: input.backend,
-      role: input.role,
-      simulated: finished.simulated === 1,
-    }).catch(() => {
-      // reconcileWorkspaceDelivery never throws, but guard anyway.
-    });
-  });
+/** A short @mention handle for a specialist/reviewer role, used in the
+ *  stuck-loop packet copy ("@dev repeated its report"). */
+function agentHandleFor(role: string): string {
+  const first = role.trim().split(/[\s/&]+/)[0] ?? role;
+  return first.toLowerCase();
 }
 
 // --------------------------------------------------------------------- shared

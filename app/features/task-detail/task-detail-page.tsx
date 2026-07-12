@@ -61,10 +61,13 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
 
 function GithubTrace({
   task,
+  githubHost,
   onCompleteMerge,
   merging,
 }: {
   task: TaskDetail;
+  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  githubHost?: string;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
   merging?: boolean;
@@ -83,13 +86,15 @@ function GithubTrace({
     );
   }
   // Real external link (spec §4.9: the prototype toast goes away): the PR
-  // when one exists, else the branch tree. Phase 7 may refine targets.
+  // when one exists, else the branch tree. Host comes from the loader
+  // (connection-derived), never hardcoded — GHE deployments keep working.
+  const host = githubHost ?? "https://github.com";
   const ghHref = task.repo
     ? task.pr
-      ? `https://github.com/${task.repo}/pull/${task.pr.number}`
+      ? `${host}/${task.repo}/pull/${task.pr.number}`
       : task.branch
-        ? `https://github.com/${task.repo}/tree/${task.branch}`
-        : `https://github.com/${task.repo}`
+        ? `${host}/${task.repo}/tree/${task.branch}`
+        : `${host}/${task.repo}`
     : null;
   return (
     <div className="panel flush">
@@ -207,7 +212,24 @@ function PolicyPanel({
       <div className="panel-head">
         <Icon name="shield" />
         <h2>Permissions</h2>
+        <span
+          className="right sub"
+          style={{ fontSize: ".72rem", color: "var(--faint)" }}
+        >
+          V1 rules
+        </span>
       </div>
+      <p
+        style={{
+          margin: "0 0 .55rem",
+          fontSize: ".74rem",
+          lineHeight: 1.4,
+          color: "var(--faint)",
+        }}
+      >
+        Fixed platform rules — identical for every task. This task's live stage,
+        owner and waiting-on are in <b>Current state</b> above.
+      </p>
       {rows.map((r) => (
         <div className="policy-line" key={r.k}>
           <span className="k">
@@ -271,10 +293,23 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 function TaskHero({
   task,
   stage,
+  canEditGoal,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
+  canEditGoal: boolean;
 }) {
+  const goalFetcher = useFetcher<ActionResult>();
+  const csrf = useCsrfToken();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.goal);
+  // Close the editor once a save round-trips successfully.
+  useEffect(() => {
+    if (goalFetcher.state === "idle" && goalFetcher.data?.ok && editing) {
+      setEditing(false);
+    }
+  }, [goalFetcher.state, goalFetcher.data, editing]);
+
   return (
     <div className="task-hero">
       <span className="key">{task.key}</span>
@@ -298,7 +333,60 @@ function TaskHero({
           <span>{task.filePath}</span>
         </span>
       </div>
-      <p className="goal">{task.goal}</p>
+      {editing ? (
+        <goalFetcher.Form
+          method="post"
+          className="goal-edit"
+          onSubmit={() => setEditing(true)}
+        >
+          <input type="hidden" name="intent" value="update-goal" />
+          <input type="hidden" name="_csrf" value={csrf} />
+          <textarea
+            name="goal"
+            className="goal-textarea"
+            defaultValue={draft}
+            onChange={(e) => setDraft(e.currentTarget.value)}
+            rows={4}
+            aria-label="Task goal and acceptance criteria"
+          />
+          <div className="goal-edit-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={goalFetcher.state !== "idle" || draft.trim().length < 3}
+            >
+              Save goal
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setDraft(task.goal);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </goalFetcher.Form>
+      ) : (
+        <p className="goal">
+          {task.goal}
+          {canEditGoal && (
+            <button
+              type="button"
+              className="goal-edit-btn"
+              onClick={() => {
+                setDraft(task.goal);
+                setEditing(true);
+              }}
+              title="Edit the goal / acceptance criteria"
+            >
+              Edit
+            </button>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -581,7 +669,10 @@ function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : (
+            ) : myRole ? (
+              // Only project MEMBERS can take ownership (M3) — setOwner requires
+              // membership, so hide "Assign me" from non-members (myRole null)
+              // rather than render a button that 403s.
               <button
                 type="button"
                 className="rev-add sm"
@@ -591,6 +682,8 @@ function CurrentStatePanel({
                 <Icon name="plus" />
                 Assign me
               </button>
+            ) : (
+              <span className="v sub">Unowned</span>
             )}
           </span>
         </div>
@@ -617,6 +710,7 @@ export function TaskDetailPage({
   myRole,
   mentionables,
   recommendations,
+  githubHost,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -637,12 +731,23 @@ export function TaskDetailPage({
   mentionables: Mentionables;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
+  /** GitHub web host for browse links (loader-derived; GHE-safe). */
+  githubHost?: string;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [logSel, setLogSel] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
   const [ask, setAsk] = useState(0);
   const csrf = useCsrfToken();
+
+  // G7: the page body is overflow:hidden and `.detail` is the actual scroll
+  // container, so keyboard scrolling (Space / PageDown / arrows) is dead until
+  // `.detail` holds focus. It's kept out of the tab order (tabIndex=-1) and
+  // focused on mount so the workspace is keyboard-scrollable immediately.
+  const detailRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    detailRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
@@ -659,6 +764,13 @@ export function TaskDetailPage({
   // RBAC. The mutations themselves live in ExecutionSection /
   // RecommendationsSection below.
   const canRunAgents = myRole === "admin" || myRole === "maintainer";
+  // The viewer may resolve THIS packet when they're admin|maintainer OR the
+  // task owner (M2 / owner ruling Q2). accept_completion is additionally
+  // re-gated to admin|maintainer on the server — an owner-only viewer who
+  // picks it gets a friendly 409, but the common non-completion options work.
+  const isOwner =
+    task.owner?.kind === "human" && task.owner.userId === me.id;
+  const canResolvePacket = canRunAgents || isOwner;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -773,9 +885,14 @@ export function TaskDetailPage({
   };
 
   return (
-    <div className="detail" data-screen-label={"Task " + task.key}>
+    <div
+      className="detail"
+      ref={detailRef}
+      tabIndex={-1}
+      data-screen-label={"Task " + task.key}
+    >
       <div className="detail-main">
-        <TaskHero task={task} stage={stage} />
+        <TaskHero task={task} stage={stage} canEditGoal={canRunAgents} />
 
         <LiveRunSlot
           runtime={runtime}
@@ -791,6 +908,8 @@ export function TaskDetailPage({
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
+            canResolve={canResolvePacket}
+            canResolveCompletion={canRunAgents}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
@@ -838,6 +957,7 @@ export function TaskDetailPage({
       <div className="detail-side">
         <GithubTrace
           task={task}
+          {...(githubHost ? { githubHost } : {})}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           merging={runBusy}
         />

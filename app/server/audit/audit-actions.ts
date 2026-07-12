@@ -102,6 +102,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.reviewer.run_started": "task",
   "task.agent.replied": "task",
   "task.quality.flagged": "task",
+  "task.goal.updated": "task",
   // Operator-authored governance actions (operator-actions.server).
   "task.operator.commented": "task",
   "task.operator.recommended": "task",

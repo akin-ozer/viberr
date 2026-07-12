@@ -9,7 +9,18 @@ import type {
   TaskPacket,
 } from "~/schemas/task-file.schema";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
-import { compactTimelineEvents } from "./timeline-compaction.server";
+import {
+  compactTimelineEvents,
+  DEFAULT_COMPACTION,
+} from "./timeline-compaction.server";
+import {
+  enforceOperatorBrevity,
+  guardrailOn,
+  guardrailValue,
+  isMeaninglessComment,
+  separateEvidence,
+} from "./comment-guardrails.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -21,6 +32,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
+import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
@@ -176,7 +188,15 @@ export function resolveOperatorAuthority(
 export function gate(authority: OperatorAuthority, capabilityId: string): Gate {
   const mode = authority.policy.get(capabilityId) ?? "off";
   if (mode === "direct") return "direct";
-  if (mode === "recommend") return authority.autonomy === "full" ? "direct" : "recommend";
+  if (mode === "recommend") {
+    // Full autonomy promotes recommend → direct — EXCEPT for acceptance-to-Done.
+    // The human-only-Done invariant's single agent exception requires the
+    // capability be EXPLICITLY `direct` (owner ruling Q1, 2026-07-11): an admin
+    // who configured `recommend` expecting a human gate must never get a silent
+    // agent-close just because the run was launched at full autonomy.
+    if (capabilityId === "completion-for-acceptance") return "recommend";
+    return authority.autonomy === "full" ? "direct" : "recommend";
+  }
   // human (reserved for a human) and off (withheld) both mean "operator can't".
   return "deny";
 }
@@ -208,22 +228,6 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
   return { ...ctx, operatorAuthorized: true };
 }
 
-/** Whether a project anti-noise guardrail is enabled (F5). Reads project.md
- *  fresh; a missing guardrail (older/other projects) is treated as off. */
-function guardrailOn(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  id: string,
-): boolean {
-  const project = readProjectFile({
-    projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
-  return (
-    project?.parsed.frontmatter.guardrails?.some((g) => g.id === id && g.on === true) ??
-    false
-  );
-}
 
 /**
  * Append an operator-authored `comment` timeline event, reproject, audit.
@@ -239,6 +243,28 @@ async function writeOperatorComment(
   text: string,
   variant: "comment" | "recommend",
 ): Promise<void> {
+  // Anti-noise guardrails — ALL enforced for real (owner ruling Q3):
+  //  · meaningful-comment: trivial chatter never reaches the canonical record;
+  //  · evidence-separation: raw output dumps are trimmed to a head + reference;
+  //  · operator-brevity: operator narration is hard-capped;
+  //  · no-duplicate-summary: an exact restatement of the last operator comment
+  //    is dropped;
+  //  · compression-threshold: long timelines compact at the CONFIGURED value.
+  if (
+    guardrailOn(ctx, projectSlug, "meaningful-comment") &&
+    isMeaninglessComment(text)
+  ) {
+    logger.info("operator comment dropped by the meaningful-comment guardrail", {
+      taskKey,
+    });
+    return;
+  }
+  if (guardrailOn(ctx, projectSlug, "evidence-separation")) {
+    text = separateEvidence(text);
+  }
+  if (guardrailOn(ctx, projectSlug, "operator-brevity")) {
+    text = enforceOperatorBrevity(text);
+  }
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -248,13 +274,9 @@ async function writeOperatorComment(
     toAgent: false,
     evidence: null,
   };
-  // Anti-noise guardrail (F5, FR: "operator brevity" / "no-duplicate-summary"):
-  // when the project enables no-duplicate-summary, drop an operator comment that
-  // exactly restates the operator's most recent comment instead of appending it
-  // — otherwise a re-running operator accretes duplicate narration and the
-  // canonical contract grows noisier over time (a named PRD adoption risk).
   const dedupeOn = guardrailOn(ctx, projectSlug, "no-duplicate-summary");
   const compactOn = guardrailOn(ctx, projectSlug, "compression-threshold");
+  const compactAt = guardrailValue(ctx, projectSlug, "compression-threshold");
   let suppressed = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     if (dedupeOn) {
@@ -270,9 +292,22 @@ async function writeOperatorComment(
     // Timeline compaction (F5/FR17): once a long-running task crosses the
     // compression threshold, collapse OLD routine comments into a marker while
     // keeping every typed governance event, so the canonical file the agents
-    // re-anchor on stays readable. Typed events + the recent window survive.
+    // re-anchor on stays readable. The guardrail's CONFIGURED value drives the
+    // threshold (it used to be ignored — the settings row advertised 40 while
+    // the code hardcoded 60).
     if (compactOn) {
-      parsed.timeline = compactTimelineEvents(parsed.timeline);
+      parsed.timeline = compactTimelineEvents(
+        parsed.timeline,
+        compactAt != null
+          ? {
+              threshold: compactAt,
+              keepRecent: Math.min(
+                DEFAULT_COMPACTION.keepRecent,
+                Math.max(4, Math.floor(compactAt / 2)),
+              ),
+            }
+          : DEFAULT_COMPACTION,
+      );
     }
   });
   if (suppressed) return;
@@ -556,6 +591,11 @@ export interface OperatorTaskSnapshot {
   stageIds: string[];
   /** The last stage id — reached only via accept_completion. */
   doneStageId: string | null;
+  /** The review stage id (edge into Done) — resolved from the workflow graph,
+   *  NOT positionally, so custom/lightweight boards classify correctly. */
+  reviewStageId: string | null;
+  /** The implementation ("work") stage id (edge into review). */
+  workStageId: string | null;
   deployedSpecialists: DeployedSpecialistView[];
   openPacket: boolean;
   recentTimeline: { type: string; actor: string; text: string }[];
@@ -584,7 +624,8 @@ export function operatorSnapshot(
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
-  const doneStageId = stages[stages.length - 1]?.id ?? null;
+  const roles = resolveStageRoles(stages, workflow);
+  const doneStageId = roles.terminalId;
 
   const nextStages = workflow.flatMap((w) =>
     w.from === fm.stage
@@ -622,6 +663,8 @@ export function operatorSnapshot(
     nextStages,
     stageIds: stages.map((s) => s.id),
     doneStageId,
+    reviewStageId: roles.reviewId,
+    workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx),
     openPacket: !!file.parsed.packet,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
@@ -713,15 +756,15 @@ export async function operatorRunSpecialist(
     return { outcome: "denied", message: "Running the specialist is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      "**Recommendation:** start the primary specialist's run. Awaiting a maintainer to confirm.",
-      "recommend",
+      { kind: "run_specialist", label: "Start the primary specialist's run" },
+      "The specialist is ready to work this task; a maintainer starts the run.",
     );
-    return { outcome: "recommended", message: "Posted a run recommendation." };
+    return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
   }
   const result = await startSpecialistRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
@@ -778,15 +821,16 @@ export async function operatorRunReviewer(
     return { outcome: "denied", message: "Running a reviewer is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    await writeOperatorComment(
+    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    await addRecommendation(
       db,
       ctx,
       input.projectSlug,
       input.taskKey,
-      `**Recommendation:** start the reviewer run for \`${input.profileId}\`. Awaiting a maintainer to confirm.`,
-      "recommend",
+      { kind: "run_reviewer", profileId: input.profileId, label: `Start ${name}'s review run` },
+      `${name} is engaged as a reviewer; a maintainer starts the review run.`,
     );
-    return { outcome: "recommended", message: "Posted a reviewer-run recommendation." };
+    return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
   }
   const result = await startReviewerRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
@@ -1148,7 +1192,7 @@ export async function operatorAcceptCompletion(
         toStageId: doneStageId,
         label: `Accept completion — move ${input.taskKey} to ${doneName}`,
       },
-      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and marks the review PR merged (human acceptance).`,
+      `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable — otherwise it records the PR as accepted (merge pending).`,
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",
@@ -1174,6 +1218,10 @@ export async function operatorAcceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
+    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24) — same as the human path
+    // Acceptance consumes any standing recommendations (a leftover transition
+    // card on a Done task would move it back OUT of Done if applied).
+    parsed.frontmatter.recommendations = [];
     if (parsed.frontmatter.pr) {
       parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: "accepted" };
     }

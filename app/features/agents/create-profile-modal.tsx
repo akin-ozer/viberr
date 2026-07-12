@@ -220,7 +220,7 @@ function AutonomyField({
       <label className="flabel">
         Default autonomy
         <span className="fhint">
-          supervised recommends at governed boundaries · full performs
+          supervised recommends at approval boundaries · full performs
           them and may accept completion to Done
         </span>
       </label>

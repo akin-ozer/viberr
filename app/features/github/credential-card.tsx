@@ -14,11 +14,13 @@ import { useDialog } from "~/ui/use-dialog";
  * in Settings — this page currently renders both, see the phase report).
  *
  * States:
- * - source "pat" | "policy_display" → cred-top + scope chips + warn/ok
- *   footer (chips render the server verdicts directly — the mock's
- *   `s.ok || scopeGranted` hack is deleted per spec §7.2).
+ * - source "pat" → cred-top + scope chips + warn/ok footer (chips render the
+ *   server verdicts directly — the mock's `s.ok || scopeGranted` hack is
+ *   deleted per spec §7.2).
  * - source "none" → the settings-spec §7.11 degraded mode: a "connect
- *   credential" affordance instead of scope chips (reuses cred-warn).
+ *   credential" affordance instead of scope chips (reuses cred-warn). A project
+ *   with a credentialPolicy but no bound PAT also lands here — a policy is not
+ *   a credential (honest empty slate), so no fabricated card is shown.
  */
 
 export type CredentialCardData = Pick<
@@ -67,6 +69,14 @@ export function CredentialCard({
   }
 
   const missing = credential.scopes.find((s) => !s.ok);
+  // A freshly-attached PAT that has never been validated has every scope chip
+  // at source "unchecked" (ok by absence-of-violation, not by evidence). Don't
+  // claim "All required scopes granted" for a credential no GitHub probe has
+  // confirmed — say it's unverified and point at Grant scope, which runs the
+  // real check.
+  const unverified =
+    credential.scopes.length > 0 &&
+    credential.scopes.every((s) => s.source === "unchecked");
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -111,6 +121,15 @@ export function CredentialCard({
               {missing.flaggedTaskKey}
             </button>
           )}
+          {warnActions}
+        </div>
+      ) : unverified ? (
+        <div className="cred-warn">
+          <Icon name="alert" />
+          <span>
+            Credential attached — scopes not yet verified against GitHub. Run
+            Grant scope to validate.
+          </span>
           {warnActions}
         </div>
       ) : (

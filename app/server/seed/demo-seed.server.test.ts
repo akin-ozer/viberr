@@ -128,7 +128,9 @@ describe("demo seed", () => {
       "request_edit",
       "block_on_policy",
     ]);
-    expect(packet.options[0]).toMatchObject({ t: "Accept completion", rec: true, accept: true });
+    expect(packet.options[0]).toMatchObject({ t: "Accept completion", rec: true });
+    // The dead `accept` flag was removed — acceptance gates on kind only.
+    expect(packet.options[0]).not.toHaveProperty("accept");
     expect(packet.options[1]?.ev).toBe(
       "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance.",
     );

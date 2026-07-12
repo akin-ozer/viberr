@@ -230,11 +230,19 @@ describe("extractReplyText", () => {
     expect(extractReplyText([line({ ev: "tool", tag: "tool_use", text: "ls" })])).toBeNull();
   });
 
-  it("truncates a huge reply but keeps it readable", () => {
+  it("truncates a huge reply but keeps it readable, pointing at the agent logs", () => {
     const big = "x".repeat(5000);
     const out = extractReplyText([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBeLessThan(5000);
-    expect(out.endsWith("…")).toBe(true);
+    expect(out).toContain("…");
+    expect(out.endsWith("_(truncated — full report in the agent logs)_")).toBe(true);
+  });
+
+  it("extractFullReplyText returns the untruncated text (verdicts classify on this)", async () => {
+    const big = "x".repeat(5000);
+    const { extractFullReplyText } = await import("./agent-reply.server");
+    const out = extractFullReplyText([line({ tag: "assistant", text: big })])!;
+    expect(out.length).toBe(5000);
   });
 });
 

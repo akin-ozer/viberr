@@ -351,32 +351,55 @@ export default function Login({
         </div>
 
         <div className="login-providers">
+          {/* D12: OAuth providers are only usable when configured on this
+              deployment (loader `providers` flags). Unconfigured ones render
+              disabled with an explicit label rather than looking clickable. */}
           <button
             type="button"
             className="btn provider github"
             onClick={() => provider("github")}
+            disabled={!providers.github}
             aria-busy={busy === "github" || undefined}
+            title={
+              providers.github
+                ? undefined
+                : "GitHub OAuth isn't configured on this deployment"
+            }
             style={
-              busy === "github"
-                ? { opacity: 0.7, pointerEvents: "none" }
-                : undefined
+              !providers.github
+                ? { opacity: 0.55, cursor: "not-allowed" }
+                : busy === "github"
+                  ? { opacity: 0.7, pointerEvents: "none" }
+                  : undefined
             }
           >
             <Icon
               name={busy === "github" ? "refresh" : "github"}
               className={busy === "github" ? "spin" : ""}
             />
-            {busy === "github" ? "Checking whitelist…" : "Continue with GitHub"}
+            {busy === "github"
+              ? "Checking whitelist…"
+              : providers.github
+                ? "Continue with GitHub"
+                : "GitHub — not configured"}
           </button>
           <button
             type="button"
             className="btn provider"
             onClick={() => provider("google")}
+            disabled={!providers.google}
             aria-busy={busy === "google" || undefined}
+            title={
+              providers.google
+                ? undefined
+                : "Google OAuth isn't configured on this deployment"
+            }
             style={
-              busy === "google"
-                ? { opacity: 0.7, pointerEvents: "none" }
-                : undefined
+              !providers.google
+                ? { opacity: 0.55, cursor: "not-allowed" }
+                : busy === "google"
+                  ? { opacity: 0.7, pointerEvents: "none" }
+                  : undefined
             }
           >
             {busy === "google" ? (
@@ -384,9 +407,25 @@ export default function Login({
             ) : (
               <span className="gmark lg">G</span>
             )}
-            {busy === "google" ? "Checking whitelist…" : "Continue with Google"}
+            {busy === "google"
+              ? "Checking whitelist…"
+              : providers.google
+                ? "Continue with Google"
+                : "Google — not configured"}
           </button>
         </div>
+        {(!providers.github || !providers.google) && (
+          <div
+            className="login-tag"
+            style={{ marginTop: ".2rem", textAlign: "center" }}
+          >
+            {!providers.github && !providers.google
+              ? "GitHub and Google sign-in aren't configured on this deployment — use a local account below."
+              : !providers.github
+                ? "GitHub sign-in isn't configured on this deployment — use a local account below."
+                : "Google sign-in isn't configured on this deployment — use a local account below."}
+          </div>
+        )}
         {info && (
           <div className="cred-warn" role="status">
             <Icon name="alert" />
@@ -426,7 +465,7 @@ export default function Login({
               className="mono"
               autoComplete="username"
               value={email}
-              placeholder="arda@viberr.dev"
+              placeholder="you@company.dev"
               onChange={(e) => {
                 setEmail(e.target.value);
                 setClientErr(null);

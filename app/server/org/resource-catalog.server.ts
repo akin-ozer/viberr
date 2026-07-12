@@ -16,7 +16,9 @@ import { listMcpServers, listSkills } from "./resources.server";
  *  - Skills: every on-disk `data/skills/<name>/` folder (the shipped expertise
  *    skills the built-in agents actually load) ∪ org-managed `org_skills` rows.
  *  - MCP servers: the in-process `viberr` governance server ∪ org MCP registry.
- *  - Knowledge bases: every on-disk `data/kb/<dir>/` folder (what runs inject).
+ *  - Knowledge bases: every on-disk `data/kb/<dir>/` folder (what runs inject)
+ *    ∪ org-managed `org_knowledge_bases` rows (E7: a KB row whose folder
+ *    vanished stays grantable/visible, consistent with org-settings).
  *
  * `id` is the reference the run layer resolves (skill name, MCP name, KB dir),
  * so a grant made here actually reaches the agent's context.
@@ -29,6 +31,11 @@ export function buildResourceCatalog(
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
 
   const kbIds = new Set<string>(dirNames(kbRootDir(dataRoot)));
+  for (const row of safe(() =>
+    db.prepare(`SELECT dir FROM org_knowledge_bases`).all() as { dir: string }[],
+  )) {
+    kbIds.add(row.dir);
+  }
 
   const mcpIds = new Set<string>(["viberr"]);
   for (const m of safe(() => listMcpServers(db))) mcpIds.add(m.name);

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
@@ -6,8 +6,8 @@ import {
   getDataRoot,
   agentProfilesDir,
   skillDirPath,
-  kbDirPath,
 } from "~/server/files/file-store-root.server";
+import { readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -107,6 +107,86 @@ function inFlightOperatorRun(
   return row ? { id: row.id, backend: row.backend as RealBackend } : null;
 }
 
+// ------------------------------------------------------ single-flight lease
+
+/**
+ * Process-level operator lease + trigger queue.
+ *
+ * The agent_runs row alone under-covers the lease: the SCRIPTED drive
+ * coordinates before its row exists, and the CODEX plan executes after its row
+ * is already `finished` — in both windows a concurrent trigger used to
+ * double-drive (double assignment, double prompts). Worse, a coalesced trigger
+ * was simply DROPPED: a human's "@operator …" landing while a run was in
+ * flight was never answered.
+ *
+ * The lease is held from runOperator entry until the mode's coordination truly
+ * ends (real: run completion; codex: plan executed; scripted: drive returned).
+ * A trigger arriving while held is QUEUED (newest wins — the operator re-reads
+ * the full task anyway, so the latest trigger subsumes older ones) and fired
+ * exactly once on release.
+ */
+interface OperatorLeaseState {
+  held: Map<string, { runId: string | null; backend: RealBackend; autonomy: OperatorAutonomy }>;
+  pending: Map<string, RunOperatorInput>;
+}
+
+const LEASE_KEY = Symbol.for("viberr.operatorLease");
+
+function leaseState(): OperatorLeaseState {
+  const cache = globalThis as unknown as Record<symbol, OperatorLeaseState | undefined>;
+  let state = cache[LEASE_KEY];
+  if (!state) {
+    state = { held: new Map(), pending: new Map() };
+    cache[LEASE_KEY] = state;
+  }
+  return state;
+}
+
+function leaseKeyFor(projectSlug: string, taskKey: string): string {
+  return `${projectSlug}/${taskKey}`;
+}
+
+/**
+ * Release the task's lease and fire the newest queued trigger, if any.
+ * IDEMPOTENT per acquisition (adversarial-review #5/#7): `token` is the exact
+ * lease-entry object captured when this drive acquired the lease. We only
+ * delete/queue-fire when the currently-held entry IS that token — so a
+ * second/late release (e.g. the scripted path's inner finally AND the outer
+ * catch both firing) can never evict a SUCCESSOR's freshly-acquired lease or
+ * double-fire the queued run. A release whose token no longer matches is a
+ * no-op.
+ */
+function releaseOperatorLease(
+  db: Database.Database,
+  key: string,
+  token?: object,
+): void {
+  const state = leaseState();
+  const current = state.held.get(key);
+  if (token !== undefined && current !== token) return; // stale release — ignore
+  state.held.delete(key);
+  const queued = state.pending.get(key);
+  if (!queued) return;
+  state.pending.delete(key);
+  logger.info("operator lease released — firing the queued trigger", {
+    key,
+    trigger: queued.trigger ?? "manual",
+  });
+  void runOperator(db, queued).catch((error) => {
+    logger.error("queued operator trigger failed", {
+      key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
+}
+
+/** Test-only: drop all leases/queued triggers (fresh state per test). */
+export function resetOperatorLeasesForTests(): void {
+  const state = leaseState();
+  state.held.clear();
+  state.pending.clear();
+}
+
 export async function runOperator(
   db: Database.Database,
   input: RunOperatorInput,
@@ -121,15 +201,39 @@ export async function runOperator(
   const backend = authority.backend;
 
   // Single-flight per task (NFR16, B6): one operator coordinates a task at a
-  // time. Concurrent triggers — e.g. create-time auto-invoke racing an
-  // "@operator …" comment, or two drag-transitions — must not start overlapping
-  // operator runs that double-assign or lose writes. If a run is already
-  // queued/running for this task, coalesce onto it instead of starting another.
-  // (The react loop is unaffected: it re-invokes only AFTER the prompting run
-  // has finished, so no run is in flight at that point.)
+  // time. A trigger arriving while the lease is held — e.g. create-time
+  // auto-invoke racing an "@operator …" comment — is QUEUED (newest wins) and
+  // fired when the in-flight coordination truly ends, so no trigger is ever
+  // silently dropped and no two drives overlap. The process lease covers the
+  // scripted/codex windows the agent_runs row alone misses.
+  const leaseKey = leaseKeyFor(input.projectSlug, input.taskKey);
+  const lease = leaseState();
+  const heldByProcess = lease.held.get(leaseKey);
+  if (heldByProcess) {
+    lease.pending.set(leaseKey, input);
+    logger.info("operator run queued — one already in flight (process lease)", {
+      taskKey: input.taskKey,
+      trigger: input.trigger ?? "manual",
+    });
+    return {
+      runId: heldByProcess.runId ?? "queued",
+      backend: heldByProcess.backend,
+      mode:
+        heldByProcess.backend === "claude" && isBackendAvailable("claude")
+          ? "real"
+          : "scripted",
+      autonomy: heldByProcess.autonomy,
+    };
+  }
+  // Cross-boot backstop: a queued/running DB row without a process lease (e.g.
+  // resumed after a restart) still coalesces; queue the trigger and drain it
+  // when that run finishes.
   const inflight = inFlightOperatorRun(db, input.projectSlug, input.taskKey);
   if (inflight) {
-    logger.info("operator run coalesced — one already in flight", {
+    lease.pending.set(leaseKey, input);
+    const { chainRunCompletion } = await import("./run-service.server");
+    chainRunCompletion(inflight.id, () => releaseOperatorLease(db, leaseKey));
+    logger.info("operator run queued — DB row already in flight", {
       taskKey: input.taskKey,
       runId: inflight.id,
       trigger: input.trigger ?? "manual",
@@ -141,6 +245,16 @@ export async function runOperator(
       autonomy: authority.autonomy,
     };
   }
+
+  // The lease-entry OBJECT is this drive's release token — every release for
+  // this drive passes it, so a stale/duplicate release can never evict a
+  // successor's lease (releaseOperatorLease is idempotent per token).
+  const leaseToken = {
+    runId: null as string | null,
+    backend,
+    autonomy: authority.autonomy,
+  };
+  lease.held.set(leaseKey, leaseToken);
 
   // Carry the run's identity on the ctx so that when an agent this operator
   // prompts replies, the reply-completion hook can re-invoke the operator to
@@ -155,14 +269,29 @@ export async function runOperator(
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
   // model emits a decision plan we execute through the same capability-gated
-  // actions). Neither available → deterministic scripted drive.
-  if (backend === "claude" && isBackendAvailable("claude")) {
-    return startRealOperatorRun(db, ctx, input, authority);
+  // actions). Neither available → deterministic scripted drive. The real/codex
+  // paths release the lease on run COMPLETION (chained callback); only a
+  // SYNCHRONOUS throw before that reaches the outer catch. The scripted path is
+  // synchronous, so it releases in its own finally — the outer catch must NOT
+  // also release it (that double-release is the bug). Idempotent-per-token
+  // release makes even an accidental double-release safe.
+  try {
+    if (backend === "claude" && isBackendAvailable("claude")) {
+      return await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
+    }
+    if (backend === "codex" && isBackendAvailable("codex")) {
+      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
+    }
+    try {
+      return await runScriptedOperatorDrive(db, ctx, input, authority);
+    } finally {
+      // Scripted coordination is fully synchronous with this call.
+      releaseOperatorLease(db, leaseKey, leaseToken);
+    }
+  } catch (error) {
+    releaseOperatorLease(db, leaseKey, leaseToken);
+    throw error;
   }
-  if (backend === "codex" && isBackendAvailable("codex")) {
-    return startCodexOperatorRun(db, ctx, input, authority);
-  }
-  return runScriptedOperatorDrive(db, ctx, input, authority);
 }
 
 // ------------------------------------------------- codex (structured output)
@@ -251,6 +380,8 @@ async function startCodexOperatorRun(
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
+  leaseKey: string,
+  leaseToken: object,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
   const prompt = buildCodexOperatorPrompt(
@@ -281,14 +412,20 @@ async function startCodexOperatorRun(
 
   // When the run finishes, parse its decision plan and execute it through the
   // capability-gated operator-actions (so codex honors the exact same RBAC +
-  // autonomy as the Claude tool-driven operator).
+  // autonomy as the Claude tool-driven operator). The lease is released only
+  // AFTER the plan finished executing — the run row is already `finished`
+  // while the plan runs, which is exactly the window the process lease covers.
+  const held = leaseState().held.get(leaseKey);
+  if (held) held.runId = runId;
   registerRunCompletion(runId, (finished) => {
-    void executeCodexPlan(db, ctx, input, authority, finished.id).catch((error) => {
-      logger.error("codex operator plan execution failed", {
-        taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-    });
+    void executeCodexPlan(db, ctx, input, authority, finished.id)
+      .catch((error) => {
+        logger.error("codex operator plan execution failed", {
+          taskKey: input.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      })
+      .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
   });
 
   logger.info("operator run started (codex structured output)", {
@@ -320,15 +457,41 @@ async function executeCodexPlan(
   runId: string,
 ): Promise<void> {
   const text = replyTextForRun(db, runId);
-  if (!text) {
-    logger.info("codex operator produced no plan text", { taskKey: input.taskKey, runId });
-    return;
-  }
-  const plan = extractPlanJson(text) as
-    | { reasoning?: string; actions?: OperatorPlanAction[] }
-    | null;
+  const plan = text
+    ? (extractPlanJson(text) as
+        | { reasoning?: string; actions?: OperatorPlanAction[] }
+        | null)
+    : null;
   if (!plan) {
-    logger.warn("codex operator plan was not valid JSON", { taskKey: input.taskKey, runId });
+    // An empty or unparseable plan is a HUMAN-VISIBLE failure, not a silent
+    // no-op: nothing else covers an operator's own run (recovery only watches
+    // specialist/reviewer runs), so without this the task simply sits with no
+    // signal. Raise a blocked recovery packet through the operator's own gate.
+    logger.warn("codex operator produced no usable plan — escalating", {
+      taskKey: input.taskKey,
+      runId,
+      hadText: !!text,
+    });
+    await operatorOpenPacket(
+      db,
+      ctx,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        packetType: "blocked",
+        title: "Operator turn produced no actionable plan",
+        body: text
+          ? "The coordinating run replied, but its output was not a valid decision plan. Coordination is paused until a human re-engages the operator or redirects the task."
+          : "The coordinating run finished without producing any output. Coordination is paused until a human re-engages the operator or redirects the task.",
+        options: defaultPacketOptions("blocked"),
+      },
+      authority,
+    ).catch((error) => {
+      logger.error("codex no-plan escalation failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
     return;
   }
   // The plan's prose fields persist to the timeline / packets — repair
@@ -433,11 +596,25 @@ async function executeCodexPlan(
           break;
       }
     } catch (error) {
-      logger.error("codex operator action failed", {
+      // ABORT the remaining plan on a governed-action failure: executing later
+      // actions against a state the failed one never produced compounds the
+      // damage (e.g. an accept_completion after a failed transition). The
+      // failure is narrated on the timeline so the board shows what stopped.
+      logger.error("codex operator action failed — aborting the remaining plan", {
         taskKey: input.taskKey,
         tool: a.tool,
         err: error instanceof Error ? error : new Error(String(error)),
       });
+      await operatorPostComment(
+        db,
+        ctx,
+        {
+          ...base,
+          text: `Coordination stopped: the \`${a.tool}\` step failed (${error instanceof Error ? error.message : String(error)}). The remaining plan was not executed.`,
+        },
+        authority,
+      ).catch(() => {});
+      break;
     }
   }
 }
@@ -449,6 +626,8 @@ async function startRealOperatorRun(
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
+  leaseKey: string,
+  leaseToken: object,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
   const systemPrompt = buildOperatorSystemPrompt(authority, input.dataRoot);
@@ -480,6 +659,14 @@ async function startRealOperatorRun(
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   });
+
+  // The real operator coordinates DURING its run (in-proc MCP tools), so the
+  // lease is held until the run reaches a terminal state. Chained (not
+  // registered) so nothing can clobber it.
+  const held = leaseState().held.get(leaseKey);
+  if (held) held.runId = runId;
+  const { chainRunCompletion } = await import("./run-service.server");
+  chainRunCompletion(runId, () => releaseOperatorLease(db, leaseKey, leaseToken));
 
   logger.info("operator run started (real)", {
     taskKey: input.taskKey,
@@ -519,10 +706,11 @@ async function runScriptedOperatorDrive(
     const isReact = (input.trigger ?? "manual") === "agent-reply";
     let snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
     const doneStageId = snap.doneStageId;
-    // Classify stages from the ordered list: the review stage is the one before
-    // Done; the implementation ("work") stage is the one before review.
-    const reviewStageId = snap.stageIds[snap.stageIds.length - 2] ?? null;
-    const workStageId = snap.stageIds[snap.stageIds.length - 3] ?? null;
+    // Classify stages from the workflow graph (NOT positionally): the review
+    // stage has an edge into Done, the work stage an edge into review. This is
+    // correct for custom/lightweight boards, not just the default 5-stage one.
+    const reviewStageId = snap.reviewStageId;
+    const workStageId = snap.workStageId;
 
     say(
       `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,
@@ -607,29 +795,13 @@ async function runScriptedOperatorDrive(
       );
     }
 
+    // ONE timeline entry per operator turn (decision E): the coordination
+    // actions themselves narrate the turn — the prompting comment, transition
+    // events, and recommendation cards ARE the plan made visible. No standalone
+    // "Plan: …" / "Read the report" pre-comments.
     if (isReact) {
-      await operatorPostComment(
-        db,
-        ctx,
-        {
-          projectSlug,
-          taskKey,
-          text: `**Read the agent's report on ${taskKey}.** Proposing the next state change based on what it reported.`,
-        },
-        authority,
-      );
       await react();
     } else {
-      await operatorPostComment(
-        db,
-        ctx,
-        {
-          projectSlug,
-          taskKey,
-          text: `**Operator (${authority.autonomy}) engaged.** Plan: prompt the stage's agent with a task-related @mention directive, then read its report before proposing the next transition.`,
-        },
-        authority,
-      );
       await coordinate();
     }
   } catch (error) {
@@ -745,34 +917,9 @@ function readSkillBody(name: string, dataRoot?: string): string {
   return "";
 }
 
-/**
- * Read a knowledge base's documents from the store (F6): every `.md` under
- * `data/kb/<dir>/`, concatenated (bounded so a large KB can't blow the context
- * window). Returns "" when the KB folder is absent — profile KB references that
- * don't resolve to a real store folder inject nothing, exactly as skills do.
- */
-function readKbBody(name: string, dataRoot?: string): string {
-  try {
-    const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir)) return "";
-    const docs: string[] = [];
-    let budget = 24_000; // cap total KB text per run
-    for (const entry of readdirSync(dir).sort()) {
-      if (!entry.endsWith(".md") || budget <= 0) continue;
-      try {
-        const raw = readFileSync(path.join(dir, entry), "utf8").trim();
-        const slice = raw.slice(0, budget);
-        budget -= slice.length;
-        docs.push(`### ${entry}\n\n${slice}`);
-      } catch {
-        // unreadable doc — skip
-      }
-    }
-    return docs.join("\n\n");
-  } catch {
-    return "";
-  }
-}
+// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
+// specialist runtime): recursive tree walk + all text-doc extensions, so
+// imported/nested/non-.md KB docs actually reach the operator's context.
 
 /** Assemble the operator's system prompt: persona + expertise + live policy. */
 export function buildOperatorSystemPrompt(
@@ -810,7 +957,7 @@ export function buildOperatorSystemPrompt(
       "- `human` / `off` / withheld: the tool is not offered — never attempt it.\n" +
       "- When a task is at (or enters) a stage, TRIGGER its agent with a task-related prompt: prompt_specialist for a working stage, prompt_reviewer for the review stage. The prompt is the agent's directive — make it specific to this task and stage, never a bare 'proceed'.\n" +
       "- Reach Done ONLY via accept_completion, and only under full autonomy; otherwise recommend acceptance.\n" +
-      "- Never write code, run shell commands, or touch the repository. You have only the `mcp__viberr__*` tools.",
+      "- Never write code, run shell commands, or touch the repository — those tools are withheld from you. Coordinate ONLY through the `mcp__viberr__*` governance tools (you may also read files and search to inform a decision).",
   );
   return parts.join("");
 }

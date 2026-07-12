@@ -18,6 +18,7 @@ import {
   reorderTask,
   resolvePacket,
   transitionStage,
+  updateTaskGoal,
 } from "./task-actions.server";
 
 const ctx = createTestDbContext();
@@ -74,6 +75,147 @@ function stageOrder(store: TestStore, stageId: string): string[] {
   const board = getBoard(store.db, store.slug)!;
   return board.columns.find((c) => c.stage.id === stageId)!.tasks.map((t) => t.key);
 }
+
+describe("P3.7 governance & lifecycle fixes", () => {
+  it("packet: the task OWNER (a contributor) may resolve a non-completion option (C3/Q2)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.selin.id }, // selin = contributor
+      PACKET,
+    );
+    // Option index 1 is request_edit (a non-completion option). The contributor
+    // owner may resolve it — no 403.
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.option.kind).toBe("request_edit");
+  });
+
+  it("packet: a non-owner contributor is still forbidden (C3)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.selin), // contributor, NOT the owner
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("packet: the OWNER cannot accept_completion — that stays admin|maintainer (C3)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.selin.id },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, // accept_completion
+        actor(store.users.selin), // contributor owner
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
+    const store = prepared();
+    // failing, at impl, with NO rework since the rejection.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        validation: "failing",
+      }),
+      timeline: [
+        {
+          occurredAt: new Date().toISOString(),
+          type: "quality",
+          actor: { kind: "operator" },
+          title: "Changes requested",
+          text: "**Validation:** failing. Reviewer requested changes.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // No rework → failing must survive the re-entry (not laundered to changed).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+  });
+
+  it("acceptCompletion (via packet) refuses a failing-validation task (C2)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.arda.id, validation: "failing" },
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda), // admin
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("dragging a card into Done reports acceptance, not a bare move (C4)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "review", ownerUserId: store.users.arda.id, validation: "healthy" });
+    const res = await reorderTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", beforeKey: null },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.acceptedIntoDone).toBe(true);
+    expect(res.task.stage).toBe("done");
+  });
+
+  it("updateTaskGoal edits the canonical goal + records a policy event (X11)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id });
+    await updateTaskGoal(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", goal: "New acceptance criteria: must contain a test." },
+      actor(store.users.murat), // maintainer
+      { dataRoot: store.dataRoot },
+    );
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.goal).toContain("must contain a test");
+    expect(file.parsed.timeline[0]).toMatchObject({ type: "policy", title: "Goal updated" });
+  });
+
+  it("updateTaskGoal is forbidden for a contributor (X11 RBAC)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl" });
+    await expect(
+      updateTaskGoal(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Sneaky rewrite." },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
 
 describe("transitionStage boundary enforcement", () => {
   it("undeclared boundary (triage→impl) → validation error", async () => {
@@ -618,6 +760,18 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict("I looked at the diff.")).toBeNull();
     expect(classifyReviewerVerdict(null)).toBeNull();
     expect(classifyReviewerVerdict("")).toBeNull();
+  });
+
+  it("treats none/nothing as negators and catches the failure(s) noun (F3)", () => {
+    expect(
+      classifyReviewerVerdict("Approve — none of the tests fail; nothing fails."),
+    ).toBe("approve");
+    expect(classifyReviewerVerdict("The suite has failures on CI.")).toBe(
+      "request_changes",
+    );
+    expect(classifyReviewerVerdict("Approved. No failures were observed.")).toBe(
+      "approve",
+    );
   });
 });
 

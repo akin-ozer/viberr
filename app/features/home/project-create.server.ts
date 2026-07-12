@@ -58,7 +58,13 @@ function presetWorkflow(
   );
 }
 
-/** `auto` preset → the operator deployment runs at full autonomy. */
+/**
+ * `auto` preset → the operator deployment runs at full autonomy AND is
+ * explicitly granted `completion-for-acceptance: direct`. The explicit grant
+ * matters: acceptance-to-Done is the one capability full autonomy does NOT
+ * promote from `recommend` (owner ruling Q1 — the human-only-Done exception
+ * requires an explicit `direct`), so the autonomous preset states it outright.
+ */
 function presetAgents(
   preset: PolicyPreset,
   agents: AgentDeployment[],
@@ -68,6 +74,12 @@ function presetAgents(
     a.profileId === "operator"
       ? {
           ...a,
+          capabilities: [
+            ...a.capabilities.filter(
+              (c) => c.capabilityId !== "completion-for-acceptance",
+            ),
+            { capabilityId: "completion-for-acceptance", mode: "direct" as const },
+          ],
           definition: {
             ...(a.definition ?? {}),
             autonomy: "full" as const,
@@ -103,12 +115,14 @@ async function fetchRemoteDefaultBranch(
 }
 
 /**
- * "New governed project" action (home spec §5.9/§5.10, §6.1): writes
+ * "New project" action (home spec §5.9/§5.10, §6.1): writes
  * projects/<slug>/project.md from the workflow template (ruling 15),
  * projects it, audits. The creator joins as project admin.
  *
- * The mock's policy preset only feeds the synthesized description — kept
- * exactly that way (agent capability presets arrive with Phase 8/9).
+ * The policy preset shapes REAL governance (S1): `strict` human-gates the
+ * pre-work boundaries, `auto` runs the operator at full autonomy + grants it
+ * completion-for-acceptance — see presetWorkflow / presetAgents. review→done
+ * stays human-locked in every preset.
  */
 
 export interface CreateProjectInput {
@@ -163,8 +177,11 @@ export async function createProject(
   }
   const template =
     input.template === "light" ? LIGHTWEIGHT_TEMPLATE : GOVERNED_TEMPLATE;
-  const repoName = input.repoName.trim() || "new-project";
-  const repo = `${owner}/${repoName}`;
+  // An empty repo field creates a repo-LESS project (repo: null) — a supported
+  // state — instead of fabricating a nonexistent `<owner>/<slug>` that every
+  // GitHub surface would then render as a dead configured repo (X12).
+  const repoName = input.repoName.trim();
+  const repo = repoName ? `${owner}/${repoName}` : null;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
@@ -172,7 +189,7 @@ export async function createProject(
   // credential health need the credential bound (project_github_credentials).
   const connection = getConnection(db, owner);
   let defaultBranch = "main";
-  if (connection) {
+  if (repo && connection) {
     const token = getPatToken(db, connection.patId);
     if (token) {
       const remote = await fetchRemoteDefaultBranch(token, repo);
@@ -184,7 +201,7 @@ export async function createProject(
   const desc =
     (input.template === "light"
       ? "Lightweight 3-stage workflow"
-      : "Governed 5-stage workflow") +
+      : "Standard 5-stage workflow") +
     " · " +
     (input.policy === "strict"
       ? "strict human-gate policy."
@@ -227,8 +244,9 @@ export async function createProject(
   });
 
   // Bind the selected connection's PAT to the project so credential health,
-  // branch creation, and PR sync work against the real repo.
-  if (connection) {
+  // branch creation, and PR sync work against the real repo. Skip for a
+  // repo-less project — there's nothing to sync against.
+  if (repo && connection) {
     setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
   }
 

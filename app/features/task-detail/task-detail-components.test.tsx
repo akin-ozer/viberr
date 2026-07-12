@@ -65,7 +65,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -94,7 +94,7 @@ describe("DecisionPacket", () => {
   it("primary button carries the selected option title and resolves by index", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     expect(primary.textContent).toContain("Accept completion");
@@ -113,7 +113,7 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={onAsk} />,
     );
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(

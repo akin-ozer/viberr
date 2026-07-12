@@ -694,13 +694,13 @@ export function AgentsPage({
         </div>
         <div className="ag-stat">
           <div className="n">{operators}</div>
-          <div className="l">operators running · one per active task</div>
+          <div className="l">active tasks · one operator each</div>
         </div>
         <div className="ag-stat">
           <div className="n" style={{ color: "var(--agent-dark)" }}>
             {working}
           </div>
-          <div className="l">specialists working right now</div>
+          <div className="l">specialists in a working state</div>
         </div>
         <div className="ag-stat">
           <div className="n" style={{ color: "var(--blue-pressed)" }}>

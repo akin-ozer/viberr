@@ -70,9 +70,10 @@ describe("home org tile counts (Phase 10)", () => {
   it("counts KBs / MCP servers / skills from the real 0008 tables", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const data = await runHomeLoader(cookie);
-    // seedOrgResources: 3 KBs · 3 MCP rows · 4 skills (9B report).
+    // seedOrgResources: 3 KBs · 4 skills · 0 MCP rows (honest empty slate — no
+    // fabricated MCP health is seeded; an admin adds real servers).
     expect(data.org.knowledgeBases).toBe(3);
-    expect(data.org.mcpServers).toBe(3);
+    expect(data.org.mcpServers).toBe(0);
     expect(data.org.skills).toBe(4);
     expect(data.org.globalAgents).toBeGreaterThan(0);
   });

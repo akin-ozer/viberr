@@ -12,7 +12,13 @@ import { Pill } from "~/ui/pill";
 
 export interface RecommendationView {
   id: string;
-  kind: "assign_specialist" | "assign_reviewer" | "transition" | "accept_completion";
+  kind:
+    | "assign_specialist"
+    | "assign_reviewer"
+    | "run_specialist"
+    | "run_reviewer"
+    | "transition"
+    | "accept_completion";
   profileId?: string;
   toStageId?: string;
   label: string;
@@ -22,6 +28,8 @@ export interface RecommendationView {
 const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
   assign_specialist: "branch",
   assign_reviewer: "check",
+  run_specialist: "bolt",
+  run_reviewer: "bolt",
   transition: "board",
   accept_completion: "check",
 };
@@ -29,6 +37,8 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
 const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   assign_specialist: "Primary specialist",
   assign_reviewer: "Reviewer",
+  run_specialist: "Run specialist",
+  run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",
 };
@@ -74,8 +84,11 @@ export function OperatorRecommendations({
               </div>
               {r.detail && <div className="op-rec-detail">{r.detail}</div>}
             </div>
-            <div className="op-rec-actions">
-              {canApply && (
+            {/* Apply AND Dismiss are both maintainer-level (M1) — the server
+                enforces admin|maintainer for each, so hide them from lower
+                roles rather than render a button that 403s on click. */}
+            {canApply && (
+              <div className="op-rec-actions">
                 <button
                   type="button"
                   className="btn primary sm"
@@ -86,17 +99,17 @@ export function OperatorRecommendations({
                   <Icon name="check" />
                   Apply
                 </button>
-              )}
-              <button
-                type="button"
-                className="btn ghost sm"
-                disabled={busy}
-                onClick={() => onDismiss(r.id)}
-                title="Dismiss without acting"
-              >
-                Dismiss
-              </button>
-            </div>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  disabled={busy}
+                  onClick={() => onDismiss(r.id)}
+                  title="Dismiss without acting"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

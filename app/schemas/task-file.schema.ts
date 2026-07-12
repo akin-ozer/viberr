@@ -91,6 +91,13 @@ export const RECOMMENDATION_KINDS = [
   "assign_specialist",
   "assign_reviewer",
   "transition",
+  // Under `recommend` autonomy the operator can't start runs itself, so it
+  // recommends STARTING the specialist / reviewer run — an actionable card a
+  // maintainer applies with one click (previously a dead-end comment with no
+  // apply affordance). profileId targets the reviewer to run; the primary
+  // specialist run needs none.
+  "run_specialist",
+  "run_reviewer",
   // A clean review → the operator recommends accepting completion, which moves
   // the task to Done (the review→done boundary). Rendered as an actionable card
   // symmetric with the other stage transitions; applying it (admin|maintainer)
@@ -115,11 +122,20 @@ export const recommendationSchema = z
   .loose();
 export type Recommendation = z.infer<typeof recommendationSchema>;
 
+/** The canonical `pr.state` cache vocabulary (ruling 12 + D3): "review" =
+ * open (incl. draft), "merged", "closed" = closed without merging, and
+ * "accepted" = a human accepted the completion but the real merge is still
+ * pending. Kept in ONE place; pr-linker/pr-open/reconcilers all write from
+ * this set. */
+export const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
+export type PrState = (typeof PR_STATE_VALUES)[number];
+
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
-    /** "review" | "merged" today; Phase 7 adds real GitHub states. */
-    state: z.string().min(1),
+    // Tolerant: an unknown string (e.g. a legacy raw GitHub "open") coerces
+    // to "review" instead of dropping the whole PR ref — parsers never throw.
+    state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
   })
   .loose();
@@ -160,7 +176,10 @@ export const packetOptionSchema = z
     t: z.string().min(1),
     d: z.string().default(""),
     rec: z.boolean().default(false),
-    accept: z.boolean().optional(),
+    // (No `accept` flag — acceptance is gated solely on kind === "accept_completion"
+    // + the admin|maintainer re-check in resolvePacket. A separate `accept` field
+    // implied an authority that nothing consumed; removed. `.loose()` keeps any
+    // legacy `accept:` key in an existing task.md parseable, just ignored.)
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
   })

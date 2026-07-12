@@ -5,6 +5,16 @@ import type {
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+import type { OperatorAutonomy } from "./operator-actions.server";
+import {
+  compactTimelineEvents,
+  DEFAULT_COMPACTION,
+} from "./timeline-compaction.server";
+import {
+  resolveStageRoles,
+  isTerminalStage,
+  type StageRoles,
+} from "~/shared/workflow/stage-roles";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -169,10 +179,19 @@ function stageName(project: ProjectContext, stageId: string): string {
   return project.stages.find((s) => s.id === stageId)?.name ?? stageId;
 }
 
+/** The four structural stage roles, resolved once from the workflow graph. */
+function stageRolesOf(project: ProjectContext): StageRoles {
+  return resolveStageRoles(project.stages, project.workflow);
+}
+
 /** The review stage id — the one with a governed edge into the final stage. */
 function reviewStageIdOf(project: ProjectContext): string | null {
-  const lastStageId = project.stages[project.stages.length - 1]?.id;
-  return project.workflow.find((w) => w.to === lastStageId)?.from ?? null;
+  return stageRolesOf(project).reviewId;
+}
+
+/** The terminal (Done-equivalent) stage id. */
+function terminalStageIdOf(project: ProjectContext): string | null {
+  return stageRolesOf(project).terminalId;
 }
 
 /**
@@ -239,7 +258,16 @@ export function notifyTaskWatchers(
       taskRef(ctx, notice.projectSlug, notice.taskKey),
     )?.parsed.frontmatter.ownerUserId;
     if (owner) recipients.add(owner);
-  } catch {
+  } catch (error) {
+    // A corrupt project/task file (or context load failure) must NOT silently
+    // notify nobody of a real governance event — log it so the blind spot is
+    // diagnosable instead of an undiagnosable "no one got the alert".
+    logger.error("notifyTaskWatchers: recipient resolution failed", {
+      projectSlug: notice.projectSlug,
+      taskKey: notice.taskKey,
+      kind: notice.kind,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
     return [];
   }
   if (notice.exceptUserId) recipients.delete(notice.exceptUserId);
@@ -439,6 +467,66 @@ export async function createTask(
 }
 
 /**
+ * Edit a task's Goal / acceptance criteria (X11) — the canonical `## Goal`
+ * body every agent re-anchors on. Previously nothing in the app could change
+ * the goal after creation, so an @mention couldn't add acceptance criteria (the
+ * agent re-reads the canonical goal and ignores comment-only criteria). RBAC:
+ * admin|maintainer (it steers all downstream agent work). A `policy` timeline
+ * event records the change so the edit is auditable on the task itself; the
+ * operator is re-engaged so it re-reads the new goal.
+ */
+export async function updateTaskGoal(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string; goal: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireMemberRole(
+    project,
+    actor,
+    ["admin", "maintainer"],
+    "edit the task goal",
+  );
+  const goal = input.goal.trim();
+  if (goal.length < 3) {
+    throw AppError.validation("A goal of at least 3 characters is required.");
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (existing.parsed.goal.trim() === goal) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  }
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.goal = goal;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "policy",
+      actor: humanActorRef(db, actor),
+      title: "Goal updated",
+      text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.goal.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {},
+  });
+  // Re-engage the operator so it reads the amended goal on its next turn.
+  void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+}
+
+/**
  * Auto-invoke the operator to start coordinating a freshly-created task under
  * its deployed capability policy + autonomy (ADR-002 — one operator per active
  * task). Best-effort and non-blocking:
@@ -473,21 +561,6 @@ async function autoInvokeOperator(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-}
-
-/**
- * Re-invoke the operator to react after a boot-recovered agent reply (NFR17,
- * B9). A thin wrapper over autoInvokeOperator so the run-recovery reconciler can
- * restart the coordination chain without importing the private helper. Uses the
- * `transition` coordination trigger (a fresh react chain, reactDepth 0).
- */
-export async function autoInvokeOperatorForRecovery(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): Promise<void> {
-  await autoInvokeOperator(db, ctx, projectSlug, taskKey, "transition");
 }
 
 // ------------------------------------------------------------ appendComment
@@ -543,8 +616,29 @@ export async function appendComment(
     evidence: null,
   };
 
+  // Timeline compaction fires on HUMAN comments too — a comment flood used to
+  // never compact because compaction only ran inside operator writes.
+  const { guardrailOn, guardrailValue } = await import(
+    "./comment-guardrails.server"
+  );
+  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
+  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
+    if (compactOn) {
+      parsed.timeline = compactTimelineEvents(
+        parsed.timeline,
+        compactAt != null
+          ? {
+              threshold: compactAt,
+              keepRecent: Math.min(
+                DEFAULT_COMPACTION.keepRecent,
+                Math.max(4, Math.floor(compactAt / 2)),
+              ),
+            }
+          : DEFAULT_COMPACTION,
+      );
+    }
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -666,7 +760,6 @@ export async function commentToAgent(
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
   const {
     resolveMentionedAgent,
-    replyTextForRun,
     resumeWorkdir,
     buildReplyScript,
   } = await import("./agent-reply.server");
@@ -744,7 +837,7 @@ export async function commentToAgent(
     `adjust your work on the repository in your working directory as needed, ` +
     `then give a concise reply.`;
 
-  const { registerRunCompletion, resumeRun } = await import(
+  const { resumeRun } = await import(
     "~/server/runtimes/run-service.server"
   );
 
@@ -836,16 +929,28 @@ export async function commentToAgent(
     triggered = "started";
   }
 
-  // 5. Post the agent's reply as an agent-authored comment when it finishes.
-  registerRunCompletion(runId, (finished) => {
-    postAgentReplyComment(db, ctx, {
+  // 5. Install THE canonical completion handler (reply → reconcile → verdict →
+  //    react). A FRESH run's start fn (startSpecialistRun/startReviewerRun)
+  //    already registered it with the real workspace dir; a RESUMED session
+  //    (resumeRun ran no start fn) registers it here. An @mention carries no
+  //    operator run in ctx, so completion begins a FRESH react chain against the
+  //    deployed operator — the reviewer's verdict is recorded and the operator
+  //    reads the reply and proposes the next step (fixes the old bug where an
+  //    @mention dropped the verdict/reconcile and never re-engaged the operator).
+  if (triggered === "resumed") {
+    await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
+    await registerAgentCompletion(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      runId: finished.id,
-      actorRef: target.actorRef,
-      replyText: replyTextForRun(db, finished.id),
+      runId,
+      backend: target.session?.backend === "codex" ? "codex" : "claude",
+      role: target.role,
+      kind: target.isPrimary ? "primary" : "reviewer",
+      workdir: null,
+      agentHandle: target.name.toLowerCase(),
+      ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
     });
-  });
+  }
 
   // BUG 3: the Agent-logs selection id for the reply run's grouped entry. The
   // reply run is the NEWEST for this agent → the group representative, so its
@@ -915,7 +1020,7 @@ function projectRepoFor(
  * never propagated (the run already finished; the transcript is in the logs).
  * When the run produced no usable text, we skip posting a comment.
  */
-export function postAgentReplyComment(
+export async function postAgentReplyComment(
   db: Database.Database,
   ctx: TaskMutationContext,
   input: {
@@ -933,6 +1038,39 @@ export function postAgentReplyComment(
     });
     return Promise.resolve();
   }
+  // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
+  // chatter is rejected before it reaches the canonical record, and raw output
+  // dumps are trimmed to a head + reference (the full transcript stays in the
+  // agent logs). Both per-project toggles.
+  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
+    "./comment-guardrails.server"
+  );
+  if (
+    guardrailOn(ctx, input.projectSlug, "meaningful-comment") &&
+    isMeaninglessComment(input.replyText)
+  ) {
+    logger.info("agent reply dropped by the meaningful-comment guardrail", {
+      taskKey: input.taskKey,
+      runId: input.runId,
+    });
+    // Record the reply audit EVEN when dropping the comment (adversarial-review
+    // #11) — boot recovery keys idempotency on the `task.agent.replied` audit
+    // row, so without this a dropped-by-guardrail run would be reprocessed on
+    // every restart (re-triggering the operator forever).
+    recordAudit(db, {
+      action: "task.agent.replied",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { runId: input.runId, droppedByGuardrail: "meaningful-comment" },
+    });
+    return Promise.resolve();
+  }
+  const separated = guardrailOn(ctx, input.projectSlug, "evidence-separation")
+    ? separateEvidence(input.replyText)
+    : input.replyText;
   // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
   // fabricated (canned "done: implemented…" text with no real work). Mark it as
   // such in the canonical timeline — the run row already carries simulated=1, but
@@ -945,8 +1083,8 @@ export function postAgentReplyComment(
         .get(input.runId) as { simulated: number } | undefined
     )?.simulated === 1;
   const replyText = simulated
-    ? `_(simulated run — no real repository work was performed)_\n\n${input.replyText}`
-    : input.replyText;
+    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
+    : separated;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -982,48 +1120,6 @@ export function postAgentReplyComment(
         err: error instanceof Error ? error : new Error(String(error)),
       });
     });
-}
-
-/**
- * Register the DEFAULT completion hook for an agent run: when it finishes, post
- * the agent's final text as an agent-authored reply comment. Every agent run
- * (specialist or reviewer, however it was started — including the UI "Run"
- * button) gets this, so an agent always reports back on the timeline.
- *
- * Registration is last-writer-wins per run id (run-service), so a richer caller
- * (the operator prompt loop, or an @mention resume) may overwrite this with a
- * callback that ALSO reacts/threads its own reply — no double post. Best-effort
- * and non-blocking.
- */
-export async function registerAgentReply(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    runId: string;
-    backend: RealBackend;
-    role: string;
-  },
-): Promise<void> {
-  const [{ registerRunCompletion }, { replyTextForRun }] = await Promise.all([
-    import("~/server/runtimes/run-service.server"),
-    import("./agent-reply.server"),
-  ]);
-  const actorRef: FileActorRef = {
-    kind: "agent",
-    backend: input.backend,
-    role: input.role,
-  };
-  registerRunCompletion(input.runId, (finished) => {
-    void postAgentReplyComment(db, ctx, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      runId: finished.id,
-      actorRef,
-      replyText: replyTextForRun(db, finished.id),
-    });
-  });
 }
 
 // ------------------------------------------------------------ operatorPromptAgent
@@ -1176,15 +1272,20 @@ export function classifyReviewerVerdict(
     return "request_changes";
   }
 
-  // 3. Weak negatives ("fail", "blocker") ONLY count when NOT locally negated —
-  //    "no blockers" / "no tests fail" / "doesn't fail" are POSITIVE. Scan each
-  //    occurrence's preceding context for a negator (a bare `/\bfail\b/` test
-  //    misclassified clean approvals — the bug this guard fixes).
-  for (const m of t.matchAll(/\b(fail(?:ed|ing|s)?|blockers?)\b/g)) {
+  // 3. Weak negatives ("fail", "failure", "blocker") ONLY count when NOT
+  //    locally negated — "no blockers" / "none of the tests fail" / "nothing
+  //    fails" / "doesn't fail" are POSITIVE. Scan each occurrence's preceding
+  //    context for a negator (a bare `/\bfail\b/` test misclassified clean
+  //    approvals — the bug this guard fixes).
+  for (const m of t.matchAll(/\b(fail(?:ed|ing|s|ures?)?|blockers?)\b/g)) {
     const pre = t.slice(Math.max(0, m.index - 28), m.index);
     // A negator anywhere in the local lead-in flips it positive. `n't` is a
     // contraction suffix (don't/doesn't/won't) so it needs no leading boundary.
-    if (!/(?:\b(?:no|not|zero|without|never|any)\b|n't)[^.!?]*$/.test(pre)) {
+    if (
+      !/(?:\b(?:no|not|none|nothing|zero|without|never|any)\b|n't)[^.!?]*$/.test(
+        pre,
+      )
+    ) {
       return "request_changes";
     }
   }
@@ -1213,6 +1314,43 @@ export function classifyReviewerVerdict(
  * updated the timeline + board but never pinged the human who owns acceptance.
  * Exported for tests.
  */
+/**
+ * Rework evidence since the last rejection: scanning the newest-first timeline,
+ * is there a primary-specialist agent reply or a stage `transition` NEWER than
+ * the most recent failing `quality` event? (Reviewer-authored comments don't
+ * count — a reviewer talking is not the developer fixing.) Used to decide
+ * whether an approve may clear a standing `failing` validation. Pure — exported
+ * for tests.
+ *
+ * `primary` (the task's assigned specialist {backend, role}) lets us match the
+ * developer's reply by IDENTITY rather than a role-name regex (adversarial-
+ * review #6/#14): a reviewer whose role string dodges the review/qa/test regex
+ * would otherwise have its own reply counted as developer rework. When `primary`
+ * is absent (or a reply's actor doesn't carry a backend to compare) we fall
+ * back to the regex heuristic.
+ */
+export function hasReworkSinceLastRejection(
+  timeline: readonly TaskFileEvent[],
+  primary?: { backend: string; role: string } | null,
+): boolean {
+  for (const e of timeline) {
+    // Newest-first walk: everything seen BEFORE the failing quality event is
+    // newer than it.
+    if (e.type === "quality" && /\*\*Validation:\*\* failing/.test(e.text)) {
+      return false; // reached the rejection without seeing rework first
+    }
+    if (e.type === "transition") return true;
+    if (e.type === "comment" && e.actor.kind === "agent") {
+      const isPrimary = primary
+        ? e.actor.backend === primary.backend && e.actor.role === primary.role
+        : !/review|valid|qa|test/i.test(e.actor.role);
+      if (isPrimary) return true; // a primary-specialist reply landed after the rejection
+    }
+  }
+  // No failing quality event found at all — nothing to hold against the approve.
+  return true;
+}
+
 export async function recordReviewerVerdict(
   db: Database.Database,
   ctx: TaskMutationContext,
@@ -1230,15 +1368,24 @@ export async function recordReviewerVerdict(
   let validation: "failing" | "healthy" = "healthy";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      // A request_changes always fails. But an APPROVE must NOT clear a
-      // `failing` set by ANOTHER reviewer in the same round (multiple engaged
-      // reviewers) — one rejection blocks acceptance until the developer
-      // reworks (impl→review resets validation to "changed", not "failing").
-      // Otherwise a later approve silently masks an earlier request_changes.
+      // A request_changes always fails. An APPROVE clears a standing `failing`
+      // ONLY when the work has demonstrably moved since the rejection — a
+      // primary-specialist reply or a stage transition after the failing
+      // quality event (rework evidence). That keeps both properties:
+      //   · same-round masking is impossible (reviewer B's simultaneous
+      //     approve can't silently bury reviewer A's rejection — nothing
+      //     changed in between), and
+      //   · a rejection is NOT a life sentence (the old bug: re-review after a
+      //     real fix could never restore health, so the operator refused
+      //     acceptance forever and stalled the task).
       validation =
         verdict === "request_changes"
           ? "failing"
-          : parsed.frontmatter.validation === "failing"
+          : parsed.frontmatter.validation === "failing" &&
+              !hasReworkSinceLastRejection(
+                parsed.timeline,
+                parsed.frontmatter.specialist,
+              )
             ? "failing"
             : "healthy";
       parsed.frontmatter.validation = validation;
@@ -1278,6 +1425,266 @@ export async function recordReviewerVerdict(
     );
   } catch (error) {
     logger.warn("reviewer verdict recording failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * THE single agent-run completion handler — installed by EVERY path that starts
+ * or resumes a specialist/reviewer run (UI "Run", @mention, operator prompt,
+ * boot recovery). `registerRunCompletion` is last-writer-wins, so a single
+ * canonical hook prevents the old bug where the @mention path clobbered the
+ * verdict + reconcile hook with a reply-only one. On completion it, in order:
+ *
+ *   1. posts the agent's reply as an agent-authored comment;
+ *   2. reconciles agent-side GitHub delivery (branch/PR the agent opened with
+ *      its own creds) into the canonical task file — real runs only;
+ *   3. for a REVIEWER run, records the verdict (validation health + typed
+ *      `quality` event + owner/supervisor notification) from the FULL reply;
+ *   4. re-invokes the operator to READ the reply and propose the next state
+ *      change — the "prompt → read → propose" loop — for EVERY completion, not
+ *      just operator-initiated ones (a UI/@mention run starts a fresh react
+ *      chain against the deployed operator). Bounded by the react-depth cap and
+ *      the no-progress guard; a killed chain opens a BLOCKED recovery packet.
+ *
+ * `operatorRun` is set when this run was itself started inside an operator react
+ * loop (so the chain continues at depth+1); absent for UI/@mention/recovery
+ * (a fresh chain at depth 0). `waiting` is set to `agent` while the run is in
+ * flight (by the start path) and cleared here when no further agent work
+ * follows.
+ */
+export async function registerAgentCompletion(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    runId: string;
+    backend: RealBackend;
+    role: string;
+    kind: "primary" | "reviewer";
+    workdir: string | null;
+    /** The agent's @mention handle, for the stuck-loop packet copy. */
+    agentHandle: string;
+    /** Present when started inside an operator react loop (continue the chain). */
+    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+  },
+): Promise<void> {
+  const { registerRunCompletion } = await import(
+    "~/server/runtimes/run-service.server"
+  );
+  registerRunCompletion(input.runId, (finished) => {
+    void applyAgentCompletionEffects(db, ctx, input, {
+      id: finished.id,
+      state: finished.state,
+      simulated: finished.simulated === 1,
+    }).catch((error: unknown) => {
+      logger.error("agent-run completion handler failed", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  });
+}
+
+/**
+ * The completion EFFECTS (reply → reconcile → verdict → react/stuck-packet/
+ * waiting-flip) — shared by the live callback above and the boot-recovery
+ * reconciler, so a run recovered after a restart behaves byte-for-byte like one
+ * whose callback fired in-process.
+ */
+export async function applyAgentCompletionEffects(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    backend: RealBackend;
+    role: string;
+    kind: "primary" | "reviewer";
+    workdir: string | null;
+    agentHandle: string;
+    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+  },
+  finished: { id: string; state: string; simulated: boolean },
+): Promise<void> {
+  const { replyTextForRun, fullReplyTextForRun } = await import(
+    "./agent-reply.server"
+  );
+  const actorRef: FileActorRef = {
+    kind: "agent",
+    backend: input.backend,
+    role: input.role,
+  };
+  const commentText = replyTextForRun(db, finished.id);
+  const fullText = fullReplyTextForRun(db, finished.id);
+  const prevReply = latestAgentReplyText(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.backend,
+    input.role,
+  );
+  // 1. Land the reply first so a reacting operator reads it in its snapshot.
+  await postAgentReplyComment(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    runId: finished.id,
+    actorRef,
+    replyText: commentText,
+  });
+  // 2. Reconcile agent-side delivery (NFR15) — real runs only.
+  if (finished.state === "finished" && !finished.simulated) {
+    const { reconcileWorkspaceDelivery } = await import(
+      "~/server/github/workspace-delivery.server"
+    );
+    await reconcileWorkspaceDelivery({
+      db,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      backend: input.backend,
+      role: input.role,
+      simulated: false,
+      ...(input.workdir ? { workdir: input.workdir } : {}),
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    }).catch(() => {});
+  }
+  // 3. Reviewer verdict — classify on the FULL (untruncated) reply so a verdict
+  //    past the 1200-char comment cap is never dropped.
+  if (input.kind === "reviewer" && finished.state === "finished") {
+    await recordReviewerVerdict(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      fullText,
+    );
+  }
+  // 4. React: continue an operator chain, or start a fresh one against the
+  //    deployed operator. Resolve the effective react context.
+  const { resolveOperatorAuthority } = await import("./operator-actions.server");
+  let reactBackend: RealBackend;
+  let reactAutonomy: OperatorAutonomy;
+  let currentDepth: number;
+  if (input.operatorRun) {
+    reactBackend = input.operatorRun.backend;
+    reactAutonomy = input.operatorRun.autonomy;
+    currentDepth = input.operatorRun.reactDepth;
+  } else {
+    const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
+    reactBackend = authority.backend;
+    reactAutonomy = authority.autonomy;
+    currentDepth = 0;
+  }
+  // No-progress detection compares the TRUNCATED comment forms (adversarial-
+  // review #4): `prevReply` is the prior reply's stored (truncated) timeline
+  // comment, so comparing it against the current UNtruncated `fullText` could
+  // never match for a >1200-char reply, defeating the CTL-3 spiral guard. Use
+  // `commentText` (same truncated form) for the react/no-progress decision;
+  // `fullText` stays reserved for the reviewer verdict above.
+  const shouldReact = operatorShouldReactToReply(
+    finished.state,
+    commentText,
+    prevReply,
+    currentDepth,
+  );
+  if (!shouldReact) {
+    const noProgress =
+      !!commentText && prevReply !== null && prevReply.trim() === commentText.trim();
+    const depthCapped =
+      !!commentText &&
+      !noProgress &&
+      finished.state === "finished" &&
+      currentDepth >= OPERATOR_REACT_DEPTH_CAP;
+    if (noProgress) {
+      logger.info("operator react skipped — agent made no progress (repeated its reply)", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+      });
+    }
+    if (noProgress || depthCapped) {
+      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        agentHandle: input.agentHandle,
+        reason: noProgress
+          ? "The agent repeated its previous report verbatim — no forward progress."
+          : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
+      });
+    }
+    // ALWAYS flip waiting off `agent` when the chain terminates (adversarial-
+    // review HIGH #1). markWaitingAgent set it at run start; openStuckLoopPacket
+    // only clears it when a packet actually opens — it silently no-ops when the
+    // operator lacks generate-packets, a packet is already open, or it throws.
+    // Without this fallback the board would read "agent working" forever with no
+    // agent running. Idempotent (no-op once a packet flipped waiting to human).
+    await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
+    return;
+  }
+  // Re-invoke only while an operator is still deployed on the project.
+  const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
+    backend: reactBackend,
+    autonomy: reactAutonomy,
+  });
+  if (!authority.deployed) {
+    await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
+    return;
+  }
+  const { runOperator } = await import("~/server/runtimes/operator-run.server");
+  await runOperator(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    trigger: "agent-reply",
+    reactDepth: currentDepth + 1,
+    backend: reactBackend,
+    autonomy: reactAutonomy,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+}
+
+/** Flip a task from `waiting: agent` back to `waiting: human` once no further
+ *  agent work follows a completion. No-op when it's already not agent-waiting. */
+async function clearWaitingToHuman(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing || existing.parsed.frontmatter.waiting !== "agent") return;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.frontmatter.waiting = "human";
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+  } catch (error) {
+    logger.warn("clearWaitingToHuman failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/** Set `waiting: agent` when a real/simulated agent run is put in flight, so the
+ *  board reads "working" (not "waiting on human") while the agent runs. */
+export async function markWaitingAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing || existing.parsed.frontmatter.waiting === "agent") return;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.frontmatter.waiting = "agent";
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+  } catch (error) {
+    logger.warn("markWaitingAgent failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
@@ -1353,136 +1760,11 @@ export async function operatorPromptAgent(
     runId = started.runId;
   }
 
-  // 3. When the agent finishes, post its reply as an agent-authored comment,
-  //    THEN re-invoke the operator so it READS that reply and proposes the next
-  //    state change (the "prompt → read output → propose" loop). The react
-  //    re-invocation is bounded by OPERATOR_REACT_DEPTH_CAP so it never runs away.
-  const [{ registerRunCompletion }, { replyTextForRun }] = await Promise.all([
-    import("~/server/runtimes/run-service.server"),
-    import("./agent-reply.server"),
-  ]);
-  const actorRef: FileActorRef = {
-    kind: "agent",
-    backend: input.backend,
-    role: input.role,
-  };
-  const opRun = ctx.operatorRun;
-  registerRunCompletion(runId, (finished) => {
-    void (async () => {
-      const replyText = replyTextForRun(db, finished.id);
-      // Capture the agent's PREVIOUS reply (before we post the new one) so we can
-      // detect a no-progress repeat.
-      const prevReply = latestAgentReplyText(
-        opCtx,
-        input.projectSlug,
-        input.taskKey,
-        input.backend,
-        input.role,
-      );
-      // Land the agent's reply on the timeline first, so the reacting operator
-      // reads it in its snapshot.
-      await postAgentReplyComment(db, opCtx, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        runId: finished.id,
-        actorRef,
-        replyText,
-      });
-      // Capture agent-side delivery into the canonical record (NFR15): a real
-      // specialist may have branched/pushed/opened a PR through its OWN git/gh
-      // credentials — outside the server's stored-PAT path — leaving task.md at
-      // branch:null/pr:null. This callback REPLACES the run's default reply
-      // hook (last-writer-wins), so reconcile here too, before the operator
-      // reacts and reads the snapshot. Best-effort, never blocks the react loop.
-      if (finished.state === "finished" && !finished.simulated) {
-        const { reconcileWorkspaceDelivery } = await import(
-          "~/server/github/workspace-delivery.server"
-        );
-        await reconcileWorkspaceDelivery({
-          db,
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          backend: input.backend,
-          role: input.role,
-          simulated: false,
-          ...(opCtx.dataRoot !== undefined ? { dataRoot: opCtx.dataRoot } : {}),
-        }).catch(() => {});
-      }
-      // A REVIEWER's verdict is a first-class quality signal (FR15/FR35): emit a
-      // typed `quality` event and drive the board's validation health (FR24) so
-      // a task that keeps failing review reads "failing", not "none". Conservative
-      // heuristic — only a clear verdict flips validation.
-      if (input.kind === "reviewer" && finished.state === "finished") {
-        await recordReviewerVerdict(
-          db,
-          opCtx,
-          input.projectSlug,
-          input.taskKey,
-          replyText,
-        );
-      }
-      // Decide whether to re-invoke the operator to react. Skips interrupted/
-      // empty runs, no-progress repeats (the CTL-3 spiral), and the depth cap.
-      if (!operatorShouldReactToReply(finished.state, replyText, prevReply, opRun?.reactDepth)) {
-        const noProgress =
-          !!replyText && prevReply !== null && prevReply.trim() === replyText.trim();
-        const depthCapped =
-          !!replyText &&
-          !noProgress &&
-          finished.state === "finished" &&
-          opRun !== undefined &&
-          opRun.reactDepth >= OPERATOR_REACT_DEPTH_CAP;
-        if (noProgress) {
-          logger.info("operator react skipped — agent made no progress (repeated its reply)", {
-            taskKey: input.taskKey,
-            runId: finished.id,
-          });
-        }
-        // Stuck-loop escalation (Journey 2: failure must be governable and
-        // recoverable, not a silent stall). The guard just killed the react
-        // chain — without this, the task sits at waiting=human with no packet,
-        // no card, and no notification, and the human must archaeology the
-        // timeline. Open a BLOCKED recovery packet instead so the supervisors
-        // are pinged with concrete options.
-        if (noProgress || depthCapped) {
-          await openStuckLoopPacket(db, opCtx, {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            agentHandle: input.handle,
-            reason: noProgress
-              ? "The agent repeated its previous report verbatim — no forward progress."
-              : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
-          });
-        }
-        return;
-      }
-      if (!opRun) return; // the predicate already guarantees this; narrows the type
-      // Only re-invoke while an operator is still deployed on the project.
-      const { resolveOperatorAuthority } = await import("./operator-actions.server");
-      const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
-        backend: opRun.backend,
-        autonomy: opRun.autonomy,
-      });
-      if (!authority.deployed) return;
-      const { runOperator } = await import("~/server/runtimes/operator-run.server");
-      await runOperator(db, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        trigger: "agent-reply",
-        reactDepth: opRun.reactDepth + 1,
-        backend: opRun.backend,
-        autonomy: opRun.autonomy,
-        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-      });
-    })().catch((error: unknown) => {
-      logger.error("operator react on agent reply failed", {
-        taskKey: input.taskKey,
-        runId: finished.id,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-    });
-  });
-
+  // 3. The completion handler (reply → reconcile → verdict → react) is already
+  //    installed by startSpecialistRun/startReviewerRun above, which read
+  //    `ctx.operatorRun` from opCtx (preserved from this operator run) and pass
+  //    the real workspace clone dir. So the chain continues at depth+1 with the
+  //    correct workdir — no separate registration here.
   return { runId };
 }
 
@@ -1861,13 +2143,26 @@ export async function transitionStage(
     // Live validation-health (FR24, B7): the board's validation signal was
     // seed-only, so a real task always read "none". Derive it from governance
     // state — entering review means the work is up for review ("changed").
-    // A failing verdict ("failing") and acceptance ("healthy") are set on the
-    // packet/accept paths. Don't stomp a "failing" flag on a re-review.
-    if (
-      input.toStageId === reviewStageIdOf(project) &&
-      parsed.frontmatter.validation === "none"
-    ) {
-      parsed.frontmatter.validation = "changed";
+    // ANY stale verdict is reset: a `healthy` from a prior round no longer
+    // describes the new evidence, and a `failing` from a prior round starts a
+    // NEW review cycle (the fix that ends "failing forever" — the reviewer
+    // re-verdicts the fresh evidence). BUT a bare re-entry must NOT launder a
+    // standing `failing` (adversarial-review #9): only reset failing→changed
+    // when there is genuine rework since the rejection — otherwise a maintainer
+    // could bounce a rejected task out of and back into review to clear the
+    // flag and accept without a re-review. A non-failing validation always
+    // resets to `changed` on review entry.
+    if (input.toStageId === reviewStageIdOf(project)) {
+      const stale = parsed.frontmatter.validation;
+      if (
+        stale !== "failing" ||
+        hasReworkSinceLastRejection(
+          parsed.timeline,
+          parsed.frontmatter.specialist,
+        )
+      ) {
+        parsed.frontmatter.validation = "changed";
+      }
     }
     // A stage move makes any pending transition recommendation stale — drop it
     // so a Done task never shows a "move to <stage>" card.
@@ -1916,7 +2211,7 @@ export async function transitionStage(
   // it degrades cleanly (no throw) when the repo/PAT isn't configured, so a
   // transition never fails on GitHub state. The review stage is the one with a
   // governed edge into the final (Done) stage.
-  const reviewStageId = project.workflow.find((w) => w.to === lastStageId)?.from;
+  const reviewStageId = reviewStageIdOf(project);
   if (reviewStageId && input.toStageId === reviewStageId) {
     void openReviewPrBestEffort(db, ctx, input.projectSlug, input.taskKey, actor);
   }
@@ -2014,7 +2309,12 @@ export async function reorderTask(
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ task: TaskSummary; movedStage: boolean; toName: string }> {
+): Promise<{
+  task: TaskSummary;
+  movedStage: boolean;
+  toName: string;
+  acceptedIntoDone: boolean;
+}> {
   const project = loadProjectContext(ctx, input.projectSlug);
   requireMemberRole(project, actor, ["admin", "maintainer"], "reorder the board");
 
@@ -2065,7 +2365,17 @@ export async function reorderTask(
 
   const toName =
     project.stages.find((s) => s.id === input.toStageId)?.name ?? input.toStageId;
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), movedStage, toName };
+  // Dragging INTO the terminal stage runs the full acceptance contract (merge
+  // attempt + completion event) via the H4 redirect — surface that honestly so
+  // the toast isn't a bare "Moved" for what is actually an acceptance + merge.
+  const acceptedIntoDone =
+    movedStage && isTerminalStage(input.toStageId, project.stages);
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    movedStage,
+    toName,
+    acceptedIntoDone,
+  };
 }
 
 // ------------------------------------------------------------ resolvePacket
@@ -2095,18 +2405,6 @@ export async function resolvePacket(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  // Resolving a decision packet steers agent work and can advance/redirect the
-  // task — a consequential governance action (FR27), so it is admin|maintainer,
-  // matching the "Approve stage transitions" row. The accept_completion option
-  // is additionally re-gated below; other options (redirect/hold/request_edit)
-  // are covered by this base gate.
-  requireMemberRole(
-    project,
-    actor,
-    ["admin", "maintainer"],
-    "resolve decision packets",
-  );
-
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const packet = existing.parsed.packet;
@@ -2116,6 +2414,33 @@ export async function resolvePacket(
   const option = packet.options[input.optionIndex];
   if (!option) {
     throw AppError.validation("Unknown packet option.");
+  }
+
+  // Packet-resolution authority (owner ruling Q2, 2026-07-11): a decision packet
+  // is addressed to the task OWNER, so the owner (whatever their project role)
+  // OR an admin|maintainer may resolve it — a contributor who took ownership is
+  // no longer told "decision needed" and then handed a 403. The
+  // `accept_completion` option is the one exception: merging + moving to Done
+  // stays admin|maintainer (re-gated below), preserving the human-only-Done
+  // authority split.
+  // The owner path additionally requires CURRENT project membership
+  // (adversarial-review #8) — a user removed from the project who still holds a
+  // stale ownerUserId must not resolve packets. `memberRoles.has` is the live
+  // membership check.
+  const isOwner =
+    !ctx.operatorAuthorized &&
+    !!actor.userId &&
+    existing.parsed.frontmatter.ownerUserId === actor.userId &&
+    project.memberRoles.has(actor.userId);
+  if (option.kind !== "accept_completion" && isOwner) {
+    // owner is allowed — skip the maintainer gate
+  } else {
+    requireMemberRole(
+      project,
+      actor,
+      ["admin", "maintainer"],
+      "resolve decision packets",
+    );
   }
 
   const now = new Date().toISOString();
@@ -2135,8 +2460,16 @@ export async function resolvePacket(
         ["admin", "maintainer"],
         "accept completion into Done",
       );
+      // Refuse a standing `failing` validation (C2) — same stance as the human
+      // acceptCompletion + operator (H3): a stale acceptance packet must not
+      // merge work the last review rejected.
+      if (existing.parsed.frontmatter.validation === "failing") {
+        throw conflict(
+          "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+        );
+      }
       const doneStageId =
-        project.stages.find((s) => s.id === "done")?.id ??
+        terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
       // Attempt the REAL merge (FR31) and only claim "merged" when it truly
@@ -2155,8 +2488,9 @@ export async function resolvePacket(
         type: "completion",
         actor: human,
         title: "Completion accepted",
-        text:
-          !hasPr || reallyMerged
+        text: !hasPr
+          ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+          : reallyMerged
             ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
             : "Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge).",
         toAgent: false,
@@ -2167,6 +2501,9 @@ export async function resolvePacket(
         fm.readiness = "ready";
         fm.waiting = "none";
         fm.validation = "healthy"; // accepted work is validated (FR24)
+        // Acceptance consumes standing recommendations — a leftover transition
+        // card on a Done task would move it back OUT of Done if applied.
+        fm.recommendations = [];
         if (fm.pr) fm.pr = { ...fm.pr, state: reallyMerged ? "merged" : "accepted" };
       };
       clearPacket = true;
@@ -2291,7 +2628,7 @@ export async function resolvePacket(
  */
 async function acceptCompletion(
   db: Database.Database,
-  input: { projectSlug: string; taskKey: string },
+  input: { projectSlug: string; taskKey: string; force?: boolean },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<void> {
@@ -2305,8 +2642,18 @@ async function acceptCompletion(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
+  // Refuse to accept a task with a standing `failing` validation (C2) — a stale
+  // "accept completion" recommendation created before a reviewer rejected must
+  // not merge broken work. Same stance as the operator's H3 refusal. The
+  // developer reworks + a reviewer re-approves (which clears failing, A3) first.
+  if (!input.force && existing.parsed.frontmatter.validation === "failing") {
+    throw conflict(
+      "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+    );
+  }
+
   const doneStageId =
-    project.stages.find((s) => s.id === "done")?.id ??
+    terminalStageIdOf(project) ??
     project.stages[project.stages.length - 1]?.id ??
     "done";
 
@@ -2332,8 +2679,9 @@ async function acceptCompletion(
     type: "completion",
     actor: humanActorRef(db, actor),
     title: "Completion accepted",
-    text:
-      !hasPr || reallyMerged
+    text: !hasPr
+      ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+      : reallyMerged
         ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
         : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge — merge it manually or reconcile once credentials are set).`,
     toAgent: false,
@@ -2467,6 +2815,25 @@ export async function applyRecommendation(
       actor,
       ctx,
     );
+  } else if (rec.kind === "run_specialist") {
+    // The operator recommended starting the primary specialist's run (it can't
+    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked in
+    // startSpecialistRun) starts the run.
+    const { startSpecialistRun } = await import("./specialist-run.server");
+    await startSpecialistRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+  } else if (rec.kind === "run_reviewer" && rec.profileId) {
+    const { startReviewerRun } = await import("./specialist-run.server");
+    await startReviewerRun(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
+      actor,
+      ctx,
+    );
   } else if (rec.kind === "transition" && rec.toStageId) {
     await transitionStage(
       db,
@@ -2513,8 +2880,9 @@ export async function applyRecommendation(
 }
 
 /**
- * Dismiss a pending operator recommendation without acting on it (any member).
- * Idempotent — a missing id is a no-op.
+ * Dismiss a pending operator recommendation without acting on it (admin|
+ * maintainer — symmetric with resolvePacket; the UI hides the control from
+ * lower roles). Idempotent — a missing id is a no-op.
  */
 export async function dismissRecommendation(
   db: Database.Database,

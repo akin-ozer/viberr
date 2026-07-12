@@ -35,6 +35,8 @@ import {
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
+  operatorRunReviewer,
+  operatorRunSpecialist,
   operatorTransitionStage,
   resolveOperatorAuthority,
   type OperatorAutonomy,
@@ -108,11 +110,15 @@ function seedTask(stage: string): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
   configureRunServiceForTests();
+  const { resetOperatorLeasesForTests } = await import(
+    "~/server/runtimes/operator-run.server"
+  );
+  resetOperatorLeasesForTests();
 });
 
 afterEach(() => {
@@ -210,6 +216,86 @@ describe("operatorAssignSpecialist", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(task().frontmatter.specialist).toBeNull();
+  });
+});
+
+describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYABLE card", () => {
+  it("run_specialist under recommend adds an actionable card (not a dead-end comment) that apply STARTS the run", async () => {
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    // Assign the specialist directly first (assignment isn't what's recommended
+    // here — starting its run is).
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+
+    const r = await operatorRunSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    // The regression: a STRUCTURED, applyable recommendation — NOT a bare
+    // "Awaiting a maintainer to confirm" comment with no button.
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("run_specialist");
+    // No run started yet (it's only recommended).
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+
+    // A maintainer applies the card → the specialist run actually starts.
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.recommendations).toHaveLength(0);
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+  });
+
+  it("run_reviewer under recommend adds an applyable card carrying the reviewer profileId", async () => {
+    deployRoster([
+      { capabilityId: "summon-reviewers", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    // Engage the reviewer first (starting its run is what's recommended).
+    const { assignReviewer } = await import("./specialist-run.server");
+    await assignReviewer(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const r = await operatorRunReviewer(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    const recs = task().frontmatter.recommendations;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.kind).toBe("run_reviewer");
+    expect(recs[0]!.profileId).toBe("reviewer");
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: recs[0]!.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
   });
 });
 
@@ -405,6 +491,45 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
   });
 });
 
+describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
+  it("a trigger arriving while a run is in flight is QUEUED and fired once, not dropped", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { runOperator, resetOperatorLeasesForTests } = await import(
+      "~/server/runtimes/operator-run.server"
+    );
+    resetOperatorLeasesForTests();
+    // Fire two concurrent triggers WITHOUT awaiting the first — the second must
+    // coalesce (queue), not start a second overlapping operator run.
+    const p1 = runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "transition",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+    const r2 = await runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      trigger: "manual",
+      autonomy: "supervised",
+      dataRoot: store.dataRoot,
+    });
+    // The second call coalesced — it returned the queued sentinel, not a new run.
+    expect(r2.runId).toBe("queued");
+    await p1;
+    // Give the queued trigger time to drain, then interrupt anything running.
+    await new Promise((r) => setTimeout(r, 50));
+    interruptRunningRuns("VIB-1");
+    // Exactly the coordination happened; no double-driving (the recommendation
+    // isn't duplicated — a transition rec is present at most once).
+    const recs = task().frontmatter.recommendations.filter(
+      (r) => r.kind === "transition",
+    );
+    expect(recs.length).toBeLessThanOrEqual(1);
+  });
+});
+
 describe("operatorTransitionStage", () => {
   it("supervised + recommend mode recommends and does not move (approval boundary)", async () => {
     // impl → review is an `approval` boundary — a human gate — so a supervised
@@ -533,8 +658,13 @@ describe("operatorAcceptCompletion", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
-  it("full autonomy accepts completion and moves the task to Done", async () => {
-    deployRoster(DEFAULT_POLICY);
+  it("full autonomy + EXPLICIT direct accepts completion and moves the task to Done", async () => {
+    // Owner ruling Q1: acceptance-to-Done requires an EXPLICIT `direct` grant —
+    // full autonomy alone does not promote it. This roster grants it directly.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
     seedTask("review");
     const r = await operatorAcceptCompletion(
       store.db,
@@ -545,9 +675,27 @@ describe("operatorAcceptCompletion", () => {
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("done");
     expect(task().frontmatter.waiting).toBe("none");
-    // The deliberate override is audited distinctly.
+    expect(task().frontmatter.validation).toBe("healthy");
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+
+  it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {
+    // The shipped default operator holds completion-for-acceptance:recommend.
+    // Under full autonomy that must NOT silently promote to an agent-close.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("recommended");
+    expect(task().frontmatter.stage).toBe("review");
+    expect(
+      task().frontmatter.recommendations.some((rec) => rec.kind === "accept_completion"),
+    ).toBe(true);
   });
 });
 

@@ -22,11 +22,11 @@ import { READINESS_VALUES } from "./task-file.schema";
 export const SSE_EVENT_NAMES = [
   "task.updated",
   "task.removed",
-  "task.readiness-changed",
   "project.updated",
   "project.removed",
   "projection.rebuilt",
   "notification.created",
+  "notification.read",
   "violation.updated",
   // Phase 8 — high-frequency runtime stream. Published STRAIGHT to the
   // broker from the run-service (NOT the projection emitter): reference-only
@@ -67,17 +67,6 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     data: z.object({ projectSlug: slug, taskKey }),
   }),
   z.object({
-    type: z.literal("task.readiness-changed"),
-    entityId,
-    occurredAt,
-    data: z.object({
-      projectSlug: slug,
-      taskKey,
-      stage: z.string().nullable(),
-      readiness: z.enum(READINESS_VALUES),
-    }),
-  }),
-  z.object({
     type: z.literal("project.updated"),
     entityId,
     occurredAt,
@@ -103,6 +92,14 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     entityId,
     occurredAt,
     // Compact reference only — the recipient revalidates its own inbox.
+    data: z.object({ userId: z.string().min(1) }),
+  }),
+  z.object({
+    // Mark-read happened (any tab / packet resolution) — other tabs of the
+    // same user revalidate so their bell badge drops without a manual reload.
+    type: z.literal("notification.read"),
+    entityId,
+    occurredAt,
     data: z.object({ userId: z.string().min(1) }),
   }),
   z.object({

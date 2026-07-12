@@ -312,9 +312,10 @@ export interface ScopeChip {
 export interface ProjectCredentialHealth {
   /** True when a real PAT row is bound to the project. */
   configured: boolean;
-  /** pat = real bound credential · policy_display = project.md
-   * credentialPolicy fallback (seeded demo) · none = nothing at all. */
-  source: "pat" | "policy_display" | "none";
+  /** pat = real bound credential · none = nothing bound (a project may still
+   * declare a credentialPolicy for requiredScopes, but a policy is not a
+   * credential and never renders as configured). */
+  source: "pat" | "none";
   patId: string | null;
   label: string | null;
   masked: string | null;
@@ -419,20 +420,13 @@ export function getProjectCredentialHealth(
       openViolations,
     };
   }
-  if (policy) {
-    return {
-      configured: false,
-      source: "policy_display",
-      patId: null,
-      label: policy.credentialLabel || null,
-      masked: policy.masked || null,
-      lastValidatedAt: null,
-      validation: null,
-      requiredScopes,
-      scopes,
-      openViolations,
-    };
-  }
+  // No bound PAT → honest "none" state, ALWAYS. A project may still declare a
+  // credentialPolicy (its requiredScopes drive the pre-flight scope check), but
+  // a policy is NOT a credential: the old `policy_display` source rendered a
+  // green "All required scopes granted" card from project.md's masked/label for
+  // a token that does not exist (seeded demo lie — owner ruling "honest empty
+  // slate"). requiredScopes still flow through so the degraded card can say what
+  // the project needs; nothing fabricated is presented as configured.
   return {
     configured: false,
     source: "none",

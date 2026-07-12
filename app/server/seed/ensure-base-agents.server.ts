@@ -8,22 +8,36 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
 import { baseAgentDeployments } from "./demo-data.server";
 
+/** The system operator's profile id (never removable, always ensured). */
+const OPERATOR_PROFILE_ID = "operator";
+
 /**
- * Backfill the built-in agent roster — the operator plus the base specialists
- * (Developer, Reviewer) — into every project that is missing any of
- * them, so the operator is preinstalled (its create-time auto-invoke fires) and
- * the core specialists are usable across all boards, including projects that
- * predate them (e.g. app-created before these shipped, or seeded with a trimmed
- * roster). Idempotent (each agent is only added when its profileId is absent)
- * and best-effort (a per-project failure is logged, never blocks boot). Runs at
- * boot after the projection rescan, before the file watcher starts, so there is
- * no concurrent writer.
+ * Ensure each project's built-in agent roster at boot — WITHOUT undoing
+ * deliberate roster edits (E10: the old version re-injected Developer/
+ * Reviewer into every project on every boot, so removing one never stuck).
+ *
+ * Rules:
+ * - The OPERATOR is unconditionally ensured on every project (it is the
+ *   system profile — its create-time auto-invoke and packet loop depend
+ *   on it being deployed).
+ * - The base specialists (Developer, Reviewer) are backfilled ONLY into a
+ *   project that has NO specialist deployments at all (first boot / a board
+ *   that predates them). A project with ≥1 specialist — even a custom one,
+ *   even after removing a built-in — keeps its roster exactly as-is.
+ *
+ * Idempotent and best-effort (a per-project failure is logged, never blocks
+ * boot). Runs at boot after the projection rescan, before the file watcher
+ * starts, so there is no concurrent writer.
  */
 export function ensureBaseAgentsDeployed(
   db: Database.Database,
   dataRoot?: string,
 ): void {
   const base = baseAgentDeployments();
+  const operator = base.find((d) => d.profileId === OPERATOR_PROFILE_ID);
+  const baseSpecialists = base.filter(
+    (d) => d.profileId !== OPERATOR_PROFILE_ID,
+  );
   for (const project of listProjects(db)) {
     try {
       const file = readProjectFile({
@@ -32,19 +46,27 @@ export function ensureBaseAgentsDeployed(
       });
       if (!file) continue;
 
-      const present = new Set(
-        file.parsed.frontmatter.agents.map((a) => a.profileId),
+      const agents = file.parsed.frontmatter.agents;
+      const present = new Set(agents.map((a) => a.profileId));
+      const hasAnySpecialist = agents.some(
+        (a) => a.profileId !== OPERATOR_PROFILE_ID,
       );
-      // Preserve roster order intent: operator first, then the specialists that
-      // are missing, then whatever the project already deployed.
-      const missing = base.filter((d) => !present.has(d.profileId));
+
+      // Operator: always ensured. Base specialists: first boot only — a
+      // project that already deploys ANY specialist keeps its roster.
+      const missing = [
+        ...(operator && !present.has(OPERATOR_PROFILE_ID) ? [operator] : []),
+        ...(!hasAnySpecialist
+          ? baseSpecialists.filter((d) => !present.has(d.profileId))
+          : []),
+      ];
       if (missing.length === 0) continue;
 
       const next = {
         ...file.parsed,
         frontmatter: {
           ...file.parsed.frontmatter,
-          agents: [...missing, ...file.parsed.frontmatter.agents],
+          agents: [...missing, ...agents],
         },
       };
       writeFileAtomic(

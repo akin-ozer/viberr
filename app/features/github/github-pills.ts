@@ -30,12 +30,14 @@ export function syncPill(state: SyncState): PillView {
 
 /**
  * PR state pill (ruling 12): merged → done, closed-unmerged → risk "closed"
- * (the rendering the mock never designed), anything else ("review",
- * open/draft) → info "in review".
+ * (the rendering the mock never designed), accepted (human accepted, real
+ * merge pending — D3/S2) → amber "merge pending" matching the task-detail
+ * branch panel, anything else ("review", open/draft) → info "in review".
  */
 export function prStatePill(state: string): PillView {
   if (state === "merged") return { kind: "done", label: "merged" };
   if (state === "closed") return { kind: "risk", label: "closed" };
+  if (state === "accepted") return { kind: "input", label: "merge pending" };
   return { kind: "info", label: "in review" };
 }
 

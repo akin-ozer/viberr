@@ -118,32 +118,75 @@ describe("buildSpecialistPersona", () => {
 });
 
 describe("ensureBaseAgentsDeployed", () => {
-  it("backfills the missing built-in specialists into a project that only has the operator", () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
-
-    // Trim viberr-core's roster down to just the operator, simulating a board
-    // that predates the base specialists.
+  /** Rewrites viberr-core's roster to exactly `keep` and reprojects. */
+  function setRoster(
+    db: ReturnType<typeof ctx.makeDb>,
+    dataRoot: string,
+    keep: (profileId: string) => boolean,
+  ): void {
     const file = readProjectFile({ projectSlug: "viberr-core", dataRoot })!;
     const trimmed = {
       ...file.parsed,
       frontmatter: {
         ...file.parsed.frontmatter,
-        agents: file.parsed.frontmatter.agents.filter((a) => a.profileId === "operator"),
+        agents: file.parsed.frontmatter.agents.filter((a) => keep(a.profileId)),
       },
     };
     writeFileAtomic(projectFilePath("viberr-core", dataRoot), serializeProjectFile(trimmed));
     rebuildPath(db, projectFilePath("viberr-core", dataRoot), { dataRoot });
+  }
 
+  function rosterIds(dataRoot: string): string[] {
+    return readProjectFile({ projectSlug: "viberr-core", dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+  }
+
+  it("backfills the base specialists into a project with NO specialists (first boot)", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    runDemoSeed(db, { dataRoot });
+
+    // Operator-only roster = no specialist deployments at all — this is the
+    // one case the base specialists are still injected into.
+    setRoster(db, dataRoot, (id) => id === "operator");
     ensureBaseAgentsDeployed(db, dataRoot);
 
-    const after = readProjectFile({ projectSlug: "viberr-core", dataRoot })!;
-    const ids = after.parsed.frontmatter.agents.map((a) => a.profileId);
+    const ids = rosterIds(dataRoot);
     expect(ids).toContain("operator");
     expect(ids).toContain("developer");
     expect(ids).toContain("reviewer");
     expect(ids).not.toContain("tester");
+  });
+
+  it("respects a deliberate specialist removal — ≥1 specialist keeps the roster as-is (E10)", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    runDemoSeed(db, { dataRoot });
+
+    // The owner removed the Reviewer on purpose; the Developer remains. The
+    // old boot backfill re-injected the Reviewer every restart.
+    setRoster(db, dataRoot, (id) => id !== "reviewer");
+    ensureBaseAgentsDeployed(db, dataRoot);
+
+    const ids = rosterIds(dataRoot);
+    expect(ids).toContain("operator");
+    expect(ids).toContain("developer");
+    expect(ids).not.toContain("reviewer");
+  });
+
+  it("the OPERATOR is always re-ensured — without dragging specialists along", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    runDemoSeed(db, { dataRoot });
+
+    // No operator, but a deliberate developer-only roster.
+    setRoster(db, dataRoot, (id) => id === "developer");
+    ensureBaseAgentsDeployed(db, dataRoot);
+
+    const ids = rosterIds(dataRoot);
+    expect(ids).toContain("operator"); // system profile: unconditional
+    expect(ids).toContain("developer");
+    expect(ids).not.toContain("reviewer"); // has ≥1 specialist → no backfill
   });
 
   it("is idempotent — a fully-rostered project is left untouched", () => {
@@ -151,11 +194,8 @@ describe("ensureBaseAgentsDeployed", () => {
     const dataRoot = ctx.makeTempDir();
     runDemoSeed(db, { dataRoot });
 
-    const before = readProjectFile({ projectSlug: "viberr-core", dataRoot })!;
-    const beforeIds = before.parsed.frontmatter.agents.map((a) => a.profileId);
+    const beforeIds = rosterIds(dataRoot);
     ensureBaseAgentsDeployed(db, dataRoot);
-    const after = readProjectFile({ projectSlug: "viberr-core", dataRoot })!;
-    const afterIds = after.parsed.frontmatter.agents.map((a) => a.profileId);
-    expect(afterIds).toEqual(beforeIds);
+    expect(rosterIds(dataRoot)).toEqual(beforeIds);
   });
 });

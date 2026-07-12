@@ -32,6 +32,7 @@ import {
 } from "./github-context.server";
 import { findPrForBranch, type PrFacts } from "./pr-linker.server";
 import {
+  POLICY_ENGINE_ACTOR,
   flagScopeViolation,
   policyViolationText,
   resolveScopeViolationWithEvent,
@@ -216,15 +217,31 @@ export async function reconcileTask(
       }
     : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 
-  const branchCommits = compare ? taskCommits(compare.commits, fm.key) : null;
   const existingGithub: GithubCache | null = fm.github;
+  // Commit association: `[KEY]`-prefixed commits on the branch. Agents don't
+  // always follow the prefix convention, so an EMPTY filtered list must not
+  // wipe a non-empty cache captured from the run workspace for this same
+  // branch — keep what we honestly recorded rather than zeroing it.
+  const prefixCommits = compare ? taskCommits(compare.commits, fm.key) : null;
+  const existingCommits = existingGithub?.commits ?? [];
+  const branchCommits =
+    prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
+      ? existingCommits
+      : prefixCommits;
   const newGithub: GithubCache | null =
     branchCommits !== null || pr?.changed || existingGithub
       ? {
-          commits: branchCommits ?? existingGithub?.commits ?? [],
+          commits: branchCommits ?? existingCommits,
           changed: pr?.changed ?? existingGithub?.changed ?? null,
         }
       : null;
+
+  // An accepted (merge-pending) PR closed on GitHub WITHOUT merging drops the
+  // Complete-merge affordance with no path back — explain why, typed `policy`.
+  const acceptedClosedExternally =
+    fm.pr?.state === "accepted" &&
+    newPr?.state === "closed" &&
+    fm.pr.number === newPr.number;
 
   const changed =
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
@@ -233,6 +250,17 @@ export async function reconcileTask(
   if (changed) {
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
     await patchTaskFrontmatter(ref, patch);
+    if (acceptedClosedExternally) {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "policy",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text: `**Policy note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     rebuildPath(db, resolveTaskFilePath(ref), {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });

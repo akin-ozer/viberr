@@ -37,21 +37,39 @@ const MEMBERS: MembershipView[] = [
   { userId: "u_new", role: "viewer", status: "invited", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal" },
 ];
 
+// A REAL bound PAT carrying an open scope violation — the honest case that
+// renders scope chips + the warn banner (the removed `policy_display`
+// fabrication no longer produces a chip card for an unbound project).
 const CREDENTIAL: SettingsViewData["credential"] = {
-  configured: false,
-  source: "policy_display",
-  patId: null,
+  configured: true,
+  source: "pat",
+  patId: "pat_seed_1",
   label: "viberr-bot · fine-grained PAT",
   masked: "github_pat_••••42af",
-  lastValidatedAt: null,
+  lastValidatedAt: "2026-07-10T00:00:00.000Z",
   validation: null,
   requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
   scopes: [
-    { id: "repo", ok: true, source: "unchecked" },
-    { id: "workflow", ok: true, source: "unchecked" },
-    { id: "read:org", ok: true, source: "unchecked" },
+    { id: "repo", ok: true, source: "header" },
+    { id: "workflow", ok: true, source: "header" },
+    { id: "read:org", ok: true, source: "header" },
     { id: "pull_request:write", ok: false, source: "violation", flaggedTaskKey: "VIB-142" },
   ],
+  openViolations: [],
+};
+
+// The honest unconfigured state — a project with a credentialPolicy but no
+// bound PAT lands here (no fabricated chip card).
+const NO_CREDENTIAL: SettingsViewData["credential"] = {
+  configured: false,
+  source: "none",
+  patId: null,
+  label: null,
+  masked: null,
+  lastValidatedAt: null,
+  validation: null,
+  requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
+  scopes: [],
   openViolations: [],
 };
 
@@ -226,7 +244,7 @@ describe("RepoPanel", () => {
     const onGrant = vi.fn();
     const onSet = vi.fn();
     const onOpenTask = vi.fn();
-    const { container, getByText } = render(
+    const { container, getByText, queryByText } = render(
       <RepoPanel
         repo="akin-ozer/viberr"
         override
@@ -254,15 +272,46 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Grant scope"));
     expect(onGrant).toHaveBeenCalled();
 
-    // Not a real PAT (policy_display) → only Attach, no Remove (finding #13).
+    // A bound PAT → Rotate (managed by `configured`, not the removed
+    // policy_display source); no "Attach credential" affordance.
     expect(container.querySelector(".cred-manage")).not.toBeNull();
-    fireEvent.click(getByText("Attach credential"));
+    expect(queryByText("Attach credential")).toBeNull();
+    fireEvent.click(getByText("Rotate credential"));
     expect(onSet).toHaveBeenCalled();
 
     const toggle = container.querySelector('[role="switch"]')!;
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalled();
+  });
+
+  it("unconfigured project (policy but no bound PAT) → honest connect card, no chips (honest empty slate)", () => {
+    const onSet = vi.fn();
+    const { container, getByText } = render(
+      <RepoPanel
+        repo="akin-ozer/viberr"
+        override
+        credential={NO_CREDENTIAL}
+        canOverride
+        canGrant
+        busy={false}
+        credBusy={false}
+        onToggleOverride={() => {}}
+        onGrantScope={() => {}}
+        onSetCredential={onSet}
+        onClearCredential={() => {}}
+        onOpenTask={() => {}}
+      />,
+    );
+    // No fabricated scope chips and no green "granted" affirmation.
+    expect(container.querySelector(".scope-chips")).toBeNull();
+    expect(container.querySelector(".cred-ok")).toBeNull();
+    expect(container.querySelector(".cred-name")!.textContent).toBe(
+      "No credential configured",
+    );
+    // Only an Attach affordance (nothing bound to rotate/remove).
+    fireEvent.click(getByText("Attach credential"));
+    expect(onSet).toHaveBeenCalled();
   });
 
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {

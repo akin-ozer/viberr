@@ -57,40 +57,23 @@ describe("translateProjectionEvent shapes (CONVENTIONS payload contract)", () =>
     });
   });
 
-  it("emits task.readiness-changed only on an actual change", () => {
-    const changed = validated(
+  it("task.updated is the ONLY event for a task change — readiness-changed is gone (E9)", () => {
+    // The derived `task.readiness-changed` event had no consumer: it doubled
+    // wire traffic and required unbounded per-task bookkeeping. Deleted —
+    // a readiness flip is exactly ONE task.updated carrying the new value.
+    const out = validated(
       translateProjectionEvent(
         { type: "task.updated", projectSlug: "p", taskKey: "K-1", occurredAt: AT },
-        {
-          taskFacts: { stage: "impl", readiness: "ready" },
-          previousReadiness: "input_required",
-        },
+        { taskFacts: { stage: "impl", readiness: "ready" } },
       ),
     );
-    expect(changed.map((e) => e.event.type)).toEqual([
-      "task.updated",
-      "task.readiness-changed",
-    ]);
-    expect(changed[1]!.event.data).toEqual({
+    expect(out.map((e) => e.event.type)).toEqual(["task.updated"]);
+    expect(out[0]!.event.data).toEqual({
       projectSlug: "p",
       taskKey: "K-1",
       stage: "impl",
       readiness: "ready",
     });
-
-    const unchanged = translateProjectionEvent(
-      { type: "task.updated", projectSlug: "p", taskKey: "K-1", occurredAt: AT },
-      { taskFacts: { stage: "impl", readiness: "ready" }, previousReadiness: "ready" },
-    );
-    expect(unchanged.map((e) => e.event.type)).toEqual(["task.updated"]);
-
-    // First sighting (undefined previous) never emits a change event —
-    // otherwise every boot rescan floods readiness-changed.
-    const first = translateProjectionEvent(
-      { type: "task.updated", projectSlug: "p", taskKey: "K-1", occurredAt: AT },
-      { taskFacts: { stage: "impl", readiness: "ready" } },
-    );
-    expect(first.map((e) => e.event.type)).toEqual(["task.updated"]);
   });
 
   it("task.removed / project.updated / project.removed", () => {
@@ -150,6 +133,19 @@ describe("translateProjectionEvent shapes (CONVENTIONS payload contract)", () =>
         occurredAt: AT,
       }),
     );
+    expect(out[0]!.event.data).toEqual({ userId: "u_arda" });
+    expect(out[0]!.route).toEqual({ userId: "u_arda" });
+  });
+
+  it("notification.read routes to the recipient user only (E12)", () => {
+    const out = validated(
+      translateProjectionEvent({
+        type: "notification.read",
+        userId: "u_arda",
+        occurredAt: AT,
+      }),
+    );
+    expect(out[0]!.event.type).toBe("notification.read");
     expect(out[0]!.event.data).toEqual({ userId: "u_arda" });
     expect(out[0]!.route).toEqual({ userId: "u_arda" });
   });

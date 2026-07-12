@@ -44,6 +44,23 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     expect(ids("mcps")).toContain("viberr");
   });
 
+  it("unions org_knowledge_bases rows — a KB row without a folder stays grantable (E7)", () => {
+    const store = setupTestStore(ctx);
+    const now = new Date().toISOString();
+    // A managed KB row whose folder vanished (or was never created on this
+    // disk) — org-settings still lists it, so the grant picker must too.
+    store.db
+      .prepare(
+        `INSERT INTO org_knowledge_bases (id, name, dir, refresh, created_at, updated_at)
+         VALUES ('kb_x', 'Ghost KB', 'ghost-kb', 'manual', ?, ?)`,
+      )
+      .run(now, now);
+
+    const catalog = buildResourceCatalog(store.db, store.dataRoot);
+    const kbIds = catalog.find((g) => g.key === "kb")!.items.map((i) => i.id);
+    expect(kbIds).toContain("ghost-kb");
+  });
+
   it("handles a store with no resources without throwing", () => {
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-empty-"));
     const store = setupTestStore(ctx);

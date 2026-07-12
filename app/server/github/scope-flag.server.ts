@@ -8,13 +8,13 @@ import {
   readTaskFile,
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
-import { createNotification } from "~/server/projections/notifications.server";
 import {
   openScopeViolation,
   resolveScopeViolation,
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { notifyTaskWatchers } from "~/server/tasks/task-actions.server";
 
 /**
  * Policy-engine side effects around scope violations (ruling 5 + github
@@ -22,9 +22,11 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
  * the FILE side effects that must accompany open/resolve:
  *
  * flag    → open row (idempotent) + typed `policy` violation event written
- *           into the flagged task's task.md + notification to the task
- *           owner + reprojection. Retries are safe: an already-open row
- *           writes nothing twice.
+ *           into the flagged task's task.md + `policy` notification fanned
+ *           out to the task's watchers (owner + project admins/maintainers,
+ *           prefs honored — E3: the old owner-only path notified NOBODY on
+ *           an ownerless task) + reprojection. Retries are safe: an
+ *           already-open row writes nothing twice.
  * resolve → resolve row + typed `policy` update event on the violation's
  *           own task + reprojection. Also idempotent.
  *
@@ -43,9 +45,11 @@ export function policyViolationText(scope: string, consequence: string): string 
 }
 
 export function policyUpdateText(scope: string): string {
+  // The consequence names the ACTUAL scope — no hardcoded pull_request:write
+  // copy shown for unrelated scopes (e.g. a `repo` read refusal).
   return (
     `**Policy update:** \`${scope}\` granted on the project credential. ` +
-    `The earlier violation is resolved — PR auto-sync will work after merge.`
+    `The earlier violation is resolved — operations needing \`${scope}\` will work now.`
   );
 }
 
@@ -87,20 +91,6 @@ async function appendPolicyEvent(
   return true;
 }
 
-function taskOwnerUserId(
-  db: Database.Database,
-  projectSlug: string,
-  taskKey: string,
-): string | null {
-  const row = db
-    .prepare(
-      `SELECT owner_user_id FROM task_projections
-       WHERE project_slug = ? AND task_key = ?`,
-    )
-    .get(projectSlug, taskKey) as { owner_user_id: string | null } | undefined;
-  return row?.owner_user_id ?? null;
-}
-
 export interface FlagScopeViolationInput {
   projectSlug: string;
   /** Task the failure happened on (violation rows carry their task). */
@@ -136,17 +126,20 @@ export async function flagScopeViolation(
       { projectSlug: input.projectSlug, taskKey: input.taskKey, text: input.detail },
       ctx,
     );
-    const ownerUserId = taskOwnerUserId(db, input.projectSlug, input.taskKey);
-    if (ownerUserId) {
-      createNotification(db, {
-        userId: ownerUserId,
+    // E3: fan out to the humans who supervise the task — owner (if any) plus
+    // project admins/maintainers, deduped, routing prefs honored. The old
+    // owner-only createNotification meant an ownerless task alerted nobody.
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
         kind: "policy",
         text: input.detail,
         from: { kind: "system", name: "Policy engine" },
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-      });
-    }
+      },
+      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+    );
   }
   return { violation, created };
 }

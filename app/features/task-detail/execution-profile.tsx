@@ -79,7 +79,8 @@ function OwnerControl({
   }, [open]);
 
   if (!o) {
-    return (
+    // Only project MEMBERS can take ownership (M3) — hide from non-members.
+    return myRole ? (
       <button
         type="button"
         className="rev-add"
@@ -90,6 +91,8 @@ function OwnerControl({
         <Icon name="plus" />
         Assign me
       </button>
+    ) : (
+      <span className="sub">Unowned — open to any project member</span>
     );
   }
 
@@ -371,13 +374,17 @@ function ReviewerControl({
  */
 function OperatorRunControl({
   busy,
+  disabled,
   onRun,
 }: {
   busy: boolean;
+  /** Task is closed (terminal stage) — controls render disabled (G9). */
+  disabled?: boolean;
   onRun: (backend: string, autonomy: string) => void;
 }) {
   const [backend, setBackend] = useState("claude");
   const [autonomy, setAutonomy] = useState("supervised");
+  const off = busy || disabled;
   return (
     <span className="op-run">
       <select
@@ -385,7 +392,7 @@ function OperatorRunControl({
         aria-label="Operator backend"
         value={backend}
         onChange={(e) => setBackend(e.target.value)}
-        disabled={busy}
+        disabled={off}
       >
         <option value="claude">Claude Code</option>
         <option value="codex">Codex</option>
@@ -395,19 +402,24 @@ function OperatorRunControl({
         aria-label="Operator autonomy"
         value={autonomy}
         onChange={(e) => setAutonomy(e.target.value)}
-        disabled={busy}
+        disabled={off}
       >
         <option value="supervised">Supervised</option>
         <option value="full">Full autonomy</option>
       </select>
       {/* The operator coordinates ongoing work, so it stays runnable even while
-          a specialist run streams — only its own in-flight run disables it. */}
+          a specialist run streams — only its own in-flight run disables it.
+          A closed (terminal-stage) task disables it too (G9). */}
       <button
         type="button"
         className="btn primary sm"
-        disabled={busy}
+        disabled={off}
         onClick={() => onRun(backend, autonomy)}
-        title="Run the operator to coordinate this task"
+        title={
+          disabled
+            ? "Task is closed (terminal stage) — reopen it to run the operator"
+            : "Run the operator to coordinate this task"
+        }
       >
         <Icon name="shield" />
         {busy ? "Running…" : "Run operator"}
@@ -477,16 +489,27 @@ export function ExecutionProfile({
   const sp = task.specialist;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
+  // G9: a task at the terminal (Done) stage is closed — its runtime action
+  // buttons (Run operator / Run specialist / Run reviewer) are disabled so a
+  // closed task doesn't advertise live controls.
+  const closed = task.displayReadiness === "accepted";
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="agents" />
         <h2>Execution profile</h2>
-        {task.operator && (
+        {(closed || task.operator) && (
           <span className="right">
-            <Pill kind="agent" dot>
-              operator active
-            </Pill>
+            {closed && (
+              <Pill kind="done" sm>
+                task closed
+              </Pill>
+            )}
+            {task.operator && (
+              <Pill kind="agent" dot>
+                operator active
+              </Pill>
+            )}
           </span>
         )}
       </div>
@@ -508,6 +531,7 @@ export function ExecutionProfile({
             {canRunAgents && (
               <OperatorRunControl
                 busy={operatorBusy}
+                disabled={closed}
                 onRun={onRunOperator}
               />
             )}
@@ -530,12 +554,14 @@ export function ExecutionProfile({
                     <button
                       type="button"
                       className="btn primary sm"
-                      disabled={runBusy || runActive}
+                      disabled={runBusy || runActive || closed}
                       onClick={onRunSpecialist}
                       title={
-                        runActive
-                          ? "A run is already streaming for this task"
-                          : "Start an agent run for the assigned specialist"
+                        closed
+                          ? "Task is closed (terminal stage) — no runs needed"
+                          : runActive
+                            ? "A run is already streaming for this task"
+                            : "Start an agent run for the assigned specialist"
                       }
                     >
                       <Icon name="bolt" />
@@ -583,12 +609,14 @@ export function ExecutionProfile({
                       <button
                         type="button"
                         className="btn primary sm"
-                        disabled={reviewerBusy || runActive}
+                        disabled={reviewerBusy || runActive || closed}
                         onClick={() => onRunReviewer(c.profileId)}
                         title={
-                          runActive
-                            ? "A run is already streaming for this task"
-                            : "Start a run for this reviewer"
+                          closed
+                            ? "Task is closed (terminal stage) — no runs needed"
+                            : runActive
+                              ? "A run is already streaming for this task"
+                              : "Start a run for this reviewer"
                         }
                       >
                         <Icon name="bolt" />

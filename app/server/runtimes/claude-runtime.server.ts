@@ -39,8 +39,12 @@ export interface ClaudeQueryOptions {
   includePartialMessages?: boolean;
   env?: Record<string, string>;
   abortController?: AbortController;
-  /** Custom system prompt (operator persona). A string REPLACES the default. */
-  systemPrompt?: string;
+  /** Custom system prompt. A string REPLACES the default (operator: tools-only,
+   *  no coding harness). The append-preset form keeps Claude Code's default
+   *  scaffolding and appends the persona (specialists: they DO write code). */
+  systemPrompt?:
+    | string
+    | { type: "preset"; preset: "claude_code"; append?: string };
   /** In-process SDK MCP servers (operator governance tools). */
   mcpServers?: Record<string, unknown>;
   /** Auto-approve allowlist. NOTE: this does NOT remove other tools from the
@@ -195,10 +199,31 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           skills: [],
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
-        if (deps.env) options.env = deps.env;
-        // Operator runs carry a persona + in-process governance tools. A plain
-        // specialist run leaves prompt/mcp unset → default prompt + full toolset.
-        if (spec.systemPrompt) options.systemPrompt = spec.systemPrompt;
+        // Base adapter env, overlaid with any per-run env (e.g. the specialist's
+        // GIT_CEILING_DIRECTORIES workspace confinement).
+        if (deps.env || spec.env) {
+          options.env = { ...(deps.env ?? {}), ...(spec.env ?? {}) };
+        }
+        // System prompt strategy differs by run kind:
+        //  · OPERATOR — its persona REPLACES the default. The operator never
+        //    writes code; it only uses the in-process viberr MCP tools, so it
+        //    must not carry Claude Code's coding harness/tool scaffolding.
+        //  · SPECIALIST (primary/reviewer) — its persona is APPENDED to the
+        //    `claude_code` preset, so the agent keeps the default coding
+        //    harness (it DOES implement/test) with its persona layered on top.
+        //    Replacing it (the old behavior) stripped the scaffolding and made a
+        //    coding agent run on persona prose alone.
+        if (spec.systemPrompt) {
+          if (typeof spec.systemPrompt === "string" && spec.kind !== "operator") {
+            options.systemPrompt = {
+              type: "preset",
+              preset: "claude_code",
+              append: spec.systemPrompt,
+            };
+          } else {
+            options.systemPrompt = spec.systemPrompt;
+          }
+        }
         if (spec.mcpServers) options.mcpServers = spec.mcpServers;
         if (spec.allowedTools && spec.allowedTools.length) {
           options.allowedTools = spec.allowedTools;

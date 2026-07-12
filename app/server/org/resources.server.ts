@@ -364,7 +364,7 @@ export function reindexKnowledgeBase(
   });
   return {
     docCount: kb.fileCount,
-    toast: `${kb.name} re-indexed — ${kb.fileCount} docs`,
+    toast: `${kb.name} re-scanned — ${kb.fileCount} docs`,
   };
 }
 
@@ -818,6 +818,18 @@ function readSkillBody(name: string, ctx: OrgSeedContext): string {
   }
 }
 
+/** True when the on-disk SKILL.md exceeds the editor read cap — the body the
+ * UI round-trips is a TRUNCATED copy, so writing it back would destroy the
+ * tail of the file (E4). */
+function skillBodyTruncatedOnDisk(name: string, ctx: OrgSeedContext): boolean {
+  const abs = path.join(skillDirPath(name, ctx.dataRoot), "SKILL.md");
+  try {
+    return existsSync(abs) && statSync(abs).size > SKILL_BODY_MAX_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 /** A sensible summary for a disk-only skill: the SKILL.md frontmatter
  * `description:` when present, else a plain placeholder. */
 function deriveSkillSummary(name: string, ctx: OrgSeedContext): string {
@@ -841,7 +853,9 @@ function buildSkill(
   return {
     id: row ? row.id : diskId(name),
     name,
-    summary: row ? row.summary : deriveSkillSummary(name, ctx),
+    // Empty row summary (e.g. a row adopted by touchResource on upload)
+    // falls back to the derived one, same as a disk-only folder.
+    summary: row?.summary ? row.summary : deriveSkillSummary(name, ctx),
     updatedAt: row ? row.updated_at : null,
     body: readSkillBody(name, ctx),
     tree,
@@ -885,7 +899,16 @@ export function getSkill(
 
 export function saveSkill(
   db: Database.Database,
-  input: { id?: string | null; name: string; summary: string; body: string },
+  input: {
+    id?: string | null;
+    name: string;
+    summary: string;
+    body: string;
+    /** Explicit "blank the SKILL.md" intent. Without it, an EMPTY submitted
+     * body on an EXISTING skill keeps the on-disk content (E4: the modal
+     * round-trips a possibly-truncated read — empty must never blank). */
+    clearBody?: boolean;
+  },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
 ): { skill: SkillView; toast: string } {
@@ -917,6 +940,24 @@ export function saveSkill(
     throw conflict(`A skill folder ${name}/ already exists.`);
   }
 
+  // E4 write policy for EXISTING skills, decided BEFORE the folder moves:
+  // - empty body without the explicit clear flag → keep the on-disk SKILL.md;
+  // - non-empty body while the on-disk file exceeds the editor read cap →
+  //   the submitted text is a truncated round-trip; refuse instead of
+  //   silently destroying the tail of the file.
+  const body = input.body ?? "";
+  const keepExistingBody = Boolean(oldName) && body === "" && !input.clearBody;
+  if (
+    oldName &&
+    !keepExistingBody &&
+    body !== "" &&
+    skillBodyTruncatedOnDisk(oldName, ctx)
+  ) {
+    throw AppError.validation(
+      `SKILL.md for ${oldName} is larger than the 256 KB editor limit, so the editor only loaded a truncated copy. Saving would overwrite the full file with that truncated text — edit SKILL.md on disk (or re-upload it) instead.`,
+    );
+  }
+
   if (oldName && name !== oldName) {
     const clash = db
       .prepare(`SELECT id FROM org_skills WHERE name = ? AND id != ?`)
@@ -931,7 +972,12 @@ export function saveSkill(
 
   const dir = skillDirPath(name, ctx.dataRoot);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, "SKILL.md"), input.body ?? "");
+  if (!keepExistingBody) {
+    writeFileSync(path.join(dir, "SKILL.md"), body);
+  }
+  const updatedToast = keepExistingBody
+    ? `Skill ${name} updated — existing SKILL.md kept`
+    : `Skill ${name} updated — SKILL.md rewritten`;
 
   if (existing) {
     db.prepare(
@@ -943,11 +989,11 @@ export function saveSkill(
       actor,
       subjectKind: "org_skill",
       subjectId: existing.id,
-      details: { name, renamed: name !== oldName },
+      details: { name, renamed: name !== oldName, bodyKept: keepExistingBody },
     });
     return {
       skill: getSkill(db, existing.id, ctx)!,
-      toast: `Skill ${name} updated — SKILL.md rewritten`,
+      toast: updatedToast,
     };
   }
 
@@ -968,9 +1014,7 @@ export function saveSkill(
   });
   return {
     skill: getSkill(db, id, ctx)!,
-    toast: oldName
-      ? `Skill ${name} updated — SKILL.md rewritten`
-      : `Skill ${name} created — SKILL.md written`,
+    toast: oldName ? updatedToast : `Skill ${name} created — SKILL.md written`,
   };
 }
 

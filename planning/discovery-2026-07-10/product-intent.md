@@ -83,3 +83,26 @@ at boundaries. GitHub is the execution surface: task-key branch → commits → 
 5. **"Accepted, merge-pending" PRs** → ✅ a "Complete merge" action finishes the real merge later (S2).
 6. **Codex tool confinement** (Codex SDK ignores allowed/disallowed tools; enforcement is Claude-only)
    → 📎 DOCUMENTED as a known gap for the upcoming role-bindings work (S3; security deprioritized now).
+
+## Additional owner decisions (2026-07-11/12 pass 2 — rulings Q1–Q8 + follow-ups; details in
+## ../discovery-2026-07-11/findings-v2.md)
+
+7. **Acceptance requires explicit `direct`** (Q1): full autonomy promotes other recommend-capabilities
+   to direct, but `completion-for-acceptance` acts only at explicit `direct`; `off`/`human` never offer
+   the accept tool. The `auto` preset grants it explicitly.
+8. **Packet resolve authority** (Q2): the task OWNER (with current project membership) may resolve
+   non-completion packets; `accept_completion` stays admin|maintainer.
+9. **Anti-noise guardrails are REAL** (Q3): meaningful-comment / operator-brevity / evidence-separation
+   enforce on the canonical record (comment-guardrails.server), not just settings decoration.
+10. **Home is membership-scoped** (Q6): members see their projects; org-admins see all.
+11. **Full workspace isolation** (Q7): specialists run in `<taskDir>/workspace` with per-run
+    `GIT_CEILING_DIRECTORIES` — an agent's git can never touch the host checkout.
+12. **Codex runs bound by IDLE timeout, not wall-clock** (Q8): long turns are expected; only true
+    inactivity interrupts.
+13. **Honest empty slate** (2026-07-12): the seed ships NO fabricated credentials or health — 0 MCP
+    servers, 0 GitHub connections, 0 PATs; a `credentialPolicy` without a bound PAT renders the honest
+    "No credential configured" card (the `policy_display` fabrication is deleted). Do not reintroduce
+    green-until-probed seed data.
+14. **Role-bindings phase** started 2026-07-12 in a dedicated session: D2/D5 matrix-as-runtime-source +
+    guard consolidation, deep capability prune, full D9 SSE membership, Q5 contributor-vs-viewer
+    (ruling still open — ask the owner), S3. Base: `viberr-selftest-implementation` (PR #7).

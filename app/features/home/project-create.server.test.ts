@@ -130,7 +130,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(opAutonomy(f.agents)).toBeUndefined(); // still supervised
   });
 
-  it("auto = the operator runs at full autonomy (boundaries unchanged)", async () => {
+  it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {
     const store = setupTestStore(ctx);
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
@@ -143,5 +143,23 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(opAutonomy(f.agents)).toBe("full");
     // review→done is ALWAYS human-locked — no preset can grant it.
     expect(boundary(f.workflow, "review", "done")).toBe("human");
+    // The auto preset EXPLICITLY grants acceptance (full autonomy alone no
+    // longer promotes it — owner ruling Q1).
+    const op = f.agents.find((a) => a.profileId === "operator")!;
+    expect(
+      op.capabilities.find((c) => c.capabilityId === "completion-for-acceptance")?.mode,
+    ).toBe("direct");
+  });
+
+  it("an EMPTY repo field creates a repo-less project (repo: null) — no fabricated repo (X12)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", template: "governed", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm(store, r.slug).repo).toBeNull();
   });
 });

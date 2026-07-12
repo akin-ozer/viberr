@@ -211,7 +211,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["ready", "impl"],
       resources: {
         skills: ["developer-expertise"],
-        mcps: ["github-mcp"],
+        // No MCP is seeded (honest empty slate — the old "github-mcp" ref
+        // pointed at a non-resolvable, unauthenticated endpoint). An admin
+        // attaches a real MCP server and references it here.
+        mcps: [],
         // Real KB folders on disk (data/kb/<dir>) so they inject into runs (F6).
         kb: ["architecture-notes", "api-contracts"],
       },
@@ -231,7 +234,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       stages: ["impl", "review"],
       resources: {
         skills: ["reviewer-expertise"],
-        mcps: ["github-mcp"],
+        mcps: [],
         kb: ["api-contracts"],
       },
     },
@@ -240,8 +243,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // validation suite (the former Tester role is folded in here).
       direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task"],
       recommend: ["Approve the review", "Request changes"],
-      // "Push commits to the branch" is a known near-miss → stays an extra.
-      forbidden: ["Merge a pull request", "Transition a task to Done", "Push commits to the branch"],
+      // The reviewer must NOT push/commit — use the exact catalog label so this
+      // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
+      // policy actually denies (git push + git commit), not a decorative extra.
+      forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
     "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary — raising typed quality flags and recommending approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
   ),
@@ -309,9 +314,13 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           { userId: ids.selin, role: "contributor" },
         ],
         agents: deployments(),
+        // Honest empty slate: the project declares the scopes it REQUIRES (used
+        // by the pre-flight scope check), but no fabricated masked token — a
+        // policy is not a credential, and no PAT is bound until an admin adds a
+        // real one, so the credential card reads "no credential configured".
         credentialPolicy: {
           credentialLabel: "viberr-bot · fine-grained PAT",
-          masked: "github_pat_••••42af",
+          masked: "",
           requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
         },
         guardrails: [
@@ -467,7 +476,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
           { k: "Flag", v: "PAT scope missing pull_request:write", code: false },
         ],
         options: [
-          { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
+          { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true },
           { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope before acceptance.", rec: false, ev: "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance." },
           { kind: "block_on_policy", t: "Block on policy", d: "Hold until Elif updates the project credential policy.", rec: false },
         ],
@@ -821,7 +830,7 @@ export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
           { k: "Branch", v: "dep-31-staging-promotion · PR #74 open", code: true },
         ],
         options: [
-          { kind: "accept_completion", t: "Accept & promote to staging", d: "Merge PR #74 and move DEP-31 to Done.", rec: true, accept: true },
+          { kind: "accept_completion", t: "Accept & promote to staging", d: "Merge PR #74 and move DEP-31 to Done.", rec: true },
           { kind: "request_edit", t: "Request one change first", d: "Send back to the Developer before promotion.", rec: false },
         ],
       },

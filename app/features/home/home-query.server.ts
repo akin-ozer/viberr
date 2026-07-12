@@ -67,6 +67,23 @@ export interface HomeProjectCard {
   accent: string;
 }
 
+/**
+ * Home project cards VISIBLE to `viewer`. Membership-scoped (owner ruling Q6):
+ * a user sees only projects they belong to; an ORG admin sees every project.
+ * This matches the inner config-page `requireProjectMember` gating — Home no
+ * longer leaks the existence + counts of projects a non-member can't open.
+ */
+export function listHomeProjectsForUser(
+  db: Database.Database,
+  viewer: { id: string; role: "admin" | "member" },
+): HomeProjectCard[] {
+  const all = listHomeProjects(db);
+  if (viewer.role === "admin") return all; // org admins see everything
+  return all.filter((p) =>
+    listProjectMembers(db, p.slug).some((m) => m.userId === viewer.id),
+  );
+}
+
 export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
   return listProjects(db).map((project) => {
     const tasks = listProjectTasks(db, project.slug);

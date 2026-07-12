@@ -47,9 +47,9 @@ describe("seedOrgResources", () => {
     expect(org).toMatchObject({
       kbs: 3,
       skills: 4,
-      mcps: 3,
+      mcps: 0, // honest empty slate — no fabricated MCP health seeded
       domains: 1,
-      connections: 1,
+      connections: 0, // no placeholder GitHub connection seeded
     });
 
     const ctx = { dataRoot };
@@ -80,46 +80,32 @@ describe("seedOrgResources", () => {
     }
     expect(skills[1]!.fileCount).toBe(3); // SKILL.md + 2 checklists
 
-    const mcps = listMcpServers(db);
-    expect(mcps.map((m) => `${m.name}:${m.up}`)).toEqual([
-      "github-mcp:true",
-      "postgres-readonly:true",
-      "browserbase:false",
-    ]);
-    expect(mcps[0]!.tools).toBe(14);
+    // Honest empty slate: no fabricated MCP health, no placeholder connection.
+    expect(listMcpServers(db)).toHaveLength(0);
+    expect(listConnections(db)).toHaveLength(0);
 
     expect(listDomains(db).map((d) => d.domain)).toEqual(["@viberr.dev"]);
-
-    const [conn] = listConnections(db);
-    expect(conn).toMatchObject({
-      id: "akin-ozer",
-      owner: "akin-ozer",
-      def: true,
-      repos: null,
-      expiresAt: null,
-      validationState: "unvalidated", // placeholder token, honest state
-      masked: "····0000",
-    });
   });
 
   it("is idempotent and --reset restores a pristine org dataset", () => {
     const { db, dataRoot } = seedAll();
 
-    // Second plain run: same counts, connection not duplicated.
+    // Second plain run: same counts, nothing duplicated. No fabricated
+    // credentials are ever seeded (honest empty slate).
     seedOrgResources(db, { dataRoot });
-    expect(listConnections(db)).toHaveLength(1);
+    expect(listConnections(db)).toHaveLength(0);
     expect(listKnowledgeBases(db, { dataRoot })).toHaveLength(3);
     expect(
       db.prepare(`SELECT count(*) AS c FROM github_pats`).get(),
-    ).toEqual({ c: 1 });
+    ).toEqual({ c: 0 });
 
-    // Mutate, then --reset: resource tables + folders rebuilt; the
-    // connection row survives (phase-7 pattern — real tokens not clobbered).
+    // Mutate, then --reset: resource tables + folders rebuilt; still no
+    // fabricated connection/MCP appears.
     db.prepare(`DELETE FROM org_skills`).run();
     runDemoSeed(db, { dataRoot, reset: true });
     const org = seedOrgResources(db, { dataRoot, reset: true });
-    expect(org).toMatchObject({ kbs: 3, skills: 4, mcps: 3, connections: 1 });
+    expect(org).toMatchObject({ kbs: 3, skills: 4, mcps: 0, connections: 0 });
     expect(listSkills(db, { dataRoot })).toHaveLength(4);
-    expect(listConnections(db)).toHaveLength(1);
+    expect(listConnections(db)).toHaveLength(0);
   });
 });

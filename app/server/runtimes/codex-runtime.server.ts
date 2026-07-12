@@ -62,6 +62,15 @@ interface CodexAdapterDeps {
   env?: Record<string, string>;
 }
 
+/** The idle (inactivity) timeout for a codex run in ms — the window a single
+ *  turn/tool may produce no event before the run is treated as hung. Overridable
+ *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8). */
+export function codexIdleTimeoutMs(): number {
+  const raw = process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
@@ -81,18 +90,77 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
       let sawError = false;
       let interrupted = false;
       let settled = false;
+      let idleTimedOut = false;
       const abort = new AbortController();
+
+      // IDLE (inactivity) timeout, not a wall-clock cap (owner ruling A8): a
+      // codex run may legitimately take much longer than the window overall,
+      // but if a SINGLE turn/tool produces NO new event for this long, the run
+      // is hung (codex has no maxTurns and only settles on `turn.completed`, so
+      // without this it stays `running` forever, waiting=agent, invisible to
+      // recovery). We abort the thread and settle `error` so the react loop /
+      // stuck-loop packet fires and a human is notified.
+      const idleMs = codexIdleTimeoutMs();
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      const armIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          if (settled || interrupted) return;
+          idleTimedOut = true;
+          logger.warn("codex run idle-timeout — no activity within the window", {
+            runId: spec.runId,
+            idleMs,
+          });
+          try {
+            abort.abort();
+          } catch {
+            // already done
+          }
+        }, idleMs);
+      };
+      const disarmIdle = () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      };
 
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
+        disarmIdle();
         cb.onExit({ outcome, effectiveBackend: "codex", simulated: false, sessionId });
       };
 
       const run = async () => {
         const factory = deps.codexFactory ?? (await realFactory());
+        // The Codex SDK REPLACES the child env wholesale, so any per-run env
+        // (e.g. the specialist's GIT_CEILING_DIRECTORIES) must be overlaid on a
+        // COMPLETE env — not `{}`. `deps.env` is the full spawn env, but it is
+        // only set when CODEX_HOME is configured; with API-key auth it's
+        // undefined, so we fall back to a snapshot of process.env. Overlaying
+        // spec.env on `{}` would strip PATH/HOME and break the spawned `codex`
+        // binary (adversarial-review HIGH #3).
+        const baseEnv =
+          deps.env ??
+          (spec.env
+            ? (Object.fromEntries(
+                Object.entries(process.env).filter(
+                  ([, v]) => typeof v === "string",
+                ),
+              ) as Record<string, string>)
+            : undefined);
+        const mergedEnv =
+          baseEnv || spec.env
+            ? { ...(baseEnv ?? {}), ...(spec.env ?? {}) }
+            : undefined;
         const codex = factory(
-          deps.apiKey || deps.env ? { ...(deps.apiKey ? { apiKey: deps.apiKey } : {}), ...(deps.env ? { env: deps.env } : {}) } : undefined,
+          deps.apiKey || mergedEnv
+            ? {
+                ...(deps.apiKey ? { apiKey: deps.apiKey } : {}),
+                ...(mergedEnv ? { env: mergedEnv } : {}),
+              }
+            : undefined,
         );
         // Fully autonomous: no approval gating. `danger-full-access` mirrors
         // Claude's bypassPermissions so a server-spawned run never blocks on
@@ -114,6 +182,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
             });
 
         try {
+          armIdle();
           const { events } = await thread.runStreamed(spec.prompt, {
             signal: abort.signal,
             // Structured-output operator: constrain the final message to the
@@ -122,6 +191,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
           });
           let turnCount = 0;
           for await (const event of events) {
+            armIdle(); // reset the inactivity window on every event
             const occurredAt = new Date().toISOString();
             const { display, facts } = projectEnvelope("codex", event, occurredAt);
             if (facts.sessionId) sessionId = facts.sessionId;
@@ -139,6 +209,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
           // Thread id lands after the first turn — capture it as the session.
           if (thread.id) sessionId = thread.id;
         } catch (error) {
+          disarmIdle();
+          // An idle-timeout aborts the same way an interrupt does; distinguish
+          // them so a hung run settles `error` (→ react/stuck-packet) while a
+          // user interrupt stays `interrupted`.
+          if (idleTimedOut) return settle("error");
           if (interrupted) return settle("interrupted");
           logger.error("codex thread error", {
             runId: spec.runId,

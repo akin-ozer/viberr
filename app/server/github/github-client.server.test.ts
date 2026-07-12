@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { createGithubClient } from "./github-client.server";
+import { createGithubClient, githubWebHost } from "./github-client.server";
 
 function client(routes: Parameters<typeof fakeGithubFetch>[0]) {
   const gh = fakeGithubFetch(routes);
@@ -150,5 +150,27 @@ describe("github-client", () => {
       expect(result.scopesHeader).toBe("repo, workflow");
       expect(result.tokenExpiration).toMatch(/^2026-12-31T/);
     }
+  });
+});
+
+describe("githubWebHost (B11: browse-link host derivation)", () => {
+  it("defaults to https://github.com when no base is configured", () => {
+    expect(githubWebHost()).toBe("https://github.com");
+    expect(githubWebHost(null)).toBe("https://github.com");
+    expect(githubWebHost("https://api.github.com")).toBe("https://github.com");
+  });
+
+  it("derives the GHE web host from its API base", () => {
+    expect(githubWebHost("https://ghe.corp/api/v3")).toBe("https://ghe.corp");
+    expect(githubWebHost("https://api.ghe.example.com/v3")).toBe(
+      "https://ghe.example.com",
+    );
+    expect(githubWebHost("https://ghe.corp:8443/api/v3")).toBe(
+      "https://ghe.corp:8443",
+    );
+  });
+
+  it("falls back to github.com on an unparseable base", () => {
+    expect(githubWebHost("not a url")).toBe("https://github.com");
   });
 });

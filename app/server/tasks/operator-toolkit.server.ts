@@ -315,13 +315,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  // accept_completion: offered when the operator holds the completion
-  // capability OR runs under full autonomy (full autonomy is what actually
-  // moves the task to Done; supervised opens a packet for a human).
-  if (
-    gate(authority, "completion-for-acceptance") !== "deny" ||
-    authority.autonomy === "full"
-  ) {
+  // accept_completion: offered ONLY when the completion capability is granted
+  // (direct or recommend). `human`/`off` withhold the tool entirely — full
+  // autonomy does NOT smuggle it back in (owner ruling Q1: the human-only-Done
+  // exception requires an explicit grant, never an autonomy side-effect).
+  if (gate(authority, "completion-for-acceptance") !== "deny") {
     add(
       tool(
         "accept_completion",

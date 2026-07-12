@@ -49,7 +49,7 @@ describe("capabilitiesToActionLabels", () => {
       [
         { capabilityId: "author-test-cases", mode: "direct" },
         { capabilityId: "attach-evidence-references", mode: "direct" },
-        { capabilityId: "validation-verdict", mode: "recommend" },
+        { capabilityId: "report-validation-verdict", mode: "recommend" },
         { capabilityId: "merge-pull-request", mode: "human" },
         { capabilityId: "transition-to-done", mode: "human" },
       ],
@@ -60,7 +60,7 @@ describe("capabilitiesToActionLabels", () => {
       "Attach evidence references",
       "Run the validation suite",
     ]);
-    expect(buckets.recommend).toEqual(["Validation verdict"]);
+    expect(buckets.recommend).toEqual(["Report a validation verdict"]);
     expect(buckets.forbidden).toEqual([
       "Merge a pull request",
       "Transition a task to Done",

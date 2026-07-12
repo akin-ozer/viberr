@@ -96,6 +96,28 @@ export function registerRunCompletion(
   getState().completions.set(runId, cb);
 }
 
+/**
+ * CHAIN a completion callback after whatever is already registered for the run
+ * (or as the only callback when none is). Unlike registerRunCompletion this
+ * never clobbers: the existing callback fires first, then `cb`. Used by the
+ * operator coalesce-queue — a trigger that lands while an operator run is in
+ * flight must fire AFTER that run's own completion work, not replace it.
+ */
+export function chainRunCompletion(
+  runId: string,
+  cb: RunCompletionCallback,
+): void {
+  const state = getState();
+  const existing = state.completions.get(runId);
+  state.completions.set(runId, (finished) => {
+    try {
+      existing?.(finished);
+    } finally {
+      cb(finished);
+    }
+  });
+}
+
 /** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
 export function configureRunServiceForTests(
   adaptersOrDeps?: AdapterSet | AdapterDeps,
@@ -163,6 +185,9 @@ export interface StartRunInput {
   /** JSON schema constraining the run's final output (Codex structured-output
    *  operator — the caller parses + executes the emitted decision plan). */
   outputSchema?: unknown;
+  /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
+   *  specialist's git to its workspace). Merged on top of the adapter env. */
+  env?: Record<string, string>;
   /** Force the simulated engine regardless of backend credential. The operator
    *  scripted-drive uses this to stream a narration run for a backend that has
    *  no in-process tools (Codex) or when Claude is unavailable — the real work
@@ -255,6 +280,7 @@ export async function startRun(
       ? { disallowedTools: input.disallowedTools }
       : {}),
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+    ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),
   };
 
   launch(db, spec, simulated);
@@ -346,11 +372,33 @@ function launch(
   // Mark running immediately (queued → running).
   sink.markRunning();
 
+  // Every adapter callback fires asynchronously (timers, SDK streams), so all
+  // persistence inside them must be caught-and-logged — a throw here has no
+  // request context and would surface as an unhandled exception on a timer
+  // (crashing the process in prod, failing the suite when a test's DB closes
+  // before an in-flight run settles). sink.line self-catches; guard the
+  // phase/finalize paths the same way.
   const handle = adapter.start(spec, {
     onLine: (line) => sink.line(line),
-    onPhase: (phase, step) => sink.phase(phase, step),
+    onPhase: (phase, step) => {
+      try {
+        sink.phase(phase, step);
+      } catch (error) {
+        logger.error("run phase persist failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    },
     onExit: (exit) => {
-      sink.finalize(exit);
+      try {
+        sink.finalize(exit);
+      } catch (error) {
+        logger.error("run finalize persist failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
       state.handles.delete(spec.runId);
       // Fire a one-shot completion callback (opaque to run-service — the
       // reply-comment wiring lives in task-actions). Reads the finalized row

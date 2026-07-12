@@ -78,11 +78,12 @@ describe("RBAC", () => {
   it("loader: admin gets the full view; member gets 403; anonymous → login", async () => {
     const data = await runLoader(ids.arda);
     expect(data.meId).toBe(ids.arda);
-    expect(data.view.connections).toHaveLength(1);
+    // Honest empty slate: no fabricated connection or MCP rows are seeded.
+    expect(data.view.connections).toHaveLength(0);
     expect(data.view.users.length).toBeGreaterThanOrEqual(5);
     expect(data.view.domains).toHaveLength(1);
     expect(data.view.kbs).toHaveLength(3);
-    expect(data.view.mcps).toHaveLength(3);
+    expect(data.view.mcps).toHaveLength(0);
     // Disk is truth (finding #7): the 4 org-managed skill rows PLUS the 3
     // shipped *-expertise skill folders that have no row — all listed. (Tester
     // was merged into the Reviewer, so tester-expertise no longer ships.)
@@ -238,7 +239,7 @@ describe("resource + store intents", () => {
     });
     expect(result).toMatchObject({
       ok: true,
-      toast: "Architecture notes re-indexed — 6 docs",
+      toast: "Architecture notes re-scanned — 6 docs",
     });
   });
 

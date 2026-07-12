@@ -13,7 +13,9 @@ import {
  * popover (both shells) and the /notifications page. Intents:
  *   read      — `id` fields (repeatable)
  *   read-all  — everything unread for the session user
- * Idempotent (read state is monotonic). Revalidation refreshes badges.
+ * Idempotent (read state is monotonic). Revalidation refreshes this tab's
+ * badge; the mark-read server layer emits a user-scoped `notification.read`
+ * SSE event so every OTHER tab of the same user revalidates too (E12).
  */
 
 export async function action({ request }: Route.ActionArgs) {

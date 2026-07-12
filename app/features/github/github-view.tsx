@@ -66,6 +66,13 @@ export function RepositoryPanel({
   manageActions?: React.ReactNode;
 }) {
   const conn = connectionPill(data.connection);
+  // G8: the Connection pill is a LIVE repository-access probe while the
+  // credential card below shows the STORED project credential — in seed / probe
+  // states they can disagree (pill "no credential" above a PAT card with
+  // scopes). When they diverge, add a one-line note so the two surfaces read as
+  // measuring different things rather than contradicting each other.
+  const showProbeNote =
+    conn.kind !== "ready" && data.credential.source !== "none";
   return (
     <div className="panel">
       <div className="panel-head">
@@ -88,10 +95,36 @@ export function RepositoryPanel({
         </div>
         <div className="kv-row">
           <span className="k">Connection</span>
-          <span className="v">
+          <span
+            className="v"
+            style={
+              showProbeNote
+                ? {
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: ".35rem",
+                  }
+                : undefined
+            }
+          >
             <Pill kind={conn.kind} dot sm>
               {conn.label}
             </Pill>
+            {showProbeNote && (
+              <span
+                style={{
+                  flexBasis: "100%",
+                  fontSize: ".72rem",
+                  fontWeight: 400,
+                  color: "var(--faint)",
+                  lineHeight: 1.4,
+                }}
+              >
+                Live repository probe — the stored project credential is shown
+                below.
+              </span>
+            )}
           </span>
         </div>
         <div className="kv-row">
@@ -153,8 +186,8 @@ export function PullRequestsPanel({
           <div className="pol-note" style={{ marginBottom: 0 }}>
             <Icon name="pr" />
             <span>
-              No pull requests yet — the developer specialist opens one at the
-              review boundary.
+              No pull requests yet — one is opened at the review boundary by
+              the server or the delivering agent.
             </span>
           </div>
         )}
@@ -188,7 +221,8 @@ export function PullRequestsPanel({
         <Icon name="lock" />
         <span>
           Merging stays reserved for humans — accepting a completion in the
-          review queue merges its PR.
+          review queue merges its PR when GitHub is reachable; otherwise it
+          records accepted (merge pending).
         </span>
       </div>
     </div>

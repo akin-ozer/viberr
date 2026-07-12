@@ -15,7 +15,7 @@ import { rebuildProjections } from "~/server/projections/rebuild.server";
 import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
 import {
   getHomeOrgSummary,
-  listHomeProjects,
+  listHomeProjectsForUser,
 } from "~/features/home/home-query.server";
 import { createProject } from "~/features/home/project-create.server";
 import { HomePage } from "~/features/home/home-page";
@@ -27,7 +27,7 @@ import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 export function meta(_: Route.MetaArgs) {
   return [
     { title: "Viberr" },
-    { name: "description", content: "Governed AI software delivery." },
+    { name: "description", content: "Collaborative AI software delivery." },
   ];
 }
 
@@ -40,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     user,
     greet,
-    projects: listHomeProjects(db),
+    projects: listHomeProjectsForUser(db, { id: user.id, role: user.role }),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
     notifications: listNotifications(db, user.id, { limit: 100 }),
@@ -73,6 +73,19 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: true as const };
     }
     if (intent === "rescan") {
+      // A global re-scan reprojects EVERY project from files — an
+      // instance-maintenance action, so it is org-admin only (D7; consistent
+      // with the board rescan's admin|maintainer project gate and with
+      // rebuild-projections below). It used to be ungated for any signed-in user.
+      if (ctx.user.role !== "admin") {
+        return data(
+          {
+            ok: false as const,
+            error: "Re-scanning the store requires the org admin role.",
+          },
+          { status: 403 },
+        );
+      }
       const summary = rescanProjections(db, { actor });
       return { ok: true as const, ...summary };
     }
@@ -133,8 +146,10 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Index({ loaderData }: Route.ComponentProps) {
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
-  // Live updates (Phase 6): `user` scope = own notification.created (bell)
-  // + projection.rebuilt broadcasts (store re-scans refresh the cards).
-  useLiveUpdates([sseScopes.user()]);
+  // Live updates (Phase 6): `user` scope = own notification.created/read
+  // (bell) + projection.rebuilt broadcasts; `projects` scope = every
+  // project/task change so the landing cards refresh without a manual
+  // re-scan (E2 — `[user]` alone never saw task/project events).
+  useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
   return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
 }

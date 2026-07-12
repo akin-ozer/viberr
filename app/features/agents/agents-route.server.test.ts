@@ -111,12 +111,13 @@ describe("loader", () => {
     expect(operator.actions.forbidden).toHaveLength(3);
     expect(operator.actions.direct).toContain("Assign the primary specialist");
 
-    // Near-miss labels stay display-only extras (contracts §7 #7). The Reviewer
-    // is the single quality specialist (Tester merged in): "Push commits to the
-    // branch" is a forbidden near-miss that stays a display-only extra.
+    // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses
+    // the exact catalog label "Commit & push to the branch" so it maps to the
+    // `commit-push-branch` capability and the tool policy actually denies push +
+    // commit — no longer a decorative extra.
     const reviewer = data.profiles.find((p) => p.id === "reviewer")!;
-    expect(reviewer.actions.forbidden).toContain("Push commits to the branch");
-    expect(reviewer.extras.map((e) => e.label)).toContain(
+    expect(reviewer.actions.forbidden).toContain("Commit & push to the branch");
+    expect(reviewer.extras.map((e) => e.label)).not.toContain(
       "Push commits to the branch",
     );
 

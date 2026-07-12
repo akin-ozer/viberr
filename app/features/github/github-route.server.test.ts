@@ -106,13 +106,15 @@ describe("loader", () => {
       repo: "akin-ozer/viberr",
     });
 
-    // Credential health: project.md credentialPolicy fallback + the seeded
-    // VIB-142 pull_request:write violation (ruling 5 — mock parity).
+    // Credential health (honest empty slate): the seeded Viberr Core project
+    // declares a credentialPolicy (requiredScopes) but binds NO PAT, so the
+    // health is source 'none' — no fabricated label/masked token — while the
+    // seeded VIB-142 pull_request:write violation still surfaces.
     expect(view.credential.configured).toBe(false);
-    expect(view.credential.source).toBe("policy_display");
-    expect(view.credential.label).toBe("viberr-bot · fine-grained PAT");
-    expect(view.credential.masked).toBe("github_pat_••••42af");
-    expect(view.credential.scopes.map((s) => s.id)).toEqual([
+    expect(view.credential.source).toBe("none");
+    expect(view.credential.label).toBeNull();
+    expect(view.credential.masked).toBeNull();
+    expect(view.credential.requiredScopes).toEqual([
       "repo",
       "workflow",
       "read:org",
@@ -297,7 +299,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
       "utf8",
     );
     expect(file).toContain(
-      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved — PR auto-sync will work after merge.",
+      "**Policy update:** `pull_request:write` granted on the project credential. The earlier violation is resolved — operations needing `pull_request:write` will work now.",
     );
     // …and projection (newest-first timeline).
     const detail = getTaskDetail(app.db, "viberr-core", "VIB-142")!;

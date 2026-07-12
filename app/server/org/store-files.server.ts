@@ -16,6 +16,8 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { createGithubClient } from "~/server/github/github-client.server";
+import { logger } from "~/server/logging/logger.server";
+import { newId } from "~/shared/ids/new-id.server";
 import { getDefaultConnectionToken } from "./connections.server";
 
 /**
@@ -128,20 +130,62 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   }
 }
 
-/** Bumps the owning resource's freshness column (kb.last_indexed_at /
- * skill.updated_at) — the consumer-side "just now" of the mock. */
+/**
+ * Bumps the owning resource's freshness column (kb.last_indexed_at /
+ * skill.updated_at) — the consumer-side "just now" of the mock.
+ *
+ * E6: a DISK-ONLY resource carries a synthetic `disk:<name>` id with no
+ * metadata row, so the plain UPDATE used to match zero rows and freshness
+ * never advanced. A store mutation now ADOPTS such a resource into a real
+ * metadata row first (same as editing/re-indexing it would), then touches.
+ */
 function touchResource(db: Database.Database, target: StoreTarget): void {
   const now = new Date().toISOString();
   if (target.kind === "kb") {
-    db.prepare(
-      `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
-       WHERE id = ?`,
-    ).run(now, now, target.id);
+    const dir = path.basename(target.rootAbs);
+    const updated = db
+      .prepare(
+        `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(now, now, target.id);
+    if (updated.changes === 0) {
+      // Adopt-on-touch. Key on dir (UNIQUE): a row may already exist under a
+      // different id than the synthetic one the target carries.
+      const adopted = db
+        .prepare(
+          `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ?
+           WHERE dir = ?`,
+        )
+        .run(now, now, dir);
+      if (adopted.changes === 0) {
+        db.prepare(
+          `INSERT INTO org_knowledge_bases
+             (id, name, dir, refresh, last_indexed_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'on change', ?, ?, ?)`,
+        ).run(newId("kb"), target.name, dir, now, now, now);
+        logger.info("adopted disk-only knowledge base on store mutation", {
+          dir,
+        });
+      }
+    }
   } else {
-    db.prepare(`UPDATE org_skills SET updated_at = ? WHERE id = ?`).run(
-      now,
-      target.id,
-    );
+    const name = path.basename(target.rootAbs);
+    const updated = db
+      .prepare(`UPDATE org_skills SET updated_at = ? WHERE id = ?`)
+      .run(now, target.id);
+    if (updated.changes === 0) {
+      const adopted = db
+        .prepare(`UPDATE org_skills SET updated_at = ? WHERE name = ?`)
+        .run(now, name);
+      if (adopted.changes === 0) {
+        db.prepare(
+          `INSERT INTO org_skills (id, name, summary, created_at, updated_at)
+           VALUES (?, ?, '', ?, ?)`,
+        ).run(newId("sk"), name, now, now);
+        logger.info("adopted disk-only skill on store mutation", { name });
+      }
+    }
   }
 }
 
@@ -338,6 +382,9 @@ export type GithubImportResult =
       status: "imported";
       folder: string;
       fileCount: number;
+      /** Blobs that were selected but could not be fetched/written (E5) —
+       * a partial import is reported honestly instead of as a clean run. */
+      skipped: number;
       source: string;
       truncated: boolean;
       toast: string;
@@ -474,6 +521,9 @@ export async function importGithubSnapshot(
       message: "GitHub refused the file contents — nothing was imported.",
     };
   }
+  // E5: per-blob failures (refused blob fetch, unwritable path) used to sum
+  // silently into the success toast — count and surface them instead.
+  const skipped = selected.length - written;
 
   touchResource(db, target);
   const source = `${owner}/${repo}${subPath ? `/${subPath}` : ""}`;
@@ -482,14 +532,21 @@ export async function importGithubSnapshot(
     actor,
     subjectKind: `org_${target.kind}`,
     subjectId: target.id,
-    details: { source, branch, folder, fileCount: written, truncated },
+    details: { source, branch, folder, fileCount: written, skipped, truncated },
   });
+  const suffix = [
+    ...(truncated ? [" (truncated)"] : []),
+    ...(skipped > 0
+      ? [` — ${skipped} file${skipped === 1 ? "" : "s"} skipped (fetch failed)`]
+      : []),
+  ].join("");
   return {
     status: "imported",
     folder,
     fileCount: written,
+    skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} imported from ${source} — snapshot, not a live sync${truncated ? " (truncated)" : ""}`,
+    toast: `${written} file${written === 1 ? "" : "s"} imported from ${source} — snapshot, not a live sync${suffix}`,
   };
 }

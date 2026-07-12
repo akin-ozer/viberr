@@ -359,7 +359,7 @@ function NewProjectModal({
           {(name.trim()[0] || "•").toUpperCase()}
         </span>
         <span className="mh-main">
-          <h2>New governed project</h2>
+          <h2>New project</h2>
           <div className="mh-sub">
             One board, one repo, agents under policy from day one
           </div>
@@ -468,7 +468,7 @@ function NewProjectModal({
               onClick={() => setTemplate("governed")}
             >
               <span className="sdot" style={{ background: "var(--blue)" }}></span>
-              Governed default · 5 stages
+              Standard · 5 stages
             </button>
             <button
               type="button"
@@ -653,15 +653,18 @@ function HomeHero({
         </h1>
         <p className="sub">
           {projectCount === 0 ? (
-            "No projects yet — create your first governed project below."
+            "No projects yet — create your first project below."
           ) : (
             <>
               Your agents kept working —{" "}
               <b>
                 <span className="working"></span>
-                {totalRunning} runs active
+                {totalRunning} {totalRunning === 1 ? "run" : "runs"} active
               </b>{" "}
-              across {activeIn} projects, <b>{totalWaiting} decisions</b>{" "}
+              across {activeIn} {activeIn === 1 ? "project" : "projects"},{" "}
+              <b>
+                {totalWaiting} {totalWaiting === 1 ? "decision" : "decisions"}
+              </b>{" "}
               waiting on you.
             </>
           )}
@@ -701,7 +704,7 @@ function EmptyHero({ onNew }: { onNew: () => void }) {
       <span className="plus">
         <Icon name="plus" />
       </span>
-      <h2>Create your first governed project</h2>
+      <h2>Create your first project</h2>
       <p>
         A project is one board, one repo, and a policy that decides what
         agents may do on their own — and what waits for you.

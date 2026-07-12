@@ -34,7 +34,9 @@ export function Rail({
         <span>
           <div className="pj-name">{projectName}</div>
           <div className="pj-meta">
-            {(projectRepo ? projectRepo + " · " : "") + membersCount + " members"}
+            {(projectRepo ? projectRepo + " · " : "") +
+              membersCount +
+              (membersCount === 1 ? " member" : " members")}
           </div>
         </span>
         <Icon name="chevron" />

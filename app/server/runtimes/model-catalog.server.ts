@@ -198,6 +198,47 @@ export function resolveRunModel(
   return m && isKnownModel(backend, m) ? m : defaultModelFor(backend);
 }
 
+/**
+ * Resolve a reasoning-effort tier to a VALID one for `backend`. Backends have
+ * different tiers (Claude: low…max; Codex: minimal…xhigh), so a "retry on the
+ * other backend" (D4) must translate — passing a Claude-only `max` to Codex, or
+ * a Codex-only `minimal` to Claude, would be rejected. An unknown/empty value,
+ * or one that doesn't exist on the target, falls back to that backend's default
+ * effort. Same-backend valid values pass through unchanged.
+ */
+export function resolveRunEffort(
+  backend: RealBackend,
+  effort: string | null | undefined,
+): string {
+  const e = (effort ?? "").trim();
+  const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
+  if (e && cat.efforts.includes(e)) return e;
+  // Map by intensity RANK across the two tier scales so a cross-backend retry
+  // keeps a comparable level instead of snapping to the default.
+  const RANK: Record<string, number> = {
+    minimal: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    xhigh: 4,
+    max: 5,
+  };
+  if (e && e in RANK) {
+    const wanted = RANK[e]!;
+    let best = cat.defaultEffort;
+    let bestDist = Infinity;
+    for (const opt of cat.efforts) {
+      const d = Math.abs((RANK[opt] ?? 2) - wanted);
+      if (d < bestDist) {
+        bestDist = d;
+        best = opt;
+      }
+    }
+    return best;
+  }
+  return cat.defaultEffort;
+}
+
 /** The friendly display name for a model id (from the curated catalog), or the
  *  id itself when it is not a curated model (e.g. a live-only or legacy value). */
 export function modelDisplayName(backend: RealBackend, model: string): string {

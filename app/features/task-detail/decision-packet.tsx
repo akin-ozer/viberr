@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -14,18 +14,45 @@ import { Pill } from "~/ui/pill";
  * (spec §7 accessibility inventory), busy-disable while the resolve action
  * is in flight (no optimistic governed state).
  *
- * NOTE (spec §8.2): packet body + observation values render as PLAIN text —
- * mock behavior kept verbatim (backticked code like `pull_request:write`
- * shows literally).
+ * The packet body renders inline `code` spans (a real operator writes branch
+ * names / scopes like `pull_request:write` inline) — the mock's plain-text-with-
+ * visible-backticks was corrected so the model's markdown reads as intended.
  */
+
+/** Render a string with `inline code` spans; everything else stays plain text. */
+function renderInlineCode(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /`([^`]+)`/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(<code key={i++}>{m[1]}</code>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 export function DecisionPacket({
   packet,
   busy,
+  canResolve,
+  canResolveCompletion,
   onResolve,
   onAsk,
 }: {
   packet: PacketRender;
   busy: boolean;
+  /** Whether the viewer may RESOLVE this packet (admin|maintainer, or the task
+   *  owner for non-completion options — M2). "Ask operator" stays open to all
+   *  (commenting is app-wide). */
+  canResolve: boolean;
+  /** Whether the viewer may resolve the ACCEPT_COMPLETION option specifically —
+   *  admin|maintainer only (the always-human Done authority). An owner-only
+   *  viewer has canResolve but not this, so the button is blocked while that
+   *  option is selected rather than 403ing on click (adversarial-review #15). */
+  canResolveCompletion: boolean;
   onResolve: (optionIndex: number) => void;
   onAsk: () => void;
 }) {
@@ -64,7 +91,7 @@ export function DecisionPacket({
             margin: 0,
           }}
         >
-          {p.body}
+          {renderInlineCode(p.body)}
         </p>
 
         <div className="packet-obs">
@@ -118,16 +145,32 @@ export function DecisionPacket({
         </div>
 
         <div className="packet-actions">
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || p.options.length === 0}
-            aria-busy={busy}
-            onClick={() => onResolve(sel)}
-          >
-            <Icon name="check" />
-            {p.options[sel] ? p.options[sel].t : "Confirm"}
-          </button>
+          {(() => {
+            const selected = p.options[sel];
+            // The accept_completion option is admin|maintainer only; an
+            // owner-only viewer can't resolve it (the server 403s), so block the
+            // button while it's selected rather than let them click into a 403.
+            const completionBlocked =
+              selected?.kind === "accept_completion" && !canResolveCompletion;
+            if (!canResolve) return null;
+            return (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || p.options.length === 0 || completionBlocked}
+                aria-busy={busy}
+                title={
+                  completionBlocked
+                    ? "Accepting completion is reserved for maintainers"
+                    : undefined
+                }
+                onClick={() => onResolve(sel)}
+              >
+                <Icon name="check" />
+                {selected ? selected.t : "Confirm"}
+              </button>
+            );
+          })()}
           <button type="button" className="btn ghost" onClick={onAsk}>
             <Icon name="message" />
             Ask operator

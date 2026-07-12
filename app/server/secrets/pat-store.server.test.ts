@@ -142,38 +142,41 @@ describe("pat-store", () => {
     expect(clearProjectCredential(store.db, store.slug, ACTOR)).toBe(false);
   });
 
-  it("credential health falls back to project.md credentialPolicy display (mock demo mode)", () => {
+  it("a credentialPolicy with NO bound PAT stays source 'none' — never fabricates a card (honest empty slate)", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot }); // project the store
-    // Give the projected row the mock's credentialPolicy (test-store's
-    // project.md carries none; the seed's viberr-core does).
+    // A project may declare what scopes it REQUIRES without a credential bound.
     store.db
       .prepare(`UPDATE projects SET credential_policy_json = ? WHERE slug = ?`)
       .run(
         JSON.stringify({
           credentialLabel: "viberr-bot · fine-grained PAT",
-          masked: "github_pat_••••42af",
+          masked: "github_pat_••••42af", // even a masked value must NOT surface
           requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
         }),
         store.slug,
       );
 
     const health = getProjectCredentialHealth(store.db, store.slug);
+    // A policy is not a credential: no fabricated card, no leaked masked token.
     expect(health.configured).toBe(false);
-    expect(health.source).toBe("policy_display");
-    expect(health.label).toBe("viberr-bot · fine-grained PAT");
-    expect(health.masked).toBe("github_pat_••••42af");
-    // The migration-seeded VIB-142 violation overlays the chip (test store
-    // uses the viberr-core slug).
+    expect(health.source).toBe("none");
+    expect(health.label).toBeNull();
+    expect(health.masked).toBeNull();
+    // requiredScopes still surface (they drive the pre-flight scope check)…
+    expect(health.requiredScopes).toEqual([
+      "repo",
+      "workflow",
+      "read:org",
+      "pull_request:write",
+    ]);
+    // …but an open violation is still reported so a blocked task stays visible.
     const prWrite = health.scopes.find((s) => s.id === "pull_request:write");
     expect(prWrite).toMatchObject({
       ok: false,
       source: "violation",
       flaggedTaskKey: "VIB-142",
     });
-    expect(
-      health.scopes.filter((s) => s.id !== "pull_request:write").every((s) => s.ok),
-    ).toBe(true);
     expect(health.openViolations).toHaveLength(1);
   });
 

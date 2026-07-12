@@ -100,9 +100,10 @@ describe("loader", () => {
     expect(view.stageCounts.review).toBe(2);
     expect(view.members).toHaveLength(4);
     expect(view.members.every((m) => m.status === "active")).toBe(true);
-    // Credential health = the ruling-5 single fact (policy_display fallback
-    // + the seeded VIB-142 violation).
-    expect(view.credential.source).toBe("policy_display");
+    // Credential health (honest empty slate): a credentialPolicy with no bound
+    // PAT reports source 'none' (no fabricated card), while the seeded VIB-142
+    // violation still surfaces on the chip.
+    expect(view.credential.source).toBe("none");
     expect(view.credential.scopes.find((s) => !s.ok)).toMatchObject({
       id: "pull_request:write",
       flaggedTaskKey: "VIB-142",
@@ -252,7 +253,7 @@ describe("stage editor", () => {
 });
 
 describe("members", () => {
-  it("invites a registered user as Viewer (invited status in project.md)", async () => {
+  it("invites a registered user as Viewer — an invite IS the membership (X15: no decorative status)", async () => {
     const result = (await postAction(ids.arda, {
       intent: "invite",
       name: "Deniz Şahin",
@@ -264,8 +265,9 @@ describe("members", () => {
     });
     const { view } = await runLoader(ids.arda);
     const deniz = view.members.find((m) => m.userId === ids.deniz)!;
-    expect(deniz).toMatchObject({ role: "viewer", status: "invited" });
-    expect(projectMd()).toContain("status: invited");
+    expect(deniz).toMatchObject({ role: "viewer" });
+    // No decorative `status: invited` is written any more.
+    expect(projectMd()).not.toContain("status: invited");
   });
 
   it("rejects a duplicate invite", async () => {
@@ -293,23 +295,21 @@ describe("members", () => {
     const { view } = await runLoader(ids.arda);
     expect(
       view.members.find((m) => m.userId === created!.id),
-    ).toMatchObject({ role: "viewer", status: "invited", name: "Yeni Kişi" });
-    // Clean up the invited seat.
+    ).toMatchObject({ role: "viewer", name: "Yeni Kişi" });
+    // Clean up the seat.
     await postAction(ids.arda, {
       intent: "remove-member",
       userId: created!.id,
     });
   });
 
-  it("revoking an invite uses the invite-revoked toast", async () => {
+  it("removing an invited member uses the standard removed toast (X15)", async () => {
     const result = (await postAction(ids.arda, {
       intent: "remove-member",
       userId: ids.deniz,
     })) as { ok: boolean; toast: string };
-    expect(result).toEqual({
-      ok: true,
-      toast: "Invite revoked · deniz@viberr.dev",
-    });
+    expect(result.ok).toBe(true);
+    expect(result.toast).toContain("removed from");
   });
 
   it("self-removal is refused server-side", async () => {

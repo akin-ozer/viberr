@@ -38,6 +38,8 @@ describe("PR state mapping matrix (ruling 12)", () => {
     expect(prPillFor("merged")).toEqual({ label: "merged", kind: "done" });
     expect(prPillFor("review")).toEqual({ label: "in review", kind: "info" });
     expect(prPillFor("closed")).toEqual({ label: "closed", kind: "risk" });
+    // Mirrors the client github-pills.prStatePill contract.
+    expect(prPillFor("accepted")).toEqual({ label: "merge pending", kind: "input" });
   });
 });
 

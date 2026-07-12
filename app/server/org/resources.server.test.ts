@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { unreachableFetch } from "../../../test-support/fake-github";
@@ -120,7 +120,7 @@ describe("knowledge bases", () => {
     expect(fresh.tree[0]).toMatchObject({ type: "dir", name: "decisions" });
 
     const reindexed = reindexKnowledgeBase(db, kb.id, ACTOR, ctx);
-    expect(reindexed.toast).toBe("Architecture notes re-indexed — 1 docs");
+    expect(reindexed.toast).toBe("Architecture notes re-scanned — 1 docs");
   });
 
   it("rename moves the folder; collisions are refused", () => {
@@ -181,6 +181,82 @@ describe("skills", () => {
     );
     expect(updated.toast).toBe("Skill terraform-review updated — SKILL.md rewritten");
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
+  });
+
+  it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = saveSkill(
+      db,
+      { name: "api-design", summary: "REST rules.", body: "# precious content" },
+      ACTOR,
+      ctx,
+    );
+
+    // Summary-only edit round-trips an empty body (e.g. the modal field was
+    // cleared / never loaded) — the on-disk body must survive.
+    const updated = saveSkill(
+      db,
+      { id: skill.id, name: "api-design", summary: "Updated summary.", body: "" },
+      ACTOR,
+      ctx,
+    );
+    expect(updated.toast).toBe(
+      "Skill api-design updated — existing SKILL.md kept",
+    );
+    const onDisk = path.join(skillDirPath("api-design", dataRoot), "SKILL.md");
+    expect(readFileSync(onDisk, "utf8")).toBe("# precious content");
+    expect(updated.skill.summary).toBe("Updated summary.");
+
+    // The explicit clear flag is the ONLY way to blank it.
+    const cleared = saveSkill(
+      db,
+      {
+        id: skill.id,
+        name: "api-design",
+        summary: "Updated summary.",
+        body: "",
+        clearBody: true,
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(cleared.toast).toBe("Skill api-design updated — SKILL.md rewritten");
+    expect(readFileSync(onDisk, "utf8")).toBe("");
+  });
+
+  it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = saveSkill(
+      db,
+      { name: "big-skill", summary: "Huge on disk.", body: "seed" },
+      ACTOR,
+      ctx,
+    );
+    // Grow SKILL.md past the 256 KB editor read cap — from here on, any body
+    // the UI round-trips is a TRUNCATED copy of the file.
+    const onDisk = path.join(skillDirPath("big-skill", dataRoot), "SKILL.md");
+    writeFileSync(onDisk, "x".repeat(256 * 1024 + 10));
+
+    expect(() =>
+      saveSkill(
+        db,
+        { id: skill.id, name: "big-skill", summary: "Huge on disk.", body: "truncated round-trip" },
+        ACTOR,
+        ctx,
+      ),
+    ).toThrowError(/256 KB/);
+    // Nothing was written.
+    expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
+
+    // A body-keeping save (empty body, e.g. summary edit) still works.
+    const kept = saveSkill(
+      db,
+      { id: skill.id, name: "big-skill", summary: "New summary here.", body: "" },
+      ACTOR,
+      ctx,
+    );
+    expect(kept.toast).toContain("existing SKILL.md kept");
+    expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
   });
 
   it("rename moves the skill folder; delete removes it", () => {
