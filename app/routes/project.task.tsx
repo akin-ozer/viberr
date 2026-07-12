@@ -53,6 +53,7 @@ import {
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
 import { Icon } from "~/ui/icon";
+import { roleCan } from "~/shared/rbac";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -421,10 +422,13 @@ export async function action({ request, params }: Route.ActionArgs) {
         // capability policy governs what it may then do to the task. The
         // backend (claude|codex) and autonomy (supervised|full) are chosen for
         // this run; full autonomy lets the operator drive to Done.
-        const role = listProjectMembers(db, projectSlug).find(
-          (m) => m.userId === actor.userId,
-        )?.role;
-        if (role !== "admin" && role !== "maintainer") {
+        const role =
+          listProjectMembers(db, projectSlug).find(
+            (m) => m.userId === actor.userId,
+          )?.role ?? null;
+        // `run-agents` in the single ACTION_ROLES source (admin|maintainer) —
+        // not a hardcoded tier (pass-4 XS-10).
+        if (!roleCan(role, "run-agents")) {
           throw new AppError({
             code: ERROR_CODES.FORBIDDEN,
             status: 403,

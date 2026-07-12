@@ -56,15 +56,18 @@ function conflict(userMessage: string): AppError {
   });
 }
 
-function requireProjectAdmin(
+function requirePolicyAction(
   ctx: PolicyMutationContext,
+  action: "manage-members" | "edit-policy",
   projectSlug: string,
   actor: PolicyActor,
   what: string,
 ): { projectName: string } {
-  // Delegates to the single canonical guard. `edit-policy` and `manage-members`
-  // are both admin-only in ACTION_ROLES; this module edits policy + roles.
-  return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
+  // Delegates to the single canonical guard, consulting the SPECIFIC action id
+  // so editing the matrix row for one (e.g. manage-members) would change its
+  // enforcement independently of the other (pass-4 XS-9). Both are admin-only
+  // today, but this closes the single-source bypass.
+  return assertProjectAction(action, projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 }
@@ -99,8 +102,9 @@ export async function setMemberRole(
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName } = requirePolicyAction(
     ctx,
+    "manage-members",
     input.projectSlug,
     actor,
     "manage members & roles",
@@ -182,7 +186,7 @@ export async function setTransitionBoundary(
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow & policy");
+  requirePolicyAction(ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
   if (!(BOUNDARY_VALUES as readonly string[]).includes(input.boundary)) {
     throw AppError.validation("Unknown boundary.");
   }

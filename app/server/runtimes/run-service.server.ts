@@ -9,6 +9,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { roleCan } from "~/shared/rbac";
 import type { RunHandle, RunSpec } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
@@ -461,10 +462,13 @@ export function interruptRun(
     throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
   }
 
-  // RBAC — admin|maintainer only.
+  // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
+  // the same tier that opens runtime sessions. Consult ACTION_ROLES, never a
+  // hardcoded role string, so the Policy display and this guard can't drift
+  // (pass-4 XS-10).
   const members = listProjectMembers(db, input.projectSlug);
-  const role = members.find((m) => m.userId === actor.userId)?.role;
-  if (role !== "admin" && role !== "maintainer") {
+  const role = members.find((m) => m.userId === actor.userId)?.role ?? null;
+  if (!roleCan(role, "run-agents")) {
     throw new AppError({
       code: ERROR_CODES.FORBIDDEN,
       status: 403,

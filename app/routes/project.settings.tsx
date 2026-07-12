@@ -26,6 +26,18 @@ import {
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
 import { SettingsPage } from "~/features/project-settings/settings-page";
+import { type ProjectRole, roleCan } from "~/shared/rbac";
+
+/** This member's project role (null when not a member) — for ACTION_ROLES guards. */
+function myRoleFor(
+  db: ReturnType<typeof getDb>,
+  slug: string,
+  userId: string,
+): ProjectRole | null {
+  return (
+    listProjectMembers(db, slug).find((m) => m.userId === userId)?.role ?? null
+  );
+}
 
 /**
  * /projects/:slug/settings — the project-admin surface (project-settings
@@ -135,19 +147,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, toast: result.toast };
       }
       case "grant-scope": {
-        // Same RBAC as the GitHub view's action: credential re-check is
-        // admin|maintainer (the settings mutations above are admin-only
-        // inside their server functions).
-        const myRole =
-          listProjectMembers(db, slug).find((m) => m.userId === ctx.user.id)
-            ?.role ?? null;
-        if (myRole !== "admin" && myRole !== "maintainer") {
+        // Consult the single ACTION_ROLES source: `grant-github-scope`
+        // (maintainer+), same as the GitHub view's action (pass-4 XS-10).
+        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
           return data(
-            {
-              ok: false as const,
-              error:
-                "Only project admins and maintainers can re-check the credential.",
-            },
+            { ok: false as const, error: "Your role can't re-check the credential." },
             { status: 403 },
           );
         }
@@ -155,18 +159,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       }
       case "set-credential":
       case "clear-credential": {
-        // Attach/rotate + remove the credential — admin|maintainer, matching
-        // grant-scope (a credential change, not a project-file mutation).
-        const myRole =
-          listProjectMembers(db, slug).find((m) => m.userId === ctx.user.id)
-            ?.role ?? null;
-        if (myRole !== "admin" && myRole !== "maintainer") {
+        // Attach/rotate + remove the credential — `grant-github-scope` tier.
+        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
           return data(
-            {
-              ok: false as const,
-              error:
-                "Only project admins and maintainers can change the credential.",
-            },
+            { ok: false as const, error: "Your role can't change the credential." },
             { status: 403 },
           );
         }
