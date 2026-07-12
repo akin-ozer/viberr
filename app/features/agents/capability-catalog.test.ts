@@ -21,18 +21,41 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     }
   });
 
-  it("carries the curated specialist capability set with its default modes", () => {
-    // 17 after the role-bindings prune removed `edit-other-task-branch` (F11:
-    // moot + harmful under per-task workspace isolation).
-    expect(MODAL_CAP_IDS.size).toBe(17);
-    expect(MODAL_CAP_IDS.has("edit-other-task-branch")).toBe(false);
+  it("carries only runtime-consulted specialist toggles (pass-4 ruling 7 prune)", () => {
+    // The toggleable catalog holds ONLY ids whose mode is consulted at runtime:
+    // 4 enforced (create-task-branch, commit-push-branch,
+    // execute-code-or-write-repo, open-review-pr) + 3 always-human. The former
+    // advisory "fake toggles" (read-task-repo, run-validation-suites,
+    // report-validation-verdict, approve-review, request-changes, …) — none of
+    // which had any runtime effect — were removed.
+    expect(MODAL_CAP_IDS.size).toBe(7);
+    expect([...MODAL_CAP_IDS].sort()).toEqual(
+      [
+        "change-project-policy",
+        "commit-push-branch",
+        "create-task-branch",
+        "execute-code-or-write-repo",
+        "merge-pull-request",
+        "open-review-pr",
+        "transition-to-done",
+      ].sort(),
+    );
+    // The pruned fake toggles are gone.
+    for (const gone of [
+      "read-task-repo",
+      "report-validation-verdict",
+      "approve-review",
+      "request-changes",
+      "move-task-to-review",
+    ]) {
+      expect(MODAL_CAP_IDS.has(gone)).toBe(false);
+    }
     expect(CAP_MODAL_CATALOG.map((g) => g.group)).toEqual([
       "Repository & execution",
-      "Validation & review",
-      "Workflow & approvals",
+      "Reserved for humans",
     ]);
-    // Spot-check the mock's defaults (agents spec §3.6).
-    expect(CAP_MODAL_DEFAULTS["read-task-repo"]).toBe("direct");
+    // XS-8: the enforced "write to the repo" capability is now expressible.
+    expect(CAP_MODAL_DEFAULTS["execute-code-or-write-repo"]).toBe("direct");
     expect(CAP_MODAL_DEFAULTS["open-review-pr"]).toBe("recommend");
     expect(CAP_MODAL_DEFAULTS["merge-pull-request"]).toBe("human");
   });
