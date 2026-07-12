@@ -4,6 +4,7 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   projectDir,
@@ -90,18 +91,11 @@ function requireProjectAdmin(
   actor: SettingsActor,
   what: string,
 ): { projectName: string } {
-  const file = readProjectFile({
-    projectSlug,
+  // Single canonical guard: project settings (identity/stages/repo/members/
+  // archive/delete) are admin-only (`edit-policy` tier in ACTION_ROLES).
+  return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
-  const role = file.parsed.frontmatter.members.find(
-    (m) => m.userId === actor.userId,
-  )?.role;
-  if (role !== "admin") {
-    throw forbidden(`Only project admins can ${what}.`);
-  }
-  return { projectName: file.parsed.frontmatter.name };
 }
 
 function projectRef(ctx: SettingsMutationContext, projectSlug: string) {

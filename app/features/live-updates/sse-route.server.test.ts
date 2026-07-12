@@ -23,6 +23,20 @@ beforeAll(async () => {
     role: "member",
   });
   userId = user.id;
+  // Full D9: an explicit project scope now requires project membership. Seed a
+  // minimal viberr-core projection + membership so the replay/scope tests below
+  // exercise the member path (a dedicated non-member 403 test lives further down).
+  app.db
+    .prepare(
+      `INSERT OR IGNORE INTO projects (slug, name, task_prefix, stages_json, workflow_json, source_path, content_hash, parsed_at)
+       VALUES ('viberr-core', 'Viberr Core', 'VIB', '[]', '[]', 'projects/viberr-core/project.md', 'h', '2026-07-04T00:00:00Z')`,
+    )
+    .run();
+  app.db
+    .prepare(
+      `INSERT OR REPLACE INTO project_members (project_slug, user_id, role) VALUES (?, ?, ?)`,
+    )
+    .run("viberr-core", userId, "contributor");
 });
 afterAll(async () => {
   const { resetSseBrokerForTests } = await import(
@@ -66,6 +80,50 @@ describe("/resources/events", () => {
       cookie,
     })) as Response;
     expect(malformed.status).toBe(400);
+  });
+
+  it("403s a non-member naming a foreign project scope (full D9)", async () => {
+    const { insertUser } = await import("~/server/auth/user-store.server");
+    const outsider = insertUser(app.db, {
+      id: "u_sse_outsider",
+      email: "outsider@viberr.dev",
+      name: "Out Sider",
+      role: "member",
+    });
+    const { cookie } = await app.cookieFor(outsider.id);
+    // Non-member of viberr-core → denied.
+    const denied = (await callLoader(
+      "/resources/events?scope=project:viberr-core",
+      { cookie },
+    )) as Response;
+    expect(denied.status).toBe(403);
+    // A task scope in the same project is likewise denied.
+    const deniedTask = (await callLoader(
+      "/resources/events?scope=task:viberr-core/VIB-139",
+      { cookie },
+    )) as Response;
+    expect(deniedTask.status).toBe(403);
+    // Their own `user` scope still works (that's their targeted events).
+    const own = (await callLoader("/resources/events?scope=user", { cookie })) as Response;
+    expect(own.status).toBe(200);
+    own.body?.cancel();
+  });
+
+  it("org admin may subscribe to any project scope (bypass)", async () => {
+    const { insertUser } = await import("~/server/auth/user-store.server");
+    const orgAdmin = insertUser(app.db, {
+      id: "u_sse_orgadmin",
+      email: "orgadmin@viberr.dev",
+      name: "Org Admin",
+      role: "admin",
+    });
+    const { cookie } = await app.cookieFor(orgAdmin.id);
+    const res = (await callLoader(
+      "/resources/events?scope=project:viberr-core",
+      { cookie },
+    )) as Response;
+    expect(res.status).toBe(200);
+    res.body?.cancel();
   });
 
   it("streams: SSE headers, hello first, then published events", async () => {

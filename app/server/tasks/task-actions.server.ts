@@ -5,6 +5,7 @@ import type {
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
+import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
   compactTimelineEvents,
@@ -308,6 +309,22 @@ function requireMemberRole(
   return role;
 }
 
+/**
+ * THE canonical project-role guard: resolves the actor's role and checks it
+ * against the single-source `ACTION_ROLES` map (app/shared/rbac.ts) — the same
+ * object the Policy page renders. Every governed project mutation names its
+ * `RbacAction` here instead of hard-coding a role list, so enforcement and
+ * display can never drift. Returns the actor's role for downstream branching.
+ */
+export function requireAction(
+  project: ProjectContext,
+  actor: TaskActor,
+  action: RbacAction,
+  what: string,
+): ProjectRole {
+  return requireMemberRole(project, actor, [...rolesForAction(action)], what);
+}
+
 function userName(db: Database.Database, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
@@ -383,8 +400,7 @@ export async function createTask(
   ctx: TaskMutationContext = {},
 ): Promise<{ key: string; task: TaskSummary; stageName: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  const role = requireMemberRole(project, actor, "any-member", "create tasks");
-  if (role === "viewer") throw forbidden("Viewers cannot create tasks.");
+  requireAction(project, actor, "create-task", "create tasks");
 
   const title = input.title.trim();
   if (title.length < 3) {
@@ -482,12 +498,7 @@ export async function updateTaskGoal(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(
-    project,
-    actor,
-    ["admin", "maintainer"],
-    "edit the task goal",
-  );
+  requireAction(project, actor, "update-goal", "edit the task goal");
   const goal = input.goal.trim();
   if (goal.length < 3) {
     throw AppError.validation("A goal of at least 3 characters is required.");
@@ -999,7 +1010,7 @@ function hasRuntimeRole(
   const role = file?.parsed.frontmatter.members.find(
     (m) => m.userId === actor.userId,
   )?.role;
-  return role === "admin" || role === "maintainer";
+  return roleCan(role, "run-agents");
 }
 
 function projectRepoFor(
@@ -1821,10 +1832,10 @@ export async function setOwner(
   ctx: TaskMutationContext = {},
 ): Promise<TaskSummary> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  const actorRole = requireMemberRole(
+  const actorRole = requireAction(
     project,
     actor,
-    "any-member",
+    "own-task",
     "take or assign task ownership",
   );
 
@@ -1834,12 +1845,16 @@ export async function setOwner(
 
   const isTake = input.targetUserId === actor.userId;
   if (!isTake) {
-    // Hand off: current owner or project admin only; target must be a member.
+    // Hand off: current owner or project admin only; target must be able to OWN
+    // (contributor+ — a viewer is read+comment only and can't hold the owner seat).
     if (currentOwnerId !== actor.userId && actorRole !== "admin") {
       throw forbidden("Only the current owner or a project admin can hand off ownership.");
     }
-    if (!project.memberRoles.has(input.targetUserId)) {
-      throw forbidden("Ownership can only be handed to a project member.");
+    const targetRole = project.memberRoles.get(input.targetUserId);
+    if (!targetRole || !roleCan(targetRole, "own-task")) {
+      throw forbidden(
+        "Ownership can only be handed to a project member who can own tasks (contributor or above).",
+      );
     }
   }
 
@@ -1932,25 +1947,25 @@ export async function releaseOwner(
   ctx: TaskMutationContext = {},
 ): Promise<TaskSummary> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  const actorRole = requireMemberRole(
-    project,
-    actor,
-    "any-member",
-    "release task ownership",
-  );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const currentOwnerId = existing.parsed.frontmatter.ownerUserId;
 
   if (!currentOwnerId) {
-    // Idempotent: nothing to release.
+    // Idempotent: nothing to release. Still require membership so a non-member
+    // can't probe task state through this path.
+    requireMemberRole(project, actor, "any-member", "release task ownership");
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
   const isSelf = currentOwnerId === actor.userId;
-  if (!isSelf && actorRole !== "admin") {
-    throw forbidden("Only project admins can release another member's ownership.");
+  if (isSelf) {
+    // Releasing your OWN seat: needs the own-task capability (contributor+).
+    requireAction(project, actor, "own-task", "release task ownership");
+  } else {
+    // Releasing SOMEONE ELSE's seat: admin only (release-any-ownership).
+    requireAction(project, actor, "release-any-ownership", "release another member's ownership");
   }
 
   const text = isSelf
@@ -2078,29 +2093,16 @@ export async function transitionStage(
   } else if (input.manual) {
     // Manual stage override (board/task dropdown) — a maintainer-level action,
     // regardless of the boundary crossed (forward, backward, or off-graph).
-    requireMemberRole(
-      project,
-      actor,
-      ["admin", "maintainer"],
-      "change the task stage",
-    );
+    requireAction(project, actor, "approve-transition", "change the task stage");
   } else if (boundary!.boundary === "auto") {
+    // An auto boundary crossed by a human (unreachable from the UI, which always
+    // sends manual:true) — the loosest gate: any member.
     requireMemberRole(project, actor, "any-member", "move this task");
   } else if (boundary!.boundary === "approval") {
-    requireMemberRole(
-      project,
-      actor,
-      ["admin", "maintainer"],
-      "approve stage transitions",
-    );
+    requireAction(project, actor, "approve-transition", "approve stage transitions");
   } else {
     // human boundary (review→done locked in V1): acceptance authority.
-    requireMemberRole(
-      project,
-      actor,
-      ["admin", "maintainer"],
-      "accept completion into Done",
-    );
+    requireAction(project, actor, "accept-completion", "accept completion into Done");
   }
 
   const event: TaskFileEvent = {
@@ -2316,7 +2318,7 @@ export async function reorderTask(
   acceptedIntoDone: boolean;
 }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(project, actor, ["admin", "maintainer"], "reorder the board");
+  requireAction(project, actor, "reorder-board", "reorder the board");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -2431,16 +2433,12 @@ export async function resolvePacket(
     !ctx.operatorAuthorized &&
     !!actor.userId &&
     existing.parsed.frontmatter.ownerUserId === actor.userId &&
-    project.memberRoles.has(actor.userId);
+    roleCan(project.memberRoles.get(actor.userId), "own-task");
   if (option.kind !== "accept_completion" && isOwner) {
-    // owner is allowed — skip the maintainer gate
+    // owner is allowed — skip the maintainer gate (the owner must still be able
+    // to own the task, i.e. contributor+; a demoted viewer-owner is caught above)
   } else {
-    requireMemberRole(
-      project,
-      actor,
-      ["admin", "maintainer"],
-      "resolve decision packets",
-    );
+    requireAction(project, actor, "resolve-packet", "resolve decision packets");
   }
 
   const now = new Date().toISOString();
@@ -2454,12 +2452,7 @@ export async function resolvePacket(
   switch (option.kind) {
     case "accept_completion": {
       // Human-only Review → Done boundary (always-human invariant).
-      requireMemberRole(
-        project,
-        actor,
-        ["admin", "maintainer"],
-        "accept completion into Done",
-      );
+      requireAction(project, actor, "accept-completion", "accept completion into Done");
       // Refuse a standing `failing` validation (C2) — same stance as the human
       // acceptCompletion + operator (H3): a stale acceptance packet must not
       // merge work the last review rejected.
@@ -2633,12 +2626,7 @@ async function acceptCompletion(
   ctx: TaskMutationContext = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(
-    project,
-    actor,
-    ["admin", "maintainer"],
-    "accept completion into Done",
-  );
+  requireAction(project, actor, "accept-completion", "accept completion into Done");
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
@@ -2733,7 +2721,7 @@ export async function completeTaskMerge(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; merged: boolean; message: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireMemberRole(project, actor, ["admin", "maintainer"], "complete a PR merge");
+  requireAction(project, actor, "accept-completion", "complete a PR merge");
   if (!actor.userId) {
     throw AppError.validation("A signed-in user is required to merge a PR.");
   }
@@ -2894,12 +2882,7 @@ export async function dismissRecommendation(
   // Dismissing an operator recommendation resolves a pending governance decision
   // (the non-packet equivalent of resolving a packet) — admin|maintainer only,
   // symmetric with resolvePacket.
-  requireMemberRole(
-    project,
-    actor,
-    ["admin", "maintainer"],
-    "dismiss recommendations",
-  );
+  requireAction(project, actor, "resolve-packet", "dismiss recommendations");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);

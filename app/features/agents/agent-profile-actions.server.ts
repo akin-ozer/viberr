@@ -4,6 +4,7 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
 import {
@@ -99,18 +100,14 @@ function requireProjectAdmin(
   projectSlug: string,
   actor: ProfileActor,
 ): { projectName: string } {
-  const file = readProjectFile({
+  // Single canonical guard: agent profile CRUD is admin-only (`manage-agents`).
+  return assertProjectAction(
+    "manage-agents",
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
-  if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
-  const role = file.parsed.frontmatter.members.find(
-    (m) => m.userId === actor.userId,
-  )?.role;
-  if (role !== "admin") {
-    throw forbidden("Only project admins can change agent capability policy.");
-  }
-  return { projectName: file.parsed.frontmatter.name };
+    actor.userId,
+    "change agent capability policy",
+    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+  );
 }
 
 function reprojectProject(

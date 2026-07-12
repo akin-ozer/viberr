@@ -420,7 +420,9 @@ describe("ownership actions", () => {
       intent: "owner-release",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(release.init.status).toBe(403);
-    expect(release.data.error).toContain("Only project admins");
+    // Canonical guard (release-any-ownership = admin only): the message names the
+    // actor's role rather than a hard-coded "admins" string.
+    expect(release.data.error).toContain("cannot release another member's ownership");
   });
 
   it("hand-off by admin + admin release with the forced copy + audit trail", async () => {

@@ -3,6 +3,7 @@ import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
@@ -61,18 +62,11 @@ function requireProjectAdmin(
   actor: PolicyActor,
   what: string,
 ): { projectName: string } {
-  const file = readProjectFile({
-    projectSlug,
+  // Delegates to the single canonical guard. `edit-policy` and `manage-members`
+  // are both admin-only in ACTION_ROLES; this module edits policy + roles.
+  return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
-  const role = file.parsed.frontmatter.members.find(
-    (m) => m.userId === actor.userId,
-  )?.role;
-  if (role !== "admin") {
-    throw forbidden(`Only project admins can ${what}.`);
-  }
-  return { projectName: file.parsed.frontmatter.name };
 }
 
 function reprojectProject(

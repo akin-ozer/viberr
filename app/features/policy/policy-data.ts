@@ -1,21 +1,24 @@
 import { ALWAYS_HUMAN_CAPABILITY_IDS, capabilityById } from "~/shared/capabilities";
+import {
+  PROJECT_ROLES,
+  RBAC_TABLE,
+  ROLE_LABEL as RBAC_ROLE_LABEL,
+  type ProjectRole,
+} from "~/shared/rbac";
 
 /**
- * Client-safe policy constants: the 4 project roles, the 9-row RBAC grant
- * table (contracts §3.2 VERBATIM — canonical permission catalog,
- * display-only in the UI), and the workflow-boundary vocabulary
- * (contracts §2.5).
+ * Client-safe policy constants for the Policy/Profile UI. The role list, labels,
+ * and the RBAC permission table all come from the ONE canonical source
+ * (app/shared/rbac.ts) that the server guards also consult — display can't drift
+ * from enforcement. `policy-rbac.server.test.ts` drives each guard per role to
+ * keep them bound.
  */
 
-export const ROLE_IDS = ["admin", "maintainer", "contributor", "viewer"] as const;
-export type RoleId = (typeof ROLE_IDS)[number];
+export const ROLE_IDS = PROJECT_ROLES;
+/** @deprecated use `ProjectRole` from ~/shared/rbac */
+export type RoleId = ProjectRole;
 
-export const ROLE_LABEL: Record<RoleId, string> = {
-  admin: "Admin",
-  maintainer: "Maintainer",
-  contributor: "Contributor",
-  viewer: "Viewer",
-};
+export const ROLE_LABEL: Record<RoleId, string> = RBAC_ROLE_LABEL;
 
 export interface RbacRow {
   action: string;
@@ -23,34 +26,16 @@ export interface RbacRow {
 }
 
 /**
- * PROJECT_CAP_MATRIX — the single source of truth for what each project role
- * may do. Each row lists the roles that hold the capability; every entry maps
- * to a real server gate (`requireMemberRole` / `requireRuntimeRole` /
- * `requireProjectAdmin`). The displayed RBAC table below is derived from this,
- * and `policy-rbac.server.test.ts` drives each guard per role to prove the
- * table can't drift from enforcement. Order: broadest grant → narrowest.
- *
- * The one distinction the old table hid: `contributor` may create tasks,
- * `viewer` may not (task-actions.server.ts createTask viewer gate).
+ * PROJECT_CAP_MATRIX — the display projection of the canonical `RBAC_TABLE`
+ * (app/shared/rbac.ts). Kept as a named export for the Policy + Profile pages;
+ * the authoritative role sets live in `ACTION_ROLES`.
  */
 export const PROJECT_CAP_MATRIX: readonly {
   action: string;
   roles: readonly RoleId[];
-}[] = [
-  { action: "View board, tasks & timelines", roles: ["admin", "maintainer", "contributor", "viewer"] },
-  { action: "Comment on tasks (app-wide)", roles: ["admin", "maintainer", "contributor", "viewer"] },
-  { action: "Take / release own task ownership", roles: ["admin", "maintainer", "contributor", "viewer"] },
-  { action: "Create tasks", roles: ["admin", "maintainer", "contributor"] },
-  { action: "Approve stage transitions", roles: ["admin", "maintainer"] },
-  { action: "Resolve decision packets", roles: ["admin", "maintainer"] },
-  { action: "Accept completion → Done", roles: ["admin", "maintainer"] },
-  { action: "Run agents & reorder the board", roles: ["admin", "maintainer"] },
-  { action: "Release any task owner", roles: ["admin"] },
-  { action: "Manage members & roles", roles: ["admin"] },
-  { action: "Edit workflow & policy", roles: ["admin"] },
-];
+}[] = RBAC_TABLE;
 
-/** RBAC grant table — derived from PROJECT_CAP_MATRIX (never hand-maintained). */
+/** RBAC grant table — derived from the canonical table (never hand-maintained). */
 export const RBAC_ROWS: readonly RbacRow[] = PROJECT_CAP_MATRIX.map((cap) => ({
   action: cap.action,
   grant: Object.fromEntries(

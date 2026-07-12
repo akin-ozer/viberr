@@ -91,22 +91,44 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
 
-  // The `projects` firehose (Home landing) delivers every project's compact
-  // task/project facts. For a NON-org-admin that leaks the existence + state of
-  // projects they aren't a member of (adversarial-review #10), so we expand it
-  // to per-project scopes for ONLY their member projects. Org admins keep the
-  // firehose (they can already see every project, mirroring the Home filter).
-  const effectiveScopes: SseScope[] =
-    ctx.user.role === "admin"
-      ? scopes
-      : scopes.flatMap((s): SseScope[] =>
-          s.kind === "projects"
-            ? memberProjectSlugs(ctx.user.id).map((slug) => ({
-                kind: "project",
-                slug,
-              }))
-            : [s],
-        );
+  // SSE subscription authorization (full D9). Org admins may subscribe to any
+  // scope (they can already see every project — mirrors the Home filter). For a
+  // NON-org-admin:
+  //   - the `projects` firehose is EXPANDED to per-project scopes for only their
+  //     member projects (it would otherwise leak every project's existence/state);
+  //   - an EXPLICITLY-named `project:<slug>` / `task:<slug>/<key>` scope is kept
+  //     only if they are a member of <slug> — otherwise dropped. Previously any
+  //     authenticated user could name a foreign scope and stream its live events
+  //     (R2: parseSseScope validated syntax, never membership).
+  //   - `user` scope (their own targeted events) always passes.
+  let effectiveScopes: SseScope[];
+  if (ctx.user.role === "admin") {
+    effectiveScopes = scopes;
+  } else {
+    const memberOf = new Set(memberProjectSlugs(ctx.user.id));
+    effectiveScopes = scopes.flatMap((s): SseScope[] => {
+      if (s.kind === "projects") {
+        return [...memberOf].map((slug) => ({ kind: "project", slug }));
+      }
+      if (s.kind === "project" || s.kind === "task") {
+        return memberOf.has(s.slug) ? [s] : [];
+      }
+      return [s]; // user scope
+    });
+    // A non-member who named ONLY foreign project/task scopes gets nothing to
+    // subscribe to — deny explicitly rather than open an empty stream.
+    if (effectiveScopes.length === 0) {
+      return Response.json(
+        {
+          error: {
+            code: "forbidden",
+            message: "You are not a member of the requested project scope(s).",
+          },
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const lastRaw =
     url.searchParams.get("lastEventId") ?? request.headers.get("last-event-id");

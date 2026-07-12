@@ -47,6 +47,7 @@ import {
 } from "~/server/runtimes/simulated-runtime.server";
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { roleCan } from "~/shared/rbac";
 import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
@@ -1319,7 +1320,7 @@ function requireRuntimeRole(
     (m) => m.userId === actor.userId,
   )?.role;
   if (!role) throw forbidden(`Only project members can ${what}.`);
-  if (role !== "admin" && role !== "maintainer") {
+  if (!roleCan(role, "run-agents")) {
     throw forbidden(`Your project role (${role}) cannot ${what}.`);
   }
   return role;
