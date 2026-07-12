@@ -129,7 +129,7 @@ export function setCredentialPassword(
   upsertCredential(db, userId, passwordHash);
 }
 
-/** Mirrors an org-role change onto the user's membership. */
+/** Sets a user's org-role on their membership (the source of truth). */
 export function setMemberRole(
   db: Database.Database,
   userId: string,
@@ -138,6 +138,40 @@ export function setMemberRole(
   db.prepare(
     `UPDATE member SET role = ? WHERE userId = ? AND organizationId = ?`,
   ).run(role, userId, DEFAULT_ORG_ID);
+}
+
+/**
+ * The AUTHORITATIVE org role for a user — the better-auth org-plugin membership
+ * (`member.role` in the default org). Option-B cutover (pass-4 ruling 5): the
+ * `member` table is the org-role source and `users.role` is a derived cache.
+ * Falls back to `fallback` (the legacy `users.role`) only when a membership row
+ * is somehow absent, so an un-provisioned user is never silently demoted.
+ */
+export function resolveOrgRole(
+  db: Database.Database,
+  userId: string,
+  fallback: UserRole,
+): UserRole {
+  const row = db
+    .prepare(
+      `SELECT role FROM member WHERE userId = ? AND organizationId = ?`,
+    )
+    .get(userId, DEFAULT_ORG_ID) as { role: string } | undefined;
+  if (!row) return fallback;
+  return row.role === "admin" ? "admin" : "member";
+}
+
+/** Syncs a user's email onto their better-auth identity (admin email edit). */
+export function syncIdentityEmail(
+  db: Database.Database,
+  userId: string,
+  email: string,
+): void {
+  db.prepare(`UPDATE "user" SET email = ?, updatedAt = ? WHERE id = ?`).run(
+    normalizeEmail(email),
+    nowIso(),
+    userId,
+  );
 }
 
 /** Revokes every better-auth session of a user (disable / password change). */

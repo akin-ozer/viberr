@@ -89,38 +89,40 @@ const CLAUDE_CURATED: ModelCatalog = {
   defaultEffort: "high",
 };
 
-/** Codex has NO list endpoint, so this is a hand-maintained snapshot of
- *  reasonable current ids — intentionally editable. */
-const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+/** Codex has no account-scoped list endpoint in the TypeScript SDK, so this is
+ *  a hand-maintained snapshot of the current ChatGPT-plan model catalog. Keep
+ *  effort values inside the SDK's ModelReasoningEffort union; the product's
+ *  newer Max/Ultra UI modes are not ThreadOptions values in SDK 0.144.1. */
+const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
 const CODEX_MODELS: CatalogModel[] = [
   {
+    value: "gpt-5.6-sol",
+    displayName: "GPT-5.6 Sol",
+    description:
+      "Flagship model for complex coding, research, and high-value work.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5.6-terra",
+    displayName: "GPT-5.6 Terra",
+    description:
+      "Balanced everyday workhorse with strong reasoning and tool use.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-5.6-luna",
+    displayName: "GPT-5.6 Luna",
+    description: "Fast model for clear, repeatable, well-scoped tasks.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
     value: "gpt-5.5",
     displayName: "GPT-5.5",
-    description:
-      "Default for coding runs. Works on a ChatGPT-plan (subscription) login.",
-    supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
-  },
-  {
-    value: "gpt-5-codex",
-    displayName: "GPT-5 Codex (API key)",
-    description:
-      "Codex-tuned GPT-5. Only available with an OpenAI API key — a ChatGPT-plan login rejects it.",
-    supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
-  },
-  {
-    value: "gpt-5",
-    displayName: "GPT-5 (API key)",
-    description: "General-purpose GPT-5. API key only (rejected on a ChatGPT plan).",
-    supportsEffort: true,
-    efforts: [...CODEX_EFFORTS],
-  },
-  {
-    value: "o4-mini",
-    displayName: "o4-mini",
-    description: "Small, fast reasoning model for lighter turns.",
+    description: "Previous-generation model retained for existing profiles.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -129,10 +131,8 @@ const CODEX_MODELS: CatalogModel[] = [
 const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
-  // Default = the first available model (a changeable starting point). gpt-5.5
-  // is listed first deliberately: it is the safe cross-account id (valid on a
-  // ChatGPT-plan login AND with an API key), whereas the codex-tuned / bare
-  // gpt-5 ids are API-key-only.
+  // Default = the first available model (a changeable starting point). Sol is
+  // the current recommended starting model for ChatGPT-plan Codex usage.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };
@@ -200,9 +200,9 @@ export function resolveRunModel(
 
 /**
  * Resolve a reasoning-effort tier to a VALID one for `backend`. Backends have
- * different tiers (Claude: low…max; Codex: minimal…xhigh), so a "retry on the
- * other backend" (D4) must translate — passing a Claude-only `max` to Codex, or
- * a Codex-only `minimal` to Claude, would be rejected. An unknown/empty value,
+ * different tiers (Claude: low…max; Codex: low…xhigh), so a "retry on the
+ * other backend" (D4) must translate — for example, passing Claude-only `max`
+ * to Codex would be rejected. An unknown/empty value,
  * or one that doesn't exist on the target, falls back to that backend's default
  * effort. Same-backend valid values pass through unchanged.
  */

@@ -38,7 +38,6 @@ function renderBrowser(overrides: { tree?: StoreNode[]; onClose?: () => void } =
           <StoreBrowser
             title="Architecture notes"
             subMono="store://kb/architecture-notes/ · re-index on change"
-            root="store://kb/architecture-notes"
             metaTail="indexed just now"
             tree={overrides.tree ?? TREE}
             resource={{ kind: "kb", id: "kb1" }}

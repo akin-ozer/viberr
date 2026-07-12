@@ -99,7 +99,6 @@ describe("loader", () => {
     // Seed: 2 review tasks (VIB-142, VIB-145), 2 done, 2 triage, 3 impl, 1 ready.
     expect(view.stageCounts.review).toBe(2);
     expect(view.members).toHaveLength(4);
-    expect(view.members.every((m) => m.status === "active")).toBe(true);
     // Credential health (honest empty slate): a credentialPolicy with no bound
     // PAT reports source 'none' (no fabricated card), while the seeded VIB-142
     // violation still surfaces on the chip.

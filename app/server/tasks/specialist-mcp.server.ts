@@ -2,10 +2,11 @@ import type Database from "better-sqlite3";
 import { listMcpServers } from "~/server/org/resources.server";
 
 /**
- * Resolve a specialist profile's declared MCP names to Claude Agent SDK
+ * Resolve a specialist profile's declared MCP names to portable runtime
  * `mcpServers` configs from the org MCP registry (item-1 / FR9). The MCP leg was
  * decorative — a profile's `resources.mcps` reached no run. This turns each
- * declared name into a real server config the SDK can connect to:
+ * declared name into a real server config. The Claude adapter accepts this
+ * shape directly; the Codex adapter translates it to `mcp_servers` config:
  *   - HTTP  → `{ type: "http", url: <target> }`
  *   - stdio → `{ command, args }` (target is the shell command line)
  *

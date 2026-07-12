@@ -3,7 +3,6 @@ import type Database from "better-sqlite3";
 import {
   listProjectMembers,
   listProjects,
-  listProjectTasks,
 } from "~/server/projections/board-query.server";
 import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { listUsers } from "~/server/auth/user-store.server";
@@ -79,16 +78,83 @@ export function listHomeProjectsForUser(
 ): HomeProjectCard[] {
   const all = listHomeProjects(db);
   if (viewer.role === "admin") return all; // org admins see everything
-  return all.filter((p) =>
-    listProjectMembers(db, p.slug).some((m) => m.userId === viewer.id),
+  // Single membership pass (pass-4 WI-9): one query for the slugs this viewer
+  // belongs to, instead of re-running listProjectMembers once per project on
+  // top of the pass listHomeProjects already made for the member avatars.
+  const memberSlugs = new Set(
+    (
+      db
+        .prepare(`SELECT project_slug FROM project_members WHERE user_id = ?`)
+        .all(viewer.id) as { project_slug: string }[]
+    ).map((r) => r.project_slug),
   );
+  return all.filter((p) => memberSlugs.has(p.slug));
+}
+
+/** Per-project task aggregates for the home cards. */
+interface HomeTaskAgg {
+  total: number;
+  running: number;
+  waiting: number;
+  updated_at: string | null;
 }
 
 export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
-  return listProjects(db).map((project) => {
-    const tasks = listProjectTasks(db, project.slug);
+  const projects = listProjects(db);
+
+  // Push the card counts into SQL (settings-query.server.ts pattern) instead of
+  // loading every task row — JSON blob columns and all — into JS just to tally
+  // them (pass-4 WI-9). Two GROUP BY queries cover all projects at once.
+  //
+  // Per-stage distribution:
+  const distBySlug = new Map<string, Record<string, number>>();
+  const distRows = db
+    .prepare(
+      `SELECT project_slug, stage, COUNT(*) AS n FROM task_projections
+       GROUP BY project_slug, stage`,
+    )
+    .all() as { project_slug: string; stage: string; n: number }[];
+  for (const r of distRows) {
+    let d = distBySlug.get(r.project_slug);
+    if (!d) {
+      d = {};
+      distBySlug.set(r.project_slug, d);
+    }
+    d[r.stage] = r.n;
+  }
+
+  // Per-project totals: task count, agents-working (waiting = 'agent'), open
+  // decision packets, and the latest updatedAt. `waiting`/`running` mirror the
+  // prior JS predicates exactly (`t.waiting === "agent"`, `t.packet !== null`
+  // ⇔ a non-empty packet_json).
+  const aggBySlug = new Map<string, HomeTaskAgg>();
+  const aggRows = db
+    .prepare(
+      `SELECT project_slug,
+              COUNT(*) AS total,
+              SUM(CASE WHEN waiting = 'agent' THEN 1 ELSE 0 END) AS running,
+              SUM(CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
+                       THEN 1 ELSE 0 END) AS waiting,
+              MAX(updated_at) AS updated_at
+       FROM task_projections
+       GROUP BY project_slug`,
+    )
+    .all() as (HomeTaskAgg & { project_slug: string })[];
+  for (const r of aggRows) {
+    aggBySlug.set(r.project_slug, {
+      total: r.total,
+      running: r.running,
+      waiting: r.waiting,
+      updated_at: r.updated_at,
+    });
+  }
+
+  // One resolver shared across every project's member list — its per-instance
+  // cache means a user shown on multiple projects is looked up once.
+  const resolve = createActorResolver(db);
+
+  return projects.map((project) => {
     const memberRecords = listProjectMembers(db, project.slug);
-    const resolve = createActorResolver(db);
     const members: HomeMember[] = memberRecords.map((m) => {
       const actor = resolve({ kind: "human", userId: m.userId, nameHint: null });
       return actor.kind === "human"
@@ -96,15 +162,7 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
         : { name: m.userId, initials: "?", tone: "" };
     });
 
-    const dist: Record<string, number> = {};
-    for (const t of tasks) dist[t.stage] = (dist[t.stage] ?? 0) + 1;
-    let updatedAt: string | null = null;
-    for (const t of tasks) {
-      if (t.updatedAt && (!updatedAt || t.updatedAt > updatedAt)) {
-        updatedAt = t.updatedAt;
-      }
-    }
-
+    const agg = aggBySlug.get(project.slug);
     return {
       slug: project.slug,
       name: project.name,
@@ -117,12 +175,12 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
         name: s.name,
         color: s.color,
       })),
-      dist,
-      total: tasks.length,
-      running: tasks.filter((t) => t.waiting === "agent").length,
-      waiting: tasks.filter((t) => t.packet !== null).length,
+      dist: distBySlug.get(project.slug) ?? {},
+      total: agg?.total ?? 0,
+      running: agg?.running ?? 0,
+      waiting: agg?.waiting ?? 0,
       members,
-      updatedAt: updatedAt ?? project.parsedAt,
+      updatedAt: agg?.updated_at ?? project.parsedAt,
       accent: accentForSlug(project.slug),
     };
   });

@@ -433,7 +433,10 @@ function projectCodex(e: Json, type: string, t: string): ProjectedEnvelope {
           return completed ? { display: { t, ev: "diff", tag: "file_change", text, changes }, facts: {} } : { display: null, facts: {} };
         }
         case "error":
-          return { display: { t, ev: "err", tag: "error", text: str(item.message) }, facts: { isError: true } };
+          // The Codex SDK explicitly defines ErrorItem as non-fatal. Surface it
+          // as an error-looking timeline row, but do not poison an otherwise
+          // successful turn; only top-level `turn.failed` / `error` do that.
+          return { display: { t, ev: "err", tag: "error", text: str(item.message) }, facts: {} };
         default:
           // web_search / mcp_tool_call / todo_list — completed only, meta.
           return completed

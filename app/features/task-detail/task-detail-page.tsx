@@ -630,7 +630,6 @@ function CurrentStatePanel({
                 currentStageId={task.stage}
                 onSelect={onTransition}
                 busy={transitionBusy}
-                variant="panel"
               />
             ) : (
               <span className="stage-static">

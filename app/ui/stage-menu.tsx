@@ -25,17 +25,11 @@ export function StageMenu({
   currentStageId,
   onSelect,
   busy = false,
-  variant = "panel",
-  align = "right",
 }: {
   stages: StageOption[];
   currentStageId: string;
   onSelect: (stageId: string) => void;
   busy?: boolean;
-  /** panel = full trigger (dot + name + caret); card = compact (dot + caret). */
-  variant?: "panel" | "card";
-  /** Which trigger edge the popover aligns to. */
-  align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(
@@ -63,7 +57,7 @@ export function StageMenu({
     if (!el) return;
     const r = el.getBoundingClientRect();
     const width = Math.max(r.width, 190);
-    const left = align === "right" ? r.right - width : r.left;
+    const left = r.right - width;
     // Clamp into the viewport with an 8px gutter.
     const clampedLeft = Math.min(
       Math.max(8, left),
@@ -119,7 +113,7 @@ export function StageMenu({
       <button
         ref={btnRef}
         type="button"
-        className={`stage-menu-btn ${variant}${open ? " open" : ""}`}
+        className={`stage-menu-btn panel${open ? " open" : ""}`}
         onClick={toggle}
         disabled={busy}
         aria-haspopup="menu"
@@ -129,9 +123,7 @@ export function StageMenu({
       >
         <span className={`sm-current${changed ? " changed" : ""}`}>
           <span className="col-stage-dot" style={{ background: current?.color }} />
-          {variant === "panel" && (
-            <span className="sm-name">{current?.name ?? "—"}</span>
-          )}
+          <span className="sm-name">{current?.name ?? "—"}</span>
         </span>
         <Icon name="chevron" className="sm-caret" />
       </button>

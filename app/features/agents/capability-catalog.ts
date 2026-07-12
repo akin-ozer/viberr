@@ -34,34 +34,33 @@ function cap(id: string, def: Exclude<CapMode, "off">): ModalCap {
   return { id, label: found ? found.label : id, def };
 }
 
+// The toggleable specialist catalog holds ONLY capabilities whose mode is
+// actually CONSULTED at runtime (pass-4 ruling 7 — "prune the fake toggles").
+// Every id here binds via the specialist tool denylist
+// (specialist-tool-policy.ts) or is a structural always-human lock. The former
+// advisory rows (read-task-repo, run-validation-suites, author-test-cases,
+// attach-evidence-references, post-quality-flags, comment-on-task,
+// report-validation-verdict, approve-review, request-changes,
+// flag-underspecified-tasks, move-task-to-review) had ZERO runtime references —
+// setting them to human/off did nothing — so they are no longer presented as
+// toggles. A profile that still carries them shows them read-only + advisory in
+// the capability matrix's "Other actions" group.
 export const CAP_MODAL_CATALOG: readonly ModalCapGroup[] = [
   {
     group: "Repository & execution",
     caps: [
-      cap("read-task-repo", "direct"),
-      cap("comment-on-task", "direct"),
       cap("create-task-branch", "direct"),
       cap("commit-push-branch", "direct"),
+      // XS-8: `execute-code-or-write-repo` IS enforced (its withhold removes
+      // Edit/Write/MultiEdit/NotebookEdit + denies git commit) but was
+      // previously inexpressible in the modal.
+      cap("execute-code-or-write-repo", "direct"),
       cap("open-review-pr", "recommend"),
     ],
   },
   {
-    group: "Validation & review",
+    group: "Reserved for humans",
     caps: [
-      cap("run-validation-suites", "direct"),
-      cap("author-test-cases", "direct"),
-      cap("attach-evidence-references", "direct"),
-      cap("post-quality-flags", "direct"),
-      cap("report-validation-verdict", "recommend"),
-      cap("approve-review", "recommend"),
-      cap("request-changes", "recommend"),
-      cap("flag-underspecified-tasks", "recommend"),
-    ],
-  },
-  {
-    group: "Workflow & approvals",
-    caps: [
-      cap("move-task-to-review", "recommend"),
       cap("merge-pull-request", "human"),
       cap("transition-to-done", "human"),
       cap("change-project-policy", "human"),

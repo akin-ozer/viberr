@@ -297,4 +297,44 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const devViews = views.filter((v) => v.who.name === "dev");
     expect(devViews.length).toBe(1);
   });
+
+  // XS-1: a resumed specialist must be re-confined by its denylist / git ceiling
+  // / MCP set / persona — the resume path used to drop all of them.
+  it("resumeRun forwards the run confinement onto the resumed RunSpec", async () => {
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "simulated", simulated: true, sessionId: null });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture, simulated: capture });
+
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      disallowedTools: ["Bash(gh pr merge:*)", "Edit"],
+      env: { GIT_CEILING_DIRECTORIES: "/data/projects/x/tasks/VIB-1" },
+      mcpServers: { viberr: { type: "sdk" } },
+      systemPrompt: "You are the Developer.",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const resumeSpec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(resumeSpec.disallowedTools).toEqual(["Bash(gh pr merge:*)", "Edit"]);
+    expect(resumeSpec.env?.GIT_CEILING_DIRECTORIES).toBe(
+      "/data/projects/x/tasks/VIB-1",
+    );
+    expect(resumeSpec.mcpServers).toEqual({ viberr: { type: "sdk" } });
+    expect(resumeSpec.systemPrompt).toBe("You are the Developer.");
+  });
 });

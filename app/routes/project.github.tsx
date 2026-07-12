@@ -15,6 +15,7 @@ import {
 } from "~/features/github/github-actions.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
 import { GithubViewPage } from "~/features/github/github-view";
+import { type RbacAction, roleCan } from "~/shared/rbac";
 
 /**
  * /projects/:slug/github — the GitHub surface (github-view spec), replacing
@@ -44,51 +45,37 @@ export async function action({ request, params }: Route.ActionArgs) {
   const actor = { userId: ctx.user.id, label: ctx.user.email };
   const intent = String(formData.get("intent") ?? "");
 
-  // RBAC (the phase-7-core services carry no role checks of their own):
-  // reconcile = any non-viewer member; grant-scope = credential/policy
-  // change, admin|maintainer only (conventions + contracts §3.2).
+  // RBAC — consult the single ACTION_ROLES source (rbac.ts), never a hardcoded
+  // role string, so the Policy page and this guard can never drift (pass-4
+  // XS-10). reconcile = `reconcile-github` (contributor+); credential changes =
+  // `grant-github-scope` (maintainer+).
   const myRole =
     listProjectMembers(db, params.slug).find((m) => m.userId === ctx.user.id)
       ?.role ?? null;
+  const deny = (action: RbacAction, what: string) =>
+    data(
+      { ok: false as const, error: `Your role can't ${what}.` },
+      { status: 403 },
+    );
 
   try {
     if (intent === "reconcile") {
-      if (!myRole || myRole === "viewer") {
-        return data(
-          {
-            ok: false as const,
-            error: "Only project members can reconcile with GitHub.",
-          },
-          { status: 403 },
-        );
+      if (!roleCan(myRole, "reconcile-github")) {
+        return deny("reconcile-github", "reconcile with GitHub");
       }
       return await runReconcile(db, params.slug, actor);
     }
     if (intent === "grant-scope") {
-      if (myRole !== "admin" && myRole !== "maintainer") {
-        return data(
-          {
-            ok: false as const,
-            error:
-              "Only project admins and maintainers can re-check the credential.",
-          },
-          { status: 403 },
-        );
+      if (!roleCan(myRole, "grant-github-scope")) {
+        return deny("grant-github-scope", "re-check the credential");
       }
       return await runGrantScope(db, params.slug, actor);
     }
     // Attach/rotate + remove the project credential — same credential-change
-    // RBAC as grant-scope (admin|maintainer).
+    // RBAC as grant-scope (`grant-github-scope`, maintainer+).
     if (intent === "set-credential" || intent === "clear-credential") {
-      if (myRole !== "admin" && myRole !== "maintainer") {
-        return data(
-          {
-            ok: false as const,
-            error:
-              "Only project admins and maintainers can change the credential.",
-          },
-          { status: 403 },
-        );
+      if (!roleCan(myRole, "grant-github-scope")) {
+        return deny("grant-github-scope", "change the credential");
       }
       return intent === "set-credential"
         ? runSetCredential(db, params.slug, actor)

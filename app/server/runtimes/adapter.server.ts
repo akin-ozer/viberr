@@ -32,17 +32,17 @@ export interface RunSpec {
   workdir: string;
   /** Resume an existing provider session, if any. */
   resumeSessionId?: string | null;
-  /** Whether the run should be autonomous (acceptEdits / workspace-write). */
+  /** Whether the run should be autonomous (Claude bypassPermissions / Codex
+   *  danger-full-access for coding specialists). */
   autonomous?: boolean;
-  /** Custom system prompt (operator persona + expertise skill). Claude only —
-   *  the Codex adapter ignores it and relies on the prompt. */
+  /** Custom system prompt (operator persona + expertise skill). Claude uses
+   *  its systemPrompt option; Codex maps it to developer_instructions. */
   systemPrompt?: string;
-  /** In-process SDK MCP servers keyed by name (operator governance tools).
-   *  Claude only — `{ viberr: createSdkMcpServer(...) }`. Opaque here so the
-   *  adapter contract stays backend-agnostic. */
+  /** MCP servers keyed by name. Portable HTTP/stdio configs work on both
+   *  backends; Claude additionally supports in-process SDK servers such as the
+   *  operator's `{ viberr: createSdkMcpServer(...) }`. */
   mcpServers?: Record<string, unknown>;
-  /** Allowlist confining which tools the run may call (e.g. the operator to
-   *  only its `mcp__viberr__*` governance tools — it can never write code). */
+  /** Claude-only allowlist for automatic tool approval. */
   allowedTools?: string[];
   /** Denylist confining a specialist run to its granted capabilities (e.g. a
    *  specialist without push rights cannot run `git push`). Deny rules bind
@@ -53,9 +53,8 @@ export interface RunSpec {
    *  emits a decision plan the caller parses + executes. */
   outputSchema?: unknown;
   /** Per-run environment overlay, merged ON TOP of the adapter's base env for
-   *  THIS run only. Used to confine a specialist's git to its own workspace
-   *  (`GIT_CEILING_DIRECTORIES`) so it can never walk up to a host checkout when
-   *  the data root lives inside a git repo (the dogfooding hazard). */
+   *  THIS run only. `GIT_CEILING_DIRECTORIES` prevents accidental parent-repo
+   *  discovery; it is not a filesystem or process isolation boundary. */
   env?: Record<string, string>;
 }
 

@@ -41,6 +41,14 @@ describe("parseEnv", () => {
     expect(env.VIBERR_SEED_ADMIN_EMAIL).toBe("admin@example.com");
   });
 
+  it("accepts a Codex ChatGPT-workspace access token", () => {
+    const env = parseEnv({
+      ...REQUIRED_ENV,
+      CODEX_ACCESS_TOKEN: "cat-subscription-test",
+    });
+    expect(env.CODEX_ACCESS_TOKEN).toBe("cat-subscription-test");
+  });
+
   it("decodes the encryption key into the exact bytes", () => {
     const bytes = Buffer.from(Array.from({ length: 32 }, (_, i) => i));
     const env = parseEnv({

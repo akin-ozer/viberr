@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { LIGHTWEIGHT_TEMPLATE } from "~/shared/workflow/templates";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
@@ -154,5 +156,38 @@ describe("getReviewQueue", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug);
     expect(queue).toEqual({ ready: [], working: [], total: 0 });
+  });
+
+  // WI-1: on a Lightweight board (todo/doing/done) the review role resolves to
+  // `doing` (the stage with an edge into the terminal). A literal-"review"
+  // filter left this queue permanently empty while the rail badge counted it.
+  it("resolves the review stage from workflow roles, not the literal id 'review'", () => {
+    const store = setupTestStore(ctx);
+    writeProject(store.dataRoot, {
+      name: "Lite",
+      slug: "lite",
+      repo: null,
+      defaultBranch: "main",
+      taskPrefix: "LP",
+      nextTaskNumber: 1,
+      stages: LIGHTWEIGHT_TEMPLATE.stages,
+      workflow: LIGHTWEIGHT_TEMPLATE.workflow,
+      members: [{ userId: store.users.arda.id, role: "admin" }],
+      agents: [],
+      credentialPolicy: null,
+      guardrails: [],
+    });
+    writeTask(store.dataRoot, "lite", {
+      frontmatter: baseTaskFrontmatter("LP-1", {
+        title: "In the review-role stage",
+        stage: "doing",
+        waiting: "human",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const queue = getReviewQueue(store.db, "lite");
+    expect(queue.total).toBe(1);
+    expect(queue.ready.map((t) => t.key)).toEqual(["LP-1"]);
   });
 });

@@ -7,6 +7,7 @@ import {
   DEFAULT_MIGRATIONS_DIR,
   runMigrations,
 } from "../app/server/db/migration-runner.server";
+import { reconcileSchemaFromMigrations } from "../app/server/db/schema-reconcile.server";
 import {
   getProjectionDbPath,
   openDatabase,
@@ -19,10 +20,12 @@ function main(): void {
   const db = openDatabase(dbPath);
   try {
     const result = runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+    const healed = reconcileSchemaFromMigrations(db, DEFAULT_MIGRATIONS_DIR);
     logger.info("migrations complete", {
       dbPath,
       applied: result.applied,
       alreadyApplied: result.alreadyApplied,
+      schemaHealed: healed,
     });
   } finally {
     db.close();

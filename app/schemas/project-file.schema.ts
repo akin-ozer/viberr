@@ -86,7 +86,9 @@ export type CapabilityGrant = z.infer<typeof capabilityGrantSchema>;
  * is optional — the org template value wins when absent. Kept `.loose()` so
  * project-created profiles can carry their full definition here without every
  * field being enumerated. `effort` is the profile's chosen reasoning level,
- * threaded into a run alongside `model`. */
+ * threaded into a run alongside `model`. This is the SINGLE source of truth for
+ * the deployment-definition shape — agents-query re-exports the inferred type
+ * (no hand-mirrored interface). */
 export const agentDeploymentDefinitionSchema = z
   .object({
     kind: z.enum(["operator", "specialist"]).optional(),
@@ -104,6 +106,16 @@ export const agentDeploymentDefinitionSchema = z
     /** Operator only: default autonomy level (supervised recommends at governed
      *  boundaries; full performs them + may accept completion to Done). */
     autonomy: z.enum(["supervised", "full"]).optional(),
+    /** Project-created profiles' bundled resources (org templates carry these
+     *  in their own frontmatter; a project deployment override carries them
+     *  here). */
+    resources: z
+      .object({
+        skills: z.array(z.string()).optional(),
+        mcps: z.array(z.string()).optional(),
+        kb: z.array(z.string()).optional(),
+      })
+      .optional(),
   })
   .loose();
 export type AgentDeploymentDefinition = z.infer<

@@ -112,6 +112,13 @@ export function listProjectTasks(
   const project = getProject(db, slug);
   const stageIds = project ? project.stages.map((s) => s.id) : [];
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
+  // ONE actor resolver for the whole query — createActorResolver caches user
+  // lookups behind a single prepared statement (its own doc: "create one per
+  // request/query and map many rows through it"). Previously `resolveTaskOwner`
+  // built a fresh resolver + empty cache per owned row inside this map
+  // (pass-4 WI-8, the hottest loader path). Output is identical — a shared
+  // cache changes only the cost, not the resolved render.
+  const resolveActor = createActorResolver(db, { projectMemberIds: memberIds });
   const rows = db
     .prepare(
       `SELECT * FROM task_projections WHERE project_slug = ?
@@ -121,7 +128,13 @@ export function listProjectTasks(
   return rows.map((row) =>
     mapTaskProjectionRow(row, {
       stageIds,
-      owner: resolveTaskOwner(db, row.owner_user_id, memberIds),
+      owner: row.owner_user_id
+        ? resolveActor({
+            kind: "human",
+            userId: row.owner_user_id,
+            nameHint: null,
+          })
+        : null,
       accepted: isAcceptedDisplayState({ stage: row.stage, stageIds }),
     }),
   );

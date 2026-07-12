@@ -27,9 +27,13 @@ test("resolving the VIB-142 packet with Request one edit", async ({ page }) => {
   // … the packet is gone …
   await expect(packet).toHaveCount(0);
 
-  // … and the newest timeline event is the recorded decision (transition
-  // event written into task.md by resolvePacket).
-  const newest = page.locator(".tl-item").first();
-  await expect(newest.locator(".tl-text")).toContainText(/Decision|edit/);
-  await expect(newest.getByText("Arda Kaya")).toBeVisible();
+  // … and the recorded decision lands in the timeline as Arda's event. It need
+  // not be the strict newest item: resolving the packet also invokes the
+  // operator, which may post its own reaction on top — so assert the decision
+  // is PRESENT rather than first (robust to operator follow-ups).
+  const decision = page
+    .locator(".tl-item")
+    .filter({ hasText: /Decision|edit/ })
+    .filter({ hasText: "Arda Kaya" });
+  await expect(decision.first()).toBeVisible();
 });

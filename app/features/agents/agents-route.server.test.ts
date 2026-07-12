@@ -214,7 +214,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       backends: ["codex"],
       // No picked model in FORM → per-backend catalog default (no more the
       // old invalid hardcoded id).
-      model: "gpt-5.5",
+      model: "gpt-5.6-sol",
       effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],
@@ -312,12 +312,13 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       intent: "create-profile",
       payload: JSON.stringify({
         name: "Minimal Dev",
-        role: "Read and comment only",
+        role: "Branch only",
         backend: "claude",
         stages: ["impl"],
         definition: "Only two caps submitted; nothing else should be granted.",
-        // Only two governed caps submitted, as a partial/older client would.
-        caps: { "read-task-repo": "direct", "comment-on-task": "direct" },
+        // Only two governed (modal) caps submitted, as a partial/older client
+        // would — the rest of the catalog must NOT be merged in.
+        caps: { "create-task-branch": "direct", "open-review-pr": "recommend" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
     })) as { ok: boolean };
@@ -333,14 +334,13 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       .map((c) => [c.capabilityId, c.mode])
       .sort();
     expect(persisted).toEqual([
-      ["comment-on-task", "direct"],
-      ["read-task-repo", "direct"],
+      ["create-task-branch", "direct"],
+      ["open-review-pr", "recommend"],
     ]);
-    // Repo-mutating powers the creator never chose are ABSENT (not `direct`).
+    // Powers the creator never chose are ABSENT (not defaulted).
     const capIds = created.capabilities.map((c) => c.capabilityId);
-    expect(capIds).not.toContain("create-task-branch");
     expect(capIds).not.toContain("commit-push-branch");
-    expect(capIds).not.toContain("open-review-pr");
+    expect(capIds).not.toContain("execute-code-or-write-repo");
 
     await postAction(ids.arda, {
       intent: "delete-profile",

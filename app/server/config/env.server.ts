@@ -93,8 +93,9 @@ const envSchema = z.object({
   //  - Claude Agent SDK: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (from
   //    `claude setup-token` — the subscription/OAuth path), or set
   //    VIBERR_CLAUDE_USE_CLI_AUTH=1 to use an already-logged-in `claude` CLI.
-  //  - Codex SDK: CODEX_API_KEY / OPENAI_API_KEY, or VIBERR_CODEX_USE_CLI_AUTH=1
-  //    for an existing `codex login`.
+  //  - Codex SDK: CODEX_ACCESS_TOKEN (ChatGPT Business/Enterprise subscription
+  //    automation), CODEX_API_KEY / OPENAI_API_KEY, or
+  //    VIBERR_CODEX_USE_CLI_AUTH=1 for an existing `codex login`.
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   CLAUDE_CODE_OAUTH_TOKEN: z.string().min(1).optional(),
   VIBERR_CLAUDE_USE_CLI_AUTH: z.string().optional(),
@@ -102,6 +103,10 @@ const envSchema = z.object({
   // $CLAUDE_CONFIG_DIR/projects/<cwd>/<id>.jsonl; default it under the data
   // volume so a resumed session (commenting an agent) survives restarts.
   CLAUDE_CONFIG_DIR: z.string().optional(),
+  // ChatGPT-workspace Codex credential for trusted non-interactive workflows.
+  // Unlike CODEX_API_KEY / OPENAI_API_KEY, this uses workspace subscription
+  // entitlements rather than Platform API billing.
+  CODEX_ACCESS_TOKEN: z.string().min(1).optional(),
   CODEX_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   // Codex ChatGPT-plan (subscription) login dir — `codex login` writes

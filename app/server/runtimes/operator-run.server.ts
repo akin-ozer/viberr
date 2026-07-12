@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
   getDataRoot,
@@ -33,7 +34,7 @@ import {
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
-import { replyTextForRun } from "~/server/tasks/agent-reply.server";
+import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
@@ -307,6 +308,21 @@ export async function runOperator(
  * list ALL properties in `required` — optional fields are expressed as nullable
  * (the model emits null when unused). The executor treats null/"" as absent.
  */
+const OPERATOR_PLAN_TOOLS = [
+  "post_comment",
+  "open_packet",
+  "assign_specialist",
+  "run_specialist",
+  "prompt_specialist",
+  "assign_reviewer",
+  "run_reviewer",
+  "prompt_reviewer",
+  "transition_stage",
+  "accept_completion",
+] as const;
+
+const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
+
 const OPERATOR_PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -324,18 +340,7 @@ const OPERATOR_PLAN_SCHEMA = {
         properties: {
           tool: {
             type: "string",
-            enum: [
-              "post_comment",
-              "open_packet",
-              "assign_specialist",
-              "run_specialist",
-              "prompt_specialist",
-              "assign_reviewer",
-              "run_reviewer",
-              "prompt_reviewer",
-              "transition_stage",
-              "accept_completion",
-            ],
+            enum: OPERATOR_PLAN_TOOLS,
           },
           profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
@@ -350,14 +355,31 @@ const OPERATOR_PLAN_SCHEMA = {
   required: ["reasoning", "actions"],
 } as const;
 
-interface OperatorPlanAction {
-  tool: string;
-  profileId?: string;
-  toStageId?: string;
-  packetType?: "input" | "blocked";
-  text?: string;
-  reason?: string;
-}
+/**
+ * Runtime mirror of OPERATOR_PLAN_SCHEMA. Structured output constrains the
+ * model, but persisted/provider output still crosses a trust boundary: reject
+ * missing nullable fields, unknown tools, wrong types, and extra properties
+ * before any governed action can run.
+ */
+const operatorPlanActionSchema = z
+  .object({
+    tool: z.enum(OPERATOR_PLAN_TOOLS),
+    profileId: z.string().nullable(),
+    toStageId: z.string().nullable(),
+    packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
+    text: z.string().nullable(),
+    reason: z.string().nullable(),
+  })
+  .strict();
+
+const operatorPlanRuntimeSchema = z
+  .object({
+    reasoning: z.string(),
+    actions: z.array(operatorPlanActionSchema),
+  })
+  .strict();
+
+type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
 
 /**
  * The Codex plan schema is flat, so it can't author rich per-option packets the
@@ -389,11 +411,10 @@ async function startCodexOperatorRun(
   leaseToken: object,
 ): Promise<RunOperatorResult> {
   const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  const systemPrompt = buildOperatorSystemPrompt(authority, input.dataRoot);
   const prompt = buildCodexOperatorPrompt(
-    authority,
     snapshot,
     input.trigger ?? "manual",
-    input.dataRoot,
     input.humanComment,
   );
 
@@ -409,6 +430,7 @@ async function startCodexOperatorRun(
     agentName: authority.name,
     agentProfileId: "operator",
     prompt,
+    systemPrompt,
     outputSchema: OPERATOR_PLAN_SCHEMA,
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
@@ -423,9 +445,18 @@ async function startCodexOperatorRun(
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
   registerRunCompletion(runId, (finished) => {
-    void executeCodexPlan(db, ctx, input, authority, finished.id)
+    // Provider output is only executable after a clean terminal completion.
+    // A failed/interrupted turn may have persisted a syntactically valid
+    // partial agent_message before it stopped; never treat that as a plan.
+    const completion =
+      finished.state === "finished"
+        ? executeCodexPlan(db, ctx, input, authority, finished.id)
+        : finished.state === "error"
+          ? escalateFailedOperatorRun(db, ctx, input, authority, finished.id)
+          : Promise.resolve();
+    void completion
       .catch((error) => {
-        logger.error("codex operator plan execution failed", {
+        logger.error("codex operator completion handling failed", {
           taskKey: input.taskKey,
           err: error instanceof Error ? error : new Error(String(error)),
         });
@@ -441,16 +472,16 @@ async function startCodexOperatorRun(
   return { runId, backend: "codex", mode: "real", autonomy: authority.autonomy };
 }
 
-/** Pull the first JSON object out of a model response (tolerates prose around it). */
-function extractPlanJson(text: string): unknown {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
+/** Parse the complete structured response and validate it before execution. */
+function parseOperatorPlan(text: string): OperatorPlan | null {
+  let value: unknown;
   try {
-    return JSON.parse(text.slice(start, end + 1));
+    value = JSON.parse(text.trim());
   } catch {
     return null;
   }
+  const parsed = operatorPlanRuntimeSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 /** Execute a finished codex operator run's decision plan (capability-gated). */
@@ -461,12 +492,11 @@ async function executeCodexPlan(
   authority: OperatorAuthority,
   runId: string,
 ): Promise<void> {
-  const text = replyTextForRun(db, runId);
-  const plan = text
-    ? (extractPlanJson(text) as
-        | { reasoning?: string; actions?: OperatorPlanAction[] }
-        | null)
-    : null;
+  // This is machine-readable control data, not a timeline preview: use the
+  // complete reply. replyTextForRun intentionally truncates at 1,200 chars and
+  // appends prose, which corrupts otherwise-valid larger JSON plans.
+  const text = fullReplyTextForRun(db, runId);
+  const plan = text ? parseOperatorPlan(text) : null;
   if (!plan) {
     // An empty or unparseable plan is a HUMAN-VISIBLE failure, not a silent
     // no-op: nothing else covers an operator's own run (recovery only watches
@@ -503,7 +533,7 @@ async function executeCodexPlan(
   // double-escaped `\n` sequences the model emitted inside its JSON strings
   // (finding #23: literal "\n" rendered verbatim in the UI).
   if (plan.reasoning) plan.reasoning = normalizeEscapedNewlines(plan.reasoning);
-  for (const a of plan.actions ?? []) {
+  for (const a of plan.actions) {
     if (a.text) a.text = normalizeEscapedNewlines(a.text);
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
   }
@@ -519,7 +549,7 @@ async function executeCodexPlan(
     await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
     postedComments.add(commentKey(plan.reasoning));
   }
-  for (const a of plan.actions ?? []) {
+  for (const a of plan.actions) {
     try {
       switch (a.tool) {
         case "post_comment":
@@ -671,7 +701,16 @@ async function startRealOperatorRun(
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
   const { chainRunCompletion } = await import("./run-service.server");
-  chainRunCompletion(runId, () => releaseOperatorLease(db, leaseKey, leaseToken));
+  chainRunCompletion(runId, (finished) => {
+    releaseOperatorLease(db, leaseKey, leaseToken);
+    // A real Claude operator run that ERRORS (crash / quota / auth / idle
+    // timeout) was previously silent — the completion hook only released the
+    // lease, so nothing reached the human (contrast the Codex no-plan
+    // escalation and the specialist F8 path). Escalate it the same way (F-OP1).
+    if (finished.state === "error") {
+      void escalateFailedOperatorRun(db, ctx, input, authority, runId);
+    }
+  });
 
   logger.info("operator run started (real)", {
     taskKey: input.taskKey,
@@ -679,6 +718,59 @@ async function startRealOperatorRun(
     autonomy: authority.autonomy,
   });
   return { runId, backend: "claude", mode: "real", autonomy: authority.autonomy };
+}
+
+/**
+ * F-OP1: surface a failed real operator run to the human. Nothing else covers
+ * an operator's OWN run (run-recovery only watches specialist/reviewer runs),
+ * so without this a crashed/quota-limited/idle-timed-out operator run leaves the
+ * task sitting with no timeline entry, packet, or notification. Raise a blocked
+ * recovery packet through the operator's own gate, with quota/auth-aware copy.
+ */
+async function escalateFailedOperatorRun(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  authority: OperatorAuthority,
+  runId: string,
+): Promise<void> {
+  try {
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    const reason = runFailureReason(db, runId);
+    const detail =
+      reason?.kind === "quota"
+        ? "the coordinating model is over its usage quota"
+        : reason?.kind === "auth"
+          ? "the coordinating model's credential was rejected"
+          : "the coordinating run did not complete";
+    logger.warn("real operator run failed — escalating", {
+      taskKey: input.taskKey,
+      runId,
+      kind: reason?.kind ?? "unknown",
+    });
+    await operatorOpenPacket(
+      db,
+      ctx,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        packetType: "blocked",
+        title: "Operator run failed — pick a recovery path",
+        body:
+          `The operator run did not complete — ${detail}. No coordination was ` +
+          `performed. Retry on the other backend, fix the credential, or redirect ` +
+          `the task.`,
+        options: defaultPacketOptions("blocked"),
+      },
+      authority,
+    );
+  } catch (error) {
+    logger.error("operator-run failure escalation failed", {
+      taskKey: input.taskKey,
+      runId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // ------------------------------------------------------- scripted drive
@@ -1001,20 +1093,18 @@ export function buildOperatorSystemPrompt(
 }
 
 /**
- * The full prompt for the CODEX structured-output operator. Codex has no
- * system-prompt field and no in-process tools, so the persona + expertise, the
- * live task snapshot, and the output instruction all go in one prompt; the
- * model returns a decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we
- * execute through the same capability-gated actions.
+ * The turn prompt for the CODEX structured-output operator. Persona + expertise
+ * are supplied separately through Codex's supported `developer_instructions`
+ * channel; this prompt contains only the live task snapshot and turn-specific
+ * output instruction. Codex has no in-process SDK MCP channel, so it returns a
+ * decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we execute through
+ * the same capability-gated actions.
  */
 export function buildCodexOperatorPrompt(
-  authority: OperatorAuthority,
   snapshot: OperatorTaskSnapshot,
   trigger: "create" | "transition" | "agent-reply" | "manual",
-  dataRoot?: string,
   humanComment?: string,
 ): string {
-  const persona = buildOperatorSystemPrompt(authority, dataRoot);
   const decision = humanComment?.trim()
     ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
     : trigger === "agent-reply"
@@ -1028,8 +1118,7 @@ export function buildCodexOperatorPrompt(
         "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
         "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
   return (
-    persona +
-    "\n\n---\n# This task\n\n" +
+    "# This task\n\n" +
     "```json\n" +
     JSON.stringify(snapshot, null, 2) +
     "\n```\n\n" +

@@ -3,7 +3,6 @@ import { useFetcher, useNavigate, type FetcherWithComponents } from "react-route
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
-import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
@@ -371,7 +370,6 @@ export function MembersPanel({
   const push = useToast();
   const [nm, setNm] = useState("");
   const [em, setEm] = useState("");
-  const pending = members.filter((m) => m.status === "invited").length;
 
   const invite = () => {
     const name = nm.trim();
@@ -410,8 +408,7 @@ export function MembersPanel({
         <Icon name="user" />
         <h2>Members</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {members.length - pending} active
-          {pending > 0 ? ` · ${pending} invited` : ""}
+          {members.length} active
         </span>
       </div>
       <div className="member-list" style={{ marginBottom: 0 }}>
@@ -425,17 +422,12 @@ export function MembersPanel({
               </div>
               <div className="em">{m.email}</div>
             </span>
-            {m.status === "invited" && (
-              <Pill kind="input" sm>
-                invite pending
-              </Pill>
-            )}
             {canManage && (
               <button
                 type="button"
                 className="stg-x"
                 aria-label={"Remove " + m.name}
-                title={m.status === "invited" ? "Revoke invite" : "Remove member"}
+                title="Remove member"
                 disabled={busy}
                 onClick={() => remove(m)}
               >

@@ -61,8 +61,9 @@ function logBootIntegrity(db: Database.Database): void {
 /**
  * One-time server startup: validates the environment (fail fast with a
  * clear message), opens the database (applying pending migrations), seeds
- * the initial admin when the users table is empty, and sweeps expired
- * sessions (once now + daily interval).
+ * the initial admin when the users table is empty, starts the SSE event
+ * publisher, and reconciles any offline projection drift before the file
+ * watcher takes over.
  * Called from entry.server.tsx module scope; safe to call repeatedly.
  */
 export function bootServer(): void {

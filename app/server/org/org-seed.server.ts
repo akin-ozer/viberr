@@ -17,17 +17,16 @@ import { ensureOrgStoreDirs } from "./resources.server";
 /**
  * Org-resource seed (Phase 9B) — ADDITIVE to the phase-3/8 demo seed:
  * knowledge bases with REAL files under ${DATA_ROOT}/kb/, skills with real
- * SKILL.md folders under /skills/, MCP server rows, the @viberr.dev Google
- * domain allowlist row, and a PLACEHOLDER akin-ozer GitHub connection
- * (no real token — its PAT row holds an obviously-fake encrypted value and
- * no validation, so the UI renders the honest "not validated" state).
+ * SKILL.md folders under /skills/, and the @viberr.dev Google domain
+ * allowlist row. Honest empty slate (owner ruling): NO MCP servers and NO
+ * GitHub connection are seeded — an admin installs real ones; nothing
+ * fabricated is presented as configured (see the note by the seed body).
  *
  * Idempotent: deterministic row ids (INSERT OR REPLACE), files overwritten,
- * file mtimes back-dated so the browser shows the mock's date spread. The
- * connection is INSERT-IF-MISSING and survives `--reset` (like the phase-7
- * PAT tables): an admin who replaced the placeholder with a real token
- * keeps it across re-seeds. `--reset` wipes kb/, skills/ and the three
- * resource tables + domain rows, then reseeds them.
+ * file mtimes back-dated so the browser shows the mock's date spread. Any
+ * GitHub connection an admin already installed is left intact and survives
+ * `--reset` (like the phase-7 PAT tables). `--reset` wipes kb/, skills/ and
+ * the resource tables + domain rows, then reseeds them.
  */
 
 export interface OrgSeedSummary {

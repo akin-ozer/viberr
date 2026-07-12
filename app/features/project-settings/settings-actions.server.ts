@@ -10,10 +10,7 @@ import {
   projectDir,
   projectFilePath,
 } from "~/server/files/file-store-root.server";
-import {
-  readProjectFile,
-  updateProjectFile,
-} from "~/server/files/project-writer.server";
+import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 

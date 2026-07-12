@@ -62,22 +62,69 @@ export interface GithubViewData {
   branches: BranchRowView[];
 }
 
-/** Latest reconciled behindBy for a task file, from provenance (or 0). */
-function behindByFor(db: Database.Database, sourcePath: string): number {
-  const row = db
-    .prepare(
-      `SELECT details_json FROM provenance
-       WHERE source_path = ? AND action = 'github.reconcile'
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(sourcePath) as { details_json: string | null } | undefined;
-  if (!row?.details_json) return 0;
-  try {
-    const details = JSON.parse(row.details_json) as { behindBy?: unknown };
-    return typeof details.behindBy === "number" ? details.behindBy : 0;
-  } catch {
-    return 0;
+/**
+ * Latest reconciled behindBy per task file, from provenance (or 0). Factory:
+ * prepare the provenance statement ONCE and map many branch rows through it,
+ * instead of re-preparing + running it per row inside `.map` (pass-4 WI-10 n+1).
+ */
+function createBehindByResolver(
+  db: Database.Database,
+): (sourcePath: string) => number {
+  const stmt = db.prepare(
+    `SELECT details_json FROM provenance
+     WHERE source_path = ? AND action = 'github.reconcile'
+     ORDER BY id DESC LIMIT 1`,
+  );
+  return (sourcePath: string): number => {
+    const row = stmt.get(sourcePath) as
+      | { details_json: string | null }
+      | undefined;
+    if (!row?.details_json) return 0;
+    try {
+      const details = JSON.parse(row.details_json) as { behindBy?: unknown };
+      return typeof details.behindBy === "number" ? details.behindBy : 0;
+    } catch {
+      return 0;
+    }
+  };
+}
+
+/**
+ * Short-lived in-process cache for `checkRepoAccess` (pass-4 WI-10): a live
+ * `GET /repos/:repo` runs on every loader call, and project-scope SSE
+ * revalidates this loader on every task/project event while the view is open —
+ * so a burst of board mutations would otherwise cost one GitHub round-trip
+ * (and rate-limit budget) each. Only the production path (no injected
+ * `fetchImpl`) is cached; tests always inject a `fetchImpl` and assert the
+ * fresh per-call result, so they bypass the cache entirely. Keyed per Database
+ * instance so parallel test DBs (and any future multi-tenant DB) never share
+ * an entry.
+ */
+const REPO_ACCESS_TTL_MS = 30_000;
+const repoAccessCache = new WeakMap<
+  Database.Database,
+  Map<string, { result: RepoAccessResult; at: number }>
+>();
+
+async function checkRepoAccessCached(
+  db: Database.Database,
+  projectSlug: string,
+  ctx: { fetchImpl?: typeof fetch },
+): Promise<RepoAccessResult> {
+  if (ctx.fetchImpl) {
+    return checkRepoAccess(db, projectSlug, { fetchImpl: ctx.fetchImpl });
   }
+  let byDb = repoAccessCache.get(db);
+  if (!byDb) {
+    byDb = new Map();
+    repoAccessCache.set(db, byDb);
+  }
+  const now = Date.now();
+  const hit = byDb.get(projectSlug);
+  if (hit && now - hit.at < REPO_ACCESS_TTL_MS) return hit.result;
+  const result = await checkRepoAccess(db, projectSlug);
+  byDb.set(projectSlug, { result, at: now });
+  return result;
 }
 
 export async function getGithubViewData(
@@ -89,11 +136,10 @@ export async function getGithubViewData(
   if (!project) return null;
 
   const credential = getProjectCredentialHealth(db, projectSlug);
-  const connection = await checkRepoAccess(db, projectSlug, {
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  const connection = await checkRepoAccessCached(db, projectSlug, ctx);
 
   const tasks = listProjectTasks(db, projectSlug);
+  const behindByFor = createBehindByResolver(db);
 
   // Branch table: every task with a branch, in task-key order (the query
   // already sorts numerically — spec §7.11 deterministic-order deviation).
@@ -106,7 +152,7 @@ export async function getGithubViewData(
       pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
       sync: deriveSyncState({
         prMerged: t.pr?.state === "merged",
-        behindBy: behindByFor(db, t.filePath),
+        behindBy: behindByFor(t.filePath),
       }),
       commitCount: t.commits.length,
     }));

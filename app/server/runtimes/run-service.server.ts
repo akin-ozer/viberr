@@ -9,6 +9,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { roleCan } from "~/shared/rbac";
 import type { RunHandle, RunSpec } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
@@ -174,9 +175,9 @@ export interface StartRunInput {
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
   actor?: AuditActor;
-  /** Custom system prompt (operator persona + expertise skill). Claude only. */
+  /** Custom instructions: Claude systemPrompt / Codex developer_instructions. */
   systemPrompt?: string;
-  /** In-process SDK MCP governance tools (operator run). Claude only. */
+  /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];
@@ -318,6 +319,17 @@ export async function resumeRun(
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
+    /** Re-apply the specialist's capability tool denylist on resume. Without
+     *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
+     *  confinement the fresh-run path establishes is silently dropped (XS-1). */
+    disallowedTools?: string[];
+    /** Re-apply the per-run env overlay (GIT_CEILING_DIRECTORIES workspace
+     *  confinement) on resume. */
+    env?: Record<string, string>;
+    /** Re-apply the specialist's declared MCP servers on resume (Claude). */
+    mcpServers?: Record<string, unknown>;
+    /** Re-apply the persona/system prompt on resume (Claude). */
+    systemPrompt?: string;
   },
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
@@ -356,6 +368,11 @@ export async function resumeRun(
     ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
     ...(input.actor ? { actor: input.actor } : {}),
+    // Re-establish the run confinement the fresh-run path applies (XS-1).
+    ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.env ? { env: input.env } : {}),
+    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
   });
 }
 
@@ -445,10 +462,13 @@ export function interruptRun(
     throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
   }
 
-  // RBAC — admin|maintainer only.
+  // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
+  // the same tier that opens runtime sessions. Consult ACTION_ROLES, never a
+  // hardcoded role string, so the Policy display and this guard can't drift
+  // (pass-4 XS-10).
   const members = listProjectMembers(db, input.projectSlug);
-  const role = members.find((m) => m.userId === actor.userId)?.role;
-  if (role !== "admin" && role !== "maintainer") {
+  const role = members.find((m) => m.userId === actor.userId)?.role ?? null;
+  if (!roleCan(role, "run-agents")) {
     throw new AppError({
       code: ERROR_CODES.FORBIDDEN,
       status: 403,

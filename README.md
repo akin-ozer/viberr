@@ -92,9 +92,22 @@ detection is presence-only, no paid call:
 - **Claude — Pro/Max subscription:** `claude setup-token` (once, on any logged-in
   machine) → `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`. _(Or pay-as-you-go
   `ANTHROPIC_API_KEY=sk-ant-…`.)_
-- **Codex — ChatGPT plan subscription:** `codex login` (writes `~/.codex/auth.json`),
-  then `VIBERR_CODEX_USE_CLI_AUTH=1` + `CODEX_HOME=<login dir>` (in Docker, mount
-  `~/.codex` — see `compose.yml`). _(Or `CODEX_API_KEY` / `OPENAI_API_KEY`.)_
+- **Codex — ChatGPT Business/Enterprise subscription (recommended for the
+  container):** create a [Codex access token](https://learn.chatgpt.com/docs/enterprise/access-tokens)
+  in the ChatGPT workspace and set `CODEX_ACCESS_TOKEN=…`. It uses workspace
+  subscription entitlements—not Platform API billing—and requires no host
+  `~/.codex` mount.
+- **Codex — other ChatGPT plans:** run `codex login`, then copy only
+  `~/.codex/auth.json` to `./docker-data/runtimes/codex-home/auth.json` and set
+  `VIBERR_CODEX_USE_CLI_AUTH=1`. The dedicated runtime directory is already on
+  the app's `/data` volume, so login refresh and resumable sessions persist
+  without importing personal config, MCP servers, rules, or skills. _(Or use `CODEX_API_KEY` /
+  `OPENAI_API_KEY` for usage-based Platform billing.)_
+
+The dedicated Codex home avoids importing the host's full personal setup, but
+it is not a security sandbox from autonomous coding runs in the same container.
+For untrusted tasks, run Codex under a separate OS user/container with only the
+task workspace mounted and keep delivery credentials in the server process.
 
 Confirm what's live: `GET /resources/health` → `backends: { claude, codex }` reports
 `real` vs `simulated`. New runs then stream real SDK output; raw NDJSON of every run is

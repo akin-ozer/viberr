@@ -27,6 +27,11 @@ const E2E_ENV = {
   // bootstrap admin still gets the well-known dev password.
   VIBERR_SEED_ADMIN_EMAIL: "arda@viberr.dev",
   VIBERR_SEED_ADMIN_PASSWORD: "viberr-dev-2828",
+  // Force the DETERMINISTIC simulated/scripted engine for e2e. Emptying the
+  // credential vars isn't enough (dotenv re-loads a developer's `.env`), so use
+  // the explicit runtime override — the golden-path specs assert on the
+  // synchronous scripted operator, not live non-deterministic agent runs.
+  VIBERR_FORCE_SIMULATED_RUNTIME: "1",
 };
 
 export default defineConfig({

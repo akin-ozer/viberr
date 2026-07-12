@@ -167,11 +167,12 @@ export function HumanAccess({
         <span>
           Rules that reach beyond project roles:{" "}
           <strong>commenting is app-wide</strong> — every registered user may
-          comment on any task; any project member may{" "}
-          <strong>take or release task ownership</strong> (the owner is the
-          task's human reviewer and acceptance authority, scoped to that task);
-          and <strong>admins may release any owner</strong> — recorded in the
-          audit trail.
+          comment on any task; <strong>contributors and above</strong> may{" "}
+          <strong>take or release their own task ownership</strong> (viewers are
+          read + comment only; the owner is the task's human reviewer and
+          acceptance authority, scoped to that task); and{" "}
+          <strong>admins may release any owner</strong> — recorded in the audit
+          trail.
         </span>
       </div>
     </div>
@@ -371,9 +372,16 @@ export function WorkflowRules({
       <div className="pol-note" style={{ marginTop: ".85rem" }}>
         <Icon name="lock" />
         <span>
-          Only a human can accept completion. Operators request{" "}
-          <strong>Review → Done</strong>; a human accepts it — no agent profile
-          can be granted this boundary.
+          By default a human accepts completion: operators request{" "}
+          <strong>Review → Done</strong> and a human accepts it. The one
+          exception is an operator running at <strong>full autonomy</strong> with{" "}
+          <strong>Completion for human acceptance</strong> set to{" "}
+          <em>Direct</em> — an explicit, audited opt-in that lets that operator
+          close a task itself (it still refuses a failing-validation task). The
+          per-transition <strong>Human approval / Human only</strong> boundaries
+          below govern <strong>human</strong> actors; an operator granted{" "}
+          <em>Direct</em> stage transitions crosses them itself, so treat those
+          settings as the rule for people, not for a direct-capability operator.
         </span>
       </div>
     </div>

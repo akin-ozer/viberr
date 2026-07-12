@@ -1,13 +1,18 @@
 import type Database from "better-sqlite3";
 import type { Validation, Waiting } from "~/schemas/task-file.schema";
-import { listProjectTasks } from "./board-query.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { getProject, listProjectTasks } from "./board-query.server";
 
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
  *
- * Qualification: literal `stage === "review"` only (contracts §2.2) — the
- * same predicate the workspace layout uses for the rail badge, so the two
- * counts can never drift. The panel split is purely on `waiting`:
+ * Qualification: the project's RESOLVED review stage (the stage with a workflow
+ * edge into the terminal stage — `resolveStageRoles().reviewId`), NOT the
+ * literal id "review". This is the exact predicate the workspace-layout rail
+ * badge uses (routes/project.tsx), so the two counts can never drift — on a
+ * Lightweight board (`todo/doing/done`) the review role is `doing`, and a
+ * literal-"review" filter left this queue permanently empty while the rail
+ * showed a count (pass-4 WI-1). The panel split is purely on `waiting`:
  * `human` → "Waiting on your acceptance", anything else — including the
  * legal `review + none` combination — lands in "Still with agents"
  * (ruling 10 / contracts §2.2, ported 1:1).
@@ -44,9 +49,13 @@ export function getReviewQueue(
   db: Database.Database,
   slug: string,
 ): ReviewQueueData {
-  const inReview = listProjectTasks(db, slug).filter(
-    (t) => t.stage === "review",
-  );
+  const project = getProject(db, slug);
+  const reviewId = project
+    ? resolveStageRoles(project.stages, project.workflow).reviewId
+    : null;
+  const inReview = reviewId
+    ? listProjectTasks(db, slug).filter((t) => t.stage === reviewId)
+    : [];
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();

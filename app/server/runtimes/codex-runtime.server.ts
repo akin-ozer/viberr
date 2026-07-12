@@ -1,5 +1,14 @@
 import { logger } from "~/server/logging/logger.server";
 import type {
+  Codex as CodexSdk,
+  CodexOptions,
+  ModelReasoningEffort,
+  SandboxMode,
+  Thread,
+  ThreadErrorEvent,
+  ThreadOptions,
+} from "@openai/codex-sdk";
+import type {
   RunCallbacks,
   RunHandle,
   RunSpec,
@@ -9,7 +18,7 @@ import { projectEnvelope } from "./wire-format.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.142.x). `new Codex()`, `codex.startThread({ workingDirectory,
+ * v0.144.1). `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
  * generator of the ThreadEvents documented in runtime-adapters.md §2.3
@@ -20,46 +29,132 @@ import { projectEnvelope } from "./wire-format.server";
  *
  * Interrupt: the SDK's `TurnOptions.signal` (AbortSignal) — we pass an
  * AbortController and abort it. Resume: `codex.resumeThread(threadId)`.
- * Success gated on seeing `turn.completed` with no `turn.failed`/`error`
- * (research §2.6). The SDK spawns the codex binary internally, so on a
- * machine where that binary is broken the run errors and the service falls
- * back to simulated — exactly the briefed behavior.
+ * Success is gated on seeing `turn.completed` with no TOP-LEVEL
+ * `turn.failed`/`error` (an item whose type is `error` is explicitly non-fatal
+ * in the SDK contract). The SDK spawns the codex binary internally; startup or
+ * runtime failures are surfaced as sanitized failed runs.
  *
- * Auth: CODEX_API_KEY / OPENAI_API_KEY or an existing `codex login`. The SDK
- * factory is injectable so tests drive fakes — real Codex is NEVER invoked.
+ * Auth: an existing Codex subscription login (auth.json / CODEX_ACCESS_TOKEN)
+ * or API-key auth. The SDK factory is injectable so tests drive fakes — real
+ * Codex is NEVER invoked.
  */
 
-export interface CodexThreadEventsResult {
-  events: AsyncGenerator<unknown, void>;
-}
-
-export interface CodexThread {
-  readonly id: string | null;
-  runStreamed(
-    input: string,
-    turnOptions?: { signal?: AbortSignal; outputSchema?: unknown },
-  ): Promise<CodexThreadEventsResult>;
-}
-
-export interface CodexClient {
-  startThread(options?: {
-    model?: string;
-    /** 'minimal'|'low'|'medium'|'high'|'xhigh'. */
-    modelReasoningEffort?: string;
-    sandboxMode?: string;
-    workingDirectory?: string;
-    skipGitRepoCheck?: boolean;
-  }): CodexThread;
-  resumeThread(id: string, options?: Record<string, unknown>): CodexThread;
-}
-
-export type CodexFactory = (options?: { apiKey?: string; env?: Record<string, string> }) => CodexClient;
+/** Narrow injectable seam, derived from the installed SDK's public types. */
+export type CodexThread = Pick<Thread, "id" | "runStreamed">;
+export type CodexClient = {
+  startThread(...args: Parameters<CodexSdk["startThread"]>): CodexThread;
+  resumeThread(...args: Parameters<CodexSdk["resumeThread"]>): CodexThread;
+};
+export type CodexFactory = (options?: CodexOptions) => CodexClient;
 
 interface CodexAdapterDeps {
   /** Injected Codex factory (default: the real SDK, imported lazily). */
   codexFactory?: CodexFactory;
   apiKey?: string;
   env?: Record<string, string>;
+  /** Extra supported CLI config overrides, primarily for test/deployment seams. */
+  config?: CodexOptions["config"];
+}
+
+type CodexConfig = NonNullable<CodexOptions["config"]>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Translate only the portable external-server subset shared by both SDKs.
+ * Claude's in-process `{ type: "sdk" }` server has no Codex equivalent and is
+ * intentionally skipped rather than serialized into invalid CLI config. */
+function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
+  const translated: CodexConfig = {};
+  for (const [name, value] of Object.entries(servers ?? {})) {
+    if (!name || !isRecord(value) || value.type === "sdk") continue;
+
+    if (value.type === "http" && typeof value.url === "string") {
+      translated[name] = {
+        url: value.url,
+        default_tools_approval_mode: "approve",
+      };
+      continue;
+    }
+
+    if (typeof value.command === "string") {
+      const args = Array.isArray(value.args)
+        ? value.args.filter((arg): arg is string => typeof arg === "string")
+        : [];
+      // Reject partially malformed arg lists instead of silently changing the
+      // command the profile declared.
+      if (Array.isArray(value.args) && args.length !== value.args.length) {
+        continue;
+      }
+      translated[name] = {
+        command: value.command,
+        default_tools_approval_mode: "approve",
+        ...(args.length ? { args } : {}),
+      };
+    }
+  }
+  return translated;
+}
+
+/** Do not cast arbitrary profile strings into the SDK's closed effort union. */
+export function resolveCodexReasoningEffort(
+  effort?: string,
+): ModelReasoningEffort | undefined {
+  switch (effort) {
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return effort;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Config inherited by the Codex CLI is distinct from the environment exposed
+ * to shell commands the model runs. Keep the former intact for subscription
+ * auth, while using the CLI's supported shell policy to expose only platform
+ * essentials to generated commands. The git ceiling is the sole per-run value
+ * that currently needs to cross that boundary.
+ */
+function codexConfigForRun(
+  spec: RunSpec,
+  base?: CodexOptions["config"],
+): CodexConfig {
+  const gitCeiling = spec.env?.GIT_CEILING_DIRECTORIES;
+  const baseFeatures = isRecord(base?.features) ? base.features : {};
+  return {
+    ...(base ?? {}),
+    ...(spec.systemPrompt ? { developer_instructions: spec.systemPrompt } : {}),
+    // Enforce these after base config so a host/deployment override cannot
+    // re-expose CODEX_ACCESS_TOKEN or other server credentials to tools.
+    allow_login_shell: false,
+    features: {
+      ...baseFeatures,
+      // Viberr exposes only a profile's declared external MCPs; ambient
+      // ChatGPT apps/connectors must not appear as extra tools.
+      apps: false,
+    },
+    // Match Claude's per-run isolation: no cross-run memory generation,
+    // injection, or memory-specific tools from the managed Codex home.
+    memories: {
+      generate_memories: false,
+      use_memories: false,
+      dedicated_tools: false,
+    },
+    // The SDK accepts arbitrary supported CLI config overrides. Translate the
+    // portable HTTP/stdio declarations and replace any base declaration so a
+    // run sees only the MCPs its profile selected.
+    mcp_servers: codexMcpServers(spec.mcpServers),
+    shell_environment_policy: {
+      inherit: "core",
+      ignore_default_excludes: false,
+      ...(gitCeiling ? { set: { GIT_CEILING_DIRECTORIES: gitCeiling } } : {}),
+    },
+  };
 }
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
@@ -71,26 +166,69 @@ export function codexIdleTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
 }
 
+/** CLI failures can include stderr and command lines. Those may contain
+ * credentials, so logs retain the error class but never the raw message. */
+function safeCodexError(error: unknown): Error {
+  const safe = new Error("Codex SDK/CLI execution failed.");
+  safe.name = error instanceof Error ? error.name : "Error";
+  return safe;
+}
+
+/** Classify provider failures in memory before redacting their raw text. This
+ * preserves useful recovery routing without ever persisting stderr, command
+ * lines, or credential-bearing messages. */
+function safeCodexFailureMessage(
+  error: unknown,
+  phase: "start" | "execution",
+): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current != null; depth += 1) {
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  const raw = parts.join("\n");
+  if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
+    return "Codex usage limit was reached. Retry after the subscription limit resets.";
+  }
+  if (
+    /unauthor|forbidden|invalid.*(?:key|token|credential)|\b401\b|\b403\b|not logged in|authenticate|authentication/i.test(
+      raw,
+    )
+  ) {
+    return "Codex authentication failed. Review the configured subscription credential.";
+  }
+  return phase === "start"
+    ? "Codex could not start. Review its authentication and runtime configuration."
+    : "Codex execution failed. Review its authentication and runtime configuration.";
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
-  const mod = (await import("@openai/codex-sdk")) as unknown as {
-    Codex: new (options?: { apiKey?: string; env?: Record<string, string> }) => CodexClient;
-  };
+  const mod = await import("@openai/codex-sdk");
   cachedFactory = (options) => new mod.Codex(options);
   return cachedFactory;
 }
 
-export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter {
+export function createCodexAdapter(
+  deps: CodexAdapterDeps = {},
+): RuntimeAdapter {
   return {
     backend: "codex",
     start(spec: RunSpec, cb: RunCallbacks): RunHandle {
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawTurnCompleted = false;
-      let sawError = false;
+      let sawFatalError = false;
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
+      let emittedAdapterFailure = false;
       const abort = new AbortController();
 
       // IDLE (inactivity) timeout, not a wall-clock cap (owner ruling A8): a
@@ -107,10 +245,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
         idleTimer = setTimeout(() => {
           if (settled || interrupted) return;
           idleTimedOut = true;
-          logger.warn("codex run idle-timeout — no activity within the window", {
-            runId: spec.runId,
-            idleMs,
-          });
+          logger.warn(
+            "codex run idle-timeout — no activity within the window",
+            {
+              runId: spec.runId,
+              idleMs,
+            },
+          );
           try {
             abort.abort();
           } catch {
@@ -129,7 +270,30 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
         if (settled) return;
         settled = true;
         disarmIdle();
-        cb.onExit({ outcome, effectiveBackend: "codex", simulated: false, sessionId });
+        cb.onExit({
+          outcome,
+          effectiveBackend: "codex",
+          simulated: false,
+          sessionId,
+        });
+      };
+
+      /** Persist a canonical, deliberately detail-free fatal event. Raw
+       * SDK/CLI stderr is neither logged nor added to the task transcript,
+       * because it may contain command arguments or credentials. */
+      const emitAdapterFailure = (message: string) => {
+        if (emittedAdapterFailure) return;
+        emittedAdapterFailure = true;
+        sawFatalError = true;
+        const event = { type: "error", message } satisfies ThreadErrorEvent;
+        const occurredAt = new Date().toISOString();
+        const { display, facts } = projectEnvelope("codex", event, occurredAt);
+        cb.onLine({
+          raw: JSON.stringify(event),
+          display,
+          facts,
+          occurredAt,
+        });
       };
 
       const run = async () => {
@@ -154,32 +318,45 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
           baseEnv || spec.env
             ? { ...(baseEnv ?? {}), ...(spec.env ?? {}) }
             : undefined;
-        const codex = factory(
-          deps.apiKey || mergedEnv
-            ? {
-                ...(deps.apiKey ? { apiKey: deps.apiKey } : {}),
-                ...(mergedEnv ? { env: mergedEnv } : {}),
-              }
-            : undefined,
-        );
+        const config = codexConfigForRun(spec, deps.config);
+        const codexOptions: CodexOptions = {
+          ...(deps.apiKey ? { apiKey: deps.apiKey } : {}),
+          ...(mergedEnv ? { env: mergedEnv } : {}),
+          config,
+        };
+        const codex = factory(codexOptions);
         // Fully autonomous: no approval gating. `danger-full-access` mirrors
         // Claude's bypassPermissions so a server-spawned run never blocks on
         // an approval it can't answer; a non-autonomous run stays sandboxed.
-        const sandboxMode = spec.autonomous ? "danger-full-access" : "workspace-write";
+        // Operators are coordinators rather than coding agents, so enforce the
+        // closest direct-SDK equivalent to Claude's denied mutation tools:
+        // read-only files, no network, and no web search.
+        const sandboxMode: SandboxMode =
+          spec.kind === "operator"
+            ? "read-only"
+            : spec.autonomous
+              ? "danger-full-access"
+              : "workspace-write";
+        const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
+        const threadOptions: ThreadOptions = {
+          model: spec.model,
+          ...(reasoningEffort ? { modelReasoningEffort: reasoningEffort } : {}),
+          sandboxMode,
+          workingDirectory: spec.workdir,
+          skipGitRepoCheck: true,
+          // There is no interactive approval channel in a server run. "never"
+          // returns denied operations to the model instead of hanging forever.
+          approvalPolicy: "never",
+          ...(spec.kind === "operator"
+            ? {
+                networkAccessEnabled: false,
+                webSearchMode: "disabled",
+              }
+            : {}),
+        };
         const thread = spec.resumeSessionId
-          ? codex.resumeThread(spec.resumeSessionId, {
-              workingDirectory: spec.workdir,
-              skipGitRepoCheck: true,
-              sandboxMode,
-            })
-          : codex.startThread({
-              model: spec.model,
-              // Pass the profile's chosen reasoning effort when present.
-              ...(spec.effort ? { modelReasoningEffort: spec.effort } : {}),
-              sandboxMode,
-              workingDirectory: spec.workdir,
-              skipGitRepoCheck: true,
-            });
+          ? codex.resumeThread(spec.resumeSessionId, threadOptions)
+          : codex.startThread(threadOptions);
 
         try {
           armIdle();
@@ -193,9 +370,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event
             const occurredAt = new Date().toISOString();
-            const { display, facts } = projectEnvelope("codex", event, occurredAt);
+            const { display, facts } = projectEnvelope(
+              "codex",
+              event,
+              occurredAt,
+            );
             if (facts.sessionId) sessionId = facts.sessionId;
-            const type = (event as { type?: string })?.type;
+            const type = event.type;
             if (type === "turn.completed") {
               sawTurnCompleted = true;
               // Running turn count so the live Turns counter climbs across a
@@ -203,8 +384,17 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
               turnCount += 1;
               facts.turns = turnCount;
             }
-            if (type === "turn.failed" || type === "error" || facts.isError) sawError = true;
-            cb.onLine({ raw: JSON.stringify(event), display, facts, occurredAt });
+            // Item-level errors are explicitly non-fatal in the SDK. Only the
+            // two top-level failure events poison the terminal outcome.
+            if (type === "turn.failed" || type === "error") {
+              sawFatalError = true;
+            }
+            cb.onLine({
+              raw: JSON.stringify(event),
+              display,
+              facts,
+              occurredAt,
+            });
           }
           // Thread id lands after the first turn — capture it as the session.
           if (thread.id) sessionId = thread.id;
@@ -213,25 +403,35 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
           // An idle-timeout aborts the same way an interrupt does; distinguish
           // them so a hung run settles `error` (→ react/stuck-packet) while a
           // user interrupt stays `interrupted`.
-          if (idleTimedOut) return settle("error");
+          if (idleTimedOut) {
+            emitAdapterFailure(
+              `Codex stopped after ${idleMs} ms without producing an event.`,
+            );
+            return settle("error");
+          }
           if (interrupted) return settle("interrupted");
           logger.error("codex thread error", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: safeCodexError(error),
           });
+          emitAdapterFailure(safeCodexFailureMessage(error, "execution"));
           return settle("error");
         }
 
         if (interrupted) return settle("interrupted");
-        if (sawTurnCompleted && !sawError) return settle("finished");
+        if (sawTurnCompleted && !sawFatalError) return settle("finished");
+        if (!sawFatalError) {
+          emitAdapterFailure("Codex ended before reporting turn completion.");
+        }
         return settle("error");
       };
 
       void run().catch((error) => {
         logger.error("codex run crashed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: safeCodexError(error),
         });
+        emitAdapterFailure(safeCodexFailureMessage(error, "start"));
         settle("error");
       });
 

@@ -1050,7 +1050,6 @@ export function ResourcesPanel({
       {browsingKb && (
         <StoreBrowser
           title={browsingKb.name}
-          root={browsingKb.uri}
           subMono={browsingKb.uri + "/ · read live"}
           metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt)}
           tree={browsingKb.tree}
@@ -1061,7 +1060,6 @@ export function ResourcesPanel({
       {browsingSkill && (
         <StoreBrowser
           title={browsingSkill.name}
-          root={browsingSkill.uri}
           subMono={browsingSkill.uri + "/ · SKILL.md + supporting files"}
           metaTail={"updated " + rel(browsingSkill.updatedAt)}
           tree={browsingSkill.tree}
