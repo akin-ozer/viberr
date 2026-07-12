@@ -32,10 +32,14 @@ ignored at runtime).
 | S3 labeling | (above) | Live |
 | Doc drift D2 | Fixed `operator-run.server.ts` header (Codex = structured-plan run, not always scripted). | code |
 
+## Also closed in follow-up commits
+- F5 (org connections copy), F9 (KB budget now a GLOBAL cap across all declared KBs), R6
+  ("Edit the task goal" added as a displayed RBAC row), F13 (see addendum below).
+
 ## Deliberately NOT changed
-- Doc-drift D1/D3/D4/D5/D6 are app-reference wording notes — the CODE is correct; will fold into
-  a docs refresh, not behavior.
-- F5/F7/F9 (copy/seed-cosmetic) — low value; F9 (per-KB budget) left as documented behavior.
+- Doc-drift D1/D3/D4/D5/D6 are app-reference wording notes — the CODE is correct; a docs refresh,
+  not behavior.
+- F7 (drip-run elapsed) is a demo-SEED cosmetic only — no product-logic surface; left as-is.
 - Existing project.md capability grants for pruned ids (selftest-4 etc.) are orphaned-but-ignored;
   re-seeding is unnecessary and the owner allowed breaking, but new projects get the clean catalog.
 
