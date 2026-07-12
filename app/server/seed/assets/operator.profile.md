@@ -32,13 +32,9 @@ capabilities:
     mode: direct
   - capabilityId: append-typed-events
     mode: direct
-  - capabilityId: compress-timelines
-    mode: direct
   - capabilityId: stage-transitions
     mode: recommend
   - capabilityId: completion-for-acceptance
-    mode: recommend
-  - capabilityId: owner-reassignment
     mode: recommend
   - capabilityId: execute-code-or-write-repo
     mode: human

@@ -222,6 +222,53 @@ describe("startSpecialistRun", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it("rejects RUNNING an already-assigned specialist at a stage it isn't eligible for (F1 run boundary)", async () => {
+    // Re-deploy `dev` scoped to the REVIEW stage only, assigned to VIB-1.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            effort: "xhigh",
+            stages: ["review"], // eligible ONLY at review
+          },
+        } as never,
+      ],
+    });
+    // VIB-1 is at `impl` (from beforeEach) with `dev` assigned — an ineligible
+    // stage for this profile. Assign-time is bypassed; the RUN boundary must
+    // still reject (regression for the adversarial-review F1 gap).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Attach execution workspace",
+        specialist: { profileId: "dev", backend: "claude", role: "developer" },
+      }),
+      goal: "Let the operator attach a repo and run the specialist.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await expect(
+      startSpecialistRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/not eligible/i);
+  });
+
   it("creates a run row with the specialist backend + a simulated stream (>0 lines)", async () => {
     await assign();
     const result = await startSpecialistRun(

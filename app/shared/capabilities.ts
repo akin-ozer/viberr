@@ -75,6 +75,8 @@ export const ALWAYS_HUMAN_CAPABILITY_IDS: readonly string[] = [
   "change-project-policy",
 ];
 
+const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
+
 const byId = new Map(CAP_CATALOG.map((c) => [c.id, c]));
 const byLabel = new Map(CAP_CATALOG.map((c) => [c.label, c]));
 
@@ -117,13 +119,16 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
  * backends because the operator's actions route through the same gated server
  * functions regardless of the operator's engine.
  *
- * These ids are Claude-enforced / Codex-advisory (a specialist tool denylist):
+ * These ids are Claude-enforced / Codex-advisory (a specialist tool denylist).
+ * NOTE: `merge-pull-request` is deliberately NOT here — it is an ALWAYS_HUMAN
+ * structural capability (never grantable to an agent in an actionable mode), so
+ * its restriction holds on BOTH backends. Labeling it "advisory on Codex" would
+ * understate the single most safety-critical row; it classifies as "both".
  */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",
-  "merge-pull-request",
   "execute-code-or-write-repo",
 ]);
 
@@ -131,6 +136,10 @@ export type EnforcementScope = "both" | "claude-only" | "advisory";
 
 /** How withholding `id` actually confines an agent at runtime. */
 export function capabilityEnforcement(id: string): EnforcementScope {
+  // Structural always-human caps enforce on BOTH backends (an agent never holds
+  // them in an actionable mode) — check them BEFORE the claude-only set so a cap
+  // that is both (e.g. merge-pull-request) is never mislabeled "advisory on Codex".
+  if (ALWAYS_HUMAN.has(id)) return "both";
   if (CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has(id)) return "claude-only";
   if (ENFORCED_CAPABILITY_IDS.has(id)) return "both";
   return "advisory";

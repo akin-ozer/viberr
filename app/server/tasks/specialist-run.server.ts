@@ -517,8 +517,10 @@ export async function startSpecialistRun(
   // specialist without push/PR/merge rights literally cannot run those
   // commands). Empty when nothing is withheld.
   let disallowedTools: string[] = [];
+  let resolvedSpec: ResolvedSpecialist | null = null;
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+    resolvedSpec = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
@@ -538,6 +540,13 @@ export async function startSpecialistRun(
     }
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
+  }
+  // Stage eligibility holds at the RUN boundary too (F1): an already-assigned
+  // specialist must not be re-run after the task moved to a stage it isn't
+  // eligible for (assign-time checks alone would let a re-prompt bypass F1).
+  // Outside the try so the graceful undeployed-profile fallback can't swallow it.
+  if (resolvedSpec) {
+    assertStageEligible(resolvedSpec, existing.parsed.frontmatter.stage);
   }
 
   // The agent's run persona: its detailed definition + declared skills + KB docs.
@@ -742,8 +751,10 @@ export async function startReviewerRun(
   let kb: string[] = [];
   let mcpNames: string[] = [];
   let disallowedTools: string[] = [];
+  let resolvedRev: ResolvedSpecialist | null = null;
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
+    resolvedRev = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
@@ -759,6 +770,12 @@ export async function startReviewerRun(
     }
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
+  }
+  // Stage eligibility at the RUN boundary (F1) — same rationale as
+  // startSpecialistRun: an engaged reviewer must not be re-run at a stage its
+  // profile isn't eligible for. Outside the try so the fallback can't swallow it.
+  if (resolvedRev) {
+    assertStageEligible(resolvedRev, existing.parsed.frontmatter.stage);
   }
 
   const persona = buildSpecialistPersona({
