@@ -11,6 +11,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
+import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { buildScript } from "~/server/runtimes/simulated-runtime.server";
 import {
@@ -256,38 +257,36 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const script = buildScript({
-      lines: [
-        { t: "", ev: "init", tag: "thread.started", text: "codex thread started" },
-        { t: "", ev: "err", tag: "turn.failed", text: "You've hit your usage limit. Upgrade to Plus to continue using Codex." },
-      ],
-      occurredAt: [new Date().toISOString(), new Date().toISOString()],
-      sessionId: "t",
-      backend: "codex",
-      model: "gpt-5.5",
-      op: false,
-      keepRunning: false,
-      instant: true,
-    });
-    const started = await startRun(store.db, {
+    // Build the errored run SYNCHRONOUSLY (no startRun/simulated-drip) so the
+    // test is deterministic — a real async run's lifecycle raced CI's slower
+    // SQLite (the "database connection is not open" flood) and intermittently
+    // dropped the watcher notification. Here the run row + its error log line
+    // exist before applyAgentCompletionEffects reads them.
+    const runId = "run_f8_probe";
+    upsertRun(store.db, {
+      id: runId,
       projectSlug: store.slug,
       taskKey: "VIB-1",
-      kind: "primary",
+      threadId: "t-f8",
       role: "Developer",
+      kind: "primary",
       backend: "codex",
+      simulated: false,
       model: "gpt-5.5",
-      prompt: "implement",
-      workdir: store.dataRoot,
-      autonomous: true,
-      script,
-      dataRoot: store.dataRoot,
-      actor: actor(store.users.arda),
+      sdk: "codex",
+      state: "error",
     });
-    await waitFor(() => {
-      const row = store.db
-        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-        .get(started.runId) as { state: string } | undefined;
-      return row?.state === "error";
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-07-12T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "turn.failed",
+        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
+      },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await applyAgentCompletionEffects(
@@ -302,7 +301,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: started.runId, state: "error", simulated: false },
+      { id: runId, state: "error", simulated: false },
     );
     const parsed = taskFile().parsed;
     // The typed failure event naming the reason (distinct from the operator's
