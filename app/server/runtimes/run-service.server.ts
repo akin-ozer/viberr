@@ -175,9 +175,9 @@ export interface StartRunInput {
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
   actor?: AuditActor;
-  /** Custom system prompt (operator persona + expertise skill). Claude only. */
+  /** Custom instructions: Claude systemPrompt / Codex developer_instructions. */
   systemPrompt?: string;
-  /** In-process SDK MCP governance tools (operator run). Claude only. */
+  /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];

@@ -24,7 +24,7 @@ afterEach(() => resetModelCatalogCache());
 describe("resolveRunModel — the SDK-safety sanitizer", () => {
   it("accepts a real catalog id and rejects legacy display-label placeholders", () => {
     // Valid ids pass through untouched.
-    expect(resolveRunModel("codex", "gpt-5.5")).toBe("gpt-5.5");
+    expect(resolveRunModel("codex", "gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(resolveRunModel("claude", "sonnet")).toBe("sonnet");
     expect(resolveRunModel("claude", "opus")).toBe("opus");
 
@@ -48,7 +48,7 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
     expect(resolveRunModel("codex", undefined)).toBe(defaultModelFor("codex"));
 
     // A codex id passed to claude (wrong backend) is rejected, and vice versa.
-    expect(resolveRunModel("claude", "gpt-5.5")).toBe(defaultModelFor("claude"));
+    expect(resolveRunModel("claude", "gpt-5.6-sol")).toBe(defaultModelFor("claude"));
     expect(resolveRunModel("codex", "sonnet")).toBe(defaultModelFor("codex"));
   });
 
@@ -56,11 +56,12 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
     const { resolveRunEffort } = await import("./model-catalog.server");
     // Same-backend valid values pass through.
     expect(resolveRunEffort("claude", "high")).toBe("high");
-    expect(resolveRunEffort("codex", "minimal")).toBe("minimal");
+    expect(resolveRunEffort("codex", "low")).toBe("low");
     // Claude-only "max" retried on Codex maps to Codex's nearest (xhigh), never
     // passed raw (Codex would reject it).
     expect(resolveRunEffort("codex", "max")).toBe("xhigh");
-    // Codex-only "minimal" retried on Claude maps to Claude's nearest (low).
+    // A legacy "minimal" setting maps to the nearest supported tier.
+    expect(resolveRunEffort("codex", "minimal")).toBe("low");
     expect(resolveRunEffort("claude", "minimal")).toBe("low");
     // Unknown/empty → the backend default.
     expect(resolveRunEffort("codex", "")).toBe(defaultEffortFor("codex"));
@@ -68,7 +69,7 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
   });
 
   it("modelDisplayName gives the friendly name for a known id, else the raw value", () => {
-    expect(modelDisplayName("codex", "gpt-5.5")).toBe("GPT-5.5");
+    expect(modelDisplayName("codex", "gpt-5.6-sol")).toBe("GPT-5.6 Sol");
     expect(modelDisplayName("claude", "sonnet")).toBe("Claude Sonnet");
     // Unknown → echoed back (the UI pairs this with a substitution flag).
     expect(modelDisplayName("codex", "codex-large · claude-sonnet")).toBe(
@@ -87,11 +88,16 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("high");
   });
 
-  it("codex curated: a small model list + minimal…xhigh efforts", () => {
+  it("codex curated: current subscription models + low…xhigh efforts", () => {
     const cat = curatedCatalog("codex");
-    expect(cat.models.map((m) => m.value)).toContain("gpt-5-codex");
-    expect(cat.efforts).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
-    expect(cat.defaultModel).toBe("gpt-5.5");
+    expect(cat.models.map((m) => m.value)).toEqual([
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+    ]);
+    expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(cat.defaultModel).toBe("gpt-5.6-sol");
     expect(cat.defaultEffort).toBe("medium");
   });
 
@@ -121,7 +127,7 @@ describe("getModelCatalog", () => {
       claudeQueryFn: queryFn as unknown as ClaudeQueryFn,
       isAvailable: () => true,
     });
-    expect(cat.defaultModel).toBe("gpt-5.5");
+    expect(cat.defaultModel).toBe("gpt-5.6-sol");
     expect(queryFn).not.toHaveBeenCalled();
   });
 

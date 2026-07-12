@@ -50,6 +50,9 @@ ENV VIBERR_DATA_ROOT=/data
 # Persist Claude Agent SDK sessions on the data volume so resuming an agent
 # (commenting on a task) survives container restarts.
 ENV CLAUDE_CONFIG_DIR=/data/runtimes/claude-home
+# Keep Codex sessions and optional cached ChatGPT login on the same managed
+# data volume; never import the host user's full ~/.codex directory.
+ENV CODEX_HOME=/data/runtimes/codex-home
 ENV PORT=3000
 
 WORKDIR /app

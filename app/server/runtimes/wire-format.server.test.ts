@@ -116,6 +116,15 @@ describe("projectEnvelope — Codex JSONL", () => {
     expect(projectEnvelope("codex", { type: "error", message: "broken pipe" }).facts.isError).toBe(true);
   });
 
+  it("ErrorItem is visible but non-fatal", () => {
+    const { display, facts } = projectEnvelope("codex", {
+      type: "item.completed",
+      item: { id: "err-1", type: "error", message: "retry warning" },
+    });
+    expect(display).toMatchObject({ ev: "err", tag: "error", text: "retry warning" });
+    expect(facts.isError).toBeUndefined();
+  });
+
   it("in-progress items other than command_execution yield no line", () => {
     expect(projectEnvelope("codex", { type: "item.started", item: { type: "reasoning", text: "x" } }).display).toBeNull();
   });

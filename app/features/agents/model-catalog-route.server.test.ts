@@ -79,15 +79,9 @@ describe("resources/model-catalog", () => {
   it("returns the curated codex catalog", async () => {
     const res = await runLoader("?backend=codex", ardaId);
     const body = (await res.json()) as { data: ModelCatalog };
-    expect(body.data.models.map((m) => m.value)).toContain("gpt-5-codex");
-    expect(body.data.defaultModel).toBe("gpt-5.5");
-    expect(body.data.efforts).toEqual([
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
+    expect(body.data.models.map((m) => m.value)).toContain("gpt-5.6-sol");
+    expect(body.data.defaultModel).toBe("gpt-5.6-sol");
+    expect(body.data.efforts).toEqual(["low", "medium", "high", "xhigh"]);
   });
 
   it("defaults an unknown/missing backend to claude", async () => {

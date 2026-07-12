@@ -14,6 +14,7 @@ describe("runtime-registry — detection & fallback", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     delete process.env.VIBERR_CLAUDE_USE_CLI_AUTH;
+    delete process.env.CODEX_ACCESS_TOKEN;
     delete process.env.CODEX_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
@@ -36,6 +37,11 @@ describe("runtime-registry — detection & fallback", () => {
 
   it("detects codex available via CODEX_API_KEY or OPENAI_API_KEY", () => {
     process.env.OPENAI_API_KEY = "sk-test";
+    expect(isBackendAvailable("codex")).toBe(true);
+  });
+
+  it("detects codex available via a ChatGPT workspace access token", () => {
+    process.env.CODEX_ACCESS_TOKEN = "cat-test";
     expect(isBackendAvailable("codex")).toBe(true);
   });
 
@@ -71,20 +77,55 @@ describe("runtime-registry — detection & fallback", () => {
     expect(adapter).toBe(adapters.simulated);
   });
 
-  it("codexSpawnEnv hands the Codex SDK a FULL env (process.env + CODEX_HOME)", () => {
+  it("codexSpawnEnv preserves runtime essentials but filters unrelated server secrets", () => {
     // The Codex SDK REPLACES the child env with what we pass, so it must be
     // complete — the bug was passing only { CODEX_HOME }, stripping PATH/HOME
     // and breaking the spawned `codex` binary.
     process.env.PATH = process.env.PATH || "/usr/bin:/bin";
     process.env.VIBERR_CODEX_TEST_MARKER = "present";
+    process.env.VIBERR_SESSION_SECRET = "server-session-secret";
+    process.env.ANTHROPIC_API_KEY = "claude-secret";
     try {
       const env = codexSpawnEnv("/codex");
       expect(env.CODEX_HOME).toBe("/codex"); // forced
       expect(env.PATH).toBeTruthy(); // preserved (would be missing with the bug)
       expect(env.VIBERR_CODEX_TEST_MARKER).toBe("present"); // process.env carried through
+      expect(env.VIBERR_SESSION_SECRET).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
       expect(Object.keys(env).length).toBeGreaterThan(2);
     } finally {
       delete process.env.VIBERR_CODEX_TEST_MARKER;
+      delete process.env.VIBERR_SESSION_SECRET;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("codexSpawnEnv prefers subscription access-token auth over API billing", () => {
+    process.env.CODEX_API_KEY = "api-billing-key";
+    process.env.OPENAI_API_KEY = "platform-billing-key";
+    try {
+      const env = codexSpawnEnv("/codex", "cat-subscription-test");
+      expect(env.CODEX_HOME).toBe("/codex");
+      expect(env.CODEX_ACCESS_TOKEN).toBe("cat-subscription-test");
+      expect(env.CODEX_API_KEY).toBeUndefined();
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+    } finally {
+      delete process.env.CODEX_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+
+  it("codexSpawnEnv keeps an explicitly selected cached login off API billing", () => {
+    process.env.CODEX_API_KEY = "api-billing-key";
+    process.env.OPENAI_API_KEY = "platform-billing-key";
+    try {
+      const env = codexSpawnEnv("/codex", undefined, true);
+      expect(env.CODEX_HOME).toBe("/codex");
+      expect(env.CODEX_API_KEY).toBeUndefined();
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+    } finally {
+      delete process.env.CODEX_API_KEY;
+      delete process.env.OPENAI_API_KEY;
     }
   });
 

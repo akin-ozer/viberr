@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { FileActorRef } from "~/schemas/task-file.schema";
@@ -412,8 +412,11 @@ export function buildReplyScript(
 /**
  * The working directory a resumed reply run should use: the specialist-run
  * clone at `<taskDir>/workspace/<repo-name>` when it still exists (so the
- * agent keeps its repo context), else the bare task dir. `repo` is the
- * task/project repo `<owner>/<name>` (null → no clone was ever made).
+ * agent keeps its repo context), else the dedicated workspace root. The
+ * workspace fallback keeps `GIT_CEILING_DIRECTORIES=<taskDir>` a strict
+ * ancestor of cwd, preventing Git from discovering a host checkout above the
+ * data root. `repo` is the task/project repo `<owner>/<name>` (null → no clone
+ * was ever made).
  */
 export function resumeWorkdir(
   projectSlug: string,
@@ -427,5 +430,7 @@ export function resumeWorkdir(
     const clone = path.join(base, "workspace", name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
-  return base;
+  const workspace = path.join(base, "workspace");
+  mkdirSync(workspace, { recursive: true });
+  return workspace;
 }

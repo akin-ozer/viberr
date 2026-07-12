@@ -54,6 +54,11 @@ import {
   resolveSpecialistDisallowedTools,
 } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
+import {
+  cloneFailureLogDetails,
+  createGitHubClonePlan,
+  githubRemoteSanitizationArgs,
+} from "./git-clone-auth.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -110,7 +115,7 @@ export interface ResolvedSpecialist {
   skills: string[];
   /** The agent's declared knowledge bases — docs injected into its run context. */
   kb: string[];
-  /** The agent's declared MCP servers — wired into a Claude run's mcpServers. */
+  /** The agent's declared MCP servers — wired into the selected SDK. */
   mcps: string[];
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
@@ -150,7 +155,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
   };
 }
 
-/** Resolve declared MCP names to a Claude `mcpServers` option, or `{}`. */
+/** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
 function mcpServersFor(
   db: Database.Database,
   names: string[],
@@ -464,8 +469,9 @@ export interface StartSpecialistRunResult {
 /**
  * Starts a PRIMARY specialist run for a task with an assigned specialist.
  * Builds an "analyze the repo" prompt from the task title + goal, best-effort
- * clones the project repo into `<taskDir>/workspace/<repo>` (PAT-injected when
- * bound, plain clone for public repos) and points the run there. Hands off to
+ * clones the project repo into `<taskDir>/workspace/<repo>` (ephemeral
+ * askpass authentication when bound, plain clone for public repos) and points
+ * the run there. Hands off to
  * the run service with a realistic simulated fallback script so the console
  * streams meaningfully when no real credential is present; a real SDK run is
  * used when the backend's credential IS available.
@@ -556,8 +562,8 @@ export async function startSpecialistRun(
   // The agent's run persona: its detailed definition + declared skills + KB docs.
   // This is what makes the specialist behave as itself (the Developer implements
   // + tests + reports back) rather than a generic analyzer. Claude takes it as a
-  // system prompt; Codex has no system-prompt channel, so it is folded into the
-  // prompt.
+  // system prompt; Codex receives the same persona through the supported
+  // `developer_instructions` configuration channel.
   const persona = buildSpecialistPersona({
     profileId: sp.profileId,
     skills,
@@ -608,7 +614,7 @@ export async function startSpecialistRun(
     delivery: resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []),
     ...(input.directive ? { directive: input.directive } : {}),
   });
-  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
+  const prompt = analyzePrompt;
 
   const script = buildAnalyzeScript({
     backend,
@@ -632,7 +638,7 @@ export async function startSpecialistRun(
     backend,
     model,
     ...(effort ? { effort } : {}),
-    ...(persona && backend === "claude" ? { systemPrompt: persona } : {}),
+    ...(persona ? { systemPrompt: persona } : {}),
     // Persist the agent identity so the Agent-logs picker groups this run's
     // resumes into one entry labeled by the specialist's name (e.g. "dev").
     agentName,
@@ -642,8 +648,8 @@ export async function startSpecialistRun(
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
     // Wire the profile's declared MCP servers into the run (item-1/FR9): a
-    // profile that declares an org MCP now actually gets it (Claude only).
-    ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
+    // profile that declares an org MCP gets it on both supported SDKs.
+    ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend
       ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
@@ -825,7 +831,7 @@ export async function startReviewerRun(
     delivery: resolveDeliveryPermissions(resolvedRev?.capabilities ?? []),
     ...(input.directive ? { directive: input.directive } : {}),
   });
-  const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
+  const prompt = analyzePrompt;
 
   const script = buildAnalyzeScript({
     backend,
@@ -847,14 +853,14 @@ export async function startReviewerRun(
     backend,
     model,
     ...(effort ? { effort } : {}),
-    ...(persona && backend === "claude" ? { systemPrompt: persona } : {}),
+    ...(persona ? { systemPrompt: persona } : {}),
     agentName,
     agentProfileId: rev.profileId,
     prompt,
     script,
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
-    ...(backend === "claude" ? mcpServersFor(db, mcpNames) : {}),
+    ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend
       ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
@@ -993,32 +999,6 @@ export function buildSpecialistPersona(input: {
 // extension, so GitHub-imported / folder-uploaded / non-.md docs actually reach
 // the agent instead of being silently dropped.
 
-/**
- * Fold the persona into the turn prompt for Codex (which has no system-prompt
- * channel), or leave the prompt as-is for Claude (which receives the persona as
- * a system prompt) and when there is no persona. Keeps both run paths honest:
- * the agent always gets its persona, wherever the backend can accept it.
- */
-function foldPersonaForCodex(
-  persona: string,
-  backend: RealBackend,
-  prompt: string,
-  /** MCP server names declared on the profile — surfaced as unavailable on
-   *  Codex (the Codex SDK has no mcpServers channel, so a profile that declares
-   *  an org MCP silently gets nothing there; F2). */
-  mcpNames: string[] = [],
-): string {
-  let out = prompt;
-  if (backend === "codex" && mcpNames.length) {
-    out +=
-      `\n\n_Note: the MCP server(s) ${mcpNames.map((n) => `\`${n}\``).join(", ")} ` +
-      `declared on your profile are not available on the Codex backend — proceed ` +
-      `with your built-in tools._`;
-  }
-  if (!persona || backend !== "codex") return out;
-  return `${persona}\n\n---\n# Your task\n\n${out}`;
-}
-
 // ----------------------------------------------------------------- prompt/script
 
 function buildAnalyzePrompt(input: {
@@ -1040,14 +1020,14 @@ function buildAnalyzePrompt(input: {
     `"${input.title}". Goal: ${input.goal}. Analyze the repository and report ` +
     `your findings (structure, dependencies, architecture, notable risks/gaps) ` +
     `as a concise summary.`;
-  // Workspace + delivery CONTRACT (NFR15 traceability). The run's cwd is an
-  // isolated per-task workspace; git is ceiling-confined to it, so the agent
-  // must work ONLY inside the current directory and never touch a parent repo.
+  // Workspace + delivery CONTRACT (NFR15 traceability). The run gets a dedicated
+  // per-task cwd, and Git's ceiling prevents accidental parent-repo discovery.
+  // This prompt is guidance, not an OS filesystem boundary.
   if (input.repo) {
     const { canBranch, canCommitPush, canOpenPr } = input.delivery;
     prompt +=
       `\n\n## Workspace & delivery contract (follow exactly)\n` +
-      `- Work ONLY inside the current working directory — it is an isolated ` +
+      `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
       (input.cloned
@@ -1225,21 +1205,24 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
 
 /**
  * Best-effort `git clone` of `<owner>/<name>` into
- * `<taskDir>/workspace/<name>`. Injects the project-bound PAT into the clone
- * URL when one exists (private repos), else a plain clone (public repos).
+ * `<taskDir>/workspace/<name>`. Supplies a project-bound PAT through an
+ * ephemeral Git askpass process when one exists (private repos), else uses a
+ * plain credential-free clone (public repos).
  * Returns the clone dir on success, null on any failure (the caller then
- * points the run at the task dir and tells the agent to clone itself).
+ * points the run at its dedicated workspace root and tells the agent to clone
+ * into that directory itself).
  *
  * Never throws — clone failure must not break starting the run.
  */
 /**
- * The isolated per-task workspace directory (`<taskDir>/workspace`). A
+ * The dedicated per-task workspace directory (`<taskDir>/workspace`). A
  * specialist run's cwd is ALWAYS inside here — NEVER the task dir itself —
  * and `GIT_CEILING_DIRECTORIES` is pinned to it, so an agent's git can never
  * walk UP to a host checkout even when `VIBERR_DATA_ROOT` lives inside a git
  * repo (the dogfooding hazard: a run once switched the running app's own
- * source onto its task branch). Combined with the run env below, the agent is
- * confined to its own directory regardless of backend.
+ * source onto its task branch). This only constrains Git discovery; autonomous
+ * Codex specialists still need a separate OS/container boundary before this can
+ * be treated as filesystem isolation.
  */
 function taskWorkspaceRoot(
   projectSlug: string,
@@ -1249,12 +1232,12 @@ function taskWorkspaceRoot(
   return path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
 }
 
-/** The per-run env that confines a specialist's git to its own workspace. */
+/** The per-run env that stops Git from discovering a parent checkout. */
 /**
- * The run confinement a resumed specialist (@mention comment) must re-apply so
- * it is bound by the SAME denylist, git ceiling, MCP set, and persona as its
- * fresh run — the resume path used to drop all of these, letting a
- * capability-withheld specialist run unconfined (XS-1). Best-effort: if the
+ * Runtime settings a resumed specialist (@mention comment) must re-apply so it
+ * gets the SAME denylist, git ceiling, MCP set, and persona as its fresh run.
+ * The denylist is enforced by Claude only; Codex's direct SDK has no equivalent.
+ * Best-effort: if the
  * profile is no longer a current deployment we still return the always-human
  * denylist and the workspace git ceiling.
  */
@@ -1291,7 +1274,7 @@ export function resolveResumeConfinement(
       ...(persona ? { systemPrompt: persona } : {}),
     };
   } catch {
-    // Profile not a current deployment — still confine to the safe floor.
+    // Profile not a current deployment — still apply the conservative settings.
     return { disallowedTools: resolveSpecialistDisallowedTools([]), env };
   }
 }
@@ -1331,32 +1314,39 @@ async function cloneRepo(
       name,
     );
     if (existsSync(path.join(dir, ".git"))) {
-      // Already cloned for this task — reuse it.
+      // Already cloned for this task — scrub URLs produced by older Viberr
+      // versions before reuse. `--replace-all` removes every prior origin URL,
+      // including a legacy `x-access-token:<PAT>@github.com` value.
+      await execFileAsync(
+        "git",
+        githubRemoteSanitizationArgs(input.repo, dir),
+        { timeout: 10_000 },
+      );
       return dir;
     }
     mkdirSync(path.dirname(dir), { recursive: true });
 
-    let url = `https://github.com/${input.repo}.git`;
     const cred = getProjectCredential(db, input.projectSlug);
-    if (cred) {
-      const token = getPatToken(db, cred.id);
-      if (token) {
-        // x-access-token is GitHub's username for token auth (never logged).
-        url = `https://x-access-token:${token}@github.com/${input.repo}.git`;
-      }
+    const token = cred ? getPatToken(db, cred.id) : null;
+    const clone = createGitHubClonePlan({
+      repo: input.repo,
+      destination: dir,
+      ...(token ? { token } : {}),
+    });
+    try {
+      await execFileAsync("git", clone.args, {
+        timeout: 60_000,
+        env: clone.env,
+      });
+      return dir;
+    } finally {
+      clone.dispose();
     }
-
-    await execFileAsync(
-      "git",
-      ["clone", "--depth", "1", url, dir],
-      { timeout: 60_000 },
-    );
-    return dir;
   } catch (error) {
     // Repo is private with no cred, network down, git missing — fall back.
-    logger.info("specialist run clone failed — falling back to task dir", {
+    logger.info("specialist run clone failed — falling back to workspace root", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error.message : String(error),
+      ...cloneFailureLogDetails(error),
     });
     return null;
   }

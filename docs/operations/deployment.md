@@ -48,12 +48,37 @@ are injected. **You can use a subscription (no per-token API key) for either bac
 The SDK authenticates with it — verified: an invalid token returns a 401, a valid one
 runs. (An `ANTHROPIC_API_KEY` also works if you prefer pay-as-you-go.)
 
-**Codex — ChatGPT plan subscription (mount the login):**
-1. On the host: `codex login` (writes `~/.codex/auth.json`).
-2. In `compose.yml` (examples are inlined there): mount `~/.codex` into the container,
-   set `CODEX_HOME=/codex` and `VIBERR_CODEX_USE_CLI_AUTH=1`. Mount read-write so the SDK
-   can refresh the token; the files must be readable by uid 1000 (the `node` user).
-(A `CODEX_API_KEY` / `OPENAI_API_KEY` also works for pay-as-you-go.)
+**Codex — ChatGPT Business/Enterprise subscription (recommended):**
+1. In the ChatGPT workspace [Access tokens page](https://learn.chatgpt.com/docs/enterprise/access-tokens),
+   create a Codex access token for this trusted deployment.
+2. Put it in `.env` as `CODEX_ACCESS_TOKEN=…`. This is a ChatGPT-workspace
+   credential that uses subscription entitlements, not a Platform API key.
+
+The SDK passes the token to its bundled Codex CLI through the environment. No
+host Codex directory is mounted. Treat the token as a secret, use a finite
+expiration, and rotate it regularly.
+
+**Codex — cached login for other ChatGPT plans:**
+1. On the host, run `codex login` and confirm `~/.codex/auth.json` exists.
+2. Copy only that credential into the dedicated container home:
+   `mkdir -p ./docker-data/runtimes/codex-home && cp ~/.codex/auth.json ./docker-data/runtimes/codex-home/auth.json`.
+3. Set `VIBERR_CODEX_USE_CLI_AUTH=1` in `.env`. `CODEX_HOME` points to that
+   isolated directory on the existing `/data` mount, allowing refresh and session persistence
+   without importing host config, MCP servers, rules, or skills. The files must
+   be readable and writable by uid 1000 (the container's `node` user).
+
+If the host uses an OS credential store instead of `auth.json`, configure
+[Codex file credential storage](https://learn.chatgpt.com/docs/auth#credential-storage)
+before logging in. A `CODEX_API_KEY` / `OPENAI_API_KEY` also works, but uses
+usage-based Platform billing.
+
+**Security boundary:** the dedicated `CODEX_HOME` prevents importing the host's
+full personal Codex configuration; it does not isolate that credential or the
+application data from an autonomous coding process running as the same container
+user. Treat the single-container setup as trusted-task mode. Untrusted tasks need
+a separate worker user/container with only the task workspace mounted, plus
+server-owned Git push/PR delivery so repository credentials never enter the
+agent's environment.
 
 Without any credential the app falls back to the built-in **simulated** backend (runs
 still stream in the UI, clearly labelled). Confirm what's active:
@@ -86,17 +111,20 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
 
 ## Persistence, backup & restore
 
-Everything stateful lives under `$VIBERR_DATA_ROOT` (Compose mounts `./docker-data:/data`):
+Everything stateful lives under `./docker-data` in the Compose setup, mounted
+at `/data`. Both SDKs keep their resumable state under `runtimes/`:
 
 ```
 projects/   canonical project.md + task.md (the source of truth — human/agent editable)
 kb/ skills/ knowledge-base and skill files
-runtimes/   raw agent run logs (NDJSON/JSONL)
+runtimes/   raw run logs plus Claude/Codex session homes; Codex may contain auth.json
 state/      projection.sqlite (users, sessions, projections, audit, PATs, notifications)
 auth/ cache/ logs/
 ```
 
-- **Backup** = snapshot the whole data-root directory. Stop the container (or accept a
+- **Backup** = snapshot the whole `./docker-data` directory. If `runtimes/codex-home/auth.json`
+  exists, the backup contains a live credential and must be encrypted and access
+  controlled like any other secret. Stop the container (or accept a
   crash-consistent copy — SQLite is WAL, so also copy `*-wal`/`*-shm`) and archive it.
 - **Restore** = drop the directory back and start the container. If only
   `state/projection.sqlite` is lost but `projects/` survives, you do **not** need a DB

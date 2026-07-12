@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -20,10 +22,12 @@ import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   extractReplyText,
+  resumeWorkdir,
   resolveMentionedAgent,
 } from "./agent-reply.server";
 import {
   assignSpecialist,
+  resolveResumeConfinement,
   startSpecialistRun,
 } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
@@ -243,6 +247,28 @@ describe("extractReplyText", () => {
     const { extractFullReplyText } = await import("./agent-reply.server");
     const out = extractFullReplyText([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBe(5000);
+  });
+});
+
+describe("resumeWorkdir", () => {
+  it("falls back inside the workspace so the Git ceiling is a strict ancestor", () => {
+    const fallback = resumeWorkdir(
+      store.slug,
+      "VIB-1",
+      null,
+      store.dataRoot,
+    );
+    const confinement = resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+    );
+    const ceiling = confinement.env.GIT_CEILING_DIRECTORIES!;
+
+    expect(fallback).toBe(path.join(ceiling, "workspace"));
+    expect(fallback).not.toBe(ceiling);
+    expect(path.relative(ceiling, fallback)).toBe("workspace");
+    expect(existsSync(fallback)).toBe(true);
   });
 });
 

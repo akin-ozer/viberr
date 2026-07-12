@@ -206,7 +206,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
       id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
-      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.5",
+      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-sol",
       scope: "Global base · customized for Viberr Core",
       stages: ["ready", "impl"],
       resources: {
