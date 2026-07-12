@@ -20,14 +20,14 @@ never a crash), derives readiness, and materializes projections into SQLite for 
 SQLite handles app management only — users, sessions, encrypted secrets, projections,
 audit — never canonical business truth.
 
-Stack: React Router 7 (framework mode, SSR) · Node >= 20 · TypeScript · better-sqlite3 (WAL)
+Stack: React Router 8 (framework mode, SSR) · Node >= 24 · TypeScript 7 (native compiler) · better-sqlite3 (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
 (no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK, with a built-in simulated
 backend so the full product works with zero external credentials.
 
 ## Quickstart (local dev)
 
-Requirements: Node >= 20 (Node 22 recommended), npm.
+Requirements: Node >= 24, npm.
 
 ```sh
 git clone <this-repo> viberr && cd viberr

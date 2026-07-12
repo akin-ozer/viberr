@@ -94,7 +94,17 @@ export function safeReturnTo(value: string | null | undefined): string | null {
 
 function loginRedirect(request: Request): Response {
   const url = new URL(request.url);
-  const returnTo = url.pathname + url.search;
+  // React Router 8 always hands loaders the RAW request, so on single-fetch
+  // client navigations the URL is the ".data" wire address
+  // ("/board.data?_routes=..."), not a navigable app path. Mirror the
+  // framework's own getNormalizedPath (react-router lib/server-runtime/urls.ts)
+  // so returnTo never sends a re-authenticated user to a .data URL.
+  let pathname = url.pathname;
+  if (pathname.endsWith("/_.data")) pathname = pathname.replace(/_\.data$/, "");
+  else pathname = pathname.replace(/\.data$/, "");
+  url.searchParams.delete("_routes");
+  const search = url.searchParams.toString();
+  const returnTo = pathname + (search ? `?${search}` : "");
   const target =
     returnTo && returnTo !== "/"
       ? `/login?returnTo=${encodeURIComponent(returnTo)}`
