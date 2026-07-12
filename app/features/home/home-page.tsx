@@ -267,6 +267,282 @@ function ProjectRow({
 
 /* ---------- new project modal (home spec §4.9) ---------- */
 
+function NewProjectNameFields({
+  nameRef,
+  name,
+  setName,
+  effKey,
+  setKey,
+  setKeyTouched,
+  submit,
+}: {
+  nameRef: RefObject<HTMLInputElement | null>;
+  name: string;
+  setName: (v: string) => void;
+  effKey: string;
+  setKey: (v: string) => void;
+  setKeyTouched: (v: boolean) => void;
+  submit: () => void;
+}) {
+  return (
+    <div className="key-row">
+      <div className="field">
+        <label className="flabel" htmlFor="np-name">
+          Project name<span className="req">*</span>
+        </label>
+        <input
+          id="np-name"
+          type="text"
+          ref={nameRef}
+          value={name}
+          placeholder="e.g. Payments Gateway"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="np-key">
+          Task key
+        </label>
+        <input
+          id="np-key"
+          type="text"
+          className="mono"
+          value={effKey}
+          placeholder="PAY"
+          onChange={(e) => {
+            setKeyTouched(true);
+            setKey(
+              e.target.value
+                .toUpperCase()
+                .replace(/[^A-Z]/g, "")
+                .slice(0, 4),
+            );
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function NewProjectConnectionField({
+  connections,
+  connOwner,
+  setConnOwner,
+  manualOwner,
+  setManualOwner,
+}: {
+  connections: string[];
+  connOwner: string;
+  setConnOwner: (owner: string) => void;
+  manualOwner: string;
+  setManualOwner: (owner: string) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">
+        GitHub connection{" "}
+        <span className="fhint">sets the repository root</span>
+      </span>
+      <div className="pick-chips">
+        {connections.map((owner) => (
+          <button
+            type="button"
+            key={owner}
+            className={"pick-chip" + (connOwner === owner ? " on" : "")}
+            onClick={() => setConnOwner(owner)}
+          >
+            <Icon name="github" />
+            {owner}/
+          </button>
+        ))}
+      </div>
+      {connections.length === 0 && (
+        <>
+          <input
+            id="np-owner"
+            type="text"
+            className="np-owner-input"
+            value={manualOwner}
+            placeholder="github owner / org (optional)"
+            onChange={(e) => setManualOwner(e.target.value.trim())}
+          />
+          <div className="def-note">
+            <Icon name="alert" />
+            <span>
+              No GitHub connections yet. Type a repo owner to bind a
+              repository, or leave it blank to create a{" "}
+              <b>repo-less project</b> — add a PAT later in{" "}
+              <b>Viberr settings → GitHub connections</b>.
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NewProjectRepoField({
+  repo,
+  setRepo,
+  effOwner,
+  effRepo,
+}: {
+  repo: string;
+  setRepo: (v: string) => void;
+  effOwner: string;
+  effRepo: string;
+}) {
+  return (
+    <div className="field">
+      <label className="flabel" htmlFor="np-repo">
+        GitHub repository{" "}
+        <span className="fhint">
+          {effOwner
+            ? "project default · task-level override later"
+            : "no owner set · this will be a repo-less project"}
+        </span>
+      </label>
+      <div className="repo-input">
+        <span className="pre">{(effOwner || "github") + "/"}</span>
+        <input
+          id="np-repo"
+          type="text"
+          value={repo}
+          placeholder={effRepo || "repo-name"}
+          disabled={!effOwner}
+          onChange={(e) => setRepo(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function NewProjectTemplateField({
+  template,
+  setTemplate,
+}: {
+  template: "governed" | "light";
+  setTemplate: (t: "governed" | "light") => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">Workflow template</span>
+      <div className="pick-chips">
+        <button
+          type="button"
+          className={"pick-chip" + (template === "governed" ? " on" : "")}
+          onClick={() => setTemplate("governed")}
+        >
+          <span className="sdot" style={{ background: "var(--blue)" }}></span>
+          Standard · 5 stages
+        </button>
+        <button
+          type="button"
+          className={"pick-chip" + (template === "light" ? " on" : "")}
+          onClick={() => setTemplate("light")}
+        >
+          <span
+            className="sdot"
+            style={{ background: "var(--teal-dark)" }}
+          ></span>
+          Lightweight · 3 stages
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewProjectPolicyField({
+  policy,
+  setPolicy,
+}: {
+  policy: "strict" | "balanced" | "auto";
+  setPolicy: (p: "strict" | "balanced" | "auto") => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">Agent policy preset</span>
+      <div className="pick-chips">
+        <button
+          type="button"
+          className={"pick-chip" + (policy === "strict" ? " on" : "")}
+          onClick={() => setPolicy("strict")}
+        >
+          <Icon name="lock" />
+          Strict human-gate
+        </button>
+        <button
+          type="button"
+          className={"pick-chip" + (policy === "balanced" ? " on" : "")}
+          onClick={() => setPolicy("balanced")}
+        >
+          <Icon name="shield" />
+          Balanced · recommended
+        </button>
+        <button
+          type="button"
+          className={"pick-chip" + (policy === "auto" ? " on" : "")}
+          onClick={() => setPolicy("auto")}
+        >
+          <Icon name="bolt" />
+          Autonomous within policy
+        </button>
+      </div>
+      <div className="def-note">
+        <Icon name="shield" />
+        <span>
+          Completion stays human-authorized in every preset. Stages, RBAC
+          and the agent capability matrix can be refined in project
+          settings.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NewProjectFooter({
+  storeRoot,
+  slug,
+  ok,
+  busy,
+  onClose,
+  submit,
+}: {
+  storeRoot: string;
+  slug: string;
+  ok: boolean;
+  busy: boolean;
+  onClose: () => void;
+  submit: () => void;
+}) {
+  return (
+    <div className="modal-foot">
+      <span className="foot-hint mono">
+        creates {storeRoot}/projects/{slug || "…"}/
+      </span>
+      <span className="foot-actions">
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!ok || busy}
+          style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
+          onClick={submit}
+          aria-busy={busy}
+        >
+          <Icon name="plus" />
+          Create project
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function NewProjectModal({
   connections,
   storeRoot,
@@ -381,167 +657,33 @@ function NewProjectModal({
         </button>
       </div>
       <div className="modal-body">
-        <div className="key-row">
-          <div className="field">
-            <label className="flabel" htmlFor="np-name">
-              Project name<span className="req">*</span>
-            </label>
-            <input
-              id="np-name"
-              type="text"
-              ref={nameRef}
-              value={name}
-              placeholder="e.g. Payments Gateway"
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-              }}
-            />
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="np-key">
-              Task key
-            </label>
-            <input
-              id="np-key"
-              type="text"
-              className="mono"
-              value={effKey}
-              placeholder="PAY"
-              onChange={(e) => {
-                setKeyTouched(true);
-                setKey(
-                  e.target.value
-                    .toUpperCase()
-                    .replace(/[^A-Z]/g, "")
-                    .slice(0, 4),
-                );
-              }}
-            />
-          </div>
-        </div>
-        <div className="field">
-          <span className="flabel">
-            GitHub connection{" "}
-            <span className="fhint">sets the repository root</span>
-          </span>
-          <div className="pick-chips">
-            {connections.map((owner) => (
-              <button
-                type="button"
-                key={owner}
-                className={"pick-chip" + (connOwner === owner ? " on" : "")}
-                onClick={() => setConnOwner(owner)}
-              >
-                <Icon name="github" />
-                {owner}/
-              </button>
-            ))}
-          </div>
-          {connections.length === 0 && (
-            <>
-              <input
-                id="np-owner"
-                type="text"
-                className="np-owner-input"
-                value={manualOwner}
-                placeholder="github owner / org (optional)"
-                onChange={(e) => setManualOwner(e.target.value.trim())}
-              />
-              <div className="def-note">
-                <Icon name="alert" />
-                <span>
-                  No GitHub connections yet. Type a repo owner to bind a
-                  repository, or leave it blank to create a{" "}
-                  <b>repo-less project</b> — add a PAT later in{" "}
-                  <b>Viberr settings → GitHub connections</b>.
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="field">
-          <label className="flabel" htmlFor="np-repo">
-            GitHub repository{" "}
-            <span className="fhint">
-              {effOwner
-                ? "project default · task-level override later"
-                : "no owner set · this will be a repo-less project"}
-            </span>
-          </label>
-          <div className="repo-input">
-            <span className="pre">{(effOwner || "github") + "/"}</span>
-            <input
-              id="np-repo"
-              type="text"
-              value={repo}
-              placeholder={effRepo || "repo-name"}
-              disabled={!effOwner}
-              onChange={(e) => setRepo(e.target.value)}
-            />
-          </div>
-        </div>
-        <div className="field">
-          <span className="flabel">Workflow template</span>
-          <div className="pick-chips">
-            <button
-              type="button"
-              className={"pick-chip" + (template === "governed" ? " on" : "")}
-              onClick={() => setTemplate("governed")}
-            >
-              <span className="sdot" style={{ background: "var(--blue)" }}></span>
-              Standard · 5 stages
-            </button>
-            <button
-              type="button"
-              className={"pick-chip" + (template === "light" ? " on" : "")}
-              onClick={() => setTemplate("light")}
-            >
-              <span
-                className="sdot"
-                style={{ background: "var(--teal-dark)" }}
-              ></span>
-              Lightweight · 3 stages
-            </button>
-          </div>
-        </div>
-        <div className="field">
-          <span className="flabel">Agent policy preset</span>
-          <div className="pick-chips">
-            <button
-              type="button"
-              className={"pick-chip" + (policy === "strict" ? " on" : "")}
-              onClick={() => setPolicy("strict")}
-            >
-              <Icon name="lock" />
-              Strict human-gate
-            </button>
-            <button
-              type="button"
-              className={"pick-chip" + (policy === "balanced" ? " on" : "")}
-              onClick={() => setPolicy("balanced")}
-            >
-              <Icon name="shield" />
-              Balanced · recommended
-            </button>
-            <button
-              type="button"
-              className={"pick-chip" + (policy === "auto" ? " on" : "")}
-              onClick={() => setPolicy("auto")}
-            >
-              <Icon name="bolt" />
-              Autonomous within policy
-            </button>
-          </div>
-          <div className="def-note">
-            <Icon name="shield" />
-            <span>
-              Completion stays human-authorized in every preset. Stages, RBAC
-              and the agent capability matrix can be refined in project
-              settings.
-            </span>
-          </div>
-        </div>
+        <NewProjectNameFields
+          nameRef={nameRef}
+          name={name}
+          setName={setName}
+          effKey={effKey}
+          setKey={setKey}
+          setKeyTouched={setKeyTouched}
+          submit={submit}
+        />
+        <NewProjectConnectionField
+          connections={connections}
+          connOwner={connOwner}
+          setConnOwner={setConnOwner}
+          manualOwner={manualOwner}
+          setManualOwner={setManualOwner}
+        />
+        <NewProjectRepoField
+          repo={repo}
+          setRepo={setRepo}
+          effOwner={effOwner}
+          effRepo={effRepo}
+        />
+        <NewProjectTemplateField
+          template={template}
+          setTemplate={setTemplate}
+        />
+        <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />
         {serverError && (
           <div className="def-note">
             <Icon name="alert" />
@@ -549,27 +691,14 @@ function NewProjectModal({
           </div>
         )}
       </div>
-      <div className="modal-foot">
-        <span className="foot-hint mono">
-          creates {storeRoot}/projects/{slug || "…"}/
-        </span>
-        <span className="foot-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!ok || busy}
-            style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
-            onClick={submit}
-            aria-busy={busy}
-          >
-            <Icon name="plus" />
-            Create project
-          </button>
-        </span>
-      </div>
+      <NewProjectFooter
+        storeRoot={storeRoot}
+        slug={slug}
+        ok={ok}
+        busy={busy}
+        onClose={onClose}
+        submit={submit}
+      />
     </dialog>
   );
 }

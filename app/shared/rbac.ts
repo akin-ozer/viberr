@@ -105,11 +105,6 @@ export function rolesForAction(action: RbacAction): readonly ProjectRole[] {
   return ACTION_ROLES[action];
 }
 
-/** True when `a` is at least as privileged as `b`. */
-export function roleAtLeast(a: ProjectRole, b: ProjectRole): boolean {
-  return ROLE_RANK[a] >= ROLE_RANK[b];
-}
-
 /**
  * The Policy-page permission table: human-readable rows, each derived from the
  * canonical map above so the UI shows exactly what the server enforces. Order:

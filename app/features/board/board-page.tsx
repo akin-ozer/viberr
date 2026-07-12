@@ -535,6 +535,199 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "risk", label: "Needs attention", icon: "alert" },
 ];
 
+function BoardHeader({
+  taskCount,
+  waitingHuman,
+  group,
+  canCreate,
+  setParam,
+  onRescan,
+  onNew,
+}: {
+  taskCount: number;
+  waitingHuman: number;
+  group: "stage" | "list";
+  canCreate: boolean;
+  setParam: (key: string, value: string | null) => void;
+  onRescan: () => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="board-head">
+      <div>
+        <h1>Board</h1>
+        <div className="sub">
+          {taskCount} tasks · {waitingHuman} waiting on a human decision
+        </div>
+      </div>
+      <div className="board-tools">
+        <div className="seg">
+          <button
+            type="button"
+            className={group === "stage" ? "on" : ""}
+            onClick={() => setParam("view", null)}
+          >
+            <Icon name="board" />
+            Board
+          </button>
+          <button
+            type="button"
+            className={group === "list" ? "on" : ""}
+            onClick={() => setParam("view", "list")}
+          >
+            <Icon name="review" />
+            List
+          </button>
+        </div>
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={onRescan}
+          title="Reconcile the board with the file-native store"
+        >
+          <Icon name="refresh" />
+          Re-scan
+        </button>
+        {canCreate && (
+          <button type="button" className="btn primary sm" onClick={onNew}>
+            <Icon name="plus" />
+            New task
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterBar({
+  filter,
+  waitingHuman,
+  setParam,
+}: {
+  filter: BoardFilterId;
+  waitingHuman: number;
+  setParam: (key: string, value: string | null) => void;
+}) {
+  return (
+    <div className="filter-bar">
+      {FILTERS.map((f) => (
+        <button
+          type="button"
+          key={f.id}
+          className={"fchip" + (filter === f.id ? " on" : "")}
+          aria-pressed={filter === f.id}
+          onClick={() => setParam("filter", f.id === "all" ? null : f.id)}
+        >
+          <Icon name={f.icon} />
+          {f.label}
+          {f.id === "human" && waitingHuman > 0 && (
+            <span style={{ opacity: 0.7 }}>· {waitingHuman}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
+  return (
+    <div className="board-orphans" role="region" aria-label="Unstaged tasks">
+      <Icon name="alert" />
+      <span className="board-orphans-label">
+        {orphanTasks.length} unstaged{" "}
+        {orphanTasks.length === 1 ? "task" : "tasks"} — the stage in the file
+        doesn't match any board column. Fix the task file to place it.
+      </span>
+      <span className="board-orphans-keys">
+        {orphanTasks.map((t) => (
+          <Link
+            key={t.key}
+            to={`tasks/${t.key}`}
+            className="board-orphan-key"
+            title={t.title}
+          >
+            {t.key}
+          </Link>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function StageBoard({
+  columns,
+  visible,
+  doneStageId,
+  canCreate,
+  canTransition,
+  onNew,
+  drag,
+  overStage,
+  beforeKey,
+  arrivedKey,
+  draggedTask,
+  onCardDragStart,
+  onCardDragEnd,
+  onCardDragOver,
+  onColumnDragOver,
+  onColumnDrop,
+}: {
+  columns: BoardColumnData[];
+  visible: (tasks: TaskSummary[]) => TaskSummary[];
+  doneStageId: string | undefined;
+  canCreate: boolean;
+  canTransition: boolean;
+  onNew: (stageId: string) => void;
+  drag: { key: string; fromStage: string } | null;
+  overStage: string | null;
+  beforeKey: string | null;
+  arrivedKey: string | null;
+  draggedTask: TaskSummary | null;
+  onCardDragStart: (task: TaskSummary, e: DragEvent) => void;
+  onCardDragEnd: () => void;
+  onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
+  onColumnDragOver: (stageId: string, e: DragEvent) => void;
+  onColumnDrop: (stageId: string, e: DragEvent) => void;
+}) {
+  return (
+    <div className="board">
+      {columns.map((c) => {
+        const base = visible(c.tasks);
+        // The hovered column is the drop target (same OR different stage).
+        // Cross-column also shifts the counts: source −1, target +1.
+        const hovered = !!drag && overStage === c.stage.id;
+        const crossDrag =
+          !!drag && overStage != null && overStage !== drag.fromStage;
+        const isSource = crossDrag && c.stage.id === drag!.fromStage;
+        const isTarget = crossDrag && c.stage.id === overStage;
+        const count = base.length + (isTarget ? 1 : 0) - (isSource ? 1 : 0);
+        return (
+          <Column
+            key={c.stage.id}
+            stage={c.stage}
+            tasks={base}
+            count={count}
+            isDone={c.stage.id === doneStageId}
+            canCreate={canCreate}
+            canTransition={canTransition}
+            onNew={() => onNew(c.stage.id)}
+            draggingKey={drag?.key ?? null}
+            arrivedKey={arrivedKey}
+            dropTarget={hovered}
+            previewTask={hovered ? draggedTask : null}
+            beforeKey={beforeKey}
+            onCardDragStart={onCardDragStart}
+            onCardDragEnd={onCardDragEnd}
+            onCardDragOver={onCardDragOver}
+            onColumnDragOver={onColumnDragOver}
+            onColumnDrop={onColumnDrop}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function BoardPage({
   columns,
   orphanTasks,
@@ -719,131 +912,43 @@ export function BoardPage({
 
   return (
     <div className="board-wrap" data-screen-label="Board">
-      <div className="board-head">
-        <div>
-          <h1>Board</h1>
-          <div className="sub">
-            {allTasks.length} tasks · {waitingHuman} waiting on a human decision
-          </div>
-        </div>
-        <div className="board-tools">
-          <div className="seg">
-            <button
-              type="button"
-              className={group === "stage" ? "on" : ""}
-              onClick={() => setParam("view", null)}
-            >
-              <Icon name="board" />
-              Board
-            </button>
-            <button
-              type="button"
-              className={group === "list" ? "on" : ""}
-              onClick={() => setParam("view", "list")}
-            >
-              <Icon name="review" />
-              List
-            </button>
-          </div>
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={rescan}
-            title="Reconcile the board with the file-native store"
-          >
-            <Icon name="refresh" />
-            Re-scan
-          </button>
-          {canCreate && (
-            <button
-              type="button"
-              className="btn primary sm"
-              onClick={() => setCreating(stages[0]?.id ?? "triage")}
-            >
-              <Icon name="plus" />
-              New task
-            </button>
-          )}
-        </div>
-      </div>
+      <BoardHeader
+        taskCount={allTasks.length}
+        waitingHuman={waitingHuman}
+        group={group}
+        canCreate={canCreate}
+        setParam={setParam}
+        onRescan={rescan}
+        onNew={() => setCreating(stages[0]?.id ?? "triage")}
+      />
 
-      <div className="filter-bar">
-        {FILTERS.map((f) => (
-          <button
-            type="button"
-            key={f.id}
-            className={"fchip" + (filter === f.id ? " on" : "")}
-            aria-pressed={filter === f.id}
-            onClick={() => setParam("filter", f.id === "all" ? null : f.id)}
-          >
-            <Icon name={f.icon} />
-            {f.label}
-            {f.id === "human" && waitingHuman > 0 && (
-              <span style={{ opacity: 0.7 }}>· {waitingHuman}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        filter={filter}
+        waitingHuman={waitingHuman}
+        setParam={setParam}
+      />
 
-      {orphanTasks.length > 0 && (
-        <div className="board-orphans" role="region" aria-label="Unstaged tasks">
-          <Icon name="alert" />
-          <span className="board-orphans-label">
-            {orphanTasks.length} unstaged{" "}
-            {orphanTasks.length === 1 ? "task" : "tasks"} — the stage in the file
-            doesn't match any board column. Fix the task file to place it.
-          </span>
-          <span className="board-orphans-keys">
-            {orphanTasks.map((t) => (
-              <Link
-                key={t.key}
-                to={`tasks/${t.key}`}
-                className="board-orphan-key"
-                title={t.title}
-              >
-                {t.key}
-              </Link>
-            ))}
-          </span>
-        </div>
-      )}
+      {orphanTasks.length > 0 && <OrphanBanner orphanTasks={orphanTasks} />}
 
       {group === "stage" ? (
-        <div className="board">
-          {columns.map((c) => {
-            const base = visible(c.tasks);
-            // The hovered column is the drop target (same OR different stage).
-            // Cross-column also shifts the counts: source −1, target +1.
-            const hovered = !!drag && overStage === c.stage.id;
-            const crossDrag =
-              !!drag && overStage != null && overStage !== drag.fromStage;
-            const isSource = crossDrag && c.stage.id === drag!.fromStage;
-            const isTarget = crossDrag && c.stage.id === overStage;
-            const count = base.length + (isTarget ? 1 : 0) - (isSource ? 1 : 0);
-            return (
-              <Column
-                key={c.stage.id}
-                stage={c.stage}
-                tasks={base}
-                count={count}
-                isDone={c.stage.id === doneStageId}
-                canCreate={canCreate}
-                canTransition={canTransition}
-                onNew={() => setCreating(c.stage.id)}
-                draggingKey={drag?.key ?? null}
-                arrivedKey={arrivedKey}
-                dropTarget={hovered}
-                previewTask={hovered ? draggedTask : null}
-                beforeKey={beforeKey}
-                onCardDragStart={onCardDragStart}
-                onCardDragEnd={onCardDragEnd}
-                onCardDragOver={onCardDragOver}
-                onColumnDragOver={onColumnDragOver}
-                onColumnDrop={onColumnDrop}
-              />
-            );
-          })}
-        </div>
+        <StageBoard
+          columns={columns}
+          visible={visible}
+          doneStageId={doneStageId}
+          canCreate={canCreate}
+          canTransition={canTransition}
+          onNew={(stageId) => setCreating(stageId)}
+          drag={drag}
+          overStage={overStage}
+          beforeKey={beforeKey}
+          arrivedKey={arrivedKey}
+          draggedTask={draggedTask}
+          onCardDragStart={onCardDragStart}
+          onCardDragEnd={onCardDragEnd}
+          onCardDragOver={onCardDragOver}
+          onColumnDragOver={onColumnDragOver}
+          onColumnDrop={onColumnDrop}
+        />
       ) : (
         <ListView tasks={visible(allTasks)} stages={stages} />
       )}
