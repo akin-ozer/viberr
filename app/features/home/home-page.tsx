@@ -286,6 +286,9 @@ function NewProjectModal({
     "balanced",
   );
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
+  // F10: with no connections yet, the owner can be typed manually (or left blank
+  // for a repo-less project) so a fresh instance can still create its first project.
+  const [manualOwner, setManualOwner] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const fetcher = useFetcher<{
     ok: boolean;
@@ -308,8 +311,10 @@ function NewProjectModal({
     repo || slugifyProjectName(name);
   const slug = slugifyProjectName(name);
   const busy = fetcher.state !== "idle";
-  const ok =
-    name.trim().length > 1 && effKey.length >= 2 && connections.length > 0;
+  // The effective repo owner: a picked connection, or a manually-typed owner when
+  // there are none. Empty owner ⇒ a repo-less project (F10).
+  const effOwner = connections.length > 0 ? connOwner : manualOwner.trim();
+  const ok = name.trim().length > 1 && effKey.length >= 2;
   const serverError =
     fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
@@ -332,8 +337,10 @@ function NewProjectModal({
     fd.set("intent", "create-project");
     fd.set("name", name.trim());
     fd.set("key", effKey);
-    fd.set("owner", connOwner);
-    fd.set("repoName", effRepo || "new-project");
+    fd.set("owner", effOwner);
+    // No owner ⇒ repo-less project: don't send a repo name (avoids a dead
+    // `<owner>/<slug>` repo the GitHub surfaces would render as configured).
+    fd.set("repoName", effOwner ? effRepo || "new-project" : "");
     fd.set("template", template);
     fd.set("policy", policy);
     fetcher.submit(fd, { method: "post" });
@@ -432,29 +439,44 @@ function NewProjectModal({
             ))}
           </div>
           {connections.length === 0 && (
-            <div className="def-note">
-              <Icon name="alert" />
-              <span>
-                No GitHub connections. Add one in{" "}
-                <b>Viberr settings → GitHub connections</b> first.
-              </span>
-            </div>
+            <>
+              <input
+                id="np-owner"
+                type="text"
+                className="np-owner-input"
+                value={manualOwner}
+                placeholder="github owner / org (optional)"
+                onChange={(e) => setManualOwner(e.target.value.trim())}
+              />
+              <div className="def-note">
+                <Icon name="alert" />
+                <span>
+                  No GitHub connections yet. Type a repo owner to bind a
+                  repository, or leave it blank to create a{" "}
+                  <b>repo-less project</b> — add a PAT later in{" "}
+                  <b>Viberr settings → GitHub connections</b>.
+                </span>
+              </div>
+            </>
           )}
         </div>
         <div className="field">
           <label className="flabel" htmlFor="np-repo">
             GitHub repository{" "}
             <span className="fhint">
-              project default · task-level override later
+              {effOwner
+                ? "project default · task-level override later"
+                : "no owner set · this will be a repo-less project"}
             </span>
           </label>
           <div className="repo-input">
-            <span className="pre">{(connOwner || "github") + "/"}</span>
+            <span className="pre">{(effOwner || "github") + "/"}</span>
             <input
               id="np-repo"
               type="text"
               value={repo}
               placeholder={effRepo || "repo-name"}
+              disabled={!effOwner}
               onChange={(e) => setRepo(e.target.value)}
             />
           </div>

@@ -23,7 +23,7 @@ import {
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { readKbBody } from "~/server/files/kb-injection.server";
+import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -47,6 +47,7 @@ import {
 } from "~/server/runtimes/simulated-runtime.server";
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { roleCan } from "~/shared/rbac";
 import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
@@ -110,6 +111,11 @@ export interface ResolvedSpecialist {
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
   capabilities: CapabilityGrant[];
+  /** Stage ids this profile may work (F1 — enforced by the assign/run guards
+   *  and the operator picker). Empty when spanAll or unset. */
+  stages: string[];
+  /** When true the profile is eligible across every stage. */
+  spanAll: boolean;
 }
 
 /** First runnable backend for a profile (codex|claude), defaulting to claude
@@ -135,6 +141,8 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     kb: view.resources.kb ?? [],
     mcps: view.resources.mcps ?? [],
     capabilities: [],
+    stages: view.stages ?? [],
+    spanAll: view.spanAll ?? false,
   };
 }
 
@@ -232,6 +240,7 @@ export async function assignSpecialist(
     input.projectSlug,
     input.profileId,
   );
+  assertStageEligible(specialist, existing.parsed.frontmatter.stage);
 
   const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
   const ref: AgentRef = {
@@ -316,6 +325,7 @@ export async function assignReviewer(
     input.projectSlug,
     input.profileId,
   );
+  assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
 
   const alreadyEngaged = existing.parsed.frontmatter.reviewers.some(
     (r) => r.profileId === reviewer.profileId,
@@ -507,8 +517,10 @@ export async function startSpecialistRun(
   // specialist without push/PR/merge rights literally cannot run those
   // commands). Empty when nothing is withheld.
   let disallowedTools: string[] = [];
+  let resolvedSpec: ResolvedSpecialist | null = null;
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+    resolvedSpec = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
@@ -528,6 +540,13 @@ export async function startSpecialistRun(
     }
   } catch {
     // Profile may have been undeployed since assignment — keep the default.
+  }
+  // Stage eligibility holds at the RUN boundary too (F1): an already-assigned
+  // specialist must not be re-run after the task moved to a stage it isn't
+  // eligible for (assign-time checks alone would let a re-prompt bypass F1).
+  // Outside the try so the graceful undeployed-profile fallback can't swallow it.
+  if (resolvedSpec) {
+    assertStageEligible(resolvedSpec, existing.parsed.frontmatter.stage);
   }
 
   // The agent's run persona: its detailed definition + declared skills + KB docs.
@@ -732,8 +751,10 @@ export async function startReviewerRun(
   let kb: string[] = [];
   let mcpNames: string[] = [];
   let disallowedTools: string[] = [];
+  let resolvedRev: ResolvedSpecialist | null = null;
   try {
     const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
+    resolvedRev = resolved;
     agentName = resolved.name;
     skills = resolved.skills;
     kb = resolved.kb;
@@ -749,6 +770,12 @@ export async function startReviewerRun(
     }
   } catch {
     // Profile may have been undeployed since engagement — keep the default.
+  }
+  // Stage eligibility at the RUN boundary (F1) — same rationale as
+  // startSpecialistRun: an engaged reviewer must not be re-run at a stage its
+  // profile isn't eligible for. Outside the try so the fallback can't swallow it.
+  if (resolvedRev) {
+    assertStageEligible(resolvedRev, existing.parsed.frontmatter.stage);
   }
 
   const persona = buildSpecialistPersona({
@@ -941,10 +968,16 @@ export function buildSpecialistPersona(input: {
   }
   // Inject declared knowledge-base docs (F6, FR9): the KB leg was decorative for
   // specialists — no run received KB content. Load each declared KB folder that
-  // exists in the store, same as skills.
+  // exists in the store. KB_INJECTION_BUDGET is a GLOBAL cap across all declared
+  // KBs (F9) — a specialist with many KBs can't blow the prompt with N × 24k.
+  let kbBudget = KB_INJECTION_BUDGET;
   for (const name of input.kb ?? []) {
-    const body = readKbBody(name, input.dataRoot);
-    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+    if (kbBudget <= 0) break;
+    const body = readKbBody(name, input.dataRoot, kbBudget);
+    if (body) {
+      parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+      kbBudget -= body.length;
+    }
   }
   return parts.join("");
 }
@@ -1319,7 +1352,7 @@ function requireRuntimeRole(
     (m) => m.userId === actor.userId,
   )?.role;
   if (!role) throw forbidden(`Only project members can ${what}.`);
-  if (role !== "admin" && role !== "maintainer") {
+  if (!roleCan(role, "run-agents")) {
     throw forbidden(`Your project role (${role}) cannot ${what}.`);
   }
   return role;
@@ -1335,6 +1368,43 @@ export interface DeployedSpecialistView {
   /** Reasoning effort (empty when unset) — carried so a comment-resume can
    *  apply the agent's current effort, not the prior run's. */
   effort: string;
+  /** Stage ids this profile is eligible to work (F1 — now enforced, not just
+   *  displayed). Empty when spanAll. */
+  stages: string[];
+  /** When true the profile is eligible across every stage. */
+  spanAll: boolean;
+}
+
+/**
+ * True when a specialist may work a task at `stageId`: it spans all stages, OR
+ * declares no eligible stages (treated as unrestricted, back-compat), OR lists
+ * this stage. Consumed by the operator picker and the assign/run guards (F1).
+ */
+export function specialistEligibleForStage(
+  spec: { stages: string[]; spanAll: boolean },
+  stageId: string,
+): boolean {
+  if (spec.spanAll) return true;
+  if (spec.stages.length === 0) return true;
+  return spec.stages.includes(stageId);
+}
+
+/**
+ * Enforce agent stage eligibility (F1): reject assigning/running a specialist on
+ * a task whose current stage the specialist isn't eligible for. The Agents UI
+ * shows "N of M stages" per profile; this makes that promise real instead of
+ * decorative. `spanAll` and no-declared-stages profiles are always eligible.
+ */
+function assertStageEligible(
+  spec: { name: string; stages: string[]; spanAll: boolean },
+  stageId: string,
+): void {
+  if (specialistEligibleForStage(spec, stageId)) return;
+  throw AppError.validation(
+    `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
+      spec.stages.join(", ") || "no stages"
+    }. Change the task's stage or the profile's eligible stages.`,
+  );
 }
 
 /**
@@ -1365,6 +1435,8 @@ export function listDeployedSpecialists(
       backend: resolved.backend,
       model: resolved.model,
       effort: resolved.effort,
+      stages: resolved.stages,
+      spanAll: resolved.spanAll,
     });
   }
   return out;

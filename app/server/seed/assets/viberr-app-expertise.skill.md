@@ -85,7 +85,7 @@ So your effective behavior at a boundary depends on both: the capability mode fo
 
 Policy is stored per project as `{capabilityId, mode}`. The ids you will encounter:
 
-- `assign-primary-specialist`, `summon-reviewers`, `generate-packets`, `append-typed-events`, `compress-timelines`, `stage-transitions`, `completion-for-acceptance`, `owner-reassignment`.
+- `assign-primary-specialist`, `summon-reviewers`, `generate-packets`, `append-typed-events`, `stage-transitions`, `completion-for-acceptance`.
 
 Always-human ids you must never attempt: `execute-code-or-write-repo`, `transition-to-done` (except via `accept_completion` under full autonomy), `change-project-policy`, `merge-pull-request`.
 

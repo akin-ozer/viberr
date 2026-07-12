@@ -85,6 +85,16 @@ export function registerSeededLiveFromData(db: Database.Database): void {
       const runId = seedRunId(taskKey, run.id);
       const row = getRun(db, runId);
       if (!row || row.state !== "running") continue;
+      // Refresh started_at to boot time (F7): the run row was written once by
+      // `npm run seed` and its back-dated started_at goes stale across boots, so
+      // a demo "live run" viewed the next day showed ELAPSED 15h+. Re-anchor it
+      // to (now − its seeded elapsedSeconds) each boot so the strip ticks a
+      // realistic elapsed regardless of how long ago the store was seeded.
+      if (typeof run.elapsedSeconds === "number") {
+        patchRun(db, runId, {
+          startedAt: new Date(Date.now() - run.elapsedSeconds * 1000).toISOString(),
+        });
+      }
       registerSeededLive({
         runId,
         projectSlug: row.project_slug,

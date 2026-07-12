@@ -1452,6 +1452,8 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
 .cap-matrix-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; border-bottom: 1px solid var(--border); }
 .cap-matrix-table th.corner { left: 0; z-index: 3; text-align: left; }
 .cap-matrix-table td.rowlabel { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; min-width: 230px; font-size: .82rem; color: var(--fg); }
+.mx-scope { display: inline-block; margin-left: .5rem; padding: .05rem .34rem; border-radius: 5px; font-size: .6rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 88%); vertical-align: middle; cursor: help; }
+.mx-legend .mx-scope-legend { color: var(--muted); }
 .mx-col { display: flex; flex-direction: column; align-items: center; gap: .35rem; font-family: var(--font-display); font-weight: 700; font-size: .78rem; }
 .mx-col .agent-glyph { width: 26px; height: 26px; }
 .cap-matrix-table tr.grp td { position: sticky; left: 0; text-align: left; font-size: .66rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: color-mix(in srgb, var(--fg), transparent 97%); }
@@ -2790,6 +2792,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
+.np-owner-input { width: 100%; padding: .5rem .7rem; margin-bottom: .5rem; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); color: var(--fg); font-size: .86rem; font-family: var(--font-mono); }
+.np-owner-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .82rem; color: var(--faint); padding: .55rem 0 .55rem .7rem; white-space: nowrap; }

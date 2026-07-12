@@ -63,22 +63,24 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
     expect(RBAC_ROWS.map((r) => r.action)).toEqual([
       "View board, tasks & timelines",
       "Comment on tasks (app-wide)",
-      "Take / release own task ownership",
       "Create tasks",
+      "Take / release own task ownership",
       "Approve stage transitions",
       "Resolve decision packets",
       "Accept completion → Done",
+      "Edit the task goal",
       "Run agents & reorder the board",
       "Release any task owner",
       "Manage members & roles",
       "Edit workflow & policy",
     ]);
     expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
-    // Admin holds everything; the contributor≠viewer line is "Create tasks".
+    // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
+    // comment; the contributor tier adds "Create tasks" AND task ownership.
     expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
   });
 });
 

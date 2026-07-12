@@ -23,6 +23,7 @@ import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
 /**
@@ -194,18 +195,35 @@ function PolicyPanel({
   myRole: string | null;
 }) {
   const admin = myRole === "admin";
+  const r = (myRole as ProjectRole | null) ?? null;
   const role = myRole || "viewer";
+  // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
+  // THIS viewer's role — no aspirational copy that the server would 403.
   const rows: { k: string; v: string; icon: "user" | "flag" | "plus" | "message" | "cpu" | "lock" }[] = [
     { k: "Your role", v: role.charAt(0).toUpperCase() + role.slice(1), icon: "user" },
-    { k: "Task owner", v: "Reviews & accepts · that task only", icon: "flag" },
+    { k: "Comments", v: "Every registered user", icon: "message" },
     {
-      k: "Ownership",
-      v: admin ? "Take / release · admin: anyone" : "Take / release · yours",
+      k: "Task ownership",
+      v: roleCan(r, "own-task")
+        ? admin
+          ? "Take / release · admin releases anyone"
+          : "Take / release your own seat"
+        : "View only — contributor+ to own",
       icon: "plus",
     },
-    { k: "Comments", v: "Every registered user", icon: "message" },
-    { k: "Agent may", v: "Request transition", icon: "cpu" },
-    { k: "Transition to done", v: "Human owner only", icon: "lock" },
+    {
+      k: "Accept completion",
+      v: roleCan(r, "accept-completion")
+        ? "You can accept → Done"
+        : "Maintainer or admin only",
+      icon: "flag",
+    },
+    {
+      k: "Run agents",
+      v: roleCan(r, "run-agents") ? "You can run agents" : "Maintainer or admin only",
+      icon: "cpu",
+    },
+    { k: "Review → Done", v: "Human decision, locked at the review boundary", icon: "lock" },
   ];
   return (
     <div className="panel">
@@ -581,7 +599,8 @@ function CurrentStatePanel({
   // server re-checks). Goes through the same governed transition that an applied
   // operator recommendation does, so it posts the **Transition:** timeline
   // comment and hands the task to the operator at its new stage.
-  const canTransition = myRole === "admin" || myRole === "maintainer";
+  const canTransition = roleCan(myRole as ProjectRole | null, "approve-transition");
+  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   const transitionBusy = transitionFetcher.state !== "idle";
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
@@ -653,7 +672,7 @@ function CurrentStatePanel({
                   {owner.name.split(" ")[0]}
                   {ownerMine ? " (you)" : ""}
                 </span>
-                {(ownerMine || myRole === "admin") && (
+                {((ownerMine && canOwn) || myRole === "admin") && (
                   <button
                     type="button"
                     className="own-x"
@@ -669,10 +688,10 @@ function CurrentStatePanel({
                   </button>
                 )}
               </span>
-            ) : myRole ? (
-              // Only project MEMBERS can take ownership (M3) — setOwner requires
-              // membership, so hide "Assign me" from non-members (myRole null)
-              // rather than render a button that 403s.
+            ) : canOwn ? (
+              // Q5 clean tiering: only contributor+ may hold the owner seat
+              // (setOwner enforces `own-task`). Viewers are read + comment, so
+              // hide "Assign me" rather than render a button that 403s.
               <button
                 type="button"
                 className="rev-add sm"
@@ -763,13 +782,17 @@ export function TaskDetailPage({
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
   // RBAC. The mutations themselves live in ExecutionSection /
   // RecommendationsSection below.
-  const canRunAgents = myRole === "admin" || myRole === "maintainer";
+  const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
+  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
   // task owner (M2 / owner ruling Q2). accept_completion is additionally
   // re-gated to admin|maintainer on the server — an owner-only viewer who
   // picks it gets a friendly 409, but the common non-completion options work.
+  // The owner bypass requires `own-task` (contributor+): the server's owner
+  // check does too, so a demoted viewer-owner must NOT be shown resolve options
+  // that would 403 (matches releaseOwner's own-task gate).
   const isOwner =
-    task.owner?.kind === "human" && task.owner.userId === me.id;
+    task.owner?.kind === "human" && task.owner.userId === me.id && canOwn;
   const canResolvePacket = canRunAgents || isOwner;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -787,7 +810,7 @@ export function TaskDetailPage({
 
   // Interrupt is admin|maintainer (contracts §3.2); the button hides for
   // everyone else. Server re-checks RBAC regardless.
-  const canInterrupt = myRole === "admin" || myRole === "maintainer";
+  const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
   const onInterrupt = (runThreadId: string) => {
     if (runBusy) return;
     const run = runtime.find((r) => r.id === runThreadId);
@@ -813,7 +836,7 @@ export function TaskDetailPage({
       : undefined;
   // Complete the real merge of an accepted (merge-pending) PR (S2).
   // admin|maintainer only; server re-checks.
-  const canMerge = myRole === "admin" || myRole === "maintainer";
+  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
   const onCompleteMerge = canMerge
     ? () => {
         if (runBusy) return;

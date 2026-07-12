@@ -420,7 +420,9 @@ describe("ownership actions", () => {
       intent: "owner-release",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(release.init.status).toBe(403);
-    expect(release.data.error).toContain("Only project admins");
+    // Canonical guard (release-any-ownership = admin only): the message names the
+    // actor's role rather than a hard-coded "admins" string.
+    expect(release.data.error).toContain("cannot release another member's ownership");
   });
 
   it("hand-off by admin + admin release with the forced copy + audit trail", async () => {
@@ -542,7 +544,10 @@ describe("loader — deployed specialists", () => {
 
 describe("assign-specialist + run-specialist intents", () => {
   it("assigns the developer specialist (admin) → frontmatter + agent event + toast", async () => {
-    // VIB-166 is a triage task with no specialist.
+    // VIB-166 is a triage task with no specialist. The Developer's eligible
+    // stages are ready/impl (F1 now enforces this), so move it to Ready first —
+    // assigning a developer at Triage is correctly rejected.
+    await postIntent("VIB-166", ids.arda, { intent: "transition", to: "ready" });
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "assign-specialist", profileId: "developer",
     })) as { ok: true; toast: string };
@@ -563,6 +568,15 @@ describe("assign-specialist + run-specialist intents", () => {
       intent: "assign-specialist", profileId: "developer",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(reviewer.init.status).toBe(403);
+  });
+
+  it("rejects assigning a specialist to a stage outside its eligibility (F1)", async () => {
+    // VIB-168 is at Triage; the Developer profile is scoped to ready/impl.
+    const result = (await postIntent("VIB-168", ids.arda, {
+      intent: "assign-specialist", profileId: "developer",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("not eligible");
   });
 
   it("assigning an unknown profile id is a validation error", async () => {

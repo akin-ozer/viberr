@@ -160,8 +160,15 @@ export async function createProject(
     throw AppError.validation("Task key must be 2–4 letters.");
   }
   const owner = input.owner.trim();
-  if (!owner) {
-    throw AppError.validation("Pick a GitHub connection first.");
+  const repoName = input.repoName.trim();
+  // F10: a repo owner is required only when a repo NAME is given (a bound repo
+  // needs `<owner>/<name>`). A brand-new instance with no GitHub connections yet
+  // (honest empty slate) can still self-serve its first project as a repo-LESS
+  // project — creation is not blocked behind adding a PAT.
+  if (repoName && !owner) {
+    throw AppError.validation(
+      "Enter a repo owner (or pick a GitHub connection) for a repository-bound project — or leave the repo empty to create a repo-less project.",
+    );
   }
   const slug = slugifyProjectName(name);
   if (!slug) {
@@ -180,7 +187,6 @@ export async function createProject(
   // An empty repo field creates a repo-LESS project (repo: null) — a supported
   // state — instead of fabricating a nonexistent `<owner>/<slug>` that every
   // GitHub surface would then render as a dead configured repo (X12).
-  const repoName = input.repoName.trim();
   const repo = repoName ? `${owner}/${repoName}` : null;
 
   // Resolve the selected connection so we can (a) fetch the repo's real

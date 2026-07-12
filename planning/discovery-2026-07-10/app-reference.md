@@ -5,6 +5,45 @@ AFTER the D1–D4 decisions + 37-finding + hunt-defect implementation (1029 test
 React Router 7 SSR · Node 20+ · TS · better-sqlite3 (WAL) · Zod v4 · SSE (no websockets) · ported
 `viberr.css` design system (**no Tailwind — use `--viberr-*`/design tokens only**).
 
+> ## ⚑ PASS-3 UPDATE — the role-bindings rework landed (2026-07-12, PR #14 / branch
+> ## `viberr-rolebindings-pass3`, 1156 tests). Where this doc and the current code disagree on
+> ## RBAC/capabilities, the code + `../discovery-2026-07-12/` win. The deltas:
+>
+> - **RBAC is now matrix-as-runtime-source.** `app/shared/rbac.ts` holds THE `ACTION_ROLES` map
+>   (16 canonical actions → allowed `ProjectRole[]`). Every server guard calls `requireAction`
+>   (task-actions) or `assertProjectAction` (`app/server/auth/project-role-guard.server.ts`, which
+>   replaced the 3 duplicated `requireProjectAdmin` copies). The Policy page renders the SAME object
+>   (`RBAC_TABLE`), and `app/features/policy/policy-rbac.server.test.ts` drives every guard per role
+>   to keep display and enforcement bound. `PROJECT_CAP_MATRIX`/`RBAC_ROWS` in policy-data.ts are now
+>   just the display projection of `RBAC_TABLE`.
+> - **Q5 clean tiering:** viewer = read + comment ONLY. Task ownership (take/release/hand-off target)
+>   and owner-resolve of non-completion packets moved to **contributor+**. UI gates use `roleCan`.
+> - **Full D9 SSE membership** (`resources.events.ts`): an explicit `project:`/`task:` scope now
+>   requires project membership (org-admin bypass); a foreign-only subscribe → 403.
+> - **Review queue + Activity loaders are members-only** now (`requireProjectMember`) — board/task
+>   view stay app-wide.
+> - **Capability catalog pruned to 26 ids** (removed `edit-other-task-branch`, `open-or-merge-pr`,
+>   `compress-timelines`, `owner-reassignment`). `ENFORCED_CAPABILITY_IDS`=13, `ALWAYS_HUMAN`=3.
+>   New `capabilityEnforcement(id)` → `both | claude-only | advisory`; the 4 `CLAUDE_ONLY_ENFORCED`
+>   specialist tool-denylist caps (create-task-branch, commit-push-branch, open-review-pr,
+>   execute-code-or-write-repo) are labeled "Claude-enforced · advisory on Codex" (S3). Always-human
+>   caps (merge-pull-request) classify as `both`, NOT advisory.
+> - **F11 (HIGH, was a real delivery blocker):** the `edit-other-task-branch` deny rule's broad
+>   `Bash(git checkout:*)` defeated the granted `create-task-branch` under bypassPermissions, so a
+>   Claude specialist couldn't create its own branch in the default config. Removed (moot under Q7
+>   per-task workspace isolation). Claude delivery now works with `edit-other-task-branch: human`.
+> - **F1 agent stage eligibility is now ENFORCED** (was displayed-only): `assertStageEligible` gates
+>   assign + run (specialist AND reviewer); operator `pickSpecialist/pickReviewer` filter by the
+>   task's current stage; the scripted operator drive SKIPS a stage-ineligible engaged agent (never
+>   hard-halts); `get_task` snapshot carries `eligibleForCurrentStage`.
+> - **Failed runs surface** (F8): an errored specialist/reviewer run posts a typed `blocked` event +
+>   a recovery packet + a watcher notification (quota/auth classified via `runFailureReason`) instead
+>   of silently reverting waiting→human.
+> - **KB injection budget is a GLOBAL cap** across all declared KBs (was per-KB). Claude runs also
+>   pass `plugins: []` (a 3rd isolation lever alongside settingSources/skills).
+> - Smaller: repo-less/manual-owner first-project creation (F10); deleteProject cleans notifications
+>   (F2); ErrorBoundary keeps the theme (F3); honest Permissions rail from the matrix (F4).
+
 > **What changed since discovery (read this first):**
 > - **Agent roster = operator + developer + reviewer only.** The Advisor/consultant (decision A) and
 >   the Tester (decision D1) profiles were REMOVED; the Reviewer ("Review & validation") both reviews
@@ -82,9 +121,10 @@ locked}, `members[]` {userId,role∈admin|maintainer|contributor|viewer}, `agent
 (ids: meaningful-comment, operator-brevity, no-duplicate-summary, compression-threshold(40 events),
 evidence-separation).
 
-Capability catalog: `app/shared/capabilities.ts` (`CAP_CATALOG`, ~32 ids;
+Capability catalog: `app/shared/capabilities.ts` (`CAP_CATALOG`, **26 ids** after the pass-3 prune;
 `ALWAYS_HUMAN_CAPABILITY_IDS` = merge-pull-request, transition-to-done, change-project-policy —
-coerced to `human` at persist by `grantsFor`).
+coerced to `human` at persist by `grantsFor`. `ENFORCED_CAPABILITY_IDS`=13, `CLAUDE_ONLY_ENFORCED`=4,
+`capabilityEnforcement(id)`→both|claude-only|advisory).
 
 ## 3. SQLite tables
 

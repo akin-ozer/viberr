@@ -1,6 +1,6 @@
 import { data } from "react-router";
 import type { Route } from "./+types/project.review";
-import { requireUser } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
@@ -18,11 +18,14 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
   const db = getDb();
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
+  // Members only (R4): the review queue exposes task detail + owner assignments;
+  // unlike the app-wide board/task read surfaces it's project-scoped, like
+  // policy/agents/settings/github.
+  await requireProjectMember(request, params.slug, "view the review queue");
   const queue = getReviewQueue(db, params.slug);
   return { slug: params.slug, ...queue };
 }

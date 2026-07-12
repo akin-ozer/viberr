@@ -45,6 +45,12 @@ async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
       resolve();
     });
   });
+  // chokidar's "ready" fires when the initial scan completes, but there is a
+  // small gap before the OS-level watches on the just-scanned subdirectories are
+  // fully established. A recursive rm that lands in that gap can miss the
+  // unlinkDir event — the source of an intermittent flake in the rm tests. A
+  // short settle after ready closes the window deterministically.
+  await new Promise((r) => setTimeout(r, 250));
   return watcher;
 }
 

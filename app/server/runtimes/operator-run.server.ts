@@ -7,7 +7,7 @@ import {
   agentProfilesDir,
   skillDirPath,
 } from "~/server/files/file-store-root.server";
-import { readKbBody } from "~/server/files/kb-injection.server";
+import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -34,6 +34,7 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { replyTextForRun } from "~/server/tasks/agent-reply.server";
+import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
@@ -49,10 +50,14 @@ import { buildScript } from "./simulated-runtime.server";
  *   claude + credential present → REAL tool-driven run: the model calls the
  *     `mcp__viberr__*` tools; every call mutates the store and updates the
  *     board live. This is the path the "operator end to end" proof exercises.
- *   codex, or claude unavailable → SCRIPTED drive: the same operator-actions
- *     are called deterministically in code (the board still advances honestly),
- *     and a simulated run streams the narrative to the agent logs. Codex has no
- *     in-process tool channel, so it always takes this path.
+ *   codex + credential present → STRUCTURED-PLAN run: Codex emits a structured
+ *     JSON plan (OPERATOR_PLAN_SCHEMA), which `executeCodexPlan` runs through the
+ *     same gated operator-actions as the Claude tools — so Codex honors the
+ *     identical RBAC + autonomy, it just plans-then-executes instead of
+ *     calling tools live.
+ *   neither backend available → SCRIPTED drive: the same operator-actions are
+ *     called deterministically in code (the board still advances honestly), and
+ *     a simulated run streams the narrative to the agent logs.
  */
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
@@ -727,9 +732,19 @@ async function runScriptedOperatorDrive(
         if (snap.stage === reviewStageId) {
           // Prompt EVERY engaged reviewer (not just the first) so each records a
           // verdict; a single engaged/picked reviewer keeps the common case.
-          const revIds = snap.reviewers.length
-            ? snap.reviewers.map((r) => r.profileId)
-            : [pickReviewer(snap)?.id].filter((x): x is string => !!x);
+          // FILTER by stage eligibility (F1): re-prompting an engaged reviewer
+          // whose profile isn't eligible for THIS stage would throw in
+          // assertStageEligible and hard-halt the whole coordination turn — skip
+          // the ineligible one instead (the snapshot precomputes eligibility).
+          const eligibleHere = (id: string) => {
+            const d = snap.deployedSpecialists.find((s) => s.id === id);
+            return !d || d.eligibleForCurrentStage;
+          };
+          const revIds = (
+            snap.reviewers.length
+              ? snap.reviewers.map((r) => r.profileId)
+              : [pickReviewer(snap)?.id].filter((x): x is string => !!x)
+          ).filter(eligibleHere);
           if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
             for (const rev of revIds) {
               say(
@@ -740,10 +755,15 @@ async function runScriptedOperatorDrive(
           return;
         }
         if (snap.stage === workStageId || !workStageId) {
-          const pick = snap.specialist
-            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId) ??
-              pickSpecialist(snap)
-            : pickSpecialist(snap);
+          // Only re-run the assigned specialist if it's ELIGIBLE for the current
+          // stage (F1); otherwise fall back to an eligible pick (pickSpecialist
+          // already filters by eligibility) so an assigned-but-now-ineligible
+          // specialist doesn't throw and halt coordination.
+          const assigned = snap.specialist
+            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
+            : undefined;
+          const pick =
+            assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
           if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
             say(
               (await operatorPromptSpecialist(db, ctx, { projectSlug, taskKey, profileId: pick.id }, authority)).message,
@@ -860,9 +880,17 @@ async function runScriptedOperatorDrive(
 
 // ------------------------------------------------------- specialist picks
 
-/** Prefer an implementation specialist eligible for the current stage. */
+/**
+ * Pick an implementation specialist ELIGIBLE for the current stage (F1 — stage
+ * eligibility is now real). Filters to specialists whose declared stages include
+ * `snap.stage` (spanAll / no-stages count as eligible), then prefers an
+ * implementation role. Returns null when no eligible specialist exists rather
+ * than silently assigning one that can't work this stage.
+ */
 function pickSpecialist(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists;
+  const specs = snap.deployedSpecialists.filter((s) =>
+    specialistEligibleForStage(s, snap.stage),
+  );
   return (
     specs.find((s) => /develop|implement/i.test(s.role) || s.id === "developer") ??
     specs.find((s) => !/review/i.test(s.role)) ??
@@ -871,10 +899,13 @@ function pickSpecialist(snap: OperatorTaskSnapshot) {
   );
 }
 
-/** Prefer a review specialist to engage before acceptance. */
+/** Prefer a stage-eligible review specialist to engage before acceptance (F1). */
 function pickReviewer(snap: OperatorTaskSnapshot) {
   const specs = snap.deployedSpecialists.filter(
-    (s) => !snap.reviewers.some((r) => r.profileId === s.id) && s.id !== snap.specialist?.profileId,
+    (s) =>
+      specialistEligibleForStage(s, snap.stage) &&
+      !snap.reviewers.some((r) => r.profileId === s.id) &&
+      s.id !== snap.specialist?.profileId,
   );
   return (
     specs.find((s) => /review/i.test(s.role) || s.id === "reviewer") ??
@@ -941,10 +972,17 @@ export function buildOperatorSystemPrompt(
   }
   // Inject declared knowledge-base docs into context (F6, FR9): the KB leg was
   // decorative — no run ever received KB content. Load every declared KB folder
-  // that exists in the store, same as skills.
+  // that exists in the store, same as skills. The KB_INJECTION_BUDGET is a GLOBAL
+  // cap shared across ALL declared KBs (F9) — an agent with many KBs can't blow
+  // the prompt with N × 24k; each KB draws from the remaining budget.
+  let kbBudget = KB_INJECTION_BUDGET;
   for (const name of authority.kb) {
-    const body = readKbBody(name, dataRoot);
-    if (body) parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+    if (kbBudget <= 0) break;
+    const body = readKbBody(name, dataRoot, kbBudget);
+    if (body) {
+      parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
+      kbBudget -= body.length;
+    }
   }
   parts.push(
     "\n\n---\n# Your authority for this task\n\n" +

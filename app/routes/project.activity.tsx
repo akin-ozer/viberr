@@ -1,6 +1,6 @@
 import { data } from "react-router";
 import type { Route } from "./+types/project.activity";
-import { requireUser } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
@@ -32,12 +32,15 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
   const db = getDb();
   const project = getProject(db, params.slug);
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
+  // Members only (R4): the activity stream + audit log expose member actions,
+  // policy changes, and access events — project-scoped like the other config
+  // surfaces, not app-wide like the board.
+  await requireProjectMember(request, params.slug, "view project activity");
   const url = new URL(request.url);
   const streamLimit = clampFeedLimit(
     url.searchParams.get("stream"),

@@ -284,7 +284,7 @@ export function ConnectionsPanel({
           );
         })}
         {connections.length === 0 && (
-          <div className="empty">No connections yet — add one to create projects.</div>
+          <div className="empty">No connections yet — add one to bind projects to a GitHub repo (projects can also be created repo-less).</div>
         )}
       </div>
       {modal && (

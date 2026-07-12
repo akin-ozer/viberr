@@ -11,6 +11,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
+import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { buildScript } from "~/server/runtimes/simulated-runtime.server";
 import {
@@ -223,6 +224,105 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ).toBe(true);
     // No operator deployed in this project → the chain ends and the task must
     // NOT read "agent working" forever.
+    expect(parsed.frontmatter.waiting).toBe("human");
+  });
+
+  it("surfaces a FAILED run as a typed blocked event + recovery packet, not silence (F8)", async () => {
+    // A run that ends in `error` (e.g. a Codex quota exhaustion) used to leave no
+    // trace on the timeline and revert waiting=human silently. Now it must post a
+    // blocked event naming the reason and open a recovery packet.
+    // Deploy an operator (with generate-packets) alongside the dev — every active
+    // task has one, and it's what opens the recovery packet on a failed run.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // Build the errored run SYNCHRONOUSLY (no startRun/simulated-drip) so the
+    // test is deterministic — a real async run's lifecycle raced CI's slower
+    // SQLite (the "database connection is not open" flood) and intermittently
+    // dropped the watcher notification. Here the run row + its error log line
+    // exist before applyAgentCompletionEffects reads them.
+    const runId = "run_f8_probe";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-f8",
+      role: "Developer",
+      kind: "primary",
+      backend: "codex",
+      simulated: false,
+      model: "gpt-5.5",
+      sdk: "codex",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-07-12T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "turn.failed",
+        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        role: "Developer",
+        kind: "primary",
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error", simulated: false },
+    );
+    const parsed = taskFile().parsed;
+    // The typed failure event naming the reason (distinct from the operator's
+    // packet event that also lands).
+    const failureEvent = parsed.timeline.find(
+      (e) => e.type === "blocked" && /did not complete/.test(e.text),
+    );
+    expect(failureEvent, "a typed failure event must be posted").toBeTruthy();
+    expect(failureEvent!.text.toLowerCase()).toContain("quota");
+    // A recovery packet reaches the human's queue (not just a timeline note):
+    // it must open and mark the task blocked so it surfaces as "waiting on you".
+    expect(parsed.packet, "a recovery packet must open on a failed run").toBeTruthy();
+    expect(parsed.packet!.type).toBe("blocked");
+    // The task owner + supervisors get a quality notification about the failure.
+    const notif = store.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality' AND text LIKE '%run failed%'`,
+      )
+      .get() as { n: number };
+    expect(notif.n, "watchers are notified of the run failure").toBeGreaterThan(0);
+    // waiting must be flipped off `agent` (no phantom "agent working").
     expect(parsed.frontmatter.waiting).toBe("human");
   });
 });

@@ -21,8 +21,11 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     }
   });
 
-  it("reproduces the mock's 18-capability curated set with its default modes", () => {
-    expect(MODAL_CAP_IDS.size).toBe(18);
+  it("carries the curated specialist capability set with its default modes", () => {
+    // 17 after the role-bindings prune removed `edit-other-task-branch` (F11:
+    // moot + harmful under per-task workspace isolation).
+    expect(MODAL_CAP_IDS.size).toBe(17);
+    expect(MODAL_CAP_IDS.has("edit-other-task-branch")).toBe(false);
     expect(CAP_MODAL_CATALOG.map((g) => g.group)).toEqual([
       "Repository & execution",
       "Validation & review",
@@ -31,7 +34,6 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     // Spot-check the mock's defaults (agents spec §3.6).
     expect(CAP_MODAL_DEFAULTS["read-task-repo"]).toBe("direct");
     expect(CAP_MODAL_DEFAULTS["open-review-pr"]).toBe("recommend");
-    expect(CAP_MODAL_DEFAULTS["edit-other-task-branch"]).toBe("human");
     expect(CAP_MODAL_DEFAULTS["merge-pull-request"]).toBe("human");
   });
 

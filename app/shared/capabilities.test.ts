@@ -1,0 +1,76 @@
+import { describe, expect, it } from "vitest";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  CAP_CATALOG,
+  CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS,
+  ENFORCED_CAPABILITY_IDS,
+  capabilityByLabel,
+  capabilityEnforcement,
+  capabilityIsEnforced,
+} from "./capabilities";
+
+describe("capability catalog", () => {
+  it("has no duplicate ids and every enforced id exists in the catalog", () => {
+    const ids = CAP_CATALOG.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const idSet = new Set(ids);
+    for (const id of ENFORCED_CAPABILITY_IDS) {
+      expect(idSet.has(id), `${id} in ENFORCED but missing from catalog`).toBe(true);
+    }
+    for (const id of ALWAYS_HUMAN_CAPABILITY_IDS) {
+      expect(idSet.has(id), `${id} in ALWAYS_HUMAN but missing from catalog`).toBe(true);
+    }
+  });
+
+  it("pruned ids (F11/R3) are gone from the catalog", () => {
+    const ids = new Set(CAP_CATALOG.map((c) => c.id));
+    for (const gone of ["edit-other-task-branch", "open-or-merge-pr", "compress-timelines", "owner-reassignment"]) {
+      expect(ids.has(gone), `${gone} should have been pruned`).toBe(false);
+    }
+  });
+});
+
+describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
+  it("classifies specialist tool-denylist caps as claude-only", () => {
+    for (const id of ["create-task-branch", "commit-push-branch", "open-review-pr", "execute-code-or-write-repo"]) {
+      expect(capabilityEnforcement(id), id).toBe("claude-only");
+    }
+  });
+
+  it("classifies structural ALWAYS_HUMAN caps as BOTH — never advisory-on-Codex", () => {
+    // Regression for the adversarial-review finding: merge-pull-request was
+    // mislabeled "claude-only" (⇒ the matrix badged it 'advisory on Codex'),
+    // understating the single most safety-critical row. Always-human caps hold
+    // on both backends because an agent never gets them in an actionable mode.
+    for (const id of ALWAYS_HUMAN_CAPABILITY_IDS) {
+      expect(capabilityEnforcement(id), id).toBe("both");
+    }
+    expect(capabilityEnforcement("merge-pull-request")).toBe("both");
+    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("merge-pull-request")).toBe(false);
+  });
+
+  it("classifies operator-gate caps as both, and unknown/advisory caps as advisory", () => {
+    for (const id of ["assign-primary-specialist", "summon-reviewers", "generate-packets", "append-typed-events", "stage-transitions"]) {
+      expect(capabilityEnforcement(id), id).toBe("both");
+    }
+    expect(capabilityEnforcement("post-quality-flags")).toBe("advisory");
+    expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
+  });
+
+  it("capabilityIsEnforced matches the enforced set", () => {
+    expect(capabilityIsEnforced("merge-pull-request")).toBe(true);
+    expect(capabilityIsEnforced("post-quality-flags")).toBe(false);
+  });
+
+  it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 4 tool-denylist rows", () => {
+    // What the CapabilityMatrixModal actually does: label → id → enforcement.
+    const claudeOnlyLabels = ["Create the task-key branch", "Commit & push to the branch", "Open the review pull request", "Execute code or write to the repo"];
+    for (const label of claudeOnlyLabels) {
+      const id = capabilityByLabel(label)?.id;
+      expect(id, label).toBeTruthy();
+      expect(capabilityEnforcement(id!), label).toBe("claude-only");
+    }
+    // Merge a pull request must NOT get the claude-only badge.
+    expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
+  });
+});

@@ -162,4 +162,29 @@ describe("createProject — policy preset shapes REAL governance", () => {
     );
     expect(fm(store, r.slug).repo).toBeNull();
   });
+
+  it("a fresh instance with NO connection (empty owner + empty repo) still self-serves a repo-less project (F10)", async () => {
+    const store = setupTestStore(ctx);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "First Project", key: "FST", owner: "", repoName: "", template: "governed", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(fm(store, r.slug).repo).toBeNull();
+    expect(r.slug).toBe("first-project");
+  });
+
+  it("a repo NAME without an owner is rejected with a helpful message (F10)", async () => {
+    const store = setupTestStore(ctx);
+    await expect(
+      createProject(
+        store.db,
+        { name: "Needs Owner", key: "NDO", owner: "", repoName: "some-repo", template: "governed", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/repo owner/i);
+  });
 });

@@ -366,6 +366,10 @@ export function GithubViewPage({
   // Grant scope stays a governed credential action (conventions: PAT/policy
   // changes are admin-shaped; project roles admin|maintainer hold it).
   const canGrant = myRole === "admin" || myRole === "maintainer";
+  // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
+  // credential is configured (F6). Only offer it once a PAT is bound; the
+  // no-credential card still shows "Fix in Settings" / "Attach credential".
+  const hasCredential = data.credential.source === "pat";
   const busy =
     reconcileFetcher.state !== "idle" || grantFetcher.state !== "idle";
 
@@ -380,7 +384,7 @@ export function GithubViewPage({
         flex: "none",
       }}
     >
-      {canGrant && (
+      {canGrant && hasCredential && (
         <button
           type="button"
           className="btn sm"

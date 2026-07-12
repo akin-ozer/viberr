@@ -50,6 +50,7 @@ import {
   assignReviewer,
   assignSpecialist,
   listDeployedSpecialists,
+  specialistEligibleForStage,
   startReviewerRun,
   startSpecialistRun,
   type DeployedSpecialistView,
@@ -596,7 +597,11 @@ export interface OperatorTaskSnapshot {
   reviewStageId: string | null;
   /** The implementation ("work") stage id (edge into review). */
   workStageId: string | null;
-  deployedSpecialists: DeployedSpecialistView[];
+  deployedSpecialists: (DeployedSpecialistView & {
+    /** Whether this specialist may work the task's CURRENT stage (F1) — the
+     *  operator should only assign/prompt an eligible one. */
+    eligibleForCurrentStage: boolean;
+  })[];
   openPacket: boolean;
   recentTimeline: { type: string; actor: string; text: string }[];
   autonomy: OperatorAutonomy;
@@ -665,7 +670,10 @@ export function operatorSnapshot(
     doneStageId,
     reviewStageId: roles.reviewId,
     workStageId: roles.workId,
-    deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx),
+    deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx).map((s) => ({
+      ...s,
+      eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
+    })),
     openPacket: !!file.parsed.packet,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
       type: e.type,

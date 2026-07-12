@@ -3,6 +3,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
 import { CAP_MODAL_CATALOG } from "./capability-catalog";
+import { capabilityByLabel, capabilityEnforcement } from "~/shared/capabilities";
 
 /**
  * CapabilityMatrixModal (agents.jsx §4.6) — THE shared read-only
@@ -108,6 +109,10 @@ export function CapabilityMatrixModal({
           <span className="d" style={{ background: "var(--ring)" }} />
           Not granted
         </span>
+        <span className="lg mx-scope-legend">
+          <span className="mx-scope">Claude-enforced</span>
+          binds tools on Claude runs · advisory on Codex
+        </span>
       </div>
       <div className="modal-body">
         <div className="mx-scroll">
@@ -137,9 +142,23 @@ export function CapabilityMatrixModal({
                   <tr className="grp">
                     <td colSpan={profiles.length + 1}>{g.group}</td>
                   </tr>
-                  {g.labels.map((label) => (
+                  {g.labels.map((label) => {
+                    const capId = capabilityByLabel(label)?.id;
+                    const claudeOnly =
+                      capId && capabilityEnforcement(capId) === "claude-only";
+                    return (
                     <tr key={label}>
-                      <td className="rowlabel">{label}</td>
+                      <td className="rowlabel">
+                        {label}
+                        {claudeOnly && (
+                          <span
+                            className="mx-scope"
+                            title="Enforced on Claude runs (tool denylist). On Codex it is advisory only — the Codex SDK ignores tool allow/deny lists (S3)."
+                          >
+                            Claude-enforced
+                          </span>
+                        )}
+                      </td>
                       {profiles.map((p) => {
                         const m = modeOf(p, label);
                         return (
@@ -154,7 +173,8 @@ export function CapabilityMatrixModal({
                         );
                       })}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </Fragment>
               ))}
             </tbody>

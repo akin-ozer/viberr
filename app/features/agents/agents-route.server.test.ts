@@ -105,11 +105,14 @@ describe("loader", () => {
     expect(operator.kind).toBe("operator");
     expect(operator.spanAll).toBe(true);
     expect(operator.model).toBe("orchestration runtime");
-    // Mock action-bucket sizes (policy spec §3.2): operator 5/3/3.
-    expect(operator.actions.direct).toHaveLength(5);
-    expect(operator.actions.recommend).toHaveLength(3);
+    // Operator action-bucket sizes after the role-bindings prune (removed the
+    // never-gated `compress-timelines` from direct and `owner-reassignment` from
+    // recommend): 4 direct / 2 recommend / 3 forbidden.
+    expect(operator.actions.direct).toHaveLength(4);
+    expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
     expect(operator.actions.direct).toContain("Assign the primary specialist");
+    expect(operator.actions.direct).not.toContain("Compress long-running timelines");
 
     // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses
     // the exact catalog label "Commit & push to the branch" so it maps to the

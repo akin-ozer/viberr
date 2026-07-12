@@ -49,13 +49,20 @@ describe("resolveSpecialistDisallowedTools", () => {
     ).not.toContain("Edit");
   });
 
-  it("withholding edit-other-task-branch denies checkout/switch/reset (D1)", () => {
+  it("does NOT blanket-deny git checkout/switch — a granted create-task-branch can create its own branch (F11)", () => {
+    // The removed `edit-other-task-branch` rule denied `Bash(git checkout:*)`,
+    // which (deny wins under bypassPermissions) also blocked the specialist's own
+    // `git checkout -B <task-branch>` and defeated create-task-branch. With the
+    // rule gone, a fully-granted developer has NO git-checkout/switch denies.
     const denied = resolveSpecialistDisallowedTools([
-      grant("edit-other-task-branch", "off"),
+      grant("create-task-branch", "direct"),
+      grant("commit-push-branch", "direct"),
+      grant("open-review-pr", "direct"),
+      grant("edit-other-task-branch", "off"), // orphan grant: ignored, no rule
     ]);
-    expect(denied).toContain("Bash(git checkout:*)");
-    expect(denied).toContain("Bash(git switch:*)");
-    expect(denied).toContain("Bash(git reset:*)");
+    expect(denied).not.toContain("Bash(git checkout:*)");
+    expect(denied).not.toContain("Bash(git switch:*)");
+    expect(denied).not.toContain("Bash(git checkout -b:*)");
   });
 
   it("commit-push withheld also denies git commit (a reviewer can't commit — D4)", () => {
