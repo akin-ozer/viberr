@@ -473,9 +473,13 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 }
 
-export function meta({ data, params }: Route.MetaArgs) {
+export function meta({ loaderData, params }: Route.MetaArgs) {
   return [
-    { title: data ? `${data.task.key} · ${data.task.title}` : params.key },
+    {
+      title: loaderData
+        ? `${loaderData.task.key} · ${loaderData.task.title}`
+        : params.key,
+    },
   ];
 }
 

@@ -1,8 +1,11 @@
 import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  plugins: [tsconfigPaths()],
+  resolve: {
+    // Vite 8 resolves the tsconfig "paths" alias (~/*) natively; the
+    // vite-tsconfig-paths plugin is no longer needed.
+    tsconfigPaths: true,
+  },
   test: {
     // *.server.test.ts files (and everything else for now) run under node.
     environment: "node",

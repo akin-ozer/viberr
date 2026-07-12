@@ -25,8 +25,10 @@ import { Topbar } from "~/features/shell/topbar";
  * derivation — see policy-violations.server.ts).
  */
 
-export function meta({ data }: Route.MetaArgs) {
-  return [{ title: data ? `${data.board.project.name} · Viberr` : "Viberr" }];
+export function meta({ loaderData }: Route.MetaArgs) {
+  return [
+    { title: loaderData ? `${loaderData.board.project.name} · Viberr` : "Viberr" },
+  ];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -64,8 +66,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
   const matches = useMatches();
   const taskMatch = matches.find((m) => m.id === "routes/project.task");
-  const openTask = taskMatch?.data
-    ? (taskMatch.data as { task: { key: string; title: string } }).task
+  const openTask = taskMatch?.loaderData
+    ? (taskMatch.loaderData as { task: { key: string; title: string } }).task
     : null;
 
   // Live updates (Phase 6): ONE stream per tab for the whole workspace
