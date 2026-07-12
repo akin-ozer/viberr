@@ -91,3 +91,21 @@ Re-ran the key cases against the restarted dev server (new code) to prove the fi
 
 All green: `npm test` 1136 · `npm run typecheck` clean · `npm run e2e` 13/13. One pre-existing
 async-teardown-race test flakes intermittently (passes on re-run; not introduced this pass).
+
+## Agent-creation + skill-isolation verification (follow-up, live)
+
+Closing the "create new agents · let operator choose correct agents · skills correctly loaded
+(not unrelated)" dimensions with a real product-path test:
+
+- Created a NEW specialist **Docs Writer** (Documentation role, Claude, impl stage, declares ONLY
+  the `changelog-writer` skill) via the `create-profile` action — appears in the Agents roster as a
+  4th profile ("idle").
+- Operator choice: pickSpecialist prefers the implementation role, so it kept assigning **Developer**
+  by default (correct — Docs Writer is a Documentation role); a human override assigned Docs Writer.
+- **End-to-end**: the Docs Writer agent ran on VSF-29 (F1: eligible at impl), pushed branch
+  `vsf-29-docs-writer-skill-isolation`, opened **PR #16** (1 file, +1 line). Closed after.
+- **Skill isolation (definitive)**: docs-writer declares 1 of 7 on-disk skills; its run persona
+  injects ONLY `changelog-writer` — developer-expertise / reviewer-expertise / terraform-review /
+  api-design / viberr-app-expertise / conventional-commits are all EXCLUDED. No unrelated skills load.
+
+Real PR lifecycle total: **#12 merged**; **#11, #13, #16 closed** (rejected).
