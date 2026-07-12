@@ -37,10 +37,6 @@ const CAP_DENY_RULES: readonly {
   },
   { capabilityId: "commit-push-branch", deny: ["Bash(git push:*)", "Bash(git commit:*)"] },
   { capabilityId: "open-review-pr", deny: ["Bash(gh pr create:*)"] },
-  {
-    capabilityId: "open-or-merge-pr",
-    deny: ["Bash(gh pr create:*)", "Bash(gh pr merge:*)"],
-  },
   { capabilityId: "merge-pull-request", deny: ["Bash(gh pr merge:*)"] },
   // The headline "write to the repo" capability now has REAL teeth (D1/Q4): a
   // specialist whose `execute-code-or-write-repo` is withheld cannot edit files
@@ -49,12 +45,15 @@ const CAP_DENY_RULES: readonly {
     capabilityId: "execute-code-or-write-repo",
     deny: ["Edit", "Write", "NotebookEdit", "Bash(git commit:*)"],
   },
-  // A specialist whose `edit-other-task-branch` is withheld cannot check out or
-  // reset onto an arbitrary other branch (it stays on its own task branch).
-  {
-    capabilityId: "edit-other-task-branch",
-    deny: ["Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)"],
-  },
+  // NOTE (F11, 2026-07-12): the former `edit-other-task-branch` rule denied the
+  // broad `Bash(git checkout:*)` / `Bash(git switch:*)`. Because deny wins under
+  // bypassPermissions, that ALSO blocked a specialist's own `git checkout -B
+  // <task-branch>`, defeating the granted `create-task-branch` and making Claude
+  // delivery impossible in the default (edit-other-task-branch: human) config.
+  // Under per-task workspace isolation (Q7) each run gets a fresh single-task
+  // clone — there is no other task branch to protect — so the capability was moot
+  // as well as harmful. It (and the dead `open-or-merge-pr` rule) were removed
+  // from the catalog rather than narrowed.
 ];
 
 /**

@@ -43,7 +43,6 @@ export const CAP_MODAL_CATALOG: readonly ModalCapGroup[] = [
       cap("create-task-branch", "direct"),
       cap("commit-push-branch", "direct"),
       cap("open-review-pr", "recommend"),
-      cap("edit-other-task-branch", "human"),
     ],
   },
   {
@@ -99,7 +98,6 @@ export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] = [
     caps: [
       cap("generate-packets", "direct"),
       cap("append-typed-events", "direct"),
-      cap("compress-timelines", "direct"),
     ],
   },
   {
@@ -107,7 +105,6 @@ export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] = [
     caps: [
       cap("stage-transitions", "recommend"),
       cap("completion-for-acceptance", "recommend"),
-      cap("owner-reassignment", "recommend"),
     ],
   },
 ];

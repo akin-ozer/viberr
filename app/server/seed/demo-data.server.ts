@@ -197,8 +197,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events", "Compress long-running timelines"],
-      recommend: ["Stage transitions", "Completion for human acceptance", "Owner re-assignment"],
+      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events"],
+      recommend: ["Stage transitions", "Completion for human acceptance"],
       forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
     },
     "A dedicated operator is instantiated for every active task. It coordinates specialists, keeps the canonical task file authoritative, and turns agent work into concise decision packets for human review. It never writes code and never closes a task itself.",
@@ -222,7 +222,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request"],
       recommend: ["Move the task to Review", "Report a validation verdict"],
-      forbidden: ["Merge a pull request", "Transition a task to Done", "Edit another task's branch"],
+      forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
     "Implements stage work on the task-key branch: writes code, runs local validation, and opens the review PR. Hands back to the operator at the review boundary.",
   ),
