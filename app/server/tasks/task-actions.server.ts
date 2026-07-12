@@ -868,10 +868,23 @@ export async function commentToAgent(
       target.session.backend === "codex" ? "codex" : "claude",
       target.model,
     );
+    // Re-establish the specialist's run confinement — denylist, git ceiling,
+    // MCP set, persona — that the fresh-run path applies. Without this a
+    // resumed (@mention) specialist runs unconfined (XS-1).
+    const { resolveResumeConfinement } = await import("./specialist-run.server");
+    const confinement = resolveResumeConfinement(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: target.profileId,
+    });
     const resumed = await resumeRun(db, {
       runId: target.session.id,
       prompt: followUp,
       workdir,
+      disallowedTools: confinement.disallowedTools,
+      env: confinement.env,
+      ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
+      ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
       // Apply the agent's CURRENT profile model/effort on resume — not the
       // stale value on the prior run row (editing an agent to a new model
       // must take effect when its session is resumed via a comment).

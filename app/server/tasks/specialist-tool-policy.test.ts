@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
-import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
+import {
+  resolveDeliveryPermissions,
+  resolveSpecialistDisallowedTools,
+} from "./specialist-tool-policy";
 
 /**
  * The specialist capability → tool confinement mapping. These are the deny
@@ -35,11 +38,12 @@ describe("resolveSpecialistDisallowedTools", () => {
     ).toEqual(["Bash(gh pr merge:*)"]);
   });
 
-  it("withholding execute-code-or-write-repo denies Edit/Write + git commit (D1)", () => {
+  it("withholding execute-code-or-write-repo denies Edit/MultiEdit/Write + git commit (D1, XS-13)", () => {
     const denied = resolveSpecialistDisallowedTools([
       grant("execute-code-or-write-repo", "human"),
     ]);
     expect(denied).toContain("Edit");
+    expect(denied).toContain("MultiEdit"); // XS-13: was omitted vs the operator denylist
     expect(denied).toContain("Write");
     expect(denied).toContain("NotebookEdit");
     expect(denied).toContain("Bash(git commit:*)");
@@ -109,5 +113,43 @@ describe("resolveSpecialistDisallowedTools", () => {
         "Bash(gh pr merge:*)",
       ]),
     );
+  });
+
+  it("withheld create-task-branch also denies the force-create variants (XS-4)", () => {
+    // The delivery-contract prompt instructs `git checkout -B <branch>`; a
+    // `-b`/`-c`-only denylist let a withheld specialist branch by following it.
+    const denied = resolveSpecialistDisallowedTools([
+      grant("create-task-branch", "human"),
+    ]);
+    expect(denied).toEqual(
+      expect.arrayContaining([
+        "Bash(git checkout -b:*)",
+        "Bash(git checkout -B:*)",
+        "Bash(git switch -c:*)",
+        "Bash(git switch -C:*)",
+      ]),
+    );
+  });
+});
+
+describe("resolveDeliveryPermissions", () => {
+  it("reports all steps permitted for a fully-granted developer", () => {
+    expect(
+      resolveDeliveryPermissions([
+        grant("create-task-branch", "direct"),
+        grant("commit-push-branch", "direct"),
+        grant("open-review-pr", "direct"),
+      ]),
+    ).toEqual({ canBranch: true, canCommitPush: true, canOpenPr: true });
+  });
+
+  it("reflects each withheld step so the prompt matches enforcement (XS-4)", () => {
+    expect(
+      resolveDeliveryPermissions([
+        grant("create-task-branch", "human"),
+        grant("commit-push-branch", "off"),
+        grant("open-review-pr", "human"),
+      ]),
+    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
   });
 });

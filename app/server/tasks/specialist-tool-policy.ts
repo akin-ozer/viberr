@@ -33,17 +33,29 @@ const CAP_DENY_RULES: readonly {
 }[] = [
   {
     capabilityId: "create-task-branch",
-    deny: ["Bash(git checkout -b:*)", "Bash(git switch -c:*)"],
+    // Cover the force-create variants too (`-B`/`-C`) — the delivery-contract
+    // prompt instructs `git checkout -B <branch>`, and `-b`/`-c`-only specifiers
+    // let a withheld specialist branch anyway by following the prompt (XS-4).
+    deny: [
+      "Bash(git checkout -b:*)",
+      "Bash(git checkout -B:*)",
+      "Bash(git switch -c:*)",
+      "Bash(git switch -C:*)",
+    ],
   },
   { capabilityId: "commit-push-branch", deny: ["Bash(git push:*)", "Bash(git commit:*)"] },
   { capabilityId: "open-review-pr", deny: ["Bash(gh pr create:*)"] },
   { capabilityId: "merge-pull-request", deny: ["Bash(gh pr merge:*)"] },
-  // The headline "write to the repo" capability now has REAL teeth (D1/Q4): a
+  // The headline "write to the repo" capability has REAL teeth (D1/Q4): a
   // specialist whose `execute-code-or-write-repo` is withheld cannot edit files
-  // or commit — Edit/Write/NotebookEdit are removed and git commit is denied.
+  // or commit — the file-write tools are removed and git commit is denied.
+  // MultiEdit is included to match the operator built-in denylist (XS-13);
+  // shell-level writes (`sed -i`, redirection) remain reachable because the
+  // specialist keeps Bash to run validation — an inherent tension we surface
+  // honestly rather than deny all of Bash and break test runs.
   {
     capabilityId: "execute-code-or-write-repo",
-    deny: ["Edit", "Write", "NotebookEdit", "Bash(git commit:*)"],
+    deny: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
   },
   // NOTE (F11, 2026-07-12): the former `edit-other-task-branch` rule denied the
   // broad `Bash(git checkout:*)` / `Bash(git switch:*)`. Because deny wins under
@@ -56,6 +68,16 @@ const CAP_DENY_RULES: readonly {
   // from the catalog rather than narrowed.
 ];
 
+function isWithheld(
+  modeById: Map<string, string>,
+  capabilityId: string,
+): boolean {
+  const mode = modeById.get(capabilityId);
+  return (
+    ALWAYS_HUMAN.has(capabilityId) || mode === "human" || mode === "off"
+  );
+}
+
 /**
  * The `disallowedTools` a specialist run is confined to, given its stored
  * capability grants. Empty when nothing is withheld.
@@ -66,12 +88,32 @@ export function resolveSpecialistDisallowedTools(
   const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
   const denied = new Set<string>();
   for (const rule of CAP_DENY_RULES) {
-    const mode = modeById.get(rule.capabilityId);
-    const withheld =
-      ALWAYS_HUMAN.has(rule.capabilityId) || mode === "human" || mode === "off";
-    if (withheld) {
+    if (isWithheld(modeById, rule.capabilityId)) {
       for (const t of rule.deny) denied.add(t);
     }
   }
   return [...denied];
+}
+
+export interface DeliveryPermissions {
+  canBranch: boolean;
+  canCommitPush: boolean;
+  canOpenPr: boolean;
+}
+
+/**
+ * Which delivery steps a specialist may perform, so the run PROMPT matches the
+ * tool-layer enforcement (XS-4): instructing `git checkout -B` while denying it
+ * is a contradiction that produces confused, failing runs. When a step is
+ * withheld the prompt omits its instruction instead.
+ */
+export function resolveDeliveryPermissions(
+  grants: readonly CapabilityGrant[],
+): DeliveryPermissions {
+  const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  return {
+    canBranch: !isWithheld(modeById, "create-task-branch"),
+    canCommitPush: !isWithheld(modeById, "commit-push-branch"),
+    canOpenPr: !isWithheld(modeById, "open-review-pr"),
+  };
 }

@@ -318,6 +318,17 @@ export async function resumeRun(
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
+    /** Re-apply the specialist's capability tool denylist on resume. Without
+     *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
+     *  confinement the fresh-run path establishes is silently dropped (XS-1). */
+    disallowedTools?: string[];
+    /** Re-apply the per-run env overlay (GIT_CEILING_DIRECTORIES workspace
+     *  confinement) on resume. */
+    env?: Record<string, string>;
+    /** Re-apply the specialist's declared MCP servers on resume (Claude). */
+    mcpServers?: Record<string, unknown>;
+    /** Re-apply the persona/system prompt on resume (Claude). */
+    systemPrompt?: string;
   },
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
@@ -356,6 +367,11 @@ export async function resumeRun(
     ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
     ...(input.actor ? { actor: input.actor } : {}),
+    // Re-establish the run confinement the fresh-run path applies (XS-1).
+    ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.env ? { env: input.env } : {}),
+    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
   });
 }
 

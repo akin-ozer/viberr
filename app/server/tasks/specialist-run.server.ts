@@ -48,7 +48,11 @@ import {
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { roleCan } from "~/shared/rbac";
-import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
+import {
+  type DeliveryPermissions,
+  resolveDeliveryPermissions,
+  resolveSpecialistDisallowedTools,
+} from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
@@ -601,6 +605,7 @@ export async function startSpecialistRun(
     repo,
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
     cloned: !!clone,
+    delivery: resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []),
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
@@ -817,6 +822,7 @@ export async function startReviewerRun(
     repo,
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
     cloned: !!clone,
+    delivery: resolveDeliveryPermissions(resolvedRev?.capabilities ?? []),
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = foldPersonaForCodex(persona, backend, analyzePrompt, mcpNames);
@@ -1024,6 +1030,8 @@ function buildAnalyzePrompt(input: {
   /** The task-key branch the delivery must land on. */
   branch: string;
   cloned: boolean;
+  /** Which delivery steps the profile's capabilities permit (XS-4). */
+  delivery: DeliveryPermissions;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
 }): string {
@@ -1036,6 +1044,7 @@ function buildAnalyzePrompt(input: {
   // isolated per-task workspace; git is ceiling-confined to it, so the agent
   // must work ONLY inside the current directory and never touch a parent repo.
   if (input.repo) {
+    const { canBranch, canCommitPush, canOpenPr } = input.delivery;
     prompt +=
       `\n\n## Workspace & delivery contract (follow exactly)\n` +
       `- Work ONLY inside the current working directory — it is an isolated ` +
@@ -1043,11 +1052,23 @@ function buildAnalyzePrompt(input: {
       `repository outside it.\n` +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.\n`
-        : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`) +
-      `- Do all work on the branch \`${input.branch}\` (create it from the default branch if it does not exist): \`git checkout -B ${input.branch}\`.\n` +
-      `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
-      `- Push the branch and open a pull request that references ${input.taskKey} in its title/body.\n` +
-      `- Report the exact branch name, commit SHAs, and PR URL back in your reply.`;
+        : `- Clone \`https://github.com/${input.repo}\` INTO the current directory (\`git clone https://github.com/${input.repo}.git .\`) before making changes.\n`);
+    if (canBranch) {
+      prompt += `- Do all work on the branch \`${input.branch}\` (create it from the default branch if it does not exist): \`git checkout -B ${input.branch}\`.\n`;
+    }
+    if (canCommitPush) {
+      prompt +=
+        `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
+        `- Push the branch${canOpenPr ? " and open a pull request that references " + input.taskKey + " in its title/body" : ""}.\n`;
+    } else if (canOpenPr) {
+      prompt += `- Open a pull request that references ${input.taskKey} in its title/body.\n`;
+    }
+    // Reflect what the profile's capabilities actually allow so the run never
+    // attempts (and fails) a step its tools deny.
+    if (!canBranch && !canCommitPush && !canOpenPr) {
+      prompt += `- Your profile does not grant branch/commit/PR delivery — do the analysis and any in-workspace edits, then report findings; do NOT attempt to branch, commit, push, or open a PR.\n`;
+    }
+    prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
   }
   if (input.directive?.trim()) {
     prompt +=
@@ -1229,6 +1250,52 @@ function taskWorkspaceRoot(
 }
 
 /** The per-run env that confines a specialist's git to its own workspace. */
+/**
+ * The run confinement a resumed specialist (@mention comment) must re-apply so
+ * it is bound by the SAME denylist, git ceiling, MCP set, and persona as its
+ * fresh run — the resume path used to drop all of these, letting a
+ * capability-withheld specialist run unconfined (XS-1). Best-effort: if the
+ * profile is no longer a current deployment we still return the always-human
+ * denylist and the workspace git ceiling.
+ */
+export function resolveResumeConfinement(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; profileId: string },
+): {
+  disallowedTools: string[];
+  env: Record<string, string>;
+  mcpServers?: Record<string, unknown>;
+  systemPrompt?: string;
+} {
+  const env = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
+  try {
+    const resolved = resolveDeployedSpecialist(
+      ctx,
+      input.projectSlug,
+      input.profileId,
+    );
+    const persona = buildSpecialistPersona({
+      profileId: input.profileId,
+      skills: resolved.skills,
+      kb: resolved.kb,
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    });
+    const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
+    return {
+      disallowedTools: resolveSpecialistDisallowedTools(resolved.capabilities),
+      env,
+      ...(mcpServers && Object.keys(mcpServers).length
+        ? { mcpServers }
+        : {}),
+      ...(persona ? { systemPrompt: persona } : {}),
+    };
+  } catch {
+    // Profile not a current deployment — still confine to the safe floor.
+    return { disallowedTools: resolveSpecialistDisallowedTools([]), env };
+  }
+}
+
 function workspaceRunEnv(
   projectSlug: string,
   taskKey: string,

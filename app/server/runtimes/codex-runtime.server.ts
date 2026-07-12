@@ -171,6 +171,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps = {}): RuntimeAdapter 
               workingDirectory: spec.workdir,
               skipGitRepoCheck: true,
               sandboxMode,
+              // Apply the profile's CURRENT model/effort to the resumed turns —
+              // the Claude adapter already does; without this a comment-resume
+              // ran on the SDK default while the row/UI showed the override
+              // (WI-4).
+              model: spec.model,
+              ...(spec.effort ? { modelReasoningEffort: spec.effort } : {}),
             })
           : codex.startThread({
               model: spec.model,
