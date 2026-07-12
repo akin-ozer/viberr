@@ -6,6 +6,7 @@ import type {
   UserRole,
 } from "~/shared/mapping/user.server";
 import { getDb } from "../db/sqlite.server";
+import { resolveOrgRole } from "./identity.server";
 import { findUserById } from "./user-store.server";
 
 /**
@@ -76,8 +77,12 @@ export async function authenticate(
     db.prepare(`DELETE FROM session WHERE id = ?`).run(result.session.id);
     return null;
   }
+  // Option-B cutover (pass-4 ruling 5): the org role is authoritatively the
+  // better-auth membership, not the legacy `users.role` column (which is now a
+  // derived cache kept in sync on every role write).
+  const orgRole = resolveOrgRole(db, user.id, user.role);
   return {
-    user: toSessionUser(user),
+    user: toSessionUser({ ...user, role: orgRole }),
     pwresetRequired: user.pwresetRequired,
     sessionId: result.session.id,
     sessionToken: result.session.token,

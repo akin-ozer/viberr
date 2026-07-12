@@ -11,6 +11,11 @@ import {
   updateUser,
 } from "~/server/auth/user-admin.server";
 import {
+  deleteIdentity,
+  revokeUserSessions,
+  syncIdentityEmail,
+} from "~/server/auth/identity.server";
+import {
   countActiveAdmins,
   findUserByEmail,
   findUserById,
@@ -241,6 +246,10 @@ export function updateOrgUser(
         new Date().toISOString(),
         existing.id,
       );
+      // Sync the better-auth identity too — credential sign-in resolves the
+      // email in better-auth's own `user` table, so updating only `users`
+      // locked the account out of sign-in entirely (pass-4 WI-2).
+      syncIdentityEmail(db, existing.id, email);
       recordAudit(db, {
         action: "org.user.updated",
         actor,
@@ -315,6 +324,11 @@ export function deleteOrgUser(
   ) {
     throw conflict("Cannot remove the last active admin.");
   }
+  // Remove the better-auth identity too (user/account/member/session cascade) —
+  // otherwise the orphaned `user` row (email is UNIQUE NOT NULL) makes
+  // re-creating the same email throw a raw constraint mid-flow (pass-4 WI-3).
+  revokeUserSessions(db, userId);
+  deleteIdentity(db, userId);
   db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
   recordAudit(db, {
     action: "org.user.removed",

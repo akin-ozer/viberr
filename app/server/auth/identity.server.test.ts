@@ -7,8 +7,11 @@ import {
   CREDENTIAL_PROVIDER,
   DEFAULT_ORG_ID,
   provisionIdentity,
+  resolveOrgRole,
   revokeUserSessions,
   setCredentialPassword,
+  setMemberRole,
+  syncIdentityEmail,
 } from "./identity.server";
 
 /**
@@ -63,6 +66,41 @@ describe("identity provisioning", () => {
       asResponse: true,
     });
     expect(res.status).toBe(200);
+  });
+
+  it("resolveOrgRole reads the membership (Option-B source of truth), not users.role", () => {
+    const db = ctx.makeDb();
+    provisionIdentity(db, {
+      id: "u_r",
+      email: "r@viberr.dev",
+      name: "R",
+      role: "member",
+      passwordHash: null,
+    });
+    expect(resolveOrgRole(db, "u_r", "member")).toBe("member");
+
+    // Promote on the membership → resolveOrgRole reflects it immediately.
+    setMemberRole(db, "u_r", "admin");
+    expect(resolveOrgRole(db, "u_r", "member")).toBe("admin");
+
+    // No membership row → falls back to the provided legacy role (no demotion).
+    expect(resolveOrgRole(db, "u_missing", "admin")).toBe("admin");
+  });
+
+  it("syncIdentityEmail updates the better-auth user email (WI-2)", () => {
+    const db = ctx.makeDb();
+    provisionIdentity(db, {
+      id: "u_e",
+      email: "old@viberr.dev",
+      name: "E",
+      role: "member",
+      passwordHash: hashPassword("secret-secret"),
+    });
+    syncIdentityEmail(db, "u_e", "New@Viberr.Dev");
+    const row = db
+      .prepare(`SELECT email FROM "user" WHERE id='u_e'`)
+      .get() as { email: string };
+    expect(row.email).toBe("new@viberr.dev");
   });
 
   it("is idempotent (no duplicate user/account/member on re-provision)", () => {

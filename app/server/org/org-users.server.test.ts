@@ -171,6 +171,31 @@ describe("edit / role / reset / remove", () => {
       /last active admin/,
     );
   });
+
+  // WI-3: delete must remove the better-auth identity too, so re-creating the
+  // same email later doesn't hit the UNIQUE constraint on "user".email.
+  it("delete removes the better-auth identity so the email can be reused", () => {
+    const db = makeDb();
+    const { user } = createLocalAccount(
+      db,
+      { name: "Reuse", email: "reuse@test.dev", role: "member" },
+      ACTOR,
+    );
+    expect(
+      db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id),
+    ).toBeTruthy();
+
+    deleteOrgUser(db, user.id, ACTOR);
+    expect(db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id)).toBeUndefined();
+
+    // Re-creating the same email succeeds (no orphaned identity constraint).
+    const again = createLocalAccount(
+      db,
+      { name: "Reuse Two", email: "reuse@test.dev", role: "member" },
+      ACTOR,
+    );
+    expect(again.user.email).toBe("reuse@test.dev");
+  });
 });
 
 describe("google domain allowlist", () => {
