@@ -61,6 +61,11 @@ export interface ClaudeQueryOptions {
    *  Skill tool rejects them (a context filter). Viberr injects its own skill
    *  as system-prompt text, so a run needs no SDK-discovered skills. */
   skills?: string[];
+  /** Local plugins to load for the session. `[]` = load NONE — closes the
+   *  plugin-marketplace leak channel that `settingSources`/`skills` don't cover
+   *  (F13), so a host-installed plugin's slash-commands/skills never reach a
+   *  Viberr run. */
+  plugins?: { type: "local"; path: string }[];
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -195,8 +200,23 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // the agent's declared resources, not the operator-user's personal
           // Claude Code skills/plugins (`settingSources` alone does NOT filter
           // plugin skills — `skills: []` does).
+          //
+          // `plugins: []` names ZERO local plugins for the run — defense-in-depth
+          // for the plugin channel (F13) on top of settingSources/skills.
+          //
+          // Isolation boundary (verified, honest): in a STANDARD deployment (a
+          // standalone node process with a pristine CLAUDE_CONFIG_DIR under the
+          // data root) these three empty levers mean a run sees ONLY the agent's
+          // declared skills/KB (injected as prompt text) — no host resources.
+          // The ONE case they can't cover is running the server from INSIDE an
+          // active Claude Code/Desktop session: the spawned `claude` subprocess
+          // inherits that parent session's managed toolset/marketplace at the
+          // PROCESS level (above any SDK option), so a dev sees the parent's
+          // slash-commands/tools in the run. That's a dev-only condition — a real
+          // deployment has no such parent — and it can't be closed from here.
           settingSources: [],
           skills: [],
+          plugins: [],
         };
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         // Base adapter env, overlaid with any per-run env (e.g. the specialist's

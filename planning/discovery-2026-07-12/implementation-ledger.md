@@ -42,3 +42,15 @@ ignored at runtime).
 ## Git
 Commits on `viberr-rolebindings-pass3`: role-bindings core → capabilities/F11 → F1 → F8 → findings.
 Live test PRs on akin-ozer/viberr: **#12 merged**, **#11 + #13 closed** (F11 proof).
+
+## Addendum: F13 closed to root cause (2026-07-12)
+Investigated the host-plugin/skill leak to conclusion. Added `plugins: []` as a third empty
+isolation lever in `claude-runtime.server.ts` (alongside settingSources/skills). Empirically
+re-ran a Claude specialist and confirmed the residual leak is **process-level inheritance**, not a
+config-dir/plugin channel: the leaked entries include the PARENT Claude session's own SDK tools
+(CronCreate, Monitor, Workflow, SendMessage, ScheduleWakeup…), present ONLY because viberr's dev
+server was spawned from inside an active Claude Code/Desktop session. No SDK option can override a
+parent's injected process environment. In a standalone deployment (systemd/Docker, pristine
+CLAUDE_CONFIG_DIR, no Claude parent) there is nothing to inherit — the declared-resources-only
+guarantee holds. Declared skills (developer-expertise etc.) DO load correctly in every case. The
+app-reference's absolute "no host plugins leak" wording is corrected to state this precise boundary.
