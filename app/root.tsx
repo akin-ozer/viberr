@@ -68,10 +68,18 @@ export function headers({ loaderHeaders }: Route.HeadersArgs) {
  * Runs before first paint. Resolves the "system" preference against
  * prefers-color-scheme (and follows OS changes live); explicit light/dark
  * are simply applied. Mirrors the inline script in the design mock's <head>.
+ *
+ * The `viberr_theme` cookie is read as the AUTHORITATIVE source and overrides
+ * the SSR-passed preference. This keeps the theme correct on the ErrorBoundary
+ * page, where the root loader data (and thus `preference`) may be missing so the
+ * Layout falls back to "system" — without the cookie read a dark session would
+ * flash/stay light on a 404/403 (F3).
  */
 function themeBootScript(preference: ThemePreference): string {
   return (
     `(function(){try{var p=${JSON.stringify(preference)};` +
+    `var c=(document.cookie.match(/(?:^|; )viberr_theme=([^;]+)/)||[])[1];` +
+    `if(c==="dark"||c==="light"||c==="system")p=c;` +
     `var d=document.documentElement;` +
     `if(p==="system"){var m=window.matchMedia("(prefers-color-scheme: dark)");` +
     `var a=function(){d.dataset.theme=m.matches?"dark":"light";};a();` +

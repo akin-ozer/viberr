@@ -50,10 +50,14 @@ import { buildScript } from "./simulated-runtime.server";
  *   claude + credential present → REAL tool-driven run: the model calls the
  *     `mcp__viberr__*` tools; every call mutates the store and updates the
  *     board live. This is the path the "operator end to end" proof exercises.
- *   codex, or claude unavailable → SCRIPTED drive: the same operator-actions
- *     are called deterministically in code (the board still advances honestly),
- *     and a simulated run streams the narrative to the agent logs. Codex has no
- *     in-process tool channel, so it always takes this path.
+ *   codex + credential present → STRUCTURED-PLAN run: Codex emits a structured
+ *     JSON plan (OPERATOR_PLAN_SCHEMA), which `executeCodexPlan` runs through the
+ *     same gated operator-actions as the Claude tools — so Codex honors the
+ *     identical RBAC + autonomy, it just plans-then-executes instead of
+ *     calling tools live.
+ *   neither backend available → SCRIPTED drive: the same operator-actions are
+ *     called deterministically in code (the board still advances honestly), and
+ *     a simulated run streams the narrative to the agent logs.
  */
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };

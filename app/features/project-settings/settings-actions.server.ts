@@ -552,6 +552,12 @@ export async function deleteProject(
   rebuildAll(db, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+  // Notifications are app-owned (no FK cascade to projects), so a deleted
+  // project used to leave orphaned "waiting on you" rows that dead-ended on a
+  // 404 when opened (F2). Clean them up with the project.
+  db.prepare(`DELETE FROM notifications WHERE project_slug = ?`).run(
+    input.projectSlug,
+  );
 
   recordAudit(db, {
     action: "project.deleted",

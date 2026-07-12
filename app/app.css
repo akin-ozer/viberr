@@ -2792,6 +2792,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
+.np-owner-input { width: 100%; padding: .5rem .7rem; margin-bottom: .5rem; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); color: var(--fg); font-size: .86rem; font-family: var(--font-mono); }
+.np-owner-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .82rem; color: var(--faint); padding: .55rem 0 .55rem .7rem; white-space: nowrap; }
