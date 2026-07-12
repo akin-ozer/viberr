@@ -1,6 +1,6 @@
-# TS7/RR8/Vite8/Node24 migration — verification evidence
+# TS7/RR8/Vite8/Node26 migration — verification evidence
 
-**Date:** 2026-07-12 · **Branch:** `ts7-stack-upgrade` (6 commits on top of `main`)
+**Date:** 2026-07-12 · **Branch:** `ts7-stack-upgrade` (9 commits on top of `main`; Node landed as 24 first, then moved to 26 — see §7)
 **Plan:** `planning/typescript-7-upgrade-plan-2026-07-12.md` — executed in full, no deviations besides those noted in §4.
 
 ## 1. What changed
@@ -78,6 +78,13 @@ A 5-lens multi-agent review (RR8 completeness, Vite8/Rolldown deltas, TS7 config
 - **README stated Node >= 20 / React Router 7** — fixed on this branch (lines 23/30). Historical `docs/build/` planning records intentionally left untouched.
 
 ### Refuted (examples)
+_(see below — §7 records the post-review Node 26 addendum)_
 - "`resolve.tsconfigPaths` is experimental and now the sole alias mechanism" — refuted: behavior verified equivalent for this repo's single `~/*` alias across dev/build/vitest; scripts/ and db/ don't use the alias.
 - A duplicate of the typescript-override finding from a second lens.
 - The diff-correctness lens confirmed the `stage-roles.ts` rewrite is semantically identical for all inputs (schema guarantees non-empty `from`), and both `@ts-expect-error` sites remain live and correct under TS7.
+
+## 7. Addendum: Node 26 + the cold-start reload root-cause (same day, post-review)
+
+At the owner's request the branch moved Node 24 → **26** (current line; LTS in Oct 2026): CI/Dockerfile/.nvmrc/engines/`@types/node@^26`/README. All floors permit it (better-sqlite3 ships 26.x prebuilds — native module verified loading on v26.4/26.5). Full gates re-ran green on Node 26; Docker builds on `node:26-slim`. Dev machines must switch defaults too (`nvm alias default 26`) — a mismatched Node loads an ABI-incompatible better-sqlite3 binary and the server fails loudly at boot.
+
+**Cold-start e2e failure, root-caused (this was the earlier "contention flake" — that theory was wrong).** On the first run after any fresh `npm install`, e2e 02-packet + its downstream 05 spec failed deterministically. Playwright trace forensics: Vite discovered the server-side CJS deps (claude-agent-sdk, better-auth, better-sqlite3, dotenv, yaml) only at first render, pushed `optimized dependencies changed. reloading`, and the mid-test document reload aborted the manifest/SSE fetches and wiped the packet dialog's radio selection — the form then submitted the DEFAULT option (`accept_completion`), wrongly moving VIB-142 to Done. Two config attempts (`optimizeDeps.include`, `ssr.optimizeDeps.include`) did NOT fix it; React Router's supported `future.unstable_optimizeDeps` flag did — zero re-optimize on a fully cold cache, 13/13 e2e on two consecutive cold runs. The behavior class predates the migration (the same flag exists for RR7); the branch's reinstalls exposed it. Side benefit: no more random mid-session reloads during development.
