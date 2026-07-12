@@ -671,7 +671,16 @@ async function startRealOperatorRun(
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
   const { chainRunCompletion } = await import("./run-service.server");
-  chainRunCompletion(runId, () => releaseOperatorLease(db, leaseKey, leaseToken));
+  chainRunCompletion(runId, (finished) => {
+    releaseOperatorLease(db, leaseKey, leaseToken);
+    // A real Claude operator run that ERRORS (crash / quota / auth / idle
+    // timeout) was previously silent — the completion hook only released the
+    // lease, so nothing reached the human (contrast the Codex no-plan
+    // escalation and the specialist F8 path). Escalate it the same way (F-OP1).
+    if (finished.state === "error") {
+      void escalateFailedOperatorRun(db, ctx, input, authority, runId);
+    }
+  });
 
   logger.info("operator run started (real)", {
     taskKey: input.taskKey,
@@ -679,6 +688,59 @@ async function startRealOperatorRun(
     autonomy: authority.autonomy,
   });
   return { runId, backend: "claude", mode: "real", autonomy: authority.autonomy };
+}
+
+/**
+ * F-OP1: surface a failed real operator run to the human. Nothing else covers
+ * an operator's OWN run (run-recovery only watches specialist/reviewer runs),
+ * so without this a crashed/quota-limited/idle-timed-out operator run leaves the
+ * task sitting with no timeline entry, packet, or notification. Raise a blocked
+ * recovery packet through the operator's own gate, with quota/auth-aware copy.
+ */
+async function escalateFailedOperatorRun(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  authority: OperatorAuthority,
+  runId: string,
+): Promise<void> {
+  try {
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    const reason = runFailureReason(db, runId);
+    const detail =
+      reason?.kind === "quota"
+        ? "the coordinating model is over its usage quota"
+        : reason?.kind === "auth"
+          ? "the coordinating model's credential was rejected"
+          : "the coordinating run did not complete";
+    logger.warn("real operator run failed — escalating", {
+      taskKey: input.taskKey,
+      runId,
+      kind: reason?.kind ?? "unknown",
+    });
+    await operatorOpenPacket(
+      db,
+      ctx,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        packetType: "blocked",
+        title: "Operator run failed — pick a recovery path",
+        body:
+          `The operator run did not complete — ${detail}. No coordination was ` +
+          `performed. Retry on the other backend, fix the credential, or redirect ` +
+          `the task.`,
+        options: defaultPacketOptions("blocked"),
+      },
+      authority,
+    );
+  } catch (error) {
+    logger.error("operator-run failure escalation failed", {
+      taskKey: input.taskKey,
+      runId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 // ------------------------------------------------------- scripted drive
