@@ -5,7 +5,7 @@
 # for this base; the toolchain below is the fallback if that ever fails),
 # compile the app, then prune node_modules down to production deps.
 # ============================================================================
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 
 # Native-module fallback toolchain (better-sqlite3 uses prebuild-install and
 # normally never compiles; python3/make/g++ keep `npm ci` working when a
@@ -31,7 +31,7 @@ RUN npm run build \
 # Runtime stage — same base as the build stage so the better-sqlite3 binary
 # copied inside node_modules keeps working (same libc, same Node ABI).
 # ============================================================================
-FROM node:24-slim
+FROM node:26-slim
 
 # Real agent runs (Claude Agent SDK / Codex SDK) execute against a repo:
 # the specialist run clones it and the coding agent shells out to git, so the
