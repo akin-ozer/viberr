@@ -9,6 +9,7 @@
   --surface: #ffffff;
   --fg: #1c1c1e;
   --muted: #555a6a;
+  --pin-star: #e8a800; /* pinned-project star accent (TD-2) */
   --faint: #828798;
   --placeholder: #a5a8b5;
   --border: #c7cad5;
@@ -622,12 +623,6 @@ h1, h2, h3, h4 {
 }
 .stage-menu-btn .sm-caret { width: 13px; height: 13px; color: var(--faint); transition: transform .16s ease; }
 .stage-menu-btn.open .sm-caret { transform: rotate(180deg); }
-/* Compact card variant — a small floating chip. */
-.stage-menu-btn.card {
-  gap: .22rem; padding: .18rem .3rem; border-radius: 7px;
-  background: var(--surface); box-shadow: var(--shadow-card);
-}
-.stage-menu-btn.card .sm-caret { width: 12px; height: 12px; }
 
 .stage-menu-pop {
   z-index: 1000;
@@ -1091,7 +1086,9 @@ h1, h2, h3, h4 {
 /* ============================================================
    AGENTS
    ============================================================ */
-.agent-glyph.op { background: var(--fg); color: #fff; border-color: var(--fg); }
+/* Operator glyph: fg-on-bg contrast in BOTH themes — a literal #fff went
+   white-on-white once --fg became light in dark mode (TD-1). */
+.agent-glyph.op { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 
 /* stats strip */
 .ag-stats { display: flex; gap: .8rem; padding: .1rem 1.4rem .9rem; flex-wrap: wrap; }
@@ -1935,6 +1932,7 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
   --placeholder: #5f6577;
   --border: #3d4152;
   --ring: #2b2e3a;
+  --pin-star: #f2b616; /* a touch brighter on dark (TD-2) */
 
   --blue: #6f87ff;
   --blue-pressed: #b3c0ff;
@@ -2665,7 +2663,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   transition: color .14s ease, background .14s ease, transform .14s ease;
 }
 .pj-star:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); transform: scale(1.08); }
-.pj-star.on { color: #e8a800; }
+.pj-star.on { color: var(--pin-star); }
 .pj-star .ico { width: 16px; height: 16px; }
 
 /* new-project tile */

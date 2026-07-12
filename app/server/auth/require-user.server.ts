@@ -153,26 +153,42 @@ export function roleSatisfies(role: UserRole, required: UserRole): boolean {
   return ROLE_ORDER[role] >= ROLE_ORDER[required];
 }
 
+function forbiddenRole(required: UserRole): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "forbidden",
+        message: `This area requires the ${required} role.`,
+      },
+    }),
+    {
+      status: 403,
+      statusText: "Forbidden",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
 /** Signed-in user with at least `required` role, else 403 (throws). */
 export async function requireRole(
   request: Request,
   required: UserRole,
 ): Promise<SessionUser> {
   const user = await requireUser(request);
-  if (!roleSatisfies(user.role, required)) {
-    throw new Response(
-      JSON.stringify({
-        error: {
-          code: "forbidden",
-          message: `This area requires the ${required} role.`,
-        },
-      }),
-      {
-        status: 403,
-        statusText: "Forbidden",
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  }
+  if (!roleSatisfies(user.role, required)) throw forbiddenRole(required);
   return user;
+}
+
+/**
+ * Like `requireRole` but returns the FULL auth context (user + sessionId) in a
+ * single `authenticate()` call — a mutation action needs the session id for the
+ * CSRF check, so this avoids the double session lookup (WI-12).
+ */
+export async function requireRoleAuth(
+  request: Request,
+  required: UserRole,
+): Promise<AuthContext> {
+  const ctx = await requireAuth(request);
+  if (!roleSatisfies(ctx.user.role, required)) throw forbiddenRole(required);
+  return ctx;
 }

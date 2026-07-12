@@ -2,7 +2,10 @@ import { data } from "react-router";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
 import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth, requireRole } from "~/server/auth/require-user.server";
+import {
+  requireRole,
+  requireRoleAuth,
+} from "~/server/auth/require-user.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
@@ -94,8 +97,10 @@ function parseJsonStringArray(raw: string): string[] {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const admin = await requireRole(request, "admin");
-  const ctx = await requireAuth(request);
+  // One session lookup for both the admin-role gate and the CSRF session id
+  // (WI-12) — requireRole + requireAuth used to authenticate twice per mutation.
+  const ctx = await requireRoleAuth(request, "admin");
+  const admin = ctx.user;
   const db = getDb();
   const formData = await request.formData();
   await assertCsrf(request, ctx.sessionId, formData);
