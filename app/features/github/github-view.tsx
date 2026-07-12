@@ -459,7 +459,7 @@ export function GithubViewPage({
           {data.project.repo && (
             <a
               className="btn ghost sm"
-              href={`https://github.com/${data.project.repo}`}
+              href={`${data.githubHost}/${data.project.repo}`}
               target="_blank"
               rel="noopener noreferrer"
             >

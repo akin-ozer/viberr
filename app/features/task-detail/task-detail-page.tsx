@@ -321,6 +321,9 @@ function TaskHero({
   const csrf = useCsrfToken();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.goal);
+  // Surface a failed save as a toast instead of silently leaving the editor
+  // open with no explanation (WI-11); on success the effect below closes it.
+  useActionFeedback(goalFetcher);
   // Close the editor once a save round-trips successfully.
   useEffect(() => {
     if (goalFetcher.state === "idle" && goalFetcher.data?.ok && editing) {

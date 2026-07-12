@@ -19,13 +19,14 @@ export function meta({ params }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const db = getDb();
+  // Members only (R4): the review queue exposes task detail + owner assignments;
+  // unlike the app-wide board/task read surfaces it's project-scoped, like
+  // policy/agents/settings/github. Guard membership FIRST (matching those
+  // siblings), then the 404 — a non-member must not learn a project exists (WI-13).
+  await requireProjectMember(request, params.slug, "view the review queue");
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // Members only (R4): the review queue exposes task detail + owner assignments;
-  // unlike the app-wide board/task read surfaces it's project-scoped, like
-  // policy/agents/settings/github.
-  await requireProjectMember(request, params.slug, "view the review queue");
   const queue = getReviewQueue(db, params.slug);
   return { slug: params.slug, ...queue };
 }

@@ -114,7 +114,10 @@ export async function action({ request }: Route.ActionArgs) {
         );
     }
   } catch (error) {
-    if (isAppError(error) && error.kind === "user") {
+    // Map ALL AppErrors to the fetcher's `{ ok:false }` shape (WI-13/WI-14):
+    // an infrastructure-kind AppError otherwise crashed the overlay's error
+    // boundary instead of surfacing inline like every sibling route.
+    if (isAppError(error)) {
       return data(
         { ok: false as const, intent, error: error.userMessage },
         { status: error.status },

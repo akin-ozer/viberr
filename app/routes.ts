@@ -34,6 +34,8 @@ export default [
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
 
+  // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
+  route("projects", "routes/projects.tsx"),
   // Workspace shell (rail + topbar) with the seven project views + task.
   route("projects/:slug", "routes/project.tsx", [
     index("routes/project._index.tsx"),

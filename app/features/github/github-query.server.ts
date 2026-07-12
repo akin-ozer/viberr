@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { deriveSyncState } from "~/server/github/branch-sync.server";
+import { githubWebHost } from "~/server/github/github-client.server";
 import {
   checkRepoAccess,
   type RepoAccessResult,
@@ -56,6 +57,8 @@ export interface GithubViewData {
     repo: string | null;
     defaultBranch: string;
   };
+  /** GHE-safe web host for "Open on GitHub" links (WI-17). */
+  githubHost: string;
   connection: RepoAccessResult;
   credential: ProjectCredentialHealth;
   prs: PrRowView[];
@@ -176,6 +179,8 @@ export async function getGithubViewData(
       repo: project.repo,
       defaultBranch: project.defaultBranch,
     },
+    // GHE-safe web host (WI-17) — the view must never hardcode github.com.
+    githubHost: githubWebHost(),
     connection,
     credential,
     prs,
