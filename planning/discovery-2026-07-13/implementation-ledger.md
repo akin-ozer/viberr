@@ -1,8 +1,26 @@
 # Implementation ledger
 
-`validated` means the implementation is covered by the final automated regression and the relevant
-Docker/API/file or browser evidence. Provider- or credential-dependent limits are named explicitly;
-they are not silently counted as live proof.
+The F01–F41 rows preserve the completed evidence pass that existed before the
+independent adversarial review. In those historical rows, `validated` means the
+implementation was covered by that pass's automated regression and relevant
+Docker/API/file or browser evidence. The subsequent hardening tree has its own
+separate final gate below. Provider- or credential-dependent limits remain
+named explicitly; they are not silently counted as live proof.
+
+## Post-review hardening ledger
+
+| ID | Implemented contract | Current state | Final proof |
+| --- | --- | --- | --- |
+| H01 | Completion/acceptance is journaled before merge/task-file boundaries with exact task incarnation, evidence fingerprint, Done stage, original actor/authority and pinned PR/head. Repo-less full-autonomy completion is durable and explicitly non-human. | validated on final tree | Crash before/after each phase; retry and boot exact-once convergence; replacement-task and disabled/revoked-actor negatives passed. |
+| H02 | GitHub merge is journaled before PUT with normalized repository, PR, full reviewed head, task incarnation and original accepter/authority. | validated on final tree | Remote-merged/local-uncommitted recovery, no repeat PUT, exact attribution, same-key replacement and repeated-PR occurrence coverage passed. |
+| H03 | PR open is journaled before POST with exact repository/base/branch/full head/task incarnation and original actor/authority. Once `posting` is ambiguous, retry/boot is observation or manual reconciliation only; empty/error observation never permits another POST. | validated on final tree | Pre/post-POST crash recovery, no duplicate POST, stale/wrong head/base/repository rejection and exact attribution passed. |
+| H04 | Intelligent routing records one exact intent across candidate context, selected/recommended binding, timeline/audit rationale and launched run `sourceIntentId`. Human fallback resumes the existing binding without inventing a new decision. | validated on final tree | Primary/reviewer, direct/supervised, prompt/run, crash/restart and unrelated-later-run negatives passed; candidate context includes skill/KB/MCP/backend, organization workload and observed cost. |
+| H05 | Archive/restore journals the exact canonical edge, lifecycle marker, teardown counts and original actor/authority. Boot converges only a marker-backed commit. Deletion tombstones and purge include all newer intent tables. | validated on final tree | Pre/post-project-file crash recovery, same-state retry, replacement/deleted project negatives and full operational-state purge passed. |
+| H06 | Ownership cleanup stages exact owner seats while access is unchanged, atomically commits the role/member change plus batch marker, and only then releases owners. Pre-commit revocation/conflict changes neither access, seats nor audit. | validated on final tree | Pre/post-access-commit and owner-release crashes, actor revocation, target conflict, boot/retry exact-once audit, replacement task and newer-owner negatives passed. |
+| H07 | Governed mutations re-check the current enabled actor and project/org/task authority at their actual canonical or irreversible boundary. Contributor-owner acceptance and visible org-admin emergency project-admin authority are recorded precisely. | validated on final tree | Revocation/disable/delete races for role, workflow, run, acceptance, PR and merge boundaries passed; audit authority matches the committing grant. |
+| H08 | Delivery/merge provenance uses full SHA and task incarnation; deterministic intent/event ids dedupe only the same occurrence. | validated on final tree | Same short SHA prefix, same task key recreated, same PR/head reused by a later incarnation, and crash/retry exact-once cases passed. |
+
+## Earlier F01–F41 implementation/evidence ledger
 
 | ID | Required change | Final status | Final evidence |
 | --- | --- | --- | --- |
@@ -50,7 +68,7 @@ they are not silently counted as live proof.
 | DOC | Reconcile operational/current-state/planning documentation | validated | This dossier records final counts, screenshots, credential limits, historic baseline separation, and cleanup state. |
 | REG | Full regression and live release evidence | validated | Typecheck clean; Vitest 146 files/1,318 tests; focused terminal/reviewer 152 plus broader focused 165; production build; Playwright 19/19 in 20.5 s; Docker/API/browser/log checks all passed. |
 
-## Final environment snapshot
+## Earlier environment snapshot
 
 - Docker Compose final image: healthy at `http://127.0.0.1:5173`.
 - Projection: 5 projects, 38 tasks, watcher active, integrity healthy, recovery not required.
@@ -60,6 +78,21 @@ they are not silently counted as live proof.
 - GitHub cleanup: PR #22 was closed and its branch deleted. The branch was rebased onto PR #20's
   merge and the merged `test-support/deep-validation/VDV-13.md` fixture was removed before the
   final product PR was published.
+
+These are facts from the earlier completed pass. They are preserved as useful
+history and do not substitute for H01–H08's separate final gate.
+
+## Post-review final evidence
+
+- Vitest: 158 files/1,565 tests in 30.25 seconds; typecheck/build/whitespace clean; independent
+  focused recovery verifier 197/197.
+- Playwright: 19/19 in 22.1 seconds.
+- Fresh Docker: 3 projects/12 tasks; rescan 0 changed/15 unchanged/0 removed/0 errors in 3 ms;
+  health/integrity OK; watcher active; 0 application warnings/errors.
+- Signed-in browser: critical project/organization routes passed, 12 new screenshots were captured,
+  and browser console review found 0 warnings/errors.
+- Publication target: existing draft PR #23; final remote push/check facts are recorded after
+  publication.
 
 ## Previously deferred pass-4 checks folded into rows above
 

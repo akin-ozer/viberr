@@ -27,8 +27,9 @@ export function mapPrToCacheState(pr: {
   merged?: boolean;
   merged_at?: string | null;
 }): PrCacheState {
-  if (pr.merged || pr.merged_at) return "merged";
-  if (pr.state === "closed") return "closed";
+  const state = pr.state.toLowerCase();
+  if (pr.merged || pr.merged_at || state === "merged") return "merged";
+  if (state === "closed") return "closed";
   return "review"; // open + draft both read "in review" (ruling 12)
 }
 
@@ -64,6 +65,8 @@ export interface PrFacts {
   state: PrCacheState;
   draft: boolean;
   headSha: string | null;
+  baseRepo: string | null;
+  baseRef: string | null;
   /** Change stats from the PR (null when the detail fetch failed). */
   changed: { files: number; add: number; del: number } | null;
   /** Check-runs summary for the head sha (null when unavailable). */
@@ -84,6 +87,7 @@ interface GhPullListItem {
   draft?: boolean;
   merged_at: string | null;
   head?: { sha?: string };
+  base?: { ref?: string; repo?: { full_name?: string } };
 }
 
 interface GhPullDetail extends GhPullListItem {
@@ -109,6 +113,7 @@ export async function findPrForBranch(
   client: GithubClient,
   repo: string,
   branch: string,
+  expectedDefaultBranch?: string,
 ): Promise<PrLinkResult> {
   const owner = repo.split("/")[0] ?? repo;
   const list = await client.request<GhPullListItem[]>(
@@ -117,6 +122,7 @@ export async function findPrForBranch(
     {
       searchParams: {
         head: `${owner}:${branch}`,
+        ...(expectedDefaultBranch ? { base: expectedDefaultBranch } : {}),
         state: "all",
         sort: "created",
         direction: "desc",
@@ -143,6 +149,14 @@ export async function findPrForBranch(
   }
   const head = list.data[0];
   if (!head) return { status: "none" };
+  if (
+    expectedDefaultBranch &&
+    (head.base?.ref !== expectedDefaultBranch ||
+      head.base?.repo?.full_name?.trim().toLowerCase() !==
+        repo.trim().toLowerCase())
+  ) {
+    return { status: "none" };
+  }
 
   // Detail fetch for merged flag + change stats (list items omit them).
   const detail = await client.request<GhPullDetail>(
@@ -150,8 +164,19 @@ export async function findPrForBranch(
     `/repos/${repo}/pulls/${head.number}`,
   );
   const pr: GhPullDetail = detail.ok ? detail.data : head;
+  if (
+    expectedDefaultBranch &&
+    (pr.base?.ref !== expectedDefaultBranch ||
+      pr.base?.repo?.full_name?.trim().toLowerCase() !==
+        repo.trim().toLowerCase())
+  ) {
+    return { status: "none" };
+  }
   const state = mapPrToCacheState(pr);
   const headSha = pr.head?.sha ?? head.head?.sha ?? null;
+  const baseRepo =
+    pr.base?.repo?.full_name ?? head.base?.repo?.full_name ?? null;
+  const baseRef = pr.base?.ref ?? head.base?.ref ?? null;
 
   let checks: PrChecksSummary | null = null;
   if (headSha) {
@@ -185,6 +210,8 @@ export async function findPrForBranch(
       state,
       draft: pr.draft ?? false,
       headSha,
+      baseRepo,
+      baseRef,
       changed:
         detail.ok &&
         typeof pr.changed_files === "number" &&

@@ -101,6 +101,43 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     expect(entry.taskKey).toBe("VIB-7");
   });
 
+  it("keeps an org-admin override notice before the trailing task chip", () => {
+    recordAudit(store.db, {
+      action: "task.ownership.admin_released",
+      actor: arda(),
+      subjectKind: "task",
+      subjectId: "VIB-7",
+      projectSlug: store.slug,
+      taskKey: "VIB-7",
+      details: { authoritySource: "org_admin_override" },
+    });
+    const entry = listAuditLog(store.db, store.slug)[0]!;
+    expect(entry.text).toBe(
+      "Arda Test released the task owner — recorded per audit policy. **Org admin override used.** Recorded on",
+    );
+    expect(entry.taskKey).toBe("VIB-7");
+  });
+
+  it("renders recommendation-only routing as a recommendation, not an assignment", () => {
+    recordAudit(store.db, {
+      action: "task.operator.routing_decided",
+      actor: { userId: null, label: "operator" },
+      subjectKind: "task",
+      subjectId: "VIB-7",
+      projectSlug: store.slug,
+      taskKey: "VIB-7",
+      details: {
+        purpose: "reviewer",
+        selectedProfileId: "quality-reviewer",
+        disposition: "recommended",
+        reason: "Best fit for this evidence.",
+      },
+    });
+    expect(listAuditLog(store.db, store.slug)[0]!.text).toBe(
+      "operator recommended profile **quality-reviewer** for **reviewer**: Best fit for this evidence.",
+    );
+  });
+
   it("messy details never leak — templates render sentences, not JSON", () => {
     recordAudit(store.db, {
       action: "project.settings.updated",

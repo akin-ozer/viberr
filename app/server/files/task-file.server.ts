@@ -31,6 +31,8 @@ import {
  *                    ### <UTC ISO> · <type> · <actor-ref>
  *                    title: …          (optional metadata, completion only)
  *                    to: agent         (optional metadata, comments only)
+ *                    run: <run-id>      (optional runtime-effect idempotency)
+ *                    intent: <intent-id> (optional governed-effect idempotency)
  *                    <blank line>
  *                    <text — RichText micro-format>
  *                    evidence:                      (optional, completion only)
@@ -42,7 +44,7 @@ import {
  *
  * Event-body escaping: free text inside a timeline event may legitimately
  * contain lines that would otherwise read as file STRUCTURE (`## ` section
- * headings, `### ` event headings, `title:`/`to:` metadata lines, the
+ * headings, `### ` event headings, `title:`/`to:`/`run:` metadata lines, the
  * `evidence:` marker). The serializer prefixes such lines with a single
  * backslash (`\## Notes`); the parser strips exactly one backslash from any
  * line that is one-or-more backslashes followed by a structural pattern —
@@ -58,7 +60,7 @@ const SEP = " · ";
 
 /** Line patterns the parser treats as structure inside an event block
  * (mirrors SECTION_RE / EVENT_HEADING_PREFIX / metadata / evidence rules). */
-const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|\s*evidence:\s*$`;
+const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|run:\s|intent:\s|\s*evidence:\s*$`;
 /** Serialize side: line needs a(nother) escape backslash. */
 const NEEDS_ESCAPE_RE = new RegExp(String.raw`^\\*(?:${STRUCTURAL_LINE_SRC})`);
 /** Parse side: line carries at least one escape backslash — strip one. */
@@ -105,7 +107,8 @@ function parseEventBlock(
 ): TaskFileEvent | null {
   const heading = headingLine.slice(EVENT_HEADING_PREFIX.length);
   const firstSep = heading.indexOf(SEP);
-  const secondSep = firstSep === -1 ? -1 : heading.indexOf(SEP, firstSep + SEP.length);
+  const secondSep =
+    firstSep === -1 ? -1 : heading.indexOf(SEP, firstSep + SEP.length);
   if (firstSep === -1 || secondSep === -1) {
     diagnostics.push(
       diagWarning(
@@ -154,9 +157,12 @@ function parseEventBlock(
     return null;
   }
 
-  // Metadata lines: consecutive `title:` / `to:` lines directly after heading.
+  // Metadata lines: consecutive `title:` / `to:` / `run:` lines directly
+  // after the heading.
   let title: string | null = null;
   let toAgent = false;
+  let sourceRunId: string | null = null;
+  let sourceIntentId: string | null = null;
   let i = 0;
   while (i < bodyLines.length) {
     const line = bodyLines[i]!;
@@ -166,13 +172,20 @@ function parseEventBlock(
     } else if (/^to:\s/.test(line)) {
       toAgent = line.slice("to:".length).trim() === "agent";
       i += 1;
+    } else if (/^run:\s/.test(line)) {
+      sourceRunId = line.slice("run:".length).trim() || null;
+      i += 1;
+    } else if (/^intent:\s/.test(line)) {
+      sourceIntentId = line.slice("intent:".length).trim() || null;
+      i += 1;
     } else {
       break;
     }
   }
 
   // Body: everything up to an `evidence:` marker line. Escaped structural
-  // lines (`\## …`, `\### …`, `\title: …`, `\to: …`, `\evidence:`) lose
+  // lines (`\## …`, `\### …`, `\title: …`, `\to: …`, `\run: …`,
+  // `\evidence:`) lose
   // exactly one backslash — the reverse of escapeEventText.
   const rest = bodyLines.slice(i);
   const evidenceIdx = rest.findIndex((l) => l.trim() === "evidence:");
@@ -203,7 +216,17 @@ function parseEventBlock(
     }
   }
 
-  return { occurredAt, type, actor, title, text, toAgent, evidence };
+  return {
+    occurredAt,
+    type,
+    actor,
+    title,
+    text,
+    toAgent,
+    ...(sourceRunId ? { sourceRunId } : {}),
+    ...(sourceIntentId ? { sourceIntentId } : {}),
+    evidence,
+  };
 }
 
 function parseTimeline(
@@ -247,6 +270,8 @@ function serializeEvent(event: TaskFileEvent): string {
   ];
   if (event.title) lines.push(`title: ${event.title}`);
   if (event.toAgent) lines.push(`to: agent`);
+  if (event.sourceRunId) lines.push(`run: ${event.sourceRunId}`);
+  if (event.sourceIntentId) lines.push(`intent: ${event.sourceIntentId}`);
   lines.push("");
   lines.push(escapeEventText(event.text));
   if (event.evidence && event.evidence.length > 0) {
@@ -341,7 +366,7 @@ export function parseTaskFileContent(
 
   for (const section of sections) {
     const raw = section.lines.join("\n");
-    if (section.title === "" ) {
+    if (section.title === "") {
       if (raw.trim() !== "") extraSections.push({ title: "", raw: raw.trim() });
       continue;
     }
@@ -393,7 +418,10 @@ export function parseTaskFileContent(
   // Timeline must be newest-first; out-of-order entries are tolerated but
   // flagged (external editors may append at the bottom).
   for (let i = 1; i < timeline.length; i++) {
-    if (Date.parse(timeline[i]!.occurredAt) > Date.parse(timeline[i - 1]!.occurredAt)) {
+    if (
+      Date.parse(timeline[i]!.occurredAt) >
+      Date.parse(timeline[i - 1]!.occurredAt)
+    ) {
       diagnostics.push(
         diagInfo(
           "timeline.out_of_order",
@@ -437,7 +465,8 @@ export function serializeTaskFile(parsed: ParsedTaskFile): string {
   bodyParts.push(eventsText ? `## Timeline\n\n${eventsText}` : `## Timeline`);
 
   for (const extra of parsed.extraSections) {
-    if (extra.title !== "") bodyParts.push(`## ${extra.title}\n\n${extra.raw}`.trimEnd());
+    if (extra.title !== "")
+      bodyParts.push(`## ${extra.title}\n\n${extra.raw}`.trimEnd());
   }
 
   const { frontmatter, unknownFrontmatter } = parsed;

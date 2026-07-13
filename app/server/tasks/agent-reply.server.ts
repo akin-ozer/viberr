@@ -15,13 +15,20 @@ import {
 } from "~/server/runtimes/simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import {
+  defaultModelFor,
+  resolveRunEffort,
+} from "~/server/runtimes/model-catalog.server";
 import {
   listDeployedSpecialists,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
+import {
+  repositoryWorkspaceKey,
+  workspaceNamespaceKey,
+} from "./specialist-preflight.server";
 
 /**
  * Agent-mention resolution + reply-text extraction for the
@@ -101,8 +108,20 @@ function handleMatchesSpecialist(
   return (
     handles.has(sp.name.toLowerCase()) ||
     handles.has(sp.id.toLowerCase()) ||
-    handles.has(sp.backend)
+    sp.backends.some((backend) => handles.has(backend))
   );
+}
+
+function specialistRuntimeForBackend(
+  specialist: DeployedSpecialistView,
+  backend: RealBackend,
+): { model: string; effort: string } {
+  return backend === specialist.backend
+    ? { model: specialist.model, effort: specialist.effort }
+    : {
+        model: defaultModelFor(backend),
+        effort: resolveRunEffort(backend, specialist.effort),
+      };
 }
 
 /**
@@ -111,10 +130,9 @@ function handleMatchesSpecialist(
  * backend alone let `@reviewer` resume the dev's most-recent claude session
  * (the dev then answered "as the dev"); this keeps each agent on its own thread.
  *
- * Pass 1 — the agent's own runs: `agent_profile_id === profileId` AND the run
- * kind matches how the agent is engaged (`primary` vs `reviewer`), so a run
- * stamped with an identity but the wrong kind (a legacy cross-agent resume) is
- * NOT reused. Pass 2 — a legacy fallback for the PRIMARY only: a pre-identity
+ * Pass 1 — the agent's own runs: identity, engagement kind, and persisted
+ * backend must all match, so switching an engagement from Claude to Codex can
+ * never resume the old provider session. Pass 2 — a legacy fallback for the PRIMARY only: a pre-identity
  * (`agent_profile_id IS NULL`) primary run of the same backend, so primaries
  * that ran before the identity columns still resume.
  */
@@ -123,14 +141,24 @@ function latestSessionRun(
   projectSlug: string,
   taskKey: string,
   target: { profileId: string; backend: RealBackend; isPrimary: boolean },
+  taskIncarnation: string | null,
 ): AgentRunRow | null {
+  if (!taskIncarnation) return null;
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
   // Pass 1 — the agent's own session (identity + engagement kind).
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
-    if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
+    if (row.state === "queued" || row.state === "running") continue;
+    if (row.task_incarnation !== taskIncarnation) continue;
+    const rowBackend: RealBackend =
+      row.backend === "codex" ? "codex" : "claude";
+    if (
+      row.agent_profile_id === target.profileId &&
+      row.kind === wantKind &&
+      rowBackend === target.backend
+    ) {
       return row;
     }
   }
@@ -140,6 +168,8 @@ function latestSessionRun(
       const row = rows[i]!;
       if (row.kind !== "primary") continue;
       if (!row.session_id) continue;
+      if (row.state === "queued" || row.state === "running") continue;
+      if (row.task_incarnation !== taskIncarnation) continue;
       if (row.agent_profile_id != null) continue;
       const rowBackend: RealBackend =
         row.backend === "codex" ? "codex" : "claude";
@@ -178,6 +208,7 @@ export function resolveMentionedAgent(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   const primaryRef = existing?.parsed.frontmatter.specialist ?? null;
+  const taskIncarnation = existing?.parsed.frontmatter.createdAt ?? null;
 
   // 1. `@operator` → the OPERATOR itself (never the primary specialist). Only
   //    resolves when an operator is actually deployed on the project; the caller
@@ -207,13 +238,16 @@ export function resolveMentionedAgent(
     const backend: RealBackend =
       primaryRef.backend === "codex" ? "codex" : "claude";
     const role = sp?.role ?? primaryRef.role;
+    const runtime = sp
+      ? specialistRuntimeForBackend(sp, backend)
+      : { model: defaultModelFor(backend), effort: "" };
     return {
       profileId: primaryRef.profileId,
       name: sp?.name ?? primaryRef.profileId,
       role,
       backend,
-      model: sp?.model ?? defaultModelFor(backend),
-      effort: sp?.effort ?? "",
+      model: runtime.model,
+      effort: runtime.effort,
       actorRef: agentActorRef(backend, role),
       isPrimary: true,
       isOperator: false,
@@ -221,7 +255,7 @@ export function resolveMentionedAgent(
         profileId: primaryRef.profileId,
         backend,
         isPrimary: true,
-      }),
+      }, taskIncarnation),
     };
   }
 
@@ -231,21 +265,45 @@ export function resolveMentionedAgent(
   );
   if (matched) {
     const isPrimary = primaryRef?.profileId === matched.id;
+    const reviewerRef =
+      existing?.parsed.frontmatter.reviewers.find(
+        (reviewer) => reviewer.profileId === matched.id,
+      ) ?? null;
+    const isReviewer = !!reviewerRef;
+    const assignment = isPrimary ? primaryRef : reviewerRef;
+    const explicitlyMentionedBackend = (
+      ["claude", "codex"] as const
+    ).find(
+      (backend) =>
+        handleSet.has(backend) && matched.backends.includes(backend),
+    );
+    const backend: RealBackend =
+      assignment?.backend ?? explicitlyMentionedBackend ?? matched.backend;
+    const runtime = specialistRuntimeForBackend(matched, backend);
     return {
       profileId: matched.id,
       name: matched.name,
       role: matched.role,
-      backend: matched.backend,
-      model: matched.model,
-      effort: matched.effort,
-      actorRef: agentActorRef(matched.backend, matched.role),
+      backend,
+      model: runtime.model,
+      effort: runtime.effort,
+      actorRef: agentActorRef(backend, matched.role),
       isPrimary,
       isOperator: false,
-      session: latestSessionRun(db, projectSlug, taskKey, {
-        profileId: matched.id,
-        backend: matched.backend,
-        isPrimary,
-      }),
+      session:
+        isPrimary || isReviewer
+          ? latestSessionRun(
+              db,
+              projectSlug,
+              taskKey,
+              {
+                profileId: matched.id,
+                backend,
+                isPrimary,
+              },
+              taskIncarnation,
+            )
+          : null,
     };
   }
 
@@ -269,7 +327,7 @@ export function resolveMentionedAgent(
           profileId: primaryRef.profileId,
           backend,
           isPrimary: true,
-        }),
+        }, taskIncarnation),
       };
     }
   }
@@ -471,16 +529,12 @@ export function resumeWorkdir(
   workspaceKey?: string,
 ): string {
   const base = taskDir(projectSlug, taskKey, dataRoot);
-  const safeWorkspaceKey = workspaceKey
-    ?.trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const safeWorkspaceKey = workspaceNamespaceKey(workspaceKey);
   const workspace = safeWorkspaceKey
     ? path.join(base, "workspace", safeWorkspaceKey)
     : path.join(base, "workspace");
   if (repo) {
-    const name = repo.split("/").pop() ?? repo;
-    const clone = path.join(workspace, name);
+    const clone = path.join(workspace, repositoryWorkspaceKey(repo));
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
   mkdirSync(workspace, { recursive: true });

@@ -36,7 +36,11 @@ import {
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
+import {
+  convergeProjectOwnershipCleanup,
+  markProjectOwnershipCleanupCommitted,
+  stageProjectOwnershipCleanup,
+} from "~/server/tasks/ownership-cleanup.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -266,7 +270,11 @@ export function updateOrgUser(
         actor,
         subjectKind: "user",
         subjectId: existing.id,
-        details: { fields: ["email"], emailFrom: existing.email, emailTo: email },
+        details: {
+          fields: ["email"],
+          emailFrom: existing.email,
+          emailTo: email,
+        },
       });
     }
   }
@@ -381,7 +389,7 @@ export async function deleteOrgUser(
   // Files first, identity last. If one file write fails, the user can still
   // sign in and an admin can retry; no ghost membership/owner is created.
   for (const membership of memberships) {
-    const releasedTaskKeys = await releaseProjectOwnerships(
+    const ownershipCleanup = await stageProjectOwnershipCleanup(
       db,
       {
         projectSlug: membership.slug,
@@ -398,6 +406,7 @@ export async function deleteOrgUser(
         ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
       },
       (parsed) => {
+        markProjectOwnershipCleanupCommitted(parsed, ownershipCleanup);
         parsed.frontmatter.members = parsed.frontmatter.members.filter(
           (member) => member.userId !== userId,
         );
@@ -406,6 +415,11 @@ export async function deleteOrgUser(
     rebuildPath(db, projectFilePath(membership.slug, ctx.dataRoot), {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
+    const releasedTaskKeys = await convergeProjectOwnershipCleanup(
+      db,
+      ownershipCleanup,
+      ctx,
+    );
     recordAudit(db, {
       action: "project.member.removed",
       actor,

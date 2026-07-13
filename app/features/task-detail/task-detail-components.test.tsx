@@ -7,12 +7,17 @@ import { MemoryRouter } from "react-router";
 import { DecisionPacket } from "./decision-packet";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
+import { OperatorRecommendations } from "./operator-recommendations";
 import {
   ExecutionProfile,
   type DeployedSpecialistView,
   type TaskMemberView,
 } from "./execution-profile";
-import { CompletionAcceptance, GithubTrace } from "./task-detail-page";
+import {
+  CompletionAcceptance,
+  GithubTrace,
+  HumanValidationControl,
+} from "./task-detail-page";
 
 afterEach(cleanup);
 
@@ -141,6 +146,28 @@ describe("DecisionPacket", () => {
     expect(onResolve).toHaveBeenCalledWith(1);
   });
 
+  it("explains and blocks completion when canonical evidence is not ready", () => {
+    const onResolve = vi.fn();
+    const { getByRole } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={false}
+        completionBlockedReason="Record current human validation first"
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const button = getByRole("button", {
+      name: "Accept completion",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("Record current human validation first");
+    fireEvent.click(button);
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
   it("blocked packets tint blocked; no rec → first option preselected; Ask fires", () => {
     const onAsk = vi.fn();
     const blocked: PacketRender = {
@@ -191,6 +218,35 @@ describe("DecisionPacket", () => {
   });
 });
 
+describe("OperatorRecommendations", () => {
+  it("keeps dismissal available but withholds completion apply until evidence is current", () => {
+    const onApply = vi.fn();
+    const onDismiss = vi.fn();
+    const { getByRole, queryByRole } = render(
+      <OperatorRecommendations
+        recommendations={[
+          {
+            id: "rec-complete",
+            kind: "accept_completion",
+            label: "Accept completion",
+            detail: "The operator recommends acceptance.",
+          },
+        ]}
+        canApply
+        canApplyCompletion={false}
+        completionReady={false}
+        busy={false}
+        onApply={onApply}
+        onDismiss={onDismiss}
+      />,
+    );
+    expect(queryByRole("button", { name: "Apply" })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Dismiss" }));
+    expect(onApply).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith("rec-complete");
+  });
+});
+
 /* ------------------------------------------ Direct completion acceptance */
 
 describe("CompletionAcceptance", () => {
@@ -221,6 +277,27 @@ describe("CompletionAcceptance", () => {
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
     expect(onAccept).not.toHaveBeenCalled();
+  });
+});
+
+describe("HumanValidationControl", () => {
+  it("makes validation explicitly separate from acceptance", () => {
+    const onValidate = vi.fn();
+    const { getByRole, getByText, queryByRole } = render(
+      <HumanValidationControl
+        taskKey="VIB-151"
+        busy={false}
+        onValidate={onValidate}
+      />,
+    );
+    expect(getByRole("region", { name: "Human validation" })).toBeTruthy();
+    expect(getByText("no reviewers assigned")).toBeTruthy();
+    expect(
+      getByText(/does not accept completion or merge anything/i),
+    ).toBeTruthy();
+    expect(queryByRole("button", { name: "Accept completion" })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Record validation" }));
+    expect(onValidate).toHaveBeenCalledOnce();
   });
 });
 
@@ -542,14 +619,20 @@ const deployedFixture: DeployedSpecialistView[] = [
     name: "Developer",
     role: "Implementation",
     backend: "codex",
+    backends: ["codex", "claude"],
     model: "codex-large",
+    stages: ["impl"],
+    spanAll: false,
   },
   {
     id: "reviewer",
     name: "Reviewer",
     role: "Code review",
     backend: "claude",
+    backends: ["claude"],
     model: "claude-sonnet",
+    stages: ["impl", "review"],
+    spanAll: false,
   },
 ];
 
@@ -557,6 +640,7 @@ function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   return {
     ...taskFixture("u-arda", "Arda Kaya"),
     projectSlug: "viberr-core",
+    stage: "impl",
     specialist: null,
     reviewers: [],
     operator: null,
@@ -660,11 +744,12 @@ describe("ExecutionProfile — assign menu + run button", () => {
     fireEvent.click(btn);
     const menu = container.querySelector('[aria-label="Assign a specialist"]')!;
     const items = menu.querySelectorAll(".menu-item");
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items[0]!.textContent).toContain("Developer");
     expect(items[0]!.textContent).toContain("Implementation");
+    expect(items[0]!.textContent).toContain("Codex");
     fireEvent.click(items[0]!);
-    expect(onAssign).toHaveBeenCalledWith("developer");
+    expect(onAssign).toHaveBeenCalledWith("developer", "codex");
   });
 
   it("no deployed specialists: hint links to the Agents page", () => {
@@ -720,6 +805,55 @@ describe("ExecutionProfile — assign menu + run button", () => {
       container.querySelectorAll("button.btn.primary"),
     ).find((b) => b.textContent?.includes("Running")) as HTMLButtonElement;
     expect(runBtn.disabled).toBe(true);
+  });
+
+  it("disables a stale primary run with the stage mismatch explained", () => {
+    const task = execTask({
+      stage: "review",
+      specialist: {
+        kind: "agent",
+        profileId: "developer",
+        backend: "codex",
+        name: "Codex",
+        role: "Implementation",
+      },
+    } as unknown as Partial<TaskSummary>);
+    const { container } = renderExec(task);
+    const runBtn = Array.from(
+      container.querySelectorAll("button.btn.primary"),
+    ).find(
+      (button) =>
+        button.textContent?.includes("Run") &&
+        !button.textContent?.includes("operator"),
+    ) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(runBtn.title).toContain("not eligible for the review stage");
+    expect(container.textContent).toContain(
+      "Run unavailable · Developer is not eligible for the review stage",
+    );
+  });
+
+  it("keeps engaged reviewers out of the primary assignment menu", () => {
+    const { container } = renderExec(
+      execTask({
+        reviewers: [
+          {
+            kind: "agent",
+            profileId: "reviewer",
+            backend: "claude",
+            name: "Claude Code",
+            role: "Code review",
+          },
+        ],
+      } as unknown as Partial<TaskSummary>),
+    );
+    const assign = Array.from(container.querySelectorAll(".own-btn")).find(
+      (button) => button.textContent?.includes("Assign specialist"),
+    ) as HTMLButtonElement;
+    fireEvent.click(assign);
+    const menu = container.querySelector('[aria-label="Assign a specialist"]')!;
+    expect(menu.textContent).toContain("Developer");
+    expect(menu.textContent).not.toContain("Reviewer");
   });
 
   it("non-privileged role: no assign/run affordances (RBAC-gated)", () => {
@@ -783,10 +917,63 @@ describe("ExecutionProfile — reviewers", () => {
     fireEvent.click(addBtn);
     const menu = container.querySelector('[aria-label="Add a reviewer"]')!;
     const items = menu.querySelectorAll(".menu-item");
-    expect(items).toHaveLength(1);
+    expect(items).toHaveLength(2);
     expect(items[0]!.textContent).toContain("Developer");
+    expect(items[0]!.textContent).toContain("Codex");
     fireEvent.click(items[0]!);
-    expect(onAssignReviewer).toHaveBeenCalledWith("developer");
+    expect(onAssignReviewer).toHaveBeenCalledWith("developer", "codex");
+  });
+
+  it("keeps the primary specialist out of the reviewer assignment menu", () => {
+    const task = execTask({
+      specialist: {
+        kind: "agent",
+        profileId: "developer",
+        backend: "codex",
+        name: "Codex",
+        role: "Implementation",
+      },
+    } as unknown as Partial<TaskSummary>);
+    const { container } = renderExec(task);
+    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find(
+      (button) => button.textContent?.includes("Add reviewer"),
+    ) as HTMLButtonElement;
+    fireEvent.click(addBtn);
+    const menu = container.querySelector('[aria-label="Add a reviewer"]')!;
+    expect(menu.textContent).toContain("Reviewer");
+    expect(menu.textContent).not.toContain("Developer");
+  });
+
+  it("disables a stale reviewer run with the stage mismatch explained", () => {
+    const reviewerOnlyInImpl: DeployedSpecialistView[] = deployedFixture.map(
+      (specialist) =>
+        specialist.id === "reviewer"
+          ? { ...specialist, stages: ["impl"] }
+          : specialist,
+    );
+    const { container } = renderExec(
+      execTask({
+        stage: "review",
+        reviewers: [
+          {
+            kind: "agent",
+            profileId: "reviewer",
+            backend: "claude",
+            name: "Claude Code",
+            role: "Code review",
+          },
+        ],
+      } as unknown as Partial<TaskSummary>),
+      { deployedSpecialists: reviewerOnlyInImpl },
+    );
+    const runBtn = container.querySelector(
+      ".rev-agent .btn.primary",
+    ) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(runBtn.title).toContain("not eligible for the review stage");
+    expect(container.textContent).toContain(
+      "Run unavailable · Reviewer is not eligible for the review stage",
+    );
   });
 
   it("reviewer Run buttons are disabled while a run is active", () => {

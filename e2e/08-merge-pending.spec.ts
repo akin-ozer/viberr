@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { writeFileSync } from "node:fs";
 
 test.use({ storageState: "e2e/.auth/selin.json" });
 
@@ -6,6 +7,15 @@ test("accepted repository work stays in Review until its PR is really merged", a
   page,
 }) => {
   await page.goto("/projects/e2e-governance/tasks/E2E-2");
+
+  const validation = page.getByRole("region", { name: "Human validation" });
+  await validation.getByRole("button", { name: "Record validation" }).click();
+  await expect(
+    page.locator(".toast", {
+      hasText: "Validation recorded · E2E-2 is ready for separate acceptance",
+    }),
+  ).toBeVisible();
+  await expect(validation).toHaveCount(0);
 
   const packet = page.locator(".packet");
   await packet.getByRole("radio", { name: /Accept completion/ }).click();
@@ -33,22 +43,35 @@ test("accepted repository work stays in Review until its PR is really merged", a
   await expect(done.locator("a.card", { hasText: "E2E-2" })).toHaveCount(0);
 });
 
-test("a contributor owner finalizes accepted work already merged on GitHub", async ({
+test("a contributor owner finalizes accepted work after an exact external merge", async ({
   page,
 }) => {
   await page.goto("/projects/e2e-governance/tasks/E2E-3");
 
-  await expect(page.getByText("merged", { exact: true })).toBeVisible();
+  await expect(page.getByText("PR #999003 · merge pending")).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Completion acceptance" }),
   ).toHaveCount(0);
   const complete = page.getByRole("button", { name: "Complete merge" });
   await expect(complete).toHaveAttribute(
     "title",
-    "Finalize this externally merged, accepted completion",
+    "Run the real GitHub merge for this accepted PR (needs a valid project credential)",
+  );
+
+  // Simulate a GitHub-side merge after Viberr recorded acceptance. The
+  // preloaded transport will now report this exact repo/base/head as merged;
+  // its PUT path is deliberately a hard failure, proving no repeat PUT occurs.
+  writeFileSync(
+    new URL(".github-fixture-pr-999003-merged", import.meta.url),
+    "merged\n",
   );
   await complete.click();
 
+  await expect(
+    page.locator(".toast", {
+      hasText: "PR #999003 merged · E2E-3 moved to Done.",
+    }),
+  ).toBeVisible();
   const currentState = page.locator(".panel", {
     has: page.getByRole("heading", { name: "Current state" }),
   });

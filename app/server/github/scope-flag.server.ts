@@ -4,11 +4,12 @@ import {
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
 import {
-  appendTimelineEvent,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
+  getScopeViolation,
   openScopeViolation,
   resolveScopeViolation,
   type ScopeViolationRecord,
@@ -55,6 +56,26 @@ export function policyUpdateText(scope: string): string {
 
 export interface ScopeFlagContext {
   dataRoot?: string;
+  /** Optional exact lifecycle observed before an asynchronous scope probe.
+   * A recreated task with the same key must not receive the old violation's
+   * policy event. `null` deliberately means the task was absent at capture. */
+  expectedTaskCreatedAt?: string | null;
+  signal?: AbortSignal;
+}
+
+function assertScopeLifecycleActive(
+  ctx: ScopeFlagContext,
+  currentCreatedAt: string | null,
+): void {
+  if (ctx.signal?.aborted) {
+    throw new DOMException("Project lifecycle ownership was revoked.", "AbortError");
+  }
+  if (
+    ctx.expectedTaskCreatedAt !== undefined &&
+    currentCreatedAt !== ctx.expectedTaskCreatedAt
+  ) {
+    throw new DOMException("Task lifecycle ownership changed.", "AbortError");
+  }
 }
 
 function taskRef(input: {
@@ -75,16 +96,27 @@ async function appendPolicyEvent(
   ctx: ScopeFlagContext,
 ): Promise<boolean> {
   const ref = taskRef({ ...input, ...ctx });
-  if (!readTaskFile(ref)) return false; // soft ref — task file may be gone
-  await appendTimelineEvent(ref, {
-    occurredAt: new Date().toISOString(),
-    type: "policy",
-    actor: POLICY_ENGINE_ACTOR,
-    title: null,
-    text: input.text,
-    toAgent: false,
-    evidence: null,
+  const current = readTaskFile(ref);
+  if (!current) {
+    assertScopeLifecycleActive(ctx, null);
+    return false; // soft ref — task file may be gone
+  }
+  assertScopeLifecycleActive(ctx, current.parsed.frontmatter.createdAt);
+  let appended = false;
+  await updateTaskFile(ref, (parsed) => {
+    assertScopeLifecycleActive(ctx, parsed.frontmatter.createdAt);
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "policy",
+      actor: POLICY_ENGINE_ACTOR,
+      title: null,
+      text: input.text,
+      toAgent: false,
+      evidence: null,
+    });
+    appended = true;
   });
+  if (!appended) return false;
   rebuildPath(db, resolveTaskFilePath(ref), {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -111,6 +143,19 @@ export async function flagScopeViolation(
   input: FlagScopeViolationInput,
   ctx: ScopeFlagContext = {},
 ): Promise<{ violation: ScopeViolationRecord; created: boolean }> {
+  if (input.taskKey) {
+    const current = readTaskFile(
+      taskRef({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      }),
+    );
+    assertScopeLifecycleActive(
+      ctx,
+      current?.parsed.frontmatter.createdAt ?? null,
+    );
+  }
   const { violation, created } = openScopeViolation(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -154,6 +199,20 @@ export async function resolveScopeViolationWithEvent(
   actor: AuditActor = SYSTEM_ACTOR,
   ctx: ScopeFlagContext = {},
 ): Promise<{ violation: ScopeViolationRecord; resolved: boolean } | null> {
+  const pending = getScopeViolation(db, violationId);
+  if (pending?.taskKey) {
+    const current = readTaskFile(
+      taskRef({
+        projectSlug: pending.projectSlug,
+        taskKey: pending.taskKey,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      }),
+    );
+    assertScopeLifecycleActive(
+      ctx,
+      current?.parsed.frontmatter.createdAt ?? null,
+    );
+  }
   const result = resolveScopeViolation(db, violationId, actor);
   if (!result || !result.resolved) return result;
   const { violation } = result;

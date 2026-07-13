@@ -1,5 +1,8 @@
 import type Database from "better-sqlite3";
-import type { ProjectRole } from "~/schemas/project-file.schema";
+import type {
+  ParsedProjectFile,
+  ProjectRole,
+} from "~/schemas/project-file.schema";
 import type { UserRole } from "~/shared/mapping/user.server";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import {
@@ -10,11 +13,24 @@ import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
-import { updateProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { ROLE_LABEL, BOUNDARIES, type RoleId } from "./policy-data";
 import { roleCan } from "~/shared/rbac";
-import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
+import {
+  convergeProjectOwnershipCleanup,
+  markProjectOwnershipCleanupCommitted,
+  recoverOwnershipCleanupIntentsForTarget,
+  stageProjectOwnershipCleanup,
+} from "~/server/tasks/ownership-cleanup.server";
+import { resolveOrgRole } from "~/server/auth/identity.server";
+import {
+  authorizeProjectAction,
+  type ProjectAuthoritySource,
+} from "~/shared/rbac";
 
 /**
  * Policy mutations (policy spec §5): member role assignment + workflow
@@ -40,6 +56,15 @@ export interface PolicyActor {
 
 export interface PolicyMutationContext {
   dataRoot?: string;
+  /** Fault seam while journaling exact owner seats before the authorized role
+   * write. No task ownership changes before that write commits. */
+  beforeOwnershipReleaseForTests?: (input: {
+    taskKey: string;
+    releasedTaskKeys: readonly string[];
+  }) => void | Promise<void>;
+  afterOwnershipCanonicalReleaseForTests?: (input: {
+    taskKey: string;
+  }) => void | Promise<void>;
 }
 
 function forbidden(userMessage: string): AppError {
@@ -61,6 +86,7 @@ function conflict(userMessage: string): AppError {
 }
 
 function requirePolicyAction(
+  db: Database.Database,
   ctx: PolicyMutationContext,
   action: "manage-members" | "edit-policy",
   projectSlug: string,
@@ -73,8 +99,51 @@ function requirePolicyAction(
   // today, but this closes the single-source bypass.
   return assertProjectAction(action, projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    ...(actor.orgRole !== undefined ? { orgRole: actor.orgRole } : {}),
+    orgRole: currentPolicyOrgRole(db, actor),
   });
+}
+
+function currentPolicyOrgRole(
+  db: Database.Database,
+  actor: PolicyActor,
+): UserRole {
+  const user = db
+    .prepare(`SELECT role, disabled FROM users WHERE id = ?`)
+    .get(actor.userId) as { role: string; disabled: number } | undefined;
+  if (!user || user.disabled === 1) {
+    throw forbidden(
+      "Your account is no longer active and cannot change project policy.",
+    );
+  }
+  return resolveOrgRole(
+    db,
+    actor.userId,
+    user.role === "admin" ? "admin" : "member",
+  );
+}
+
+/** Re-authorize against the exact project.md snapshot about to be committed.
+ * Role cleanup can await many task-file locks, so admission-time authority is
+ * never allowed to survive that asynchronous window. */
+function requireCurrentPolicyAction(
+  db: Database.Database,
+  parsed: ParsedProjectFile,
+  actor: PolicyActor,
+  action: "manage-members" | "edit-policy",
+  what: string,
+): Exclude<ProjectAuthoritySource, "denied"> {
+  const projectRole = parsed.frontmatter.members.find(
+    (member) => member.userId === actor.userId,
+  )?.role;
+  const authority = authorizeProjectAction(
+    projectRole,
+    currentPolicyOrgRole(db, actor),
+    action,
+  );
+  if (!authority.allowed) {
+    throw forbidden(`Only project admins can ${what}.`);
+  }
+  return authority.source as Exclude<ProjectAuthoritySource, "denied">;
 }
 
 function reprojectProject(
@@ -89,8 +158,7 @@ function reprojectProject(
 
 function userName(db: Database.Database, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
-    | { name: string }
-    | undefined;
+    { name: string } | undefined;
   return row?.name ?? userId;
 }
 
@@ -108,6 +176,7 @@ export async function setMemberRole(
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
   const { projectName, authoritySource } = requirePolicyAction(
+    db,
     ctx,
     "manage-members",
     input.projectSlug,
@@ -118,24 +187,103 @@ export async function setMemberRole(
     throw AppError.validation("Unknown project role.");
   }
   const role = input.role as ProjectRole;
-  const auditActor = withProjectAuditAuthority(actor, authoritySource);
+  const cleanupAuditActor = withProjectAuditAuthority(actor, authoritySource);
+  let committedAuthoritySource = authoritySource;
 
   const ref = {
     projectSlug: input.projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   };
 
-  let previousRole: ProjectRole | null = null;
-  let changed = false;
+  const priorCleanup = await recoverOwnershipCleanupIntentsForTarget(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      targetUserId: input.targetUserId,
+    },
+    ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+  );
+  if (priorCleanup.errors > 0) {
+    throw new Error(
+      "A previous ownership cleanup could not be recovered. Retry shortly.",
+    );
+  }
+
+  const initial = readProjectFile(ref);
+  const initialMember = initial?.parsed.frontmatter.members.find(
+    (member) => member.userId === input.targetUserId,
+  );
+  if (!initial || !initialMember) {
+    throw AppError.notFound("That user is not a member of this project.");
+  }
+  const previousRole = initialMember.role;
+  const targetName = userName(db, input.targetUserId);
+  if (previousRole === role) {
+    return {
+      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as RoleId]} · enforced on the next action`,
+      changed: false,
+    };
+  }
+  if (
+    previousRole === "admin" &&
+    role !== "admin" &&
+    initial.parsed.frontmatter.members.filter(
+      (member) => member.role === "admin",
+    ).length <= 1
+  ) {
+    throw conflict(
+      `${projectName} needs at least one admin — promote someone else first`,
+    );
+  }
+
+  const losesOwnership =
+    roleCan(previousRole, "own-task") && !roleCan(role, "own-task");
+  const ownershipCleanup = losesOwnership
+    ? await stageProjectOwnershipCleanup(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          targetUserId: input.targetUserId,
+          targetName,
+          reason: "role_demoted",
+        },
+        cleanupAuditActor,
+        {
+          ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+          ...(ctx.beforeOwnershipReleaseForTests
+            ? {
+                beforeTaskReleaseForTests: ctx.beforeOwnershipReleaseForTests,
+              }
+            : {}),
+          ...(ctx.afterOwnershipCanonicalReleaseForTests
+            ? {
+                afterTaskCanonicalReleaseForTests:
+                  ctx.afterOwnershipCanonicalReleaseForTests,
+              }
+            : {}),
+        },
+      )
+    : null;
+
   await updateProjectFile(ref, (parsed) => {
+    committedAuthoritySource = requireCurrentPolicyAction(
+      db,
+      parsed,
+      actor,
+      "manage-members",
+      "manage members & roles",
+    );
     const member = parsed.frontmatter.members.find(
       (m) => m.userId === input.targetUserId,
     );
     if (!member) {
       throw AppError.notFound("That user is not a member of this project.");
     }
-    previousRole = member.role;
-    if (member.role === role) return; // no-op, no event
+    if (member.role !== previousRole) {
+      throw conflict(
+        "That member's role changed while owner seats were being released. Refresh and try again.",
+      );
+    }
     if (member.role === "admin" && role !== "admin") {
       const admins = parsed.frontmatter.members.filter(
         (m) => m.role === "admin",
@@ -147,40 +295,27 @@ export async function setMemberRole(
         );
       }
     }
+    markProjectOwnershipCleanupCommitted(parsed, ownershipCleanup);
     member.role = role;
-    changed = true;
   });
 
-  const targetName = userName(db, input.targetUserId);
-  if (!changed) {
-    return {
-      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as RoleId]} · enforced on the next action`,
-      changed: false,
-    };
-  }
-
   reprojectProject(db, ctx, input.projectSlug);
-  const releasedTaskKeys =
-    previousRole &&
-    roleCan(previousRole, "own-task") &&
-    !roleCan(role, "own-task")
-      ? await releaseProjectOwnerships(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            targetUserId: input.targetUserId,
-            targetName,
-            reason: "role_demoted",
-          },
-          auditActor,
-          {
-            ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-          },
-        )
-      : [];
+  const releasedTaskKeys = await convergeProjectOwnershipCleanup(
+    db,
+    ownershipCleanup,
+    {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(ctx.afterOwnershipCanonicalReleaseForTests
+        ? {
+            afterTaskCanonicalReleaseForTests:
+              ctx.afterOwnershipCanonicalReleaseForTests,
+          }
+        : {}),
+    },
+  );
   recordAudit(db, {
     action: "project.member.role_changed",
-    actor: auditActor,
+    actor: withProjectAuditAuthority(actor, committedAuthoritySource),
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
@@ -216,6 +351,7 @@ export async function setTransitionBoundary(
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
   const { authoritySource } = requirePolicyAction(
+    db,
     ctx,
     "edit-policy",
     input.projectSlug,
@@ -226,7 +362,7 @@ export async function setTransitionBoundary(
     throw AppError.validation("Unknown boundary.");
   }
   const boundary = input.boundary as "auto" | "approval" | "human";
-  const auditActor = withProjectAuditAuthority(actor, authoritySource);
+  let committedAuthoritySource = authoritySource;
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -237,6 +373,13 @@ export async function setTransitionBoundary(
   let fromName = input.from;
   let toName = input.to;
   await updateProjectFile(ref, (parsed) => {
+    committedAuthoritySource = requireCurrentPolicyAction(
+      db,
+      parsed,
+      actor,
+      "edit-policy",
+      "edit workflow & policy",
+    );
     const rule = parsed.frontmatter.workflow.find(
       (w) => w.from === input.from && w.to === input.to,
     );
@@ -265,7 +408,7 @@ export async function setTransitionBoundary(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.policy.boundary_changed",
-    actor: auditActor,
+    actor: withProjectAuditAuthority(actor, committedAuthoritySource),
     subjectKind: "workflow_boundary",
     subjectId: `${input.from}>${input.to}`,
     projectSlug: input.projectSlug,

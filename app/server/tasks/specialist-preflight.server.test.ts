@@ -6,13 +6,26 @@ import { setupTestStore } from "../../../test-support/test-store";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   preflightSpecialistWorkspace,
+  repositoryWorkspaceKey,
+  workspaceNamespaceKey,
   type PreflightExec,
 } from "./specialist-preflight.server";
+import {
+  createPat,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 describe("preflightSpecialistWorkspace", () => {
+  it("keys workspaces by full repository identity, not basename", () => {
+    expect(repositoryWorkspaceKey("acme/web")).not.toBe(
+      repositoryWorkspaceKey("fork/web"),
+    );
+    expect(workspaceNamespaceKey("../../reviewer/a")).toBe("..-..-reviewer-a");
+  });
+
   it("blocks a real specialist when no repository is configured", async () => {
     const store = setupTestStore(ctx);
     await expect(
@@ -41,7 +54,7 @@ describe("preflightSpecialistWorkspace", () => {
       if (args.includes("--is-inside-work-tree")) {
         return { ok: true, stdout: "true\n" };
       }
-      return { ok: false, reason: "command_failed" };
+      return { ok: false, reason: "failed" };
     };
 
     const result = await preflightSpecialistWorkspace(
@@ -103,13 +116,80 @@ describe("preflightSpecialistWorkspace", () => {
     expect(second.workdir).toContain(`${path.sep}reviewer-b${path.sep}`);
   });
 
+  it("authenticates an exact reviewer branch fetch and verifies its head", async () => {
+    const store = setupTestStore(ctx);
+    const actor = {
+      userId: store.users.arda.id,
+      label: store.users.arda.email,
+    };
+    const pat = createPat(
+      store.db,
+      {
+        userId: store.users.arda.id,
+        label: "Private review checkout",
+        token: "ghp_private_review_fixture",
+      },
+      actor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor,
+    );
+    const headSha = "b".repeat(40);
+    let fetchedArgs: string[] | null = null;
+    let fetchAuthenticated = false;
+    const exec: PreflightExec = async (_file, args, options) => {
+      if (args[0] === "clone") {
+        mkdirSync(path.join(args.at(-1)!, ".git"), { recursive: true });
+        return { ok: true, stdout: "" };
+      }
+      if (args.includes("--is-inside-work-tree")) {
+        return { ok: true, stdout: "true\n" };
+      }
+      if (args.includes("fetch")) {
+        fetchedArgs = args;
+        fetchAuthenticated = Boolean(options.env?.GIT_ASKPASS);
+        return { ok: true, stdout: "" };
+      }
+      if (args.includes("checkout")) return { ok: true, stdout: "" };
+      if (args.at(-1) === "HEAD") return { ok: true, stdout: `${headSha}\n` };
+      return { ok: false, reason: "failed" };
+    };
+
+    const result = await preflightSpecialistWorkspace(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "ATL-1",
+        repo: "private/repository",
+        workspaceKey: "reviewer-a",
+        checkoutRef: "atl-1-governed-change",
+        expectedHeadSha: headSha,
+        dataRoot: store.dataRoot,
+      },
+      { exec },
+    );
+    expect(result).toMatchObject({ status: "ready", headSha });
+    expect(fetchedArgs).toEqual(
+      expect.arrayContaining([
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        "refs/heads/atl-1-governed-change",
+      ]),
+    );
+    expect(fetchAuthenticated).toBe(true);
+  });
+
   it("classifies a failed unauthenticated checkout without leaking diagnostics", async () => {
     const store = setupTestStore(ctx);
     const secret = "github_pat_NEVER_REPORT_ME";
     const exec: PreflightExec = async () => ({
       ok: false,
-      reason: "command_failed",
-      exitCode: 128,
+      reason: "failed",
+      code: 128,
     });
     const result = await preflightSpecialistWorkspace(
       store.db,
@@ -133,14 +213,14 @@ describe("preflightSpecialistWorkspace", () => {
     const dir = path.join(
       taskDir(store.slug, "ATL-1", store.dataRoot),
       "workspace",
-      "viberr",
+      repositoryWorkspaceKey("akin-ozer/viberr"),
       ".git",
     );
     mkdirSync(dir, { recursive: true });
     const exec: PreflightExec = async (_file, args) =>
       args.includes("remote.origin.url")
         ? { ok: true, stdout: "" }
-        : { ok: false, reason: "command_failed" };
+        : { ok: false, reason: "failed" };
     const result = await preflightSpecialistWorkspace(
       store.db,
       {

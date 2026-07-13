@@ -18,12 +18,12 @@ import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { DecisionPacket } from "./decision-packet";
 import {
-  type OperatorExecutionStatus,
   ExecutionProfile,
   type DeployedSpecialistView,
   type OwnerAction,
   type TaskMemberView,
 } from "./execution-profile";
+import type { OperatorExecutionStatus } from "./operator-execution-status";
 import { ReleaseConfirm } from "./release-confirm";
 import {
   OperatorRecommendations,
@@ -220,8 +220,8 @@ function PolicyPanel({
   myRole: string | null;
   canAcceptCompletion: boolean;
 }) {
-  const admin = myRole === "admin";
   const r = (myRole as ProjectRole | null) ?? null;
+  const canReleaseAnyOwner = roleCan(r, "release-any-ownership");
   const role = myRole || "viewer";
   // Render exactly what the canonical matrix (app/shared/rbac.ts) enforces for
   // THIS viewer's role — no aspirational copy that the server would 403.
@@ -239,7 +239,7 @@ function PolicyPanel({
     {
       k: "Task ownership",
       v: roleCan(r, "own-task")
-        ? admin
+        ? canReleaseAnyOwner
           ? "Take / release · admin releases anyone"
           : "Take / release your own seat"
         : "View only — contributor+ to own",
@@ -353,6 +353,53 @@ export function CompletionAcceptance({
         >
           <Icon name="check" />
           Accept completion
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** The evidence action for a Review task that deliberately has no reviewers.
+ * It is visually and operationally separate from completion acceptance. */
+export function HumanValidationControl({
+  taskKey,
+  busy,
+  onValidate,
+}: {
+  taskKey: string;
+  busy: boolean;
+  onValidate: () => void;
+}) {
+  return (
+    <section
+      className="panel completion-acceptance"
+      aria-label="Human validation"
+    >
+      <div className="panel-head">
+        <Icon name="shield" />
+        <h2>Human validation required</h2>
+        <span className="right">
+          <Pill kind="input" dot>
+            no reviewers assigned
+          </Pill>
+        </span>
+      </div>
+      <div className="completion-acceptance-body">
+        <div>
+          <strong>Inspect the current delivery evidence.</strong>
+          <p>
+            Record validation for {taskKey}. This does not accept completion or
+            merge anything; acceptance appears as a separate next action.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy}
+          onClick={onValidate}
+        >
+          <Icon name="shield" />
+          Record validation
         </button>
       </div>
     </section>
@@ -515,10 +562,12 @@ function RecommendationsSection({
   recommendations,
   canApply,
   canApplyCompletion,
+  completionReady,
 }: {
   recommendations: RecommendationView[];
   canApply: boolean;
   canApplyCompletion: boolean;
+  completionReady: boolean;
 }) {
   const csrf = useCsrfToken();
   const recFetcher = useFetcher<ActionResult>();
@@ -549,6 +598,7 @@ function RecommendationsSection({
       recommendations={recommendations}
       canApply={canApply}
       canApplyCompletion={canApplyCompletion}
+      completionReady={completionReady}
       busy={recBusy}
       onApply={onApplyRec}
       onDismiss={onDismissRec}
@@ -598,12 +648,16 @@ function ExecutionSection({
   // Assign a deployed specialist / start a specialist run — admin|maintainer
   // (contracts §3.2); server re-checks RBAC. The ExecutionProfile only renders
   // these affordances when canRunAgents.
-  const onAssignSpecialist = (profileId: string) => {
+  const onAssignSpecialist = (
+    profileId: string,
+    backend: "claude" | "codex",
+  ) => {
     if (specialistBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "assign-specialist");
     fd.set("profileId", profileId);
+    fd.set("backend", backend);
     specialistFetcher.submit(fd, { method: "post" });
   };
   const onRunSpecialist = () => {
@@ -617,12 +671,16 @@ function ExecutionSection({
   // Reviewer engagement (admin|maintainer; server re-checks). Assign a deployed
   // specialist as a reviewer, run a specific reviewer (gated on runActive so
   // one run streams at a time, same as the primary), or release one.
-  const onAssignReviewer = (profileId: string) => {
+  const onAssignReviewer = (
+    profileId: string,
+    backend: "claude" | "codex",
+  ) => {
     if (reviewerBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "assign-reviewer");
     fd.set("profileId", profileId);
+    fd.set("backend", backend);
     reviewerFetcher.submit(fd, { method: "post" });
   };
   const onRunReviewer = (profileId: string) => {
@@ -720,6 +778,10 @@ function CurrentStatePanel({
     "approve-transition",
   );
   const canOwn = roleCan(projectRole as ProjectRole | null, "own-task");
+  const canReleaseAnyOwner = roleCan(
+    myRole as ProjectRole | null,
+    "release-any-ownership",
+  );
   const transitionBusy = transitionFetcher.state !== "idle";
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
@@ -792,7 +854,7 @@ function CurrentStatePanel({
                   {owner.name.split(" ")[0]}
                   {ownerMine ? " (you)" : ""}
                 </span>
-                {((ownerMine && canOwn) || myRole === "admin") && (
+                {((ownerMine && canOwn) || canReleaseAnyOwner) && (
                   <button
                     type="button"
                     className="own-x"
@@ -852,6 +914,7 @@ export function TaskDetailPage({
   mentionables,
   recommendations,
   reviewStageId,
+  completionEvidence,
   githubHost,
   readOnly = false,
 }: {
@@ -880,6 +943,14 @@ export function TaskDetailPage({
   recommendations: RecommendationView[];
   /** Governed stage whose workflow edge enters the terminal stage. */
   reviewStageId: string | null;
+  /** Canonical, evidence-fingerprint-aware completion readiness from the
+   * server. Never infer this from the coarse validation pill alone. */
+  completionEvidence: {
+    repositoryReady: boolean;
+    humanValidationCurrent: boolean;
+    reviewerApprovalsCurrent: boolean;
+    ready: boolean;
+  };
   /** github.com web host for browse links. */
   githubHost?: string;
   /** Archived task history stays navigable but exposes no mutations. */
@@ -945,7 +1016,16 @@ export function TaskDetailPage({
     canAcceptCompletion &&
     atCompletionBoundary &&
     task.validation === "healthy" &&
+    completionEvidence.ready &&
     !hasAcceptanceArtifact &&
+    !completionAlreadyAccepted;
+  const offerHumanValidation =
+    canAcceptCompletion &&
+    atCompletionBoundary &&
+    task.reviewers.length === 0 &&
+    completionEvidence.repositoryReady &&
+    !completionEvidence.humanValidationCurrent &&
+    task.validation !== "failing" &&
     !completionAlreadyAccepted;
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
@@ -1069,6 +1149,14 @@ export function TaskDetailPage({
     resolveFetcher.submit(fd, { method: "post" });
   };
 
+  const onRecordHumanValidation = () => {
+    if (resolveBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "record-human-validation");
+    resolveFetcher.submit(fd, { method: "post" });
+  };
+
   return (
     <div
       className="detail"
@@ -1095,7 +1183,16 @@ export function TaskDetailPage({
             packet={task.packet}
             busy={resolveBusy}
             canResolve={canResolvePacket}
-            canResolveCompletion={canRunAgents || isOwner}
+            canResolveCompletion={
+              (canRunAgents || isOwner) && completionEvidence.ready
+            }
+            completionBlockedReason={
+              canAcceptCompletion && !completionEvidence.ready
+                ? completionEvidence.repositoryReady
+                  ? "Record current human or reviewer validation before accepting completion"
+                  : "Wait for a full verified pull-request head before accepting completion"
+                : undefined
+            }
             canAsk={!readOnly}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
@@ -1110,10 +1207,19 @@ export function TaskDetailPage({
           />
         )}
 
+        {offerHumanValidation && (
+          <HumanValidationControl
+            taskKey={task.key}
+            busy={resolveBusy}
+            onValidate={onRecordHumanValidation}
+          />
+        )}
+
         <RecommendationsSection
           recommendations={recommendations}
           canApply={canRunAgents}
           canApplyCompletion={isOwner}
+          completionReady={completionEvidence.ready}
         />
 
         <ExecutionSection

@@ -60,9 +60,18 @@ import {
 } from "./specialist-run.server";
 import {
   buildOperatorRoutingContext,
+  buildOperatorRoutingContexts,
   type OperatorRoutingCandidate,
+  type OperatorRoutingContext,
 } from "./operator-routing.server";
 import { reviewEvidenceFingerprint } from "./review-evidence.server";
+import { projectCompletionSignal } from "~/server/runtimes/run-completion-state.server";
+import {
+  convergeTaskCompletionIntent,
+  getTaskCompletionIntent,
+  stageTaskCompletionIntent,
+  type TaskCompletionIntent,
+} from "./task-completion-recovery.server";
 
 /**
  * Operator-authorized, capability-GATED task mutations — the layer the
@@ -221,6 +230,9 @@ function taskRef(
     projectSlug,
     taskKey,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    ...(ctx.expectedTaskIncarnation !== undefined
+      ? { expectedTaskIncarnation: ctx.expectedTaskIncarnation }
+      : {}),
   };
 }
 
@@ -269,13 +281,22 @@ function routingCandidate(
     projectSlug: string;
     taskKey: string;
     profileId: string;
+    backend: RealBackend;
     purpose: "primary" | "reviewer";
     allowEngagedReviewer?: boolean;
   },
-): { candidate: OperatorRoutingCandidate | null; denial: string | null } {
+): {
+  candidate: OperatorRoutingCandidate | null;
+  context: OperatorRoutingContext | null;
+  denial: string | null;
+} {
   const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!task)
-    return { candidate: null, denial: `Task ${input.taskKey} not found.` };
+    return {
+      candidate: null,
+      context: null,
+      denial: `Task ${input.taskKey} not found.`,
+    };
   const specialists = listDeployedSpecialists(db, input.projectSlug, ctx);
   const context = buildOperatorRoutingContext(db, ctx, {
     projectSlug: input.projectSlug,
@@ -288,69 +309,672 @@ function routingCandidate(
       : task.parsed.frontmatter.reviewers.map((reviewer) => reviewer.profileId),
   });
   const candidate =
-    context.eligible.find((item) => item.profileId === input.profileId) ?? null;
+    context.eligible.find(
+      (item) =>
+        item.profileId === input.profileId && item.backend === input.backend,
+    ) ?? null;
   const excluded = context.excluded.find(
-    (item) => item.profileId === input.profileId,
+    (item) =>
+      item.profileId === input.profileId && item.backend === input.backend,
   );
   return {
     candidate,
+    context,
     denial: candidate
       ? null
       : excluded
         ? `${excluded.name} is not eligible: ${excluded.reasons.join("; ")}.`
-        : `No hard-eligible deployed specialist "${input.profileId}" is available.`,
+        : `No hard-eligible deployed specialist "${input.profileId}" on ${input.backend} is available.`,
   };
 }
 
-async function recordRoutingDecision(
+type RoutingOperation =
+  "assign_primary" | "assign_reviewer" | "prompt_primary" | "prompt_reviewer";
+type RoutingDisposition = "selected" | "recommended";
+
+interface OperatorRoutingIntentRow {
+  id: string;
+  project_slug: string;
+  task_key: string;
+  task_incarnation: string;
+  data_root: string;
+  operation: RoutingOperation;
+  purpose: "primary" | "reviewer";
+  profile_id: string;
+  backend: RealBackend;
+  disposition: RoutingDisposition;
+  reason: string;
+  candidate_json: string;
+  context_json: string;
+  state: "pending" | "action_applied";
+  created_at: string;
+  action_applied_at: string | null;
+}
+
+function routingIntentCandidate(
+  intent: OperatorRoutingIntentRow,
+): OperatorRoutingCandidate {
+  return JSON.parse(intent.candidate_json) as OperatorRoutingCandidate;
+}
+
+function routingIntentFactsStillMatch(
+  intent: OperatorRoutingIntentRow,
+  current: {
+    candidate: OperatorRoutingCandidate;
+    context: OperatorRoutingContext;
+  },
+): boolean {
+  // These snapshots are written by JSON.stringify from the same deterministic
+  // context builder. Comparing the serialized facts detects drift in the
+  // chosen profile as well as the alternatives the operator compared.
+  return (
+    intent.candidate_json === JSON.stringify(current.candidate) &&
+    intent.context_json === JSON.stringify(current.context)
+  );
+}
+
+function findRoutingIntent(
+  db: Database.Database,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    taskIncarnation: string;
+    dataRoot: string;
+    operation: RoutingOperation;
+    purpose: "primary" | "reviewer";
+    profileId: string;
+    backend: RealBackend;
+    disposition: RoutingDisposition;
+    reason: string;
+  },
+): OperatorRoutingIntentRow | null {
+  return (
+    (db
+      .prepare(
+        `SELECT id, project_slug, task_key, task_incarnation, data_root,
+                operation, purpose, profile_id, backend, disposition, reason,
+                candidate_json, context_json, state, created_at,
+                action_applied_at
+           FROM operator_routing_intents
+          WHERE project_slug = ? AND task_key = ? AND task_incarnation = ?
+            AND data_root = ? AND operation = ? AND purpose = ?
+            AND profile_id = ? AND backend = ? AND disposition = ?
+            AND reason = ?`,
+      )
+      .get(
+        input.projectSlug,
+        input.taskKey,
+        input.taskIncarnation,
+        input.dataRoot,
+        input.operation,
+        input.purpose,
+        input.profileId,
+        input.backend,
+        input.disposition,
+        input.reason,
+      ) as OperatorRoutingIntentRow | undefined) ?? null
+  );
+}
+
+function stageRoutingIntent(
+  db: Database.Database,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    taskIncarnation: string;
+    dataRoot: string;
+    operation: RoutingOperation;
+    purpose: "primary" | "reviewer";
+    candidate: OperatorRoutingCandidate;
+    context: OperatorRoutingContext;
+    disposition: RoutingDisposition;
+    reason: string;
+  },
+): OperatorRoutingIntentRow {
+  const id = newId("routing_intent");
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT OR IGNORE INTO operator_routing_intents
+       (id, project_slug, task_key, task_incarnation, data_root, operation,
+        purpose, profile_id, backend, disposition, reason, candidate_json,
+        context_json, state, created_at, action_applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL)`,
+  ).run(
+    id,
+    input.projectSlug,
+    input.taskKey,
+    input.taskIncarnation,
+    input.dataRoot,
+    input.operation,
+    input.purpose,
+    input.candidate.profileId,
+    input.candidate.backend,
+    input.disposition,
+    input.reason,
+    JSON.stringify(input.candidate),
+    JSON.stringify(input.context),
+    now,
+  );
+  const intent = findRoutingIntent(db, {
+    ...input,
+    profileId: input.candidate.profileId,
+    backend: input.candidate.backend,
+  });
+  if (!intent)
+    throw new Error("Operator routing intent could not be persisted.");
+  return intent;
+}
+
+function routingActionWasApplied(
+  db: Database.Database,
+  intent: OperatorRoutingIntentRow,
+  options: { allowInFlightPrompt?: boolean } = {},
+): boolean {
+  let task;
+  try {
+    task = readTaskFile({
+      projectSlug: intent.project_slug,
+      taskKey: intent.task_key,
+      expectedTaskIncarnation: intent.task_incarnation,
+      ...(intent.data_root ? { dataRoot: intent.data_root } : {}),
+    });
+  } catch {
+    return false;
+  }
+  if (!task) return false;
+
+  if (intent.disposition === "recommended") {
+    const kind =
+      intent.purpose === "primary" ? "assign_specialist" : "assign_reviewer";
+    const recommendationExists = task.parsed.frontmatter.recommendations.some(
+      (rec) =>
+        rec.sourceIntentId === intent.id &&
+        rec.kind === kind &&
+        rec.profileId === intent.profile_id &&
+        rec.backend === intent.backend &&
+        rec.detail === intent.reason,
+    );
+    return (
+      recommendationExists &&
+      task.parsed.timeline.some((event) => event.sourceIntentId === intent.id)
+    );
+  }
+
+  if (intent.operation === "assign_primary") {
+    return (
+      task.parsed.frontmatter.specialist?.profileId === intent.profile_id &&
+      task.parsed.frontmatter.specialist.backend === intent.backend &&
+      task.parsed.frontmatter.specialist.sourceIntentId === intent.id
+    );
+  }
+  if (intent.operation === "assign_reviewer") {
+    return task.parsed.frontmatter.reviewers.some(
+      (reviewer) =>
+        reviewer.profileId === intent.profile_id &&
+        reviewer.backend === intent.backend &&
+        reviewer.sourceIntentId === intent.id,
+    );
+  }
+
+  const expectedKind =
+    intent.operation === "prompt_primary" ? "primary" : "reviewer";
+  // During the request, startRun returning with its exact source link is the
+  // governed launch effect. During boot recovery, however, a queued/running
+  // row may be only the pre-adapter crash window; require a terminal success
+  // so process loss can never promote an ambiguous reservation. A retry may
+  // retain earlier failed attempts with the same intent id.
+  const promptStatePredicate = options.allowInFlightPrompt
+    ? `state NOT IN ('error', 'interrupted')`
+    : `state = 'finished'`;
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM agent_runs
+        WHERE source_intent_id = ?
+          AND project_slug = ? AND task_key = ? AND task_incarnation = ?
+          AND kind = ? AND agent_profile_id = ? AND backend = ?
+          AND ${promptStatePredicate}
+        LIMIT 1`,
+    )
+    .get(
+      intent.id,
+      intent.project_slug,
+      intent.task_key,
+      intent.task_incarnation,
+      expectedKind,
+      intent.profile_id,
+      intent.backend,
+    );
+  return Boolean(row);
+}
+
+function routingIntentOrphanReason(
+  intent: OperatorRoutingIntentRow,
+): "task_missing" | "task_replaced" | null {
+  const task = readTaskFile({
+    projectSlug: intent.project_slug,
+    taskKey: intent.task_key,
+    ...(intent.data_root ? { dataRoot: intent.data_root } : {}),
+  });
+  if (!task) return "task_missing";
+  return task.parsed.frontmatter.createdAt === intent.task_incarnation
+    ? null
+    : "task_replaced";
+}
+
+type RoutingIntentCancellationReason =
+  | "task_missing"
+  | "task_replaced"
+  | "candidate_ineligible"
+  | "candidate_context_drifted"
+  | "prompt_run_failed";
+
+function cancelRoutingIntent(
+  db: Database.Database,
+  intent: OperatorRoutingIntentRow,
+  reason: RoutingIntentCancellationReason,
+  details: Record<string, unknown> = {},
+): void {
+  db.transaction(() => {
+    db.prepare(
+      `INSERT OR IGNORE INTO audit_events
+         (id, occurred_at, actor_user_id, actor_label, action, subject_kind,
+          subject_id, project_slug, task_key, details_json)
+       VALUES (?, ?, NULL, ?, 'task.operator.routing_cancelled', 'task', ?, ?, ?, ?)`,
+    ).run(
+      `evt_${intent.id}_cancelled`,
+      new Date().toISOString(),
+      OPERATOR_AUDIT_ACTOR.label,
+      intent.task_key,
+      intent.project_slug,
+      intent.task_key,
+      JSON.stringify({
+        routingIntentId: intent.id,
+        reason,
+        operation: intent.operation,
+        disposition: intent.disposition,
+        expectedTaskIncarnation: intent.task_incarnation,
+        ...details,
+      }),
+    );
+    db.prepare(`DELETE FROM operator_routing_intents WHERE id = ?`).run(
+      intent.id,
+    );
+  })();
+}
+
+/** A prompt reservation which survived a crash is not proof that the adapter
+ * launched. Once every exact source-linked attempt is terminal and none
+ * finished successfully, the staged choice must be cancelled rather than
+ * remaining replayable forever. */
+function promptRoutingIntentFailed(
+  db: Database.Database,
+  intent: OperatorRoutingIntentRow,
+): boolean {
+  if (
+    intent.operation !== "prompt_primary" &&
+    intent.operation !== "prompt_reviewer"
+  ) {
+    return false;
+  }
+  const expectedKind =
+    intent.operation === "prompt_primary" ? "primary" : "reviewer";
+  const states = db
+    .prepare(
+      `SELECT state
+         FROM agent_runs
+        WHERE source_intent_id = ?
+          AND project_slug = ? AND task_key = ? AND task_incarnation = ?
+          AND kind = ? AND agent_profile_id = ? AND backend = ?`,
+    )
+    .all(
+      intent.id,
+      intent.project_slug,
+      intent.task_key,
+      intent.task_incarnation,
+      expectedKind,
+      intent.profile_id,
+      intent.backend,
+    ) as Array<{ state: string }>;
+  return (
+    states.length > 0 &&
+    states.every(({ state }) => state === "error" || state === "interrupted")
+  );
+}
+
+function markRoutingActionApplied(
+  db: Database.Database,
+  intent: OperatorRoutingIntentRow,
+): OperatorRoutingIntentRow {
+  db.prepare(
+    `UPDATE operator_routing_intents
+        SET state = 'action_applied', action_applied_at = coalesce(action_applied_at, ?)
+      WHERE id = ?`,
+  ).run(new Date().toISOString(), intent.id);
+  return {
+    ...intent,
+    state: "action_applied",
+    action_applied_at: intent.action_applied_at ?? new Date().toISOString(),
+  };
+}
+
+async function convergeRoutingDecision(
+  db: Database.Database,
+  intent: OperatorRoutingIntentRow,
+  ctx: TaskMutationContext,
+): Promise<void> {
+  const candidate = routingIntentCandidate(intent);
+  const label =
+    intent.disposition === "selected"
+      ? `Routing decision (${intent.purpose})`
+      : `Routing recommendation (${intent.purpose})`;
+  const ref = {
+    projectSlug: intent.project_slug,
+    taskKey: intent.task_key,
+    expectedTaskIncarnation: intent.task_incarnation,
+    ...(intent.data_root ? { dataRoot: intent.data_root } : {}),
+  };
+  await updateTaskFile(ref, (parsed) => {
+    if (
+      parsed.timeline.some(
+        (event) =>
+          event.sourceIntentId === intent.id &&
+          event.type === "agent" &&
+          event.text.startsWith(`**${label}:**`),
+      )
+    ) {
+      return;
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "agent",
+      actor: { kind: "operator" },
+      title: null,
+      text: `**${label}:** ${intent.disposition} **${candidate.name}** (${candidate.backend}). ${intent.reason}`,
+      toAgent: false,
+      sourceIntentId: intent.id,
+      evidence: null,
+    });
+  });
+  ctx.routingDecisionEffectHookForTests?.({
+    projectSlug: intent.project_slug,
+    taskKey: intent.task_key,
+    intentId: intent.id,
+    phase: "after_timeline",
+  });
+  reproject(
+    db,
+    {
+      ...ctx,
+      ...(!ctx.dataRoot && intent.data_root
+        ? { dataRoot: intent.data_root }
+        : {}),
+    },
+    intent.project_slug,
+    intent.task_key,
+  );
+  const details = {
+    routingIntentId: intent.id,
+    operation: intent.operation,
+    purpose: intent.purpose,
+    selectedProfileId: candidate.profileId,
+    selectedBackend: candidate.backend,
+    disposition: intent.disposition,
+    reason: intent.reason,
+    context: {
+      resources: candidate.resources,
+      backendHealth: candidate.backendHealth,
+      workload: candidate.workload,
+      cost: candidate.cost,
+    },
+  };
+  db.transaction(() => {
+    db.prepare(
+      `INSERT OR IGNORE INTO audit_events
+         (id, occurred_at, actor_user_id, actor_label, action, subject_kind,
+          subject_id, project_slug, task_key, details_json)
+       VALUES (?, ?, NULL, ?, 'task.operator.routing_decided', 'task', ?, ?, ?, ?)`,
+    ).run(
+      `evt_${intent.id}`,
+      intent.action_applied_at ?? new Date().toISOString(),
+      OPERATOR_AUDIT_ACTOR.label,
+      intent.task_key,
+      intent.project_slug,
+      intent.task_key,
+      JSON.stringify(details),
+    );
+    db.prepare(`DELETE FROM operator_routing_intents WHERE id = ?`).run(
+      intent.id,
+    );
+  })();
+}
+
+/** Recover only objectively-applied routing effects. A merely staged or failed
+ * callback remains pending and can never acquire a selected/recommended fact. */
+export async function recoverOperatorRoutingIntents(
+  db: Database.Database,
+): Promise<{
+  completed: number;
+  pending: number;
+  cancelled: number;
+  errors: number;
+}> {
+  const rows = db
+    .prepare(
+      `SELECT id, project_slug, task_key, task_incarnation, data_root,
+              operation, purpose, profile_id, backend, disposition, reason,
+              candidate_json, context_json, state, created_at,
+              action_applied_at
+         FROM operator_routing_intents
+        ORDER BY created_at, id`,
+    )
+    .all() as OperatorRoutingIntentRow[];
+  const summary = { completed: 0, pending: 0, cancelled: 0, errors: 0 };
+  for (let intent of rows) {
+    try {
+      const orphanReason = routingIntentOrphanReason(intent);
+      if (orphanReason) {
+        cancelRoutingIntent(db, intent, orphanReason);
+        summary.cancelled += 1;
+        continue;
+      }
+      if (intent.state === "pending") {
+        if (!routingActionWasApplied(db, intent)) {
+          if (promptRoutingIntentFailed(db, intent)) {
+            cancelRoutingIntent(db, intent, "prompt_run_failed");
+            summary.cancelled += 1;
+            continue;
+          }
+          summary.pending += 1;
+          continue;
+        }
+        intent = markRoutingActionApplied(db, intent);
+      }
+      await convergeRoutingDecision(db, intent, {
+        ...(intent.data_root ? { dataRoot: intent.data_root } : {}),
+      });
+      summary.completed += 1;
+    } catch (error) {
+      summary.errors += 1;
+      logger.error("operator routing decision recovery failed", {
+        intentId: intent.id,
+        projectSlug: intent.project_slug,
+        taskKey: intent.task_key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return summary;
+}
+
+/**
+ * Resolve the operator's chosen hard-eligible candidate and persist its intent
+ * before the governed mutation. Only objective action evidence promotes the
+ * intent, after which canonical rationale/projection/audit converge exactly
+ * once across crashes and retries.
+ *
+ * Candidate construction remains factual and unscored. The intelligent
+ * operator supplies an exact `profileId`/`backend` pair; this helper validates
+ * that choice rather than selecting a winner on its behalf.
+ */
+async function performRoutedOperatorAction(
   db: Database.Database,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
     taskKey: string;
-    purpose: "primary" | "reviewer";
-    candidate: OperatorRoutingCandidate;
-    reason?: string;
+    profileId: string;
+    backend: RealBackend;
+    reason: string;
   },
-): Promise<void> {
-  const reason =
-    input.reason?.trim() ||
-    `${input.candidate.name} is hard-eligible for this stage; the operator selected it after comparing its declared fit, backend health, workload, and observed cost context.`;
-  await updateTaskFile(
-    taskRef(ctx, input.projectSlug, input.taskKey),
-    (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "agent",
-        actor: { kind: "operator" },
-        title: null,
-        text: `**Routing decision (${input.purpose}):** selected **${input.candidate.name}** (${input.candidate.backend}). ${reason}`,
-        toAgent: false,
-        evidence: null,
-      });
-    },
-  );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
-  recordAudit(db, {
-    action: "task.operator.routing_decided",
-    actor: OPERATOR_AUDIT_ACTOR,
-    subjectKind: "task",
-    subjectId: input.taskKey,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: {
-      purpose: input.purpose,
-      selectedProfileId: input.candidate.profileId,
-      selectedBackend: input.candidate.backend,
-      reason,
-      context: {
-        resources: input.candidate.resources,
-        backendHealth: input.candidate.backendHealth,
-        workload: input.candidate.workload,
-        cost: input.candidate.cost,
-      },
-    },
+  routing: {
+    purpose: "primary" | "reviewer";
+    operation: RoutingOperation;
+    disposition: RoutingDisposition;
+    allowEngagedReviewer?: boolean;
+  },
+  perform: (
+    intentId: string,
+    actionCtx: TaskMutationContext,
+  ) => Promise<OperatorActionResult & { outcome: "done" | "recommended" }>,
+): Promise<OperatorActionResult> {
+  const reason = input.reason.trim();
+  if (!reason) {
+    return {
+      outcome: "denied",
+      message:
+        "A non-empty routing reason is required. Compare the candidate's fit, resources, backend health, workload, and observed cost, then explain the choice.",
+    };
+  }
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  const taskIncarnation = task?.parsed.frontmatter.createdAt;
+  if (!task || !taskIncarnation) {
+    return { outcome: "denied", message: "The routed task is unavailable." };
+  }
+  const dataRoot = ctx.dataRoot ?? "";
+  let intent = findRoutingIntent(db, {
+    ...input,
+    reason,
+    taskIncarnation,
+    dataRoot,
+    operation: routing.operation,
+    purpose: routing.purpose,
+    disposition: routing.disposition,
   });
+  if (!intent) {
+    const routed = routingCandidate(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      backend: input.backend,
+      purpose: routing.purpose,
+      ...(routing.allowEngagedReviewer ? { allowEngagedReviewer: true } : {}),
+    });
+    if (!routed.candidate || !routed.context) {
+      return { outcome: "denied", message: routed.denial! };
+    }
+    intent = stageRoutingIntent(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      taskIncarnation,
+      dataRoot,
+      operation: routing.operation,
+      purpose: routing.purpose,
+      candidate: routed.candidate,
+      context: routed.context,
+      disposition: routing.disposition,
+      reason,
+    });
+    ctx.routingDecisionEffectHookForTests?.({
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      intentId: intent.id,
+      phase: "after_intent",
+    });
+  }
+
+  let result: OperatorActionResult | null = null;
+  if (
+    intent.state === "pending" &&
+    routingActionWasApplied(db, intent, { allowInFlightPrompt: true })
+  ) {
+    intent = markRoutingActionApplied(db, intent);
+  }
+  if (intent.state === "pending") {
+    const orphanReason = routingIntentOrphanReason(intent);
+    if (orphanReason) {
+      cancelRoutingIntent(db, intent, orphanReason);
+      return {
+        outcome: "denied",
+        message:
+          "The staged routing choice no longer belongs to the current task lifecycle and was cancelled.",
+      };
+    }
+    const actionCtx: TaskMutationContext = {
+      ...ctx,
+      expectedTaskIncarnation: intent.task_incarnation,
+    };
+    const current = routingCandidate(db, actionCtx, {
+      projectSlug: intent.project_slug,
+      taskKey: intent.task_key,
+      profileId: intent.profile_id,
+      backend: intent.backend,
+      purpose: intent.purpose,
+      ...(routing.allowEngagedReviewer ? { allowEngagedReviewer: true } : {}),
+    });
+    if (!current.candidate || !current.context) {
+      cancelRoutingIntent(db, intent, "candidate_ineligible", {
+        denial: current.denial,
+      });
+      return {
+        outcome: "denied",
+        message: `The staged routing choice is no longer hard-eligible and was cancelled. ${current.denial ?? "Re-evaluate the current routing context."}`,
+      };
+    }
+    if (
+      !routingIntentFactsStillMatch(intent, {
+        candidate: current.candidate,
+        context: current.context,
+      })
+    ) {
+      cancelRoutingIntent(db, intent, "candidate_context_drifted", {
+        stagedCandidate: routingIntentCandidate(intent),
+        currentCandidate: current.candidate,
+      });
+      return {
+        outcome: "denied",
+        message:
+          "Routing facts changed after this choice was staged. The stale intent was cancelled; compare the current eligible set, resources, backend health, workload, and cost before choosing again.",
+      };
+    }
+    result = await perform(intent.id, actionCtx);
+    if (
+      (result.outcome === "recommended" ? "recommended" : "selected") !==
+      intent.disposition
+    ) {
+      throw new Error("Routed action outcome did not match its staged intent.");
+    }
+    if (!routingActionWasApplied(db, intent, { allowInFlightPrompt: true })) {
+      throw new Error(
+        "Routed action returned without an exact intent-linked canonical effect.",
+      );
+    }
+    ctx.routingDecisionEffectHookForTests?.({
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      intentId: intent.id,
+      phase: "after_action",
+    });
+    intent = markRoutingActionApplied(db, intent);
+  }
+  await convergeRoutingDecision(db, intent, ctx);
+  return (
+    result ?? {
+      outcome: intent.disposition === "recommended" ? "recommended" : "done",
+      message:
+        "Recovered the completed routing action and its decision record.",
+    }
+  );
 }
 
 /** The operator mutation context — carries the operator-authorized flag so
@@ -482,10 +1106,12 @@ async function addRecommendation(
   rec: {
     kind: RecommendationKind;
     profileId?: string;
+    backend?: RealBackend;
     toStageId?: string;
     label: string;
   },
   reasoning: string,
+  sourceIntentId?: string,
 ): Promise<void> {
   const recommendation: Recommendation = {
     id: newId("rec"),
@@ -493,19 +1119,28 @@ async function addRecommendation(
     label: rec.label,
     detail: reasoning,
     ...(rec.profileId ? { profileId: rec.profileId } : {}),
+    ...(rec.backend ? { backend: rec.backend } : {}),
     ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
+    ...(sourceIntentId ? { sourceIntentId } : {}),
   };
   let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-    const dup = parsed.frontmatter.recommendations.some(
+    const dup = parsed.frontmatter.recommendations.find(
       (r) =>
         r.kind === rec.kind &&
         r.profileId === rec.profileId &&
+        r.backend === rec.backend &&
         r.toStageId === rec.toStageId,
     );
     if (!dup) {
       parsed.frontmatter.recommendations.push(recommendation);
       wasNew = true;
+    } else if (sourceIntentId) {
+      // This call performed a real canonical effect even when the target card
+      // already existed: bind the current recommendation and rationale to the
+      // exact staged intent instead of inferring ownership from matching text.
+      dup.detail = reasoning;
+      dup.sourceIntentId = sourceIntentId;
     }
     parsed.frontmatter.waiting = "human";
     parsed.timeline.unshift({
@@ -515,6 +1150,7 @@ async function addRecommendation(
       title: null,
       text: `**Recommendation:** ${rec.label}. ${reasoning}`,
       toAgent: false,
+      ...(sourceIntentId ? { sourceIntentId } : {}),
       evidence: null,
     });
   });
@@ -526,7 +1162,11 @@ async function addRecommendation(
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: { kind: rec.kind },
+    details: {
+      kind: rec.kind,
+      ...(rec.profileId ? { profileId: rec.profileId } : {}),
+      ...(rec.backend ? { backend: rec.backend } : {}),
+    },
   });
   // Ping the supervisors: a supervised operator recommendation is a decision
   // waiting on a human. Without this, the recommendation card only appears if
@@ -713,6 +1353,10 @@ function specialistName(
   return found?.name ?? profileId;
 }
 
+function backendName(backend: RealBackend): string {
+  return backend === "claude" ? "Claude Code" : "Codex";
+}
+
 // ------------------------------------------------------------- snapshot
 
 export interface OperatorTaskSnapshot {
@@ -724,11 +1368,11 @@ export interface OperatorTaskSnapshot {
   readiness: string;
   waiting: string;
   owner: string | null;
-  specialist: { profileId: string; role: string; backend: string } | null;
+  specialist: { profileId: string; role: string; backend: RealBackend } | null;
   reviewers: {
     profileId: string;
     role: string;
-    backend: string;
+    backend: RealBackend;
     verdict: "approve" | "request_changes" | null;
     verdictSummary: string | null;
   }[];
@@ -756,8 +1400,18 @@ export interface OperatorTaskSnapshot {
     primary: OperatorRoutingCandidate[];
     reviewer: OperatorRoutingCandidate[];
     excluded: {
-      primary: { profileId: string; name: string; reasons: string[] }[];
-      reviewer: { profileId: string; name: string; reasons: string[] }[];
+      primary: {
+        profileId: string;
+        name: string;
+        backend: RealBackend;
+        reasons: string[];
+      }[];
+      reviewer: {
+        profileId: string;
+        name: string;
+        backend: RealBackend;
+        reasons: string[];
+      }[];
     };
     decisionRule: "operator_decides_no_static_score";
   };
@@ -805,16 +1459,9 @@ export function operatorSnapshot(
       )?.name ?? null)
     : null;
   const deployedSpecialists = listDeployedSpecialists(db, projectSlug, ctx);
-  const primaryRouting = buildOperatorRoutingContext(db, ctx, {
+  const routing = buildOperatorRoutingContexts(db, ctx, {
     projectSlug,
     stageId: fm.stage,
-    purpose: "primary",
-    specialists: deployedSpecialists,
-  });
-  const reviewerRouting = buildOperatorRoutingContext(db, ctx, {
-    projectSlug,
-    stageId: fm.stage,
-    purpose: "reviewer",
     specialists: deployedSpecialists,
     primaryProfileId: fm.specialist?.profileId ?? null,
     reviewerProfileIds: fm.reviewers.map((reviewer) => reviewer.profileId),
@@ -867,11 +1514,11 @@ export function operatorSnapshot(
       ),
     })),
     routingCandidates: {
-      primary: primaryRouting.eligible,
-      reviewer: reviewerRouting.eligible,
+      primary: routing.primary.eligible,
+      reviewer: routing.reviewer.eligible,
       excluded: {
-        primary: primaryRouting.excluded,
-        reviewer: reviewerRouting.excluded,
+        primary: routing.primary.excluded,
+        reviewer: routing.reviewer.excluded,
       },
       decisionRule: "operator_decides_no_static_score",
     },
@@ -1042,7 +1689,8 @@ export async function operatorAssignSpecialist(
     projectSlug: string;
     taskKey: string;
     profileId: string;
-    reason?: string;
+    backend: RealBackend;
+    reason: string;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -1056,44 +1704,82 @@ export async function operatorAssignSpecialist(
         "Assigning the primary specialist is not permitted for the operator here.",
     };
   }
-  const routed = routingCandidate(db, ctx, { ...input, purpose: "primary" });
-  if (!routed.candidate) {
-    return { outcome: "denied", message: routed.denial! };
-  }
-  await recordRoutingDecision(db, ctx, {
-    ...input,
-    purpose: "primary",
-    candidate: routed.candidate,
-  });
-  if (g === "recommend") {
-    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_specialist",
-        profileId: input.profileId,
-        label: `Assign ${name} as the primary specialist`,
-      },
-      input.reason ?? `${name} fits the current stage of work.`,
+  if (g === "direct") {
+    const currentTask = readTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
     );
-    return {
-      outcome: "recommended",
-      message: `Recommended assigning ${name} as the primary specialist.`,
-    };
+    const current = currentTask?.parsed.frontmatter.specialist;
+    const taskIncarnation = currentTask?.parsed.frontmatter.createdAt;
+    const retryingIntent = taskIncarnation
+      ? findRoutingIntent(db, {
+          ...input,
+          reason: input.reason.trim(),
+          taskIncarnation,
+          dataRoot: ctx.dataRoot ?? "",
+          operation: "assign_primary",
+          purpose: "primary",
+          disposition: "selected",
+        })
+      : null;
+    if (
+      current?.profileId === input.profileId &&
+      current.backend === input.backend &&
+      !retryingIntent
+    ) {
+      return {
+        outcome: "noop",
+        message: `${input.profileId} is already the primary specialist on ${backendName(input.backend)}; no new routing decision was made.`,
+      };
+    }
   }
-  const result = await assignSpecialist(
+  return performRoutedOperatorAction(
     db,
+    ctx,
     input,
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
+    {
+      purpose: "primary",
+      operation: "assign_primary",
+      disposition: g === "recommend" ? "recommended" : "selected",
+    },
+    async (intentId, actionCtx) => {
+      if (g === "recommend") {
+        const name = specialistName(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.profileId,
+        );
+        await addRecommendation(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.taskKey,
+          {
+            kind: "assign_specialist",
+            profileId: input.profileId,
+            backend: input.backend,
+            label: `Assign ${name} on ${backendName(input.backend)} as the primary specialist`,
+          },
+          input.reason.trim(),
+          intentId,
+        );
+        return {
+          outcome: "recommended",
+          message: `Recommended assigning ${name} as the primary specialist.`,
+        };
+      }
+      const result = await assignSpecialist(
+        db,
+        { ...input, sourceIntentId: intentId },
+        OPERATOR_TASK_ACTOR,
+        opCtx(actionCtx),
+      );
+      return {
+        outcome: "done",
+        message: `Assigned ${result.name} as the primary specialist.`,
+      };
+    },
   );
-  return {
-    outcome: "done",
-    message: `Assigned ${result.name} as the primary specialist.`,
-  };
 }
 
 /** Start the primary specialist's run (governed by assign-primary-specialist). */
@@ -1146,7 +1832,8 @@ export async function operatorAssignReviewer(
     projectSlug: string;
     taskKey: string;
     profileId: string;
-    reason?: string;
+    backend: RealBackend;
+    reason: string;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -1159,50 +1846,85 @@ export async function operatorAssignReviewer(
       message: "Summoning reviewers is not permitted for the operator here.",
     };
   }
-  const routed = routingCandidate(db, ctx, {
-    ...input,
-    purpose: "reviewer",
-    allowEngagedReviewer: true,
-  });
-  if (!routed.candidate) {
-    return { outcome: "denied", message: routed.denial! };
-  }
-  await recordRoutingDecision(db, ctx, {
-    ...input,
-    purpose: "reviewer",
-    candidate: routed.candidate,
-  });
-  if (g === "recommend") {
-    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_reviewer",
-        profileId: input.profileId,
-        label: `Engage ${name} as a reviewer`,
-      },
-      input.reason ?? `${name} should review the work at this stage.`,
+  if (g === "direct") {
+    const currentTask = readTaskFile(
+      taskRef(ctx, input.projectSlug, input.taskKey),
     );
-    return {
-      outcome: "recommended",
-      message: `Recommended engaging ${name} as a reviewer.`,
-    };
+    const alreadyEngaged = currentTask?.parsed.frontmatter.reviewers.some(
+      (reviewer) =>
+        reviewer.profileId === input.profileId &&
+        reviewer.backend === input.backend,
+    );
+    const taskIncarnation = currentTask?.parsed.frontmatter.createdAt;
+    const retryingIntent = taskIncarnation
+      ? findRoutingIntent(db, {
+          ...input,
+          reason: input.reason.trim(),
+          taskIncarnation,
+          dataRoot: ctx.dataRoot ?? "",
+          operation: "assign_reviewer",
+          purpose: "reviewer",
+          disposition: "selected",
+        })
+      : null;
+    if (alreadyEngaged && !retryingIntent) {
+      return {
+        outcome: "noop",
+        message: `${input.profileId} is already an engaged reviewer on ${backendName(input.backend)}; no new routing decision was made.`,
+      };
+    }
   }
-  const result = await assignReviewer(
+  return performRoutedOperatorAction(
     db,
+    ctx,
     input,
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
+    {
+      purpose: "reviewer",
+      operation: "assign_reviewer",
+      disposition: g === "recommend" ? "recommended" : "selected",
+      allowEngagedReviewer: true,
+    },
+    async (intentId, actionCtx) => {
+      if (g === "recommend") {
+        const name = specialistName(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.profileId,
+        );
+        await addRecommendation(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.taskKey,
+          {
+            kind: "assign_reviewer",
+            profileId: input.profileId,
+            backend: input.backend,
+            label: `Engage ${name} on ${backendName(input.backend)} as a reviewer`,
+          },
+          input.reason.trim(),
+          intentId,
+        );
+        return {
+          outcome: "recommended",
+          message: `Recommended engaging ${name} as a reviewer.`,
+        };
+      }
+      const result = await assignReviewer(
+        db,
+        { ...input, sourceIntentId: intentId },
+        OPERATOR_TASK_ACTOR,
+        opCtx(actionCtx),
+      );
+      return {
+        outcome: "done",
+        message: result.alreadyEngaged
+          ? `${result.name} is already a reviewer.`
+          : `Engaged ${result.name} as a reviewer.`,
+      };
+    },
   );
-  return {
-    outcome: "done",
-    message: result.alreadyEngaged
-      ? `${result.name} is already a reviewer.`
-      : `Engaged ${result.name} as a reviewer.`,
-  };
 }
 
 /** Start a reviewer's run (governed by summon-reviewers). */
@@ -1260,12 +1982,13 @@ function deployedAgent(
   ctx: TaskMutationContext,
   projectSlug: string,
   profileId: string,
+  backend: RealBackend,
 ): DeployedSpecialistView | null {
-  return (
-    listDeployedSpecialists(db, projectSlug, ctx).find(
-      (s) => s.id === profileId,
-    ) ?? null
+  const specialist = listDeployedSpecialists(db, projectSlug, ctx).find(
+    (s) => s.id === profileId,
   );
+  if (!specialist || !specialist.backends.includes(backend)) return null;
+  return { ...specialist, backend };
 }
 
 /**
@@ -1283,8 +2006,18 @@ async function ensureTaskBranchBestEffort(
   try {
     const { ensureTaskBranch } =
       await import("~/server/github/branch-sync.server");
+    const signal = projectCompletionSignal(db, projectSlug);
     await ensureTaskBranch(db, { projectSlug, taskKey }, OPERATOR_AUDIT_ACTOR, {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      signal,
+      ...(ctx.expectedTaskIncarnation !== undefined
+        ? {
+            taskLifecycle: {
+              expectedCreatedAt: ctx.expectedTaskIncarnation,
+              signal,
+            },
+          }
+        : {}),
     });
   } catch {
     // Non-fatal: coordination proceeds without a branch when GitHub is absent.
@@ -1331,8 +2064,9 @@ export async function operatorPromptSpecialist(
     projectSlug: string;
     taskKey: string;
     profileId: string;
+    backend: RealBackend;
     directive?: string;
-    reason?: string;
+    reason: string;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -1346,86 +2080,107 @@ export async function operatorPromptSpecialist(
         "Prompting the primary specialist is not permitted for the operator here.",
     };
   }
-  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  const agent = deployedAgent(
+    db,
+    ctx,
+    input.projectSlug,
+    input.profileId,
+    input.backend,
+  );
   if (!agent) {
     return {
       outcome: "denied",
-      message: `No deployed specialist "${input.profileId}" to prompt.`,
+      message: `No deployed specialist "${input.profileId}" declares the ${input.backend} backend.`,
     };
   }
-  const routed = routingCandidate(db, ctx, { ...input, purpose: "primary" });
-  if (!routed.candidate) {
-    return { outcome: "denied", message: routed.denial! };
-  }
-  await recordRoutingDecision(db, ctx, {
-    ...input,
-    purpose: "primary",
-    candidate: routed.candidate,
-  });
-
-  if (g === "recommend") {
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_specialist",
-        profileId: input.profileId,
-        label: `Assign ${agent.name} as the primary specialist`,
-      },
-      input.reason ??
-        input.directive ??
-        `${agent.name} fits the current stage of work.`,
-    );
-    return {
-      outcome: "recommended",
-      message: `Recommended assigning ${agent.name} as the primary specialist.`,
-    };
-  }
-
-  // direct: assign as primary if it isn't already, then prompt + run.
-  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  const currentPrimary = file?.parsed.frontmatter.specialist?.profileId ?? null;
-  if (currentPrimary !== input.profileId) {
-    await assignSpecialist(
-      db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        profileId: input.profileId,
-      },
-      OPERATOR_TASK_ACTOR,
-      opCtx(ctx),
-    );
-  }
-  // Delivery spine (FR31): the developer is about to work, so ensure the
-  // task-key branch exists on GitHub. Best-effort — degrades cleanly (no throw)
-  // when the repo/PAT isn't configured, and writes the branch name into task.md
-  // so the PR/commit/branch chain stays traceable to this task.
-  await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
-  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
-  const directive =
-    (input.directive ?? "").trim() ||
-    `implement "${c.title}" (now in ${c.stageName}). ` +
-      `Goal: ${c.goal} Please pick it up and do the stage work, then report back.`;
-  await operatorPromptAgent(
+  return performRoutedOperatorAction(
     db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      role: agent.role,
-      backend: agent.backend,
-      handle: agent.name,
-      directive,
-      kind: "primary",
-    },
     ctx,
+    input,
+    {
+      purpose: "primary",
+      operation: "prompt_primary",
+      disposition: g === "recommend" ? "recommended" : "selected",
+    },
+    async (intentId, actionCtx) => {
+      if (g === "recommend") {
+        await addRecommendation(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.taskKey,
+          {
+            kind: "assign_specialist",
+            profileId: input.profileId,
+            backend: input.backend,
+            label: `Assign ${agent.name} on ${backendName(input.backend)} as the primary specialist`,
+          },
+          input.reason.trim(),
+          intentId,
+        );
+        return {
+          outcome: "recommended",
+          message: `Recommended assigning ${agent.name} as the primary specialist.`,
+        };
+      }
+
+      // direct: assign as primary if it isn't already, then prompt + run.
+      const file = readTaskFile(
+        taskRef(actionCtx, input.projectSlug, input.taskKey),
+      );
+      const currentPrimary = file?.parsed.frontmatter.specialist ?? null;
+      if (
+        currentPrimary?.profileId !== input.profileId ||
+        currentPrimary.backend !== input.backend
+      ) {
+        await assignSpecialist(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: input.profileId,
+            backend: input.backend,
+            sourceIntentId: intentId,
+          },
+          OPERATOR_TASK_ACTOR,
+          opCtx(actionCtx),
+        );
+      }
+      // Delivery spine (FR31): the developer is about to work, so ensure the
+      // task-key branch exists on GitHub. Best-effort — degrades cleanly (no throw)
+      // when the repo/PAT isn't configured, and writes the branch name into task.md
+      // so the PR/commit/branch chain stays traceable to this task.
+      await ensureTaskBranchBestEffort(
+        db,
+        actionCtx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      const c = taskContext(db, actionCtx, input.projectSlug, input.taskKey);
+      const directive =
+        (input.directive ?? "").trim() ||
+        `implement "${c.title}" (now in ${c.stageName}). ` +
+          `Goal: ${c.goal} Please pick it up and do the stage work, then report back.`;
+      await operatorPromptAgent(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          role: agent.role,
+          backend: agent.backend,
+          handle: agent.name,
+          directive,
+          kind: "primary",
+          sourceIntentId: intentId,
+        },
+        actionCtx,
+      );
+      return {
+        outcome: "done",
+        message: `Prompted @${agent.name} and started its run.`,
+      };
+    },
   );
-  return {
-    outcome: "done",
-    message: `Prompted @${agent.name} and started its run.`,
-  };
 }
 
 /**
@@ -1442,8 +2197,9 @@ export async function operatorPromptReviewer(
     projectSlug: string;
     taskKey: string;
     profileId: string;
+    backend: RealBackend;
     directive?: string;
-    reason?: string;
+    reason: string;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -1456,82 +2212,90 @@ export async function operatorPromptReviewer(
       message: "Prompting a reviewer is not permitted for the operator here.",
     };
   }
-  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  const agent = deployedAgent(
+    db,
+    ctx,
+    input.projectSlug,
+    input.profileId,
+    input.backend,
+  );
   if (!agent) {
     return {
       outcome: "denied",
-      message: `No deployed specialist "${input.profileId}" to engage as a reviewer.`,
+      message: `No deployed specialist "${input.profileId}" declares the ${input.backend} backend.`,
     };
   }
-  const routed = routingCandidate(db, ctx, {
-    ...input,
-    purpose: "reviewer",
-    allowEngagedReviewer: true,
-  });
-  if (!routed.candidate) {
-    return { outcome: "denied", message: routed.denial! };
-  }
-  await recordRoutingDecision(db, ctx, {
-    ...input,
-    purpose: "reviewer",
-    candidate: routed.candidate,
-  });
-
-  if (g === "recommend") {
-    await addRecommendation(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      {
-        kind: "assign_reviewer",
-        profileId: input.profileId,
-        label: `Engage ${agent.name} as a reviewer`,
-      },
-      input.reason ??
-        input.directive ??
-        `${agent.name} should review the work at this stage.`,
-    );
-    return {
-      outcome: "recommended",
-      message: `Recommended engaging ${agent.name} as a reviewer.`,
-    };
-  }
-
-  // direct: engage (idempotent) then prompt + run.
-  await assignReviewer(
+  return performRoutedOperatorAction(
     db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      profileId: input.profileId,
-    },
-    OPERATOR_TASK_ACTOR,
-    opCtx(ctx),
-  );
-  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
-  const directive =
-    (input.directive ?? "").trim() ||
-    `please review the work on "${c.title}" against the goal: ${c.goal} ` +
-      `Flag correctness, security, and gaps, then report back.`;
-  await operatorPromptAgent(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      role: agent.role,
-      backend: agent.backend,
-      handle: agent.name,
-      directive,
-      kind: "reviewer",
-      profileId: input.profileId,
-    },
     ctx,
+    input,
+    {
+      purpose: "reviewer",
+      operation: "prompt_reviewer",
+      disposition: g === "recommend" ? "recommended" : "selected",
+      allowEngagedReviewer: true,
+    },
+    async (intentId, actionCtx) => {
+      if (g === "recommend") {
+        await addRecommendation(
+          db,
+          actionCtx,
+          input.projectSlug,
+          input.taskKey,
+          {
+            kind: "assign_reviewer",
+            profileId: input.profileId,
+            backend: input.backend,
+            label: `Engage ${agent.name} on ${backendName(input.backend)} as a reviewer`,
+          },
+          input.reason.trim(),
+          intentId,
+        );
+        return {
+          outcome: "recommended",
+          message: `Recommended engaging ${agent.name} as a reviewer.`,
+        };
+      }
+
+      // direct: engage (idempotent) then prompt + run.
+      await assignReviewer(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: input.profileId,
+          backend: input.backend,
+          sourceIntentId: intentId,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx(actionCtx),
+      );
+      const c = taskContext(db, actionCtx, input.projectSlug, input.taskKey);
+      const directive =
+        (input.directive ?? "").trim() ||
+        `please review the work on "${c.title}" against the goal: ${c.goal} ` +
+          `Flag correctness, security, and gaps, then report back.`;
+      await operatorPromptAgent(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          role: agent.role,
+          backend: agent.backend,
+          handle: agent.name,
+          directive,
+          kind: "reviewer",
+          profileId: input.profileId,
+          sourceIntentId: intentId,
+        },
+        actionCtx,
+      );
+      return {
+        outcome: "done",
+        message: `Prompted reviewer @${agent.name} and started its run.`,
+      };
+    },
   );
-  return {
-    outcome: "done",
-    message: `Prompted reviewer @${agent.name} and started its run.`,
-  };
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */
@@ -1662,6 +2426,28 @@ export async function operatorAcceptCompletion(
   const doneStageId = stages[stages.length - 1]?.id ?? "done";
 
   if (file.parsed.frontmatter.stage === doneStageId) {
+    const taskIncarnation = file.parsed.frontmatter.createdAt;
+    const completionIntent = taskIncarnation
+      ? getTaskCompletionIntent(db, {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          taskIncarnation,
+        })
+      : null;
+    if (
+      completionIntent?.authoritySource === "operator_full_autonomy" &&
+      !convergeTaskCompletionIntent(db, completionIntent, {
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      })
+    ) {
+      throw new AppError({
+        code: ERROR_CODES.CONFLICT,
+        status: 409,
+        userMessage:
+          "Completion is Done, but its projection and audit are still inconsistent.",
+        kind: "user",
+      });
+    }
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
@@ -1755,6 +2541,16 @@ export async function operatorAcceptCompletion(
     file.parsed,
     project.parsed.frontmatter.repo,
   );
+  const taskIncarnation = file.parsed.frontmatter.createdAt;
+  if (!taskIncarnation) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: "This task has no canonical lifecycle identity.",
+      kind: "user",
+    });
+  }
+  let completionIntent: TaskCompletionIntent | null = null;
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
@@ -1778,6 +2574,17 @@ export async function operatorAcceptCompletion(
           kind: "user",
         });
       }
+      completionIntent = stageTaskCompletionIntent(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        taskIncarnation,
+        evidenceFingerprint: expectedEvidence,
+        actorUserId: null,
+        actorLabel: OPERATOR_AUDIT_ACTOR.label,
+        authoritySource: "operator_full_autonomy",
+        doneStageId,
+        mergedPr: false,
+      });
       parsed.frontmatter.stage = doneStageId;
       parsed.frontmatter.readiness = "ready";
       parsed.frontmatter.waiting = "none";
@@ -1786,7 +2593,7 @@ export async function operatorAcceptCompletion(
       parsed.frontmatter.recommendations = [];
       parsed.packet = null;
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: completionIntent.createdAt,
         type: "completion",
         actor: { kind: "operator" },
         title: "Completion accepted",
@@ -1796,16 +2603,27 @@ export async function operatorAcceptCompletion(
       });
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
-  recordAudit(db, {
-    action: "task.operator.accepted_completion",
-    actor: OPERATOR_AUDIT_ACTOR,
-    subjectKind: "task",
-    subjectId: input.taskKey,
+  ctx.completionFinalizationHookForTests?.(input);
+  completionIntent ??= getTaskCompletionIntent(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { autonomy: "full", toStage: doneStageId },
+    taskIncarnation,
+    evidenceFingerprint: expectedEvidence,
   });
+  if (
+    !completionIntent ||
+    !convergeTaskCompletionIntent(db, completionIntent, {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    })
+  ) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "Completion became canonical but its projection and audit could not be reconciled.",
+      kind: "user",
+    });
+  }
   return {
     outcome: "done",
     message: `Accepted completion — ${input.taskKey} moved to Done.`,

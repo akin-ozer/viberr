@@ -15,20 +15,47 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard } from "~/server/projections/board-query.server";
 import {
+  provisionIdentity,
+  setMemberRole,
+} from "~/server/auth/identity.server";
+import {
+  createPat,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
+import {
   classifyReviewerVerdict,
   applyRecommendation,
   completeTaskMerge,
+  recordHumanValidation,
   reorderTask,
   resolvePacket,
   transitionStage,
   updateTaskGoal,
 } from "./task-actions.server";
 
+const REVIEW_HEAD = "a".repeat(40);
+
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
+}
+
+async function validateCompletion(
+  store: TestStore,
+  validatingActor: {
+    userId: string;
+    label: string;
+    orgRole?: "admin" | "member";
+  },
+): Promise<void> {
+  await recordHumanValidation(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-1" },
+    validatingActor,
+    { dataRoot: store.dataRoot },
+  );
 }
 
 const PACKET: TaskPacket = {
@@ -156,6 +183,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
       },
       PACKET,
     );
+    await validateCompletion(store, actor(store.users.selin));
     const result = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -194,6 +222,18 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
   it("packet: a nonmember org admin may accept through the emergency override", async () => {
     const store = prepared();
+    // Request/session claims are deliberately insufficient at a governed
+    // boundary. Make Deniz an authoritative org admin in Better Auth while
+    // leaving them absent from project.md, which is the emergency-override
+    // case this test is intended to exercise.
+    provisionIdentity(store.db, {
+      id: store.users.deniz.id,
+      email: store.users.deniz.email,
+      name: store.users.deniz.name,
+      role: "admin",
+      passwordHash: null,
+    });
+    setMemberRole(store.db, store.users.deniz.id, "admin");
     withTask(
       store,
       {
@@ -203,13 +243,15 @@ describe("P3.7 governance & lifecycle fixes", () => {
       },
       PACKET,
     );
+    const orgAdmin = {
+      ...actor(store.users.deniz),
+      orgRole: "admin" as const,
+    };
+    await validateCompletion(store, orgAdmin);
     const result = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      {
-        ...actor(store.users.deniz),
-        orgRole: "admin",
-      },
+      orgAdmin,
       { dataRoot: store.dataRoot },
     );
     expect(result.task.stage).toBe("done");
@@ -239,6 +281,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
         },
       ],
     });
+    await validateCompletion(store, actor(store.users.selin));
     const result = await applyRecommendation(
       store.db,
       {
@@ -386,6 +429,20 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
   it("a repository task with an already-merged healthy PR may finish", async () => {
     const store = prepared();
+    const pat = createPat(
+      store.db,
+      {
+        userId: store.users.arda.id,
+        label: "Already merged completion fixture",
+        token: "ghp_already_merged_completion_fixture",
+      },
+      actor(store.users.arda),
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor(store.users.arda),
+    );
     withTask(
       store,
       {
@@ -393,16 +450,45 @@ describe("P3.7 governance & lifecycle fixes", () => {
         ownerUserId: store.users.arda.id,
         validation: "healthy",
         repo: "akin-ozer/viberr",
-        pr: { number: 318, state: "merged", title: "PR" },
+        pr: {
+          number: 318,
+          state: "merged",
+          title: "PR",
+          headSha: REVIEW_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
+        },
       },
       PACKET,
     );
+    await validateCompletion(store, actor(store.users.arda));
+    let putCalls = 0;
+    const githubFetchImpl: typeof fetch = async (_input, init) => {
+      if ((init?.method ?? "GET") !== "GET") {
+        putCalls += 1;
+      }
+      return new Response(
+        JSON.stringify({
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-01T10:00:00.000Z",
+          merge_commit_sha: "b".repeat(40),
+          head: { sha: REVIEW_HEAD },
+          base: {
+            ref: "main",
+            repo: { full_name: "akin-ozer/viberr" },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
     const result = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
       actor(store.users.arda),
-      { dataRoot: store.dataRoot },
+      { dataRoot: store.dataRoot, githubFetchImpl },
     );
+    expect(putCalls).toBe(0);
     expect(result.completion).toEqual({ completed: true, mergePending: false });
     expect(result.task).toMatchObject({ stage: "done", validation: "healthy" });
     expect(result.task.pr).toMatchObject({ state: "merged" });
@@ -436,6 +522,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
       ownerUserId: store.users.arda.id,
       validation: "healthy",
     });
+    await validateCompletion(store, actor(store.users.arda));
     const res = await reorderTask(
       store.db,
       {
@@ -620,6 +707,7 @@ describe("transitionStage boundary enforcement", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
+    await validateCompletion(store, actor(store.users.arda));
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
@@ -872,7 +960,12 @@ describe("resolvePacket kind matrix", () => {
         waiting: "human",
         validation: "healthy",
         repo: "akin-ozer/viberr",
-        pr: { number: 318, state: "review", title: "PR" },
+        pr: {
+          number: 318,
+          state: "review",
+          title: "PR",
+          headSha: REVIEW_HEAD,
+        },
       },
       PACKET,
     );
@@ -884,6 +977,8 @@ describe("resolvePacket kind matrix", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
+
+    await validateCompletion(store, actor(store.users.arda));
 
     const { task } = await resolvePacket(
       store.db,
@@ -1158,7 +1253,32 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       stage: "review",
       validation: "healthy",
       repo: "akin-ozer/viberr",
-      pr: { number: 7, state: "accepted", title: "PR" },
+      pr: {
+        number: 7,
+        state: "review",
+        title: "PR",
+        headSha: REVIEW_HEAD,
+      },
+    });
+    await validateCompletion(store, actor(store.users.arda));
+    const humanValidation = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.humanValidation;
+    // Model a completion that was accepted in an earlier request and is now
+    // waiting for the explicit merge retry.
+    withTask(store, {
+      stage: "review",
+      validation: "healthy",
+      repo: "akin-ozer/viberr",
+      humanValidation,
+      pr: {
+        number: 7,
+        state: "accepted",
+        title: "PR",
+        headSha: REVIEW_HEAD,
+      },
     });
     const result = await completeTaskMerge(
       store.db,

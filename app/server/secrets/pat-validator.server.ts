@@ -11,10 +11,16 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { createGithubClient } from "~/server/github/github-client.server";
 import { resolveScopeViolationWithEvent } from "~/server/github/scope-flag.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   listScopeViolations,
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
+import {
+  projectCompletionSignal,
+  withProjectCompletionEffect,
+} from "~/server/runtimes/run-completion-state.server";
 import {
   DEFAULT_REQUIRED_SCOPES,
   getPatToken,
@@ -61,6 +67,8 @@ export interface ValidatePatTokenOptions {
   knownExpiresAt?: string | null;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
+  /** Abort an in-flight probe when project lifecycle ownership is revoked. */
+  signal?: AbortSignal;
 }
 
 function tokenKindOf(token: string, scopesHeader: string | null): PatTokenKind {
@@ -114,7 +122,9 @@ export async function validatePatToken(
   };
 
   // 1. Identity — /user.
-  const user = await client.request<GhUser>("GET", "/user");
+  const user = await client.request<GhUser>("GET", "/user", {
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
   if (!user.ok) {
     if (user.kind === "network") {
       return {
@@ -164,6 +174,7 @@ export async function validatePatToken(
     const repoResult = await client.request<{ full_name: string }>(
       "GET",
       `/repos/${repo}`,
+      { ...(options.signal ? { signal: options.signal } : {}) },
     );
     if (repoResult.ok) {
       repoAccessible = true;
@@ -217,6 +228,7 @@ export async function validatePatToken(
     if (requiredScopes.includes("read:org")) {
       const orgs = await client.request<unknown[]>("GET", "/user/orgs", {
         searchParams: { per_page: 1 },
+        ...(options.signal ? { signal: options.signal } : {}),
       });
       orgReadOk = orgs.ok ? true : orgs.kind === "http" ? false : null;
     }
@@ -225,7 +237,10 @@ export async function validatePatToken(
       const pulls = await client.request<unknown[]>(
         "GET",
         `/repos/${repo}/pulls`,
-        { searchParams: { per_page: 1, state: "all" } },
+        {
+          searchParams: { per_page: 1, state: "all" },
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
       );
       pullsReadOk = pulls.ok ? true : pulls.kind === "http" ? false : null;
     }
@@ -334,12 +349,37 @@ export async function revalidateProjectCredential(
   actor: AuditActor = SYSTEM_ACTOR,
   ctx: RevalidateContext = {},
 ): Promise<RevalidateProjectCredentialResult> {
+  return withProjectCompletionEffect(db, projectSlug, async () => {
+    assertProjectActive(db, projectSlug, ctx);
+    return revalidateProjectCredentialOwned(db, projectSlug, actor, ctx);
+  });
+}
+
+async function revalidateProjectCredentialOwned(
+  db: Database.Database,
+  projectSlug: string,
+  actor: AuditActor,
+  ctx: RevalidateContext,
+): Promise<RevalidateProjectCredentialResult> {
+  const lifecycleSignal = projectCompletionSignal(db, projectSlug);
+  const assertLifecycleActive = () => {
+    if (lifecycleSignal.aborted) {
+      throw (
+        lifecycleSignal.reason ??
+        new DOMException(
+          `Project ${projectSlug} lifecycle ownership was revoked.`,
+          "AbortError",
+        )
+      );
+    }
+  };
   // Governed action (Phase 10): the grant/re-check ATTEMPT itself is
   // audited with its outcome — not only the violation resolutions.
   const auditAttempt = (
     outcome: RevalidateProjectCredentialResult["status"],
     extra: Record<string, unknown> = {},
-  ) =>
+  ) => {
+    assertLifecycleActive();
     recordAudit(db, {
       action: "github.credential.revalidated",
       actor,
@@ -348,6 +388,7 @@ export async function revalidateProjectCredential(
       projectSlug,
       details: { outcome, ...extra },
     });
+  };
 
   const credential = getProjectCredential(db, projectSlug);
   if (!credential) {
@@ -379,12 +420,30 @@ export async function revalidateProjectCredential(
     }
   }
 
+  // Snapshot every open violation and its exact task lifecycle before the
+  // first network await. A delayed successful probe may resolve the durable
+  // old violation, but must never append its event to a replacement task.
+  const violationSnapshots = listScopeViolations(db, projectSlug, {
+    status: "open",
+  }).map((violation) => ({
+    violation,
+    expectedTaskCreatedAt: violation.taskKey
+      ? (readTaskFile({
+          projectSlug,
+          taskKey: violation.taskKey,
+          ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+        })?.parsed.frontmatter.createdAt ?? null)
+      : null,
+  }));
+
   const validation = await validatePat(db, credential.id, {
     repo: ctx.repo !== undefined ? ctx.repo : (projectRow?.repo ?? null),
     ...(requiredScopes ? { requiredScopes } : {}),
     knownExpiresAt: credential.validation?.expiresAt ?? null,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+    signal: lifecycleSignal,
   });
+  assertLifecycleActive();
   if (!validation) {
     auditAttempt("no_pat_configured");
     return { status: "no_pat_configured" };
@@ -398,18 +457,21 @@ export async function revalidateProjectCredential(
     validation.scopes.flatMap((s) => (s.ok ? [s.id] : [])),
   );
   const resolvedViolations: ScopeViolationRecord[] = [];
-  for (const violation of listScopeViolations(db, projectSlug, {
-    status: "open",
-  })) {
+  for (const { violation, expectedTaskCreatedAt } of violationSnapshots) {
     if (!grantedScopes.has(violation.scope)) continue;
     const result = await resolveScopeViolationWithEvent(
       db,
       violation.id,
       actor,
-      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      {
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+        ...(violation.taskKey ? { expectedTaskCreatedAt } : {}),
+        signal: lifecycleSignal,
+      },
     );
     if (result?.resolved) resolvedViolations.push(result.violation);
   }
+  assertLifecycleActive();
   auditAttempt("revalidated", {
     validationStatus: validation.status,
     resolvedViolations: resolvedViolations.length,

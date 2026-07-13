@@ -29,9 +29,14 @@ describe("typed toast feedback", () => {
     );
 
     fireEvent.click(getByRole("button", { name: "success" }));
+    // The live region is the always-mounted wrapper (so it is registered before
+    // content arrives); the success toast renders inside it.
     const status = getByRole("status");
-    expect(status.classList.contains("success")).toBe(true);
-    expect(status.textContent).toContain("Saved");
+    expect(status.classList.contains("toast-wrap")).toBe(true);
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    const successToast = status.querySelector(".toast.success");
+    expect(successToast).not.toBeNull();
+    expect(successToast?.textContent).toContain("Saved");
 
     fireEvent.click(getByRole("button", { name: "error" }));
     const alert = getByRole("alert");

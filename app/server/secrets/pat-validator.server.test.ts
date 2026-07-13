@@ -13,6 +13,11 @@ import {
   findOpenScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import {
+  allowProjectCompletionEffects,
+  revokeProjectCompletionEffects,
+  waitForProjectCompletionEffects,
+} from "~/server/runtimes/run-completion-state.server";
 import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
 import {
   revalidateProjectCredential,
@@ -312,5 +317,143 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
       dataRoot: store.dataRoot,
     })!.parsed.timeline.filter((e) => e.type === "policy");
     expect(policyEvents).toHaveLength(1);
+  });
+
+  it("does not append an old scope-resolution event to a same-key replacement task", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", {
+        stage: "review",
+        createdAt: "2026-07-01T09:00:00.000Z",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: FINE },
+      actor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor,
+    );
+    const healthy = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /user/orgs": { body: [] },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    }).fetchImpl;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const firstRequest = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let paused = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (!paused) {
+        paused = true;
+        entered();
+        await gate;
+      }
+      return healthy(input, init);
+    };
+
+    const revalidation = revalidateProjectCredential(
+      store.db,
+      store.slug,
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+    await firstRequest;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", {
+        stage: "review",
+        createdAt: "2026-07-02T09:00:00.000Z",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    release();
+    await expect(revalidation).rejects.toMatchObject({ name: "AbortError" });
+    expect(countOpenPolicyViolations(store.db, store.slug)).toBe(1);
+
+    const replacement = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(replacement.frontmatter.createdAt).toBe(
+      "2026-07-02T09:00:00.000Z",
+    );
+    expect(
+      replacement.timeline.some((event) =>
+        event.text.includes("**Policy update:**"),
+      ),
+    ).toBe(false);
+  });
+
+  it("registers a paused scope revalidation in the project lifecycle drain", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: FINE },
+      actor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor,
+    );
+    const healthy = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /user/orgs": { body: [] },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    }).fetchImpl;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const firstRequest = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let paused = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (!paused) {
+        paused = true;
+        entered();
+        await gate;
+      }
+      return healthy(input, init);
+    };
+
+    const revalidation = revalidateProjectCredential(
+      store.db,
+      store.slug,
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+    await firstRequest;
+    revokeProjectCompletionEffects(store.db, store.slug);
+    let drained = false;
+    const drain = waitForProjectCompletionEffects(store.db, store.slug).then(
+      () => {
+        drained = true;
+      },
+    );
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await expect(revalidation).rejects.toMatchObject({ name: "AbortError" });
+    await drain;
+    expect(drained).toBe(true);
+    allowProjectCompletionEffects(store.db, store.slug);
   });
 });

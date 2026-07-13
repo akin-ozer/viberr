@@ -81,6 +81,68 @@ PJT-7. Delete/recreate the same secondary slug and prove no credential/run/viola
 
 PJT-8. Org disable/delete/member removal respects sole-admin and owner invariants.
 
+## Post-review exact-intent recovery matrix
+
+These cases supplement the original 24-task campaign. Fault seams must stop the
+operation immediately before and after each named remote/canonical boundary,
+then exercise both an explicit retry and boot recovery. Every assertion is
+bound to the task's canonical `createdAt` incarnation, not key alone.
+
+REC-1. Repo-less human acceptance crashes after the durable intent and after
+the Done task-file write. Recovery preserves the original contributor-owner or
+supervisor attribution, produces one terminal timeline/audit occurrence and
+does not accept a replacement task.
+
+REC-2. Repo-less full-autonomy operator completion crosses the same boundaries
+without borrowing a human identity. Recovery retains
+`operator_full_autonomy`, one occurrence and the exact evidence fingerprint.
+
+REC-3. Repository acceptance crashes before/after the pinned merge PUT and
+after GitHub reports the exact PR/head merged but before local convergence.
+Recovery performs no second PUT, preserves the original accepter/authority and
+moves only the exact accepted incarnation to Done.
+
+REC-4. PR opening crashes before POST, after an ambiguous POST, and after the
+exact PR is observed but before task-file projection/audit convergence.
+Before an attempt, recovery may search the exact normalized
+repo/base/branch/full-head target. Once an intent reaches ambiguous `posting`,
+retry/boot is observation or manual reconciliation only: empty or failed
+observation never authorizes another POST, and a wrong base, head or task
+incarnation is never reused.
+
+REC-5. Direct and supervised intelligent routing cover primary and reviewer
+assignment/prompt paths. Assignment or recommendation, rationale timeline,
+audit and run must share one exact `sourceIntentId`; boot cannot use a later
+unrelated run as proof, and human fallback resumes an existing binding without
+creating a routing decision.
+
+REC-6. Archive and restore crash before and after `project.md` carries the
+exact lifecycle marker, and after the file commit but before projection/audit.
+Boot cancels uncommitted rows, converges marker-backed rows once with original
+actor/authority, and handles a same-state retry idempotently.
+
+REC-7. Member removal and contributor demotion stage exact owner seats while
+access is unchanged, then crash before/after the atomic role/member change plus
+batch marker, and before/after owner release. Pre-commit actor revocation or
+target conflict leaves access, seats and audits unchanged. Retry/boot converges
+one cleanup occurrence for each exact task incarnation and refuses to clear a
+newer owner or recreated task.
+
+REC-8. Project deletion purges completion, merge, PR-open, routing, lifecycle
+and ownership-cleanup intents in addition to earlier project-keyed operational
+state. Recreating the slug/key cannot inherit any old work or attribution.
+
+REC-9. Disable/delete/demote the initiating user, change task ownership, and
+remove project/org authority between admission and each canonical/irreversible
+boundary. The action must stop when the current grant no longer permits it;
+successful org-admin emergency actions must audit `org_admin_override`, while
+successful contributor acceptance must audit `task_owner`.
+
+REC-10. Deliver two full SHAs sharing a short prefix and recreate a same-key
+task that references the same PR/head. Provenance and merge/acceptance audit
+must distinguish task incarnation and full SHA while a retry of the identical
+intent remains exact-once.
+
 ## Cross-role/browser cases
 
 RB-1. Every ACTION_ROLES action through all four project roles; UI affordances and server results
@@ -139,3 +201,7 @@ For each case record:
 7. Remote Git branch/commit/PR state for delivery cases.
 8. Post-restart behavior for lease/recovery/persistence cases.
 9. Operator trigger provenance, candidate comparison/rationale, and checkout preflight result.
+10. Exact intent id, task incarnation, sourceIntentId, original actor and authority for every
+    cross-boundary recovery case.
+11. Remote call counts (especially PR POST and merge PUT) plus deterministic timeline/audit ids
+    before and after retry/boot.

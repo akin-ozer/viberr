@@ -16,6 +16,7 @@ import {
   readTaskFile,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
+import { updateProjectFile } from "~/server/files/project-writer.server";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
@@ -26,7 +27,9 @@ import {
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import {
+  configureMergeFaultHooksForTests,
   mergeTaskPr,
+  recoverGithubMergeIntents,
   reconcileProject,
   reconcileTask,
 } from "./github-reconciler.server";
@@ -36,9 +39,31 @@ process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
-afterEach(ctx.cleanup);
+afterEach(() => {
+  configureMergeFaultHooksForTests(null);
+  ctx.cleanup();
+});
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
+const REVIEWED_HEAD = "1".repeat(40);
+const REPLACEMENT_HEAD = "2".repeat(40);
+const OLDER_HEAD = "3".repeat(40);
+const BASE = { ref: "main", repo: { full_name: "akin-ozer/viberr" } };
+
+function livePull(
+  headSha = REVIEWED_HEAD,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    state: "open",
+    merged: false,
+    merged_at: null,
+    merge_commit_sha: null,
+    head: { sha: headSha },
+    base: BASE,
+    ...overrides,
+  };
+}
 
 function setup(): {
   store: TestStore;
@@ -96,7 +121,8 @@ function happyRoutes(): Record<string, FakeResponder> {
           state: "open",
           draft: false,
           merged_at: null,
-          head: { sha: "headsha318" },
+          head: { sha: REVIEWED_HEAD },
+          base: BASE,
         },
       ],
     },
@@ -107,13 +133,14 @@ function happyRoutes(): Record<string, FakeResponder> {
         state: "open",
         merged: false,
         merged_at: null,
-        head: { sha: "headsha318" },
+        head: { sha: REVIEWED_HEAD },
+        base: BASE,
         additions: 412,
         deletions: 87,
         changed_files: 9,
       },
     },
-    [`GET ${REPO_PATH}/commits/headsha318/check-runs`]: {
+    [`GET ${REPO_PATH}/commits/${REVIEWED_HEAD}/check-runs`]: {
       body: {
         total_count: 2,
         check_runs: [
@@ -235,7 +262,9 @@ describe("reconcileTask", () => {
           number: 318,
           state: "review",
           title: "Attach execution workspace",
-          headSha: "reviewed-head",
+          headSha: OLDER_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
         };
         parsed.frontmatter.reviewers = [
           { profileId: "reviewer", backend: "claude", role: "Reviewer" },
@@ -272,9 +301,160 @@ describe("reconcileTask", () => {
       taskKey: "VIB-301",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    expect(fm.pr?.headSha).toBe("headsha318");
+    expect(fm.pr?.headSha).toBe(REVIEWED_HEAD);
     expect(fm.reviewerVerdicts).toEqual([]);
     expect(fm.validation).toBe("changed");
+  });
+
+  it("preserves approval when mutable commit cache changes under the same verified head", async () => {
+    const { store, actor } = setup();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.pr = {
+          number: 318,
+          state: "review",
+          title: "Attach execution workspace",
+          headSha: REVIEWED_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
+        };
+        parsed.frontmatter.github = {
+          commits: [
+            { sha: "fffffff", msg: "unrelated cache entry" },
+            { sha: "a91f7c2", msg: "[VIB-301] old cache order" },
+          ],
+          changed: null,
+        };
+        parsed.frontmatter.reviewers = [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+        ];
+        parsed.frontmatter.validation = "healthy";
+        parsed.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the verified head.",
+            runId: "run-reviewed-head",
+            reviewedAt: "2026-07-13T00:00:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              parsed,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl,
+      },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.headSha).toBe(REVIEWED_HEAD);
+    expect(fm.github?.commits).toEqual([
+      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
+      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+    ]);
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.validation).toBe("healthy");
+  });
+
+  it("preserves the last verified head and approval when a degraded PR read omits head", async () => {
+    const { store, actor } = setup();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.pr = {
+          number: 318,
+          state: "review",
+          title: "Attach execution workspace",
+          headSha: REVIEWED_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
+        };
+        parsed.frontmatter.reviewers = [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+        ];
+        parsed.frontmatter.validation = "healthy";
+        parsed.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the verified head.",
+            runId: "run-reviewed-head",
+            reviewedAt: "2026-07-13T00:00:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              parsed,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls`] = {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "open",
+          draft: false,
+          merged_at: null,
+          base: BASE,
+        },
+      ],
+    };
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "open",
+        merged: false,
+        merged_at: null,
+        base: BASE,
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+      },
+    );
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.headSha).toBe(REVIEWED_HEAD);
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.validation).toBe("healthy");
   });
 
   it("merged PR → sync 'merged' beats behind (ruling 12 precedence)", async () => {
@@ -290,7 +470,8 @@ describe("reconcileTask", () => {
         state: "closed",
         merged: true,
         merged_at: "2026-07-05T09:00:00Z",
-        head: { sha: "headsha318" },
+        head: { sha: REVIEWED_HEAD },
+        base: BASE,
         additions: 412,
         deletions: 87,
         changed_files: 9,
@@ -322,6 +503,9 @@ describe("reconcileTask", () => {
           number: 318,
           state: "accepted",
           title: "Attach execution workspace",
+          headSha: REVIEWED_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
         },
       }),
     });
@@ -389,7 +573,8 @@ describe("reconcileTask", () => {
         state: "closed",
         merged: true,
         merged_at: "2026-07-05T09:00:00Z",
-        head: { sha: "headsha318" },
+        head: { sha: REVIEWED_HEAD },
+        base: BASE,
         additions: 412,
         deletions: 87,
         changed_files: 9,
@@ -520,7 +705,8 @@ describe("reconcileTask", () => {
         state: "closed",
         merged: false,
         merged_at: null,
-        head: { sha: "headsha318" },
+        head: { sha: REVIEWED_HEAD },
+        base: BASE,
         additions: 412,
         deletions: 87,
         changed_files: 9,
@@ -644,6 +830,9 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
           number: 318,
           state: "review",
           title: "Attach execution workspace",
+          headSha: REVIEWED_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
         },
       }),
     });
@@ -651,12 +840,272 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     return { store, actor };
   }
 
+  function stageMergeIntent(
+    store: TestStore,
+    actor: { userId: string; label: string },
+    id = "merge_intent_test",
+  ): void {
+    const task = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!;
+    store.db
+      .prepare(
+        `INSERT INTO github_merge_intents
+           (id, project_slug, task_key, task_incarnation, repo,
+            default_branch, pr_number, head_sha, actor_user_id, actor_label,
+            authority_source, created_at)
+         VALUES (?, ?, 'VIB-142', ?, 'akin-ozer/viberr', 'main', 318, ?, ?, ?,
+                 'task_owner', '2026-07-13T09:00:00.000Z')`,
+      )
+      .run(
+        id,
+        store.slug,
+        task.parsed.frontmatter.createdAt,
+        REVIEWED_HEAD,
+        actor.userId,
+        actor.label,
+      );
+  }
+
+  it("defers a cached merged intent without live credentials or fabricated merge facts", async () => {
+    const { store, actor } = setupWithPr();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (task) => {
+        task.frontmatter.pr = { ...task.frontmatter.pr!, state: "merged" };
+      },
+    );
+    stageMergeIntent(store, actor);
+    store.db
+      .prepare(`DELETE FROM project_github_credentials WHERE project_slug = ?`)
+      .run(store.slug);
+
+    await expect(
+      recoverGithubMergeIntents(store.db, { dataRoot: store.dataRoot }),
+    ).resolves.toEqual({
+      completed: 0,
+      cancelled: 0,
+      deferred: 1,
+      errors: 0,
+    });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(0);
+    expect(
+      store.db
+        .prepare(`SELECT 1 FROM provenance WHERE action = 'github.merge'`)
+        .all(),
+    ).toHaveLength(0);
+  });
+
+  it("retains an archived project's merge intent without GitHub reads or canonical mutation", async () => {
+    const { store, actor } = setupWithPr();
+    stageMergeIntent(store, actor);
+    await updateProjectFile(
+      { projectSlug: store.slug, dataRoot: store.dataRoot },
+      (project) => {
+        project.frontmatter.archived = true;
+      },
+    );
+    let githubCalls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      githubCalls += 1;
+      throw new Error("archived recovery must not contact GitHub");
+    };
+
+    await expect(
+      recoverGithubMergeIntents(store.db, {
+        dataRoot: store.dataRoot,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      completed: 0,
+      cancelled: 0,
+      deferred: 1,
+      errors: 0,
+    });
+    expect(githubCalls).toBe(0);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.pr,
+    ).toMatchObject({ state: "review" });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(0);
+  });
+
+  it("recovers an exact remote merge as a detached immutable fact without corrupting a replacement target", async () => {
+    const { store, actor } = setupWithPr();
+    stageMergeIntent(store, actor);
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (task) => {
+        task.frontmatter.repo = "other-owner/other-repo";
+        task.frontmatter.pr = {
+          number: 400,
+          state: "review",
+          title: "Replacement delivery",
+          headSha: REPLACEMENT_HEAD,
+          baseRepo: "other-owner/other-repo",
+          baseRef: "main",
+        };
+      },
+    );
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: livePull(REVIEWED_HEAD, {
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-13T09:01:00.000Z",
+          merge_commit_sha: "detached-merge-sha",
+        }),
+      },
+    });
+
+    await expect(
+      recoverGithubMergeIntents(store.db, {
+        dataRoot: store.dataRoot,
+        fetchImpl: gh.fetchImpl,
+      }),
+    ).resolves.toEqual({
+      completed: 1,
+      cancelled: 0,
+      deferred: 0,
+      errors: 0,
+    });
+    const current = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(current.repo).toBe("other-owner/other-repo");
+    expect(current.pr).toMatchObject({ number: 400, state: "review" });
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" })[0]!.details,
+    ).toMatchObject({
+      repo: "akin-ozer/viberr",
+      prNumber: 318,
+      canonicalApplied: false,
+      authoritySource: "task_owner",
+    });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
+  });
+
+  it("clears a newly staged intent when exact authority is revoked before PUT", async () => {
+    const { store, actor } = setupWithPr();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "must-not-run" },
+      },
+    });
+    let checks = 0;
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: gh.fetchImpl,
+          assertAuthorized: () => {
+            checks += 1;
+            if (checks === 2) {
+              throw new DOMException("authority revoked", "AbortError");
+            }
+            return "task_owner";
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)).toHaveLength(0);
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
+  });
+
+  it("rejects a same-head PR retargeted to a different base before PUT", async () => {
+    const { store, actor } = setupWithPr();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: livePull(REVIEWED_HEAD, {
+          base: { ref: "release", repo: { full_name: "akin-ozer/viberr" } },
+        }),
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "must-not-run" },
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+      ),
+    ).resolves.toMatchObject({ status: "head_changed", prNumber: 318 });
+    expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)).toHaveLength(0);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.pr,
+    ).toMatchObject({ baseRef: "release", state: "review" });
+  });
+
   it("merges, flips the cache, writes the github event, resolves the task's pull_request:write violation", async () => {
     const { store, actor } = setupWithPr();
     // The migration-seeded VIB-142 violation is open on this slug.
     expect(countOpenPolicyViolations(store.db, store.slug)).toBe(1);
 
     const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
       [`PUT ${REPO_PATH}/pulls/318/merge`]: {
         body: {
           merged: true,
@@ -667,7 +1116,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     });
     const result = await mergeTaskPr(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-142" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
       actor,
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
@@ -675,6 +1128,9 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       status: "merged",
       prNumber: 318,
       sha: "mergesha01",
+    });
+    expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)[0]?.body).toEqual({
+      sha: REVIEWED_HEAD,
     });
 
     const file = readTaskFile({
@@ -711,8 +1167,525 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     expect(prov).toHaveLength(1);
   });
 
-  it("405 → not_mergeable, 409 → head_changed, 404 → pr_not_found, 401 → auth_failed", async () => {
+  it("records merge facts independently for a recreated same-key task incarnation", async () => {
     const { store, actor } = setupWithPr();
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch({
+            [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+            [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+              body: { merged: true, sha: "merge-old-incarnation" },
+            },
+          }).fetchImpl,
+        },
+      ),
+    ).resolves.toMatchObject({ status: "merged" });
+
+    const replacementCreatedAt = "2026-07-14T10:00:00.000Z";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", {
+        title: "Recreated delivery",
+        createdAt: replacementCreatedAt,
+        updatedAt: replacementCreatedAt,
+        stage: "review",
+        branch: "vib-142-attach-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 318,
+          state: "review",
+          title: "Attach execution workspace",
+          headSha: REVIEWED_HEAD,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const alreadyMerged = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: livePull(REVIEWED_HEAD, {
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-14T10:05:00.000Z",
+          merge_commit_sha: "merge-new-incarnation",
+        }),
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: alreadyMerged.fetchImpl },
+      ),
+    ).resolves.toMatchObject({ status: "merged" });
+    expect(
+      alreadyMerged.calls.filter((call) => call.method === "PUT"),
+    ).toHaveLength(0);
+
+    const audits = listAuditEvents(store.db, { action: "github.pr.merged" });
+    expect(audits).toHaveLength(2);
+    expect(
+      new Set(audits.map((event) => event.details?.taskIncarnation)),
+    ).toEqual(new Set(["2026-07-01T09:00:00.000Z", replacementCreatedAt]));
+    expect(
+      store.db
+        .prepare(
+          `SELECT details_json FROM provenance WHERE action = 'github.merge'`,
+        )
+        .all()
+        .map(
+          (row) =>
+            JSON.parse((row as { details_json: string }).details_json)
+              .taskIncarnation,
+        ),
+    ).toEqual(
+      expect.arrayContaining([
+        "2026-07-01T09:00:00.000Z",
+        replacementCreatedAt,
+      ]),
+    );
+  });
+
+  it("converges when remote merge succeeds and the process crashes before the task write", async () => {
+    const { store, actor } = setupWithPr();
+    configureMergeFaultHooksForTests({
+      afterRemoteSuccess: () => {
+        throw new Error("injected crash after remote merge");
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch({
+            [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+            [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+              body: { merged: true, sha: "merge-sha-crash-a" },
+            },
+          }).fetchImpl,
+        },
+      ),
+    ).rejects.toThrow("injected crash after remote merge");
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.pr?.state,
+    ).toBe("review");
+
+    configureMergeFaultHooksForTests(null);
+    const retryActor = {
+      userId: store.users.murat.id,
+      label: store.users.murat.email,
+    };
+    const retry = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        status: 405,
+        body: { message: "Pull Request is not mergeable" },
+      },
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: {
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-13T09:00:00.000Z",
+          merge_commit_sha: "merge-sha-crash-a",
+          head: { sha: REVIEWED_HEAD },
+          base: BASE,
+        },
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        retryActor,
+        { dataRoot: store.dataRoot, fetchImpl: retry.fetchImpl },
+      ),
+    ).resolves.toEqual({
+      status: "merged",
+      prNumber: 318,
+      sha: "merge-sha-crash-a",
+    });
+    const mergeAudits = listAuditEvents(store.db, {
+      action: "github.pr.merged",
+    });
+    expect(mergeAudits).toHaveLength(1);
+    expect(mergeAudits[0]).toMatchObject({
+      actorUserId: actor.userId,
+      actorLabel: actor.label,
+    });
+    const mergeEvent = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((event) => event.type === "github");
+    expect(mergeEvent?.actor).toMatchObject({
+      kind: "human",
+      userId: actor.userId,
+    });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
+    expect(
+      store.db
+        .prepare(`SELECT 1 FROM provenance WHERE action = 'github.merge'`)
+        .all(),
+    ).toHaveLength(1);
+    expect(countOpenPolicyViolations(store.db, store.slug)).toBe(0);
+  });
+
+  it("never retargets a surviving merge intent when the task repository changes during retry", async () => {
+    const { store, actor } = setupWithPr();
+    const expectedTarget = {
+      expectedRepo: "akin-ozer/viberr",
+      expectedDefaultBranch: "main",
+      expectedPrNumber: 318,
+    };
+    const ambiguousFetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      );
+      if (
+        (init?.method ?? "GET") === "GET" &&
+        url.pathname.endsWith("/pulls/318")
+      ) {
+        return Response.json(livePull());
+      }
+      throw new TypeError("connection reset after request write");
+    }) as typeof fetch;
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+          ...expectedTarget,
+        },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: ambiguousFetch },
+      ),
+    ).resolves.toMatchObject({ status: "network_unavailable" });
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(1);
+
+    const retry = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: () => {
+        const current = readTaskFile({
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          dataRoot: store.dataRoot,
+        })!.parsed;
+        writeTask(store.dataRoot, store.slug, {
+          ...current,
+          frontmatter: {
+            ...current.frontmatter,
+            repo: "other-owner/other-repo",
+          },
+        });
+        return {
+          body: {
+            state: "open",
+            merged: false,
+            head: { sha: REVIEWED_HEAD },
+            base: BASE,
+          },
+        };
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "must-not-run" },
+      },
+      [`PUT /repos/other-owner/other-repo/pulls/318/merge`]: {
+        body: { merged: true, sha: "must-not-run-either" },
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+          ...expectedTarget,
+        },
+        { userId: store.users.murat.id, label: store.users.murat.email },
+        { dataRoot: store.dataRoot, fetchImpl: retry.fetchImpl },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(retry.calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+  });
+
+  it.each([
+    "project default branch",
+    "pull request base repository",
+    "pull request base branch",
+  ] as const)(
+    "rechecks the %s under the task lock after the remote merge succeeds",
+    async (retarget) => {
+      const { store, actor } = setupWithPr();
+      configureMergeFaultHooksForTests({
+        afterTargetCheckBeforeCanonicalWrite: async () => {
+          if (retarget === "project default branch") {
+            await updateProjectFile(
+              { projectSlug: store.slug, dataRoot: store.dataRoot },
+              (project) => {
+                project.frontmatter.defaultBranch = "release";
+              },
+            );
+            return;
+          }
+          await updateTaskFile(
+            {
+              projectSlug: store.slug,
+              taskKey: "VIB-142",
+              dataRoot: store.dataRoot,
+            },
+            (task) => {
+              task.frontmatter.pr = {
+                ...task.frontmatter.pr!,
+                ...(retarget === "pull request base repository"
+                  ? { baseRepo: "other-owner/other-repo" }
+                  : { baseRef: "release" }),
+              };
+            },
+          );
+        },
+      });
+      const gh = fakeGithubFetch({
+        [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+        [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+          body: { merged: true, sha: `merge-after-${retarget}` },
+        },
+      });
+
+      await expect(
+        mergeTaskPr(
+          store.db,
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-142",
+            expectedHeadSha: REVIEWED_HEAD,
+          },
+          actor,
+          { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+        ),
+      ).resolves.toMatchObject({ status: "merged", prNumber: 318 });
+      expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)).toHaveLength(1);
+      const current = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      })!.parsed;
+      expect(current.frontmatter.pr?.state).toBe("review");
+      expect(
+        current.timeline.filter((event) => event.type === "github"),
+      ).toHaveLength(0);
+      expect(
+        listAuditEvents(store.db, { action: "github.pr.merged" })[0]!.details,
+      ).toMatchObject({ canonicalApplied: false });
+      expect(
+        (
+          store.db
+            .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+            .get() as { n: number }
+        ).n,
+      ).toBe(1);
+    },
+  );
+
+  it("rechecks the task incarnation under the task lock after the remote merge succeeds", async () => {
+    const { store, actor } = setupWithPr();
+    const replacementCreatedAt = "2026-07-15T10:00:00.000Z";
+    configureMergeFaultHooksForTests({
+      afterTargetCheckBeforeCanonicalWrite: async () => {
+        await updateTaskFile(
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-142",
+            dataRoot: store.dataRoot,
+          },
+          (task) => {
+            task.frontmatter.createdAt = replacementCreatedAt;
+            task.frontmatter.updatedAt = replacementCreatedAt;
+          },
+        );
+      },
+    });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "merge-after-incarnation-change" },
+      },
+    });
+
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)).toHaveLength(1);
+    const current = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(current.frontmatter.createdAt).toBe(replacementCreatedAt);
+    expect(current.frontmatter.pr?.state).toBe("review");
+    expect(
+      current.timeline.filter((event) => event.type === "github"),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(0);
+    expect(
+      (
+        store.db
+          .prepare(`SELECT count(*) AS n FROM github_merge_intents`)
+          .get() as { n: number }
+      ).n,
+    ).toBe(1);
+  });
+
+  it("replays missing side effects after a crash immediately after the canonical merge write", async () => {
+    const { store, actor } = setupWithPr();
+    configureMergeFaultHooksForTests({
+      afterCanonicalWrite: () => {
+        throw new Error("injected crash after canonical merge write");
+      },
+    });
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch({
+            [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
+            [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+              body: { merged: true, sha: "merge-sha-crash-b" },
+            },
+          }).fetchImpl,
+        },
+      ),
+    ).rejects.toThrow("injected crash after canonical merge write");
+    const afterCrash = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(afterCrash.frontmatter.pr?.state).toBe("merged");
+    expect(
+      afterCrash.timeline.filter((event) => event.type === "github"),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(0);
+    expect(
+      store.db
+        .prepare(`SELECT 1 FROM provenance WHERE action = 'github.merge'`)
+        .all(),
+    ).toHaveLength(0);
+
+    configureMergeFaultHooksForTests(null);
+    await expect(
+      mergeTaskPr(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch({
+            [`GET ${REPO_PATH}/pulls/318`]: {
+              body: livePull(REVIEWED_HEAD, {
+                state: "closed",
+                merged: true,
+                merged_at: "2026-07-13T09:05:00.000Z",
+                merge_commit_sha: "merge-sha-crash-b",
+              }),
+            },
+          }).fetchImpl,
+        },
+      ),
+    ).resolves.toMatchObject({ status: "merged", prNumber: 318 });
+    const replayed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(
+      replayed.timeline.filter((event) => event.type === "github"),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(1);
+    expect(
+      store.db
+        .prepare(`SELECT 1 FROM provenance WHERE action = 'github.merge'`)
+        .all(),
+    ).toHaveLength(1);
+    expect(countOpenPolicyViolations(store.db, store.slug)).toBe(0);
+  });
+
+  it("405 → not_mergeable, 409 → head_changed, 404 → pr_not_found, 401 → auth_failed", async () => {
     const cases: [number, string, string][] = [
       [405, "Pull Request is not mergeable", "not_mergeable"],
       [409, "Head branch was modified", "head_changed"],
@@ -720,26 +1693,328 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       [401, "Bad credentials", "auth_failed"],
     ];
     for (const [status, message, expected] of cases) {
+      const { store, actor } = setupWithPr();
+      const routes: Record<string, FakeResponder> = {
+        [`GET ${REPO_PATH}/pulls/318`]:
+          status === 409
+            ? (call) => ({
+                body:
+                  call.attempt === 1 ? livePull() : livePull(REPLACEMENT_HEAD),
+              })
+            : { body: livePull() },
+        [`PUT ${REPO_PATH}/pulls/318/merge`]: { status, body: { message } },
+      };
       const result = await mergeTaskPr(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-142" },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
         actor,
         {
           dataRoot: store.dataRoot,
-          fetchImpl: fakeGithubFetch({
-            [`PUT ${REPO_PATH}/pulls/318/merge`]: { status, body: { message } },
-          }).fetchImpl,
+          fetchImpl: fakeGithubFetch(routes).fetchImpl,
         },
       );
       expect(result.status).toBe(expected);
+      expect(
+        readTaskFile({
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          dataRoot: store.dataRoot,
+        })!.parsed.frontmatter.pr?.state,
+      ).toBe("review");
     }
-    // No cache flip on failures.
-    const file = readTaskFile({
+  });
+
+  it("never sends an unpinned merge and caches the live head for review", async () => {
+    const { store, actor } = setupWithPr();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.pr = { ...parsed.frontmatter.pr!, headSha: null };
+      },
+    );
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { head: { sha: REVIEWED_HEAD } },
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "must-not-run" },
+      },
+    });
+
+    const result = await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: null,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+
+    expect(result.status).toBe("head_changed");
+    expect(gh.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)).toHaveLength(0);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.pr?.headSha,
+    ).toBe(REVIEWED_HEAD);
+  });
+
+  it("refreshes a 409 head once, requires fresh review, then merges that exact head", async () => {
+    const { store, actor } = setupWithPr();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.reviewers = [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+        ];
+        parsed.frontmatter.validation = "healthy";
+        parsed.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the old head.",
+            runId: "run-old-head",
+            reviewedAt: "2026-07-13T00:00:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              parsed,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+    const first = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        status: 409,
+        body: { message: "Head branch was modified" },
+      },
+      [`GET ${REPO_PATH}/pulls/318`]: (call) => ({
+        body: call.attempt === 1 ? livePull() : livePull(REPLACEMENT_HEAD),
+      }),
+    });
+    const changed = await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: first.fetchImpl },
+    );
+    expect(changed.status).toBe("head_changed");
+    let parsed = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-142",
       dataRoot: store.dataRoot,
-    })!;
-    expect(file.parsed.frontmatter.pr?.state).toBe("review");
+    })!.parsed;
+    expect(parsed.frontmatter.pr?.headSha).toBe(REPLACEMENT_HEAD);
+    expect(parsed.frontmatter.reviewerVerdicts).toEqual([]);
+    expect(parsed.frontmatter.validation).toBe("changed");
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.head_rebound" }),
+    ).toHaveLength(1);
+
+    // Repeating the stale request cannot create another invalidation/audit.
+    await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: first.fetchImpl },
+    );
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.head_rebound" }),
+    ).toHaveLength(1);
+
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (task) => {
+        task.frontmatter.validation = "healthy";
+        task.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the replacement head.",
+            runId: "run-new-head",
+            reviewedAt: "2026-07-13T00:05:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              task,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+    const retry = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: livePull(REPLACEMENT_HEAD),
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "merge-sha" },
+      },
+    });
+    const merged = await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REPLACEMENT_HEAD,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: retry.fetchImpl },
+    );
+    expect(merged.status).toBe("merged");
+    expect(retry.callsTo(`PUT ${REPO_PATH}/pulls/318/merge`)[0]?.body).toEqual({
+      sha: REPLACEMENT_HEAD,
+    });
+    parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.frontmatter.pr?.state).toBe("merged");
+  });
+
+  it("preserves the review round when a 409 reports the same verified head", async () => {
+    const { store, actor } = setupWithPr();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.reviewers = [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+        ];
+        parsed.frontmatter.validation = "healthy";
+        parsed.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the current head.",
+            runId: "run-current-head",
+            reviewedAt: "2026-07-13T00:00:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              parsed,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+    const gh = fakeGithubFetch({
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        status: 409,
+        body: { message: "Pull Request is not mergeable" },
+      },
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: livePull(),
+      },
+    });
+
+    const result = await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+
+    expect(result.status).toBe("not_mergeable");
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.headSha).toBe(REVIEWED_HEAD);
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.validation).toBe("healthy");
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.head_rebound" }),
+    ).toHaveLength(0);
+  });
+
+  it("does not wipe a fresh approval when an older completion snapshot loses the race", async () => {
+    const { store, actor } = setupWithPr();
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.pr = {
+          ...parsed.frontmatter.pr!,
+          headSha: REPLACEMENT_HEAD,
+        };
+        parsed.frontmatter.reviewers = [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+        ];
+        parsed.frontmatter.validation = "healthy";
+        parsed.frontmatter.reviewerVerdicts = [
+          {
+            profileId: "reviewer",
+            verdict: "approve",
+            summary: "Approved the replacement head.",
+            runId: "run-new-head",
+            reviewedAt: "2026-07-13T00:05:00.000Z",
+            evidenceFingerprint: reviewEvidenceFingerprint(
+              parsed,
+              "akin-ozer/viberr",
+            ),
+          },
+        ];
+      },
+    );
+
+    const stale = await mergeTaskPr(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-142",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
+    );
+
+    expect(stale.status).toBe("head_changed");
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr?.headSha).toBe(REPLACEMENT_HEAD);
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.validation).toBe("healthy");
   });
 
   it("403 → typed scope_violation reusing the seeded VIB-142 row (idempotent, no duplicate events)", async () => {
@@ -753,11 +2028,16 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     const merge = () =>
       mergeTaskPr(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-142" },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-142",
+          expectedHeadSha: REVIEWED_HEAD,
+        },
         actor,
         {
           dataRoot: store.dataRoot,
           fetchImpl: fakeGithubFetch({
+            [`GET ${REPO_PATH}/pulls/318`]: { body: livePull() },
             [`PUT ${REPO_PATH}/pulls/318/merge`]: {
               status: 403,
               body: {
@@ -805,18 +2085,28 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
         stage: "review",
         branch: "vib-301-workspace",
         ownerUserId: store.users.arda.id,
-        pr: { number: 400, state: "review", title: "Workspace PR" },
+        pr: {
+          number: 400,
+          state: "review",
+          title: "Workspace PR",
+          headSha: REVIEWED_HEAD,
+        },
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     const result = await mergeTaskPr(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-301",
+        expectedHeadSha: REVIEWED_HEAD,
+      },
       actor,
       {
         dataRoot: store.dataRoot,
         fetchImpl: fakeGithubFetch({
+          [`GET ${REPO_PATH}/pulls/400`]: { body: livePull() },
           [`PUT ${REPO_PATH}/pulls/400/merge`]: {
             status: 403,
             body: {
@@ -860,7 +2150,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     expect(
       await mergeTaskPr(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-301",
+          expectedHeadSha: null,
+        },
         actor,
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
@@ -868,7 +2162,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     expect(
       await mergeTaskPr(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-999" },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-999",
+          expectedHeadSha: null,
+        },
         actor,
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
@@ -884,7 +2182,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     expect(
       await mergeTaskPr(
         bare.db,
-        { projectSlug: bare.slug, taskKey: "VIB-500" },
+        {
+          projectSlug: bare.slug,
+          taskKey: "VIB-500",
+          expectedHeadSha: null,
+        },
         actor,
         { dataRoot: bare.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),

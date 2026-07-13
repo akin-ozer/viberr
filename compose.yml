@@ -9,7 +9,9 @@ services:
       VIBERR_DATA_ROOT: /data
       # Local Compose has a stable public origin. Production deployments still
       # override this with BETTER_AUTH_URL from .env/reverse-proxy config.
-      BETTER_AUTH_URL: "${BETTER_AUTH_URL:-http://127.0.0.1:${PORT:-3000}}"
+      # Use the same host people type in the browser. Pinning this to 127.0.0.1
+      # made Better Auth reject social/OAuth form posts opened at localhost.
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:-http://localhost:${PORT:-3000}}"
       # --- Run agents on a SUBSCRIPTION (no per-token API key) ---
       # Claude (Claude Pro/Max): run `claude setup-token` once on any machine,
       # put the token in .env as CLAUDE_CODE_OAUTH_TOKEN=... (env_file injects it).

@@ -25,6 +25,11 @@ import {
 } from "./operator-actions.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  projectCompletionAdmissionOpen,
+  withProjectCompletionEffect,
+} from "~/server/runtimes/run-completion-state.server";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -52,6 +57,13 @@ interface ToolkitDeps {
   projectSlug: string;
   taskKey: string;
   authority: OperatorAuthority;
+  expectedTaskIncarnation?: string;
+  /** Exact operator lease cancellation state. Project admission can remain
+   * open for unrelated work while this particular run has lost ownership. */
+  isCancelled?: () => boolean;
+  /** Deterministic test seam after effect ownership is registered but before
+   * the final admission/incarnation check immediately preceding mutation. */
+  beforeMutationForTests?: () => void | Promise<void>;
 }
 
 function textResult(payload: unknown) {
@@ -71,8 +83,38 @@ function resultText(r: OperatorActionResult) {
 
 /** Build the operator's toolkit for one task run. */
 export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
-  const { db, ctx, projectSlug, taskKey, authority } = deps;
+  const { db, ctx, projectSlug, taskKey, authority, expectedTaskIncarnation } = deps;
   const base = { projectSlug, taskKey };
+  const assertMutationOwned = () => {
+    if (deps.isCancelled?.()) {
+      throw new Error(
+        `Operator tool ownership for ${projectSlug}/${taskKey} was cancelled.`,
+      );
+    }
+    if (!projectCompletionAdmissionOpen(db, projectSlug)) {
+      throw new Error(`Operator tool ownership for project ${projectSlug} was revoked.`);
+    }
+    if (expectedTaskIncarnation !== undefined) {
+      const current = readTaskFile({
+        projectSlug,
+        taskKey,
+        ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      })?.parsed.frontmatter.createdAt;
+      if (current !== expectedTaskIncarnation) {
+        throw new Error(`Operator tool target ${projectSlug}/${taskKey} changed incarnation.`);
+      }
+    }
+  };
+  const ownedAction = (effect: () => Promise<OperatorActionResult>) =>
+    withProjectCompletionEffect(db, projectSlug, async () => {
+      assertMutationOwned();
+      await deps.beforeMutationForTests?.();
+      // Lifecycle revocation or a same-key replacement can win while an SDK
+      // tool is awaiting provider/application work. Revalidate at the final
+      // boundary before allowing the governed mutation to begin.
+      assertMutationOwned();
+      return resultText(await effect());
+    });
   // Tool availability is frozen for this turn. If readiness was unresolved at
   // turn start, this toolkit can assess/ask/comment only; even a ready verdict
   // cannot be followed by assignment/transition in the same model turn.
@@ -114,8 +156,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           .describe("For input_required: exactly what outcome or verification boundary the human must add."),
       },
       async (args) =>
-        resultText(
-          await operatorAssessReadiness(
+        ownedAction(() =>
+          operatorAssessReadiness(
             db,
             ctx,
             {
@@ -140,9 +182,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "Post a concise operator comment to the task timeline. Use it to narrate your plan and decisions (observed → changed → recommended → decision required). Keep it short.",
         { text: z.string().describe("The comment text (markdown allowed).") },
         async (args) =>
-          resultText(
-            await operatorPostComment(db, ctx, { ...base, text: prose(args.text) }, authority),
-          ),
+          ownedAction(() => operatorPostComment(db, ctx, { ...base, text: prose(args.text) }, authority)),
       ),
       "post_comment",
     );
@@ -183,8 +223,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe("The 2-4 resolvable options; exactly one recommended."),
         },
         async (args) =>
-          resultText(
-            await operatorOpenPacket(
+          ownedAction(() =>
+            operatorOpenPacket(
               db,
               ctx,
               {
@@ -222,17 +262,29 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "assign_specialist",
-        "Assign a hard-eligible routingCandidates.primary profile. Compare declared scope/skills/KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score or preselect a winner. The task must already be ready.",
+        "Assign an exact hard-eligible routingCandidates.primary profileId/backend pair. Compare declared scope/skills/KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score or preselect a winner. The task must already be ready.",
         {
           profileId: z.string().describe("The specialist profile id to assign."),
-          reason: z.string().describe("Why this candidate is the best fit from the supplied context; persisted and audited."),
+          backend: z
+            .enum(["claude", "codex"])
+            .describe("The backend from the selected routing candidate row."),
+          reason: z
+            .string()
+            .trim()
+            .min(1)
+            .describe("Why this profile/backend choice is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
-          resultText(
-            await operatorAssignSpecialist(
+          ownedAction(() =>
+            operatorAssignSpecialist(
               db,
               ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              {
+                ...base,
+                profileId: args.profileId,
+                backend: args.backend,
+                reason: prose(args.reason),
+              },
               authority,
             ),
           ),
@@ -244,30 +296,37 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "run_specialist",
         "Start an agent run for the assigned primary specialist so it does the stage work.",
         {},
-        async () =>
-          resultText(await operatorRunSpecialist(db, ctx, base, authority)),
+        async () => ownedAction(() => operatorRunSpecialist(db, ctx, base, authority)),
       ),
       "run_specialist",
     );
     add(
       tool(
         "prompt_specialist",
-        "Hand the ready task to a routingCandidates.primary profile for this stage. YOU choose after comparing fit/resources, backend health, workload, and observed cost, and persist why. Keep the directive inside the canonical goal; never ask the specialist to invent a change.",
+        "Hand the ready task to an exact routingCandidates.primary profileId/backend pair for this stage. YOU choose after comparing fit/resources, backend health, workload, and observed cost, and persist why. Keep the directive inside the canonical goal; never ask the specialist to invent a change.",
         {
           profileId: z.string().describe("The primary specialist profile id to prompt."),
+          backend: z
+            .enum(["claude", "codex"])
+            .describe("The backend from the selected routing candidate row."),
           prompt: z
             .string()
             .describe("The task-related directive to give the specialist (what to do now at this stage)."),
-          reason: z.string().describe("Why this candidate is the best fit from the supplied context; persisted and audited."),
+          reason: z
+            .string()
+            .trim()
+            .min(1)
+            .describe("Why this profile/backend choice is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
-          resultText(
-            await operatorPromptSpecialist(
+          ownedAction(() =>
+            operatorPromptSpecialist(
               db,
               ctx,
               {
                 ...base,
                 profileId: args.profileId,
+                backend: args.backend,
                 directive: prose(args.prompt),
                 reason: prose(args.reason),
               },
@@ -283,17 +342,29 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "assign_reviewer",
-        "Engage a hard-eligible routingCandidates.reviewer profile. Compare review fit/resources, backend health, workload, and observed cost; YOU choose and persist why. Supervised → recommendation card; full autonomy → engages directly.",
+        "Engage an exact hard-eligible routingCandidates.reviewer profileId/backend pair. Compare review fit/resources, backend health, workload, and observed cost; YOU choose and persist why. Supervised → recommendation card; full autonomy → engages directly.",
         {
           profileId: z.string().describe("The specialist profile id to engage as reviewer."),
-          reason: z.string().describe("Why this reviewer is the best fit from the supplied context; persisted and audited."),
+          backend: z
+            .enum(["claude", "codex"])
+            .describe("The backend from the selected routing candidate row."),
+          reason: z
+            .string()
+            .trim()
+            .min(1)
+            .describe("Why this reviewer/backend choice is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
-          resultText(
-            await operatorAssignReviewer(
+          ownedAction(() =>
+            operatorAssignReviewer(
               db,
               ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              {
+                ...base,
+                profileId: args.profileId,
+                backend: args.backend,
+                reason: prose(args.reason),
+              },
               authority,
             ),
           ),
@@ -306,31 +377,37 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "Start an agent run for an engaged reviewer. Pass its profileId.",
         { profileId: z.string().describe("The engaged reviewer's profile id.") },
         async (args) =>
-          resultText(
-            await operatorRunReviewer(db, ctx, { ...base, profileId: args.profileId }, authority),
-          ),
+          ownedAction(() => operatorRunReviewer(db, ctx, { ...base, profileId: args.profileId }, authority)),
       ),
       "run_reviewer",
     );
     add(
       tool(
         "prompt_reviewer",
-        "Hand the ready task to a routingCandidates.reviewer profile for the review stage. Compare review fit/resources, backend health, workload, and observed cost, persist why, and keep the directive grounded in this task's goal and evidence.",
+        "Hand the ready task to an exact routingCandidates.reviewer profileId/backend pair for the review stage. Compare review fit/resources, backend health, workload, and observed cost, persist why, and keep the directive grounded in this task's goal and evidence.",
         {
           profileId: z.string().describe("The reviewer profile id to prompt."),
+          backend: z
+            .enum(["claude", "codex"])
+            .describe("The backend from the selected routing candidate row."),
           prompt: z
             .string()
             .describe("The task-related directive to give the reviewer (what to review now)."),
-          reason: z.string().describe("Why this reviewer is the best fit from the supplied context; persisted and audited."),
+          reason: z
+            .string()
+            .trim()
+            .min(1)
+            .describe("Why this reviewer/backend choice is the best fit from the supplied context; persisted and audited."),
         },
         async (args) =>
-          resultText(
-            await operatorPromptReviewer(
+          ownedAction(() =>
+            operatorPromptReviewer(
               db,
               ctx,
               {
                 ...base,
                 profileId: args.profileId,
+                backend: args.backend,
                 directive: prose(args.prompt),
                 reason: prose(args.reason),
               },
@@ -352,8 +429,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           reason: z.string().optional().describe("Why advance now — shown on the recommendation card."),
         },
         async (args) =>
-          resultText(
-            await operatorTransitionStage(
+          ownedAction(() =>
+            operatorTransitionStage(
               db,
               ctx,
               { ...base, toStageId: args.toStageId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
@@ -375,8 +452,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "accept_completion",
         "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted; the real merge is completed when GitHub is reachable, otherwise it is left 'merge pending' for a human to finish — never claim a merge that has not happened. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply. Only call this once the work has reached the review boundary and the review is clean.",
         {},
-        async () =>
-          resultText(await operatorAcceptCompletion(db, ctx, base, authority)),
+        async () => ownedAction(() => operatorAcceptCompletion(db, ctx, base, authority)),
       ),
       "accept_completion",
     );

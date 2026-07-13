@@ -2,11 +2,20 @@ import type Database from "better-sqlite3";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
-  patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
+import {
+  projectCompletionSignal,
+  withProjectCompletionEffect,
+} from "~/server/runtimes/run-completion-state.server";
+import {
+  assertTaskLifecycleActive,
+  type TaskLifecycleGuard,
+} from "~/server/tasks/task-lifecycle.server";
 import type { GithubClient } from "./github-client.server";
 import {
   getProjectGithubContext,
@@ -79,11 +88,15 @@ export async function getBranchCompare(
   repo: string,
   base: string,
   head: string,
+  signal?: AbortSignal,
 ): Promise<BranchCompareResult> {
   const result = await client.request<GhCompare>(
     "GET",
     `/repos/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
-    { searchParams: { per_page: 250 } },
+    {
+      searchParams: { per_page: 250 },
+      ...(signal ? { signal } : {}),
+    },
   );
   if (result.ok) {
     return {
@@ -162,6 +175,13 @@ export type EnsureBranchResult =
 export interface EnsureBranchContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
+  /** Exact task identity held across every GitHub and canonical-write await. */
+  taskLifecycle?: TaskLifecycleGuard;
+  /** Optional caller-owned project lifecycle signal. Defaults to the shared
+   * project signal so archive/delete revocation is never accidentally omitted. */
+  signal?: AbortSignal;
+  /** Governing caller re-check immediately before remote/canonical mutation. */
+  assertAuthorization?: () => void;
 }
 
 interface GhRef {
@@ -180,6 +200,18 @@ export async function ensureTaskBranch(
   actor: AuditActor,
   ctx: EnsureBranchContext = {},
 ): Promise<EnsureBranchResult> {
+  return withProjectCompletionEffect(db, input.projectSlug, () =>
+    ensureTaskBranchOwned(db, input, actor, ctx),
+  );
+}
+
+async function ensureTaskBranchOwned(
+  db: Database.Database,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: EnsureBranchContext,
+): Promise<EnsureBranchResult> {
+  assertProjectActive(db, input.projectSlug, ctx);
   const taskRef = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -187,6 +219,30 @@ export async function ensureTaskBranch(
   };
   const file = readTaskFile(taskRef);
   if (!file) return { status: "task_not_found" };
+  const capturedCreatedAt = file.parsed.frontmatter.createdAt;
+  if (!capturedCreatedAt) {
+    throw new DOMException("Task lifecycle ownership is missing.", "AbortError");
+  }
+  const signal =
+    ctx.taskLifecycle?.signal ??
+    ctx.signal ??
+    projectCompletionSignal(db, input.projectSlug);
+  const taskLifecycle: TaskLifecycleGuard = {
+    expectedCreatedAt:
+      ctx.taskLifecycle?.expectedCreatedAt ??
+      capturedCreatedAt,
+    signal,
+  };
+  const assertCurrent = (): void => {
+    assertProjectActive(db, input.projectSlug, ctx);
+    ctx.assertAuthorization?.();
+    const current = readTaskFile(taskRef);
+    assertTaskLifecycleActive(
+      taskLifecycle,
+      current?.parsed.frontmatter.createdAt ?? null,
+    );
+  };
+  assertCurrent();
 
   const gh = getProjectGithubContext(db, input.projectSlug, {
     repoOverride: file.parsed.frontmatter.repo,
@@ -202,7 +258,9 @@ export async function ensureTaskBranch(
   const existing = await gh.client.request<GhRef>(
     "GET",
     `/repos/${gh.repo}/git/ref/${encodeURIComponent(`heads/${branch}`)}`,
+    { signal },
   );
+  assertCurrent();
   let created = false;
   if (!existing.ok) {
     if (existing.kind === "network") {
@@ -216,7 +274,9 @@ export async function ensureTaskBranch(
       const baseRef = await gh.client.request<GhRef>(
         "GET",
         `/repos/${gh.repo}/git/ref/${encodeURIComponent(`heads/${gh.defaultBranch}`)}`,
+        { signal },
       );
+      assertCurrent();
       if (!baseRef.ok) {
         if (baseRef.kind === "http" && baseRef.status === 404) {
           return {
@@ -233,11 +293,37 @@ export async function ensureTaskBranch(
         };
       }
       // 3. …and create the branch ref from it.
+      // This is the irreversible remote boundary: task/project ownership and
+      // caller authority must still be exact immediately before the request.
+      assertCurrent();
       const createRef = await gh.client.request<GhRef>(
         "POST",
         `/repos/${gh.repo}/git/refs`,
-        { body: { ref: `refs/heads/${branch}`, sha: baseRef.data.object.sha } },
+        {
+          body: { ref: `refs/heads/${branch}`, sha: baseRef.data.object.sha },
+          signal,
+        },
       );
+      // Preserve the objective remote fact even when ownership changed while
+      // GitHub was processing the irreversible request. The old task identity
+      // remains explicit and no canonical mutation follows unless the guard
+      // below still succeeds.
+      if (createRef.ok) {
+        recordAudit(db, {
+          action: "github.branch.created",
+          actor,
+          subjectKind: "branch",
+          subjectId: branch,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          details: {
+            repo: gh.repo,
+            from: gh.defaultBranch,
+            taskCreatedAt: taskLifecycle.expectedCreatedAt,
+          },
+        });
+      }
+      assertCurrent();
       if (createRef.ok) {
         created = true;
       } else if (
@@ -259,7 +345,11 @@ export async function ensureTaskBranch(
             ),
             actor,
           },
-          ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+          {
+            ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+            expectedTaskCreatedAt: taskLifecycle.expectedCreatedAt,
+            signal,
+          },
         );
         return {
           status: "scope_violation",
@@ -287,7 +377,11 @@ export async function ensureTaskBranch(
           ),
           actor,
         },
-        ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+        {
+          ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+          expectedTaskCreatedAt: taskLifecycle.expectedCreatedAt,
+          signal,
+        },
       );
       return {
         status: "scope_violation",
@@ -305,21 +399,32 @@ export async function ensureTaskBranch(
   // Persist the branch name into task.md when it wasn't recorded yet
   // (file write → reproject; canonical truth stays in the file).
   if (file.parsed.frontmatter.branch !== branch) {
-    await patchTaskFrontmatter(taskRef, { branch });
+    assertCurrent();
+    await updateTaskFile(
+      {
+        ...taskRef,
+        expectedTaskIncarnation: taskLifecycle.expectedCreatedAt,
+      },
+      (parsed) => {
+        assertTaskLifecycleActive(
+          taskLifecycle,
+          parsed.frontmatter.createdAt,
+        );
+        if (
+          parsed.frontmatter.branch !== null &&
+          parsed.frontmatter.branch !== branch
+        ) {
+          throw new DOMException(
+            "Task branch ownership changed while branch creation was in progress.",
+            "AbortError",
+          );
+        }
+        parsed.frontmatter.branch = branch;
+      },
+    );
+    assertCurrent();
     rebuildPath(db, resolveTaskFilePath(taskRef), {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    });
-  }
-
-  if (created) {
-    recordAudit(db, {
-      action: "github.branch.created",
-      actor,
-      subjectKind: "branch",
-      subjectId: branch,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      details: { repo: gh.repo, from: gh.defaultBranch },
     });
   }
 
@@ -328,7 +433,9 @@ export async function ensureTaskBranch(
     gh.repo,
     gh.defaultBranch,
     branch,
+    signal,
   );
+  assertCurrent();
   return {
     status: "synced",
     branch,

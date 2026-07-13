@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import {
   checkDatabaseIntegrity,
+  checkDatabaseIntegrityCached,
+  clearDatabaseIntegrityCache,
   ProjectionIntegrityError,
 } from "./database-integrity.server";
 import {
@@ -44,6 +46,25 @@ describe("projection database integrity", () => {
     expect(new ProjectionIntegrityError(report).message).toContain(
       "preserve state/projection.sqlite",
     );
+  });
+
+  it("caches health-probe checks for a bounded interval", () => {
+    let calls = 0;
+    const fake = {
+      pragma() {
+        calls += 1;
+        return [{ quick_check: "ok" }];
+      },
+    } as unknown as Database.Database;
+
+    expect(checkDatabaseIntegrityCached(fake, { now: 1_000, ttlMs: 500 }).ok).toBe(true);
+    expect(checkDatabaseIntegrityCached(fake, { now: 1_400, ttlMs: 500 }).ok).toBe(true);
+    expect(calls).toBe(1);
+    expect(checkDatabaseIntegrityCached(fake, { now: 1_501, ttlMs: 500 }).ok).toBe(true);
+    expect(calls).toBe(2);
+    clearDatabaseIntegrityCache(fake);
+    checkDatabaseIntegrityCached(fake, { now: 1_600, ttlMs: 500 });
+    expect(calls).toBe(3);
   });
 
   it("stays clean under a single-process high-rate run-log transaction", () => {

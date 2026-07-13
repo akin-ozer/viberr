@@ -919,7 +919,9 @@ export async function saveMcpServer(
     });
     up = probe.kind === "up" ? 1 : 0;
     checkedAt = now;
-    tools = probe.kind === "up" ? probe.tools : null;
+    // HTTP tool counts are never fabricated, so a transient handshake failure
+    // must not erase a previously-discovered count — keep the existing column.
+    tools = probe.kind === "up" ? probe.tools : (existing?.tools ?? null);
     toast =
       probe.kind === "up"
         ? `${name} saved — ${probe.tools} tool${probe.tools === 1 ? "" : "s"} discovered · ${probe.latencyMs}ms`

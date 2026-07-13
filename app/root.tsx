@@ -18,6 +18,7 @@ import {
   Links,
   Meta,
   Outlet,
+  redirect,
   Scripts,
   ScrollRestoration,
   useRouteLoaderData,
@@ -33,12 +34,19 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "./server/theme/theme-cookie.server";
+import { getEnv } from "./server/config/env.server";
+import { canonicalLoopbackRedirectUrl } from "./lib/auth.server";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
 ];
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const canonicalUrl = canonicalLoopbackRedirectUrl(
+    request.url,
+    getEnv().BETTER_AUTH_URL,
+  );
+  if (canonicalUrl) throw redirect(canonicalUrl, 302);
   const theme = getThemePreference(request);
   // Runs on every document request: identifies the signed-in user (for the
   // shell + <CsrfInput />). better-auth owns session cookie sliding.

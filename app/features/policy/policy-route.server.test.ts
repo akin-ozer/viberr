@@ -182,7 +182,10 @@ describe("set-role", () => {
     ).toBeNull();
     // …and the last-change chip now derives from it.
     const { view } = await runLoader(ids.arda);
-    expect(view.edited).toEqual({ by: "Arda Kaya", t: "Today" });
+    expect(view.edited).toEqual({
+      by: "Arda Kaya",
+      at: expect.any(String),
+    });
 
     // Restore.
     await postAction(ids.arda, {

@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type Database from "better-sqlite3";
 import type {
   FileActorRef,
@@ -13,16 +11,31 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
-  appendTimelineEvent,
-  patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import type { PrCacheState } from "./pr-linker.server";
+import {
+  clearReviewEvidence,
+  reviewEvidenceFingerprint,
+} from "~/server/tasks/review-evidence.server";
+import { repositoryWorkspaceKey } from "~/server/tasks/specialist-preflight.server";
+import {
+  assertTaskLifecycleActive,
+  type TaskLifecycleGuard,
+} from "~/server/tasks/task-lifecycle.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { mapPrToCacheState } from "./pr-linker.server";
 import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
+import { normalizeFullGitSha } from "./head-sha.server";
+import {
+  defaultCommandExec,
+  type CommandExec as SharedCommandExec,
+  type CommandExecResult,
+} from "./command-exec.server";
 
 /**
  * Workspace delivery reconciliation (finding #31).
@@ -48,9 +61,7 @@ import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
 // ------------------------------------------------------------- command exec
 
 /** Result of a single external command — never throws, exit failures are values. */
-export type ExecResult =
-  | { ok: true; stdout: string }
-  | { ok: false; stdout: string; stderr: string; code: number | null };
+export type ExecResult = CommandExecResult;
 
 /**
  * Injectable command runner (git / gh). Mirrors how the GitHub layer injects
@@ -58,37 +69,7 @@ export type ExecResult =
  * process (or network, or repo) is touched. The default shells out via
  * `execFile` with a short timeout.
  */
-export type CommandExec = (
-  file: string,
-  args: string[],
-  opts: { cwd: string; timeoutMs: number },
-) => Promise<ExecResult>;
-
-const execFileAsync = promisify(execFile);
-
-const defaultExec: CommandExec = async (file, args, opts) => {
-  try {
-    const { stdout } = await execFileAsync(file, args, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return { ok: true, stdout: stdout.toString() };
-  } catch (error) {
-    const err = error as { stdout?: unknown; stderr?: unknown; code?: number };
-    return {
-      ok: false,
-      stdout: typeof err.stdout === "string" ? err.stdout : "",
-      stderr:
-        typeof err.stderr === "string"
-          ? err.stderr
-          : error instanceof Error
-            ? error.message
-            : String(error),
-      code: typeof err.code === "number" ? err.code : null,
-    };
-  }
-};
+export type CommandExec = SharedCommandExec;
 
 // ------------------------------------------------------------------- input
 
@@ -98,8 +79,8 @@ export interface ReconcileWorkspaceDeliveryInput {
   taskKey: string;
   /** The repo working dir the run used (the specialist clone dir), when known.
    *  Falls back to probing the conventional paths:
-   *  `<taskDir>/workspace/<repo-name>`, `<taskDir>/workspace/repo`, then
-   *  `<taskDir>/workspace` itself — whichever contains a git repo. */
+   *  `<taskDir>/workspace/<full-repo-identity>`, then legacy clone paths —
+   *  whichever contains a git repo. */
   workdir?: string | null;
   dataRoot?: string;
   /** The finished run's backend + role — attribution for the typed events. */
@@ -112,15 +93,15 @@ export interface ReconcileWorkspaceDeliveryInput {
   /** Server-owned delivery resolves PRs through the GitHub API, so it skips
    *  the legacy ambient `gh` probe while reusing branch/commit reconciliation. */
   skipPrDetection?: boolean;
+  /** Exact task incarnation that authorized this delayed reconciliation. */
+  expectedTaskCreatedAt?: string;
+  signal?: AbortSignal;
+  assertAuthorization?: () => void;
 }
 
 export interface WorkspaceDeliveryResult {
   status:
-    | "reconciled"
-    | "no_workspace"
-    | "no_repo"
-    | "task_not_found"
-    | "skipped";
+    "reconciled" | "no_workspace" | "no_repo" | "task_not_found" | "skipped";
   /** True when this call wrote a branch it didn't have before. */
   branchLinked: boolean;
   /** True when this call linked a PR (new or state-changed). */
@@ -147,15 +128,6 @@ function githubEvent(actor: FileActorRef, text: string): TaskFileEvent {
     toAgent: false,
     evidence: null,
   };
-}
-
-/** Map `gh`'s GraphQL PR-state enum (OPEN|CLOSED|MERGED) to the task-file cache
- *  vocabulary (open → "review") so it matches the server delivery path. */
-function mapGhStateToCache(raw: unknown): PrCacheState {
-  const s = String(raw ?? "OPEN").toUpperCase();
-  if (s === "MERGED") return "merged";
-  if (s === "CLOSED") return "closed";
-  return "review";
 }
 
 /** Parse `git log --oneline` output into the github-cache commit shape. */
@@ -201,7 +173,7 @@ export async function reconcileWorkspaceDelivery(
     projectSlug,
     taskKey,
     dataRoot,
-    exec = defaultExec,
+    exec = defaultCommandExec,
     backend = "claude",
     role = "Specialist",
   } = input;
@@ -222,6 +194,7 @@ export async function reconcileWorkspaceDelivery(
   });
 
   try {
+    input.assertAuthorization?.();
     if (input.simulated) {
       return noop("skipped", "simulated run — no real repository work");
     }
@@ -233,6 +206,32 @@ export async function reconcileWorkspaceDelivery(
     };
     const file = readTaskFile(ref);
     if (!file) return noop("task_not_found", "task file missing");
+    const capturedCreatedAt =
+      input.expectedTaskCreatedAt ?? file.parsed.frontmatter.createdAt;
+    if (!capturedCreatedAt) {
+      throw new DOMException("Task lifecycle ownership is missing.", "AbortError");
+    }
+    const taskLifecycle: TaskLifecycleGuard = {
+      expectedCreatedAt: capturedCreatedAt,
+      ...(input.signal ? { signal: input.signal } : {}),
+    };
+    const assertCurrent = () => {
+      input.assertAuthorization?.();
+      const current = readTaskFile(ref);
+      assertTaskLifecycleActive(
+        taskLifecycle,
+        current?.parsed.frontmatter.createdAt ?? null,
+      );
+    };
+    const runExec: CommandExec = async (fileName, args, options) => {
+      assertCurrent();
+      const result = await exec(fileName, args, {
+        ...options,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      assertCurrent();
+      return result;
+    };
     const fm = file.parsed.frontmatter;
 
     // Repo + default branch WITHOUT requiring a viberr PAT — the agent used
@@ -246,16 +245,26 @@ export async function reconcileWorkspaceDelivery(
     const defaultBranch =
       projectFile?.parsed.frontmatter.defaultBranch || "main";
     const repoName = repo.split("/").pop() ?? repo;
+    const repoIdentity = repositoryWorkspaceKey(repo);
+    const reviewStageId = projectFile
+      ? resolveStageRoles(
+          projectFile.parsed.frontmatter.stages,
+          projectFile.parsed.frontmatter.workflow,
+        ).reviewId
+      : null;
 
     // Locate the workspace git repo: the run's own workdir first, then the
-    // conventional clone paths — cloneRepo() uses <taskDir>/workspace/<name>,
-    // reviewers that clone themselves tend to use <taskDir>/workspace/repo,
-    // and an agent told "clone into ./" lands on <taskDir>/workspace itself.
-    // Callers that can't thread workdir (e.g. the operator path) still get
-    // reconciled via these conventions.
-    const wsRoot = path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
+    // canonical full-repository-identity path used by specialist preflight.
+    // Keep the basename/repo/root probes for legacy workspaces. Callers that
+    // can't persist workdir (notably boot recovery) must still find the exact
+    // checkout without confusing same-basename repositories.
+    const wsRoot = path.join(
+      taskDir(projectSlug, taskKey, dataRoot),
+      "workspace",
+    );
     const candidates = [
       input.workdir ?? null,
+      path.join(wsRoot, repoIdentity),
       path.join(wsRoot, repoName),
       path.join(wsRoot, "repo"),
       wsRoot,
@@ -268,7 +277,7 @@ export async function reconcileWorkspaceDelivery(
     const actor: FileActorRef = { kind: "agent", backend, role };
 
     // 1. Current branch.
-    const branchRes = await exec(
+    const branchRes = await runExec(
       "git",
       ["-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD"],
       { cwd: repoDir, timeoutMs: 5_000 },
@@ -295,7 +304,7 @@ export async function reconcileWorkspaceDelivery(
     //    SKIP the commit computation entirely rather than write a wrong cache.
     let commits: { sha: string; msg: string }[] | null = null;
     if (validBranch) {
-      const shallowRes = await exec(
+      const shallowRes = await runExec(
         "git",
         ["-C", repoDir, "rev-parse", "--is-shallow-repository"],
         { cwd: repoDir, timeoutMs: 5_000 },
@@ -303,7 +312,7 @@ export async function reconcileWorkspaceDelivery(
       const isShallow = shallowRes.ok && shallowRes.stdout.trim() === "true";
       let historyOk = true;
       if (isShallow) {
-        const deepen = await exec(
+        const deepen = await runExec(
           "git",
           ["-C", repoDir, "fetch", "--deepen", "50", "origin", defaultBranch],
           { cwd: repoDir, timeoutMs: 30_000 },
@@ -311,7 +320,7 @@ export async function reconcileWorkspaceDelivery(
         historyOk = deepen.ok;
       }
       if (historyOk) {
-        const logRes = await exec(
+        const logRes = await runExec(
           "git",
           ["-C", repoDir, "log", "--oneline", `origin/${defaultBranch}..HEAD`],
           { cwd: repoDir, timeoutMs: 5_000 },
@@ -337,18 +346,25 @@ export async function reconcileWorkspaceDelivery(
       };
     }
     if (Object.keys(branchPatch).length > 0) {
-      if (branchLinked) {
-        await appendTimelineEvent(
-          ref,
-          githubEvent(
-            actor,
-            `Reconciled branch \`${validBranch}\` from the specialist workspace.`,
-          ),
-          branchPatch,
-        );
-      } else {
-        await patchTaskFrontmatter(ref, branchPatch);
-      }
+      await updateTaskFile(ref, (parsed) => {
+        assertTaskLifecycleActive(taskLifecycle, parsed.frontmatter.createdAt);
+        input.assertAuthorization?.();
+        if (branchPatch.branch !== undefined) {
+          parsed.frontmatter.branch = branchPatch.branch;
+        }
+        if (branchPatch.github !== undefined) {
+          parsed.frontmatter.github = branchPatch.github;
+        }
+        if (branchLinked) {
+          parsed.timeline.unshift(
+            githubEvent(
+              actor,
+              `Reconciled branch \`${validBranch}\` from the specialist workspace.`,
+            ),
+          );
+        }
+      });
+      assertCurrent();
       rebuildPath(db, resolveTaskFilePath(ref), {
         ...(dataRoot !== undefined ? { dataRoot } : {}),
       });
@@ -373,7 +389,7 @@ export async function reconcileWorkspaceDelivery(
     let prLinked = false;
     let reconciledPr: PrRef | null = fm.pr;
     if (effectiveBranch && !input.skipPrDetection) {
-      const prRes = await exec(
+      const prRes = await runExec(
         "gh",
         [
           "pr",
@@ -382,83 +398,160 @@ export async function reconcileWorkspaceDelivery(
           "--repo",
           repo,
           "--json",
-          "number,state,title",
+          "number,state,title,headRefOid",
         ],
         { cwd: repoDir, timeoutMs: 8_000 },
       );
       if (prRes.ok && prRes.stdout.trim()) {
         const obj = safeJsonObject(prRes.stdout);
-        const number = obj && typeof obj.number === "number" ? obj.number : null;
+        const number =
+          obj && typeof obj.number === "number" ? obj.number : null;
         if (number !== null) {
           // `gh` returns the GraphQL enum OPEN|CLOSED|MERGED; map it to the
           // SAME cache vocabulary the server delivery path uses (open →
           // "review"). Comparing/writing gh's raw "open" against the
           // canonical "review" would treat an already-linked PR as new and
           // ping-pong the state on every reconcile.
-          const liveState = mapGhStateToCache(obj?.state);
-          const cur = fm.pr;
-          const samePr = !!cur && cur.number === number;
-          // H1 guard (same as the server reconciler): a human-set "accepted"
-          // (merge pending, D3/S2) must NOT be downgraded to "review" while
-          // the PR is still open on GitHub — that would silently hide the
-          // "Complete merge" affordance. Only a real terminal state
-          // (merged/closed) overrides it.
-          const detected: PrRef = {
-            number,
-            state:
-              samePr && cur.state === "accepted" && liveState === "review"
-                ? "accepted"
-                : liveState,
-            title: typeof obj?.title === "string" ? obj.title : "",
+          const liveState = mapPrToCacheState({
+            state: String(obj?.state ?? "OPEN"),
+          });
+          const observedHeadSha = normalizeFullGitSha(
+            typeof obj?.headRefOid === "string" ? obj.headRefOid : null,
+          );
+          const detectedPrFor = (cur: PrRef | null): PrRef => {
+            const samePr = !!cur && cur.number === number;
+            const previousHeadSha = samePr
+              ? normalizeFullGitSha(cur.headSha)
+              : null;
+            const reconciledHeadSha = observedHeadSha ?? previousHeadSha;
+            const detected: PrRef = {
+              ...(samePr ? cur : {}),
+              number,
+              state:
+                samePr && cur.state === "accepted" && liveState === "review"
+                  ? "accepted"
+                  : liveState,
+              title:
+                typeof obj?.title === "string"
+                  ? obj.title
+                  : samePr
+                    ? cur.title
+                    : "",
+              ...(reconciledHeadSha ? { headSha: reconciledHeadSha } : {}),
+            };
+            if (!reconciledHeadSha) delete detected.headSha;
+            return detected;
           };
-          const stale =
-            !cur || cur.number !== detected.number || cur.state !== detected.state;
-          if (stale) {
-            await appendTimelineEvent(
-              ref,
-              githubEvent(
-                actor,
-                // Honest copy: only a NEWLY linked PR "opened from the
-                // workspace"; a state change on the already-linked PR is a
-                // reconcile, not an open.
-                samePr
-                  ? `Reconciled **PR #${detected.number}** state → \`${detected.state}\` from the specialist workspace.`
-                  : `Linked **PR #${detected.number}** opened from the specialist workspace.`,
-              ),
-              { pr: detected },
-            );
-            // An accepted (merge-pending) PR that was closed on GitHub without
-            // merging loses its Complete-merge path — say why, typed `policy`.
-            if (samePr && cur.state === "accepted" && detected.state === "closed") {
-              await appendTimelineEvent(ref, {
-                occurredAt: new Date().toISOString(),
-                type: "policy",
-                actor: POLICY_ENGINE_ACTOR,
-                title: null,
-                text: `**Policy note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
-                toAgent: false,
-                evidence: null,
+          const initiallyDetected = detectedPrFor(fm.pr);
+          // The common case is a confirmation of already-canonical facts. Skip
+          // the locked writer entirely so reconciliation stays truly idempotent
+          // (no updatedAt churn, audit, or duplicate event).
+          if (JSON.stringify(fm.pr) !== JSON.stringify(initiallyDetected)) {
+            let previousHeadSha: string | null = null;
+            let headChanged = false;
+            let evidenceInvalidated = false;
+            let prChanged = false;
+            const updated = await updateTaskFile(ref, (parsed) => {
+              assertTaskLifecycleActive(
+                taskLifecycle,
+                parsed.frontmatter.createdAt,
+              );
+              input.assertAuthorization?.();
+              const cur = parsed.frontmatter.pr;
+              const samePr = !!cur && cur.number === number;
+              previousHeadSha = samePr
+                ? normalizeFullGitSha(cur.headSha)
+                : null;
+              // A missing/malformed head in an otherwise useful `gh` response is
+              // degraded data, not proof that GitHub erased the commit. Preserve
+              // the last verified head only for the same PR; never carry it to a
+              // different PR number.
+              // H1 guard (same as the server reconciler): a human-set "accepted"
+              // (merge pending, D3/S2) is preserved while the exact accepted head
+              // remains open. A real replacement head is invalidated below and
+              // returns the PR to review through clearReviewEvidence.
+              const detected = detectedPrFor(cur);
+              if (JSON.stringify(cur) === JSON.stringify(detected)) return;
+              prChanged = true;
+
+              const oldEvidence = reviewEvidenceFingerprint(parsed, repo);
+              const stateChanged = cur?.state !== detected.state;
+              const samePrHeadChanged =
+                samePr &&
+                observedHeadSha !== null &&
+                previousHeadSha !== observedHeadSha;
+              parsed.frontmatter.pr = detected;
+              const evidenceChanged =
+                oldEvidence !== reviewEvidenceFingerprint(parsed, repo);
+              if (evidenceChanged) {
+                clearReviewEvidence(parsed, reviewStageId);
+                // GitHub evidence is stale in every stage, not only while the
+                // task happens to sit in Review. Keep `failing` sticky, matching
+                // the server reconciler's canonical invalidation semantics.
+                if (parsed.frontmatter.validation !== "failing") {
+                  parsed.frontmatter.validation = "changed";
+                }
+                evidenceInvalidated = true;
+              }
+              headChanged = samePrHeadChanged;
+
+              const finalPr = parsed.frontmatter.pr!;
+              const eventText = !samePr
+                ? `Linked **PR #${finalPr.number}** opened from the specialist workspace.`
+                : samePrHeadChanged
+                  ? `Reconciled **PR #${finalPr.number}** head → \`${observedHeadSha}\`${
+                      stateChanged ? ` and state → \`${finalPr.state}\`` : ""
+                    } from the specialist workspace.`
+                  : stateChanged
+                    ? `Reconciled **PR #${finalPr.number}** state → \`${finalPr.state}\` from the specialist workspace.`
+                    : `Reconciled **PR #${finalPr.number}** metadata from the specialist workspace.`;
+              parsed.timeline.unshift(githubEvent(actor, eventText));
+
+              // An accepted (merge-pending) PR that was closed on GitHub without
+              // merging loses its Complete-merge path — say why, typed `policy`.
+              if (
+                samePr &&
+                cur.state === "accepted" &&
+                detected.state === "closed"
+              ) {
+                parsed.timeline.unshift({
+                  occurredAt: new Date().toISOString(),
+                  type: "policy",
+                  actor: POLICY_ENGINE_ACTOR,
+                  title: null,
+                  text: `**Policy note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+                  toAgent: false,
+                  evidence: null,
+                });
+              }
+            });
+            assertCurrent();
+            const detected = updated.frontmatter.pr;
+            if (prChanged && detected) {
+              rebuildPath(db, resolveTaskFilePath(ref), {
+                ...(dataRoot !== undefined ? { dataRoot } : {}),
               });
+              recordAudit(db, {
+                action: "github.workspace.pr_linked",
+                actor: { userId: null, label: "system:workspace-reconcile" },
+                subjectKind: "task",
+                subjectId: taskKey,
+                projectSlug,
+                taskKey,
+                details: {
+                  repo,
+                  branch: effectiveBranch,
+                  prNumber: detected.number,
+                  prState: detected.state,
+                  previousHeadSha,
+                  headSha: normalizeFullGitSha(detected.headSha),
+                  headChanged,
+                  evidenceInvalidated,
+                },
+              });
+              prLinked = true;
+              reconciledPr = detected;
             }
-            rebuildPath(db, resolveTaskFilePath(ref), {
-              ...(dataRoot !== undefined ? { dataRoot } : {}),
-            });
-            recordAudit(db, {
-              action: "github.workspace.pr_linked",
-              actor: { userId: null, label: "system:workspace-reconcile" },
-              subjectKind: "task",
-              subjectId: taskKey,
-              projectSlug,
-              taskKey,
-              details: {
-                repo,
-                branch: effectiveBranch,
-                prNumber: detected.number,
-                prState: detected.state,
-              },
-            });
-            prLinked = true;
-            reconciledPr = detected;
           }
         }
       }

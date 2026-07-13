@@ -200,9 +200,13 @@ describe("useRunLogStream", () => {
     ]);
   });
 
-  it("aborts and ignores a stale request when loader backfill re-seeds the thread", async () => {
+  it("aborts a stale request, preserves its target, and applies only the fresh retry", async () => {
     const pending = deferredResponse();
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(pending.promise);
+    const fresh = deferredResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(pending.promise)
+      .mockReturnValueOnce(fresh.promise);
     const { result, rerender } = renderHook(
       ({ lines }: { lines: StreamedLine[] }) =>
         useRunLogStream({
@@ -219,16 +223,77 @@ describe("useRunLogStream", () => {
 
     // Same line count, different loader evidence: the seed fingerprint must
     // still invalidate the request (length-only keys miss this race).
-    rerender({ lines: [streamed("loader-zero-replaced")] });
+    await act(async () => {
+      rerender({ lines: [streamed("loader-zero-replaced")] });
+      await Promise.resolve();
+    });
     expect(signal.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     await act(async () => {
       pending.resolve(response([{ seq: 1, text: "stale-network-one" }], 1));
       await pending.promise;
+      await Promise.resolve();
+      fresh.resolve(response([{ seq: 1, text: "fresh-network-one" }], 1));
+      await fresh.promise;
       await Promise.resolve();
     });
 
     expect(result.current.linesByThread.primary?.map((line) => line.display.text)).toEqual([
       "loader-zero-replaced",
+      "fresh-network-one",
+    ]);
+  });
+
+  it("preserves an announced target and immediately refetches when loader backfill lags it", async () => {
+    const stale = deferredResponse();
+    const retry = deferredResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValueOnce(retry.promise);
+    const { result, rerender } = renderHook(
+      ({ lines }: { lines: StreamedLine[] }) =>
+        useRunLogStream({
+          projectSlug: "viberr",
+          taskKey: "VIB-1",
+          threads: [{ threadId: "primary", runId: "run_1", lines }],
+        }),
+      { initialProps: { lines: [streamed("zero")] } },
+    );
+
+    act(() => FakeEventSource.last().emit("run.log-appended", appended(3)));
+    const staleSignal = (fetchMock.mock.calls[0]![1] as RequestInit)
+      .signal as AbortSignal;
+
+    await act(async () => {
+      // Revalidation knows about seq 1, but the SSE target is already seq 3.
+      rerender({ lines: [streamed("zero"), streamed("loader-one")] });
+      await Promise.resolve();
+    });
+
+    expect(staleSignal.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toContain("since=1");
+
+    await act(async () => {
+      retry.resolve(
+        response(
+          [
+            { seq: 2, text: "two" },
+            { seq: 3, text: "three" },
+          ],
+          3,
+        ),
+      );
+      await retry.promise;
+      await Promise.resolve();
+    });
+
+    expect(result.current.linesByThread.primary?.map((line) => line.display.text)).toEqual([
+      "zero",
+      "loader-one",
+      "two",
+      "three",
     ]);
   });
 

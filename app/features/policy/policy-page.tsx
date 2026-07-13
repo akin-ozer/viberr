@@ -7,6 +7,9 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import type { MatrixProfile } from "~/features/agents/agent-types";
+import { formatDayBucket } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 
 /** The Agent-capability rows need the matrix shape plus the role sub-line. */
 export type PcapProfile = MatrixProfile & { role: string };
@@ -407,11 +410,12 @@ export function PolicyPage({
 }: {
   data: PolicyViewData;
   projectSlug: string;
-  myRole: string | null;
+  myRole: ProjectRole | null;
   /** Archived projects retain policy inspection and navigation only. */
   readOnly?: boolean;
 }) {
   const navigate = useNavigate();
+  const timeZone = useViewerTimeZone();
   const csrf = useCsrfToken();
   const roleFetcher = useFetcher<ActionResult>();
   const boundaryFetcher = useFetcher<ActionResult>();
@@ -419,7 +423,7 @@ export function PolicyPage({
   useActionToast(boundaryFetcher);
   const [matrixOpen, setMatrixOpen] = useState(false);
 
-  const canManage = myRole === "admin" && !readOnly;
+  const canManage = !readOnly && roleCan(myRole, "edit-policy");
   const busy =
     roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
 
@@ -454,7 +458,7 @@ export function PolicyPage({
           {data.edited && (
             <span className="hero-file">
               <Icon name="clock" />
-              last change · {data.edited.by} · {data.edited.t}
+              last change · {data.edited.by} · {formatDayBucket(data.edited.at, new Date(), timeZone)}
             </span>
           )}
           <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>

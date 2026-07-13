@@ -26,6 +26,34 @@ export function checkDatabaseIntegrity(
   }
 }
 
+const integrityCache = new WeakMap<
+  Database.Database,
+  { checkedAt: number; report: DatabaseIntegrityReport }
+>();
+
+/**
+ * Health probes can arrive every few seconds. `quick_check` walks database
+ * pages and should not run once per probe, so retain a recent structural result
+ * while normal count queries still prove the handle is responsive on every
+ * request. Boot always uses the uncached check.
+ */
+export function checkDatabaseIntegrityCached(
+  db: Database.Database,
+  options: { now?: number; ttlMs?: number } = {},
+): DatabaseIntegrityReport {
+  const now = options.now ?? Date.now();
+  const ttlMs = options.ttlMs ?? 30_000;
+  const cached = integrityCache.get(db);
+  if (cached && now - cached.checkedAt < ttlMs) return cached.report;
+  const report = checkDatabaseIntegrity(db);
+  integrityCache.set(db, { checkedAt: now, report });
+  return report;
+}
+
+export function clearDatabaseIntegrityCache(db: Database.Database): void {
+  integrityCache.delete(db);
+}
+
 export class ProjectionIntegrityError extends Error {
   readonly report: DatabaseIntegrityReport;
 

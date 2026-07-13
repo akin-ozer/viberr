@@ -5,6 +5,7 @@ import { ArchivedBadge } from "~/ui/archived-badge";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
 import {
@@ -666,7 +667,7 @@ export function DangerZone({
   onDelete,
 }: {
   projectName: string;
-  myRole: string | null;
+  myRole: ProjectRole | null;
   archived: boolean;
   busy: boolean;
   onArchive: (archived: boolean) => void;
@@ -674,7 +675,7 @@ export function DangerZone({
 }) {
   const push = useToast();
   const [confirming, setConfirming] = useState(false);
-  const isAdmin = myRole === "admin";
+  const isAdmin = roleCan(myRole, "edit-policy");
   const deny = (what: string) =>
     push(`${what} is admin-only — you're signed in as a ${myRole ?? "guest"}`);
 
@@ -747,7 +748,7 @@ export function SettingsPage({
 }: {
   data: SettingsViewData;
   meId: string | null;
-  myRole: string | null;
+  myRole: ProjectRole | null;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -765,9 +766,8 @@ export function SettingsPage({
   useActionToast(dangerFetcher);
 
   const archived = data.project.archived;
-  const isAdmin = myRole === "admin" && !archived;
-  const canGrant =
-    !archived && (myRole === "admin" || myRole === "maintainer");
+  const isAdmin = !archived && roleCan(myRole, "edit-policy");
+  const canGrant = !archived && roleCan(myRole, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can

@@ -56,6 +56,26 @@ function RailHarness() {
   );
 }
 
+function AlwaysOpenRail({ revision }: { revision: number }) {
+  return (
+    <MemoryRouter initialEntries={["/projects/p/board"]}>
+      <span data-testid="revision">{revision}</span>
+      <Rail
+        projectSlug="p"
+        projectName="Project"
+        projectRepo="org/repo"
+        membersCount={2}
+        boardCount={3}
+        reviewCount={1}
+        violations={0}
+        mobile
+        open
+        onClose={() => undefined}
+      />
+    </MemoryRouter>
+  );
+}
+
 describe("compact project rail", () => {
   it("opens accessibly, focuses the drawer, and restores focus on Escape", async () => {
     render(<RailHarness />);
@@ -90,6 +110,20 @@ describe("compact project rail", () => {
     fireEvent.click(screen.getByRole("link", { name: /Review/ }));
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(toggle);
+  });
+
+  it("does not steal focus back to Close on an unrelated re-render", async () => {
+    const { container, rerender } = render(<AlwaysOpenRail revision={1} />);
+    const review = screen.getByRole("link", { name: /Review/ });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        container.querySelector(".rail-close"),
+      ),
+    );
+    review.focus();
+    expect(document.activeElement).toBe(review);
+    rerender(<AlwaysOpenRail revision={2} />);
+    expect(document.activeElement).toBe(review);
   });
 });
 

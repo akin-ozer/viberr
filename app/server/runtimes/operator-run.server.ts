@@ -8,8 +8,13 @@ import {
   agentProfilesDir,
   skillDirPath,
 } from "~/server/files/file-store-root.server";
-import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
+import {
+  KB_INJECTION_BUDGET,
+  readKbBody,
+} from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { newId } from "~/shared/ids/new-id.server";
@@ -37,9 +42,24 @@ import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
-import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
-import { registerRunCompletion, startRun } from "./run-service.server";
+import {
+  isBackendAvailable,
+  type RealBackend,
+} from "./runtime-registry.server";
+import {
+  registerRunCompletion,
+  startRun,
+  stopRunForLifecycle,
+} from "./run-service.server";
+import { patchRun, upsertRun } from "./run-store.server";
 import { buildScript } from "./simulated-runtime.server";
+import {
+  advanceRunCompletionPhase,
+  projectCompletionAdmissionOpen,
+  RUN_COMPLETION_PHASE,
+  sourceLinkedOperatorReactionReady,
+  withProjectCompletionEffect,
+} from "./run-completion-state.server";
 
 /**
  * Runs the OPERATOR as a real agent (Claude Code) or a deterministic scripted
@@ -63,9 +83,73 @@ import { buildScript } from "./simulated-runtime.server";
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
 
+type OpenSystemRecovery =
+  typeof import("~/server/tasks/task-recovery.server").openSystemRecovery;
+let operatorRecoveryWriterForTests: OpenSystemRecovery | null = null;
+let scriptedOperatorHookForTests:
+  | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+  | null = null;
+let scriptedOperatorBeforeNarrationHookForTests:
+  | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+  | null = null;
+let operatorLaunchHookForTests:
+  | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+  | null = null;
+
+/** Focused fault-injection seam: completion durability tests must prove a
+ * failed recovery write leaves operator_effect_state pending. */
+export function configureOperatorRecoveryWriterForTests(
+  writer: OpenSystemRecovery | null,
+): void {
+  operatorRecoveryWriterForTests = writer;
+}
+
+export function configureScriptedOperatorHookForTests(
+  hook:
+    | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+    | null,
+): void {
+  scriptedOperatorHookForTests = hook;
+}
+
+/** Fault seam after governed scripted actions but before startRun materializes
+ * narration. The durable run/effect marker must already exist here. */
+export function configureScriptedOperatorBeforeNarrationHookForTests(
+  hook:
+    | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+    | null,
+): void {
+  scriptedOperatorBeforeNarrationHookForTests = hook;
+}
+
+/** Fault seam after the durable operator reservation and lease acquisition but
+ * before any provider launch. This exercises the synchronous launch-recovery
+ * path without depending on provider-adapter error handling. */
+export function configureOperatorLaunchHookForTests(
+  hook:
+    | ((db: Database.Database, input: RunOperatorInput) => void | Promise<void>)
+    | null,
+): void {
+  operatorLaunchHookForTests = hook;
+}
+
+async function openOperatorSystemRecovery(
+  ...args: Parameters<OpenSystemRecovery>
+): Promise<Awaited<ReturnType<OpenSystemRecovery>>> {
+  const writer =
+    operatorRecoveryWriterForTests ??
+    (await import("~/server/tasks/task-recovery.server")).openSystemRecovery;
+  return writer(...args);
+}
+
 export interface RunOperatorInput {
   projectSlug: string;
   taskKey: string;
+  /** Canonical task `createdAt` captured by a caller before it performs any
+   * asynchronous prerequisite (for example, persisting an `@operator`
+   * comment). When supplied, admission is valid only for that exact task
+   * incarnation; a delete/recreate may never retarget the old intent. */
+  expectedTaskIncarnation?: string;
   /** Backend to run the operator on (claude|codex). Defaults to the deployment. */
   backend?: RealBackend;
   /** Autonomy for THIS run (supervised|full). Defaults to the deployment. */
@@ -86,6 +170,14 @@ export interface RunOperatorInput {
   humanComment?: string;
   dataRoot?: string;
   actor?: AuditActor;
+  /** Durable automatic dispatch that is attempting to own this run. Unlike
+   * human/reaction triggers, a dispatch must never coalesce onto another run:
+   * the dispatcher keeps its own row queued and retries after the task lease
+   * becomes available. */
+  dispatchId?: string;
+  /** Specialist run whose clean completion caused this reaction. Exactly one
+   * source-linked operator run may exist, making boot replay idempotent. */
+  completionSourceRunId?: string;
 }
 
 export interface RunOperatorResult {
@@ -94,6 +186,11 @@ export interface RunOperatorResult {
   /** "real" = LLM tool-driven · "scripted" = deterministic drive. */
   mode: "real" | "scripted";
   autonomy: OperatorAutonomy;
+  /** `started` is the only result a durable dispatch may claim as its own.
+   * `coalesced` is reserved for ordinary/manual triggers; `busy` tells the
+   * dispatcher to leave its durable row queued without borrowing a foreign
+   * run id or placing work in the process-local pending map. */
+  disposition: "started" | "coalesced" | "busy";
 }
 
 /** A queued/running operator run for the same task, if one is already in flight. */
@@ -101,22 +198,81 @@ function inFlightOperatorRun(
   db: Database.Database,
   projectSlug: string,
   taskKey: string,
+  taskIncarnation: string,
 ): { id: string; backend: RealBackend } | null {
   const row = db
     .prepare(
       `SELECT id, backend FROM agent_runs
        WHERE project_slug = ? AND task_key = ? AND kind = 'operator'
+         AND task_incarnation = ?
          AND state IN ('queued', 'running')
        ORDER BY rowid DESC LIMIT 1`,
     )
-    .get(projectSlug, taskKey) as { id: string; backend: string } | undefined;
+    .get(projectSlug, taskKey, taskIncarnation) as
+    { id: string; backend: string } | undefined;
   return row ? { id: row.id, backend: row.backend as RealBackend } : null;
+}
+
+interface OperatorReactionReservation {
+  runId: string;
+  threadId: string;
+}
+
+function sourceLinkedOperatorRun(
+  db: Database.Database,
+  sourceRunId: string,
+): { id: string; backend: RealBackend; simulated: number } | null {
+  return (
+    (db
+      .prepare(
+        `SELECT id, backend, simulated FROM agent_runs
+         WHERE kind = 'operator' AND completion_source_run_id = ?
+         LIMIT 1`,
+      )
+      .get(sourceRunId) as
+      { id: string; backend: RealBackend; simulated: number } | undefined) ??
+    null
+  );
+}
+
+/** Persist every operator run/effect identity before any scripted action or
+ * provider launch. Source-linked rows additionally provide reaction
+ * idempotency. A crash from this point is ambiguous and recovered, never
+ * replayed as if it were safely pre-launch. */
+function reserveOperatorRun(
+  db: Database.Database,
+  input: RunOperatorInput,
+  authority: OperatorAuthority,
+  taskIncarnation: string,
+): OperatorReactionReservation {
+  const runId = newId("run");
+  const threadId = "op-" + newId("t").replace("t_", "").slice(0, 8);
+  upsertRun(db, {
+    id: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    threadId,
+    role: "Operator",
+    kind: "operator",
+    backend: authority.backend,
+    simulated: !isBackendAvailable(authority.backend),
+    model: authority.model,
+    sdk: authority.backend === "codex" ? "Codex SDK" : "Claude Agent SDK",
+    agentName: authority.name,
+    agentProfileId: "operator",
+    completionSourceRunId: input.completionSourceRunId,
+    taskIncarnation,
+    operatorDispatchId: input.dispatchId ?? null,
+    operatorEffectState: "pending",
+    state: "queued",
+  });
+  return { runId, threadId };
 }
 
 // ------------------------------------------------------ single-flight lease
 
 /**
- * Process-level operator lease + trigger queue.
+ * Process-level operator lease + durable trigger mailbox.
  *
  * The agent_runs row alone under-covers the lease: the SCRIPTED drive
  * coordinates before its row exists, and the CODEX plan executes after its row
@@ -127,29 +283,392 @@ function inFlightOperatorRun(
  *
  * The lease is held from runOperator entry until the mode's coordination truly
  * ends (real: run completion; codex: plan executed; scripted: drive returned).
- * A trigger arriving while held is QUEUED (newest wins — the operator re-reads
- * the full task anyway, so the latest trigger subsumes older ones) and fired
- * exactly once on release.
+ * A trigger arriving while held is persisted (newest wins — the operator
+ * re-reads the full task anyway, so the latest trigger subsumes older ones)
+ * and drained on release or boot recovery.
  */
+interface OperatorLeaseToken {
+  runId: string | null;
+  backend: RealBackend;
+  autonomy: OperatorAutonomy;
+  cancelled: boolean;
+  projectSlug: string;
+  taskKey: string;
+  taskIncarnation: string;
+  dataRoot?: string;
+}
+
 interface OperatorLeaseState {
-  held: Map<string, { runId: string | null; backend: RealBackend; autonomy: OperatorAutonomy }>;
-  pending: Map<string, RunOperatorInput>;
+  held: Map<string, OperatorLeaseToken>;
+  /** Prevent a release callback and boot recovery from draining the same task
+   * concurrently inside one process. The work itself lives in SQLite. */
+  draining: Set<string>;
 }
 
 const LEASE_KEY = Symbol.for("viberr.operatorLease");
 
 function leaseState(): OperatorLeaseState {
-  const cache = globalThis as unknown as Record<symbol, OperatorLeaseState | undefined>;
+  const cache = globalThis as unknown as Record<
+    symbol,
+    OperatorLeaseState | undefined
+  >;
   let state = cache[LEASE_KEY];
   if (!state) {
-    state = { held: new Map(), pending: new Map() };
+    state = { held: new Map(), draining: new Set() };
     cache[LEASE_KEY] = state;
   }
+  // Dev HMR may retain the pre-durable process-global object.
+  state.draining ??= new Set();
   return state;
 }
 
-function leaseKeyFor(projectSlug: string, taskKey: string): string {
-  return `${projectSlug}/${taskKey}`;
+function leaseKeyFor(
+  projectSlug: string,
+  taskKey: string,
+  taskIncarnation: string,
+): string {
+  return `${projectSlug}/${taskKey}@${taskIncarnation}`;
+}
+
+/** Read the canonical lifecycle token only while both projections and files
+ * still agree that this task belongs to an active project. */
+function activeTaskIncarnation(
+  db: Database.Database,
+  projectSlug: string,
+  taskKey: string,
+  dataRoot?: string,
+): string | null {
+  if (!projectCompletionAdmissionOpen(db, projectSlug)) return null;
+  const projectedProject = db
+    .prepare(`SELECT archived FROM projects WHERE slug = ?`)
+    .get(projectSlug) as { archived: number } | undefined;
+  if (!projectedProject || projectedProject.archived === 1) return null;
+  const project = readProjectFile({
+    projectSlug,
+    ...(dataRoot !== undefined ? { dataRoot } : {}),
+  });
+  if (!project || project.parsed.frontmatter.archived === true) return null;
+  const projectedTask = db
+    .prepare(
+      `SELECT 1 FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+    )
+    .get(projectSlug, taskKey);
+  if (!projectedTask) return null;
+  const task = readTaskFile({
+    projectSlug,
+    taskKey,
+    ...(dataRoot !== undefined ? { dataRoot } : {}),
+  });
+  return task?.parsed.frontmatter.createdAt || null;
+}
+
+interface OperatorPendingTriggerRow {
+  project_slug: string;
+  task_key: string;
+  task_incarnation: string;
+  coalescing_key: string;
+  trigger: NonNullable<RunOperatorInput["trigger"]>;
+  backend: RealBackend | null;
+  autonomy: OperatorAutonomy | null;
+  react_depth: number | null;
+  human_comment: string | null;
+  source_run_id: string | null;
+  actor_json: string | null;
+  data_root: string | null;
+  generation: string;
+}
+
+const pendingAuditActorSchema = z
+  .object({
+    userId: z.string().nullable(),
+    label: z.string(),
+    auditAuthoritySource: z.literal("org_admin_override").optional(),
+  })
+  .strict();
+
+/** Atomically replace the task's waiting instruction. The operator always
+ * re-reads canonical task state, so the newest trigger subsumes older context
+ * while preserving the latest human comment/source identity exactly. */
+function pendingTriggerCoalescingKey(input: RunOperatorInput): string {
+  return input.completionSourceRunId
+    ? `source:${input.completionSourceRunId}`
+    : "ordinary";
+}
+
+function upsertPendingOperatorTrigger(
+  db: Database.Database,
+  input: RunOperatorInput,
+  taskIncarnation: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO operator_pending_triggers
+       (project_slug, task_key, task_incarnation, coalescing_key, trigger,
+        backend, autonomy, react_depth, human_comment, source_run_id,
+        actor_json, data_root, generation, sequence, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             (SELECT coalesce(max(sequence), 0) + 1 FROM operator_pending_triggers),
+             ?, ?)
+     ON CONFLICT(project_slug, task_key, coalescing_key) DO UPDATE SET
+       task_incarnation = excluded.task_incarnation,
+       trigger = excluded.trigger,
+       backend = excluded.backend,
+       autonomy = excluded.autonomy,
+       react_depth = excluded.react_depth,
+       human_comment = excluded.human_comment,
+       source_run_id = excluded.source_run_id,
+       actor_json = excluded.actor_json,
+       data_root = excluded.data_root,
+       generation = excluded.generation,
+       sequence = excluded.sequence,
+       updated_at = excluded.updated_at`,
+  ).run(
+    input.projectSlug,
+    input.taskKey,
+    taskIncarnation,
+    pendingTriggerCoalescingKey(input),
+    input.trigger ?? "manual",
+    input.backend ?? null,
+    input.autonomy ?? null,
+    input.reactDepth ?? null,
+    input.humanComment ?? null,
+    input.completionSourceRunId ?? null,
+    input.actor ? JSON.stringify(input.actor) : null,
+    input.dataRoot ?? null,
+    newId("opt"),
+    now,
+    now,
+  );
+}
+
+function deletePendingOperatorGeneration(
+  db: Database.Database,
+  row: OperatorPendingTriggerRow,
+): boolean {
+  return (
+    db
+      .prepare(
+        `DELETE FROM operator_pending_triggers
+          WHERE project_slug = ? AND task_key = ?
+            AND coalescing_key = ? AND generation = ?`,
+      )
+      .run(row.project_slug, row.task_key, row.coalescing_key, row.generation)
+      .changes > 0
+  );
+}
+
+function pendingTriggerInput(
+  row: OperatorPendingTriggerRow,
+  fallbackDataRoot?: string,
+): RunOperatorInput | null {
+  let actor: AuditActor | undefined;
+  if (row.actor_json !== null) {
+    try {
+      const parsed = pendingAuditActorSchema.safeParse(
+        JSON.parse(row.actor_json),
+      );
+      if (!parsed.success) return null;
+      actor = parsed.data;
+    } catch {
+      return null;
+    }
+  }
+  const dataRoot = row.data_root ?? fallbackDataRoot;
+  return {
+    projectSlug: row.project_slug,
+    taskKey: row.task_key,
+    expectedTaskIncarnation: row.task_incarnation,
+    trigger: row.trigger,
+    ...(row.backend !== null ? { backend: row.backend } : {}),
+    ...(row.autonomy !== null ? { autonomy: row.autonomy } : {}),
+    ...(row.react_depth !== null ? { reactDepth: row.react_depth } : {}),
+    ...(row.human_comment !== null ? { humanComment: row.human_comment } : {}),
+    ...(row.source_run_id !== null
+      ? { completionSourceRunId: row.source_run_id }
+      : {}),
+    ...(actor !== undefined ? { actor } : {}),
+    ...(dataRoot !== undefined ? { dataRoot } : {}),
+  };
+}
+
+/** Canonical files and projections must both still own the target. This makes
+ * an archive/delete that races boot or a release callback win deterministically
+ * even while the file watcher is between its own lifecycle steps. */
+function pendingTriggerTargetActive(
+  db: Database.Database,
+  row: OperatorPendingTriggerRow,
+  fallbackDataRoot?: string,
+): boolean {
+  const dataRoot = row.data_root ?? fallbackDataRoot;
+  return (
+    activeTaskIncarnation(db, row.project_slug, row.task_key, dataRoot) ===
+    row.task_incarnation
+  );
+}
+
+export interface DrainPendingOperatorTriggersOptions {
+  /** Omit both to drain every task during boot. */
+  projectSlug?: string;
+  taskKey?: string;
+  /** Fallback for historical/default-root rows; newly queued custom-root work
+   * carries its own data root in the durable row. */
+  dataRoot?: string;
+}
+
+/** Launch each durable generation at most once per drain snapshot. Deletion is
+ * compare-and-delete by generation: a concurrent newer instruction remains in
+ * the mailbox and the successor lease will drain it later. */
+export async function drainPendingOperatorTriggers(
+  db: Database.Database,
+  options: DrainPendingOperatorTriggersOptions = {},
+): Promise<void> {
+  if (!db.open) return;
+  const hasProject = options.projectSlug !== undefined;
+  const hasTask = options.taskKey !== undefined;
+  if (hasProject !== hasTask) {
+    throw new Error(
+      "Pending operator drain requires both projectSlug and taskKey, or neither.",
+    );
+  }
+  const rows = (
+    hasProject
+      ? db
+          .prepare(
+            `SELECT project_slug, task_key, task_incarnation, coalescing_key, trigger, backend, autonomy,
+                  react_depth, human_comment, source_run_id, actor_json,
+                  data_root, generation
+             FROM operator_pending_triggers
+            WHERE project_slug = ? AND task_key = ?
+            ORDER BY sequence ASC, coalescing_key ASC`,
+          )
+          .all(options.projectSlug, options.taskKey)
+      : db
+          .prepare(
+            `SELECT project_slug, task_key, task_incarnation, coalescing_key, trigger, backend, autonomy,
+                  react_depth, human_comment, source_run_id, actor_json,
+                  data_root, generation
+             FROM operator_pending_triggers
+            ORDER BY sequence ASC, project_slug ASC, task_key ASC, coalescing_key ASC`,
+          )
+          .all()
+  ) as OperatorPendingTriggerRow[];
+
+  for (const row of rows) {
+    if (!db.open) return;
+    const key = leaseKeyFor(
+      row.project_slug,
+      row.task_key,
+      row.task_incarnation,
+    );
+    const state = leaseState();
+    if (state.draining.has(key)) continue;
+    state.draining.add(key);
+    let completedScriptedDrive = false;
+    try {
+      if (!pendingTriggerTargetActive(db, row, options.dataRoot)) {
+        deletePendingOperatorGeneration(db, row);
+        continue;
+      }
+      const input = pendingTriggerInput(row, options.dataRoot);
+      if (!input) {
+        deletePendingOperatorGeneration(db, row);
+        logger.error("discarded malformed durable operator trigger", {
+          projectSlug: row.project_slug,
+          taskKey: row.task_key,
+        });
+        continue;
+      }
+
+      logger.info("draining durable operator trigger", {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        trigger: row.trigger,
+      });
+      const launched = await runOperator(db, input);
+      if (launched.disposition === "busy") {
+        // Durable manual/reaction rows never carry dispatchId, but retain the
+        // row if a future caller introduces another admission reason.
+        continue;
+      }
+      if (
+        row.source_run_id !== null &&
+        sourceLinkedOperatorReactionReady(db, row.source_run_id)
+      ) {
+        // The specialist completion callback already returned when it placed
+        // this source reaction behind another lease. Once drain has obtained a
+        // durable source-linked owner, acknowledge the handoff live instead of
+        // leaving completion_phase stranded until the next boot.
+        advanceRunCompletionPhase(
+          db,
+          row.source_run_id,
+          RUN_COMPLETION_PHASE.complete,
+        );
+      }
+      const consumed = deletePendingOperatorGeneration(db, row);
+      if (!consumed && launched.disposition === "started") {
+        const successor = db
+          .prepare(
+            `SELECT generation FROM operator_pending_triggers
+              WHERE project_slug = ? AND task_key = ? AND coalescing_key = ?`,
+          )
+          .get(row.project_slug, row.task_key, row.coalescing_key) as
+          { generation: string } | undefined;
+        if (!successor) {
+          // Lifecycle purge won after eligibility but before launch ownership
+          // was consumed. Revoke this exact run; never sweep a same-slug
+          // replacement project.
+          const held = state.held.get(key);
+          if (held?.runId === launched.runId) {
+            held.cancelled = true;
+            state.held.delete(key);
+          }
+          stopRunForLifecycle(db, launched.runId);
+        }
+      }
+      completedScriptedDrive =
+        launched.disposition === "started" && launched.mode === "scripted";
+    } catch (error) {
+      logger.error("durable operator trigger failed and remains queued", {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      state.draining.delete(key);
+      if (completedScriptedDrive && db.open) {
+        const successor = db
+          .prepare(
+            `SELECT 1 FROM operator_pending_triggers
+              WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(row.project_slug, row.task_key);
+        // A scripted drive releases before runOperator resolves, so its nested
+        // release drain observed `draining`. Wake the newer generation now.
+        if (successor) {
+          void drainPendingOperatorTriggers(db, {
+            projectSlug: row.project_slug,
+            taskKey: row.task_key,
+            ...(options.dataRoot !== undefined
+              ? { dataRoot: options.dataRoot }
+              : {}),
+          });
+        }
+      }
+    }
+  }
+}
+
+/** Archive/delete intentionally purge waiting instructions rather than retain
+ * them as history: restoring or recreating a project must not resurrect an old
+ * human comment or specialist reaction. */
+export function cancelPendingOperatorTriggersForProject(
+  db: Database.Database,
+  projectSlug: string,
+): number {
+  if (!db.open) return 0;
+  return db
+    .prepare(`DELETE FROM operator_pending_triggers WHERE project_slug = ?`)
+    .run(projectSlug).changes;
 }
 
 /**
@@ -165,47 +684,108 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
 function releaseOperatorLease(
   db: Database.Database,
   key: string,
-  token?: object,
+  token: OperatorLeaseToken,
 ): void {
   const state = leaseState();
   const current = state.held.get(key);
-  if (token !== undefined && current !== token) return; // stale release — ignore
+  if (current !== token) return; // stale release — ignore
   state.held.delete(key);
-  const queued = state.pending.get(key);
-  if (!queued) return;
-  state.pending.delete(key);
   if (!db.open) return;
-  logger.info("operator lease released — firing the queued trigger", {
-    key,
-    trigger: queued.trigger ?? "manual",
-  });
-  void runOperator(db, queued).catch((error) => {
-    logger.error("queued operator trigger failed", {
-      key,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
+  void drainPendingOperatorTriggers(db, {
+    projectSlug: token.projectSlug,
+    taskKey: token.taskKey,
+    ...(token.dataRoot !== undefined ? { dataRoot: token.dataRoot } : {}),
   });
 }
 
-/** Test-only: drop all leases/queued triggers (fresh state per test). */
-export function resetOperatorLeasesForTests(): void {
+function revokeOperatorLaunch(
+  db: Database.Database,
+  key: string,
+  token: OperatorLeaseToken,
+  runId: string | null,
+): void {
+  token.cancelled = true;
   const state = leaseState();
-  state.held.clear();
-  state.pending.clear();
+  if (state.held.get(key) === token) state.held.delete(key);
+  if (runId) stopRunForLifecycle(db, runId);
+}
+
+function clearOperatorLeaseState(matches: (key: string) => boolean): number {
+  const state = leaseState();
+  let cleared = 0;
+  for (const key of state.held.keys()) {
+    if (!matches(key)) continue;
+    const held = state.held.get(key);
+    if (held) held.cancelled = true;
+    if (state.held.delete(key)) cleared += 1;
+  }
+  return cleared;
+}
+
+/** Test-only: simulate a fresh process. Durable triggers intentionally remain
+ * in SQLite so restart tests can prove boot replay. */
+export function resetOperatorLeasesForTests(): void {
+  clearOperatorLeaseState(() => true);
+  leaseState().draining.clear();
+}
+
+/** Cancel every process-local operator lease for a project.
+ * Archive/delete call this before detaching runtime handles. Token-checked
+ * late releases then become harmless no-ops and cannot resurrect work. */
+export function clearOperatorLeasesForProject(projectSlug: string): number {
+  const prefix = `${projectSlug}/`;
+  return clearOperatorLeaseState((key) => key.startsWith(prefix));
 }
 
 export async function runOperator(
   db: Database.Database,
   input: RunOperatorInput,
 ): Promise<RunOperatorResult> {
+  const taskIncarnation = activeTaskIncarnation(
+    db,
+    input.projectSlug,
+    input.taskKey,
+    input.dataRoot,
+  );
+  if (!taskIncarnation) {
+    throw new Error(
+      `Operator target ${input.projectSlug}/${input.taskKey} is missing, archived, or has no canonical incarnation.`,
+    );
+  }
+  if (
+    input.expectedTaskIncarnation !== undefined &&
+    input.expectedTaskIncarnation !== taskIncarnation
+  ) {
+    throw new Error(
+      `Operator target ${input.projectSlug}/${input.taskKey} changed before admission.`,
+    );
+  }
   const ctx: TaskMutationContext = {
     ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    expectedTaskIncarnation: taskIncarnation,
   };
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
     ...(input.backend ? { backend: input.backend } : {}),
     ...(input.autonomy ? { autonomy: input.autonomy } : {}),
   });
   const backend = authority.backend;
+  if (input.completionSourceRunId && input.trigger !== "agent-reply") {
+    throw new Error(
+      "completionSourceRunId is valid only for an agent-reply operator reaction.",
+    );
+  }
+  if (input.completionSourceRunId) {
+    const existing = sourceLinkedOperatorRun(db, input.completionSourceRunId);
+    if (existing) {
+      return {
+        runId: existing.id,
+        backend: existing.backend,
+        mode: existing.simulated === 1 ? "scripted" : "real",
+        autonomy: authority.autonomy,
+        disposition: "coalesced",
+      };
+    }
+  }
 
   // Single-flight per task (NFR16, B6): one operator coordinates a task at a
   // time. A trigger arriving while the lease is held — e.g. create-time
@@ -213,42 +793,84 @@ export async function runOperator(
   // fired when the in-flight coordination truly ends, so no trigger is ever
   // silently dropped and no two drives overlap. The process lease covers the
   // scripted/codex windows the agent_runs row alone misses.
-  const leaseKey = leaseKeyFor(input.projectSlug, input.taskKey);
+  const leaseKey = leaseKeyFor(
+    input.projectSlug,
+    input.taskKey,
+    taskIncarnation,
+  );
   const lease = leaseState();
   const heldByProcess = lease.held.get(leaseKey);
   if (heldByProcess) {
-    lease.pending.set(leaseKey, input);
-    logger.info("operator run queued — one already in flight (process lease)", {
-      taskKey: input.taskKey,
-      trigger: input.trigger ?? "manual",
-    });
+    if (input.dispatchId) {
+      logger.info("automatic operator dispatch waiting for the task lease", {
+        taskKey: input.taskKey,
+        dispatchId: input.dispatchId,
+      });
+      return {
+        runId: "queued",
+        backend: heldByProcess.backend,
+        mode: isBackendAvailable(heldByProcess.backend) ? "real" : "scripted",
+        autonomy: heldByProcess.autonomy,
+        disposition: "busy",
+      };
+    }
+    upsertPendingOperatorTrigger(db, input, taskIncarnation);
+    logger.info(
+      "operator run durably queued — one already in flight (process lease)",
+      {
+        taskKey: input.taskKey,
+        trigger: input.trigger ?? "manual",
+      },
+    );
     return {
       runId: heldByProcess.runId ?? "queued",
       backend: heldByProcess.backend,
-      mode:
-        heldByProcess.backend === "claude" && isBackendAvailable("claude")
-          ? "real"
-          : "scripted",
+      mode: isBackendAvailable(heldByProcess.backend) ? "real" : "scripted",
       autonomy: heldByProcess.autonomy,
+      disposition: "coalesced",
     };
   }
   // Cross-boot backstop: a queued/running DB row without a process lease (e.g.
   // resumed after a restart) still coalesces; queue the trigger and drain it
   // when that run finishes.
-  const inflight = inFlightOperatorRun(db, input.projectSlug, input.taskKey);
+  const inflight = inFlightOperatorRun(
+    db,
+    input.projectSlug,
+    input.taskKey,
+    taskIncarnation,
+  );
   if (inflight) {
-    lease.pending.set(leaseKey, input);
+    if (input.dispatchId) {
+      logger.info("automatic operator dispatch waiting for an in-flight run", {
+        taskKey: input.taskKey,
+        dispatchId: input.dispatchId,
+        runId: inflight.id,
+      });
+      return {
+        runId: "queued",
+        backend: inflight.backend,
+        mode: isBackendAvailable(inflight.backend) ? "real" : "scripted",
+        autonomy: authority.autonomy,
+        disposition: "busy",
+      };
+    }
+    upsertPendingOperatorTrigger(db, input, taskIncarnation);
     const recoveryToken = {
       runId: inflight.id,
       backend: inflight.backend,
       autonomy: authority.autonomy,
+      cancelled: false,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      taskIncarnation,
+      ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
     };
     lease.held.set(leaseKey, recoveryToken);
-    const { chainRunCompletion } = await import("./run-service.server");
-    chainRunCompletion(inflight.id, () =>
+    const { chainRunCompletionOrInvoke } = await import("./run-service.server");
+    chainRunCompletionOrInvoke(db, inflight.id, () =>
       releaseOperatorLease(db, leaseKey, recoveryToken),
     );
-    logger.info("operator run queued — DB row already in flight", {
+    logger.info("operator run durably queued — DB row already in flight", {
       taskKey: input.taskKey,
       runId: inflight.id,
       trigger: input.trigger ?? "manual",
@@ -256,8 +878,9 @@ export async function runOperator(
     return {
       runId: inflight.id,
       backend: inflight.backend,
-      mode: inflight.backend === "claude" && isBackendAvailable("claude") ? "real" : "scripted",
+      mode: isBackendAvailable(inflight.backend) ? "real" : "scripted",
       autonomy: authority.autonomy,
+      disposition: "coalesced",
     };
   }
 
@@ -268,8 +891,42 @@ export async function runOperator(
     runId: null as string | null,
     backend,
     autonomy: authority.autonomy,
+    cancelled: false,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    taskIncarnation,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   };
   lease.held.set(leaseKey, leaseToken);
+
+  let reactionReservation: OperatorReactionReservation | null = null;
+  try {
+    reactionReservation = reserveOperatorRun(
+      db,
+      input,
+      authority,
+      taskIncarnation,
+    );
+  } catch (error) {
+    // A second process may have won the unique source-id reservation between
+    // the initial read and this insert. Return that durable owner rather than
+    // surfacing a false failure or launching duplicate work.
+    const existing = input.completionSourceRunId
+      ? sourceLinkedOperatorRun(db, input.completionSourceRunId)
+      : null;
+    if (!existing) {
+      releaseOperatorLease(db, leaseKey, leaseToken);
+      throw error;
+    }
+    releaseOperatorLease(db, leaseKey, leaseToken);
+    return {
+      runId: existing.id,
+      backend: existing.backend,
+      mode: existing.simulated === 1 ? "scripted" : "real",
+      autonomy: authority.autonomy,
+      disposition: "coalesced",
+    };
+  }
 
   // Carry the run's identity on the ctx so that when an agent this operator
   // prompts replies, the reply-completion hook can re-invoke the operator to
@@ -281,6 +938,28 @@ export async function runOperator(
     reactDepth: input.reactDepth ?? 0,
   };
 
+  // Close the admission gap before any scripted governed action or provider
+  // launch. The post-start comparison below closes the second half of the
+  // handshake when archive/delete/recreation happens inside adapter.start().
+  if (
+    activeTaskIncarnation(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      input.dataRoot,
+    ) !== taskIncarnation
+  ) {
+    revokeOperatorLaunch(
+      db,
+      leaseKey,
+      leaseToken,
+      reactionReservation?.runId ?? null,
+    );
+    throw new Error(
+      `Operator target ${input.projectSlug}/${input.taskKey} changed during admission.`,
+    );
+  }
+
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
   // model emits a decision plan we execute through the same capability-gated
@@ -290,23 +969,107 @@ export async function runOperator(
   // synchronous, so it releases in its own finally — the outer catch must NOT
   // also release it (that double-release is the bug). Idempotent-per-token
   // release makes even an accidental double-release safe.
+  let launched: RunOperatorResult;
   try {
+    await operatorLaunchHookForTests?.(db, input);
     if (backend === "claude" && isBackendAvailable("claude")) {
-      return await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    if (backend === "codex" && isBackendAvailable("codex")) {
-      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    try {
-      return await runScriptedOperatorDrive(db, ctx, input, authority);
-    } finally {
-      // Scripted coordination is fully synchronous with this call.
-      releaseOperatorLease(db, leaseKey, leaseToken);
+      launched = await startRealOperatorRun(
+        db,
+        ctx,
+        input,
+        authority,
+        leaseKey,
+        leaseToken,
+        reactionReservation,
+      );
+    } else if (backend === "codex" && isBackendAvailable("codex")) {
+      launched = await startCodexOperatorRun(
+        db,
+        ctx,
+        input,
+        authority,
+        leaseKey,
+        leaseToken,
+        reactionReservation,
+      );
+    } else {
+      try {
+        launched = await withProjectCompletionEffect(
+          db,
+          input.projectSlug,
+          () =>
+            runScriptedOperatorDrive(
+              db,
+              ctx,
+              input,
+              authority,
+              reactionReservation,
+            ),
+        );
+      } finally {
+        // Scripted coordination is fully synchronous with this call.
+        releaseOperatorLease(db, leaseKey, leaseToken);
+      }
     }
   } catch (error) {
-    releaseOperatorLease(db, leaseKey, leaseToken);
+    try {
+      if (reactionReservation && db.open) {
+        patchRun(db, reactionReservation.runId, {
+          state: "error",
+          finishedAt: new Date().toISOString(),
+          phase: null,
+          step: null,
+        });
+        if (
+          activeTaskIncarnation(
+            db,
+            input.projectSlug,
+            input.taskKey,
+            input.dataRoot,
+          ) !== taskIncarnation
+        ) {
+          patchRun(db, reactionReservation.runId, {
+            operatorEffectState: "recovery",
+          });
+        } else {
+          await escalateFailedOperatorRun(
+            db,
+            ctx,
+            input,
+            reactionReservation.runId,
+          );
+          patchRun(db, reactionReservation.runId, {
+            operatorEffectState: "recovery",
+          });
+        }
+      }
+    } finally {
+      // Recovery persistence is deliberately allowed to fail so boot can
+      // converge a pending effect. It must never retain the in-process lease.
+      releaseOperatorLease(db, leaseKey, leaseToken);
+    }
     throw error;
   }
+
+  if (
+    activeTaskIncarnation(
+      db,
+      input.projectSlug,
+      input.taskKey,
+      input.dataRoot,
+    ) !== taskIncarnation
+  ) {
+    revokeOperatorLaunch(db, leaseKey, leaseToken, launched.runId);
+    logger.warn("operator launch lost its task incarnation", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: launched.runId,
+    });
+    throw new Error(
+      `Operator target ${input.projectSlug}/${input.taskKey} changed during launch.`,
+    );
+  }
+  return launched;
 }
 
 // ------------------------------------------------- codex (structured output)
@@ -339,7 +1102,8 @@ const OPERATOR_PLAN_SCHEMA = {
   properties: {
     reasoning: {
       type: "string",
-      description: "A concise operator comment: observed → changed → recommended → decision required.",
+      description:
+        "A concise operator comment: observed → changed → recommended → decision required.",
     },
     actions: {
       type: "array",
@@ -352,14 +1116,52 @@ const OPERATOR_PLAN_SCHEMA = {
             type: "string",
             enum: OPERATOR_PLAN_TOOLS,
           },
-          profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
-          toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
-          packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          readiness: { type: ["string", "null"], enum: ["ready", "input_required", null], description: "For assess_readiness, else null." },
-          text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
-          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
+          profileId: {
+            type: ["string", "null"],
+            description: "For assign_/run_/prompt_ actions, else null.",
+          },
+          backend: {
+            type: ["string", "null"],
+            enum: ["claude", "codex", null],
+            description:
+              "For assign_/prompt_ routing actions, the backend from the selected candidate row; else null.",
+          },
+          toStageId: {
+            type: ["string", "null"],
+            description: "For transition_stage, else null.",
+          },
+          packetType: {
+            type: ["string", "null"],
+            enum: ["input", "blocked", null],
+            description:
+              "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null.",
+          },
+          readiness: {
+            type: ["string", "null"],
+            enum: ["ready", "input_required", null],
+            description: "For assess_readiness, else null.",
+          },
+          text: {
+            type: ["string", "null"],
+            description:
+              "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null.",
+          },
+          reason: {
+            type: ["string", "null"],
+            description:
+              "Short why — required and non-empty for assign_/prompt_ routing choices; recommendation-card reasoning or the packet body elsewhere.",
+          },
         },
-        required: ["tool", "profileId", "toStageId", "packetType", "readiness", "text", "reason"],
+        required: [
+          "tool",
+          "profileId",
+          "backend",
+          "toStageId",
+          "packetType",
+          "readiness",
+          "text",
+          "reason",
+        ],
       },
     },
   },
@@ -376,13 +1178,38 @@ const operatorPlanActionSchema = z
   .object({
     tool: z.enum(OPERATOR_PLAN_TOOLS),
     profileId: z.string().nullable(),
+    backend: z.enum(["claude", "codex"]).nullable(),
     toStageId: z.string().nullable(),
     packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
     readiness: z.enum(["ready", "input_required"]).nullable(),
     text: z.string().nullable(),
     reason: z.string().nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((action, refinement) => {
+    if (
+      action.tool !== "assign_specialist" &&
+      action.tool !== "prompt_specialist" &&
+      action.tool !== "assign_reviewer" &&
+      action.tool !== "prompt_reviewer"
+    ) {
+      return;
+    }
+    if (!action.profileId) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["profileId"],
+        message: "A routed action requires an exact profileId.",
+      });
+    }
+    if (!action.backend) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["backend"],
+        message: "A routed action requires the selected candidate backend.",
+      });
+    }
+  });
 
 const operatorPlanRuntimeSchema = z
   .object({
@@ -404,12 +1231,23 @@ function defaultPacketOptions(
 ): { kind: PacketOptionKind; title: string; recommended?: boolean }[] {
   return packetType === "blocked"
     ? [
-        { kind: "block_on_policy", title: "Update the policy / credential and unblock", recommended: true },
-        { kind: "redirect", title: "Redirect the specialist with new guidance" },
+        {
+          kind: "block_on_policy",
+          title: "Update the policy / credential and unblock",
+          recommended: true,
+        },
+        {
+          kind: "redirect",
+          title: "Redirect the specialist with new guidance",
+        },
         { kind: "hold_runtime_debug", title: "Hold for runtime debugging" },
       ]
     : [
-        { kind: "request_edit", title: "Send back to the specialist for changes", recommended: true },
+        {
+          kind: "request_edit",
+          title: "Send back to the specialist for changes",
+          recommended: true,
+        },
         { kind: "redirect", title: "Reassign or redirect the work" },
       ];
 }
@@ -446,9 +1284,16 @@ async function startCodexOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
-  leaseToken: object,
+  leaseToken: OperatorLeaseToken,
+  reservation: OperatorReactionReservation | null,
 ): Promise<RunOperatorResult> {
-  const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  const snapshot = operatorSnapshot(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    authority,
+  );
   const systemPrompt = buildOperatorSystemPrompt(authority, input.dataRoot);
   const prompt = buildCodexOperatorPrompt(
     snapshot,
@@ -462,9 +1307,11 @@ async function startCodexOperatorRun(
   );
 
   const { runId } = await startRun(db, {
+    ...(reservation ? { runId: reservation.runId } : {}),
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
+    threadId:
+      reservation?.threadId ?? "op-" + newId("t").replace("t_", "").slice(0, 8),
     role: "Operator",
     kind: "operator",
     backend: "codex",
@@ -472,6 +1319,8 @@ async function startCodexOperatorRun(
     ...(authority.effort ? { effort: authority.effort } : {}),
     agentName: authority.name,
     agentProfileId: "operator",
+    completionSourceRunId: input.completionSourceRunId ?? null,
+    operatorDispatchId: input.dispatchId ?? null,
     prompt,
     systemPrompt,
     outputSchema: OPERATOR_PLAN_SCHEMA,
@@ -490,25 +1339,71 @@ async function startCodexOperatorRun(
   // while the plan runs, which is exactly the window the process lease covers.
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
-  registerRunCompletion(runId, (finished) => {
+  registerRunCompletion(db, runId, async (finished, completion) => {
     // Provider output is only executable after a clean terminal completion.
     // A failed/interrupted turn may have persisted a syntactically valid
     // partial agent_message before it stopped; never treat that as a plan.
-    const completion =
-      finished.state === "finished"
-        ? executeCodexPlan(db, ctx, input, authority, finished.id)
-        : finished.state === "error"
-          ? escalateFailedOperatorRun(db, ctx, input, finished.id)
-          : Promise.resolve();
-    void completion
-      .catch((error) => {
-        if (!db.open) return;
-        logger.error("codex operator completion handling failed", {
-          taskKey: input.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-      })
-      .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
+    let effectState: "pending" | "applied" | "recovery" = "pending";
+    try {
+      if (finished.state === "finished") {
+        const outcome = await executeCodexPlan(
+          db,
+          ctx,
+          input,
+          authority,
+          finished.id,
+          () =>
+            completion.isCancelled() ||
+            leaseToken.cancelled ||
+            activeTaskIncarnation(
+              db,
+              input.projectSlug,
+              input.taskKey,
+              input.dataRoot,
+            ) !== leaseToken.taskIncarnation,
+        );
+        effectState = outcome === "cancelled" ? "recovery" : "applied";
+      } else if (finished.state === "error") {
+        if (
+          !completion.isCancelled() &&
+          !leaseToken.cancelled &&
+          activeTaskIncarnation(
+            db,
+            input.projectSlug,
+            input.taskKey,
+            input.dataRoot,
+          ) === leaseToken.taskIncarnation
+        ) {
+          await escalateFailedOperatorRun(db, ctx, input, finished.id);
+          effectState = "applied";
+        } else {
+          effectState = "recovery";
+        }
+      }
+    } catch (error) {
+      if (!db.open) return;
+      logger.error("codex operator completion handling failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      if (
+        completion.isCancelled() ||
+        leaseToken.cancelled ||
+        activeTaskIncarnation(
+          db,
+          input.projectSlug,
+          input.taskKey,
+          input.dataRoot,
+        ) !== leaseToken.taskIncarnation
+      ) {
+        effectState = "recovery";
+      }
+      if (db.open) {
+        patchRun(db, runId, { operatorEffectState: effectState });
+      }
+      releaseOperatorLease(db, leaseKey, leaseToken);
+    }
   });
 
   logger.info("operator run started (codex structured output)", {
@@ -516,7 +1411,13 @@ async function startCodexOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "codex", mode: "real", autonomy: authority.autonomy };
+  return {
+    runId,
+    backend: "codex",
+    mode: "real",
+    autonomy: authority.autonomy,
+    disposition: "started",
+  };
 }
 
 /** Parse the complete structured response and validate it before execution. */
@@ -538,16 +1439,19 @@ async function executeCodexPlan(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   runId: string,
-): Promise<void> {
+  isCancelled: () => boolean = () => false,
+): Promise<"applied" | "cancelled"> {
+  if (isCancelled() || !db.open) return "cancelled";
   const readinessOnly =
-    operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority).readiness !==
-    "ready";
+    operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority)
+      .readiness !== "ready";
   // This is machine-readable control data, not a timeline preview: use the
   // complete reply. replyTextForRun intentionally truncates at 1,200 chars and
   // appends prose, which corrupts otherwise-valid larger JSON plans.
   const text = fullReplyTextForRun(db, runId);
   const plan = text ? parseOperatorPlan(text) : null;
   if (!plan) {
+    if (isCancelled() || !db.open) return "cancelled";
     // An empty or unparseable plan is a HUMAN-VISIBLE failure, not a silent
     // no-op: nothing else covers an operator's own run (recovery only watches
     // specialist/reviewer runs), so without this the task simply sits with no
@@ -558,15 +1462,13 @@ async function executeCodexPlan(
       runId,
       hadText: !!text,
     });
-    const { openSystemRecovery } = await import(
-      "~/server/tasks/task-recovery.server"
-    );
-    await openSystemRecovery(
+    await openOperatorSystemRecovery(
       db,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         code: "operator_plan_invalid",
+        occurrenceId: runId,
         title: "Operator turn produced no actionable plan",
         body: text
           ? "The coordinating run replied, but its output was not a valid decision plan. Coordination is paused until a human re-engages the operator or redirects the task."
@@ -574,13 +1476,8 @@ async function executeCodexPlan(
         observations: [{ k: "Run", v: runId, code: true }],
       },
       ctx,
-    ).catch((error) => {
-      logger.error("codex no-plan escalation failed", {
-        taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-    });
-    return;
+    );
+    return "applied";
   }
   // The plan's prose fields persist to the timeline / packets — repair
   // double-escaped `\n` sequences the model emitted inside its JSON strings
@@ -599,14 +1496,23 @@ async function executeCodexPlan(
   const postedComments = new Set<string>();
   const commentKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
   if (plan.reasoning) {
-    await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
+    if (isCancelled() || !db.open) return "cancelled";
+    await operatorPostComment(
+      db,
+      ctx,
+      { ...base, text: plan.reasoning },
+      authority,
+    );
     postedComments.add(commentKey(plan.reasoning));
   }
   if (readinessOnly) {
+    if (isCancelled() || !db.open) return "cancelled";
     // The set of executable actions is frozen at turn start, matching Claude's
     // toolkit. A readiness verdict is a complete turn: later assignment or
     // transition actions in the same model response are ignored server-side.
-    const assessment = plan.actions.find((action) => action.tool === "assess_readiness");
+    const assessment = plan.actions.find(
+      (action) => action.tool === "assess_readiness",
+    );
     if (assessment?.readiness && assessment.reason) {
       await operatorAssessReadiness(
         db,
@@ -632,9 +1538,10 @@ async function executeCodexPlan(
         authority,
       );
     }
-    return;
+    return "applied";
   }
   for (const a of plan.actions) {
+    if (isCancelled() || !db.open) return "cancelled";
     try {
       switch (a.tool) {
         case "assess_readiness":
@@ -655,7 +1562,12 @@ async function executeCodexPlan(
           break;
         case "post_comment":
           if (a.text && !postedComments.has(commentKey(a.text))) {
-            await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
+            await operatorPostComment(
+              db,
+              ctx,
+              { ...base, text: a.text },
+              authority,
+            );
             postedComments.add(commentKey(a.text));
           }
           break;
@@ -677,11 +1589,16 @@ async function executeCodexPlan(
           break;
         }
         case "assign_specialist":
-          if (a.profileId)
+          if (a.profileId && a.backend)
             await operatorAssignSpecialist(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                backend: a.backend,
+                reason: a.reason ?? "",
+              },
               authority,
             );
           break;
@@ -689,41 +1606,54 @@ async function executeCodexPlan(
           await operatorRunSpecialist(db, ctx, base, authority);
           break;
         case "prompt_specialist":
-          if (a.profileId)
+          if (a.profileId && a.backend)
             await operatorPromptSpecialist(
               db,
               ctx,
               {
                 ...base,
                 profileId: a.profileId,
+                backend: a.backend,
                 ...(a.text ? { directive: a.text } : {}),
-                ...(a.reason ? { reason: a.reason } : {}),
+                reason: a.reason ?? "",
               },
               authority,
             );
           break;
         case "assign_reviewer":
-          if (a.profileId)
+          if (a.profileId && a.backend)
             await operatorAssignReviewer(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                backend: a.backend,
+                reason: a.reason ?? "",
+              },
               authority,
             );
           break;
         case "run_reviewer":
-          if (a.profileId) await operatorRunReviewer(db, ctx, { ...base, profileId: a.profileId }, authority);
+          if (a.profileId)
+            await operatorRunReviewer(
+              db,
+              ctx,
+              { ...base, profileId: a.profileId },
+              authority,
+            );
           break;
         case "prompt_reviewer":
-          if (a.profileId)
+          if (a.profileId && a.backend)
             await operatorPromptReviewer(
               db,
               ctx,
               {
                 ...base,
                 profileId: a.profileId,
+                backend: a.backend,
                 ...(a.text ? { directive: a.text } : {}),
-                ...(a.reason ? { reason: a.reason } : {}),
+                reason: a.reason ?? "",
               },
               authority,
             );
@@ -733,7 +1663,11 @@ async function executeCodexPlan(
             await operatorTransitionStage(
               db,
               ctx,
-              { ...base, toStageId: a.toStageId, ...(a.reason ? { reason: a.reason } : {}) },
+              {
+                ...base,
+                toStageId: a.toStageId,
+                ...(a.reason ? { reason: a.reason } : {}),
+              },
               authority,
             );
           break;
@@ -746,11 +1680,15 @@ async function executeCodexPlan(
       // actions against a state the failed one never produced compounds the
       // damage (e.g. an accept_completion after a failed transition). The
       // failure is narrated on the timeline so the board shows what stopped.
-      logger.error("codex operator action failed — aborting the remaining plan", {
-        taskKey: input.taskKey,
-        tool: a.tool,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
+      logger.error(
+        "codex operator action failed — aborting the remaining plan",
+        {
+          taskKey: input.taskKey,
+          tool: a.tool,
+          err: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+      if (isCancelled() || !db.open) return "cancelled";
       await operatorPostComment(
         db,
         ctx,
@@ -759,10 +1697,43 @@ async function executeCodexPlan(
           text: `Coordination stopped: the \`${a.tool}\` step failed (${error instanceof Error ? error.message : String(error)}). The remaining plan was not executed.`,
         },
         authority,
-      ).catch(() => {});
-      break;
+      ).catch((commentError) => {
+        logger.error("codex action-failure comment failed", {
+          taskKey: input.taskKey,
+          err:
+            commentError instanceof Error
+              ? commentError
+              : new Error(String(commentError)),
+        });
+      });
+      if (isCancelled() || !db.open) return "cancelled";
+      await openOperatorSystemRecovery(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          code: "operator_action_failed",
+          occurrenceId: `${runId}:${a.tool}`,
+          title: "Operator plan stopped on a failed action",
+          body:
+            `The operator's \`${a.tool}\` action failed after earlier plan steps may already have applied. ` +
+            "The remaining plan was not executed. Review the timeline and choose whether to retry or redirect.",
+          observations: [
+            { k: "Run", v: runId, code: true },
+            { k: "Failed action", v: a.tool, code: true },
+            {
+              k: "Failure",
+              v: error instanceof Error ? error.message : String(error),
+              code: false,
+            },
+          ],
+        },
+        ctx,
+      );
+      return "applied";
     }
   }
+  return "applied";
 }
 
 // ------------------------------------------------------- real (tool-driven)
@@ -773,9 +1744,16 @@ async function startRealOperatorRun(
   input: RunOperatorInput,
   authority: OperatorAuthority,
   leaseKey: string,
-  leaseToken: object,
+  leaseToken: OperatorLeaseToken,
+  reservation: OperatorReactionReservation | null,
 ): Promise<RunOperatorResult> {
-  const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  const snapshot = operatorSnapshot(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    authority,
+  );
   const systemPrompt = buildOperatorSystemPrompt(authority, input.dataRoot);
   const toolkit = buildOperatorToolkit({
     db,
@@ -783,13 +1761,21 @@ async function startRealOperatorRun(
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     authority,
+    expectedTaskIncarnation: leaseToken.taskIncarnation,
+    isCancelled: () => leaseToken.cancelled,
   });
-  const prompt = buildOperatorTurnPrompt(snapshot, input.trigger ?? "manual", input.humanComment);
+  const prompt = buildOperatorTurnPrompt(
+    snapshot,
+    input.trigger ?? "manual",
+    input.humanComment,
+  );
 
   const { runId } = await startRun(db, {
+    ...(reservation ? { runId: reservation.runId } : {}),
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
+    threadId:
+      reservation?.threadId ?? "op-" + newId("t").replace("t_", "").slice(0, 8),
     role: "Operator",
     kind: "operator",
     backend: "claude",
@@ -797,6 +1783,8 @@ async function startRealOperatorRun(
     ...(authority.effort ? { effort: authority.effort } : {}),
     agentName: authority.name,
     agentProfileId: "operator",
+    completionSourceRunId: input.completionSourceRunId ?? null,
+    operatorDispatchId: input.dispatchId ?? null,
     prompt,
     systemPrompt,
     mcpServers: toolkit.mcpServers,
@@ -811,15 +1799,67 @@ async function startRealOperatorRun(
   // registered) so nothing can clobber it.
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
-  const { chainRunCompletion } = await import("./run-service.server");
-  chainRunCompletion(runId, (finished) => {
-    releaseOperatorLease(db, leaseKey, leaseToken);
-    // A real Claude operator run that ERRORS (crash / quota / auth / idle
-    // timeout) was previously silent — the completion hook only released the
-    // lease, so nothing reached the human (contrast the Codex no-plan
-    // escalation and the specialist F8 path). Escalate it the same way (F-OP1).
-    if (finished.state === "error") {
-      if (db.open) void escalateFailedOperatorRun(db, ctx, input, runId);
+  const { chainRunCompletionOrInvoke } = await import("./run-service.server");
+  chainRunCompletionOrInvoke(db, runId, async (finished, completion) => {
+    let effectState: "pending" | "applied" | "recovery" = "pending";
+    try {
+      // A real Claude operator run that ERRORS (crash / quota / auth / idle
+      // timeout) was previously silent — the completion hook only released the
+      // lease, so nothing reached the human (contrast the Codex no-plan
+      // escalation and the specialist F8 path). Escalate it the same way (F-OP1).
+      if (finished.state === "error") {
+        if (
+          db.open &&
+          !completion.isCancelled() &&
+          !leaseToken.cancelled &&
+          activeTaskIncarnation(
+            db,
+            input.projectSlug,
+            input.taskKey,
+            input.dataRoot,
+          ) === leaseToken.taskIncarnation
+        ) {
+          await escalateFailedOperatorRun(db, ctx, input, runId);
+          effectState = "applied";
+        }
+      }
+      if (
+        finished.state === "finished" &&
+        !completion.isCancelled() &&
+        !leaseToken.cancelled &&
+        activeTaskIncarnation(
+          db,
+          input.projectSlug,
+          input.taskKey,
+          input.dataRoot,
+        ) === leaseToken.taskIncarnation
+      ) {
+        effectState = "applied";
+      }
+    } catch (error) {
+      if (db.open) {
+        logger.error("claude operator completion handling failed", {
+          taskKey: input.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    } finally {
+      if (
+        completion.isCancelled() ||
+        leaseToken.cancelled ||
+        activeTaskIncarnation(
+          db,
+          input.projectSlug,
+          input.taskKey,
+          input.dataRoot,
+        ) !== leaseToken.taskIncarnation
+      ) {
+        effectState = "recovery";
+      }
+      if (db.open) {
+        patchRun(db, runId, { operatorEffectState: effectState });
+      }
+      releaseOperatorLease(db, leaseKey, leaseToken);
     }
   });
 
@@ -828,7 +1868,13 @@ async function startRealOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "claude", mode: "real", autonomy: authority.autonomy };
+  return {
+    runId,
+    backend: "claude",
+    mode: "real",
+    autonomy: authority.autonomy,
+    disposition: "started",
+  };
 }
 
 /**
@@ -845,7 +1891,8 @@ export async function escalateFailedOperatorRun(
   runId: string,
 ): Promise<void> {
   try {
-    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    const { runFailureReason } =
+      await import("~/server/tasks/agent-reply.server");
     const reason = runFailureReason(db, runId);
     const detail =
       reason?.kind === "quota"
@@ -858,15 +1905,13 @@ export async function escalateFailedOperatorRun(
       runId,
       kind: reason?.kind ?? "unknown",
     });
-    const { openSystemRecovery } = await import(
-      "~/server/tasks/task-recovery.server"
-    );
-    await openSystemRecovery(
+    await openOperatorSystemRecovery(
       db,
       {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         code: "operator_run_failed",
+        occurrenceId: runId,
         title: "Operator run failed — pick a recovery path",
         body:
           `The operator run did not complete — ${detail}. No coordination was ` +
@@ -885,6 +1930,7 @@ export async function escalateFailedOperatorRun(
       runId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    throw error;
   }
 }
 
@@ -901,6 +1947,7 @@ async function runScriptedOperatorDrive(
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
+  reservation: OperatorReactionReservation | null,
 ): Promise<RunOperatorResult> {
   const { projectSlug, taskKey } = input;
   const lines: LogLine[] = [];
@@ -927,6 +1974,7 @@ async function runScriptedOperatorDrive(
     say(
       `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,
     );
+    await scriptedOperatorHookForTests?.(db, input);
 
     // COORDINATE the current stage: prompt its agent (reviewer at the review
     // stage, specialist at the work stage), advancing through any pre-work
@@ -965,9 +2013,11 @@ async function runScriptedOperatorDrive(
             const d = snap.deployedSpecialists.find((s) => s.id === id);
             return !d || d.eligibleForCurrentStage;
           };
-          const revIds = snap.reviewers.map((r) => r.profileId).filter(eligibleHere);
+          const eligibleReviewers = snap.reviewers.filter((reviewer) =>
+            eligibleHere(reviewer.profileId),
+          );
           const candidates = snap.routingCandidates.reviewer;
-          if (revIds.length === 0) {
+          if (eligibleReviewers.length === 0) {
             const result = await operatorOpenPacket(
               db,
               ctx,
@@ -983,27 +2033,29 @@ async function runScriptedOperatorDrive(
                   candidates.length === 0
                     ? "Every reviewer candidate failed a hard stage or MCP compatibility constraint."
                     : `The deterministic fallback will not select among ${candidates.length} eligible reviewer${candidates.length === 1 ? "" : "s"}. Run Claude/Codex Operator or assign a reviewer explicitly.`,
-                options: defaultPacketOptions(candidates.length === 0 ? "blocked" : "input"),
+                options: defaultPacketOptions(
+                  candidates.length === 0 ? "blocked" : "input",
+                ),
               },
               authority,
             );
             say(result.message);
             return;
           }
-          if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
-            for (const rev of revIds) {
+          if (
+            eligibleReviewers.length &&
+            gate(authority, "summon-reviewers") !== "deny"
+          ) {
+            for (const reviewer of eligibleReviewers) {
               say(
                 (
-                  await operatorPromptReviewer(
+                  await operatorRunReviewer(
                     db,
                     ctx,
                     {
                       projectSlug,
                       taskKey,
-                      profileId: rev,
-                      reason: snap.reviewers.some((r) => r.profileId === rev)
-                        ? "This reviewer was already explicitly engaged; no new ranking decision was made."
-                        : "This reviewer was explicitly selected before the deterministic fallback turn.",
+                      profileId: reviewer.profileId,
                     },
                     authority,
                   )
@@ -1014,14 +2066,33 @@ async function runScriptedOperatorDrive(
           return;
         }
         if (snap.stage === workStageId || !workStageId) {
-          // A prior explicit assignment may be resumed. With no assignment the
-          // deterministic fallback may use a sole hard-eligible candidate, but
-          // it never ranks several candidates with a hidden static preference.
-          const assigned = snap.specialist
-            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
-            : undefined;
+          // A prior explicit human/intelligent assignment may be continued.
+          // With no eligible binding, deterministic fallback stops at a human
+          // packet; it never turns candidate facts into a ranking decision.
           const candidates = snap.routingCandidates.primary;
-          if (!assigned || !assigned.eligibleForCurrentStage) {
+          const assigned = snap.specialist
+            ? snap.deployedSpecialists.find(
+                (s) => s.id === snap.specialist!.profileId,
+              )
+            : undefined;
+          // A binding is resumable only when its exact profile/backend also
+          // survives the routing hard filters. Stage eligibility alone is not
+          // enough: for example, a Codex binding may be unable to enforce the
+          // profile's withheld capabilities. In that case the deterministic
+          // fallback must stop for an intelligent re-route instead of trying a
+          // run that admission will reject.
+          const assignedCandidate = snap.specialist
+            ? candidates.find(
+                (candidate) =>
+                  candidate.profileId === snap.specialist!.profileId &&
+                  candidate.backend === snap.specialist!.backend,
+              )
+            : undefined;
+          if (
+            !assigned ||
+            !assigned.eligibleForCurrentStage ||
+            !assignedCandidate
+          ) {
             const result = await operatorOpenPacket(
               db,
               ctx,
@@ -1037,26 +2108,26 @@ async function runScriptedOperatorDrive(
                   candidates.length === 0
                     ? "Every specialist candidate failed a hard stage or MCP compatibility constraint."
                     : `The deterministic fallback will not select among ${candidates.length} eligible specialist${candidates.length === 1 ? "" : "s"}. Run Claude/Codex Operator or assign a specialist explicitly.`,
-                options: defaultPacketOptions(candidates.length === 0 ? "blocked" : "input"),
+                options: defaultPacketOptions(
+                  candidates.length === 0 ? "blocked" : "input",
+                ),
               },
               authority,
             );
             say(result.message);
             return;
           }
-          const pick = assigned && assigned.eligibleForCurrentStage ? assigned : undefined;
+          const pick =
+            assigned && assigned.eligibleForCurrentStage ? assigned : undefined;
           if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
             say(
               (
-                await operatorPromptSpecialist(
+                await operatorRunSpecialist(
                   db,
                   ctx,
                   {
                     projectSlug,
                     taskKey,
-                    profileId: pick.id,
-                    reason:
-                      "This specialist was already explicitly assigned; no new ranking decision was made.",
                   },
                   authority,
                 )
@@ -1068,7 +2139,12 @@ async function runScriptedOperatorDrive(
         // Pre-work stage — advance toward the work stage.
         const nid = snap.nextStages[0]?.id;
         if (!nid) return;
-        const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
+        const t = await operatorTransitionStage(
+          db,
+          ctx,
+          { projectSlug, taskKey, toStageId: nid },
+          authority,
+        );
         say(t.message);
         if (t.outcome !== "done") return; // recommended (supervised) → stop.
       }
@@ -1081,15 +2157,31 @@ async function runScriptedOperatorDrive(
       snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
       if (snap.stage === doneStageId) return;
       if (snap.stage === reviewStageId) {
-        say((await operatorAcceptCompletion(db, ctx, { projectSlug, taskKey }, authority)).message);
+        say(
+          (
+            await operatorAcceptCompletion(
+              db,
+              ctx,
+              { projectSlug, taskKey },
+              authority,
+            )
+          ).message,
+        );
         return;
       }
       const nid = snap.nextStages[0]?.id;
       if (!nid) {
-        say("No further governed transition from here — handing back to humans.");
+        say(
+          "No further governed transition from here — handing back to humans.",
+        );
         return;
       }
-      const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
+      const t = await operatorTransitionStage(
+        db,
+        ctx,
+        { projectSlug, taskKey, toStageId: nid },
+        authority,
+      );
       say(t.message);
       if (t.outcome === "done") await coordinate(); // full: performed → coordinate the new stage.
     };
@@ -1123,15 +2215,26 @@ async function runScriptedOperatorDrive(
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    say("Operator halted on an error — see the task timeline.");
+    throw error;
   }
+
+  await scriptedOperatorBeforeNarrationHookForTests?.(db, input);
 
   lines.push({
     t: "",
     ev: "result",
     tag: "result",
     text: "operator pass complete",
-    stats: { subtype: "success", dur: 1200, api: 900, turns: 1, cost: 0, in: 0, cached: 0, out: 0 },
+    stats: {
+      subtype: "success",
+      dur: 1200,
+      api: 900,
+      turns: 1,
+      cost: 0,
+      in: 0,
+      cached: 0,
+      out: 0,
+    },
   });
 
   const sid = newId("op").replace("op_", "");
@@ -1148,15 +2251,19 @@ async function runScriptedOperatorDrive(
   });
 
   const { runId } = await startRun(db, {
+    ...(reservation ? { runId: reservation.runId } : {}),
     projectSlug,
     taskKey,
-    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
+    threadId:
+      reservation?.threadId ?? "op-" + newId("t").replace("t_", "").slice(0, 8),
     role: "Operator",
     kind: "operator",
     backend: authority.backend,
     model: authority.model,
     agentName: authority.name,
     agentProfileId: "operator",
+    completionSourceRunId: input.completionSourceRunId ?? null,
+    operatorDispatchId: input.dispatchId ?? null,
     prompt: `Supervise ${taskKey} toward its next boundary.`,
     script,
     simulate: true,
@@ -1164,12 +2271,23 @@ async function runScriptedOperatorDrive(
     ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   });
 
+  // Scripted coordination executes synchronously before its narration run is
+  // materialized. Reaching this point proves all governed effects (or their
+  // narrated failure boundary) have settled durably.
+  patchRun(db, runId, { operatorEffectState: "applied" });
+
   logger.info("operator run started (scripted)", {
     taskKey,
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: authority.backend, mode: "scripted", autonomy: authority.autonomy };
+  return {
+    runId,
+    backend: authority.backend,
+    mode: "scripted",
+    autonomy: authority.autonomy,
+    disposition: "started",
+  };
 }
 
 // ------------------------------------------------------- system prompt
@@ -1180,7 +2298,12 @@ const FALLBACK_OPERATOR_DEFINITION = `You are the Operator: the coordinator for 
 /** Read the shipped operator agent definition (body only), or the fallback. */
 function readOperatorDefinition(dataRoot?: string): string {
   try {
-    const file = path.join(agentProfilesDir(dataRoot), "..", "definitions", "operator.md");
+    const file = path.join(
+      agentProfilesDir(dataRoot),
+      "..",
+      "definitions",
+      "operator.md",
+    );
     if (existsSync(file)) {
       const { body } = splitFrontmatter(readFileSync(file, "utf8"));
       const trimmed = body.trim();
@@ -1223,7 +2346,9 @@ export function buildOperatorSystemPrompt(
   const parts = [definition];
   // Load EVERY declared skill that exists in the store (not just one), so the
   // operator's profile-declared skills are actually in its context.
-  const skills = authority.skills.length ? authority.skills : ["viberr-app-expertise"];
+  const skills = authority.skills.length
+    ? authority.skills
+    : ["viberr-app-expertise"];
   for (const name of skills) {
     const body = readSkillBody(name, dataRoot);
     if (body) parts.push(`\n\n---\n# ${name} (skill)\n\n${body}`);
@@ -1273,22 +2398,23 @@ export function buildCodexOperatorPrompt(
   trigger: "create" | "transition" | "agent-reply" | "manual",
   humanComment?: string,
 ): string {
-  const decision = snapshot.readiness !== "ready"
-    ? "READINESS GATE: return exactly one assess_readiness action and no assignment, run, prompt, or transition. " +
-      "Use ready only if the canonical goal itself states a concrete outcome and verification boundary; otherwise use input_required and name the missing intent. Never invent a repository change."
-    : humanComment?.trim()
-    ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
-    : trigger === "agent-reply"
-      ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
-        "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
-        "toward review if the implementation looks complete, or accept_completion if the review is clean. Only " +
-        "re-prompt the same agent (prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not " +
-        "prompt just to repeat yourself."
-      : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
-        "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
-        "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
-        "the agent reports back. Choose profileId only from the matching hard-eligible routingCandidates list after comparing " +
-        "scope, skills, KB/MCP fit, backend health, workload, and observed cost. Put your concrete selection explanation in reason.";
+  const decision =
+    snapshot.readiness !== "ready"
+      ? "READINESS GATE: return exactly one assess_readiness action and no assignment, run, prompt, or transition. " +
+        "Use ready only if the canonical goal itself states a concrete outcome and verification boundary; otherwise use input_required and name the missing intent. Never invent a repository change."
+      : humanComment?.trim()
+        ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
+        : trigger === "agent-reply"
+          ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
+            "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
+            "toward review if the implementation looks complete, or accept_completion if the review is clean. Only " +
+            "re-prompt the same agent (prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not " +
+            "prompt just to repeat yourself."
+          : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
+            '(the review stage), putting a concrete task-related directive addressed to the agent ("@dev implement …") ' +
+            "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
+            "the agent reports back. Choose the profileId + backend pair only from the matching hard-eligible routingCandidates list after comparing " +
+            "scope, skills, KB/MCP fit, backend health, workload, and observed cost. Put your concrete selection explanation in reason.";
   return (
     "# This task\n\n" +
     "```json\n" +
@@ -1296,12 +2422,12 @@ export function buildCodexOperatorPrompt(
     "\n```\n\n" +
     "# Your decision\n\n" +
     "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
-    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions.\n\n" +
+    "Use an exact profileId + backend pair from routingCandidates for assign/prompt actions, and nextStages' ids for transitions.\n\n" +
     decision +
     "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
     "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
     "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "text": "<task-related directive>", "reason": "why this candidate fits the supplied context" } ] }. ` +
+    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "backend": "claude", "text": "<task-related directive>", "reason": "why this exact profile/backend candidate fits the supplied context" } ] }. ` +
     "Include a short reason on each governed action (it is shown on the recommendation card)."
   );
 }
@@ -1321,7 +2447,26 @@ export function buildOperatorTurnPrompt(
   const header =
     `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
     `Goal: ${snapshot.goal}\n\n` +
-      `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
+
+  // A human is talking to you directly (@operator). Answer them even when a
+  // preceding crashed turn left readiness blocked; otherwise durable replay
+  // technically launches but silently drops the message from the prompt.
+  if (humanComment?.trim()) {
+    const readinessBoundary =
+      snapshot.readiness === "ready"
+        ? "If their message calls for a coordination action you're allowed to take (prompt an agent, engage a reviewer, recommend/perform a transition), do it and say so. If it does not, just respond."
+        : `Readiness is ${snapshot.readiness}. Respond first. If the message supplies the missing intent, call assess_readiness exactly once; otherwise explain the remaining input needed. STOP without assigning, prompting, or transitioning while readiness is not ready.`;
+    return (
+      header +
+      `A human just addressed YOU directly with: "${humanComment.trim()}"\n\n` +
+      "Do this now:\n" +
+      "1. Call get_task to read the live state, your policy, and the allowed next stages.\n" +
+      "2. Post a `post_comment` that RESPONDS to the human's message — answer their question or acknowledge their instruction, grounded in the task's real state.\n" +
+      `3. ${readinessBoundary}\n` +
+      "Respect your capability policy. Keep it concise and directly responsive."
+    );
+  }
 
   if (snapshot.readiness !== "ready") {
     return (
@@ -1331,20 +2476,6 @@ export function buildOperatorTurnPrompt(
       "2. Call assess_readiness exactly once. Mark ready only when the goal states a concrete outcome and verification boundary.\n" +
       "3. If intent is missing, keep input_required and name what the human must add.\n" +
       "4. STOP. Do not assign, run, prompt, or transition in the same turn. Never invent a product or repository change."
-    );
-  }
-
-  // A human is talking to you directly (@operator). Answer them first, then take
-  // any coordination action that their message warrants.
-  if (humanComment?.trim()) {
-    return (
-      header +
-      `A human just addressed YOU directly with: "${humanComment.trim()}"\n\n` +
-      "Do this now:\n" +
-      "1. Call get_task to read the live state, your policy, and the allowed next stages.\n" +
-      "2. Post a `post_comment` that RESPONDS to the human's message — answer their question or acknowledge their instruction, grounded in the task's real state.\n" +
-      "3. If their message calls for a coordination action you're allowed to take (prompt an agent, engage a reviewer, recommend/perform a transition), do it and say so. If it does not, just respond.\n" +
-      "Respect your capability policy. Keep it concise and directly responsive."
     );
   }
 
@@ -1369,10 +2500,10 @@ export function buildOperatorTurnPrompt(
     "Do this now:\n" +
     "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
     "2. Post a brief plan comment.\n" +
-    "3. Compare the matching hard-eligible routingCandidates by declared scope, skills, KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score candidates.\n" +
+    "3. Compare the exact profileId + backend rows in the matching hard-eligible routingCandidates by declared scope, skills, KB/MCP fit, backend health, workload, and observed cost. YOU make the final choice; Viberr does not score candidates.\n" +
     "4. TRIGGER the chosen agent with a concrete, goal-grounded directive and a persisted routing reason:\n" +
     "   · a working stage (before review) → prompt_specialist(profileId, prompt) — assigns the\n" +
-    "     specialist, posts your \"@name …\" prompt to it, and starts its run on your directive;\n" +
+    '     specialist, posts your "@name …" prompt to it, and starts its run on your directive;\n' +
     "   · the review stage → prompt_reviewer(profileId, prompt) — engages + prompts + runs a reviewer.\n" +
     "   Write the prompt about THIS task (its goal and what to do at this stage), not a generic 'go'.\n" +
     "5. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +

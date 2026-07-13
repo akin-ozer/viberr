@@ -71,6 +71,15 @@ function validateValue(value: string): string {
 }
 
 /**
+ * The last four characters shown in the masked metadata — but only when the
+ * value is long enough that the suffix is not the whole secret. Short values
+ * (≤8 chars) reveal no characters, so `····` masks them completely.
+ */
+function maskedSuffix(value: string): string {
+  return value.length > 8 ? value.slice(-4) : "";
+}
+
+/**
  * Creates or rotates an org secret. Names (and therefore refs) are immutable;
  * rotation never rewrites an MCP config and an empty edit never erases a value.
  */
@@ -96,7 +105,7 @@ export function saveOrgSecret(
       `UPDATE org_secrets
        SET encrypted_value = ?, value_suffix = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(sealSecret(value), value.slice(-4), now, input.id);
+    ).run(sealSecret(value), maskedSuffix(value), now, input.id);
     recordAudit(db, {
       action: "org.secret.rotated",
       actor,
@@ -120,7 +129,7 @@ export function saveOrgSecret(
     `INSERT INTO org_secrets
        (id, name, encrypted_value, value_suffix, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(id, name, sealSecret(value), value.slice(-4), now, now);
+  ).run(id, name, sealSecret(value), maskedSuffix(value), now, now);
   recordAudit(db, {
     action: "org.secret.created",
     actor,

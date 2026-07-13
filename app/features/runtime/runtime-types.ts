@@ -24,6 +24,13 @@ export type RunBackend = "claude" | "codex" | "simulated";
 
 export type RunKind = "operator" | "primary" | "reviewer";
 
+/** Why a specialist session exists. Governance side effects are keyed to this
+ * persisted purpose, never inferred from role labels or prompt prose. */
+export type SpecialistRunPurpose =
+  | "implementation"
+  | "governance_review"
+  | "conversation";
+
 /**
  * Projected LogLine — one console row. Mirrors the mock's `cc.*`/`cx.*`
  * builder output (runs.md §3.2). `ev` selects the row color + raw-envelope

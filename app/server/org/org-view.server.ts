@@ -23,7 +23,7 @@ import {
   type OrgSecretMetadata,
 } from "~/server/secrets/org-secret-store.server";
 import {
-  listAgentResourceUsages,
+  buildAgentResourceDependencyIndex,
   type AgentResourceUsage,
 } from "./resource-dependencies.server";
 
@@ -50,6 +50,7 @@ export function getOrgSettingsView(
   db: Database.Database,
   ctx: OrgSeedContext = {},
 ): OrgSettingsView {
+  const dependencies = buildAgentResourceDependencyIndex(db, ctx);
   return {
     connections: listConnections(db),
     users: listOrgUsers(db),
@@ -58,8 +59,8 @@ export function getOrgSettingsView(
     mcps: listMcpServers(db),
     secrets: listOrgSecrets(db),
     skills: listSkills(db, ctx),
-    gagents: listGlobalAgentProfiles(db, ctx),
+    gagents: listGlobalAgentProfiles(db, ctx, dependencies.projectReferences),
     stages: GOVERNED_TEMPLATE.stages,
-    resourceUsages: listAgentResourceUsages(db, ctx),
+    resourceUsages: dependencies.resourceUsages,
   };
 }

@@ -44,24 +44,66 @@ CREATE TABLE agent_runs_new (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
   interrupted_by TEXT,
+  source_intent_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   agent_name TEXT,
-  agent_profile_id TEXT
+  agent_profile_id TEXT,
+  run_purpose TEXT CHECK (run_purpose IN
+    ('implementation', 'governance_review', 'conversation')),
+  review_evidence_fingerprint TEXT,
+  review_head_sha TEXT,
+  -- A specialist completion may start one follow-up operator reaction. This
+  -- durable source identity closes the crash-after-start replay window.
+  completion_source_run_id TEXT,
+  -- Canonical task lifecycle observed before provider launch. A deleted and
+  -- recreated slug/key must never inherit completion/operator effects.
+  task_incarnation TEXT,
+  -- Automatic-dispatch claim which owns this operator run, persisted before
+  -- provider launch so boot can distinguish an unlaunched claim from one
+  -- whose governed effects may already have executed.
+  operator_dispatch_id TEXT,
+  -- Snapshot needed to replay specialist completion after process loss. Phase
+  -- is monotonic: 0 pending, 1 reply, 2 delivery, 3 evidence, 4 verdict,
+  -- 5 reaction, 6 complete.
+  completion_context_json TEXT,
+  completion_phase INTEGER NOT NULL DEFAULT 0
+    CHECK (completion_phase BETWEEN 0 AND 6),
+  -- Operator plans/tool effects are not complete merely because provider
+  -- output is terminal. Boot recovery escalates unresolved pending effects.
+  operator_effect_state TEXT
+    CHECK (operator_effect_state IN ('pending', 'applied', 'recovery'))
 );
 
 INSERT INTO agent_runs_new
   (id, task_key, project_slug, thread_id, role, kind, backend, simulated,
    model, session_id, sdk, state, phase, step, started_at, finished_at, turns,
    input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
-   interrupted_by, created_at, updated_at, agent_name, agent_profile_id)
+   interrupted_by, source_intent_id, created_at, updated_at, agent_name, agent_profile_id,
+   run_purpose, review_evidence_fingerprint, review_head_sha,
+   completion_source_run_id, task_incarnation, operator_dispatch_id,
+   completion_context_json, completion_phase,
+   operator_effect_state)
 SELECT
    id, task_key, project_slug, thread_id, role,
    CASE WHEN kind = 'consultant' THEN 'reviewer' ELSE kind END,
    backend, simulated, model, session_id, sdk, state, phase, step, started_at,
    finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
-   total_cost_usd, interrupted_by, created_at, updated_at, agent_name,
-   agent_profile_id
+   total_cost_usd, interrupted_by, source_intent_id, created_at, updated_at, agent_name,
+   agent_profile_id,
+   CASE
+     WHEN kind = 'primary' THEN 'implementation'
+     WHEN kind = 'consultant' THEN 'governance_review'
+     ELSE NULL
+   END,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   0,
+   NULL
 FROM agent_runs;
 
 DROP TABLE agent_runs;
@@ -71,6 +113,15 @@ CREATE INDEX idx_agent_runs__task ON agent_runs (project_slug, task_key);
 CREATE INDEX idx_agent_runs__state ON agent_runs (state);
 CREATE UNIQUE INDEX idx_agent_runs__thread
   ON agent_runs (project_slug, task_key, thread_id);
+CREATE UNIQUE INDEX idx_agent_runs__completion_source
+  ON agent_runs (completion_source_run_id)
+  WHERE kind = 'operator' AND completion_source_run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_agent_runs__operator_dispatch
+  ON agent_runs (operator_dispatch_id)
+  WHERE kind = 'operator' AND operator_dispatch_id IS NOT NULL;
+CREATE INDEX idx_agent_runs__source_intent
+  ON agent_runs (source_intent_id)
+  WHERE source_intent_id IS NOT NULL;
 
 -- --- 3. Rebuild run_log_lines (FK → new agent_runs) and restore its rows. ---
 CREATE TABLE run_log_lines (

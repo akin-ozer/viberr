@@ -14,6 +14,7 @@ import {
 } from "~/server/tasks/task-actions.server";
 import { withProjectAuditAuthority } from "~/server/audit/audit-recorder.server";
 import { BoardPage } from "~/features/board/board-page";
+import { roleCan } from "~/shared/rbac";
 
 /**
  * Board view (board spec). Data comes from the workspace layout loader
@@ -124,11 +125,8 @@ export default function Board() {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
   const archived = layout.board.project.archived;
-  const canCreate =
-    !archived && layout.myRole !== null && layout.myRole !== "viewer";
-  const canTransition =
-    !archived &&
-    (layout.myRole === "admin" || layout.myRole === "maintainer");
+  const canCreate = !archived && roleCan(layout.myRole, "create-task");
+  const canTransition = !archived && roleCan(layout.myRole, "reorder-board");
   return (
     <BoardPage
       columns={layout.board.columns}

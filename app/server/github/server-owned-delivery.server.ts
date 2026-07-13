@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { promisify } from "node:util";
 import type Database from "better-sqlite3";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { DeliveryPermissions } from "~/server/tasks/specialist-tool-policy";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
-  appendTimelineEvent,
   readTaskFile,
   resolveTaskFilePath,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -21,7 +18,17 @@ import {
   githubRemoteSanitizationArgs,
 } from "~/server/tasks/git-clone-auth.server";
 import { getBranchCompare, taskBranchName } from "./branch-sync.server";
+import {
+  defaultCommandExec,
+  type CommandExec as SharedCommandExec,
+  type CommandExecResult,
+} from "./command-exec.server";
 import { getProjectGithubContext } from "./github-context.server";
+import { normalizeFullGitSha } from "./head-sha.server";
+import {
+  assertTaskLifecycleActive,
+  type TaskLifecycleGuard,
+} from "~/server/tasks/task-lifecycle.server";
 import { openTaskPr } from "./pr-open.server";
 import {
   reconcileWorkspaceDelivery,
@@ -40,7 +47,12 @@ export type DeliveryFailureCode =
   | "pr_open_failed";
 
 export type ServerOwnedDeliveryResult =
-  | { status: "delivered"; branch: string; remoteSha: string; prNumber: number | null }
+  | {
+      status: "delivered";
+      branch: string;
+      remoteSha: string;
+      prNumber: number | null;
+    }
   | { status: "no_changes"; branch: string }
   | { status: "withheld"; reason: string }
   | {
@@ -50,47 +62,8 @@ export type ServerOwnedDeliveryResult =
       detail: string;
     };
 
-export type DeliveryExecResult =
-  | { ok: true; stdout: string }
-  | { ok: false; reason: "unavailable" | "failed" | "terminated" };
-
-export type DeliveryExec = (
-  file: string,
-  args: string[],
-  options: {
-    cwd: string;
-    timeoutMs: number;
-    env?: NodeJS.ProcessEnv;
-  },
-) => Promise<DeliveryExecResult>;
-
-const execFileAsync = promisify(execFile);
-
-const defaultExec: DeliveryExec = async (file, args, options) => {
-  try {
-    const { stdout } = await execFileAsync(file, args, {
-      cwd: options.cwd,
-      timeout: options.timeoutMs,
-      env: options.env,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return { ok: true, stdout: stdout.toString() };
-  } catch (error) {
-    const value =
-      error && typeof error === "object"
-        ? (error as { code?: unknown; signal?: unknown; killed?: unknown })
-        : {};
-    return {
-      ok: false,
-      reason:
-        value.code === "ENOENT"
-          ? "unavailable"
-          : value.killed || typeof value.signal === "string"
-            ? "terminated"
-            : "failed",
-    };
-  }
-};
+export type DeliveryExecResult = CommandExecResult;
+export type DeliveryExec = SharedCommandExec;
 
 function failure(
   code: DeliveryFailureCode,
@@ -130,11 +103,22 @@ export async function deliverSpecialistWorkspace(
     role: string;
     permissions: DeliveryPermissions;
     dataRoot?: string;
+    /** Revoked when archive/delete ends ownership during delivery. */
+    signal?: AbortSignal;
+    expectedTaskCreatedAt?: string;
+    assertAuthorization?: () => void;
+    /** Crash seam after the canonical delivery event but before projection and
+     * deterministic audit convergence. */
+    afterDeliveryCanonicalHookForTests?: () => void | Promise<void>;
   },
   options: { exec?: DeliveryExec; fetchImpl?: typeof fetch } = {},
 ): Promise<ServerOwnedDeliveryResult> {
+  input.assertAuthorization?.();
   if (!input.permissions.canCommitPush) {
-    return { status: "withheld", reason: "Remote branch delivery is withheld by policy." };
+    return {
+      status: "withheld",
+      reason: "Remote branch delivery is withheld by policy.",
+    };
   }
   if (!input.workdir || !existsSync(`${input.workdir}/.git`)) {
     return failure(
@@ -160,6 +144,18 @@ export async function deliverSpecialistWorkspace(
       "The task or project record disappeared before delivery could be finalized.",
     );
   }
+  const capturedCreatedAt =
+    input.expectedTaskCreatedAt ?? task.parsed.frontmatter.createdAt;
+  if (!capturedCreatedAt) {
+    throw new DOMException(
+      "Task lifecycle ownership is missing.",
+      "AbortError",
+    );
+  }
+  const taskLifecycle: TaskLifecycleGuard = {
+    expectedCreatedAt: capturedCreatedAt,
+    ...(input.signal ? { signal: input.signal } : {}),
+  };
   const repo = task.parsed.frontmatter.repo ?? project.parsed.frontmatter.repo;
   if (!repo) {
     return failure(
@@ -172,15 +168,46 @@ export async function deliverSpecialistWorkspace(
   const expectedBranch =
     task.parsed.frontmatter.branch ??
     taskBranchName(input.taskKey, task.parsed.frontmatter.title);
-  const exec = options.exec ?? defaultExec;
-  const run = (args: string[], timeoutMs = 10_000, env?: NodeJS.ProcessEnv) =>
-    exec("git", args, {
+  const exec = options.exec ?? defaultCommandExec;
+  const assertActive = () => {
+    input.assertAuthorization?.();
+    if (input.signal?.aborted) {
+      throw new DOMException(
+        "Specialist delivery was cancelled.",
+        "AbortError",
+      );
+    }
+    const current = readTaskFile(taskRef);
+    assertTaskLifecycleActive(
+      taskLifecycle,
+      current?.parsed.frontmatter.createdAt ?? null,
+    );
+  };
+  const run = async (
+    args: string[],
+    timeoutMs = 10_000,
+    env?: NodeJS.ProcessEnv,
+  ) => {
+    assertActive();
+    const result = await exec("git", args, {
       cwd: input.workdir!,
       timeoutMs,
       ...(env ? { env } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
+    assertActive();
+    return result;
+  };
 
-  const branchResult = await run(["-C", input.workdir, "rev-parse", "--abbrev-ref", "HEAD"]);
+  assertActive();
+  const branchResult = await run([
+    "-C",
+    input.workdir,
+    "rev-parse",
+    "--abbrev-ref",
+    "HEAD",
+  ]);
+  assertActive();
   if (!branchResult.ok) {
     return failure(
       "workspace_invalid",
@@ -197,6 +224,7 @@ export async function deliverSpecialistWorkspace(
     );
   }
   const status = await run(["-C", input.workdir, "status", "--porcelain"]);
+  assertActive();
   if (!status.ok) {
     return failure(
       "workspace_invalid",
@@ -211,6 +239,7 @@ export async function deliverSpecialistWorkspace(
     "--format=%h%x09%s",
     `origin/${defaultBranch}..HEAD`,
   ]);
+  assertActive();
   if (!commitsResult.ok) {
     return failure(
       "workspace_invalid",
@@ -237,6 +266,7 @@ export async function deliverSpecialistWorkspace(
     );
   }
   const head = await run(["-C", input.workdir, "rev-parse", "HEAD"]);
+  assertActive();
   if (!head.ok || !head.stdout.trim()) {
     return failure(
       "workspace_invalid",
@@ -244,7 +274,14 @@ export async function deliverSpecialistWorkspace(
       "Viberr could not identify the exact local commit to deliver.",
     );
   }
-  const localSha = head.stdout.trim();
+  const localSha = normalizeFullGitSha(head.stdout);
+  if (!localSha) {
+    return failure(
+      "workspace_invalid",
+      "Specialist delivery HEAD is invalid",
+      "Viberr requires the full Git commit SHA before remote delivery can be governed.",
+    );
+  }
   const credential = getProjectCredential(db, input.projectSlug);
   const token = credential ? getPatToken(db, credential.id) : null;
   if (!token) {
@@ -255,7 +292,10 @@ export async function deliverSpecialistWorkspace(
     );
   }
 
-  const sanitized = await run(githubRemoteSanitizationArgs(repo, input.workdir));
+  const sanitized = await run(
+    githubRemoteSanitizationArgs(repo, input.workdir),
+  );
+  assertActive();
   if (!sanitized.ok) {
     return failure(
       "workspace_invalid",
@@ -281,6 +321,7 @@ export async function deliverSpecialistWorkspace(
   } finally {
     auth.dispose();
   }
+  assertActive();
   if (!pushed.ok) {
     return failure(
       "push_failed",
@@ -304,7 +345,8 @@ export async function deliverSpecialistWorkspace(
     "GET",
     `/repos/${gh.repo}/git/ref/${encodeURIComponent(`heads/${branch}`)}`,
   );
-  if (!remote.ok || remote.data.object.sha !== localSha) {
+  assertActive();
+  if (!remote.ok || normalizeFullGitSha(remote.data.object.sha) !== localSha) {
     return failure(
       "remote_head_unverified",
       "Remote branch HEAD does not match",
@@ -317,6 +359,7 @@ export async function deliverSpecialistWorkspace(
     gh.defaultBranch,
     branch,
   );
+  assertActive();
   if (compare.status !== "ok" || compare.compare.aheadBy < 1) {
     return failure(
       "remote_diff_empty",
@@ -326,13 +369,21 @@ export async function deliverSpecialistWorkspace(
   }
 
   const reconcileExec: CommandExec = (file, args, reconcileOptions) =>
-    exec(file, args, { cwd: reconcileOptions.cwd, timeoutMs: reconcileOptions.timeoutMs }).then(
-      (result) =>
-        result.ok
-          ? { ok: true as const, stdout: result.stdout }
-          : { ok: false as const, stdout: "", stderr: "command failed", code: null },
+    exec(file, args, {
+      cwd: reconcileOptions.cwd,
+      timeoutMs: reconcileOptions.timeoutMs,
+      ...(input.signal ? { signal: input.signal } : {}),
+    }).then((result) =>
+      result.ok
+        ? { ok: true as const, stdout: result.stdout }
+        : {
+            ok: false as const,
+            stdout: "",
+            stderr: "command failed",
+            code: null,
+          },
     );
-  await reconcileWorkspaceDelivery({
+  const reconciled = await reconcileWorkspaceDelivery({
     db,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -342,43 +393,92 @@ export async function deliverSpecialistWorkspace(
     simulated: false,
     skipPrDetection: true,
     exec: reconcileExec,
+    expectedTaskCreatedAt: capturedCreatedAt,
+    ...(input.assertAuthorization
+      ? { assertAuthorization: input.assertAuthorization }
+      : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
     ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   });
+  assertActive();
+  if (
+    reconciled.status === "skipped" &&
+    reconciled.reason === "unexpected error (swallowed)"
+  ) {
+    return failure(
+      "workspace_invalid",
+      "Specialist delivery reconciliation failed",
+      "The remote branch was pushed, but Viberr could not durably reconcile its canonical task evidence. Recovery is required before delivery can complete.",
+    );
+  }
 
+  const deliverySourceId = `github-delivery:${capturedCreatedAt}:${localSha}`;
   const refreshed = readTaskFile(taskRef);
   const alreadyRecorded = refreshed?.parsed.timeline.some(
     (event) =>
       event.type === "github" &&
       event.actor.kind === "system" &&
       event.actor.systemId === "github-delivery" &&
-      event.text.includes(localSha.slice(0, 7)),
+      event.sourceIntentId === deliverySourceId,
   );
   if (!alreadyRecorded) {
-    await appendTimelineEvent(taskRef, {
-      occurredAt: new Date().toISOString(),
-      type: "github",
-      actor: { kind: "system", systemId: "github-delivery" },
-      title: "Remote branch verified",
-      text: `Viberr pushed and verified branch \`${branch}\` at \`${localSha.slice(0, 7)}\` with ${compare.compare.aheadBy} commit(s) ahead of \`${gh.defaultBranch}\`.`,
-      toAgent: false,
-      evidence: null,
-    });
-    rebuildPath(db, resolveTaskFilePath(taskRef), {
-      ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
-    });
-    recordAudit(db, {
-      action: "github.workspace.branch_pushed",
-      actor: { userId: null, label: "system:delivery" },
-      subjectKind: "branch",
-      subjectId: branch,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      details: { repo, branch, remoteSha: localSha, aheadBy: compare.compare.aheadBy },
+    assertActive();
+    await updateTaskFile(taskRef, (parsed) => {
+      assertTaskLifecycleActive(taskLifecycle, parsed.frontmatter.createdAt);
+      input.assertAuthorization?.();
+      const recorded = parsed.timeline.some(
+        (event) =>
+          event.type === "github" &&
+          event.actor.kind === "system" &&
+          event.actor.systemId === "github-delivery" &&
+          event.sourceIntentId === deliverySourceId,
+      );
+      if (recorded) return;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "github-delivery" },
+        title: "Remote branch verified",
+        text: `Viberr pushed and verified branch \`${branch}\` at \`${localSha.slice(0, 7)}\` with ${compare.compare.aheadBy} commit(s) ahead of \`${gh.defaultBranch}\`.`,
+        toAgent: false,
+        evidence: null,
+        sourceIntentId: deliverySourceId,
+      });
     });
   }
+  await input.afterDeliveryCanonicalHookForTests?.();
+  assertActive();
+  rebuildPath(db, resolveTaskFilePath(taskRef), {
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+  });
+  // Converge independently from the timeline. A retry after a process exit
+  // between the file write and this insert restores the audit, and the full
+  // SHA + task incarnation prevents short-SHA or same-key collisions.
+  db.prepare(
+    `INSERT OR IGNORE INTO audit_events
+       (id, occurred_at, actor_user_id, actor_label, action,
+        subject_kind, subject_id, project_slug, task_key, details_json)
+     VALUES (?, ?, NULL, 'system:delivery',
+             'github.workspace.branch_pushed', 'branch', ?, ?, ?, ?)`,
+  ).run(
+    `evt:${deliverySourceId}`,
+    new Date().toISOString(),
+    branch,
+    input.projectSlug,
+    input.taskKey,
+    JSON.stringify({
+      repo,
+      branch,
+      remoteSha: localSha,
+      aheadBy: compare.compare.aheadBy,
+      taskIncarnation: capturedCreatedAt,
+      sourceIntentId: deliverySourceId,
+    }),
+  );
 
   let prNumber: number | null = null;
   if (input.permissions.canOpenPr) {
+    assertActive();
     const pr = await openTaskPr(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
@@ -386,8 +486,15 @@ export async function deliverSpecialistWorkspace(
       {
         ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        verifiedHeadSha: localSha,
+        signal: input.signal,
+        taskLifecycle,
+        ...(input.assertAuthorization
+          ? { assertAuthorization: input.assertAuthorization }
+          : {}),
       },
     );
+    assertActive();
     if (pr.status !== "ok") {
       return failure(
         "pr_open_failed",

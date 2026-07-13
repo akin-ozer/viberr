@@ -1,15 +1,19 @@
-import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type Database from "better-sqlite3";
+import {
+  defaultCommandExec,
+  type CommandExec,
+  type CommandExecResult,
+} from "~/server/github/command-exec.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   getPatToken,
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import {
-  cloneFailureLogDetails,
+  createGitHubAuthPlan,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
 } from "./git-clone-auth.server";
@@ -27,6 +31,8 @@ export type SpecialistPreflightResult =
       workdir: string;
       credentialBound: boolean;
       reused: boolean;
+      /** Exact checked-out head when a review target was requested. */
+      headSha: string | null;
     }
   | {
       status: "blocked";
@@ -36,49 +42,43 @@ export type SpecialistPreflightResult =
       credentialBound: boolean;
     };
 
-export type PreflightExecResult =
-  | { ok: true; stdout: string }
-  | {
-      ok: false;
-      reason: "git_unavailable" | "command_failed" | "command_terminated";
-      exitCode?: number;
-    };
+/** Compatibility export for the focused preflight tests and callers. */
+export type PreflightExec = CommandExec;
 
-export type PreflightExec = (
-  file: string,
-  args: string[],
-  options: {
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    timeoutMs: number;
-  },
-) => Promise<PreflightExecResult>;
+function assertPreflightActive(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException("Specialist workspace preparation was cancelled.", "AbortError");
+}
 
-const execFileAsync = promisify(execFile);
+/** Full repository identity, not basename, owns a workspace. The digest keeps
+ * paths bounded while ensuring owner changes such as acme/web→fork/web cannot
+ * relabel and reuse an unrelated checkout. */
+export function repositoryWorkspaceKey(repo: string): string {
+  const readable = repo
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "--")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  const digest = createHash("sha256")
+    .update(repo.trim().toLowerCase())
+    .digest("hex")
+    .slice(0, 12);
+  return `${readable || "repository"}-${digest}`;
+}
 
-const defaultExec: PreflightExec = async (file, args, options) => {
-  try {
-    const { stdout } = await execFileAsync(file, args, {
-      cwd: options.cwd,
-      env: options.env,
-      timeout: options.timeoutMs,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return { ok: true, stdout: stdout.toString() };
-  } catch (error) {
-    const safe = cloneFailureLogDetails(error);
-    return {
-      ok: false,
-      reason:
-        safe.reason === "git_unavailable"
-          ? "git_unavailable"
-          : safe.reason === "clone_terminated"
-            ? "command_terminated"
-            : "command_failed",
-      ...(safe.exitCode !== undefined ? { exitCode: safe.exitCode } : {}),
-    };
-  }
-};
+/** A caller-selected workspace namespace (for example one reviewer profile).
+ * Returning null keeps all path construction centralized and traversal-safe. */
+export function workspaceNamespaceKey(
+  value: string | null | undefined,
+): string | null {
+  const safe = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return safe || null;
+}
 
 function blocked(
   code: SpecialistPreflightCode,
@@ -146,29 +146,45 @@ export async function preflightSpecialistWorkspace(
     repo: string | null;
     /** Optional isolated workspace namespace (one stable namespace per reviewer). */
     workspaceKey?: string;
+    /** Reviewers inspect the exact remote task branch, never a new branch made
+     * from the clone's default branch. */
+    checkoutRef?: string;
+    /** When canonical GitHub evidence knows the head, refuse any other code. */
+    expectedHeadSha?: string | null;
     dataRoot?: string;
   },
-  options: { exec?: PreflightExec } = {},
+  options: { exec?: PreflightExec; signal?: AbortSignal } = {},
 ): Promise<SpecialistPreflightResult> {
+  assertPreflightActive(options.signal);
   const credential = getProjectCredential(db, input.projectSlug);
   const token = credential ? getPatToken(db, credential.id) : null;
   const credentialBound = token !== null;
   if (!input.repo) return blocked("repository_not_configured", credentialBound);
 
-  const exec = options.exec ?? defaultExec;
-  const repoName = input.repo.split("/").pop() ?? input.repo;
+  const rawExec = options.exec ?? defaultCommandExec;
+  // Archive/delete aborts the project-owned launch. Thread that cancellation
+  // through every Git command and check it on both sides of the await so a
+  // terminated command cannot be misclassified as a checkout failure and open
+  // a recovery packet on a project whose lifecycle is already draining.
+  const exec: PreflightExec = async (file, args, execOptions) => {
+    assertPreflightActive(options.signal);
+    const result = await rawExec(file, args, {
+      ...execOptions,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    assertPreflightActive(options.signal);
+    return result;
+  };
+  const repoIdentity = repositoryWorkspaceKey(input.repo);
   const baseWorkspaceRoot = path.join(
     taskDir(input.projectSlug, input.taskKey, input.dataRoot),
     "workspace",
   );
-  const workspaceKey = input.workspaceKey
-    ?.trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const workspaceKey = workspaceNamespaceKey(input.workspaceKey);
   const workspaceRoot = workspaceKey
     ? path.join(baseWorkspaceRoot, workspaceKey)
     : baseWorkspaceRoot;
-  const destination = path.join(workspaceRoot, repoName);
+  const destination = path.join(workspaceRoot, repoIdentity);
   mkdirSync(workspaceRoot, { recursive: true });
 
   const validate = async (): Promise<boolean> => {
@@ -180,6 +196,7 @@ export async function preflightSpecialistWorkspace(
     return result.ok && result.stdout.trim() === "true";
   };
 
+  let reused = false;
   if (existsSync(path.join(destination, ".git"))) {
     const sanitized = await exec(
       "git",
@@ -188,7 +205,7 @@ export async function preflightSpecialistWorkspace(
     );
     if (!sanitized.ok) {
       return blocked(
-        sanitized.reason === "git_unavailable"
+        sanitized.reason === "unavailable"
           ? "git_unavailable"
           : "checkout_invalid",
         credentialBound,
@@ -196,45 +213,94 @@ export async function preflightSpecialistWorkspace(
     }
     if (!(await validate()))
       return blocked("checkout_invalid", credentialBound);
-    return {
-      status: "ready",
-      workdir: destination,
-      credentialBound,
-      reused: true,
-    };
+    reused = true;
+  } else {
+    const clone = createGitHubClonePlan({
+      repo: input.repo,
+      destination,
+      ...(token ? { token } : {}),
+    });
+    let cloned: CommandExecResult;
+    try {
+      cloned = await exec("git", clone.args, {
+        cwd: workspaceRoot,
+        env: clone.env,
+        timeoutMs: 60_000,
+      });
+    } finally {
+      clone.dispose();
+    }
+    if (!cloned.ok) {
+      if (cloned.reason === "unavailable") {
+        return blocked("git_unavailable", credentialBound);
+      }
+      return blocked(
+        credentialBound ? "checkout_failed" : "checkout_auth_or_access_required",
+        credentialBound,
+      );
+    }
+    if (!existsSync(path.join(destination, ".git")) || !(await validate())) {
+      return blocked("checkout_invalid", credentialBound);
+    }
   }
 
-  const clone = createGitHubClonePlan({
-    repo: input.repo,
-    destination,
-    ...(token ? { token } : {}),
-  });
-  let cloned: PreflightExecResult;
-  try {
-    cloned = await exec("git", clone.args, {
-      cwd: workspaceRoot,
-      env: clone.env,
-      timeoutMs: 60_000,
-    });
-  } finally {
-    clone.dispose();
-  }
-  if (!cloned.ok) {
-    if (cloned.reason === "git_unavailable") {
-      return blocked("git_unavailable", credentialBound);
+  let headSha: string | null = null;
+  if (input.checkoutRef?.trim()) {
+    const auth = createGitHubAuthPlan({ ...(token ? { token } : {}) });
+    let fetched: CommandExecResult;
+    try {
+      fetched = await exec(
+        "git",
+        [
+          "-C",
+          destination,
+          "fetch",
+          "--depth",
+          "1",
+          "origin",
+          `refs/heads/${input.checkoutRef.trim()}`,
+        ],
+        { cwd: destination, env: auth.env, timeoutMs: 60_000 },
+      );
+    } finally {
+      auth.dispose();
     }
-    return blocked(
-      credentialBound ? "checkout_failed" : "checkout_auth_or_access_required",
-      credentialBound,
+    if (!fetched.ok) {
+      return blocked(
+        fetched.reason === "unavailable"
+          ? "git_unavailable"
+          : credentialBound
+            ? "checkout_failed"
+            : "checkout_auth_or_access_required",
+        credentialBound,
+      );
+    }
+    const checkedOut = await exec(
+      "git",
+      ["-C", destination, "checkout", "--detach", "FETCH_HEAD"],
+      { cwd: destination, timeoutMs: 10_000 },
     );
-  }
-  if (!existsSync(path.join(destination, ".git")) || !(await validate())) {
-    return blocked("checkout_invalid", credentialBound);
+    if (!checkedOut.ok) return blocked("checkout_invalid", credentialBound);
+    const head = await exec("git", ["-C", destination, "rev-parse", "HEAD"], {
+      cwd: destination,
+      timeoutMs: 10_000,
+    });
+    if (!head.ok || !head.stdout.trim()) {
+      return blocked("checkout_invalid", credentialBound);
+    }
+    headSha = head.stdout.trim();
+    if (
+      input.expectedHeadSha?.trim() &&
+      headSha.toLowerCase() !== input.expectedHeadSha.trim().toLowerCase()
+    ) {
+      return blocked("checkout_invalid", credentialBound);
+    }
   }
   return {
     status: "ready",
     workdir: destination,
     credentialBound,
-    reused: false,
+    reused,
+    headSha,
   };
 }

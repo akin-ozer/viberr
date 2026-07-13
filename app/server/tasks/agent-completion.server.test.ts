@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { chmodSync } from "node:fs";
+import path from "node:path";
 import {
   createTestDbContext,
   type TestDbContext,
@@ -10,7 +12,10 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  readTaskFile,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -24,12 +29,19 @@ import {
 } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { buildScript } from "~/server/runtimes/simulated-runtime.server";
+import { taskFilePath } from "~/server/files/file-store-root.server";
+import {
+  advanceRunCompletionPhase,
+  readRunCompletionPhase,
+  RUN_COMPLETION_PHASE,
+} from "~/server/runtimes/run-completion-state.server";
 import {
   applyAgentCompletionEffects,
   markWaitingAgent,
 } from "./task-actions.server";
 import {
   assignReviewer,
+  captureTaskLaunchAuthorization,
   startReviewerRun,
   startSpecialistRun,
   assignSpecialist,
@@ -60,6 +72,19 @@ function deployDevSpecialist(): void {
     repo: null,
     agents: [
       {
+        profileId: "implementer",
+        capabilities: [],
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: "implementer",
+          role: "Developer",
+          backends: ["claude"],
+          model: "sonnet",
+          effort: "xhigh",
+        },
+      } as never,
+      {
         profileId: "dev",
         capabilities: [],
         extras: [],
@@ -85,6 +110,18 @@ function taskFile() {
   })!;
 }
 
+function completionAuthorization(kind: "primary" | "reviewer") {
+  return captureTaskLaunchAuthorization(
+    { dataRoot: store.dataRoot },
+    {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      kind,
+      profileId: kind === "primary" ? "implementer" : "dev",
+    },
+  );
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 5_000,
@@ -106,6 +143,11 @@ beforeEach(() => {
       stage: "impl",
       ownerUserId: store.users.arda.id,
       title: "Unified completion pipeline probe",
+      specialist: {
+        profileId: "implementer",
+        backend: "claude",
+        role: "Developer",
+      },
       reviewers: [{ profileId: "dev", backend: "claude", role: "developer" }],
     }),
     goal: "Exercise the canonical completion handler.",
@@ -124,7 +166,11 @@ describe("waiting-state bookkeeping (A2)", () => {
   it("startSpecialistRun marks waiting=agent while the run is in flight", async () => {
     await assignSpecialist(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "implementer",
+      },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -202,6 +248,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
 
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "review";
+        parsed.frontmatter.validation = "changed";
+      },
+    );
     // 1500 chars of filler BEFORE the verdict line: the truncated comment
     // (1200 chars) never contains it — the old classifier missed it.
     const filler = "Detailed review notes follow. ".repeat(50);
@@ -216,9 +273,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         backend: "claude",
         role: "Reviewer",
         kind: "reviewer",
+        purpose: "governance_review",
         profileId: "dev",
         workdir: null,
         agentHandle: "reviewer",
+        launchAuthorization: completionAuthorization("reviewer"),
       },
       { id: runId, state: "finished", simulated: false },
     );
@@ -228,6 +287,159 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       (e) => e.type === "quality",
     );
     expect(quality).toBeTruthy();
+    expect(taskFile().parsed.packet).toBeNull();
+    expect(
+      taskFile().parsed.timeline.some(
+        (event) =>
+          event.type === "blocked" &&
+          event.actor.kind === "system" &&
+          event.actor.systemId.includes("agent-launch-authorization-changed"),
+      ),
+    ).toBe(false);
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.complete,
+    );
+  });
+
+  it("never treats a reviewer conversation as a governance verdict", async () => {
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "review";
+        parsed.frontmatter.validation = "changed";
+      },
+    );
+    const runId = await finishedRunWith(
+      'VIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"This was only a conversational reply."}',
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "Reviewer",
+        kind: "reviewer",
+        purpose: "conversation",
+        profileId: "dev",
+        workdir: null,
+        reviewEvidenceFingerprint: null,
+        reviewHeadSha: null,
+        agentHandle: "reviewer",
+        launchAuthorization: completionAuthorization("reviewer"),
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.reviewerVerdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
+  });
+
+  it("never delivers from a reviewer run even if generic delivery grants are supplied", async () => {
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "review";
+        parsed.frontmatter.validation = "changed";
+        parsed.frontmatter.branch = null;
+        parsed.frontmatter.pr = null;
+      },
+    );
+    const runId = await finishedRunWith(
+      'VIBERR_REVIEW_VERDICT: {"verdict":"approve","summary":"Repo-less evidence is correct."}',
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "Reviewer",
+        kind: "reviewer",
+        purpose: "governance_review",
+        profileId: "dev",
+        workdir: store.dataRoot,
+        delivery: {
+          canBranch: true,
+          canCommitPush: true,
+          canOpenPr: true,
+        },
+        agentHandle: "reviewer",
+        launchAuthorization: completionAuthorization("reviewer"),
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.branch).toBeNull();
+    expect(fm.pr).toBeNull();
+    expect(fm.validation).toBe("healthy");
+  });
+
+  it("keeps a reviewer callback after Done informational", async () => {
+    const launchAuthorization = completionAuthorization("reviewer");
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "done";
+        parsed.frontmatter.validation = "healthy";
+      },
+    );
+    const runId = await finishedRunWith(
+      'VIBERR_REVIEW_VERDICT: {"verdict":"request_changes","summary":"Late result."}',
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "Reviewer",
+        kind: "reviewer",
+        purpose: "governance_review",
+        profileId: "dev",
+        workdir: null,
+        agentHandle: "reviewer",
+        launchAuthorization,
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.stage).toBe("done");
+    expect(parsed.frontmatter.validation).toBe("healthy");
+    expect(parsed.frontmatter.reviewerVerdicts).toEqual([]);
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).not.toBe("blocked");
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM notifications
+              WHERE task_key = 'VIB-1'
+                AND kind = 'quality'
+                AND title = 'Late agent result retained in run history'`,
+          )
+          .get() as { n: number }
+      ).n,
+    ).toBeGreaterThan(0);
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.complete,
+    );
   });
 
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {
@@ -247,8 +459,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         backend: "claude",
         role: "developer",
         kind: "primary",
+        purpose: "implementation",
+        profileId: "implementer",
         workdir: null,
         agentHandle: "dev",
+        launchAuthorization: completionAuthorization("primary"),
       },
       { id: runId, state: "finished", simulated: false },
     );
@@ -314,6 +529,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       model: "gpt-5.5",
       sdk: "codex",
       state: "error",
+      taskIncarnation: taskFile().parsed.frontmatter.createdAt,
     });
     insertRunLine(store.db, {
       runId,
@@ -342,8 +558,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         backend: "codex",
         role: "Developer",
         kind: "primary",
+        purpose: "implementation",
+        profileId: "implementer",
         workdir: null,
         agentHandle: "dev",
+        launchAuthorization: completionAuthorization("primary"),
       },
       { id: runId, state: "error", simulated: false },
     );
@@ -373,6 +592,266 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
     // waiting must be flipped off `agent` (no phantom "agent working").
     expect(parsed.frontmatter.waiting).toBe("human");
+  });
+
+  it("keeps the verdict checkpoint replayable when its canonical write fails", async () => {
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "review";
+        parsed.frontmatter.validation = "changed";
+      },
+    );
+    const runId = await finishedRunWith(
+      'VIBERR_REVIEW_VERDICT: {"verdict":"request_changes","summary":"Retry this durable verdict."}',
+    );
+    advanceRunCompletionPhase(
+      store.db,
+      runId,
+      RUN_COMPLETION_PHASE.evidence,
+    );
+    const taskDirectory = path.dirname(
+      taskFilePath(store.slug, "VIB-1", store.dataRoot),
+    );
+    chmodSync(taskDirectory, 0o500);
+    try {
+      await expect(
+        applyAgentCompletionEffects(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            backend: "claude",
+            role: "Reviewer",
+            kind: "reviewer",
+            purpose: "governance_review",
+            profileId: "dev",
+            workdir: null,
+            agentHandle: "reviewer",
+            launchAuthorization: completionAuthorization("reviewer"),
+          },
+          { id: runId, state: "finished", simulated: false },
+        ),
+      ).rejects.toBeTruthy();
+      expect(readRunCompletionPhase(store.db, runId)).toBe(
+        RUN_COMPLETION_PHASE.evidence,
+      );
+    } finally {
+      chmodSync(taskDirectory, 0o700);
+    }
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "Reviewer",
+        kind: "reviewer",
+        purpose: "governance_review",
+        profileId: "dev",
+        workdir: null,
+        agentHandle: "reviewer",
+        launchAuthorization: completionAuthorization("reviewer"),
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.complete,
+    );
+    expect(
+      taskFile().parsed.timeline.some(
+        (event) => event.type === "quality" && event.sourceRunId === runId,
+      ),
+    ).toBe(true);
+  });
+
+  it("replays a canonical request-changes verdict without treating its own Review to Work transition as stale", async () => {
+    await updateTaskFile(
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      },
+      (parsed) => {
+        parsed.frontmatter.stage = "review";
+        parsed.frontmatter.validation = "changed";
+      },
+    );
+    const launchAuthorization = completionAuthorization("reviewer");
+    const runId = await finishedRunWith(
+      'VIBERR_REVIEW_VERDICT: {"verdict":"request_changes","summary":"Replay the canonical rejection effects."}',
+    );
+    const completionInput = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      role: "Reviewer",
+      kind: "reviewer" as const,
+      purpose: "governance_review" as const,
+      profileId: "dev",
+      workdir: null,
+      agentHandle: "reviewer",
+      launchAuthorization,
+    };
+    let injected = false;
+    await expect(
+      applyAgentCompletionEffects(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          reviewerVerdictEffectHookForTests: () => {
+            if (injected) return;
+            injected = true;
+            throw new Error("injected post-verdict convergence crash");
+          },
+        },
+        completionInput,
+        { id: runId, state: "finished", simulated: false },
+      ),
+    ).rejects.toThrow(/post-verdict convergence crash/);
+
+    expect(taskFile().parsed.frontmatter.stage).toBe("impl");
+    expect(
+      taskFile().parsed.timeline.some(
+        (event) =>
+          event.type === "quality" && event.sourceRunId === runId,
+      ),
+    ).toBe(true);
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.evidence,
+    );
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM audit_events
+              WHERE action = 'task.quality.flagged'
+                AND json_extract(details_json, '$.runId') = ?`,
+          )
+          .get(runId) as { n: number }
+      ).n,
+    ).toBe(0);
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      completionInput,
+      { id: runId, state: "finished", simulated: false },
+    );
+
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.stage).toBe("impl");
+    expect(parsed.frontmatter.validation).toBe("failing");
+    expect(parsed.packet).toBeNull();
+    expect(
+      parsed.timeline.some(
+        (event) =>
+          event.type === "blocked" &&
+          event.actor.kind === "system" &&
+          event.actor.systemId.includes("agent-launch-authorization-changed"),
+      ),
+    ).toBe(false);
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.complete,
+    );
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM audit_events
+              WHERE action = 'task.quality.flagged'
+                AND json_extract(details_json, '$.runId') = ?`,
+          )
+          .get(runId) as { n: number }
+      ).n,
+    ).toBe(1);
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM notifications
+              WHERE task_key = 'VIB-1'
+                AND kind = 'quality'
+                AND title = 'Changes requested'`,
+          )
+          .get() as { n: number }
+      ).n,
+    ).toBeGreaterThan(0);
+  });
+
+  it("does not complete while waiting=agent cleanup failed", async () => {
+    const runId = await finishedRunWith("History already persisted.");
+    advanceRunCompletionPhase(
+      store.db,
+      runId,
+      RUN_COMPLETION_PHASE.verdict,
+    );
+    await markWaitingAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+    );
+    const taskDirectory = path.dirname(
+      taskFilePath(store.slug, "VIB-1", store.dataRoot),
+    );
+    chmodSync(taskDirectory, 0o500);
+    try {
+      await expect(
+        applyAgentCompletionEffects(
+          store.db,
+          { dataRoot: store.dataRoot },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            backend: "claude",
+            role: "Developer",
+            kind: "primary",
+            purpose: "conversation",
+            profileId: "implementer",
+            workdir: null,
+            agentHandle: "developer",
+            launchAuthorization: completionAuthorization("primary"),
+          },
+          { id: runId, state: "finished", simulated: false },
+        ),
+      ).rejects.toBeTruthy();
+      expect(readRunCompletionPhase(store.db, runId)).toBe(
+        RUN_COMPLETION_PHASE.verdict,
+      );
+      expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
+    } finally {
+      chmodSync(taskDirectory, 0o700);
+    }
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "Developer",
+        kind: "primary",
+        purpose: "conversation",
+        profileId: "implementer",
+        workdir: null,
+        agentHandle: "developer",
+        launchAuthorization: completionAuthorization("primary"),
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    expect(taskFile().parsed.frontmatter.waiting).toBe("human");
+    expect(readRunCompletionPhase(store.db, runId)).toBe(
+      RUN_COMPLETION_PHASE.complete,
+    );
   });
 });
 

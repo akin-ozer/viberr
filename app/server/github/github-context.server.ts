@@ -3,10 +3,7 @@ import {
   getPatToken,
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import {
-  createGithubClient,
-  type GithubClient,
-} from "./github-client.server";
+import { createGithubClient, type GithubClient } from "./github-client.server";
 
 /**
  * Shared "can we talk to GitHub for this project?" resolver. Every GitHub
@@ -38,6 +35,9 @@ export type GithubContextResult = GithubContext | GithubContextFailure;
 export interface GithubContextOptions {
   /** Task-level repo override (task.md `repo`); null/undefined → project default. */
   repoOverride?: string | null;
+  /** Canonical project.md default branch captured by a caller that must not
+   * trust a potentially lagging projection at a remote mutation boundary. */
+  defaultBranchOverride?: string | null;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
 }
@@ -50,8 +50,7 @@ export function getProjectGithubContext(
   const projectRow = db
     .prepare(`SELECT repo, default_branch FROM projects WHERE slug = ?`)
     .get(projectSlug) as
-    | { repo: string | null; default_branch: string | null }
-    | undefined;
+    { repo: string | null; default_branch: string | null } | undefined;
 
   const repo = options.repoOverride ?? projectRow?.repo ?? null;
   if (!repo) return { status: "no_repo_configured" };
@@ -70,7 +69,8 @@ export function getProjectGithubContext(
     }),
     repo,
     owner: repo.split("/")[0] ?? repo,
-    defaultBranch: projectRow?.default_branch || "main",
+    defaultBranch:
+      options.defaultBranchOverride ?? projectRow?.default_branch ?? "main",
     patId: credential.id,
   };
 }

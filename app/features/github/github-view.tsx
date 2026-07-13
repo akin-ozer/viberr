@@ -9,6 +9,7 @@ import { ArchivedBadge } from "~/ui/archived-badge";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import { connectionPill, prStatePill, syncPill } from "./github-pills";
@@ -334,7 +335,7 @@ export function GithubViewPage({
   readOnly = false,
 }: {
   data: GithubViewData;
-  myRole: string | null;
+  myRole: ProjectRole | null;
   /** Archived projects retain repository history and external links. */
   readOnly?: boolean;
 }) {
@@ -369,13 +370,8 @@ export function GithubViewPage({
 
   // Grant scope stays a governed credential action (conventions: PAT/policy
   // changes are admin-shaped; project roles admin|maintainer hold it).
-  const canGrant =
-    !readOnly && (myRole === "admin" || myRole === "maintainer");
-  const canReconcile =
-    !readOnly &&
-    (myRole === "admin" ||
-      myRole === "maintainer" ||
-      myRole === "contributor");
+  const canGrant = !readOnly && roleCan(myRole, "grant-github-scope");
+  const canReconcile = !readOnly && roleCan(myRole, "reconcile-github");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".

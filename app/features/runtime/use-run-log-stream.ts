@@ -74,11 +74,14 @@ export function useRunLogStream(input: {
   const [linesByThread, setLinesByThread] = useState<Record<string, StreamedLine[]>>(() =>
     Object.fromEntries(input.threads.map((t) => [t.threadId, t.lines])),
   );
+  const linesRef = useRef(linesByThread);
+  linesRef.current = linesByThread;
 
   // Cursors: highest seq held per run. Loader lines are seq 0..N-1, so the
   // head seq is (lines.length - 1). RunId is needed to fetch the tail.
   const cursorsRef = useRef<Map<string, ThreadCursor>>(new Map());
   const tailRequestsRef = useRef<Map<string, TailRequest>>(new Map());
+  const pumpTailRef = useRef<(runId: string) => void>(() => undefined);
   const seedGenerationRef = useRef(0);
   const threadsKey = input.threads
     .map(
@@ -88,19 +91,44 @@ export function useRunLogStream(input: {
     .join("|");
 
   useEffect(() => {
-    // Re-seed lines + cursors whenever the loader thread-set changes (e.g. a
-    // revalidation after a state change delivered new backfill).
+    // Reconcile loader backfill with the live local suffix. A loader snapshot
+    // can legitimately lag an SSE announcement; replacing a longer live suffix
+    // and clearing its target would freeze the log until another event happened.
     seedGenerationRef.current += 1;
-    for (const request of tailRequestsRef.current.values()) {
+    const priorRequests = tailRequestsRef.current;
+    for (const request of priorRequests.values()) {
       request.controller?.abort();
     }
-    tailRequestsRef.current.clear();
-    setLinesByThread(Object.fromEntries(input.threads.map((t) => [t.threadId, t.lines])));
+    const previousCursors = cursorsRef.current;
+    const nextLines: Record<string, StreamedLine[]> = {};
     const map = new Map<string, ThreadCursor>();
+    const requests = new Map<string, TailRequest>();
     for (const t of input.threads) {
-      if (t.runId) map.set(t.runId, { runId: t.runId, threadId: t.threadId, headSeq: t.lines.length - 1 });
+      const previous = t.runId ? previousCursors.get(t.runId) : undefined;
+      const liveLines = linesRef.current[t.threadId] ?? [];
+      const keepLiveSuffix =
+        Boolean(previous) && liveLines.length > t.lines.length;
+      nextLines[t.threadId] = keepLiveSuffix ? liveLines : t.lines;
+      if (!t.runId) continue;
+      const headSeq = keepLiveSuffix
+        ? Math.max(previous!.headSeq, liveLines.length - 1)
+        : t.lines.length - 1;
+      map.set(t.runId, { runId: t.runId, threadId: t.threadId, headSeq });
+      const prior = priorRequests.get(t.runId);
+      if (prior && prior.targetSeq > headSeq) {
+        requests.set(t.runId, {
+          targetSeq: prior.targetSeq,
+          inFlight: false,
+          controller: null,
+        });
+      }
     }
+    setLinesByThread(nextLines);
     cursorsRef.current = map;
+    tailRequestsRef.current = requests;
+    for (const runId of requests.keys()) {
+      queueMicrotask(() => pumpTailRef.current(runId));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadsKey]);
 
@@ -200,6 +228,7 @@ export function useRunLogStream(input: {
         }
       })();
     };
+    pumpTailRef.current = pumpTail;
 
     const client = createSseClient({
       url: buildEventsUrl([sseScopes.task(projectSlug, taskKey)]),
@@ -246,6 +275,7 @@ export function useRunLogStream(input: {
         request.controller?.abort();
       }
       tailRequestsRef.current.clear();
+      pumpTailRef.current = () => undefined;
       client.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

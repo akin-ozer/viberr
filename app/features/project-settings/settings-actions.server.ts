@@ -1,4 +1,3 @@
-import { existsSync, rmSync } from "node:fs";
 import type Database from "better-sqlite3";
 import type { UserRole } from "~/shared/mapping/user.server";
 import {
@@ -10,26 +9,62 @@ import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-role-guard.server";
+import { resolveOrgRole } from "~/server/auth/identity.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import {
-  projectDir,
-  projectFilePath,
-} from "~/server/files/file-store-root.server";
+import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
-import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
+import { withFileLock } from "~/server/files/file-mutex.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { releaseProjectOwnerships } from "~/server/tasks/ownership-cleanup.server";
-import { authorizeProjectAction } from "~/shared/rbac";
-import { purgeProjectOperationalState } from "~/server/projects/project-operational-state.server";
+import {
+  convergeProjectOwnershipCleanup,
+  markProjectOwnershipCleanupCommitted,
+  stageProjectOwnershipCleanup,
+} from "~/server/tasks/ownership-cleanup.server";
+import {
+  authorizeProjectAction,
+  type ProjectAuthoritySource,
+} from "~/shared/rbac";
+import {
+  cancelProjectDeletion,
+  commitProjectDirectoryDeletion,
+  completeProjectDeletion,
+  stageProjectDeletion,
+  type ProjectDeletionTombstone,
+} from "~/server/projects/project-operational-state.server";
 import type {
+  ParsedProjectFile,
+  ProjectRole,
   StageDef,
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
-import { stopProjectRuns } from "~/server/runtimes/run-service.server";
+import {
+  stopProjectRuns,
+  waitForProjectRunTermination,
+} from "~/server/runtimes/run-service.server";
+import {
+  allowProjectCompletionEffects,
+  completeProjectRunEffects,
+  revokeProjectCompletionEffects,
+  waitForProjectCompletionEffects,
+} from "~/server/runtimes/run-completion-state.server";
+import { cancelAutoOperatorDispatchesForProject } from "~/server/runtimes/operator-dispatch.server";
+import {
+  cancelPendingOperatorTriggersForProject,
+  clearOperatorLeasesForProject,
+} from "~/server/runtimes/operator-run.server";
 import { getEnv } from "~/server/config/env.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  PROJECT_LIFECYCLE_INTENT_MARKER,
+  convergeProjectLifecycleIntent,
+  getProjectLifecycleIntent,
+  stageProjectLifecycleIntent,
+  type ProjectLifecycleIntent,
+} from "~/server/projects/project-lifecycle.server";
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -55,6 +90,37 @@ export interface SettingsActor {
 
 export interface SettingsMutationContext {
   dataRoot?: string;
+  /** Deterministic pause after archive/delete revokes admission. Tests use it
+   * to prove a concurrent restore is serialized behind the lifecycle drain. */
+  lifecycleDrainHookForTests?: (
+    operation: "archive" | "delete",
+  ) => void | Promise<void>;
+  /** Shorten the provider-exit deadline in lifecycle timeout regressions. */
+  lifecycleTerminationTimeoutMsForTests?: number;
+  /** Fault/authorization seam after provider/effect drain but before the
+   * canonical archive/delete commit boundary. */
+  beforeProjectLifecycleCommitHookForTests?: (
+    operation: "archive" | "restore" | "delete",
+  ) => void | Promise<void>;
+  /** Fault seam for projection failures after a canonical lifecycle write. */
+  reprojectHookForTests?: () => void;
+  /** Crash seam after lifecycle attribution is durable but before project.md
+   * carries the intent marker and changed archived flag. */
+  afterProjectLifecycleIntentStagedForTests?: (
+    operation: "archive" | "restore",
+  ) => void;
+  /** Crash seam after the canonical project directory has atomically left its
+   * live path but before operational cleanup and audit convergence. */
+  afterProjectRemovalHookForTests?: () => void;
+  /** Fault seam while journaling owner-seat candidates before the authorized
+   * membership write. No task ownership changes before that write commits. */
+  beforeOwnershipReleaseForTests?: (input: {
+    taskKey: string;
+    releasedTaskKeys: readonly string[];
+  }) => void | Promise<void>;
+  afterOwnershipCanonicalReleaseForTests?: (input: {
+    taskKey: string;
+  }) => void | Promise<void>;
 }
 
 /**
@@ -103,19 +169,17 @@ export function workflowForStageOrder(
         from: from.id,
         to: to.id,
         boundary: "human",
-        by:
-          entering?.by ??
-          "Human acceptance of the completion report",
+        by: entering?.by ?? "Human acceptance of the completion report",
         locked: true,
       };
     }
     return {
       from: from.id,
       to: to.id,
-      boundary:
-        entering?.boundary === "human"
-          ? "approval"
-          : (entering?.boundary ?? "approval"),
+      // Preserve the destination's prior boundary, including an intermediate
+      // "Human only" the Policy page legitimately allows; coercing it to
+      // approval here silently weakened a human gate on any stage reorder.
+      boundary: entering?.boundary ?? "approval",
       by:
         entering?.by ??
         "Operator transition request under the configured project policy",
@@ -142,7 +206,49 @@ function conflict(userMessage: string): AppError {
   });
 }
 
+const PROJECT_LIFECYCLE_LOCKS = Symbol.for("viberr.projectLifecycleLocks");
+
+function projectLifecycleLocks(): WeakMap<
+  Database.Database,
+  Map<string, Promise<void>>
+> {
+  const cache = globalThis as unknown as Record<
+    symbol,
+    WeakMap<Database.Database, Map<string, Promise<void>>> | undefined
+  >;
+  return (cache[PROJECT_LIFECYCLE_LOCKS] ??= new WeakMap());
+}
+
+/** Archive, restore and delete are one serialized state machine per project.
+ * Register the successor synchronously before awaiting its predecessor so a
+ * concurrent restore can never reopen admission during an archive/delete
+ * drain. */
+async function withProjectLifecycleLock<T>(
+  db: Database.Database,
+  projectSlug: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const byProject = projectLifecycleLocks().get(db) ?? new Map();
+  projectLifecycleLocks().set(db, byProject);
+  const previous = byProject.get(projectSlug) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  byProject.set(projectSlug, current);
+  await previous.catch(() => {});
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (byProject.get(projectSlug) === current) {
+      byProject.delete(projectSlug);
+    }
+  }
+}
+
 function requireProjectAdmin(
+  db: Database.Database,
   ctx: SettingsMutationContext,
   projectSlug: string,
   actor: SettingsActor,
@@ -152,8 +258,55 @@ function requireProjectAdmin(
   // archive/delete) are admin-only (`edit-policy` tier in ACTION_ROLES).
   return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    ...(actor.orgRole !== undefined ? { orgRole: actor.orgRole } : {}),
+    orgRole: currentOrgRole(db, actor),
   });
+}
+
+function currentOrgRole(db: Database.Database, actor: SettingsActor): UserRole {
+  const cached = db
+    .prepare(`SELECT role, disabled FROM users WHERE id = ?`)
+    .get(actor.userId) as { role: string; disabled: number } | undefined;
+  if (!cached || cached.disabled === 1) {
+    throw forbidden(
+      "Your account is no longer active and cannot change project settings.",
+    );
+  }
+  const fallback: UserRole = cached.role === "admin" ? "admin" : "member";
+  return resolveOrgRole(db, actor.userId, fallback);
+}
+
+/** Commit-boundary authority against the exact project.md snapshot which will
+ * be written or removed. This closes the drain window where project role or
+ * emergency org-admin authority can be revoked after request admission. */
+function requireCurrentProjectAdmin(
+  db: Database.Database,
+  parsed: ParsedProjectFile,
+  actor: SettingsActor,
+  what: string,
+): {
+  projectName: string;
+  role: ProjectRole;
+  authoritySource: Exclude<ProjectAuthoritySource, "denied">;
+} {
+  const projectRole = parsed.frontmatter.members.find(
+    (member) => member.userId === actor.userId,
+  )?.role;
+  const authority = authorizeProjectAction(
+    projectRole,
+    currentOrgRole(db, actor),
+    "edit-policy",
+  );
+  if (!authority.allowed) {
+    throw forbidden(`Only project admins can ${what}.`);
+  }
+  return {
+    projectName: parsed.frontmatter.name,
+    role: authority.source === "org_admin_override" ? "admin" : projectRole!,
+    authoritySource: authority.source as Exclude<
+      ProjectAuthoritySource,
+      "denied"
+    >,
+  };
 }
 
 function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
@@ -163,7 +316,42 @@ function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
   };
 }
 
+function reopenCompletionAdmissionIfActive(
+  db: Database.Database,
+  ctx: SettingsMutationContext,
+  projectSlug: string,
+  revocation: number,
+): boolean {
+  if (!db.open) return false;
+  const current = readProjectFile(projectRef(ctx, projectSlug));
+  if (!current || current.parsed.frontmatter.archived) return false;
+  return allowProjectCompletionEffects(db, projectSlug, revocation);
+}
+
+/** Timeout is a request boundary, not a provider-ownership boundary. Keep the
+ * slug revoked until every detached provider acknowledges exit and every
+ * already-owned completion/tool effect has settled. The revocation generation
+ * prevents this continuation from reopening admission underneath a retry. */
+function reopenCompletionAdmissionAfterTermination(
+  db: Database.Database,
+  ctx: SettingsMutationContext,
+  projectSlug: string,
+  revocation: number,
+): void {
+  void (async () => {
+    await waitForProjectRunTermination(db, projectSlug, null);
+    await waitForProjectCompletionEffects(db, projectSlug);
+    reopenCompletionAdmissionIfActive(db, ctx, projectSlug, revocation);
+  })().catch((error) => {
+    logger.error("failed to converge project lifecycle admission", {
+      projectSlug,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
+}
+
 function settingsAuditActor(
+  db: Database.Database,
   ctx: SettingsMutationContext,
   projectSlug: string,
   actor: SettingsActor,
@@ -174,7 +362,11 @@ function settingsAuditActor(
   )?.role;
   return withProjectAuditAuthority(
     actor,
-    authorizeProjectAction(projectRole, actor.orgRole, "edit-policy").source,
+    authorizeProjectAction(
+      projectRole,
+      currentOrgRole(db, actor),
+      "edit-policy",
+    ).source,
   );
 }
 
@@ -183,6 +375,7 @@ function reprojectProject(
   ctx: SettingsMutationContext,
   projectSlug: string,
 ): void {
+  ctx.reprojectHookForTests?.();
   rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
@@ -192,11 +385,22 @@ function reprojectProject(
 
 export async function updateProjectIdentity(
   db: Database.Database,
-  input: { projectSlug: string; name: string; prefix: string; description: string },
+  input: {
+    projectSlug: string;
+    name: string;
+    prefix: string;
+    description: string;
+  },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "change project settings",
+  );
 
   const name = input.name.trim();
   const prefix = input.prefix.trim().toUpperCase().slice(0, 4);
@@ -230,7 +434,7 @@ export async function updateProjectIdentity(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.settings.updated",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
@@ -247,7 +451,13 @@ export async function renameStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "edit workflow stages",
+  );
   const name = input.name.trim();
   if (!name) throw AppError.validation("Stage name is required.");
 
@@ -265,7 +475,7 @@ export async function renameStage(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.renamed",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
@@ -280,7 +490,13 @@ export async function addStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; stageId: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "edit workflow stages",
+  );
 
   // Server-generated id (spec §5.2 — never the mock's Date.now scheme).
   const stageId = newId("stage").toLowerCase().replace(/_/g, "-");
@@ -304,7 +520,7 @@ export async function addStage(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.added",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: stageId,
     projectSlug: input.projectSlug,
@@ -319,7 +535,13 @@ export async function removeStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "edit workflow stages",
+  );
 
   // Non-empty guard re-checked at ACTION time from projections (spec §5.2 —
   // client counts can be stale).
@@ -358,7 +580,7 @@ export async function removeStage(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.removed",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "stage",
     subjectId: input.stageId,
     projectSlug: input.projectSlug,
@@ -373,7 +595,13 @@ export async function reorderStages(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "edit workflow stages",
+  );
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const stages = parsed.frontmatter.stages;
@@ -391,9 +619,7 @@ export async function reorderStages(
     // "triage"/"done") so custom/lightweight boards are protected too.
     const entryId = stages[0]!.id;
     const terminalId = stages[stages.length - 1]!.id;
-    const middle = next.filter(
-      (s) => s.id !== entryId && s.id !== terminalId,
-    );
+    const middle = next.filter((s) => s.id !== entryId && s.id !== terminalId);
     parsed.frontmatter.stages = [
       byId.get(entryId)!,
       ...middle,
@@ -408,7 +634,7 @@ export async function reorderStages(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.stage.reordered",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
@@ -433,7 +659,13 @@ export async function grantMemberAccess(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; userId: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "manage members & roles");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "manage members & roles",
+  );
 
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
@@ -452,12 +684,11 @@ export async function grantMemberAccess(
   );
   let provisionedProvider: "GitHub" | "Google" | null = null;
   if (!user) {
-    provisionedProvider =
-      githubOAuthConfigured
-        ? "GitHub"
-        : googleOAuthConfigured
-          ? "Google"
-          : null;
+    provisionedProvider = githubOAuthConfigured
+      ? "GitHub"
+      : googleOAuthConfigured
+        ? "Google"
+        : null;
     if (!provisionedProvider) {
       throw AppError.validation(
         "Configure GitHub or Google OAuth before granting a new passwordless account. Existing Viberr users can still be added directly.",
@@ -524,7 +755,7 @@ export async function grantMemberAccess(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.member.access_granted",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "user",
     subjectId: userId,
     projectSlug: input.projectSlug,
@@ -548,6 +779,7 @@ export async function removeMember(
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
   const { projectName, authoritySource } = requireProjectAdmin(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -563,7 +795,58 @@ export async function removeMember(
     .get(input.targetUserId) as { name: string; email: string } | undefined;
   const displayName = userRow?.name ?? input.targetUserId;
 
+  const initial = readProjectFile(projectRef(ctx, input.projectSlug));
+  const initialMember = initial?.parsed.frontmatter.members.find(
+    (member) => member.userId === input.targetUserId,
+  );
+  if (!initial || !initialMember) {
+    throw AppError.notFound("That user is not a member of this project.");
+  }
+  if (
+    initialMember.role === "admin" &&
+    initial.parsed.frontmatter.members.filter(
+      (member) => member.role === "admin",
+    ).length <= 1
+  ) {
+    throw conflict(
+      `${displayName} is the only admin — assign another admin in Policy first`,
+    );
+  }
+
+  // Journal exact owner-seat candidates while membership is unchanged. The
+  // project-file write below commits the matching batch marker and membership
+  // removal atomically; only then may task ownership be released.
+  const ownershipCleanup = await stageProjectOwnershipCleanup(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      targetUserId: input.targetUserId,
+      targetName: displayName,
+      reason: "member_removed",
+    },
+    withProjectAuditAuthority(actor, authoritySource),
+    {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(ctx.beforeOwnershipReleaseForTests
+        ? { beforeTaskReleaseForTests: ctx.beforeOwnershipReleaseForTests }
+        : {}),
+      ...(ctx.afterOwnershipCanonicalReleaseForTests
+        ? {
+            afterTaskCanonicalReleaseForTests:
+              ctx.afterOwnershipCanonicalReleaseForTests,
+          }
+        : {}),
+    },
+  );
+
+  let committedAuthoritySource = authoritySource;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    committedAuthoritySource = requireCurrentProjectAdmin(
+      db,
+      parsed,
+      actor,
+      "manage members & roles",
+    ).authoritySource;
     const member = parsed.frontmatter.members.find(
       (m) => m.userId === input.targetUserId,
     );
@@ -580,23 +863,24 @@ export async function removeMember(
         );
       }
     }
+    markProjectOwnershipCleanupCommitted(parsed, ownershipCleanup);
     parsed.frontmatter.members = parsed.frontmatter.members.filter(
       (m) => m.userId !== input.targetUserId,
     );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
-  const releasedTaskKeys = await releaseProjectOwnerships(
+  const releasedTaskKeys = await convergeProjectOwnershipCleanup(
     db,
-    {
-      projectSlug: input.projectSlug,
-      targetUserId: input.targetUserId,
-      targetName: displayName,
-      reason: "member_removed",
-    },
-    withProjectAuditAuthority(actor, authoritySource),
+    ownershipCleanup,
     {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(ctx.afterOwnershipCanonicalReleaseForTests
+        ? {
+            afterTaskCanonicalReleaseForTests:
+              ctx.afterOwnershipCanonicalReleaseForTests,
+          }
+        : {}),
     },
   );
   db.prepare(
@@ -606,7 +890,7 @@ export async function removeMember(
   ).run(new Date().toISOString(), input.targetUserId, input.projectSlug);
   recordAudit(db, {
     action: "project.member.removed",
-    actor: withProjectAuditAuthority(actor, authoritySource),
+    actor: withProjectAuditAuthority(actor, committedAuthoritySource),
     subjectKind: "user",
     subjectId: input.targetUserId,
     projectSlug: input.projectSlug,
@@ -625,7 +909,13 @@ export async function setRepoOverride(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+  requireProjectAdmin(
+    db,
+    ctx,
+    input.projectSlug,
+    actor,
+    "change project settings",
+  );
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     parsed.unknownFrontmatter.taskRepoOverride = input.enabled;
@@ -634,7 +924,7 @@ export async function setRepoOverride(
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: "project.repo_override.changed",
-    actor: settingsAuditActor(ctx, input.projectSlug, actor),
+    actor: settingsAuditActor(db, ctx, input.projectSlug, actor),
     subjectKind: "project",
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
@@ -655,40 +945,220 @@ export async function setRepoOverride(
  * moved to the home "Archived" section, restorable anytime. Canonical truth is
  * the file, so the change persists via reproject like every other setting.
  */
-export async function setProjectArchived(
+export function setProjectArchived(
   db: Database.Database,
   input: { projectSlug: string; archived: boolean },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; archived: boolean }> {
-  const { projectName, authoritySource } = requireProjectAdmin(
+  return withProjectLifecycleLock(db, input.projectSlug, () =>
+    setProjectArchivedOwned(db, input, actor, ctx),
+  );
+}
+
+async function setProjectArchivedOwned(
+  db: Database.Database,
+  input: { projectSlug: string; archived: boolean },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext,
+): Promise<{ toast: string; archived: boolean }> {
+  let { projectName, authoritySource } = requireProjectAdmin(
+    db,
     ctx,
     input.projectSlug,
     actor,
     input.archived ? "archive this project" : "restore this project",
   );
+  let currentProject = readProjectFile(projectRef(ctx, input.projectSlug));
+  if (!currentProject) {
+    throw AppError.notFound(`Project ${input.projectSlug} not found.`);
+  }
 
-  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
-    parsed.frontmatter.archived = input.archived;
+  // A previous request may have crossed the canonical file boundary and died
+  // before projection/audit. Converge it under its original attribution before
+  // treating an already-matching boolean as a no-op. A marker-less staged row
+  // is cancelled here and cannot mutate project.md.
+  const pendingIntent = getProjectLifecycleIntent(db, input.projectSlug);
+  if (pendingIntent) {
+    convergeProjectLifecycleIntent(db, pendingIntent, {
+      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      ...(ctx.reprojectHookForTests
+        ? { beforeProjectionForTests: ctx.reprojectHookForTests }
+        : {}),
+    });
+    currentProject = readProjectFile(projectRef(ctx, input.projectSlug));
+    if (!currentProject) {
+      throw AppError.notFound(`Project ${input.projectSlug} not found.`);
+    }
+    projectName = currentProject.parsed.frontmatter.name;
+  }
+
+  const expectedArchived = Boolean(currentProject.parsed.frontmatter.archived);
+  if (expectedArchived === input.archived) {
+    return {
+      toast: input.archived
+        ? `Project "${projectName}" is already archived`
+        : `Project "${projectName}" is already active`,
+      archived: input.archived,
+    };
+  }
+
+  let cancelledDispatches = 0;
+  let cancelledPendingTriggers = 0;
+  let stoppedRuns = 0;
+  let committedProjectName = projectName;
+  let committedAuthoritySource = authoritySource;
+  let lifecycleIntent: ProjectLifecycleIntent | null = null;
+  if (input.archived) {
+    // Revoke runtime/completion ownership before flipping canonical lifecycle
+    // state. Every subsequent drain step belongs to one failure boundary: if
+    // any hook, provider acknowledgement, effect drain, or file write fails,
+    // reopen admission only for the exact unchanged active project we revoked.
+    const revocation = revokeProjectCompletionEffects(db, input.projectSlug);
+    let providerShutdownStarted = false;
+    let safeToReopen = false;
+    try {
+      await ctx.lifecycleDrainHookForTests?.("archive");
+      cancelledDispatches = cancelAutoOperatorDispatchesForProject(
+        db,
+        input.projectSlug,
+        ctx.dataRoot,
+      );
+      providerShutdownStarted = true;
+      clearOperatorLeasesForProject(input.projectSlug);
+      cancelledPendingTriggers = cancelPendingOperatorTriggersForProject(
+        db,
+        input.projectSlug,
+      );
+      stoppedRuns = stopProjectRuns(db, input.projectSlug);
+      const terminated = await waitForProjectRunTermination(
+        db,
+        input.projectSlug,
+        ctx.lifecycleTerminationTimeoutMsForTests,
+      );
+      if (!terminated) {
+        throw new AppError({
+          code: ERROR_CODES.CONFLICT,
+          status: 409,
+          userMessage:
+            "Agent shutdown is still in progress. Retry archive shortly.",
+          kind: "user",
+        });
+      }
+      await waitForProjectCompletionEffects(db, input.projectSlug);
+      safeToReopen = true;
+      await ctx.beforeProjectLifecycleCommitHookForTests?.("archive");
+      await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+        if (parsed.frontmatter.archived !== expectedArchived) {
+          throw conflict(
+            "Project lifecycle changed while this request was in progress. Refresh and try again.",
+          );
+        }
+        const currentAuthority = requireCurrentProjectAdmin(
+          db,
+          parsed,
+          actor,
+          "archive this project",
+        );
+        committedProjectName = currentAuthority.projectName;
+        committedAuthoritySource = currentAuthority.authoritySource;
+        lifecycleIntent = stageProjectLifecycleIntent(db, {
+          projectSlug: input.projectSlug,
+          operation: "archive",
+          expectedArchived,
+          targetArchived: true,
+          projectName: committedProjectName,
+          actorUserId: actor.userId,
+          actorLabel: actor.label,
+          authoritySource: committedAuthoritySource,
+          stoppedRuns,
+          cancelledDispatches,
+          cancelledPendingTriggers,
+        });
+        ctx.afterProjectLifecycleIntentStagedForTests?.("archive");
+        parsed.unknownFrontmatter[PROJECT_LIFECYCLE_INTENT_MARKER] =
+          lifecycleIntent.id;
+        parsed.frontmatter.archived = true;
+      });
+      // Canonical archived truth is the recovery authority. Only now may old
+      // replayable specialist/operator effects be permanently abandoned.
+      completeProjectRunEffects(db, input.projectSlug);
+    } catch (error) {
+      if (providerShutdownStarted && !safeToReopen) {
+        reopenCompletionAdmissionAfterTermination(
+          db,
+          ctx,
+          input.projectSlug,
+          revocation,
+        );
+      } else {
+        reopenCompletionAdmissionIfActive(
+          db,
+          ctx,
+          input.projectSlug,
+          revocation,
+        );
+      }
+      throw error;
+    }
+  } else {
+    await ctx.beforeProjectLifecycleCommitHookForTests?.("restore");
+    await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+      if (parsed.frontmatter.archived !== expectedArchived) {
+        throw conflict(
+          "Project lifecycle changed while this request was in progress. Refresh and try again.",
+        );
+      }
+      const currentAuthority = requireCurrentProjectAdmin(
+        db,
+        parsed,
+        actor,
+        "restore this project",
+      );
+      committedProjectName = currentAuthority.projectName;
+      committedAuthoritySource = currentAuthority.authoritySource;
+      lifecycleIntent = stageProjectLifecycleIntent(db, {
+        projectSlug: input.projectSlug,
+        operation: "restore",
+        expectedArchived,
+        targetArchived: false,
+        projectName: committedProjectName,
+        actorUserId: actor.userId,
+        actorLabel: actor.label,
+        authoritySource: committedAuthoritySource,
+        stoppedRuns,
+        cancelledDispatches,
+        cancelledPendingTriggers,
+      });
+      ctx.afterProjectLifecycleIntentStagedForTests?.("restore");
+      parsed.unknownFrontmatter[PROJECT_LIFECYCLE_INTENT_MARKER] =
+        lifecycleIntent.id;
+      parsed.frontmatter.archived = false;
+    });
+    // Canonical active state is the admission authority. Reopen immediately;
+    // projection/audit are convergent side effects and a failure between the
+    // file write and either one must not leave an active project disabled.
+    allowProjectCompletionEffects(db, input.projectSlug);
+  }
+
+  if (!lifecycleIntent) {
+    throw new Error("Project lifecycle committed without a durable intent.");
+  }
+  const converged = convergeProjectLifecycleIntent(db, lifecycleIntent, {
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    ...(ctx.reprojectHookForTests
+      ? { beforeProjectionForTests: ctx.reprojectHookForTests }
+      : {}),
   });
-
-  const stoppedRuns = input.archived
-    ? stopProjectRuns(db, input.projectSlug)
-    : 0;
-
-  reprojectProject(db, ctx, input.projectSlug);
-  recordAudit(db, {
-    action: input.archived ? "project.archived" : "project.unarchived",
-    actor: withProjectAuditAuthority(actor, authoritySource),
-    subjectKind: "project",
-    subjectId: input.projectSlug,
-    projectSlug: input.projectSlug,
-    details: { name: projectName, stoppedRuns },
-  });
+  if (converged !== "completed") {
+    throw conflict(
+      "Project lifecycle evidence changed before it could be finalized. Refresh and try again.",
+    );
+  }
   return {
     toast: input.archived
-      ? `Project "${projectName}" archived read-only — ${stoppedRuns} active ${stoppedRuns === 1 ? "run" : "runs"} stopped`
-      : `Project "${projectName}" restored`,
+      ? `Project "${committedProjectName}" archived read-only — ${stoppedRuns} active ${stoppedRuns === 1 ? "run" : "runs"} stopped`
+      : `Project "${committedProjectName}" restored`,
     archived: input.archived,
   };
 }
@@ -700,13 +1170,25 @@ export async function setProjectArchived(
  * The deletion fact remains in the organization audit, but is intentionally
  * not scoped to the deleted slug so a future project cannot inherit it.
  */
-export async function deleteProject(
+export function deleteProject(
   db: Database.Database,
   input: { projectSlug: string; confirmName: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
+  return withProjectLifecycleLock(db, input.projectSlug, () =>
+    deleteProjectOwned(db, input, actor, ctx),
+  );
+}
+
+async function deleteProjectOwned(
+  db: Database.Database,
+  input: { projectSlug: string; confirmName: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext,
+): Promise<{ toast: string }> {
   const { projectName, authoritySource } = requireProjectAdmin(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -715,20 +1197,98 @@ export async function deleteProject(
   if (input.confirmName.trim() !== projectName) {
     throw AppError.validation("Type the project name to confirm deletion.");
   }
+  const canonicalProjectPath = projectFilePath(input.projectSlug, ctx.dataRoot);
 
-  const dir = projectDir(input.projectSlug, ctx.dataRoot);
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  rebuildAll(db, {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
-  purgeProjectOperationalState(db, input.projectSlug, ctx.dataRoot);
+  // Cancel live handles and queued completion effects before removing the
+  // canonical directory. purgeProjectOperationalState repeats this
+  // idempotently after the projection rebuild and deletes the durable rows.
+  const revocation = revokeProjectCompletionEffects(db, input.projectSlug);
+  let providerShutdownStarted = false;
+  let safeToReopen = false;
+  let deletionTombstone: ProjectDeletionTombstone | null = null;
+  let committedProjectName = projectName;
+  let committedAuthoritySource = authoritySource;
+  try {
+    await ctx.lifecycleDrainHookForTests?.("delete");
+    providerShutdownStarted = true;
+    clearOperatorLeasesForProject(input.projectSlug);
+    cancelAutoOperatorDispatchesForProject(db, input.projectSlug, ctx.dataRoot);
+    cancelPendingOperatorTriggersForProject(db, input.projectSlug);
+    stopProjectRuns(db, input.projectSlug);
+    const terminated = await waitForProjectRunTermination(
+      db,
+      input.projectSlug,
+      ctx.lifecycleTerminationTimeoutMsForTests,
+    );
+    if (!terminated) {
+      throw new AppError({
+        code: ERROR_CODES.CONFLICT,
+        status: 409,
+        userMessage:
+          "Agent shutdown is still in progress. Retry project deletion shortly.",
+        kind: "user",
+      });
+    }
+    await waitForProjectCompletionEffects(db, input.projectSlug);
+    safeToReopen = true;
+    await ctx.beforeProjectLifecycleCommitHookForTests?.("delete");
 
-  recordAudit(db, {
-    action: "project.deleted",
-    actor: withProjectAuditAuthority(actor, authoritySource),
-    subjectKind: "project",
-    subjectId: input.projectSlug,
-    details: { name: projectName, formerProjectSlug: input.projectSlug },
-  });
-  return { toast: `Project "${projectName}" deleted` };
+    // Hold the same mutex used by every project.md writer across the final
+    // authority/name check and the atomic directory rename. No settings write
+    // can slip between confirmation and the deletion commit point.
+    await withFileLock(canonicalProjectPath, () => {
+      const current = readProjectFile(projectRef(ctx, input.projectSlug));
+      if (!current) {
+        throw AppError.notFound(`Project ${input.projectSlug} not found.`);
+      }
+      const currentAuthority = requireCurrentProjectAdmin(
+        db,
+        current.parsed,
+        actor,
+        "delete this project",
+      );
+      if (input.confirmName.trim() !== currentAuthority.projectName) {
+        throw AppError.validation(
+          "Type the current project name to confirm deletion.",
+        );
+      }
+      committedProjectName = currentAuthority.projectName;
+      committedAuthoritySource = currentAuthority.authoritySource;
+      deletionTombstone = stageProjectDeletion(db, {
+        projectSlug: input.projectSlug,
+        projectName: committedProjectName,
+        actorUserId: actor.userId,
+        actorLabel: actor.label,
+        authoritySource:
+          committedAuthoritySource === "org_admin_override"
+            ? committedAuthoritySource
+            : null,
+      });
+      commitProjectDirectoryDeletion(deletionTombstone, ctx.dataRoot);
+    });
+    ctx.afterProjectRemovalHookForTests?.();
+    const committedTombstone =
+      deletionTombstone as ProjectDeletionTombstone | null;
+    if (!committedTombstone) {
+      throw new Error("Project deletion reached commit without a tombstone.");
+    }
+    completeProjectDeletion(db, committedTombstone, ctx.dataRoot);
+  } catch (error) {
+    const canonical = readProjectFile(projectRef(ctx, input.projectSlug));
+    if (canonical && deletionTombstone) {
+      cancelProjectDeletion(db, deletionTombstone);
+    }
+    if (providerShutdownStarted && !safeToReopen) {
+      reopenCompletionAdmissionAfterTermination(
+        db,
+        ctx,
+        input.projectSlug,
+        revocation,
+      );
+    } else {
+      reopenCompletionAdmissionIfActive(db, ctx, input.projectSlug, revocation);
+    }
+    throw error;
+  }
+  return { toast: `Project "${committedProjectName}" deleted` };
 }

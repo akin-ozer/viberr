@@ -66,13 +66,18 @@ export function useToasts(): { toasts: Toast[]; push: PushToast } {
 
 function ToastHost({ toasts }: { toasts: Toast[] }) {
   return (
-    <div className="toast-wrap">
+    // The live-region attributes live on the always-mounted wrapper so screen
+    // readers register the region before content arrives; a region created at
+    // the same time as its text is not reliably announced. Error toasts escalate
+    // to assertive via role="alert" on the individual node.
+    <div className="toast-wrap" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div
           className={`toast ${t.kind}`}
           key={t.id}
-          role={t.kind === "error" ? "alert" : "status"}
-          aria-live={t.kind === "error" ? "assertive" : "polite"}
+          {...(t.kind === "error"
+            ? { role: "alert" as const, "aria-live": "assertive" as const }
+            : {})}
         >
           <Icon
             name={

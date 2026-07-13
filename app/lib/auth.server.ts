@@ -54,6 +54,37 @@ export interface AuthDeps {
   google?: { clientId: string; clientSecret: string };
 }
 
+/** Better Auth should trust the configured canonical origin exactly. OAuth
+ * state cookies are host-only, so merely trusting both loopback aliases would
+ * let a 127.0.0.1 start generate a localhost callback that cannot receive its
+ * state cookie. The root loader canonicalizes local page loads instead. */
+export function trustedAuthOrigins(baseURL: string | undefined): string[] {
+  if (!baseURL) return [];
+  return [new URL(baseURL).origin];
+}
+
+/** Return the canonical local URL when the same Compose app was opened through
+ * the other IPv4 loopback spelling. This redirect must happen before an OAuth
+ * request sets its host-only state cookie. Non-local deployments are untouched. */
+export function canonicalLoopbackRedirectUrl(
+  requestUrl: string,
+  baseURL: string | undefined,
+): string | null {
+  if (!baseURL) return null;
+  const requested = new URL(requestUrl);
+  const canonical = new URL(baseURL);
+  const loopback = new Set(["localhost", "127.0.0.1"]);
+  if (
+    !loopback.has(requested.hostname) ||
+    !loopback.has(canonical.hostname) ||
+    requested.origin === canonical.origin
+  ) {
+    return null;
+  }
+  return new URL(`${requested.pathname}${requested.search}`, canonical.origin)
+    .href;
+}
+
 /**
  * Pure options builder — the gen/validation script and the app both use this
  * so the schema that ships is exactly the schema the app runs against.
@@ -204,7 +235,7 @@ export function getAuth(): ReturnType<typeof betterAuth> {
       // Undefined lets better-auth infer the origin from the request — correct
       // for dev where the preview port varies. Set BETTER_AUTH_URL in prod.
       baseURL,
-      trustedOrigins: baseURL ? [baseURL] : [],
+      trustedOrigins: trustedAuthOrigins(baseURL),
       github:
         env.GITHUB_OAUTH_CLIENT_ID && env.GITHUB_OAUTH_CLIENT_SECRET
           ? {

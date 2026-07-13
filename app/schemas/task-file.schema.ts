@@ -77,6 +77,9 @@ export const agentRefSchema = z
     profileId: z.string().min(1),
     backend: z.enum(["codex", "claude"]),
     role: z.string().min(1),
+    /** Durable operator-routing intent that created this exact binding. Human
+     * and historical bindings intentionally omit it. */
+    sourceIntentId: z.string().min(1).optional(),
   })
   .loose();
 export type AgentRef = z.infer<typeof agentRefSchema>;
@@ -96,6 +99,18 @@ export const reviewerVerdictSchema = z
   })
   .loose();
 export type ReviewerVerdict = z.infer<typeof reviewerVerdictSchema>;
+
+/** Typed human validation evidence for the deliberately reviewer-less path.
+ * Validation and acceptance remain two distinct human actions: this record
+ * proves who validated which immutable evidence before a later acceptance. */
+export const humanValidationSchema = z
+  .object({
+    userId: z.string().min(1),
+    validatedAt: z.string().min(1),
+    evidenceFingerprint: z.string().min(1),
+  })
+  .loose();
+export type HumanValidation = z.infer<typeof humanValidationSchema>;
 
 /** Operator assignment — stage id captured when the operator attached
  * (ruling 16: store the stage id; UI renders "stage <1-based index>"). */
@@ -133,12 +148,18 @@ export const recommendationSchema = z
     kind: z.enum(RECOMMENDATION_KINDS),
     /** assign_specialist / assign_reviewer — the deployed specialist to engage. */
     profileId: z.string().optional(),
+    /** assign_specialist / assign_reviewer — the operator-selected declared
+     * backend. Legacy recommendations may omit it; newly routed ones never do. */
+    backend: z.enum(["claude", "codex"]).optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
     /** Button label, e.g. "Assign Dev as primary specialist". */
     label: z.string().min(1),
     /** The operator's reasoning for the recommendation (rendered under it). */
     detail: z.string().default(""),
+    /** Exact routed recommendation intent. Recovery never infers ownership
+     * from a coincidentally matching target/reason. */
+    sourceIntentId: z.string().min(1).optional(),
   })
   .loose();
 export type Recommendation = z.infer<typeof recommendationSchema>;
@@ -165,6 +186,10 @@ export const prRefSchema = z
     title: z.string(),
     /** Last live PR head SHA observed while reconciling/delivering. */
     headSha: z.string().min(1).nullable().optional(),
+    /** Last live base target observed for this PR. Legacy records may omit
+     * these; irreversible merge always verifies them against GitHub. */
+    baseRepo: z.string().min(1).nullable().optional(),
+    baseRef: z.string().min(1).nullable().optional(),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
@@ -242,6 +267,10 @@ export const taskFrontmatterSchema = z.object({
   specialist: agentRefSchema.nullable(),
   reviewers: z.array(agentRefSchema),
   reviewerVerdicts: z.array(reviewerVerdictSchema),
+  humanValidation: humanValidationSchema.nullable(),
+  /** Monotonic review-cycle identity. New implementation evidence, reviewer
+   * roster changes, and re-entry into Review invalidate older run bindings. */
+  reviewRevision: z.number().int().nonnegative(),
   operator: operatorRefSchema.nullable(),
   /** Pending operator recommendations rendered as one-click action cards. */
   recommendations: z.array(recommendationSchema),
@@ -270,6 +299,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "specialist",
   "reviewers",
   "reviewerVerdicts",
+  "humanValidation",
+  "reviewRevision",
   "operator",
   "recommendations",
   "urgent",
@@ -472,6 +503,20 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.reviewerVerdicts,
       [],
     ),
+    humanValidation: tolerant(
+      diagnostics,
+      "humanValidation",
+      data.humanValidation,
+      taskFrontmatterSchema.shape.humanValidation,
+      null,
+    ),
+    reviewRevision: tolerant(
+      diagnostics,
+      "reviewRevision",
+      data.reviewRevision,
+      taskFrontmatterSchema.shape.reviewRevision,
+      0,
+    ),
     operator: tolerant(
       diagnostics,
       "operator",
@@ -632,6 +677,14 @@ export interface TaskFileEvent {
   text: string;
   /** Comments only — routed to the operator/agent (toagent card tint). */
   toAgent: boolean;
+  /** Runtime completion that durably produced this effect. Optional for human,
+   * operator, historical, and non-runtime events. Boot recovery uses it as the
+   * canonical idempotency key across a file-write / database-checkpoint crash. */
+  sourceRunId?: string | null;
+  /** Durable non-runtime action intent that produced this event. Recovery uses
+   * this as an idempotency key across canonical-file / projection / audit
+   * boundaries. */
+  sourceIntentId?: string | null;
   /** Completion events only. add/del are signed display strings ("+14"). */
   evidence: { label: string; add: string; del: string }[] | null;
 }

@@ -1,7 +1,13 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
-import type { LogLine, RunBackend, RunKind, RunState } from "~/features/runtime/runtime-types";
+import type {
+  LogLine,
+  RunBackend,
+  RunKind,
+  RunState,
+  SpecialistRunPurpose,
+} from "~/features/runtime/runtime-types";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
 /**
@@ -29,6 +35,15 @@ export interface AgentRunRow {
   /** The deployed profile id — the stable per-agent grouping key; null on
    *  seed/historical rows (the projection falls back to the run's role). */
   agent_profile_id: string | null;
+  run_purpose: SpecialistRunPurpose | null;
+  review_evidence_fingerprint: string | null;
+  review_head_sha: string | null;
+  completion_source_run_id: string | null;
+  task_incarnation: string | null;
+  operator_dispatch_id: string | null;
+  completion_context_json: string | null;
+  completion_phase: number;
+  operator_effect_state: "pending" | "applied" | "recovery" | null;
   state: RunState;
   phase: string | null;
   step: string | null;
@@ -40,6 +55,8 @@ export interface AgentRunRow {
   output_tokens: number;
   total_cost_usd: number | null;
   interrupted_by: string | null;
+  /** Exact operator-routing intent that launched this run, when any. */
+  source_intent_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +88,15 @@ export interface InsertRunInput {
   agentName?: string | null;
   /** The deployed profile id (per-agent grouping key). */
   agentProfileId?: string | null;
+  runPurpose?: SpecialistRunPurpose | null;
+  reviewEvidenceFingerprint?: string | null;
+  reviewHeadSha?: string | null;
+  completionSourceRunId?: string | null;
+  taskIncarnation?: string | null;
+  operatorDispatchId?: string | null;
+  completionContextJson?: string | null;
+  completionPhase?: number;
+  operatorEffectState?: "pending" | "applied" | "recovery" | null;
   state: RunState;
   phase?: string | null;
   step?: string | null;
@@ -82,6 +108,7 @@ export interface InsertRunInput {
   outputTokens?: number;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
+  sourceIntentId?: string | null;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -90,28 +117,47 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
   db.prepare(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, simulated,
-        model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
+        model, session_id, sdk, agent_name, agent_profile_id, run_purpose,
+        review_evidence_fingerprint, review_head_sha, completion_source_run_id,
+        task_incarnation, operator_dispatch_id, completion_context_json,
+        completion_phase, operator_effect_state,
+        state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
-        interrupted_by, created_at, updated_at)
+        interrupted_by, source_intent_id, created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend, @simulated,
-        @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
+        @model, @sessionId, @sdk, @agentName, @agentProfileId, @runPurpose,
+        @reviewEvidenceFingerprint, @reviewHeadSha, @completionSourceRunId,
+        @taskIncarnation, @operatorDispatchId, @completionContextJson,
+        @completionPhase, @operatorEffectState,
+        @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
-        @interruptedBy, @createdAt, @updatedAt)
+        @interruptedBy, @sourceIntentId, @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
         backend=excluded.backend, simulated=excluded.simulated, model=excluded.model,
         session_id=excluded.session_id, sdk=excluded.sdk,
         agent_name=excluded.agent_name, agent_profile_id=excluded.agent_profile_id,
+        run_purpose=excluded.run_purpose,
+        review_evidence_fingerprint=excluded.review_evidence_fingerprint,
+        review_head_sha=excluded.review_head_sha,
+        completion_source_run_id=excluded.completion_source_run_id,
+        task_incarnation=excluded.task_incarnation,
+        operator_dispatch_id=excluded.operator_dispatch_id,
+        completion_context_json=excluded.completion_context_json,
+        completion_phase=excluded.completion_phase,
+        operator_effect_state=excluded.operator_effect_state,
         state=excluded.state,
         phase=excluded.phase, step=excluded.step, started_at=excluded.started_at,
         finished_at=excluded.finished_at, turns=excluded.turns,
         input_tokens=excluded.input_tokens, cached_input_tokens=excluded.cached_input_tokens,
         output_tokens=excluded.output_tokens, total_cost_usd=excluded.total_cost_usd,
-        interrupted_by=excluded.interrupted_by, updated_at=excluded.updated_at`,
+        interrupted_by=excluded.interrupted_by,
+        source_intent_id=coalesce(agent_runs.source_intent_id, excluded.source_intent_id),
+        updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
     taskKey: input.taskKey,
@@ -126,6 +172,15 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
     sdk: input.sdk,
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId ?? null,
+    runPurpose: input.runPurpose ?? null,
+    reviewEvidenceFingerprint: input.reviewEvidenceFingerprint ?? null,
+    reviewHeadSha: input.reviewHeadSha ?? null,
+    completionSourceRunId: input.completionSourceRunId ?? null,
+    taskIncarnation: input.taskIncarnation ?? null,
+    operatorDispatchId: input.operatorDispatchId ?? null,
+    completionContextJson: input.completionContextJson ?? null,
+    completionPhase: input.completionPhase ?? 0,
+    operatorEffectState: input.operatorEffectState ?? null,
     state: input.state,
     phase: input.phase ?? null,
     step: input.step ?? null,
@@ -137,6 +192,7 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
     outputTokens: input.outputTokens ?? 0,
     totalCostUsd: input.totalCostUsd ?? null,
     interruptedBy: input.interruptedBy ?? null,
+    sourceIntentId: input.sourceIntentId ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -157,12 +213,20 @@ export interface RunPatch {
   interruptedBy?: string | null;
   simulated?: boolean;
   backend?: RunBackend;
+  operatorEffectState?: "pending" | "applied" | "recovery" | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
-export function patchRun(db: Database.Database, runId: string, patch: RunPatch): void {
+export function patchRun(
+  db: Database.Database,
+  runId: string,
+  patch: RunPatch,
+): void {
   const cols: string[] = [];
-  const params: Record<string, unknown> = { id: runId, updatedAt: new Date().toISOString() };
+  const params: Record<string, unknown> = {
+    id: runId,
+    updatedAt: new Date().toISOString(),
+  };
   const map: Record<keyof RunPatch, string> = {
     sessionId: "session_id",
     state: "state",
@@ -178,6 +242,7 @@ export function patchRun(db: Database.Database, runId: string, patch: RunPatch):
     interruptedBy: "interrupted_by",
     simulated: "simulated",
     backend: "backend",
+    operatorEffectState: "operator_effect_state",
   };
   for (const key of Object.keys(patch) as (keyof RunPatch)[]) {
     const value = patch[key];
@@ -186,11 +251,19 @@ export function patchRun(db: Database.Database, runId: string, patch: RunPatch):
     params[key] = key === "simulated" ? (value ? 1 : 0) : (value as unknown);
   }
   if (cols.length === 0) return;
-  db.prepare(`UPDATE agent_runs SET ${cols.join(", ")}, updated_at = @updatedAt WHERE id = @id`).run(params);
+  db.prepare(
+    `UPDATE agent_runs SET ${cols.join(", ")}, updated_at = @updatedAt WHERE id = @id`,
+  ).run(params);
 }
 
-export function getRun(db: Database.Database, runId: string): AgentRunRow | null {
-  return (db.prepare(`SELECT * FROM agent_runs WHERE id = ?`).get(runId) as AgentRunRow | undefined) ?? null;
+export function getRun(
+  db: Database.Database,
+  runId: string,
+): AgentRunRow | null {
+  return (
+    (db.prepare(`SELECT * FROM agent_runs WHERE id = ?`).get(runId) as
+      AgentRunRow | undefined) ?? null
+  );
 }
 
 export function listRunsForTaskRows(
@@ -208,9 +281,9 @@ export function listRunsForTaskRows(
 
 /** Next append sequence for a run (max seq + 1, or 0). */
 export function nextSeq(db: Database.Database, runId: string): number {
-  const row = db.prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`).get(runId) as
-    | { m: number | null }
-    | undefined;
+  const row = db
+    .prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`)
+    .get(runId) as { m: number | null } | undefined;
   return (row?.m ?? -1) + 1;
 }
 
@@ -250,7 +323,12 @@ export function rawLogPath(
   sessionOrRunId: string,
   dataRoot?: string,
 ): string {
-  return path.join(getDataRoot(dataRoot), "runtimes", backend, `${sessionOrRunId}.jsonl`);
+  return path.join(
+    getDataRoot(dataRoot),
+    "runtimes",
+    backend,
+    `${sessionOrRunId}.jsonl`,
+  );
 }
 
 /** Append one raw envelope line to the canonical .jsonl (creates dirs). */
@@ -268,7 +346,13 @@ export function appendRawLine(
 /** Insert one projected log line row (raw + display). Returns the seq used. */
 export function insertRunLine(
   db: Database.Database,
-  input: { runId: string; seq: number; occurredAt: string; raw: string; display: LogLine },
+  input: {
+    runId: string;
+    seq: number;
+    occurredAt: string;
+    raw: string;
+    display: LogLine;
+  },
 ): void {
   db.prepare(
     `INSERT INTO run_log_lines (run_id, seq, occurred_at, raw_json, display_json, created_at)

@@ -1,9 +1,12 @@
 # Findings — pre-fix evidence and current resolution targets
 
-The prose in each finding preserves the observed pre-fix defect; each `Status` gives the final
-implementation/validation state and is mirrored by `implementation-ledger.md`. `Validated
-(automated contract)` means the provider-dependent behavior is proven by tests while final live
-health had no provider run signal. Credential-dependent GitHub limits are called out separately.
+The prose in each finding preserves the observed pre-fix defect. F01–F41's `Status` records the
+completed evidence pass that preceded the independent adversarial review and is mirrored by
+`implementation-ledger.md`; it is not a new release claim for the later hardening tree. `Validated
+(automated contract)` means the provider-dependent behavior was proven by tests while that pass's
+live health had no provider run signal. Credential-dependent GitHub limits are called out
+separately. The post-review resolution addendum near the end records the newer final local gate and
+keeps remote publication as a separate fact.
 
 ## P0 — delivery, integrity, and lifecycle
 
@@ -478,6 +481,40 @@ add startup/health integrity detection and an operator-visible recovery path, an
 live WAL database must not be opened from both sides of a Docker Desktop bind mount. If corruption
 reproduces without the host reader, fix the write lifecycle before any release claim.
 
+## Post-review resolution addendum
+
+The independent review found a shared failure mode beneath several otherwise
+separate features: a process could cross a remote or canonical boundary, crash
+before its local side effects converged, and leave retry code to infer identity
+or attribution from mutable current state. The corrected design is exact-intent
+recovery. These rows describe resolutions validated by the new final local
+release gate.
+
+| Review area | Resolution | State |
+| --- | --- | --- |
+| Human and full-autonomy completion | A completion intent binds task incarnation, evidence fingerprint, Done stage, original actor/authority and pinned PR/head when present. Repo-less full autonomy has explicit non-human attribution. Boot/retry resumes phases without repeating completed GitHub work. | validated on final tree |
+| Irreversible merge | A pre-PUT merge intent pins normalized repository, PR, full reviewed head, task incarnation and original accepter/authority. Local merge facts converge under the original occurrence even when a later request performs recovery. | validated on final tree |
+| PR creation ambiguity | A pre-POST PR-open intent pins repository, base, branch, full head, task incarnation, title/body and original actor/authority. Once POST is ambiguous, recovery is observation/manual-reconciliation only and never blindly reposts, including after empty or failed observation. | validated on final tree |
+| Intelligent routing provenance | One routing intent id follows exact candidate context and choice through primary/reviewer assignment or recommendation, timeline/audit rationale and launched run `sourceIntentId`. Later unrelated work and human fallback cannot satisfy it. | validated on final tree |
+| Archive/restore split commit | A lifecycle intent plus canonical `project.md` marker proves whether the exact archive/restore edge committed. Boot converges projection and deterministic original-actor audit only from that proof; otherwise it cancels the row. | validated on final tree |
+| Ownership cleanup split commit | Exact owner-seat intents are staged while access is unchanged; the authorized member/role mutation atomically commits its batch marker; only then are task owners released. Pre-commit revocation/conflict leaves access, seats and audits unchanged, and retry/boot refuses a replacement task or newer owner. | validated on final tree |
+| Actor/authority races | The current enabled user, Better Auth organization role, canonical project role and exact task ownership are rechecked at the actual mutation/launch/merge boundary. Contributor-owner acceptance and org-admin emergency authority are audited as the grant used to commit. | validated on final tree |
+| Occurrence dedupe | Delivery uses the complete SHA in structured provenance, while delivery/merge/completion/routing records bind task incarnation. Deterministic ids dedupe a retry of one occurrence without collapsing later same-key work. | validated on final tree |
+
+Security hardening remains deliberately outside this campaign, as requested by
+the owner; it is not silently reclassified as resolved here.
+
+### Post-review evidence
+
+- Vitest: 158 files/1,565 tests in 30.25 seconds; typecheck/build/whitespace clean; independent
+  focused recovery verifier 197/197.
+- Playwright: 19/19 in 22.1 seconds.
+- Fresh Docker: 3 projects/12 tasks; rescan 0 changed/15 unchanged/0 removed/0 errors in 3 ms;
+  health/integrity OK; watcher active; 0 application warnings/errors.
+- Signed-in browser: all critical project/organization routes reviewed, 12 new screenshots captured,
+  and 0 console warnings/errors.
+- Publication target: draft PR #23; final remote push/check facts are recorded after publication.
+
 ## Documentation drift (reconciled)
 
 - README previously called older planning artifacts authoritative.
@@ -492,3 +529,5 @@ reproduces without the host reader, fix the write lifecycle before any release c
 - Credential-dependent GitHub reconcile/delivery remains explicitly unverified in-app because the
   logged-in host credential was not imported without owner confirmation; tests and external GitHub
   truth are documented separately.
+- References to “final” counts and screenshots elsewhere in F01–F41 describe the earlier completed
+  pass. The separate post-review gate above is the authoritative evidence for the hardened tree.

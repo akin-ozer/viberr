@@ -96,6 +96,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.board.reordered": "task",
   "task.packet.resolved": "task",
   "task.completion.accepted_merge_pending": "task",
+  "task.completion.acceptance_cancelled": "task",
   "task.ownership.taken": "task",
   "task.ownership.handed_off": "task",
   "task.ownership.released": "task",
@@ -107,6 +108,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.reviewer.run_started": "task",
   "task.agent.replied": "task",
   "task.quality.flagged": "task",
+  "task.quality.human_validated": "task",
   "task.recovery.opened": "task",
   "task.goal.updated": "task",
   // Operator-authored governance actions (operator-actions.server).
@@ -116,6 +118,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.operator.accepted_completion": "task",
   "task.operator.packet_opened": "task",
   "task.operator.routing_decided": "task",
+  "task.operator.routing_cancelled": "task",
   "task.operator.readiness_assessed": "task",
   "task.operator.auto_queued": "task",
   "task.operator.auto_finished": "task",
@@ -136,6 +139,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "github.reconcile.task": "task",
   "github.reconcile.project": "project",
   "github.pr.opened": "task",
+  "github.pr.open.cancelled": "task",
+  "github.pr.head_rebound": "task",
+  "github.pr.target_rebound": "task",
   "github.pr.merged": "task",
   "github.pr.merge_refused": "task",
   // Agent-side delivery reconciled from the specialist workspace (NFR15):

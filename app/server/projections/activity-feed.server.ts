@@ -261,8 +261,12 @@ function auditText(
       const role = str(d.role) ?? "agent";
       return `${actor} opened the ${role} runtime session — recorded per audit policy on`;
     }
-    case "task.operator.routing_decided":
-      return `${actor} routed **${str(d.purpose) ?? "work"}** to profile **${str(d.selectedProfileId) ?? "?"}**: ${str(d.reason) ?? "no explanation recorded"}.`;
+    case "task.operator.routing_decided": {
+      const verb = str(d.disposition) === "recommended" ? "recommended" : "routed";
+      const joiner = verb === "recommended" ? "for" : "to";
+      const reason = str(d.reason) ?? "no explanation recorded";
+      return `${actor} ${verb} profile **${str(d.selectedProfileId) ?? "?"}** ${joiner} **${str(d.purpose) ?? "work"}**: ${reason}${/[.!?]$/.test(reason) ? "" : "."}`;
+    }
     case "task.operator.readiness_assessed":
       return `${actor} assessed readiness as **${str(d.to) ?? "?"}**: ${str(d.rationale) ?? "no rationale recorded"}.`;
     case "task.operator.auto_queued":
@@ -287,9 +291,14 @@ function withAuthorityNotice(text: string, detailsJson: string | null): string {
   if (!detailsJson) return text;
   try {
     const details = JSON.parse(detailsJson) as Record<string, unknown>;
-    return details.authoritySource === "org_admin_override"
-      ? `${text} **Org admin override used.**`
-      : text;
+    if (details.authoritySource !== "org_admin_override") return text;
+    // Several audit templates deliberately end in " on" because the renderer
+    // appends a task-key chip. Keep that chip at the end of the sentence: adding
+    // the override notice after the dangling preposition produced copy such as
+    // "recorded on Org admin override used VIB-123".
+    return text.endsWith(" on")
+      ? `${text.slice(0, -3)}. **Org admin override used.** Recorded on`
+      : `${text} **Org admin override used.**`;
   } catch {
     return text;
   }

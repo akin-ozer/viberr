@@ -5,14 +5,19 @@ import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "
 import { AppError } from "~/server/errors/app-error.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
+  chainRunCompletionOrInvoke,
   configureRunServiceForTests,
   disposeRunsForDatabaseForTests,
+  disposeRunsForProject,
   getRunLog,
   interruptRun,
   interruptRunAndWait,
   listRunsForTask,
+  registerRunCompletion,
   resumeRun,
   startRun,
+  stopRunForLifecycle,
+  waitForProjectRunTermination,
 } from "./run-service.server";
 import { getRun, listRunLines } from "./run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -24,6 +29,11 @@ import {
   getBackendHealth,
   setBackendAvailability,
 } from "./runtime-registry.server";
+import {
+  allowProjectCompletionEffects,
+  revokeProjectCompletionEffects,
+  waitForProjectCompletionEffects,
+} from "./run-completion-state.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -62,6 +72,318 @@ async function settle(): Promise<void> {
 }
 
 describe("run-service lifecycle (simulated)", () => {
+  it("orders chained observers after async governed completion effects", async () => {
+    let exit: ((outcome?: "finished" | "error") => void) | null = null;
+    const held: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        exit = (outcome = "finished") =>
+          cb.onExit({
+            outcome,
+            effectiveBackend: "simulated",
+            simulated: true,
+            sessionId: null,
+          });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: held, codex: held, simulated: held });
+
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registerRunCompletion(store.db, runId, async () => {
+      order.push("governed:start");
+      await gate;
+      order.push("governed:end");
+    });
+    chainRunCompletionOrInvoke(store.db, runId, () => {
+      order.push("dispatch:finished");
+    });
+
+    expect(exit).not.toBeNull();
+    exit!();
+    await settle();
+    expect(getRun(store.db, runId)?.state).toBe("finished");
+    expect(order).toEqual(["governed:start"]);
+
+    release();
+    await settle();
+    expect(order).toEqual([
+      "governed:start",
+      "governed:end",
+      "dispatch:finished",
+    ]);
+  });
+
+  it("retains the completion barrier for handlers registered after an instant exit", async () => {
+    const instant: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        cb.onExit({
+          outcome: "finished",
+          effectiveBackend: "simulated",
+          simulated: true,
+          sessionId: null,
+        });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({
+      claude: instant,
+      codex: instant,
+      simulated: instant,
+    });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registerRunCompletion(store.db, runId, async () => {
+      order.push("late-governed:start");
+      await gate;
+      order.push("late-governed:end");
+    });
+    chainRunCompletionOrInvoke(store.db, runId, () => {
+      order.push("late-dispatch:finished");
+    });
+
+    await settle();
+    expect(order).toEqual(["late-governed:start"]);
+    release();
+    await settle();
+    expect(order).toEqual([
+      "late-governed:start",
+      "late-governed:end",
+      "late-dispatch:finished",
+    ]);
+  });
+
+  it("cancels the whole queued completion chain when project ownership ends", async () => {
+    let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
+    const held: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        callbacks = cb;
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: held, codex: held, simulated: held });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    const effects: string[] = [];
+    registerRunCompletion(store.db, runId, () => {
+      effects.push("governed");
+    });
+    chainRunCompletionOrInvoke(store.db, runId, () => {
+      effects.push("observer");
+    });
+    callbacks!.onExit({
+      outcome: "finished",
+      effectiveBackend: "simulated",
+      simulated: true,
+      sessionId: null,
+    });
+    disposeRunsForProject(store.db, store.slug);
+    await settle();
+    expect(effects).toEqual([]);
+  });
+
+  it("drains an already-entered exit effect before reopening the same slug", async () => {
+    let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
+    const held: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        callbacks = cb;
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: held, codex: held, simulated: held });
+    const old = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "old-lifecycle",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const writes: string[] = [];
+    registerRunCompletion(store.db, old.runId, async (_finished, completion) => {
+      entered();
+      await gate;
+      if (!completion.isCancelled()) writes.push("old");
+    });
+    callbacks!.onExit({
+      outcome: "finished",
+      effectiveBackend: "simulated",
+      simulated: true,
+      sessionId: null,
+    });
+    await enteredPromise;
+
+    revokeProjectCompletionEffects(store.db, store.slug);
+    disposeRunsForProject(store.db, store.slug);
+    let drained = false;
+    const draining = waitForProjectCompletionEffects(store.db, store.slug).then(
+      () => {
+        drained = true;
+      },
+    );
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await draining;
+    expect(writes).toEqual([]);
+
+    allowProjectCompletionEffects(store.db, store.slug);
+    const replacement = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "replacement-lifecycle",
+      role: "Operator",
+      kind: "operator",
+      backend: "codex",
+      model: "m",
+      prompt: "go again",
+      dataRoot: store.dataRoot,
+    });
+    registerRunCompletion(store.db, replacement.runId, () => {
+      writes.push("replacement");
+    });
+    callbacks!.onExit({
+      outcome: "finished",
+      effectiveBackend: "simulated",
+      simulated: true,
+      sessionId: null,
+    });
+    await settle();
+    expect(writes).toEqual(["replacement"]);
+  });
+
+  it("does not acknowledge project teardown until the provider exits", async () => {
+    let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
+    let interrupted = false;
+    const delayed: RuntimeAdapter = {
+      backend: "simulated",
+      start(spec, cb) {
+        callbacks = cb;
+        return {
+          runId: spec.runId,
+          interrupt() {
+            interrupted = true;
+          },
+        };
+      },
+    };
+    configureRunServiceForTests({
+      claude: delayed,
+      codex: delayed,
+      simulated: delayed,
+    });
+    const started = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "delayed-provider-exit",
+      role: "Developer",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+
+    // Exact post-start ownership loss may occur after an archive sweep. The
+    // exact stop must retain the provider's termination barrier so the project
+    // drain still sees it.
+    expect(stopRunForLifecycle(store.db, started.runId)).toBe(true);
+    expect(interrupted).toBe(true);
+    expect(
+      await waitForProjectRunTermination(store.db, store.slug, 5),
+    ).toBe(false);
+    callbacks!.onExit({
+      outcome: "interrupted",
+      effectiveBackend: "simulated",
+      simulated: true,
+      sessionId: null,
+    });
+    expect(
+      await waitForProjectRunTermination(store.db, store.slug, 50),
+    ).toBe(true);
+  });
+
+  it("terminalizes a synchronous adapter launch failure before late completion", async () => {
+    const throwing: RuntimeAdapter = {
+      backend: "simulated",
+      start() {
+        throw new Error("adapter boot failed");
+      },
+    };
+    configureRunServiceForTests({
+      claude: throwing,
+      codex: throwing,
+      simulated: throwing,
+    });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary",
+      kind: "primary",
+      backend: "claude",
+      model: "m",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    expect(getRun(store.db, runId)?.state).toBe("error");
+    const observed: string[] = [];
+    registerRunCompletion(store.db, runId, (finished) => {
+      observed.push(finished.state);
+    });
+    await settle();
+    expect(observed).toEqual(["error"]);
+  });
+
   it("startRun materializes a run + persists lines + reaches finished", async () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "session x" },
@@ -415,6 +737,49 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
 });
 
 describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () => {
+  it("persists run purpose and clears review bindings on a conversation resume", async () => {
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Reviewer",
+      kind: "reviewer",
+      backend: "claude",
+      model: "m",
+      runPurpose: "governance_review",
+      reviewEvidenceFingerprint: "review-fingerprint",
+      reviewHeadSha: "a".repeat(40),
+      prompt: "review",
+      script: instantScript([
+        { t: "1", ev: "text", tag: "assistant", text: "reviewed" },
+      ]),
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, runId)).toMatchObject({
+      run_purpose: "governance_review",
+      review_evidence_fingerprint: "review-fingerprint",
+      review_head_sha: "a".repeat(40),
+    });
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "answer a human question",
+      runPurpose: "conversation",
+      reviewEvidenceFingerprint: null,
+      reviewHeadSha: null,
+      script: instantScript([
+        { t: "1", ev: "text", tag: "assistant", text: "reply" },
+      ]),
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, resumed.runId)).toMatchObject({
+      run_purpose: "conversation",
+      review_evidence_fingerprint: null,
+      review_head_sha: null,
+    });
+  });
+
   it("startRun persists agent_name + agent_profile_id on the run row", async () => {
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",

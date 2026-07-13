@@ -9,6 +9,16 @@ test("a contributor task owner accepts healthy repository-free completion", asyn
 
   await expect(page.locator(".packet")).toHaveCount(0);
   await expect(page.locator(".op-recs")).toHaveCount(0);
+  const validation = page.getByRole("region", { name: "Human validation" });
+  await expect(validation).toContainText("Human validation required");
+  await validation.getByRole("button", { name: "Record validation" }).click();
+  await expect(
+    page.locator(".toast", {
+      hasText: "Validation recorded · E2E-1 is ready for separate acceptance",
+    }),
+  ).toBeVisible();
+  await expect(validation).toHaveCount(0);
+
   const acceptance = page.getByRole("region", {
     name: "Completion acceptance",
   });

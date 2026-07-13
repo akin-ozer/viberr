@@ -13,7 +13,61 @@ the corrected build.
 - Existing data: Viberr Core, Deploy Pipeline, Billing Service, Viberr Live Six.
 - No org GitHub connections and no MCP servers.
 
-## Final post-fix walkthrough
+## Post-review final walkthrough — 2026-07-13
+
+The exact-intent hardening tree was built into a fresh Docker Compose image and exercised through
+the signed-in in-app browser at `http://localhost:5173`. The clean seed contained 3 projects and 12
+tasks. Health and integrity stayed green, the watcher remained active, and the browser console
+contained no warnings or errors across the complete route pass.
+
+### Page and behavior results
+
+1. Home renders all three clean-seed projects, truthful quiet/running counts, actionable-decision
+   counts, and honest empty GitHub/MCP summaries.
+2. Viberr Core Board renders all 10 tasks across Triage, Ready, In Progress, Review, and Done with
+   distinct human/agent waiting states, owners, branches, and PR references.
+3. VIB-142 renders the governed completion packet, immutable evidence summary, owner-scoped human
+   acceptance authority, reviewer roster, runtime history, timeline, and the honest no-credential
+   blocker. It does not claim a merge can occur offline.
+4. Review states the terminal contract precisely: healthy current evidence and all assigned
+   reviewer approvals are consumed by acceptance; repository work remains Review/merge-pending
+   until a real merge.
+5. Agents shows the task Operator as a coordinator, not a coder or closer. Eligible stages,
+   direct/recommend/human capability groups, skills, KBs, MCP context, Claude/Codex backends,
+   autonomy and current engagements are visible.
+6. Policy separates human RBAC from agent capability. It names the task-owner exception for
+   contributor completion and the organization-admin emergency project-admin override, and keeps
+   merging, Done, and policy changes human-reserved.
+7. GitHub truthfully reports no credential while retaining seeded historical PR/branch state and
+   explaining accepted/merge-pending behavior.
+8. Activity renders typed human, agent, operator, GitHub, policy, and audit events without console
+   errors.
+9. Project Settings renders canonical-file identity, workflow stages, members, repository controls,
+   archive and delete lifecycle controls.
+10. Organization Resources shows 3 KBs, no configured MCP server or org secret, seeded and
+    built-in skills, and global profiles; Organization Users shows the one org admin plus four
+    members and the domain allowlist.
+
+### Post-review screenshot index
+
+All paths are relative to this discovery folder under `screenshots/post-review/`.
+
+| Surface or state | Evidence |
+| --- | --- |
+| Home | `01-home.png` |
+| Viberr Core Board | `02-viberr-core-board.png` |
+| VIB-142 completion packet | `03-task-vib-142-completion.png` |
+| Governed Review queue | `04-review-queue.png` |
+| Operator profile and routing resources | `05-agents-operator.png` |
+| Human RBAC and agent capability | `06-policy-rbac-top.png` |
+| Completion/emergency authority and workflow | `07-policy-rbac-authority.png` |
+| Honest GitHub offline state | `08-github-honest-empty.png` |
+| Activity and audit stream | `09-activity-audit-stream.png` |
+| Project configuration | `10-project-settings.png` |
+| Organization agent resources | `11-org-agent-resources.png` |
+| Organization users and roles | `12-org-users.png` |
+
+## Earlier final post-fix walkthrough
 
 The final Docker Compose image was exercised in the in-app browser at desktop and 390×844 phone
 sizes. Health stayed green with 5 projects, 38 tasks, watcher active, and projection integrity

@@ -7,6 +7,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { GagentView } from "~/server/org/gagents.server";
 import {
   deploymentDot,
@@ -672,7 +673,7 @@ export function AgentsPage({
   stages: StageView[];
   projectSlug: string;
   projectName: string;
-  myRole: string | null;
+  myRole: ProjectRole | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
   globalProfiles?: GagentView[];
@@ -685,7 +686,7 @@ export function AgentsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
-  const canManage = myRole === "admin" && !readOnly;
+  const canManage = !readOnly && roleCan(myRole, "manage-agents");
   const [creating, setCreating] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);

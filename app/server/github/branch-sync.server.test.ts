@@ -12,6 +12,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { revokeProjectCompletionEffects } from "~/server/runtimes/run-completion-state.server";
 import {
   deriveSyncState,
   ensureTaskBranch,
@@ -273,5 +274,163 @@ describe("ensureTaskBranch", () => {
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl },
       ),
     ).toEqual({ status: "task_not_found" });
+  });
+
+  it("does not create or attach the old branch after a same-key task replacement", async () => {
+    const store = setupWithCredential("VIB-207");
+    const old = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-207",
+      dataRoot: store.dataRoot,
+    })!;
+    const branch = taskBranchName("VIB-207", old.parsed.frontmatter.title);
+    let releaseLookup!: () => void;
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      markLookupStarted = resolve;
+    });
+    const lookupGate = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const calls: string[] = [];
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      );
+      const key = `${init?.method ?? "GET"} ${url.pathname}`;
+      calls.push(key);
+      if (key === `GET ${REPO_PATH}/git/ref/heads%2F${branch}`) {
+        markLookupStarted();
+        await lookupGate;
+        return new Response(JSON.stringify({ message: "Not Found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (key === `GET ${REPO_PATH}/git/ref/heads%2Fmain`) {
+        return Response.json({ object: { sha: "basesha00" } });
+      }
+      if (key === `POST ${REPO_PATH}/git/refs`) {
+        return Response.json(
+          { object: { sha: "basesha00" } },
+          { status: 201 },
+        );
+      }
+      return new Response(JSON.stringify({ message: "Not Found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const pending = ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-207" },
+      ACTOR,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl,
+        taskLifecycle: {
+          expectedCreatedAt: old.parsed.frontmatter.createdAt!,
+        },
+      },
+    );
+    await lookupStarted;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-207", {
+        title: "Replacement task",
+        createdAt: "2026-07-13T12:00:00.000Z",
+        updatedAt: "2026-07-13T12:00:00.000Z",
+      }),
+    });
+    releaseLookup();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).not.toContain(`POST ${REPO_PATH}/git/refs`);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-207",
+        dataRoot: store.dataRoot,
+      })?.parsed.frontmatter.branch,
+    ).toBeNull();
+    expect(
+      listAuditEvents(store.db, { action: "github.branch.created" }),
+    ).toHaveLength(0);
+  });
+
+  it("stops delayed branch creation when project lifecycle ownership is revoked", async () => {
+    const store = setupWithCredential("VIB-208");
+    const branch = taskBranchName(
+      "VIB-208",
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-208",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.title,
+    );
+    let releaseLookup!: () => void;
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      markLookupStarted = resolve;
+    });
+    const lookupGate = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const calls: string[] = [];
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      );
+      const key = `${init?.method ?? "GET"} ${url.pathname}`;
+      calls.push(key);
+      if (key === `GET ${REPO_PATH}/git/ref/heads%2F${branch}`) {
+        markLookupStarted();
+        // Deliberately ignore AbortSignal here: the post-await ownership check
+        // must still stop a transport that cannot cancel promptly.
+        await lookupGate;
+        return new Response(JSON.stringify({ message: "Not Found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Response.json({ object: { sha: "basesha00" } });
+    }) as typeof fetch;
+
+    const pending = ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-208" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl },
+    );
+    await lookupStarted;
+    revokeProjectCompletionEffects(store.db, store.slug);
+    releaseLookup();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).not.toContain(`POST ${REPO_PATH}/git/refs`);
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-208",
+        dataRoot: store.dataRoot,
+      })?.parsed.frontmatter.branch,
+    ).toBeNull();
+    expect(
+      listAuditEvents(store.db, { action: "github.branch.created" }),
+    ).toHaveLength(0);
   });
 });

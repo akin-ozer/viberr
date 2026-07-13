@@ -2,22 +2,7 @@ import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
-import type { PrState } from "~/schemas/task-file.schema";
-
-function prPill(
-  state: PrState,
-): { kind: "done" | "info" | "risk" | "input"; label: string } {
-  switch (state) {
-    case "merged":
-      return { kind: "done", label: "merged" };
-    case "closed":
-      return { kind: "risk", label: "closed" };
-    case "accepted":
-      return { kind: "input", label: "merge pending" };
-    default:
-      return { kind: "info", label: "in review" };
-  }
-}
+import { prStatePill } from "~/features/github/github-pills";
 
 /**
  * Review queue — the human acceptance boundary as a read-only triage list
@@ -49,7 +34,7 @@ function RQRow({
       </span>
       <span className="rq-meta">
         {t.pr && (() => {
-          const meta = prPill(t.pr.state);
+          const meta = prStatePill(t.pr.state);
           return (
             <Pill kind={meta.kind} sm>
               PR #{t.pr.number} · {meta.label}

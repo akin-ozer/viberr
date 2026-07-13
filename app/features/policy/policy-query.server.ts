@@ -6,7 +6,6 @@ import {
   type MembershipView,
 } from "~/features/project-settings/membership.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { formatDayBucket } from "~/shared/dates/format";
 
 /**
  * Policy view read model (policy spec §3): members + roles from the
@@ -32,7 +31,7 @@ export interface PolicyViewData {
   profiles: AgentProfileView[];
   /** Null until a policy change has been audited (fresh seed) — the mock's
    * "Elif Demir · Mar 30" was fixture data; the chip hides when unknown. */
-  edited: { by: string; t: string } | null;
+  edited: { by: string; at: string } | null;
 }
 
 /** Audit actions that count as "policy changes" for the last-change chip. */
@@ -47,7 +46,7 @@ export const POLICY_AUDIT_ACTIONS = [
 export function latestPolicyChange(
   db: Database.Database,
   projectSlug: string,
-): { by: string; t: string } | null {
+): { by: string; at: string } | null {
   const placeholders = POLICY_AUDIT_ACTIONS.map(() => "?").join(", ");
   const row = db
     .prepare(
@@ -66,9 +65,7 @@ export function latestPolicyChange(
     : undefined;
   return {
     by: user?.name ?? row.actor_label,
-    t: formatDayBucket(row.occurred_at) === "Today"
-      ? "Today"
-      : formatDayBucket(row.occurred_at),
+    at: row.occurred_at,
   };
 }
 

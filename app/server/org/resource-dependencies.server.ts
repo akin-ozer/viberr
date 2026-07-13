@@ -112,6 +112,11 @@ export interface ProjectAgentReference {
   profileId: string;
 }
 
+export interface AgentResourceDependencyIndex {
+  projectReferences: ProjectAgentReference[];
+  resourceUsages: AgentResourceUsage[];
+}
+
 /**
  * Canonical project files first, projected DB rows only as a fallback. This
  * makes dependency guards safe even if a file changed just before reproject.
@@ -166,9 +171,15 @@ export function listProjectAgentReferences(
   db: Database.Database,
   ctx: ResourceDependencyContext = {},
 ): ProjectAgentReference[] {
+  return projectReferencesFrom(loadProjects(db, ctx));
+}
+
+function projectReferencesFrom(
+  projects: readonly ProjectAgents[],
+): ProjectAgentReference[] {
   const out: ProjectAgentReference[] = [];
   const seen = new Set<string>();
-  for (const project of loadProjects(db, ctx)) {
+  for (const project of projects) {
     for (const deployment of project.agents) {
       if (!deployment || typeof deployment.profileId !== "string") continue;
       const key = `${project.slug}\0${deployment.profileId}`;
@@ -197,6 +208,13 @@ export function listAgentResourceUsages(
   ctx: ResourceDependencyContext = {},
 ): AgentResourceUsage[] {
   const templates = loadTemplates(ctx);
+  return resourceUsagesFrom(templates, loadProjects(db, ctx));
+}
+
+function resourceUsagesFrom(
+  templates: ReturnType<typeof loadTemplates>,
+  projects: readonly ProjectAgents[],
+): AgentResourceUsage[] {
   const out: AgentResourceUsage[] = [];
 
   for (const template of templates.values()) {
@@ -208,7 +226,7 @@ export function listAgentResourceUsages(
     });
   }
 
-  for (const project of loadProjects(db, ctx)) {
+  for (const project of projects) {
     for (const deployment of project.agents) {
       if (!deployment || typeof deployment.profileId !== "string") continue;
       const template = templates.get(deployment.profileId);
@@ -242,6 +260,23 @@ export function listAgentResourceUsages(
   }
 
   return out;
+}
+
+/**
+ * Org settings needs both deployment counts and the complete resource graph.
+ * Build them from one canonical project-file scan instead of independently
+ * walking the projects directory three times in a single loader request.
+ */
+export function buildAgentResourceDependencyIndex(
+  db: Database.Database,
+  ctx: ResourceDependencyContext = {},
+): AgentResourceDependencyIndex {
+  const templates = loadTemplates(ctx);
+  const projects = loadProjects(db, ctx);
+  return {
+    projectReferences: projectReferencesFrom(projects),
+    resourceUsages: resourceUsagesFrom(templates, projects),
+  };
 }
 
 /** Match a resource by every stable/legacy alias its row currently has. */

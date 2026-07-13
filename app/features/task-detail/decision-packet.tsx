@@ -39,6 +39,7 @@ export function DecisionPacket({
   busy,
   canResolve,
   canResolveCompletion,
+  completionBlockedReason,
   canAsk = true,
   onResolve,
   onAsk,
@@ -52,6 +53,9 @@ export function DecisionPacket({
   /** Whether the viewer may resolve ACCEPT_COMPLETION specifically — a project
    *  supervisor, org-admin override, or the active contributor+ task owner. */
   canResolveCompletion: boolean;
+  /** Why an otherwise actionable completion option is not ready. Authority
+   * uses the default copy; evidence gates provide their precise reason. */
+  completionBlockedReason?: string;
   /** Archived task history keeps option inspection but closes commenting. */
   canAsk?: boolean;
   onResolve: (optionIndex: number) => void;
@@ -161,7 +165,8 @@ export function DecisionPacket({
                 aria-busy={busy}
                 title={
                   completionBlocked
-                    ? "Only this task's owner or a project supervisor can accept completion"
+                    ? (completionBlockedReason ??
+                      "Only this task's owner or a project supervisor can accept completion")
                     : undefined
                 }
                 onClick={() => onResolve(sel)}

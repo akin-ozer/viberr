@@ -14,6 +14,7 @@ import type {
   AgentResourceUsage,
 } from "~/server/org/resource-dependencies.server";
 import { formatRelative } from "~/shared/dates/format";
+import { useViewerTimeZone } from "~/shared/dates/use-viewer-time-zone";
 import { slugify } from "~/shared/ids/slugify";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -32,8 +33,8 @@ import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-acti
  * (spec §8.6 recommendation).
  */
 
-function rel(iso: string | null): string {
-  return iso ? formatRelative(iso) : "never";
+function rel(iso: string | null, timeZone: string): string {
+  return iso ? formatRelative(iso, new Date(), timeZone) : "never";
 }
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
@@ -457,6 +458,34 @@ const unmatched = (list: string[], names: string[]) => {
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
+/**
+ * Profile templates historically stored a KB by display name, while the
+ * runtime now stores its canonical folder id. Resolve every known alias to the
+ * folder id and dedupe it before the modal renders/saves; otherwise a renamed
+ * or migrated profile could carry both `Architecture notes` and
+ * `architecture-notes`, with the legacy copy invisible and impossible to
+ * remove from the picker.
+ */
+export function canonicalizeKbProfileRefs(
+  refs: readonly string[],
+  kbs: readonly Pick<KbView, "id" | "name" | "dir">[],
+): { selected: string[]; legacy: string[] } {
+  const aliases = new Map<string, string>();
+  for (const kb of kbs) {
+    aliases.set(kb.id, kb.dir);
+    aliases.set(kb.name, kb.dir);
+    aliases.set(kb.dir, kb.dir);
+  }
+  const selected = new Set<string>();
+  const legacy: string[] = [];
+  for (const ref of refs) {
+    const canonical = aliases.get(ref);
+    if (canonical) selected.add(canonical);
+    else if (!legacy.includes(ref)) legacy.push(ref);
+  }
+  return { selected: [...selected], legacy };
+}
+
 function AgentModal({
   initial,
   stages,
@@ -476,7 +505,7 @@ function AgentModal({
   const mcpNames = mcps.map((m) => m.name);
   // KB references are canonical folder ids (the runtime/catalog resolve
   // `store://kb/<dir>`), while the chip still renders the friendly name.
-  const kbNames = kbs.map((k) => k.dir);
+  const initialKbRefs = canonicalizeKbProfileRefs(initial?.kbs ?? [], kbs);
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
@@ -491,14 +520,14 @@ function AgentModal({
     initial ? match(initial.mcps, mcpNames) : [],
   );
   const [selKbs, setSelKbs] = useState<string[]>(
-    initial ? match(initial.kbs, kbNames) : [],
+    initialKbRefs.selected,
   );
   // Legacy template resource strings that don't match an org resource are
   // preserved untouched on save (documented deviation).
   const legacy = {
     skills: initial ? unmatched(initial.skills, skillNames) : [],
     mcps: initial ? unmatched(initial.mcps, mcpNames) : [],
-    kbs: initial ? unmatched(initial.kbs, kbNames) : [],
+    kbs: initialKbRefs.legacy,
   };
   const { action, err, setErr } = useModalAction(() => onClose());
 
@@ -725,6 +754,7 @@ function KbPanel({
   onEdit: (kb: KbView) => void;
   onDelete: (kb: KbView) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   return (
     <section className="panel">
       <div className="panel-head">
@@ -752,7 +782,7 @@ function KbPanel({
                 store://kb/{kb.dir}/ · {kb.fileCount} docs
               </span>
               <span className="sub">
-                read live · re-scanned {rel(kb.lastIndexedAt)}
+                read live · re-scanned {rel(kb.lastIndexedAt, timeZone)}
                 {usages.length > 0
                   ? " · " + usages.length + " reference" + (usages.length === 1 ? "" : "s")
                   : ""}
@@ -821,6 +851,7 @@ function SecretPanel({
   onRotate: (secret: OrgSecretMetadata) => void;
   onDelete: (secret: OrgSecretMetadata) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   return (
     <section className="panel">
       <div className="panel-head">
@@ -840,7 +871,7 @@ function SecretPanel({
               <b className="mono-b">{secret.name}</b>
               <span className="sub mono">{secret.ref}</span>
               <span className="sub">
-                {secret.masked} · rotated {rel(secret.updatedAt)}
+                {secret.masked} · rotated {rel(secret.updatedAt, timeZone)}
               </span>
             </span>
             <span className="rsrc-acts">
@@ -890,6 +921,7 @@ function McpPanel({
   onEdit: (m: McpView) => void;
   onDelete: (m: McpView) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   return (
     <section className="panel">
       <div className="panel-head">
@@ -924,9 +956,9 @@ function McpPanel({
               <span className="sub">
                 {m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "healthy · ") +
-                    "checked " + rel(m.lastCheckedAt)
+                    "checked " + rel(m.lastCheckedAt, timeZone)
                   : m.up === false
-                    ? "unreachable · checked " + rel(m.lastCheckedAt)
+                    ? "unreachable · checked " + rel(m.lastCheckedAt, timeZone)
                     : "not health-checked yet"}
                 {Object.keys(m.auth).length
                   ? " · auth: " +
@@ -990,6 +1022,7 @@ function SkillPanel({
   onEdit: (s: SkillView) => void;
   onDelete: (s: SkillView) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1020,7 +1053,7 @@ function SkillPanel({
               <span className="sub">{s.summary}</span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
-                {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
+                {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt, timeZone)}
                 {usages.length > 0
                   ? " · " + usages.length + " reference" + (usages.length === 1 ? "" : "s")
                   : ""}
@@ -1160,6 +1193,7 @@ export function ResourcesPanel({
   stages: StageDef[];
   resourceUsages?: AgentResourceUsage[];
 }) {
+  const timeZone = useViewerTimeZone();
   const [modal, setModal] = useState<ResourceModal | null>(null);
   const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(null);
   const [confirm, setConfirm] = useState<ResourceConfirm | null>(null);
@@ -1355,7 +1389,7 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingKb.name}
           subMono={browsingKb.uri + "/ · read live"}
-          metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt)}
+          metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt, timeZone)}
           tree={browsingKb.tree}
           resource={{ kind: "kb", id: browsingKb.id }}
           onClose={() => setBrowsing(null)}
@@ -1365,7 +1399,7 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingSkill.name}
           subMono={browsingSkill.uri + "/ · SKILL.md + supporting files"}
-          metaTail={"updated " + rel(browsingSkill.updatedAt)}
+          metaTail={"updated " + rel(browsingSkill.updatedAt, timeZone)}
           tree={browsingSkill.tree}
           resource={{ kind: "skill", id: browsingSkill.id }}
           onClose={() => setBrowsing(null)}

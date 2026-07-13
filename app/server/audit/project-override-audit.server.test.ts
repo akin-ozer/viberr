@@ -164,6 +164,7 @@ describe("organization-admin override audit propagation", () => {
     await postTask(denizId, "VIB-153", {
       intent: "assign-specialist",
       profileId: "developer",
+      backend: "codex",
     });
     expect(newestDetails("task.specialist.assigned", denizId)).toMatchObject({
       authoritySource: "org_admin_override",

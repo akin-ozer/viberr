@@ -1,10 +1,65 @@
 # Live test results
 
-All campaigns used the Docker Compose production build at `http://127.0.0.1:5173`. The historical
-sections preserve the first campaign's failures. The final section records corrected-build proof
-without reclassifying old VDV model outcomes as successes.
+Live campaigns use the Docker Compose production build. The canonical browser origin is
+`http://localhost:5173`; the `127.0.0.1` alias redirects to it. Historical sections preserve the
+first campaign's failures and earlier corrected-build proof without reclassifying old VDV model
+outcomes as successes.
 
-## Final post-fix release evidence
+## Post-review final release evidence — 2026-07-13
+
+This is the authoritative gate for the exact-intent hardening tree. Older counts below are retained
+only as evidence for the earlier F01–F41 pass.
+
+### Automated and build gates: PASS
+
+- Full Vitest regression: 158 files and 1,565 tests passed in 30.25 seconds.
+- TypeScript typecheck: clean.
+- Production build: passed. Vite reported only the already-understood ineffective dynamic-import
+  notices; there was no build failure.
+- Repository whitespace check: clean.
+- Playwright against the production application: 19/19 passed in 22.1 seconds.
+- Independent recovery verification: 197/197 focused tests passed. The verifier separately audited
+  archived boot fencing, Review-to-PR handoff durability, observation-only ambiguous PR creation,
+  full merge-target revalidation, incarnation-scoped acceptance audit, access-first ownership
+  cleanup, and routing orphan/context recovery, and found no remaining concrete defect in scope.
+
+### Fresh Docker, projection, and health: PASS
+
+- The previous Docker data directory was preserved at
+  `/private/tmp/viberr-docker-data-pre-review-20260713-1705`, then Compose built and started from an
+  empty data root. The final image id was
+  `c5616916a494cfb4d5d5f4bae6c60a2dcc2487f7a9493432b363f188a39e85f4`.
+- Fresh seed: 5 users, 3 projects, 12 tasks, 36 timeline events, 10 notifications, 3 agent
+  profiles, 18 agent runs, 96 log lines, 3 KBs/15 KB files, 4 seeded org skills, 0 MCP servers,
+  and 0 GitHub connections.
+- Immediate rescan: 3 projects, 12 tasks, 0 changed, 15 unchanged, 0 removed, 0 errors in 3 ms.
+- Health: `ok: true`; integrity `ok: true`; `recoveryRequired: false`; 3 projects/12 tasks;
+  watcher active. Claude and Codex are configured but honestly remain `unknown`/unverified because
+  this gate did not manufacture a provider-success signal.
+- Compose application log review: 0 warnings and 0 errors.
+
+### Signed-in browser walkthrough: PASS
+
+- The production Docker application was signed into through the in-app browser at
+  `http://localhost:5173` and exercised across Home; Viberr Core Board, task VIB-142, Review,
+  Agents, Policy, GitHub, Activity, and Settings; and organization Users and Agent Resources.
+- The Policy/task surfaces state that a contributor+ task owner is the task-scoped reviewer and
+  completion authority; an organization admin receives visible, audited emergency project-admin
+  authority; and operator context includes skill/KB/MCP fit, backend options, workload and cost
+  facts while the intelligent operator makes the final choice.
+- GitHub and MCP remained truthfully unconfigured in the fresh organization. The seeded task/PR
+  history is presented as history; no live authenticated GitHub success is claimed.
+- Twelve new screenshots are indexed in `browser-walkthrough.md` under
+  `screenshots/post-review/`. Browser console review across the walkthrough found 0 warnings and
+  0 errors.
+
+### Publication
+
+- Publication target: existing draft PR #23 from `codex/full-pass-2026-07-13`.
+- Final push and remote-check evidence is recorded after publication; it is not inferred from the
+  local gate.
+
+## Earlier final post-fix release evidence
 
 ### Automated and build gates: PASS
 

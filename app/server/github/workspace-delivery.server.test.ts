@@ -8,9 +8,14 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import {
+  readTaskFile,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { reviewEvidenceFingerprint } from "~/server/tasks/review-evidence.server";
+import { repositoryWorkspaceKey } from "~/server/tasks/specialist-preflight.server";
 import {
   reconcileWorkspaceDelivery,
   type CommandExec,
@@ -27,12 +32,20 @@ afterEach(ctx.cleanup);
 
 const BRANCH = "atl-3-add-workspace-feature";
 const COMMITS = "abc1234 [ATL-3] Add feature\ndef5678 [ATL-3] Wire tests";
+const REVIEWED_HEAD = "1".repeat(40);
+const REPLACEMENT_HEAD = "2".repeat(40);
 
 /** A canned git/gh runner keyed by the command shape. */
 function fakeExec(config: {
   branch?: string;
   commits?: string;
-  pr?: { number: number; state: string; title: string };
+  pr?: {
+    number: number;
+    state: string;
+    title: string;
+    /** Omitted/null simulates a degraded state-only gh response. */
+    headRefOid?: string | null;
+  };
   ghMissing?: boolean;
   /** `rev-parse --is-shallow-repository` answer (default: not shallow). */
   shallow?: boolean;
@@ -81,7 +94,10 @@ function setupTask(
 ) {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter(taskKey, { title: "Add feature", ...patch }),
+    frontmatter: baseTaskFrontmatter(taskKey, {
+      title: "Add feature",
+      ...patch,
+    }),
     goal: "Deliver the feature.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -94,6 +110,42 @@ function readFm(store: ReturnType<typeof setupTask>, taskKey = "ATL-3") {
     taskKey,
     dataRoot: store.dataRoot,
   })!.parsed;
+}
+
+async function seedApproval(
+  store: ReturnType<typeof setupTask>,
+  taskKey = "ATL-3",
+): Promise<void> {
+  await updateTaskFile(
+    { projectSlug: store.slug, taskKey, dataRoot: store.dataRoot },
+    (parsed) => {
+      parsed.frontmatter.reviewers = [
+        { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+      ];
+      parsed.frontmatter.validation = "healthy";
+      parsed.frontmatter.reviewerVerdicts = [
+        {
+          profileId: "reviewer",
+          verdict: "approve",
+          summary: "Approved the exact PR head.",
+          runId: "run-review",
+          reviewedAt: "2026-07-13T00:00:00.000Z",
+          evidenceFingerprint: reviewEvidenceFingerprint(
+            parsed,
+            "akin-ozer/viberr",
+          ),
+        },
+      ];
+      parsed.frontmatter.humanValidation = {
+        userId: store.users.arda.id,
+        validatedAt: "2026-07-13T00:01:00.000Z",
+        evidenceFingerprint: reviewEvidenceFingerprint(
+          parsed,
+          "akin-ozer/viberr",
+        ),
+      };
+    },
+  );
 }
 
 describe("reconcileWorkspaceDelivery", () => {
@@ -134,7 +186,12 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask();
     // "akin-ozer/viberr" → repo name "viberr".
     mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", "viberr", ".git"),
+      path.join(
+        taskDir(store.slug, "ATL-3", store.dataRoot),
+        "workspace",
+        "viberr",
+        ".git",
+      ),
       { recursive: true },
     );
 
@@ -151,10 +208,50 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(readFm(store).frontmatter.branch).toBe(BRANCH);
   });
 
+  it("prefers the canonical full-repository-identity workspace over a same-basename legacy clone", async () => {
+    const store = setupTask();
+    const workspace = path.join(
+      taskDir(store.slug, "ATL-3", store.dataRoot),
+      "workspace",
+    );
+    const canonical = path.join(
+      workspace,
+      repositoryWorkspaceKey("akin-ozer/viberr"),
+    );
+    const legacyBasename = path.join(workspace, "viberr");
+    mkdirSync(path.join(canonical, ".git"), { recursive: true });
+    // This could belong to a previous project-repo identity with the same
+    // basename; canonical identity must win deterministically.
+    mkdirSync(path.join(legacyBasename, ".git"), { recursive: true });
+    const commandCwds: string[] = [];
+    const inner = fakeExec({ branch: BRANCH, commits: COMMITS });
+    const exec: CommandExec = async (file, args, opts) => {
+      if (opts.cwd) commandCwds.push(opts.cwd);
+      return inner(file, args, opts);
+    };
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      dataRoot: store.dataRoot,
+      exec,
+    });
+
+    expect(res.status).toBe("reconciled");
+    expect(commandCwds.length).toBeGreaterThan(0);
+    expect(new Set(commandCwds)).toEqual(new Set([canonical]));
+  });
+
   it("probes <taskDir>/workspace/repo when no workdir is given (reviewer clones — B12)", async () => {
     const store = setupTask();
     mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", "repo", ".git"),
+      path.join(
+        taskDir(store.slug, "ATL-3", store.dataRoot),
+        "workspace",
+        "repo",
+        ".git",
+      ),
       { recursive: true },
     );
 
@@ -174,7 +271,11 @@ describe("reconcileWorkspaceDelivery", () => {
   it("probes <taskDir>/workspace itself when the agent cloned into ./ (B12)", async () => {
     const store = setupTask();
     mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", ".git"),
+      path.join(
+        taskDir(store.slug, "ATL-3", store.dataRoot),
+        "workspace",
+        ".git",
+      ),
       { recursive: true },
     );
 
@@ -223,7 +324,10 @@ describe("reconcileWorkspaceDelivery", () => {
     // wrong cache (and never wipe a prior run's honest cache).
     const store = setupTask("ATL-3", {
       branch: BRANCH,
-      github: { commits: [{ sha: "abc1234", msg: "[ATL-3] real work" }], changed: null },
+      github: {
+        commits: [{ sha: "abc1234", msg: "[ATL-3] real work" }],
+        changed: null,
+      },
     });
     const workdir = makeWorkspaceRepo();
 
@@ -250,7 +354,10 @@ describe("reconcileWorkspaceDelivery", () => {
   it("is a no-op when the branch already matches (confirm + leave, no duplicate event)", async () => {
     const store = setupTask("ATL-3", {
       branch: BRANCH,
-      github: { commits: [{ sha: "abc1234", msg: "[ATL-3] Add feature" }], changed: null },
+      github: {
+        commits: [{ sha: "abc1234", msg: "[ATL-3] Add feature" }],
+        changed: null,
+      },
     });
     const workdir = makeWorkspaceRepo();
 
@@ -260,7 +367,10 @@ describe("reconcileWorkspaceDelivery", () => {
       taskKey: "ATL-3",
       workdir,
       dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: BRANCH, commits: "abc1234 [ATL-3] Add feature" }),
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: "abc1234 [ATL-3] Add feature",
+      }),
     });
 
     expect(res.status).toBe("reconciled");
@@ -298,7 +408,10 @@ describe("reconcileWorkspaceDelivery", () => {
     // because they don't belong to fm.branch.
     const store = setupTask("ATL-3", {
       branch: BRANCH,
-      github: { commits: [{ sha: "abc1234", msg: "[ATL-3] real work" }], changed: null },
+      github: {
+        commits: [{ sha: "abc1234", msg: "[ATL-3] real work" }],
+        changed: null,
+      },
     });
     const workdir = makeWorkspaceRepo();
 
@@ -329,17 +442,30 @@ describe("reconcileWorkspaceDelivery", () => {
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
-        pr: { number: 9, state: "OPEN", title: "[ATL-3] Add feature" },
+        pr: {
+          number: 9,
+          state: "OPEN",
+          title: "[ATL-3] Add feature",
+          headRefOid: REVIEWED_HEAD,
+        },
       }),
     });
 
     expect(res.prLinked).toBe(true);
     // gh's OPEN maps to the canonical cache vocabulary "review" (same as the
     // server delivery path) — never the raw "open".
-    expect(res.pr).toMatchObject({ number: 9, state: "review" });
+    expect(res.pr).toMatchObject({
+      number: 9,
+      state: "review",
+      headSha: REVIEWED_HEAD,
+    });
 
     const parsed = readFm(store);
-    expect(parsed.frontmatter.pr).toMatchObject({ number: 9, state: "review" });
+    expect(parsed.frontmatter.pr).toMatchObject({
+      number: 9,
+      state: "review",
+      headSha: REVIEWED_HEAD,
+    });
     const prEvent = parsed.timeline.find((e) => e.text.includes("PR #9"));
     expect(prEvent?.type).toBe("github");
     expect(prEvent?.text).toContain("Linked **PR #9**");
@@ -348,7 +474,7 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
-  it("does NOT re-link or ping-pong a PR the server already cached as \"review\"", async () => {
+  it('does NOT re-link or ping-pong a PR the server already cached as "review"', async () => {
     // The server delivery path stores an open PR as "review"; a later real
     // specialist run's reconcile must treat that as already-linked (gh OPEN →
     // "review" == cached "review"), not clobber it back to "open".
@@ -372,10 +498,153 @@ describe("reconcileWorkspaceDelivery", () => {
     });
 
     expect(res.prLinked).toBe(false);
-    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "review" });
+    expect(readFm(store).frontmatter.pr).toMatchObject({
+      number: 9,
+      state: "review",
+    });
     expect(
       readFm(store).timeline.filter((e) => e.text.includes("PR #9")),
     ).toHaveLength(0);
+  });
+
+  it("updates same-PR state without dropping its unchanged verified head or approval evidence", async () => {
+    const store = setupTask("ATL-3", {
+      stage: "review",
+      branch: BRANCH,
+      pr: {
+        number: 9,
+        state: "review",
+        title: "[ATL-3] Add feature",
+        headSha: REVIEWED_HEAD,
+      },
+    });
+    await seedApproval(store);
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: {
+          number: 9,
+          state: "MERGED",
+          title: "[ATL-3] Add feature",
+          headRefOid: REVIEWED_HEAD,
+        },
+      }),
+    });
+
+    expect(res.prLinked).toBe(true);
+    const fm = readFm(store).frontmatter;
+    expect(fm.pr).toMatchObject({
+      number: 9,
+      state: "merged",
+      headSha: REVIEWED_HEAD,
+    });
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.humanValidation).not.toBeNull();
+    expect(fm.validation).toBe("healthy");
+  });
+
+  it("rebinds a real same-PR replacement head and invalidates evidence for the old head", async () => {
+    const store = setupTask("ATL-3", {
+      stage: "review",
+      branch: BRANCH,
+      pr: {
+        number: 9,
+        state: "review",
+        title: "[ATL-3] Add feature",
+        headSha: REVIEWED_HEAD,
+      },
+    });
+    await seedApproval(store);
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: {
+          number: 9,
+          state: "OPEN",
+          title: "[ATL-3] Add feature",
+          headRefOid: REPLACEMENT_HEAD,
+        },
+      }),
+    });
+
+    expect(res.prLinked).toBe(true);
+    const parsed = readFm(store);
+    expect(parsed.frontmatter.pr?.headSha).toBe(REPLACEMENT_HEAD);
+    expect(parsed.frontmatter.reviewerVerdicts).toEqual([]);
+    expect(parsed.frontmatter.humanValidation).toBeNull();
+    expect(parsed.frontmatter.validation).toBe("changed");
+    expect(
+      parsed.timeline.find((event) => event.text.includes("PR #9"))?.text,
+    ).toContain(`head → \`${REPLACEMENT_HEAD}\``);
+    const audit = listAuditEvents(store.db, {
+      action: "github.workspace.pr_linked",
+    }).at(0);
+    expect(audit?.details).toMatchObject({
+      previousHeadSha: REVIEWED_HEAD,
+      headSha: REPLACEMENT_HEAD,
+      headChanged: true,
+      evidenceInvalidated: true,
+    });
+  });
+
+  it("preserves the verified same-PR head and evidence when gh degrades to state-only data", async () => {
+    const store = setupTask("ATL-3", {
+      stage: "review",
+      branch: BRANCH,
+      pr: {
+        number: 9,
+        state: "review",
+        title: "[ATL-3] Add feature",
+        headSha: REVIEWED_HEAD,
+      },
+    });
+    await seedApproval(store);
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      workdir,
+      dataRoot: store.dataRoot,
+      exec: fakeExec({
+        branch: BRANCH,
+        commits: COMMITS,
+        pr: {
+          number: 9,
+          state: "CLOSED",
+          title: "[ATL-3] Add feature",
+          // Deliberately no headRefOid: absence is unknown, not deletion.
+        },
+      }),
+    });
+
+    expect(res.prLinked).toBe(true);
+    const fm = readFm(store).frontmatter;
+    expect(fm.pr).toMatchObject({
+      number: 9,
+      state: "closed",
+      headSha: REVIEWED_HEAD,
+    });
+    expect(fm.reviewerVerdicts).toHaveLength(1);
+    expect(fm.humanValidation).not.toBeNull();
+    expect(fm.validation).toBe("healthy");
   });
 
   it("leaves pr untouched (never fabricates) when gh is unavailable", async () => {
@@ -398,7 +667,7 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
-  it("a legacy non-canonical \"open\" cache reads as \"review\" (schema coercion) — no re-link, no ping-pong", async () => {
+  it('a legacy non-canonical "open" cache reads as "review" (schema coercion) — no re-link, no ping-pong', async () => {
     // The prRefSchema enum coerces the legacy raw "open" to "review" at parse
     // time, so reconcile sees an already-linked canonical PR: nothing to heal,
     // no duplicate event, ever.
@@ -428,7 +697,10 @@ describe("reconcileWorkspaceDelivery", () => {
 
     const first = await reconcileWorkspaceDelivery(opts);
     expect(first.prLinked).toBe(false);
-    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "review" });
+    expect(readFm(store).frontmatter.pr).toMatchObject({
+      number: 9,
+      state: "review",
+    });
 
     const second = await reconcileWorkspaceDelivery(opts);
     expect(second.prLinked).toBe(false);
@@ -437,7 +709,7 @@ describe("reconcileWorkspaceDelivery", () => {
     ).toHaveLength(0);
   });
 
-  it("preserves a human-set \"accepted\" (merge pending) while gh reports the PR still OPEN (B1)", async () => {
+  it('preserves a human-set "accepted" (merge pending) while gh reports the PR still OPEN (B1)', async () => {
     // D3/S2 regression: a real agent run finishing on an accepted merge-pending
     // task must NOT clobber pr.state back to "review" — that hides the
     // Complete-merge button and fabricates a "PR opened" event.
@@ -461,14 +733,17 @@ describe("reconcileWorkspaceDelivery", () => {
     });
 
     expect(res.prLinked).toBe(false);
-    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "accepted" });
+    expect(readFm(store).frontmatter.pr).toMatchObject({
+      number: 9,
+      state: "accepted",
+    });
     // No misleading "Linked PR opened" event when nothing actually changed.
     expect(
       readFm(store).timeline.filter((e) => e.text.includes("PR #9")),
     ).toHaveLength(0);
   });
 
-  it("a real terminal state overrides \"accepted\": MERGED advances it with an honest state-change event (B1)", async () => {
+  it('a real terminal state overrides "accepted": MERGED advances it with an honest state-change event (B1)', async () => {
     const store = setupTask("ATL-3", {
       branch: BRANCH,
       pr: { number: 9, state: "accepted", title: "[ATL-3] Add feature" },
@@ -489,7 +764,10 @@ describe("reconcileWorkspaceDelivery", () => {
     });
 
     expect(res.prLinked).toBe(true);
-    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "merged" });
+    expect(readFm(store).frontmatter.pr).toMatchObject({
+      number: 9,
+      state: "merged",
+    });
     const ev = readFm(store).timeline.find((e) => e.text.includes("PR #9"));
     // The already-linked PR changed state — never re-announced as "opened".
     expect(ev?.text).toContain("Reconciled **PR #9** state");

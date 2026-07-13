@@ -72,6 +72,8 @@ export interface GithubRequestOptions {
   /** JSON body for POST/PUT/PATCH. */
   body?: unknown;
   searchParams?: Record<string, string | number>;
+  /** Lifecycle revocation for request-backed governed mutations. */
+  signal?: AbortSignal;
 }
 
 export interface GithubClient {
@@ -125,7 +127,11 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       "x-github-api-version": API_VERSION,
     };
     if (requestOptions.etag) headers["if-none-match"] = requestOptions.etag;
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = {
+      method,
+      headers,
+      ...(requestOptions.signal ? { signal: requestOptions.signal } : {}),
+    };
     if (requestOptions.body !== undefined) {
       headers["content-type"] = "application/json";
       init.body = JSON.stringify(requestOptions.body);

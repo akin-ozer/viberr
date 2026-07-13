@@ -15,6 +15,8 @@ import { createProjectFile } from "~/server/files/project-writer.server";
 import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { getProjectDeletionTombstone } from "~/server/projects/project-operational-state.server";
+import { allowProjectCompletionEffects } from "~/server/runtimes/run-completion-state.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   DEFAULT_GUARDRAILS,
@@ -174,6 +176,14 @@ export async function createProject(
   if (!slug) {
     throw AppError.validation("The project name must contain letters or digits.");
   }
+  if (getProjectDeletionTombstone(db, slug)) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: `Project ${slug} deletion is still being finalized. Retry shortly.`,
+      kind: "user",
+    });
+  }
   if (getProject(db, slug)) {
     throw new AppError({
       code: ERROR_CODES.CONFLICT,
@@ -248,6 +258,7 @@ export async function createProject(
   rebuildPath(db, projectFilePath(slug, ctx.dataRoot), {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+  allowProjectCompletionEffects(db, slug);
 
   // Bind the selected connection's PAT to the project so credential health,
   // branch creation, and PR sync work against the real repo. Skip for a

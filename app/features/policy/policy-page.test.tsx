@@ -217,7 +217,7 @@ describe("PolicyPage archived mode", () => {
       stages: STAGES,
       transitions: TRANSITIONS,
       profiles: PROFILES as unknown as PolicyViewData["profiles"],
-      edited: { by: "Elif Demir", t: "Today" },
+      edited: { by: "Elif Demir", at: new Date().toISOString() },
     };
     const router = createMemoryRouter(
       [

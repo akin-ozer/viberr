@@ -39,12 +39,11 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 /**
  * Phase 10 audit regression — two halves:
  *
- * 1. STATIC SWEEP: every `recordAudit(...)` call site in app/ + scripts/ is
- *    parsed for its `action:` literal(s); the extracted set must equal the
- *    canonical catalog in audit-actions.ts in BOTH directions. Adding a
- *    governed action without registering it (or leaving a stale catalog
- *    row) fails here — this is the "entry points vs recorded actions"
- *    enumeration, kept maintainable as data.
+ * 1. STATIC SWEEP: every `recordAudit(...)` call site and deterministic direct
+ *    `INSERT [OR IGNORE] INTO audit_events` recovery checkpoint in app/ +
+ *    scripts/ is parsed for its action literal(s); the extracted set must equal
+ *    the canonical catalog in BOTH directions. Recovery inserts intentionally
+ *    use stable ids and therefore cannot go through the random-id recorder.
  *
  * 2. TABLE-DRIVEN FUNCTIONAL: one representative invocation per governed
  *    action family runs against the real server functions and asserts the
@@ -96,9 +95,9 @@ function extractRecordedActions(): {
           problems.push(`${rel}@${match.index}: no action: line found`);
           continue;
         }
-        const literals = [
-          ...actionLine[1]!.matchAll(/"([a-z0-9_.]+)"/g),
-        ].map((m) => m[1]!);
+        const literals = [...actionLine[1]!.matchAll(/"([a-z0-9_.]+)"/g)].map(
+          (m) => m[1]!,
+        );
         if (literals.length === 0) {
           problems.push(
             `${rel}@${match.index}: action is not a string literal (${actionLine[1]!.trim()})`,
@@ -110,6 +109,14 @@ function extractRecordedActions(): {
           files.push(rel);
           found.set(action, files);
         }
+      }
+      const deterministicInsertRe =
+        /INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+audit_events[\s\S]{0,700}?VALUES\s*\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*['"]([a-z0-9_.]+)['"]/g;
+      for (const match of source.matchAll(deterministicInsertRe)) {
+        const action = match[1]!;
+        const files = found.get(action) ?? [];
+        files.push(rel);
+        found.set(action, files);
       }
     }
   }
@@ -388,7 +395,8 @@ describe("governed actions record audit rows (table-driven)", () => {
             },
             dataRoot: store.dataRoot,
           });
-          for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+          for (let i = 0; i < 10; i++)
+            await new Promise((r) => setTimeout(r, 0));
           interruptRun(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-1", runId },

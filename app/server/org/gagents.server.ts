@@ -17,7 +17,10 @@ import {
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
 import { slugify } from "~/shared/ids/slugify";
-import { listProjectAgentReferences } from "./resource-dependencies.server";
+import {
+  listProjectAgentReferences,
+  type ProjectAgentReference,
+} from "./resource-dependencies.server";
 
 /**
  * Global agent profile TEMPLATES (org-settings spec §3.7/§4.4) — the org
@@ -83,9 +86,10 @@ function readTemplateFile(
 export function usedByProject(
   db: Database.Database,
   ctx: GagentContext = {},
+  references: readonly ProjectAgentReference[] = listProjectAgentReferences(db, ctx),
 ): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const ref of listProjectAgentReferences(db, ctx)) {
+  for (const ref of references) {
     counts[ref.profileId] = (counts[ref.profileId] ?? 0) + 1;
   }
   return counts;
@@ -116,11 +120,11 @@ function toView(
 export function listGlobalAgentProfiles(
   db: Database.Database,
   ctx: GagentContext = {},
+  references: readonly ProjectAgentReference[] = listProjectAgentReferences(db, ctx),
 ): GagentView[] {
   const dir = agentProfilesDir(ctx.dataRoot);
   if (!existsSync(dir)) return [];
-  const references = listProjectAgentReferences(db, ctx);
-  const used = usedByProject(db, ctx);
+  const used = usedByProject(db, ctx, references);
   const out: GagentView[] = [];
   for (const entry of readdirSync(dir).sort()) {
     if (!entry.endsWith(".md")) continue;

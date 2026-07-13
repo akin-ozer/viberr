@@ -7,10 +7,18 @@
  * real end-to-end condition rather than a mocked role.
  */
 import { findUserByEmail } from "../app/server/auth/user-store.server";
+import { rmSync } from "node:fs";
+import path from "node:path";
 import { getDb } from "../app/server/db/sqlite.server";
 import { createProjectFile } from "../app/server/files/project-writer.server";
 import { createTaskFile } from "../app/server/files/task-writer.server";
 import { rebuildAll } from "../app/server/projections/rebuilder.server";
+import { reviewEvidenceFingerprint } from "../app/server/tasks/review-evidence.server";
+import { stageTaskMergeAcceptanceIntent } from "../app/server/tasks/task-completion-recovery.server";
+import {
+  createPat,
+  setProjectCredential,
+} from "../app/server/secrets/pat-store.server";
 import type {
   TaskFileEvent,
   TaskFrontmatter,
@@ -28,6 +36,12 @@ const selinId = selin.id;
 
 const projectSlug = "e2e-governance";
 const fixedAt = "2026-07-13T08:00:00.000Z";
+const pendingHeadSha = "2".repeat(40);
+const externallyMergedHeadSha = "3".repeat(40);
+rmSync(
+  path.resolve(import.meta.dirname, ".github-fixture-pr-999003-merged"),
+  { force: true },
+);
 
 await createProjectFile(
   { projectSlug, dataRoot },
@@ -85,10 +99,15 @@ function frontmatter(
     specialist: null,
     reviewers: [],
     reviewerVerdicts: [],
+    humanValidation: null,
+    reviewRevision: 0,
     operator: { assignedAtStageId: "review" },
     recommendations: [],
     urgent: false,
-    validation: "healthy",
+    // A zero-reviewer task reaches the human boundary with implementation
+    // evidence, but it is not completion-ready until an authorized human
+    // records validation as a distinct action.
+    validation: "changed",
     branch: null,
     repo: null,
     pr: null,
@@ -132,7 +151,14 @@ await createTaskFile(
       {
         repo: "akin-ozer/viberr",
         branch: "codex/e2e-merge-pending",
-        pr: { number: 999_002, state: "review", title: "E2E merge pending" },
+        pr: {
+          number: 999_002,
+          state: "review",
+          title: "E2E merge pending",
+          headSha: pendingHeadSha,
+          baseRepo: "akin-ozer/viberr",
+          baseRef: "main",
+        },
       },
     ),
     goal: "Prove acceptance cannot move repository-backed work to Done before merge.",
@@ -141,27 +167,63 @@ await createTaskFile(
   },
 );
 
+const externallyMergedGoal =
+  "Prove a contributor owner can finalize accepted work after exact live GitHub proof of an external merge.";
+const externallyMergedFrontmatter = frontmatter(
+  "E2E-3",
+  "Externally merged accepted work can be finalized",
+  {
+    repo: "akin-ozer/viberr",
+    branch: "codex/e2e-externally-merged",
+    pr: {
+      number: 999_003,
+      state: "accepted",
+      title: "E2E externally merged",
+      headSha: externallyMergedHeadSha,
+      baseRepo: "akin-ozer/viberr",
+      baseRef: "main",
+    },
+    validation: "healthy",
+  },
+);
+const externallyMergedEvidence = reviewEvidenceFingerprint(
+  { goal: externallyMergedGoal, frontmatter: externallyMergedFrontmatter },
+  null,
+);
+externallyMergedFrontmatter.humanValidation = {
+  userId: selinId,
+  validatedAt: fixedAt,
+  evidenceFingerprint: externallyMergedEvidence,
+};
+
 await createTaskFile(
   { projectSlug, taskKey: "E2E-3", dataRoot },
   {
-    frontmatter: frontmatter(
-      "E2E-3",
-      "Externally merged accepted work can be finalized",
-      {
-        repo: "akin-ozer/viberr",
-        branch: "codex/e2e-externally-merged",
-        pr: {
-          number: 999_003,
-          state: "merged",
-          title: "E2E externally merged",
-        },
-      },
-    ),
-    goal: "Prove a contributor owner can finalize accepted work after GitHub reports an external merge.",
+    frontmatter: externallyMergedFrontmatter,
+    goal: externallyMergedGoal,
     packet: null,
     timeline: [readyForOwner],
   },
 );
+
+// This is accepted work, not merely a task whose mutable cache happens to say
+// `merged`. Preserve the original accepter in the durable acceptance journal;
+// the browser action must still obtain an exact live repo/base/head observation
+// before it can converge the task to Done.
+stageTaskMergeAcceptanceIntent(db, {
+  projectSlug,
+  taskKey: "E2E-3",
+  taskIncarnation: fixedAt,
+  evidenceFingerprint: externallyMergedEvidence,
+  actorUserId: selinId,
+  actorLabel: "selin@viberr.dev",
+  authoritySource: "task_owner",
+  doneStageId: "done",
+  repo: "akin-ozer/viberr",
+  defaultBranch: "main",
+  prNumber: 999_003,
+  headSha: externallyMergedHeadSha,
+});
 
 const summary = rebuildAll(db, { dataRoot, force: true });
 if (summary.errors > 0) {
@@ -169,4 +231,23 @@ if (summary.errors > 0) {
     `E2E fixture projection failed with ${summary.errors} errors`,
   );
 }
+
+// A dummy encrypted credential unlocks the real GitHub client path. The Node
+// preload in playwright.config.ts intercepts only PRs 999002/999003, so no
+// external repository can be read or mutated by these fixtures.
+const fixtureActor = { userId: selinId, label: "selin@viberr.dev" };
+const fixturePat = createPat(
+  db,
+  {
+    userId: selinId,
+    label: "E2E exact-merge transport",
+    token: "ghp_e2e_fixture_token",
+  },
+  fixtureActor,
+);
+setProjectCredential(
+  db,
+  { projectSlug, patId: fixturePat.id },
+  fixtureActor,
+);
 db.close();

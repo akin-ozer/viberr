@@ -39,6 +39,23 @@ describe("org secret store", () => {
     expect(resolveOrgSecretRef(db, saved.secret.ref)).toBe("plain-super-secret");
   });
 
+  it("fully masks short values instead of revealing their last four characters", () => {
+    const db = ctx.makeDb();
+    const { secret } = saveOrgSecret(
+      db,
+      { name: "short", value: "12345678" },
+      ACTOR,
+    );
+    expect(secret.masked).toBe("····");
+    const rotated = saveOrgSecret(
+      db,
+      { id: secret.id, name: secret.name, value: "tiny" },
+      ACTOR,
+    );
+    expect(rotated.secret.masked).toBe("····");
+    expect(resolveOrgSecretRef(db, secret.ref)).toBe("tiny");
+  });
+
   it("rotates in place and refuses deletion while an MCP mapping uses the ref", () => {
     const db = ctx.makeDb();
     const { secret } = saveOrgSecret(

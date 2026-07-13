@@ -126,6 +126,8 @@ export function baseTaskFrontmatter(
     specialist: null,
     reviewers: [],
     reviewerVerdicts: [],
+    humanValidation: null,
+    reviewRevision: 0,
     operator: null,
     recommendations: [],
     urgent: false,

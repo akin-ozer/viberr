@@ -393,6 +393,24 @@ describe("mcp servers", () => {
     expect(stored.auth_json).not.toContain("header-plaintext");
     expect(up.toast).not.toContain("header-plaintext");
 
+    const transientRename = await saveMcpServer(
+      db,
+      {
+        id: up.mcp.id,
+        name: "GitHub MCP renamed",
+        transport: "HTTP",
+        target: "https://x.dev/sse",
+        auth: { "X-API-Key": secret.ref },
+      },
+      ACTOR,
+      { fetchImpl: unreachableFetch() },
+    );
+    expect(transientRename.mcp).toMatchObject({
+      name: "github-mcp-renamed",
+      up: false,
+      tools: 6,
+    });
+
     const down = await saveMcpServer(
       db,
       {

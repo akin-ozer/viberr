@@ -7,4 +7,8 @@ export default function globalTeardown(): void {
     recursive: true,
     force: true,
   });
+  rmSync(
+    path.resolve(import.meta.dirname, ".github-fixture-pr-999003-merged"),
+    { force: true },
+  );
 }

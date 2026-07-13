@@ -44,9 +44,16 @@ export function Rail({
   const closeRef = useRef<HTMLButtonElement>(null);
   const mobileClosed = mobile && !open;
 
+  // Focus the close button only when the drawer opens. Keyed on mobile/open
+  // alone — depending on onClose (recreated every parent render) would re-run
+  // this on every SSE-driven revalidation and yank focus back off the nav links.
   useEffect(() => {
     if (!mobile || !open) return;
     closeRef.current?.focus();
+  }, [mobile, open]);
+
+  useEffect(() => {
+    if (!mobile || !open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

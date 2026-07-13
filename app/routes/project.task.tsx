@@ -21,7 +21,9 @@ import {
   commentToAgent,
   completeTaskMerge,
   dismissRecommendation,
+  missingReviewerApprovalProfileIds,
   releaseOwner,
+  recordHumanValidation,
   resolvePacket,
   setOwner,
   transitionStage,
@@ -54,10 +56,8 @@ import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
-import type {
-  OperatorExecutionStatus,
-  TaskMemberView,
-} from "~/features/task-detail/execution-profile";
+import type { TaskMemberView } from "~/features/task-detail/execution-profile";
+import { resolveOperatorExecutionStatus } from "~/features/task-detail/operator-execution-status";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
@@ -68,6 +68,10 @@ import { authorizeProjectAction } from "~/shared/rbac";
 import { withProjectAuditAuthority } from "~/server/audit/audit-recorder.server";
 import { assertProjectActive } from "~/server/projects/project-lifecycle.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import {
+  hasCurrentHumanValidation,
+  repositoryReviewEvidenceReady,
+} from "~/server/tasks/review-evidence.server";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -113,25 +117,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     params.key,
   );
   const operatorConfigured = resolveOperatorAuthority({}, params.slug).deployed;
-  const operatorStatus: OperatorExecutionStatus =
-    operatorRun?.lifecycle === "running" || operatorRun?.lifecycle === "queued"
-      ? operatorRun.lifecycle
-      : operatorDispatch?.state === "running" ||
-          operatorDispatch?.state === "queued"
-        ? operatorDispatch.state
-        : operatorRun
-          ? operatorRun.lifecycle === "error"
-            ? "failed"
-            : operatorRun.lifecycle
-          : operatorDispatch
-            ? operatorDispatch.state === "failed"
-              ? "failed"
-              : operatorDispatch.state
-            : detail.operator
-              ? "engaged"
-              : operatorConfigured
-                ? "configured"
-                : "not_configured";
+  const operatorStatus = resolveOperatorExecutionStatus({
+    runLifecycle: operatorRun?.lifecycle ?? null,
+    dispatchState: operatorDispatch?.state ?? null,
+    engaged: !!detail.operator,
+    configured: operatorConfigured,
+  });
 
   // Deployed specialists the "Assign specialist" menu offers; runActive
   // disables the Run button while a run for this task is already running.
@@ -155,11 +146,44 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const reviewStageId = project
     ? resolveStageRoles(project.stages, project.workflow).reviewId
     : null;
+  const completionEvidence = (() => {
+    if (!taskFile || !project) {
+      return {
+        repositoryReady: false,
+        humanValidationCurrent: false,
+        reviewerApprovalsCurrent: false,
+        ready: false,
+      };
+    }
+    const parsed = taskFile.parsed;
+    const repositoryReady = repositoryReviewEvidenceReady(
+      parsed,
+      project.repo,
+    );
+    const humanValidationCurrent = hasCurrentHumanValidation(
+      parsed,
+      project.repo,
+    );
+    const reviewerApprovalsCurrent =
+      parsed.frontmatter.reviewers.length > 0 &&
+      missingReviewerApprovalProfileIds(parsed, project.repo).length === 0;
+    return {
+      repositoryReady,
+      humanValidationCurrent,
+      reviewerApprovalsCurrent,
+      ready:
+        repositoryReady &&
+        (parsed.frontmatter.reviewers.length === 0
+          ? humanValidationCurrent
+          : reviewerApprovalsCurrent),
+    };
+  })();
 
   return {
     task: { ...detail, timeline: slice.events },
     recommendations,
     reviewStageId,
+    completionEvidence,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
@@ -182,6 +206,14 @@ function backendOverride(formData: FormData): {
 } {
   const b = String(formData.get("backend") ?? "");
   return b === "claude" || b === "codex" ? { backendOverride: b } : {};
+}
+
+function assignmentBackend(formData: FormData): "claude" | "codex" {
+  const backend = String(formData.get("backend") ?? "");
+  if (backend === "claude" || backend === "codex") return backend;
+  throw AppError.validation(
+    "Choose a declared Claude Code or Codex backend for this assignment.",
+  );
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -301,6 +333,18 @@ export async function action({ request, params }: Route.ActionArgs) {
             : `Completion accepted · ${taskKey} stays in ${currentStageName} until its PR is merged`,
         };
       }
+      case "record-human-validation": {
+        await recordHumanValidation(
+          db,
+          { projectSlug, taskKey },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `Validation recorded · ${taskKey} is ready for separate acceptance`,
+        };
+      }
       case "complete-merge": {
         // Run the REAL merge for a PR accepted "merge pending" (D3/S2).
         // Server re-checks task-owner/project/org authority and reports
@@ -316,6 +360,10 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast: result.merged
             ? result.message
             : `Not merged — ${result.message}`,
+          // A blocked merge still returns ok:true (the action ran); flag it as an
+          // error so useActionFeedback does not render a green success toast for
+          // a merge that did not happen.
+          ...(result.merged ? {} : { toastKind: "error" as const }),
         };
       }
       case "owner-take": {
@@ -424,6 +472,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             projectSlug,
             taskKey,
             profileId: String(formData.get("profileId") ?? ""),
+            backend: assignmentBackend(formData),
           },
           actor,
         );
@@ -458,6 +507,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             projectSlug,
             taskKey,
             profileId: String(formData.get("profileId") ?? ""),
+            backend: assignmentBackend(formData),
           },
           actor,
         );
@@ -583,7 +633,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           toast:
-            `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy` +
+            `Operator ${result.disposition === "started" ? "running" : "queued"} · ${result.backend === "claude" ? "Claude Code" : "Codex"} · ${result.autonomy} autonomy` +
             (result.mode === "scripted" ? " (scripted)" : ""),
         };
       }
@@ -649,6 +699,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
       reviewStageId={loaderData.reviewStageId}
+      completionEvidence={loaderData.completionEvidence}
       githubHost={loaderData.githubHost}
       readOnly={layout.board.project.archived}
     />

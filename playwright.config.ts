@@ -33,6 +33,15 @@ const E2E_ENV = {
   // the explicit runtime override — the golden-path specs assert on the
   // synchronous scripted operator, not live non-deterministic agent runs.
   VIBERR_FORCE_SIMULATED_RUNTIME: "1",
+  // E2E-only exact GitHub observations for impossible fixture PR numbers.
+  // Product code still uses its normal client; this Node preload replaces
+  // transport only inside Playwright's isolated web-server process.
+  NODE_OPTIONS: [
+    process.env.NODE_OPTIONS,
+    `--import=${path.resolve(import.meta.dirname, "e2e/github-fetch-fixture.mjs")}`,
+  ]
+    .filter(Boolean)
+    .join(" "),
 };
 
 export default defineConfig({

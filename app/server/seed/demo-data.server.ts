@@ -541,6 +541,8 @@ function fm(input: {
             evidenceFingerprint: "pending-seed-evidence",
           }))
         : [],
+    humanValidation: null,
+    reviewRevision: 0,
     operator: input.operator,
     recommendations: [],
     urgent: input.urgent,
@@ -567,6 +569,16 @@ function bindReviewEvidence<T extends SeedTask>(
         evidenceFingerprint,
       }),
     );
+    if (
+      task.frontmatter.validation === "healthy" &&
+      task.frontmatter.reviewers.length === 0
+    ) {
+      task.frontmatter.humanValidation = {
+        userId: task.frontmatter.ownerUserId ?? "seed-system",
+        validatedAt: task.frontmatter.updatedAt ?? new Date(0).toISOString(),
+        evidenceFingerprint,
+      };
+    }
   }
   return tasks;
 }

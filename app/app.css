@@ -5815,7 +5815,7 @@ dialog::backdrop {
 }
 .live-status.connecting .live-status-dot,
 .live-status.reconnecting .live-status-dot {
-  background: var(--amber, #c7891f);
+  background: var(--yellow-dark);
   animation: pulse 1.4s ease-out infinite;
 }
 .live-status.offline,
@@ -7778,8 +7778,8 @@ a.home-brand {
 }
 .archived-banner {
   align-items: center;
-  background: color-mix(in srgb, var(--yellow) 12%, var(--surface));
-  border-bottom: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow-dark) 12%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow-dark) 40%, var(--border));
   color: var(--text);
   display: flex;
   flex-wrap: wrap;
@@ -7799,8 +7799,8 @@ a.home-brand {
 
 .archived-chip {
   align-items: center;
-  background: color-mix(in srgb, var(--yellow) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--yellow) 38%, var(--border));
+  background: color-mix(in srgb, var(--yellow-dark) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--yellow-dark) 38%, var(--border));
   border-radius: 999px;
   color: var(--muted);
   display: inline-flex;

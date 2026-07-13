@@ -16,6 +16,7 @@ import {
   RouterProvider,
 } from "react-router";
 import { ToastProvider } from "~/ui/toast";
+import type { ProjectRole } from "~/shared/rbac";
 import type { AgentDeploymentView, AgentProfileView } from "./agent-types";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
@@ -168,7 +169,7 @@ function AgentsHarness({
   readOnly = false,
 }: {
   removable?: boolean;
-  myRole?: string;
+  myRole?: ProjectRole;
   readOnly?: boolean;
 }) {
   const [profiles, setProfiles] = useState(URL_PROFILES);

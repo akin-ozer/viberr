@@ -27,6 +27,8 @@ describe("PR state mapping matrix (ruling 12)", () => {
     expect(mapPrToCacheState({ state: "open" })).toBe("review");
     expect(mapPrToCacheState({ state: "open", merged: false })).toBe("review");
     expect(mapPrToCacheState({ state: "closed", merged_at: null })).toBe("closed");
+    expect(mapPrToCacheState({ state: "MERGED" })).toBe("merged");
+    expect(mapPrToCacheState({ state: "CLOSED" })).toBe("closed");
   });
 
   it("draft PRs read 'in review' like open ones", () => {

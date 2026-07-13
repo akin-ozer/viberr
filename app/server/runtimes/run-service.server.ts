@@ -1,5 +1,10 @@
 import type Database from "better-sqlite3";
-import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
+import type {
+  LogLine,
+  RunKind,
+  RunView,
+  SpecialistRunPurpose,
+} from "~/features/runtime/runtime-types";
 import {
   recordAudit,
   withProjectAuditAuthority,
@@ -8,11 +13,13 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { authorizeProjectAction } from "~/shared/rbac";
 import type { UserRole } from "~/shared/mapping/user.server";
-import type { RunHandle, RunSpec } from "./adapter.server";
+import type { RunExit, RunHandle, RunSpec } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
 import { createRunSink } from "./run-sink.server";
@@ -23,6 +30,12 @@ import {
   upsertRun,
   type AgentRunRow,
 } from "./run-store.server";
+import {
+  advanceRunCompletionPhase,
+  projectCompletionAdmissionOpen,
+  RUN_COMPLETION_PHASE,
+  withProjectCompletionEffect,
+} from "./run-completion-state.server";
 import {
   createAdapters,
   recordBackendRunResult,
@@ -60,6 +73,7 @@ interface ServiceState {
       handle: RunHandle;
       db: Database.Database;
       projectSlug: string;
+      termination: Promise<void>;
       dispose(): void;
     }
   >;
@@ -71,29 +85,204 @@ interface ServiceState {
    * a comment when a resumed/started reply run finishes — run-service stays
    * decoupled (it invokes an OPAQUE callback and never imports task-actions).
    *
-   * CAVEAT: callbacks live only in this process. A server restart mid-run
-   * loses the pending callback, so the reply comment is not posted for a run
-   * that finishes after a restart (acceptable — the transcript is still in
-   * the agent logs). Documented in feature-agent-reply.md.
+   * Callbacks live only in this process, while terminal effect checkpoints,
+   * launch context, and task incarnation are durable on agent_runs. Boot
+   * recovery resumes any incomplete specialist/reviewer effects and raises a
+   * human boundary for ambiguous operator effects.
    */
   completions: Map<string, RunCompletionCallback>;
+  /** Cleanup which must run on every termination path, including lifecycle
+   * stops that deliberately discard normal completion callbacks. */
+  terminationFinalizers: Map<string, Set<() => void>>;
+  /**
+   * Ordered, retained completion work for runs which have already exited.
+   * A provider can finish synchronously before its caller gets the run id, and
+   * some consumers (notably the durable operator dispatcher) subscribe only
+   * after `startRun()` returns. Keeping this short-lived barrier lets those
+   * late consumers run AFTER the completion effects which own the run.
+   */
+  completionEffects: Map<
+    string,
+    {
+      db: Database.Database;
+      projectSlug: string;
+      promise: Promise<void>;
+      cancelled: boolean;
+      controller: AbortController;
+      gcTimer: ReturnType<typeof setTimeout> | null;
+    }
+  >;
+}
+
+export interface RunCompletionContext {
+  /** True once project/run teardown revoked this completion chain. Long-running
+   * governed effects check it between mutations so stale work cannot spill
+   * into an archived or same-slug replacement project. */
+  isCancelled(): boolean;
+  /** Aborts subprocess-backed completion work (notably server-owned Git push)
+   * when archive/delete revokes the run lifecycle. */
+  signal: AbortSignal;
 }
 
 /** Invoked once when a registered run reaches a terminal state. */
-export type RunCompletionCallback = (finished: AgentRunRow) => void;
+export type RunCompletionCallback = (
+  finished: AgentRunRow,
+  context: RunCompletionContext,
+) => void | Promise<void>;
 
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
 function getState(): ServiceState {
-  const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
+  const cache = globalThis as unknown as Record<
+    symbol,
+    ServiceState | undefined
+  >;
   let state = cache[SERVICE_KEY];
   if (!state) {
-    state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
+    state = {
+      handles: new Map(),
+      adapters: createAdapters(),
+      completions: new Map(),
+      terminationFinalizers: new Map(),
+      completionEffects: new Map(),
+    };
     cache[SERVICE_KEY] = state;
   }
   // Older cached states (hot-reload / tests) may predate the completions map.
   if (!state.completions) state.completions = new Map();
+  if (!state.terminationFinalizers) state.terminationFinalizers = new Map();
+  if (!state.completionEffects) state.completionEffects = new Map();
   return state;
+}
+
+function runTerminationFinalizers(state: ServiceState, runId: string): void {
+  const finalizers = state.terminationFinalizers.get(runId);
+  if (!finalizers) return;
+  state.terminationFinalizers.delete(runId);
+  for (const finalize of finalizers) {
+    try {
+      finalize();
+    } catch (error) {
+      logger.warn("run termination finalizer failed", {
+        runId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+}
+
+function settleRunTerminationFinalizers(
+  state: ServiceState,
+  runId: string,
+): void {
+  const effect = state.completionEffects.get(runId);
+  if (!effect) {
+    runTerminationFinalizers(state, runId);
+    return;
+  }
+  void effect.promise.finally(() => {
+    runTerminationFinalizers(state, runId);
+  });
+}
+
+/** Register cleanup which survives completion-callback cancellation. */
+export function registerRunTerminationFinalizer(
+  db: Database.Database,
+  runId: string,
+  finalize: () => void,
+): void {
+  const state = getState();
+  const row = getRun(db, runId);
+  const finalizers = state.terminationFinalizers.get(runId) ?? new Set();
+  finalizers.add(finalize);
+  state.terminationFinalizers.set(runId, finalizers);
+  if (!row || (row.state !== "queued" && row.state !== "running")) {
+    settleRunTerminationFinalizers(state, runId);
+  }
+}
+
+const COMPLETION_EFFECT_RETENTION_MS = 60_000;
+
+function clearCompletionEffect(state: ServiceState, runId: string): void {
+  const effect = state.completionEffects.get(runId);
+  if (!effect) return;
+  effect.cancelled = true;
+  effect.controller.abort();
+  if (effect.gcTimer) clearTimeout(effect.gcTimer);
+  state.completionEffects.delete(runId);
+}
+
+/** Append one terminal effect to the per-run promise chain. Every error is
+ * contained here because provider exits have no request boundary to receive a
+ * rejection. The settled barrier is retained briefly to close the
+ * start/subscribe gap for an instant adapter. */
+function appendCompletionEffect(
+  state: ServiceState,
+  db: Database.Database,
+  finished: AgentRunRow,
+  cb: RunCompletionCallback,
+): Promise<void> {
+  const prior = state.completionEffects.get(finished.id);
+  if (prior?.gcTimer) clearTimeout(prior.gcTimer);
+
+  // Reuse one mutable chain record so lifecycle cancellation also suppresses
+  // callbacks which were appended before the newest observer replaced the
+  // promise. Replacing the record would orphan an earlier queued microtask.
+  const effect = prior ?? {
+    db,
+    projectSlug: finished.project_slug,
+    promise: Promise.resolve(),
+    cancelled: false,
+    controller: new AbortController(),
+    gcTimer: null as ReturnType<typeof setTimeout> | null,
+  };
+  effect.gcTimer = null;
+  const previousPromise = effect.promise;
+  const appendedPromise = previousPromise
+    .catch(() => {
+      // The prior link already logged its own error. A later observer must
+      // still run so dispatch capacity and lifecycle cleanup cannot wedge.
+    })
+    .then(async () => {
+      if (!effect.cancelled) {
+        await withProjectCompletionEffect(
+          db,
+          finished.project_slug,
+          async () => {
+            await cb(finished, {
+              isCancelled: () => effect.cancelled,
+              signal: effect.controller.signal,
+            });
+          },
+        );
+      }
+    })
+    .catch((error) => {
+      logger.error("run completion callback failed", {
+        runId: finished.id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  effect.promise = appendedPromise;
+  state.completionEffects.set(finished.id, effect);
+  void appendedPromise.then(() => {
+    if (
+      state.completionEffects.get(finished.id) !== effect ||
+      effect.promise !== appendedPromise
+    ) {
+      return;
+    }
+    effect.gcTimer = setTimeout(() => {
+      if (
+        state.completionEffects.get(finished.id) === effect &&
+        effect.promise === appendedPromise
+      ) {
+        state.completionEffects.delete(finished.id);
+      }
+    }, COMPLETION_EFFECT_RETENTION_MS);
+    effect.gcTimer.unref?.();
+  });
+  return appendedPromise;
 }
 
 /**
@@ -102,10 +291,19 @@ function getState(): ServiceState {
  * registration for the same run id overwrites the first (last writer wins).
  */
 export function registerRunCompletion(
+  db: Database.Database,
   runId: string,
   cb: RunCompletionCallback,
 ): void {
-  getState().completions.set(runId, cb);
+  const state = getState();
+  const row = getRun(db, runId);
+  if (row && row.state !== "queued" && row.state !== "running") {
+    void appendCompletionEffect(state, db, row, cb);
+    return;
+  }
+  // JavaScript cannot interleave an adapter exit between the synchronous row
+  // read and this registration, so a live row cannot escape this hook.
+  state.completions.set(runId, cb);
 }
 
 /**
@@ -121,13 +319,33 @@ export function chainRunCompletion(
 ): void {
   const state = getState();
   const existing = state.completions.get(runId);
-  state.completions.set(runId, (finished) => {
+  state.completions.set(runId, async (finished, context) => {
     try {
-      existing?.(finished);
+      await existing?.(finished, context);
     } finally {
-      cb(finished);
+      await cb(finished, context);
     }
   });
+}
+
+/** Chain a callback for a live run, or invoke it immediately when the row is
+ * already terminal. This closes the start/subscribe gap for instant simulated
+ * runs: their adapter may finish before the dispatcher has received the newly
+ * created run id. JavaScript execution is single-threaded between the row read
+ * and callback registration, so a non-terminal row cannot complete in that
+ * synchronous interval. */
+export function chainRunCompletionOrInvoke(
+  db: Database.Database,
+  runId: string,
+  cb: RunCompletionCallback,
+): void {
+  const state = getState();
+  const row = getRun(db, runId);
+  if (row && row.state !== "queued" && row.state !== "running") {
+    void appendCompletionEffect(state, db, row, cb);
+    return;
+  }
+  chainRunCompletion(runId, cb);
 }
 
 /** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
@@ -141,18 +359,33 @@ export function configureRunServiceForTests(
   resetRegistryForTests();
   setBackendAvailability("claude", false);
   setBackendAvailability("codex", false);
-  const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
+  const cache = globalThis as unknown as Record<
+    symbol,
+    ServiceState | undefined
+  >;
   const previous = cache[SERVICE_KEY];
   if (previous) {
     for (const active of previous.handles.values()) active.dispose();
+    for (const runId of previous.terminationFinalizers.keys()) {
+      runTerminationFinalizers(previous, runId);
+    }
     previous.handles.clear();
     previous.completions.clear();
+    for (const runId of previous.completionEffects.keys()) {
+      clearCompletionEffect(previous, runId);
+    }
   }
   const adapters =
     adaptersOrDeps && "simulated" in adaptersOrDeps
       ? (adaptersOrDeps as AdapterSet)
       : createAdapters((adaptersOrDeps as AdapterDeps) ?? {});
-  cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
+  cache[SERVICE_KEY] = {
+    handles: new Map(),
+    adapters,
+    completions: new Map(),
+    terminationFinalizers: new Map(),
+    completionEffects: new Map(),
+  };
 }
 
 /**
@@ -168,6 +401,9 @@ export function disposeRunsForDatabaseForTests(db: Database.Database): void {
     state.handles.delete(runId);
     state.completions.delete(runId);
   }
+  for (const [runId, effect] of state.completionEffects) {
+    if (effect.db === db) clearCompletionEffect(state, runId);
+  }
 }
 
 /** Stop and detach all live callbacks owned by a project before deletion. */
@@ -179,9 +415,107 @@ export function disposeRunsForProject(
   for (const [runId, active] of state.handles) {
     if (active.db !== db || active.projectSlug !== projectSlug) continue;
     active.dispose();
-    state.handles.delete(runId);
     state.completions.delete(runId);
   }
+  for (const [runId, effect] of state.completionEffects) {
+    if (effect.db === db && effect.projectSlug === projectSlug) {
+      clearCompletionEffect(state, runId);
+    }
+  }
+}
+
+/**
+ * Wait for providers which were interrupted during project teardown to
+ * acknowledge exit. Canonical archive/delete must not continue while an SDK
+ * process can still write its run workspace. The lifecycle caller decides
+ * whether an unchanged active project may safely reopen admission on timeout;
+ * an archived/deleted/replaced lifecycle must remain revoked.
+ */
+export async function waitForProjectRunTermination(
+  db: Database.Database,
+  projectSlug: string,
+  timeoutMs: number | null = 5_000,
+): Promise<boolean> {
+  const pending = [...getState().handles.values()]
+    .filter((active) => active.db === db && active.projectSlug === projectSlug)
+    .map((active) => active.termination);
+  if (pending.length === 0) return true;
+  if (timeoutMs === null) {
+    await Promise.allSettled(pending);
+    return true;
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+    timer.unref?.();
+  });
+  const terminated = Promise.allSettled(pending).then(() => true as const);
+  const result = await Promise.race([terminated, timedOut]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
+/**
+ * Stop and detach one exact run after its owning lifecycle object disappeared.
+ * This is intentionally keyed only by run id: archive/delete can race launch,
+ * and a project with the same slug may already have been recreated by the time
+ * the launcher notices it lost ownership. The database row may also have been
+ * purged already, so a matching live handle/completion is sufficient to stop.
+ */
+export function stopRunForLifecycle(
+  db: Database.Database,
+  runId: string,
+  options: { recoveryStep?: string } = {},
+): boolean {
+  const state = getState();
+  const registered = state.handles.get(runId);
+  const active = registered?.db === db ? registered : undefined;
+  const row = db.open ? getRun(db, runId) : null;
+  const hadCompletion = state.completions.delete(runId);
+  const hadCompletionEffect = state.completionEffects.has(runId);
+  if (hadCompletionEffect) clearCompletionEffect(state, runId);
+  let stopped = hadCompletion || hadCompletionEffect;
+  const hadFinalizer = state.terminationFinalizers.has(runId);
+  if (hadFinalizer) stopped = true;
+
+  if (active) {
+    active.dispose();
+    stopped = true;
+  } else if (hadFinalizer) {
+    settleRunTerminationFinalizers(state, runId);
+  }
+
+  if (row && (row.state === "queued" || row.state === "running")) {
+    patchRun(db, runId, {
+      state: "interrupted",
+      finishedAt: new Date().toISOString(),
+      phase: null,
+      step: options.recoveryStep ?? null,
+    });
+    publishRunStateChanged({
+      projectSlug: row.project_slug,
+      taskKey: row.task_key,
+      runId,
+      threadId: row.thread_id,
+      state: "interrupted",
+    });
+    stopped = true;
+  }
+
+  // A deliberate launch/lifecycle rejection discards the normal completion
+  // callback. If its exact authority context was already registered, close
+  // the durable checkpoint too so a later run is not permanently excluded
+  // from the workspace. Orphan recovery is different: it intentionally keeps
+  // the checkpoint pending until the boot-recovery packet is durable.
+  if (
+    row &&
+    !options.recoveryStep &&
+    (row.kind === "primary" || row.kind === "reviewer")
+  ) {
+    advanceRunCompletionPhase(db, runId, RUN_COMPLETION_PHASE.complete);
+  }
+
+  return stopped;
 }
 
 /** Stop all queued/running sessions when a project becomes archived. */
@@ -223,8 +557,13 @@ const SDK_LABEL: Record<string, string> = {
 };
 
 export interface StartRunInput {
+  /** Preallocated durable identity. Used only by operator-reaction recovery so
+   * a crash before adapter launch still leaves an idempotency marker. */
+  runId?: string;
   projectSlug: string;
   taskKey: string;
+  /** Exact canonical task lifecycle which authorized this launch. */
+  expectedTaskIncarnation?: string;
   /** Thread id within the task ("op" | "primary" | "c0"). Defaulted per kind. */
   threadId?: string;
   role: string;
@@ -239,6 +578,19 @@ export interface StartRunInput {
   agentName?: string | null;
   /** The deployed profile id persisted on the run (per-agent grouping key). */
   agentProfileId?: string | null;
+  /** Persisted semantic intent for specialist completion/recovery effects. */
+  runPurpose?: SpecialistRunPurpose;
+  /** Immutable canonical evidence reviewed when a governance review began. */
+  reviewEvidenceFingerprint?: string | null;
+  /** Exact repository head checked out for that review. */
+  reviewHeadSha?: string | null;
+  /** Specialist run whose completion caused this operator reaction. */
+  completionSourceRunId?: string | null;
+  /** Automatic dispatch claim which owns this operator run. */
+  operatorDispatchId?: string | null;
+  /** Exact intelligent-routing intent that authorized this specialist launch.
+   * Deterministic/human resumes deliberately omit it. */
+  sourceIntentId?: string | null;
   prompt: string;
   /** Optional scripted stream (simulated backend / seed resumer). */
   script?: SimulatedScript;
@@ -291,11 +643,59 @@ export async function startRun(
   db: Database.Database,
   input: StartRunInput,
 ): Promise<{ runId: string; simulated: boolean }> {
+  if (!projectCompletionAdmissionOpen(db, input.projectSlug)) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "This project is changing lifecycle state; no new agent run can start.",
+      kind: "user",
+    });
+  }
+  const canonicalProject = readProjectFile({
+    projectSlug: input.projectSlug,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+  });
+  if (!canonicalProject || canonicalProject.parsed.frontmatter.archived) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: "This project does not currently own new agent runs.",
+      kind: "user",
+    });
+  }
   const state = getState();
   const threadId = input.threadId ?? DEFAULT_THREAD[input.kind];
-  const runId = newId("run");
+  const runId = input.runId ?? newId("run");
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
+  const canonicalTask = readTaskFile({
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+  });
+  const taskIncarnation = canonicalTask?.parsed.frontmatter.createdAt ?? null;
+  if (!taskIncarnation) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "This task has no stable lifecycle identity; refresh or recreate it before starting an agent.",
+      kind: "user",
+    });
+  }
+  if (
+    input.expectedTaskIncarnation !== undefined &&
+    taskIncarnation !== input.expectedTaskIncarnation
+  ) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "This task was replaced while the agent launch was being prepared.",
+      kind: "user",
+    });
+  }
 
   const { simulated: detected } = selectAdapter(input.backend, state.adapters);
   const simulated = input.simulate === true ? true : detected;
@@ -314,6 +714,14 @@ export async function startRun(
     sessionId: input.resumeSessionId ?? null,
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId ?? null,
+    runPurpose: input.runPurpose ?? null,
+    reviewEvidenceFingerprint: input.reviewEvidenceFingerprint ?? null,
+    reviewHeadSha: input.reviewHeadSha ?? null,
+    completionSourceRunId: input.completionSourceRunId ?? null,
+    taskIncarnation,
+    operatorDispatchId: input.operatorDispatchId ?? null,
+    sourceIntentId: input.sourceIntentId ?? null,
+    operatorEffectState: input.kind === "operator" ? "pending" : null,
     state: "queued",
   });
 
@@ -333,6 +741,8 @@ export async function startRun(
       kind: input.kind,
       simulated,
       resumed: Boolean(input.resumeSessionId),
+      completionSourceRunId: input.completionSourceRunId ?? null,
+      sourceIntentId: input.sourceIntentId ?? null,
     },
   });
 
@@ -394,6 +804,9 @@ export async function resumeRun(
      *  row's agent_name/agent_profile_id. */
     agentName?: string | null;
     agentProfileId?: string | null;
+    runPurpose?: SpecialistRunPurpose;
+    reviewEvidenceFingerprint?: string | null;
+    reviewHeadSha?: string | null;
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
@@ -408,10 +821,34 @@ export async function resumeRun(
     mcpServers?: Record<string, unknown>;
     /** Re-apply the persona/system prompt on resume (Claude). */
     systemPrompt?: string;
+    /** Exact task lifecycle which owns both the prior session and this resume. */
+    expectedTaskIncarnation?: string;
   },
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
+  const currentTask = readTaskFile({
+    projectSlug: prev.project_slug,
+    taskKey: prev.task_key,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+  });
+  const currentTaskIncarnation =
+    currentTask?.parsed.frontmatter.createdAt ?? null;
+  const expectedTaskIncarnation =
+    input.expectedTaskIncarnation ?? currentTaskIncarnation;
+  if (
+    !expectedTaskIncarnation ||
+    currentTaskIncarnation !== expectedTaskIncarnation ||
+    prev.task_incarnation !== expectedTaskIncarnation
+  ) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "That provider session belongs to an older task lifecycle and cannot be resumed.",
+      kind: "user",
+    });
+  }
   if (prev.backend === "simulated") {
     // Purely-simulated runs resume as simulated too.
   }
@@ -425,6 +862,7 @@ export async function resumeRun(
   return startRun(db, {
     projectSlug: prev.project_slug,
     taskKey: prev.task_key,
+    expectedTaskIncarnation,
     threadId: resumeThreadId,
     role: prev.role,
     kind: prev.kind,
@@ -439,6 +877,17 @@ export async function resumeRun(
     // override (e.g. a comment-resume that knows the current profile name).
     agentName: input.agentName ?? prev.agent_name,
     agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
+    ...((input.runPurpose ?? prev.run_purpose)
+      ? { runPurpose: input.runPurpose ?? prev.run_purpose! }
+      : {}),
+    reviewEvidenceFingerprint:
+      input.reviewEvidenceFingerprint !== undefined
+        ? input.reviewEvidenceFingerprint
+        : prev.review_evidence_fingerprint,
+    reviewHeadSha:
+      input.reviewHeadSha !== undefined
+        ? input.reviewHeadSha
+        : prev.review_head_sha,
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
     ...(input.script ? { script: input.script } : {}),
@@ -447,7 +896,9 @@ export async function resumeRun(
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
     ...(input.actor ? { actor: input.actor } : {}),
     // Re-establish the run confinement the fresh-run path applies (XS-1).
-    ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+    ...(input.disallowedTools
+      ? { disallowedTools: input.disallowedTools }
+      : {}),
     ...(input.env ? { env: input.env } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
@@ -462,7 +913,9 @@ function launch(
 ): void {
   const state = getState();
   const sink = createRunSink(db, spec);
-  const adapter = simulated ? state.adapters.simulated : state.adapters[spec.backend as RealBackend];
+  const adapter = simulated
+    ? state.adapters.simulated
+    : state.adapters[spec.backend as RealBackend];
 
   // Mark running immediately (queued → running).
   sink.markRunning();
@@ -475,64 +928,125 @@ function launch(
   // phase/finalize paths the same way.
   let exitedSynchronously = false;
   let disposed = false;
-  const handle = adapter.start(spec, {
-    onLine: (line) => {
-      if (!disposed) sink.line(line);
-    },
-    onPhase: (phase, step) => {
-      if (disposed) return;
-      try {
-        sink.phase(phase, step);
-      } catch (error) {
-        logger.error("run phase persist failed", {
-          runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-      }
-    },
-    onExit: (exit) => {
-      exitedSynchronously = true;
-      if (disposed) return;
-      // A real provider result is the cheapest honest health probe we have.
-      // Never infer validity from credential presence, and never let simulated
-      // runs or human interrupts affect provider health.
-      if (
-        !exit.simulated &&
-        (exit.effectiveBackend === "claude" || exit.effectiveBackend === "codex") &&
-        exit.outcome !== "interrupted"
-      ) {
-        recordBackendRunResult(
-          exit.effectiveBackend,
-          exit.outcome === "finished" ? "success" : "failure",
-        );
-      }
-      try {
-        sink.finalize(exit);
-      } catch (error) {
-        logger.error("run finalize persist failed", {
-          runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-      }
+  let resolveTermination!: () => void;
+  const termination = new Promise<void>((resolve) => {
+    resolveTermination = resolve;
+  });
+  const onExit = (exit: RunExit) => {
+    exitedSynchronously = true;
+    resolveTermination();
+    if (disposed) {
       state.handles.delete(spec.runId);
-      // Fire a one-shot completion callback (opaque to run-service — the
-      // reply-comment wiring lives in task-actions). Reads the finalized row
-      // so the callback sees the terminal state + folded session/usage facts.
-      const cb = state.completions.get(spec.runId);
-      if (cb) {
-        state.completions.delete(spec.runId);
+      settleRunTerminationFinalizers(state, spec.runId);
+      return;
+    }
+    // A real provider result is the cheapest honest health probe we have.
+    // Never infer validity from credential presence, and never let simulated
+    // runs or human interrupts affect provider health.
+    if (
+      !exit.simulated &&
+      (exit.effectiveBackend === "claude" ||
+        exit.effectiveBackend === "codex") &&
+      exit.outcome !== "interrupted"
+    ) {
+      recordBackendRunResult(
+        exit.effectiveBackend,
+        exit.outcome === "finished" ? "success" : "failure",
+      );
+    }
+    let terminalPersisted = false;
+    try {
+      sink.finalize(exit);
+      terminalPersisted = true;
+    } catch (error) {
+      logger.error("run finalize persist failed", {
+        runId: spec.runId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      // Never run governed completion effects against a row still claiming to
+      // be live. A direct conservative fallback makes provider/finalizer
+      // failures durable even if the richer sink path failed after launch.
+      try {
+        patchRun(db, spec.runId, {
+          state: "error",
+          finishedAt: new Date().toISOString(),
+          phase: null,
+          step: null,
+        });
+        terminalPersisted = true;
+      } catch (fallbackError) {
+        logger.error("run terminal fallback persist failed", {
+          runId: spec.runId,
+          err:
+            fallbackError instanceof Error
+              ? fallbackError
+              : new Error(String(fallbackError)),
+        });
+      }
+    }
+    state.handles.delete(spec.runId);
+    if (!terminalPersisted) {
+      settleRunTerminationFinalizers(state, spec.runId);
+      return;
+    }
+    // Fire a one-shot completion callback (opaque to run-service — the
+    // reply-comment wiring lives in task-actions). Reads the finalized row
+    // so the callback sees the terminal state + folded session/usage facts.
+    const cb = state.completions.get(spec.runId);
+    if (cb) {
+      state.completions.delete(spec.runId);
+      try {
+        const finished = getRun(db, spec.runId);
+        if (
+          finished &&
+          finished.state !== "queued" &&
+          finished.state !== "running"
+        ) {
+          void appendCompletionEffect(state, db, finished, cb);
+        }
+      } catch (error) {
+        logger.error("run completion callback failed", {
+          runId: spec.runId,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+    settleRunTerminationFinalizers(state, spec.runId);
+  };
+
+  let handle: RunHandle;
+  try {
+    handle = adapter.start(spec, {
+      onLine: (line) => {
+        if (!disposed) sink.line(line);
+      },
+      onPhase: (phase, step) => {
+        if (disposed) return;
         try {
-          const finished = getRun(db, spec.runId);
-          if (finished) cb(finished);
+          sink.phase(phase, step);
         } catch (error) {
-          logger.error("run completion callback failed", {
+          logger.error("run phase persist failed", {
             runId: spec.runId,
             err: error instanceof Error ? error : new Error(String(error)),
           });
         }
-      }
-    },
-  });
+      },
+      onExit,
+    });
+  } catch (error) {
+    logger.error("runtime adapter failed during launch", {
+      runId: spec.runId,
+      backend: spec.backend,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    onExit({
+      outcome: "error",
+      effectiveBackend: simulated ? "simulated" : spec.backend,
+      simulated,
+      sessionId: null,
+    });
+    return;
+  }
   // Test/fallback adapters may complete inside start(). Do not resurrect a
   // handle after onExit already removed it.
   if (!exitedSynchronously) {
@@ -540,6 +1054,7 @@ function launch(
       handle,
       db,
       projectSlug: spec.projectSlug,
+      termination,
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -579,8 +1094,14 @@ export function interruptRun(
   actor: { userId: string; label: string; orgRole?: UserRole },
 ): InterruptResult {
   const run = getRun(db, input.runId);
-  if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
-    throw AppError.notFound(`Run ${input.runId} not found on ${input.taskKey}.`);
+  if (
+    !run ||
+    run.project_slug !== input.projectSlug ||
+    run.task_key !== input.taskKey
+  ) {
+    throw AppError.notFound(
+      `Run ${input.runId} not found on ${input.taskKey}.`,
+    );
   }
 
   // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
@@ -594,7 +1115,8 @@ export function interruptRun(
     throw new AppError({
       code: ERROR_CODES.FORBIDDEN,
       status: 403,
-      userMessage: "Interrupting a runtime session requires the admin or maintainer role.",
+      userMessage:
+        "Interrupting a runtime session requires the admin or maintainer role.",
       kind: "user",
     });
   }
@@ -713,9 +1235,19 @@ export function getRunLog(
   if (!run) return null;
   const lines = listRunLines(db, runId, sinceSeq);
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
-  return { runId, threadId: run.thread_id, state: run.state, lines, headSeq: head };
+  return {
+    runId,
+    threadId: run.thread_id,
+    state: run.state,
+    lines,
+    headSeq: head,
+  };
 }
 
 function projectOne(db: Database.Database, run: AgentRunRow): RunView {
-  return projectRunsForTask(db, run.project_slug, run.task_key).find((r) => r.id === run.thread_id) ?? projectRunsForTask(db, run.project_slug, run.task_key)[0]!;
+  return (
+    projectRunsForTask(db, run.project_slug, run.task_key).find(
+      (r) => r.id === run.thread_id,
+    ) ?? projectRunsForTask(db, run.project_slug, run.task_key)[0]!
+  );
 }

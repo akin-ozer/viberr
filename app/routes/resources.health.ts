@@ -4,7 +4,7 @@ import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
 import { logger } from "~/server/logging/logger.server";
 import { getBackendHealth } from "~/server/runtimes/runtime-registry.server";
 import {
-  checkDatabaseIntegrity,
+  checkDatabaseIntegrityCached,
   getDatabaseIntegrityIncident,
   ProjectionIntegrityError,
 } from "~/server/db/database-integrity.server";
@@ -41,7 +41,7 @@ export async function loader() {
   }
   try {
     const db = getDb();
-    const integrity = checkDatabaseIntegrity(db);
+    const integrity = checkDatabaseIntegrityCached(db);
     if (!integrity.ok) throw new ProjectionIntegrityError(integrity);
     const projects = (
       db.prepare(`SELECT count(*) AS c FROM projects`).get() as { c: number }

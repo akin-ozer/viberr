@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import {
+  createTestDbContext,
+  type TestDbContext,
+} from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -8,8 +11,16 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import {
+  readTaskFile,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import {
+  deleteProject,
+  setProjectArchived,
+} from "~/features/project-settings/settings-actions.server";
+import { allowProjectCompletionEffects } from "~/server/runtimes/run-completion-state.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   configureRunServiceForTests,
@@ -20,10 +31,12 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
+import { assignSpecialist } from "./specialist-run.server";
 import {
   applyRecommendation,
   createTask,
   dismissRecommendation,
+  recordHumanValidation,
   transitionStage,
 } from "./task-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
@@ -41,9 +54,12 @@ import {
   operatorRunSpecialist,
   operatorSnapshot,
   operatorTransitionStage,
+  recoverOperatorRoutingIntents,
   resolveOperatorAuthority,
   type OperatorAutonomy,
 } from "./operator-actions.server";
+import { recoverTaskCompletionIntents } from "./task-completion-recovery.server";
+import { recoverAgentRunsThenRoutingIntents } from "~/server/boot.server";
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
@@ -54,8 +70,13 @@ let ctx: TestDbContext;
 let store: TestStore;
 
 /** Deploy the operator (with a policy) + a dev specialist + a reviewer. */
-function deployRoster(operatorPolicy: { capabilityId: string; mode: CapabilityMode }[]): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+function deployRoster(
+  operatorPolicy: { capabilityId: string; mode: CapabilityMode }[],
+): void {
+  const file = readProjectFile({
+    projectSlug: store.slug,
+    dataRoot: store.dataRoot,
+  })!;
   writeProject(store.dataRoot, {
     ...file.parsed.frontmatter,
     repo: null,
@@ -64,19 +85,36 @@ function deployRoster(operatorPolicy: { capabilityId: string; mode: CapabilityMo
         profileId: "operator",
         capabilities: operatorPolicy,
         extras: [],
-        definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
+        definition: {
+          kind: "operator",
+          name: "Operator",
+          backends: ["claude"],
+          model: "sonnet",
+        },
       },
       {
         profileId: "developer",
         capabilities: [],
         extras: [],
-        definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet" },
+        definition: {
+          kind: "specialist",
+          name: "Dev",
+          role: "Implementation",
+          backends: ["claude", "codex"],
+          model: "sonnet",
+        },
       },
       {
         profileId: "reviewer",
         capabilities: [],
         extras: [],
-        definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet" },
+        definition: {
+          kind: "specialist",
+          name: "Rev",
+          role: "Code review",
+          backends: ["claude"],
+          model: "sonnet",
+        },
       },
     ] as never,
   });
@@ -91,13 +129,24 @@ const DEFAULT_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
   { capabilityId: "completion-for-acceptance", mode: "recommend" },
 ];
 
+const ROUTING_CHOICE = {
+  backend: "claude" as const,
+  reason:
+    "This Claude profile matches the current stage and has suitable fit, health, workload, and cost context.",
+};
+
 function authority(autonomy: OperatorAutonomy) {
-  return resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, { autonomy });
+  return resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {
+    autonomy,
+  });
 }
 
 function task() {
-  return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-    .parsed;
+  return readTaskFile({
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    dataRoot: store.dataRoot,
+  })!.parsed;
 }
 
 function seedTask(stage: string): void {
@@ -121,13 +170,11 @@ beforeEach(async () => {
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
   configureRunServiceForTests();
-  const { resetOperatorLeasesForTests } = await import(
-    "~/server/runtimes/operator-run.server"
-  );
+  const { resetOperatorLeasesForTests } =
+    await import("~/server/runtimes/operator-run.server");
   resetOperatorLeasesForTests();
-  const { resetOperatorDispatchForTests } = await import(
-    "~/server/runtimes/operator-dispatch.server"
-  );
+  const { resetOperatorDispatchForTests } =
+    await import("~/server/runtimes/operator-dispatch.server");
   resetOperatorDispatchForTests();
 });
 
@@ -171,8 +218,13 @@ describe("resolveOperatorAuthority backend override", () => {
 describe("operator routing context", () => {
   it("hard-filters candidates and supplies fit, backend, workload, and observed cost without a score", () => {
     deployRoster(DEFAULT_POLICY);
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const developer = project.parsed.frontmatter.agents.find((agent) => agent.profileId === "developer")!;
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    const developer = project.parsed.frontmatter.agents.find(
+      (agent) => agent.profileId === "developer",
+    )!;
     developer.definition = {
       ...(developer.definition ?? {}),
       kind: "specialist",
@@ -183,7 +235,11 @@ describe("operator routing context", () => {
       backends: ["claude"],
       model: "sonnet",
       stages: ["impl"],
-      resources: { skills: ["typescript"], kb: ["architecture"], mcps: ["viberr"] },
+      resources: {
+        skills: ["typescript"],
+        kb: ["architecture"],
+        mcps: ["viberr"],
+      },
     };
     writeProject(store.dataRoot, project.parsed.frontmatter);
     seedTask("impl");
@@ -214,8 +270,12 @@ describe("operator routing context", () => {
       "VIB-1",
       authority("supervised"),
     );
-    expect(snapshot.routingCandidates.decisionRule).toBe("operator_decides_no_static_score");
-    const dev = snapshot.routingCandidates.primary.find((candidate) => candidate.profileId === "developer")!;
+    expect(snapshot.routingCandidates.decisionRule).toBe(
+      "operator_decides_no_static_score",
+    );
+    const dev = snapshot.routingCandidates.primary.find(
+      (candidate) => candidate.profileId === "developer",
+    )!;
     expect(dev).toMatchObject({
       scope: "Own concrete application changes and their tests.",
       resources: {
@@ -247,6 +307,34 @@ describe("operatorAssignSpecialist", () => {
   it("direct mode assigns the primary specialist", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
+    const before = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("supervised"),
+    );
+    expect(before.routingCandidates.primary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profileId: "developer",
+          backend: "claude",
+        }),
+      ]),
+    );
+    expect(before.routingCandidates.excluded.primary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profileId: "developer",
+          backend: "codex",
+          reasons: expect.arrayContaining([
+            expect.stringContaining(
+              "cannot enforce withheld local capabilities",
+            ),
+          ]),
+        }),
+      ]),
+    );
     const r = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
@@ -254,30 +342,442 @@ describe("operatorAssignSpecialist", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         profileId: "developer",
-        reason: "The implementation profile matches the concrete code goal and is currently available.",
+        backend: "claude",
+        reason:
+          "The implementation profile matches the concrete code goal and is currently available.",
       },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.specialist?.profileId).toBe("developer");
-    expect(task().timeline.some((event) => event.text.includes("Routing decision (primary)"))).toBe(true);
+    expect(task().frontmatter.specialist?.backend).toBe("claude");
+    expect(
+      task().timeline.some((event) =>
+        event.text.includes("Routing decision (primary)"),
+      ),
+    ).toBe(true);
     const audit = listAuditEvents(store.db, {
       action: "task.operator.routing_decided",
     })[0]!;
     expect(audit.details).toMatchObject({
       purpose: "primary",
       selectedProfileId: "developer",
-      reason: "The implementation profile matches the concrete code goal and is currently available.",
+      selectedBackend: "claude",
+      disposition: "selected",
+      reason:
+        "The implementation profile matches the concrete code goal and is currently available.",
     });
   });
 
+  it("recovers a crash after the routed action without losing its rationale", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason:
+        "The implementation profile is the best factual fit for this work.",
+    };
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_action") {
+              throw new Error("injected crash after routed action");
+            }
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("injected crash after routed action");
+
+    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(
+      task().timeline.filter((event) =>
+        event.text.includes("Routing decision (primary)"),
+      ),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+    expect(
+      store.db.prepare(`SELECT state FROM operator_routing_intents`).get(),
+    ).toEqual({ state: "pending" });
+
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 1,
+      pending: 0,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      task().timeline.filter((event) =>
+        event.text.includes("Routing decision (primary)"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(1);
+    expect(
+      store.db
+        .prepare(`SELECT count(*) AS n FROM operator_routing_intents`)
+        .get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it("does not promote or replay a staged choice after an unrelated human binding changes its routing context", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason:
+        "The intelligent operator selected this exact fit/backend pair from current routing context.",
+    };
+
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_intent") {
+              throw new Error("injected crash after intent staging");
+            }
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("injected crash after intent staging");
+    const staged = store.db
+      .prepare(`SELECT id, state FROM operator_routing_intents`)
+      .get() as { id: string; state: string };
+
+    await assignSpecialist(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        backend: "claude",
+      },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.specialist).toMatchObject({
+      profileId: "developer",
+      backend: "claude",
+    });
+    expect(task().frontmatter.specialist?.sourceIntentId).toBeUndefined();
+
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 0,
+      pending: 1,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+    expect(
+      task().timeline.some((event) =>
+        event.text.includes("Routing decision (primary)"),
+      ),
+    ).toBe(false);
+
+    const retried = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      input,
+      authority("supervised"),
+    );
+    expect(retried).toMatchObject({ outcome: "denied" });
+    expect(retried.message).toContain("Routing facts changed");
+    expect(task().frontmatter.specialist?.sourceIntentId).toBeUndefined();
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.routing_cancelled",
+      })[0]?.details,
+    ).toMatchObject({
+      routingIntentId: staged.id,
+      reason: "candidate_context_drifted",
+    });
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        { dataRoot: store.dataRoot },
+        input,
+        authority("supervised"),
+      ),
+    ).resolves.toMatchObject({ outcome: "noop" });
+  });
+
+  it("cancels a pending action when the full routing comparison context drifts", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason:
+        "Developer was selected from the complete current comparison context.",
+    };
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_intent") {
+              throw new Error("crash after routing snapshot");
+            }
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("crash after routing snapshot");
+    const staged = store.db
+      .prepare(`SELECT id FROM operator_routing_intents`)
+      .get() as { id: string };
+
+    // A later organization-wide run changes workload/cost comparison facts,
+    // even though the selected profile remains technically eligible.
+    upsertRun(store.db, {
+      id: "run_context_drift",
+      projectSlug: store.slug,
+      taskKey: "VIB-99",
+      threadId: "context-drift",
+      role: "Implementation",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "sonnet",
+      sdk: "test",
+      agentName: "Dev",
+      agentProfileId: "developer",
+      taskIncarnation: task().frontmatter.createdAt,
+      state: "finished",
+    });
+
+    const retried = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      input,
+      authority("supervised"),
+    );
+    expect(retried.outcome).toBe("denied");
+    expect(retried.message).toContain("Routing facts changed");
+    expect(task().frontmatter.specialist).toBeNull();
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.routing_cancelled",
+      })[0]?.details,
+    ).toMatchObject({
+      routingIntentId: staged.id,
+      reason: "candidate_context_drifted",
+    });
+    expect(
+      store.db
+        .prepare(`SELECT count(*) AS n FROM operator_routing_intents`)
+        .get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it("cancels a pending action when the selected backend is no longer hard-eligible", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason: "Developer was hard-eligible on Claude when this was staged.",
+    };
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_intent") throw new Error("staged only");
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("staged only");
+
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    const developer = project.parsed.frontmatter.agents.find(
+      (deployment) => deployment.profileId === "developer",
+    )!;
+    developer.definition = {
+      ...(developer.definition ?? {}),
+      backends: ["codex"],
+    };
+    writeProject(store.dataRoot, project.parsed.frontmatter);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const retried = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      input,
+      authority("supervised"),
+    );
+    expect(retried.outcome).toBe("denied");
+    expect(retried.message).toContain("no longer hard-eligible");
+    expect(task().frontmatter.specialist).toBeNull();
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.routing_cancelled",
+      })[0]?.details,
+    ).toMatchObject({ reason: "candidate_ineligible" });
+  });
+
+  it("recovers between canonical rationale and audit without duplicating the timeline", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    let crashed = false;
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_timeline" && !crashed) {
+              crashed = true;
+              throw new Error("injected crash before routing audit");
+            }
+          },
+        },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "developer",
+          backend: "claude",
+          reason:
+            "Dev is selected from current fit, backend, workload, and cost facts.",
+        },
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("injected crash before routing audit");
+
+    const before = task().timeline.filter((event) =>
+      event.text.includes("Routing decision (primary)"),
+    );
+    expect(before).toHaveLength(1);
+    expect(before[0]?.sourceIntentId).toBeTruthy();
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 1,
+      pending: 0,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      task().timeline.filter((event) =>
+        event.text.includes("Routing decision (primary)"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(1);
+  });
+
+  it("cancels an orphaned intent when the task incarnation was replaced", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await expect(
+      operatorAssignSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_action") {
+              throw new Error("injected crash before task replacement");
+            }
+          },
+        },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          profileId: "developer",
+          backend: "claude",
+          reason: "This choice belonged only to the original task incarnation.",
+        },
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("injected crash before task replacement");
+
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.createdAt = "2099-01-01T00:00:00.000Z";
+        parsed.frontmatter.specialist = null;
+      },
+    );
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 0,
+      pending: 0,
+      cancelled: 1,
+      errors: 0,
+    });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+    const cancellation = listAuditEvents(store.db, {
+      action: "task.operator.routing_cancelled",
+    });
+    expect(cancellation).toHaveLength(1);
+    expect(cancellation[0]?.details).toMatchObject({
+      reason: "task_replaced",
+      operation: "assign_primary",
+    });
+    expect(
+      store.db
+        .prepare(`SELECT count(*) AS n FROM operator_routing_intents`)
+        .get(),
+    ).toEqual({ n: 0 });
+  });
+
   it("recommend mode adds an actionable recommendation and does NOT assign", async () => {
-    deployRoster([{ capabilityId: "assign-primary-specialist", mode: "recommend" }, { capabilityId: "append-typed-events", mode: "direct" }]);
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
     seedTask("impl");
     const r = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", reason: "Dev fits impl." },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        backend: "claude",
+        reason: "Dev fits impl.",
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
@@ -287,9 +787,31 @@ describe("operatorAssignSpecialist", () => {
     expect(recs).toHaveLength(1);
     expect(recs[0]!.kind).toBe("assign_specialist");
     expect(recs[0]!.profileId).toBe("developer");
+    expect(recs[0]!.backend).toBe("claude");
     expect(recs[0]!.detail).toBe("Dev fits impl.");
+    const routingEvent = task().timeline.find((event) =>
+      event.text.includes("Routing recommendation (primary)"),
+    );
+    expect(routingEvent?.text).toContain("recommended **");
+    expect(routingEvent?.text).not.toContain("selected **");
+    expect(
+      task().timeline.some((event) =>
+        event.text.includes("selected **Developer**"),
+      ),
+    ).toBe(false);
+    const routingAudit = listAuditEvents(store.db, {
+      action: "task.operator.routing_decided",
+    })[0]!;
+    expect(routingAudit.details).toMatchObject({
+      selectedProfileId: "developer",
+      disposition: "recommended",
+    });
     // …and the operator's reasoning is also commented to the timeline.
-    expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
+    expect(
+      task().timeline.some(
+        (e) => e.actor.kind === "operator" && e.type === "comment",
+      ),
+    ).toBe(true);
   });
 
   it("off mode (don't recommend) is denied", async () => {
@@ -298,11 +820,42 @@ describe("operatorAssignSpecialist", () => {
     const r = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("full"), // even full autonomy cannot override an `off` capability
     );
     expect(r.outcome).toBe("denied");
     expect(task().frontmatter.specialist).toBeNull();
+  });
+
+  it("denies a routing choice with no concrete operator reason", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const result = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        backend: "claude",
+        reason: "   ",
+      },
+      authority("supervised"),
+    );
+
+    expect(result).toMatchObject({ outcome: "denied" });
+    expect(result.message).toContain("non-empty routing reason");
+    expect(task().frontmatter.specialist).toBeNull();
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.routing_decided",
+      }),
+    ).toHaveLength(0);
   });
 });
 
@@ -331,13 +884,20 @@ describe("operator readiness gate", () => {
       authority: authority("full"),
     });
     expect(toolkit.allowedTools).toContain("mcp__viberr__assess_readiness");
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__prompt_specialist");
+    expect(toolkit.allowedTools).not.toContain(
+      "mcp__viberr__prompt_specialist",
+    );
     expect(toolkit.allowedTools).not.toContain("mcp__viberr__transition_stage");
 
     const denied = await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("full"),
     );
     expect(denied).toMatchObject({ outcome: "denied" });
@@ -350,16 +910,21 @@ describe("operator readiness gate", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         verdict: "input_required",
-        rationale: "The goal only describes a lifecycle exercise and does not identify a product change.",
-        missingInformation: "Name the concrete repository outcome and its verification criteria.",
+        rationale:
+          "The goal only describes a lifecycle exercise and does not identify a product change.",
+        missingInformation:
+          "Name the concrete repository outcome and its verification criteria.",
       },
       authority("supervised"),
     );
     expect(assessed.outcome).toBe("done");
     expect(task().frontmatter.readiness).toBe("input_required");
     expect(task().packet?.title).toBe("Clarify the implementation intent");
-    expect(listAuditEvents(store.db, { action: "task.operator.readiness_assessed" })[0]?.details)
-      .toMatchObject({ from: "input_required", to: "input_required" });
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.readiness_assessed",
+      })[0]?.details,
+    ).toMatchObject({ from: "input_required", to: "input_required" });
   });
 
   it("marks a concrete canonical goal ready atomically before a transition", async () => {
@@ -380,13 +945,222 @@ describe("operator readiness gate", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         verdict: "ready",
-        rationale: "The goal names the operator behavior to implement and requires a verifiable proof.",
+        rationale:
+          "The goal names the operator behavior to implement and requires a verifiable proof.",
       },
       authority("supervised"),
     );
     expect(assessed.outcome).toBe("done");
-    expect(task().frontmatter).toMatchObject({ readiness: "ready", waiting: "none" });
-    expect(task().frontmatter.operator).toEqual({ assignedAtStageId: "triage" });
+    expect(task().frontmatter).toMatchObject({
+      readiness: "ready",
+      waiting: "none",
+    });
+    expect(task().frontmatter.operator).toEqual({
+      assignedAtStageId: "triage",
+    });
+  });
+});
+
+describe("operator toolkit lifecycle ownership", () => {
+  it("rejects a Claude tool mutation when its exact operator lease is cancelled", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    let cancelled = false;
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+      expectedTaskIncarnation: task().frontmatter.createdAt!,
+      isCancelled: () => cancelled,
+      beforeMutationForTests: () => {
+        cancelled = true;
+      },
+    });
+    const server = toolkit.mcpServers.viberr as {
+      instance: {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+        >;
+      };
+    };
+
+    await expect(
+      server.instance._registeredTools.post_comment!.handler(
+        { text: "This cancelled lease must not mutate the task." },
+        {},
+      ),
+    ).rejects.toThrow(/ownership .* cancelled/i);
+    expect(
+      task().timeline.some(
+        (event) =>
+          event.type === "comment" && event.text.includes("cancelled lease"),
+      ),
+    ).toBe(false);
+  });
+
+  it("makes archive wait for a paused Claude tool and rejects its stale mutation after revocation", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const expectedTaskIncarnation = task().frontmatter.createdAt!;
+    let releaseMutation!: () => void;
+    let announceEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      announceEntered = resolve;
+    });
+    const pause = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+      expectedTaskIncarnation,
+      beforeMutationForTests: async () => {
+        announceEntered();
+        await pause;
+      },
+    });
+    const server = toolkit.mcpServers.viberr as {
+      instance: {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+        >;
+      };
+    };
+    const mutation = server.instance._registeredTools.post_comment!.handler(
+      { text: "This stale tool comment must never land." },
+      {},
+    );
+    await entered;
+
+    let archiveSettled = false;
+    const archive = setProjectArchived(
+      store.db,
+      { projectSlug: store.slug, archived: true },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    ).then((result) => {
+      archiveSettled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(archiveSettled).toBe(false);
+
+    releaseMutation();
+    await expect(mutation).rejects.toThrow(/ownership .* revoked/);
+    await archive;
+
+    expect(
+      task().timeline.some((event) =>
+        event.text.includes("This stale tool comment must never land."),
+      ),
+    ).toBe(false);
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter.archived,
+    ).toBe(true);
+  });
+
+  it("cannot carry a paused Claude tool mutation into a deleted same-slug replacement", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const originalProject = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const expectedTaskIncarnation = task().frontmatter.createdAt!;
+    let releaseMutation!: () => void;
+    let announceEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      announceEntered = resolve;
+    });
+    const pause = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+      expectedTaskIncarnation,
+      beforeMutationForTests: async () => {
+        announceEntered();
+        await pause;
+      },
+    });
+    const server = toolkit.mcpServers.viberr as {
+      instance: {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+        >;
+      };
+    };
+    const mutation = server.instance._registeredTools.post_comment!.handler(
+      { text: "Never leak this tool output into a replacement." },
+      {},
+    );
+    await entered;
+
+    let deleteSettled = false;
+    const deletion = deleteProject(
+      store.db,
+      {
+        projectSlug: store.slug,
+        confirmName: originalProject.frontmatter.name,
+      },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    ).then((result) => {
+      deleteSettled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(deleteSettled).toBe(false);
+
+    releaseMutation();
+    await expect(mutation).rejects.toThrow(/ownership .* revoked/);
+    await deletion;
+
+    const replacementCreatedAt = "2026-07-13T17:00:00.000Z";
+    writeProject(
+      store.dataRoot,
+      originalProject.frontmatter,
+      originalProject.description,
+    );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Same-slug replacement",
+        stage: "impl",
+        readiness: "ready",
+        waiting: "none",
+        ownerUserId: store.users.arda.id,
+        createdAt: replacementCreatedAt,
+        updatedAt: replacementCreatedAt,
+      }),
+      goal: "This replacement owns a completely new lifecycle.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    allowProjectCompletionEffects(store.db, store.slug);
+
+    expect(task().frontmatter.createdAt).toBe(replacementCreatedAt);
+    expect(
+      task().timeline.some((event) =>
+        event.text.includes("Never leak this tool output into a replacement."),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -430,7 +1204,9 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
       { dataRoot: store.dataRoot },
     );
     expect(task().frontmatter.recommendations).toHaveLength(0);
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").length,
+    ).toBeGreaterThan(0);
   });
 
   it("run_reviewer under recommend adds an applyable card carrying the reviewer profileId", async () => {
@@ -443,14 +1219,24 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
     const { assignReviewer } = await import("./specialist-run.server");
     await assignReviewer(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        ...ROUTING_CHOICE,
+      },
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
     const r = await operatorRunReviewer(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
@@ -466,7 +1252,9 @@ describe("operatorRunSpecialist / operatorRunReviewer — recommend is an APPLYA
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").length).toBeGreaterThan(0);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").length,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -477,11 +1265,18 @@ describe("operatorAssignReviewer", () => {
     const r = await operatorAssignReviewer(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain(
+      "reviewer",
+    );
   });
 });
 
@@ -492,7 +1287,8 @@ async function waitForFinishedRun(
 ): Promise<boolean> {
   for (let i = 0; i < 160; i++) {
     const run = listRunsForTask(store.db, store.slug, taskKey).find(predicate);
-    if (run && run.lifecycle !== "running" && run.lifecycle !== "queued") return true;
+    if (run && run.lifecycle !== "running" && run.lifecycle !== "queued")
+      return true;
     await new Promise((r) => setTimeout(r, 25));
   }
   return false;
@@ -503,7 +1299,11 @@ function interruptRunningRuns(taskKey: string): void {
   const arda = { userId: store.users.arda.id, label: store.users.arda.email };
   for (const r of listRunsForTask(store.db, store.slug, taskKey)) {
     if (r.lifecycle === "running" || r.lifecycle === "queued") {
-      interruptRun(store.db, { projectSlug: store.slug, taskKey, runId: r.serverRunId }, arda);
+      interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey, runId: r.serverRunId },
+        arda,
+      );
     }
   }
 }
@@ -515,7 +1315,12 @@ describe("operatorPromptSpecialist", () => {
     const r = await operatorPromptSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
@@ -530,7 +1335,11 @@ describe("operatorPromptSpecialist", () => {
     // …addressed to the agent by @mention ("@Dev …")…
     expect(prompt!.text.startsWith("@Dev")).toBe(true);
     // …and its run was triggered (the primary run row exists right after the await).
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "primary")).toBe(true);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").some(
+        (x) => x.kind === "primary",
+      ),
+    ).toBe(true);
     interruptRunningRuns("VIB-1");
   });
 
@@ -544,6 +1353,7 @@ describe("operatorPromptSpecialist", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         profileId: "developer",
+        ...ROUTING_CHOICE,
         directive: "@Dev implement the auth guard first, then wire the tests.",
       },
       authority("full"),
@@ -551,7 +1361,9 @@ describe("operatorPromptSpecialist", () => {
     const prompt = task().timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
-    expect(prompt!.text).toBe("@Dev implement the auth guard first, then wire the tests.");
+    expect(prompt!.text).toBe(
+      "@Dev implement the auth guard first, then wire the tests.",
+    );
   });
 
   it("recommend mode posts an assign card and does NOT run the specialist", async () => {
@@ -563,15 +1375,26 @@ describe("operatorPromptSpecialist", () => {
     const r = await operatorPromptSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
     expect(task().frontmatter.specialist).toBeNull();
-    expect(task().frontmatter.recommendations[0]?.kind).toBe("assign_specialist");
+    expect(task().frontmatter.recommendations[0]?.kind).toBe(
+      "assign_specialist",
+    );
     // No run was triggered.
     await new Promise((res) => setTimeout(res, 40));
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").filter((x) => x.kind === "primary")).toHaveLength(0);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").filter(
+        (x) => x.kind === "primary",
+      ),
+    ).toHaveLength(0);
   });
 });
 
@@ -582,37 +1405,493 @@ describe("operatorPromptReviewer", () => {
     const r = await operatorPromptReviewer(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain(
+      "reviewer",
+    );
     const prompt = task().timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
     expect(prompt).toBeDefined();
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").some((x) => x.kind === "reviewer")).toBe(true);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").some(
+        (x) => x.kind === "reviewer",
+      ),
+    ).toBe(true);
     interruptRunningRuns("VIB-1");
   });
 });
 
+describe("routed operator actions record only after the governed mutation", () => {
+  type RoutedAction =
+    "assign-primary" | "assign-reviewer" | "prompt-primary" | "prompt-reviewer";
+
+  const cases: {
+    action: RoutedAction;
+    stage: "impl" | "review";
+    purpose: "primary" | "reviewer";
+    profileId: "developer" | "reviewer";
+  }[] = [
+    {
+      action: "assign-primary",
+      stage: "impl",
+      purpose: "primary",
+      profileId: "developer",
+    },
+    {
+      action: "assign-reviewer",
+      stage: "review",
+      purpose: "reviewer",
+      profileId: "reviewer",
+    },
+    {
+      action: "prompt-primary",
+      stage: "impl",
+      purpose: "primary",
+      profileId: "developer",
+    },
+    {
+      action: "prompt-reviewer",
+      stage: "review",
+      purpose: "reviewer",
+      profileId: "reviewer",
+    },
+  ];
+
+  async function invoke(action: RoutedAction) {
+    const auth = authority("supervised");
+    const common = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+    };
+    switch (action) {
+      case "assign-primary":
+        return operatorAssignSpecialist(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { ...common, profileId: "developer", ...ROUTING_CHOICE },
+          auth,
+        );
+      case "assign-reviewer":
+        return operatorAssignReviewer(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { ...common, profileId: "reviewer", ...ROUTING_CHOICE },
+          auth,
+        );
+      case "prompt-primary":
+        return operatorPromptSpecialist(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { ...common, profileId: "developer", ...ROUTING_CHOICE },
+          auth,
+        );
+      case "prompt-reviewer":
+        return operatorPromptReviewer(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { ...common, profileId: "reviewer", ...ROUTING_CHOICE },
+          auth,
+        );
+    }
+  }
+
+  it.each(cases)(
+    "$action persists the direct mutation before recording selected",
+    async ({ action, stage, purpose, profileId }) => {
+      deployRoster(DEFAULT_POLICY);
+      seedTask(stage);
+
+      const result = await invoke(action);
+      expect(result.outcome).toBe("done");
+
+      const timeline = task().timeline;
+      const decisionIndex = timeline.findIndex((event) =>
+        event.text.includes(`Routing decision (${purpose})`),
+      );
+      const mutationIndex = timeline.findIndex((event) =>
+        action.startsWith("prompt-")
+          ? event.type === "comment" && event.toAgent
+          : event.type === "agent" &&
+            !event.text.includes("Routing decision") &&
+            (purpose === "primary"
+              ? event.text.includes("primary specialist")
+              : event.text.includes("as a reviewer")),
+      );
+      expect(decisionIndex).toBeGreaterThanOrEqual(0);
+      expect(mutationIndex).toBeGreaterThan(decisionIndex);
+
+      const audit = listAuditEvents(store.db, {
+        action: "task.operator.routing_decided",
+      })[0]!;
+      expect(audit.details).toMatchObject({
+        purpose,
+        selectedProfileId: profileId,
+        disposition: "selected",
+      });
+      expect(audit.details?.context).not.toHaveProperty("score");
+      const intentId = String(audit.details?.routingIntentId);
+      expect(intentId).toMatch(/^routing_intent_/);
+      if (action === "assign-primary") {
+        expect(task().frontmatter.specialist?.sourceIntentId).toBe(intentId);
+      } else if (action === "assign-reviewer") {
+        expect(
+          task().frontmatter.reviewers.find(
+            (reviewer) => reviewer.profileId === profileId,
+          )?.sourceIntentId,
+        ).toBe(intentId);
+      } else {
+        expect(
+          store.db
+            .prepare(
+              `SELECT source_intent_id FROM agent_runs WHERE source_intent_id = ?`,
+            )
+            .get(intentId),
+        ).toEqual({ source_intent_id: intentId });
+      }
+
+      if (action.startsWith("prompt-")) interruptRunningRuns("VIB-1");
+    },
+  );
+
+  it("does not promote a prompt intent from a later matching but unrelated run", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason:
+        "This exact prompt choice follows the current intelligent routing comparison.",
+    };
+    await expect(
+      operatorPromptSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_intent") {
+              throw new Error("crash before routed provider action");
+            }
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("crash before routed provider action");
+    const staged = store.db
+      .prepare(`SELECT id FROM operator_routing_intents`)
+      .get() as { id: string };
+
+    upsertRun(store.db, {
+      id: "run_unrelated_matching_profile",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "manual-unrelated",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "sonnet",
+      sdk: "test",
+      agentName: "Dev",
+      agentProfileId: "developer",
+      taskIncarnation: task().frontmatter.createdAt,
+      state: "finished",
+    });
+
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 0,
+      pending: 1,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      store.db
+        .prepare(
+          `SELECT source_intent_id FROM agent_runs WHERE id = 'run_unrelated_matching_profile'`,
+        )
+        .get(),
+    ).toEqual({ source_intent_id: null });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+
+    upsertRun(store.db, {
+      id: "run_exact_but_ambiguous_at_boot",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "routed-ambiguous",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "sonnet",
+      sdk: "test",
+      agentName: "Dev",
+      agentProfileId: "developer",
+      taskIncarnation: task().frontmatter.createdAt,
+      sourceIntentId: staged.id,
+      state: "running",
+    });
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 0,
+      pending: 1,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+
+    store.db
+      .prepare(
+        `UPDATE agent_runs
+            SET state = 'finished', finished_at = ?, updated_at = ?
+          WHERE id = 'run_exact_but_ambiguous_at_boot'`,
+      )
+      .run("2026-07-13T12:00:00.000Z", "2026-07-13T12:00:00.000Z");
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 1,
+      pending: 0,
+      cancelled: 0,
+      errors: 0,
+    });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(1);
+  });
+
+  it("boot interrupts an orphaned exact prompt run before cancelling its routing intent", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      profileId: "developer",
+      backend: "claude" as const,
+      reason:
+        "This prompt was selected from the routing facts available before restart.",
+    };
+    await expect(
+      operatorPromptSpecialist(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          routingDecisionEffectHookForTests: ({ phase }) => {
+            if (phase === "after_intent") {
+              throw new Error("crash before provider launch");
+            }
+          },
+        },
+        input,
+        authority("supervised"),
+      ),
+    ).rejects.toThrow("crash before provider launch");
+    const staged = store.db
+      .prepare(`SELECT id FROM operator_routing_intents`)
+      .get() as { id: string };
+    upsertRun(store.db, {
+      id: "run_orphaned_exact_prompt",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "orphaned-exact-prompt",
+      role: "Implementation",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "sonnet",
+      sdk: "test",
+      agentName: "Dev",
+      agentProfileId: "developer",
+      taskIncarnation: task().frontmatter.createdAt,
+      sourceIntentId: staged.id,
+      state: "running",
+    });
+
+    // This is the ambiguous state seen by boot's first routing pass.
+    await expect(recoverOperatorRoutingIntents(store.db)).resolves.toEqual({
+      completed: 0,
+      pending: 1,
+      cancelled: 0,
+      errors: 0,
+    });
+
+    const recovered = await recoverAgentRunsThenRoutingIntents(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        openRecovery: async () => ({
+          recorded: true,
+          packetCreated: true,
+          notifiedUserIds: [],
+        }),
+      },
+    );
+    expect(recovered).toEqual({
+      agentRuns: { recovered: 0, orphaned: 1 },
+      routing: { completed: 0, pending: 0, cancelled: 1, errors: 0 },
+    });
+    expect(
+      store.db
+        .prepare(
+          `SELECT state FROM agent_runs WHERE id = 'run_orphaned_exact_prompt'`,
+        )
+        .get(),
+    ).toEqual({ state: "interrupted" });
+    expect(
+      store.db
+        .prepare(`SELECT count(*) AS n FROM operator_routing_intents`)
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.routing_cancelled",
+      })[0]?.details,
+    ).toMatchObject({
+      routingIntentId: staged.id,
+      reason: "prompt_run_failed",
+    });
+    expect(
+      listAuditEvents(store.db, { action: "task.operator.routing_decided" }),
+    ).toHaveLength(0);
+  });
+
+  it.each(cases)(
+    "$action persists the recommendation before recording recommended",
+    async ({ action, stage, purpose, profileId }) => {
+      deployRoster([
+        {
+          capabilityId:
+            purpose === "primary"
+              ? "assign-primary-specialist"
+              : "summon-reviewers",
+          mode: "recommend",
+        },
+      ]);
+      seedTask(stage);
+
+      const result = await invoke(action);
+      expect(result.outcome).toBe("recommended");
+
+      const timeline = task().timeline;
+      const decisionIndex = timeline.findIndex((event) =>
+        event.text.includes(`Routing recommendation (${purpose})`),
+      );
+      const recommendationIndex = timeline.findIndex((event) =>
+        event.text.startsWith("**Recommendation:**"),
+      );
+      expect(decisionIndex).toBeGreaterThanOrEqual(0);
+      expect(recommendationIndex).toBeGreaterThan(decisionIndex);
+
+      const audit = listAuditEvents(store.db, {
+        action: "task.operator.routing_decided",
+      })[0]!;
+      expect(audit.details).toMatchObject({
+        purpose,
+        selectedProfileId: profileId,
+        disposition: "recommended",
+      });
+      expect(audit.details?.context).not.toHaveProperty("score");
+    },
+  );
+
+  it.each(cases)(
+    "$action returns the shared hard-eligibility denial without a decision fact",
+    async ({ action, stage, profileId }) => {
+      deployRoster(DEFAULT_POLICY);
+      const project = readProjectFile({
+        projectSlug: store.slug,
+        dataRoot: store.dataRoot,
+      })!;
+      const deployment = project.parsed.frontmatter.agents.find(
+        (agent) => agent.profileId === profileId,
+      )!;
+      deployment.definition = {
+        ...(deployment.definition ?? {}),
+        stages: ["triage"],
+      };
+      writeProject(store.dataRoot, project.parsed.frontmatter);
+      seedTask(stage);
+
+      const result = await invoke(action);
+      expect(result).toMatchObject({
+        outcome: "denied",
+        message: expect.stringContaining(`not eligible for stage ${stage}`),
+      });
+      expect(
+        listAuditEvents(store.db, {
+          action: "task.operator.routing_decided",
+        }),
+      ).toHaveLength(0);
+      expect(
+        task().timeline.some((event) =>
+          event.text.includes("Routing decision"),
+        ),
+      ).toBe(false);
+      expect(task().frontmatter).toMatchObject({
+        specialist: null,
+        reviewers: [],
+        recommendations: [],
+      });
+    },
+  );
+});
+
 describe("operatorShouldReactToReply (no-progress guard)", () => {
   it("reacts only to a finished run with a NEW, non-empty report within the depth cap", async () => {
-    const { operatorShouldReactToReply } = await import("./task-actions.server");
+    const { operatorShouldReactToReply } =
+      await import("./task-actions.server");
     // Happy path: finished, a fresh report, first-time reply, depth 0.
-    expect(operatorShouldReactToReply("finished", "implemented X, tests pass", null, 0)).toBe(true);
-    expect(operatorShouldReactToReply("finished", "round two — different result", "round one", 1)).toBe(true);
+    expect(
+      operatorShouldReactToReply(
+        "finished",
+        "implemented X, tests pass",
+        null,
+        0,
+      ),
+    ).toBe(true);
+    expect(
+      operatorShouldReactToReply(
+        "finished",
+        "round two — different result",
+        "round one",
+        1,
+      ),
+    ).toBe(true);
     // No progress: the agent repeated its previous reply verbatim → do NOT react
     // (this is the CTL-3 spiral fix).
-    expect(operatorShouldReactToReply("finished", "same canned findings", "same canned findings", 0)).toBe(false);
-    expect(operatorShouldReactToReply("finished", "  same  ", "same", 0)).toBe(false); // trimmed compare
+    expect(
+      operatorShouldReactToReply(
+        "finished",
+        "same canned findings",
+        "same canned findings",
+        0,
+      ),
+    ).toBe(false);
+    expect(operatorShouldReactToReply("finished", "  same  ", "same", 0)).toBe(
+      false,
+    ); // trimmed compare
     // Not a clean finish, or no report → nothing to react to.
-    expect(operatorShouldReactToReply("interrupted", "partial", null, 0)).toBe(false);
+    expect(operatorShouldReactToReply("interrupted", "partial", null, 0)).toBe(
+      false,
+    );
     expect(operatorShouldReactToReply("error", "boom", null, 0)).toBe(false);
     expect(operatorShouldReactToReply("finished", null, null, 0)).toBe(false);
     expect(operatorShouldReactToReply("finished", "", null, 0)).toBe(false);
     // No active operator run (undefined depth) or depth cap reached → stop.
-    expect(operatorShouldReactToReply("finished", "new", null, undefined)).toBe(false);
+    expect(operatorShouldReactToReply("finished", "new", null, undefined)).toBe(
+      false,
+    );
     expect(operatorShouldReactToReply("finished", "new", null, 4)).toBe(false);
     expect(operatorShouldReactToReply("finished", "new", null, 3)).toBe(true); // just under the cap
   });
@@ -622,7 +1901,8 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
   it("supervised: reading the report proposes the next transition as a recommendation", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    const { runOperator } =
+      await import("~/server/runtimes/operator-run.server");
     await runOperator(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -645,7 +1925,8 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
   it("full autonomy: reading the report performs the move and coordinates the new stage", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    const { runOperator } =
+      await import("~/server/runtimes/operator-run.server");
     await runOperator(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -671,7 +1952,10 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
     // run-boundary eligibility throw would propagate and post "Operator halted
     // on an error", permanently stalling the task. It must skip the ineligible
     // reviewer instead.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const file = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       repo: null,
@@ -680,15 +1964,24 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
           profileId: "operator",
           capabilities: DEFAULT_POLICY,
           extras: [],
-          definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["claude"],
+            model: "sonnet",
+          },
         },
         {
           profileId: "reviewer",
           capabilities: [],
           extras: [],
           definition: {
-            kind: "specialist", name: "Rev", role: "Code review",
-            backends: ["claude"], model: "sonnet", stages: ["impl"],
+            kind: "specialist",
+            name: "Rev",
+            role: "Code review",
+            backends: ["claude"],
+            model: "sonnet",
+            stages: ["impl"],
           },
         },
       ] as never,
@@ -699,13 +1992,16 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
         ownerUserId: store.users.arda.id,
         operator: { assignedAtStageId: "triage" },
         title: "Ineligible engaged reviewer",
-        reviewers: [{ profileId: "reviewer", backend: "claude", role: "Code review" }],
+        reviewers: [
+          { profileId: "reviewer", backend: "claude", role: "Code review" },
+        ],
       }),
       goal: "Prove the operator skips an ineligible engaged reviewer.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
+    const { runOperator } =
+      await import("~/server/runtimes/operator-run.server");
     await runOperator(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -715,8 +2011,13 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
     });
     await waitForFinishedRun("VIB-1", (r) => r.op === true);
     // The operator must NOT have hard-halted on the eligibility throw.
-    const halted = task().timeline.some((e) => /halted on an error/i.test(e.text));
-    expect(halted, "operator must skip the ineligible reviewer, not hard-halt").toBe(false);
+    const halted = task().timeline.some((e) =>
+      /halted on an error/i.test(e.text),
+    );
+    expect(
+      halted,
+      "operator must skip the ineligible reviewer, not hard-halt",
+    ).toBe(false);
     interruptRunningRuns("VIB-1");
   });
 });
@@ -725,9 +2026,8 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
   it("a trigger arriving while a run is in flight is QUEUED and fired once, not dropped", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { runOperator, resetOperatorLeasesForTests } = await import(
-      "~/server/runtimes/operator-run.server"
-    );
+    const { runOperator, resetOperatorLeasesForTests } =
+      await import("~/server/runtimes/operator-run.server");
     resetOperatorLeasesForTests();
     // Fire two concurrent triggers WITHOUT awaiting the first — the second must
     // coalesce (queue), not start a second overlapping operator run.
@@ -790,7 +2090,11 @@ describe("operatorTransitionStage", () => {
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("review");
     // The transition event is attributed to the operator, not a human.
-    expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
+    expect(
+      task().timeline.some(
+        (e) => e.type === "transition" && e.actor.kind === "operator",
+      ),
+    ).toBe(true);
   });
 
   it("supervised operator CROSSES the triage → ready `auto` boundary directly", async () => {
@@ -823,12 +2127,19 @@ describe("operatorTransitionStage", () => {
     );
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("impl");
-    expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
+    expect(
+      task().timeline.some(
+        (e) => e.type === "transition" && e.actor.kind === "operator",
+      ),
+    ).toBe(true);
   });
 });
 
 describe("auto-invoke on stage transition", () => {
-  const arda = () => ({ userId: store.users.arda.id, label: store.users.arda.email });
+  const arda = () => ({
+    userId: store.users.arda.id,
+    label: store.users.arda.email,
+  });
 
   it("a human transition runs the operator without statically ranking several candidates", async () => {
     deployRoster(DEFAULT_POLICY);
@@ -849,6 +2160,12 @@ describe("auto-invoke on stage transition", () => {
   it("a transition INTO the final Done stage does not auto-invoke the operator", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
+    await recordHumanValidation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      arda(),
+      { dataRoot: store.dataRoot },
+    );
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
@@ -857,7 +2174,9 @@ describe("auto-invoke on stage transition", () => {
     );
     // Give any (unwanted) fire-and-forget invocation a chance to appear.
     await new Promise((r) => setTimeout(r, 60));
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").filter((r) => r.op)).toHaveLength(0);
+    expect(
+      listRunsForTask(store.db, store.slug, "VIB-1").filter((r) => r.op),
+    ).toHaveLength(0);
   });
 });
 
@@ -912,7 +2231,9 @@ describe("operatorAcceptCompletion", () => {
     // Owner ruling Q1: acceptance-to-Done requires an EXPLICIT `direct` grant —
     // full autonomy alone does not promote it. This roster grants it directly.
     deployRoster([
-      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      ...DEFAULT_POLICY.filter(
+        (c) => c.capabilityId !== "completion-for-acceptance",
+      ),
       { capabilityId: "completion-for-acceptance", mode: "direct" },
     ]);
     seedTask("review");
@@ -930,6 +2251,110 @@ describe("operatorAcceptCompletion", () => {
     expect(audits).toContain("task.operator.accepted_completion");
   });
 
+  it("boot converges full-autonomy completion after task.md committed but before projection and audit", async () => {
+    deployRoster([
+      ...DEFAULT_POLICY.filter(
+        (c) => c.capabilityId !== "completion-for-acceptance",
+      ),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
+    seedTask("review");
+
+    await expect(
+      operatorAcceptCompletion(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          completionFinalizationHookForTests: () => {
+            throw new Error("injected operator completion crash");
+          },
+        },
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority("full"),
+      ),
+    ).rejects.toThrow("injected operator completion crash");
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT stage FROM task_projections
+              WHERE project_slug = ? AND task_key = 'VIB-1'`,
+          )
+          .get(store.slug) as { stage: string }
+      ).stage,
+    ).toBe("review");
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.accepted_completion",
+      }),
+    ).toHaveLength(0);
+    expect(
+      store.db
+        .prepare(
+          `SELECT authority_source, actor_user_id, actor_label, phase
+             FROM task_completion_intents`,
+        )
+        .get(),
+    ).toMatchObject({
+      authority_source: "operator_full_autonomy",
+      actor_user_id: null,
+      actor_label: "operator",
+      phase: "done",
+    });
+
+    expect(recoverTaskCompletionIntents(store.db, store.dataRoot)).toEqual({
+      completed: 1,
+      cancelled: 0,
+      retained: 0,
+      errors: 0,
+    });
+    expect(
+      (
+        store.db
+          .prepare(
+            `SELECT stage FROM task_projections
+              WHERE project_slug = ? AND task_key = 'VIB-1'`,
+          )
+          .get(store.slug) as { stage: string }
+      ).stage,
+    ).toBe("done");
+    expect(
+      task().timeline.filter((event) => event.title === "Completion accepted"),
+    ).toHaveLength(1);
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.accepted_completion",
+      })[0],
+    ).toMatchObject({
+      actorUserId: null,
+      actorLabel: "operator",
+      details: expect.objectContaining({
+        autonomy: "full",
+        toStage: "done",
+        via: "accept_completion",
+      }),
+    });
+    expect(
+      store.db
+        .prepare(`SELECT count(*) AS n FROM task_completion_intents`)
+        .get(),
+    ).toEqual({ n: 0 });
+
+    expect(recoverTaskCompletionIntents(store.db, store.dataRoot)).toEqual({
+      completed: 0,
+      cancelled: 0,
+      retained: 0,
+      errors: 0,
+    });
+    expect(
+      listAuditEvents(store.db, {
+        action: "task.operator.accepted_completion",
+      }),
+    ).toHaveLength(1);
+  });
+
   it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {
     // The shipped default operator holds completion-for-acceptance:recommend.
     // Under full autonomy that must NOT silently promote to an agent-close.
@@ -944,15 +2369,24 @@ describe("operatorAcceptCompletion", () => {
     expect(r.outcome).toBe("recommended");
     expect(task().frontmatter.stage).toBe("review");
     expect(
-      task().frontmatter.recommendations.some((rec) => rec.kind === "accept_completion"),
+      task().frontmatter.recommendations.some(
+        (rec) => rec.kind === "accept_completion",
+      ),
     ).toBe(true);
   });
 });
 
 describe("operatorOpenPacket (decision/blocking packet generator)", () => {
   const OPTIONS = [
-    { kind: "redirect" as const, title: "Reassign to another developer", recommended: true },
-    { kind: "hold_runtime_debug" as const, title: "Hold for runtime debugging" },
+    {
+      kind: "redirect" as const,
+      title: "Reassign to another developer",
+      recommended: true,
+    },
+    {
+      kind: "hold_runtime_debug" as const,
+      title: "Hold for runtime debugging",
+    },
   ];
 
   it("opens a round-trippable input packet, sets waiting=human, notifies supervisors", async () => {
@@ -1008,7 +2442,9 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
         taskKey: "VIB-1",
         packetType: "blocked",
         title: "Blocked on a missing credential",
-        options: [{ kind: "block_on_policy", title: "Update the credential policy" }],
+        options: [
+          { kind: "block_on_policy", title: "Update the credential policy" },
+        ],
       },
       authority("supervised"),
     );
@@ -1071,7 +2507,12 @@ describe("applyRecommendation / dismissRecommendation", () => {
     await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     return task().frontmatter.recommendations[0]!.id;
@@ -1079,7 +2520,10 @@ describe("applyRecommendation / dismissRecommendation", () => {
 
   it("applying a recommendation executes the action and clears it", async () => {
     const recId = await seedRecommendation();
-    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const actor = {
+      userId: store.users.arda.id,
+      label: store.users.arda.email,
+    };
     const res = await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId },
@@ -1089,10 +2533,65 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(res.label).toContain("Dev");
     // The recommended assignment was performed…
     expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(task().frontmatter.specialist?.backend).toBe("claude");
     // …and the recommendation card was cleared.
     expect(task().frontmatter.recommendations).toHaveLength(0);
-    const audits = listAuditEvents(store.db, {}).map((a) => a.action);
-    expect(audits).toContain("task.recommendation.applied");
+    const appliedAudit = listAuditEvents(store.db, {
+      action: "task.recommendation.applied",
+    })[0]!;
+    expect(appliedAudit.details).toMatchObject({
+      kind: "assign_specialist",
+      backend: "claude",
+    });
+  });
+
+  it("applies the exact alternate backend stored on an assignment recommendation", async () => {
+    deployRoster([
+      { capabilityId: "assign-primary-specialist", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    const developer = project.parsed.frontmatter.agents.find(
+      (agent) => agent.profileId === "developer",
+    )!;
+    developer.capabilities = [
+      { capabilityId: "create-task-branch", mode: "direct" },
+      { capabilityId: "commit-push-branch", mode: "direct" },
+      { capabilityId: "execute-code-or-write-repo", mode: "direct" },
+    ];
+    writeProject(store.dataRoot, project.parsed.frontmatter);
+    seedTask("impl");
+
+    const routed = await operatorAssignSpecialist(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        backend: "codex",
+        reason:
+          "Codex is the selected compatible backend for this implementation assignment.",
+      },
+      authority("supervised"),
+    );
+    expect(routed.outcome).toBe("recommended");
+    const rec = task().frontmatter.recommendations[0]!;
+    expect(rec.backend).toBe("codex");
+
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: rec.id },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().frontmatter.specialist).toMatchObject({
+      profileId: "developer",
+      backend: "codex",
+    });
   });
 
   it("a stage transition clears stale transition recommendations", async () => {
@@ -1106,7 +2605,9 @@ describe("applyRecommendation / dismissRecommendation", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("supervised"),
     );
-    expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(true);
+    expect(
+      task().frontmatter.recommendations.some((r) => r.kind === "transition"),
+    ).toBe(true);
     // A human then performs the transition — the stale card must clear.
     await transitionStage(
       store.db,
@@ -1115,7 +2616,9 @@ describe("applyRecommendation / dismissRecommendation", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task().frontmatter.stage).toBe("review");
-    expect(task().frontmatter.recommendations.some((r) => r.kind === "transition")).toBe(false);
+    expect(
+      task().frontmatter.recommendations.some((r) => r.kind === "transition"),
+    ).toBe(false);
   });
 
   it("applying an accept-completion recommendation moves the task to Done", async () => {
@@ -1132,7 +2635,14 @@ describe("applyRecommendation / dismissRecommendation", () => {
       (r) => r.kind === "accept_completion",
     )!;
     expect(rec).toBeDefined();
-    // A maintainer applies it → the task is accepted into Done.
+    // Validation and acceptance are separate deliberate human actions.
+    await recordHumanValidation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    // A maintainer then applies it → the task is accepted into Done.
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: rec.id },
@@ -1146,7 +2656,10 @@ describe("applyRecommendation / dismissRecommendation", () => {
 
   it("dismissing a recommendation clears it without acting", async () => {
     const recId = await seedRecommendation();
-    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const actor = {
+      userId: store.users.arda.id,
+      label: store.users.arda.email,
+    };
     await dismissRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId },
@@ -1178,7 +2691,12 @@ describe("applyRecommendation / dismissRecommendation", () => {
     await operatorAssignSpecialist(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        ...ROUTING_CHOICE,
+      },
       authority("supervised"),
     );
     const after = listNotifications(store.db, store.users.murat.id).filter(
@@ -1213,7 +2731,11 @@ describe("auto-invoke on task creation", () => {
     const key = created.key;
     expect(created.operatorTrigger).toBe("awaiting_input");
     expect(listRunsForTask(store.db, store.slug, key)).toHaveLength(0);
-    const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
+    const t = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
     expect(t.frontmatter.stage).toBe("triage");
     expect(t.frontmatter.readiness).toBe("input_required");
     expect(t.timeline[0]?.text).toContain("Automatic Triage paused");
@@ -1240,11 +2762,19 @@ describe("auto-invoke on task creation", () => {
       if (!opDone) await new Promise((r) => setTimeout(r, 25));
     }
     expect(opDone).toBe(true);
-    const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
+    const t = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
     expect(t.frontmatter.stage).toBe("impl");
     expect(t.frontmatter.readiness).toBe("input_required");
     expect(t.frontmatter.specialist).toBeNull();
-    expect(t.timeline.some((event) => event.text.includes("deterministic fallback will not invent"))).toBe(true);
+    expect(
+      t.timeline.some((event) =>
+        event.text.includes("deterministic fallback will not invent"),
+      ),
+    ).toBe(true);
     interruptRunningRuns(key);
   });
 
@@ -1258,7 +2788,11 @@ describe("auto-invoke on task creation", () => {
     );
     expect(created.operatorTrigger).toBe("not_deployed");
     await new Promise((r) => setTimeout(r, 60));
-    const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
+    const t = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: created.key,
+      dataRoot: store.dataRoot,
+    })!.parsed;
     expect(t.frontmatter.specialist).toBeNull();
     expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
   });

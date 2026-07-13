@@ -29,6 +29,10 @@ export interface TaskFileRef {
   dataRoot?: string;
   projectSlug: string;
   taskKey: string;
+  /** Optional lifecycle identity enforced on every read inside the file lock.
+   * Operator completions use it so delayed work cannot mutate a same-key
+   * replacement task. */
+  expectedTaskIncarnation?: string;
 }
 
 export function resolveTaskFilePath(ref: TaskFileRef): string {
@@ -50,6 +54,17 @@ export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
   const { parsed, diagnostics } = parseTaskFileContent(content, {
     fallbackKey: ref.taskKey,
   });
+  if (
+    ref.expectedTaskIncarnation !== undefined &&
+    parsed.frontmatter.createdAt !== ref.expectedTaskIncarnation
+  ) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: `Task ${ref.taskKey} was replaced while this operation was in progress.`,
+      kind: "user",
+    });
+  }
   return { parsed, diagnostics, content, absPath };
 }
 

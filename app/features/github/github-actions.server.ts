@@ -13,6 +13,10 @@ import {
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
+import {
+  projectCompletionSignal,
+  withProjectCompletionEffect,
+} from "~/server/runtimes/run-completion-state.server";
 
 /**
  * The two GitHub-view actions, as thin typed wrappers over the phase-7-core
@@ -38,7 +42,15 @@ export async function runReconcile(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<GithubActionOutcome> {
-  const summary = await reconcileProject(db, projectSlug, actor, ctx);
+  const signal = projectCompletionSignal(db, projectSlug);
+  return withProjectCompletionEffect(db, projectSlug, async () => {
+    const summary = await reconcileProject(db, projectSlug, actor, {
+      ...ctx,
+      signal,
+    });
+    if (signal.aborted) {
+      throw new DOMException("Project lifecycle ownership was revoked.", "AbortError");
+    }
   const failures = summary.results.filter(
     (r) => r.status !== "reconciled" && r.status !== "no_branch",
   );
@@ -50,7 +62,8 @@ export async function runReconcile(
       failures.length > 0 &&
       failures.every((r) => r.status === "network_unavailable"),
   });
-  return { ok: true, toast, result: summary.status };
+    return { ok: true, toast, result: summary.status };
+  });
 }
 
 /**

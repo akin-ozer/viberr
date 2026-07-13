@@ -233,13 +233,23 @@ describe("comment action — @agent routing detection", () => {
     expect(humanComment).toMatchObject({ type: "comment", toAgent: true });
   });
 
-  it("@codex also routes + triggers; plain member mentions do not", async () => {
+  it("@codex fails closed when its policy cannot be enforced; plain member mentions do not route", async () => {
     const codex = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "@codex check the linter",
-    })) as { toAgent: boolean; triggered: string | null };
-    expect(codex.toAgent).toBe(true);
-    expect(codex.triggered).toBeTruthy();
-    await stopTaskRuns("VIB-153", ids.arda);
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(codex.init.status).toBe(400);
+    expect(codex.data.error).toContain(
+      "Codex cannot enforce this profile's withheld local capabilities",
+    );
+
+    const afterCodex = await runLoader("VIB-153", ids.arda);
+    const routedComment = afterCodex.task.timeline.find(
+      (event) =>
+        event.type === "comment" &&
+        event.actor.kind === "human" &&
+        event.text === "@codex check the linter",
+    );
+    expect(routedComment).toMatchObject({ type: "comment", toAgent: true });
 
     const plain = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "cc @murat for a second look",
@@ -551,7 +561,12 @@ describe("loader — deployed specialists", () => {
     expect(ids2).toContain("developer");
     expect(ids2).not.toContain("operator");
     const dev = result.deployedSpecialists.find((s) => s.id === "developer")!;
-    expect(dev).toMatchObject({ role: "Implementation" });
+    expect(dev).toMatchObject({
+      role: "Implementation",
+      backends: ["codex", "claude"],
+      stages: ["ready", "impl"],
+      spanAll: false,
+    });
     expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
     expect(result.runActive).toBe(false); // no running run on VIB-166 (triage)
   });
@@ -564,7 +579,7 @@ describe("assign-specialist + run-specialist intents", () => {
     // assigning a developer at Triage is correctly rejected.
     await postIntent("VIB-166", ids.arda, { intent: "transition", to: "ready" });
     const result = (await postIntent("VIB-166", ids.arda, {
-      intent: "assign-specialist", profileId: "developer",
+      intent: "assign-specialist", profileId: "developer", backend: "codex",
     })) as { ok: true; toast: string };
     expect(result.ok).toBe(true);
     expect(result.toast).toBe("Deployed Developer as specialist");
@@ -582,7 +597,7 @@ describe("assign-specialist + run-specialist intents", () => {
 
   it("reviewer + viewer are denied assign (admin|maintainer only)", async () => {
     const reviewer = (await postIntent("VIB-145", ids.selin, {
-      intent: "assign-specialist", profileId: "developer",
+      intent: "assign-specialist", profileId: "developer", backend: "codex",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(reviewer.init.status).toBe(403);
   });
@@ -590,7 +605,7 @@ describe("assign-specialist + run-specialist intents", () => {
   it("rejects assigning a specialist to a stage outside its eligibility (F1)", async () => {
     // VIB-168 is at Triage; the Developer profile is scoped to ready/impl.
     const result = (await postIntent("VIB-168", ids.arda, {
-      intent: "assign-specialist", profileId: "developer",
+      intent: "assign-specialist", profileId: "developer", backend: "codex",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(400);
     expect(result.data.error).toContain("not eligible");
@@ -598,9 +613,18 @@ describe("assign-specialist + run-specialist intents", () => {
 
   it("assigning an unknown profile id is a validation error", async () => {
     const result = (await postIntent("VIB-145", ids.arda, {
-      intent: "assign-specialist", profileId: "does-not-exist",
+      intent: "assign-specialist", profileId: "does-not-exist", backend: "codex",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(400);
+  });
+
+  it("requires an explicit backend for a manual assignment", async () => {
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "assign-specialist",
+      profileId: "developer",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("Choose a declared");
   });
 
   it("run-specialist requires an assigned specialist", async () => {

@@ -20,6 +20,7 @@ export interface RecommendationView {
     | "transition"
     | "accept_completion";
   profileId?: string;
+  backend?: "claude" | "codex";
   toStageId?: string;
   label: string;
   detail: string;
@@ -47,6 +48,7 @@ export function OperatorRecommendations({
   recommendations,
   canApply,
   canApplyCompletion = false,
+  completionReady = true,
   busy,
   onApply,
   onDismiss,
@@ -56,6 +58,8 @@ export function OperatorRecommendations({
   canApply: boolean;
   /** Current contributor+ task owner may apply only accept_completion. */
   canApplyCompletion?: boolean;
+  /** Current immutable validation/review evidence satisfies completion. */
+  completionReady?: boolean;
   busy: boolean;
   onApply: (recId: string) => void;
   onDismiss: (recId: string) => void;
@@ -75,49 +79,56 @@ export function OperatorRecommendations({
         </span>
       </div>
       <div className="op-rec-list">
-        {recommendations.map((r) => (
-          <div className="op-rec" key={r.id}>
-            <div className="op-rec-main">
-              <div className="op-rec-label">
-                <span className="op-rec-kind">
-                  <Icon name={KIND_ICON[r.kind]} />
-                  {KIND_LABEL[r.kind]}
-                </span>
-                <span className="op-rec-title">{r.label}</span>
+        {recommendations.map((r) => {
+          const canApplyRecommendation =
+            r.kind === "accept_completion"
+              ? completionReady && (canApply || canApplyCompletion)
+              : canApply;
+          return (
+            <div className="op-rec" key={r.id}>
+              <div className="op-rec-main">
+                <div className="op-rec-label">
+                  <span className="op-rec-kind">
+                    <Icon name={KIND_ICON[r.kind]} />
+                    {KIND_LABEL[r.kind]}
+                  </span>
+                  <span className="op-rec-title">{r.label}</span>
+                </div>
+                {r.detail && <div className="op-rec-detail">{r.detail}</div>}
               </div>
-              {r.detail && <div className="op-rec-detail">{r.detail}</div>}
+              {/* Supervisors may dismiss any recommendation. Applying a
+                  completion recommendation additionally requires current
+                  immutable evidence; a task owner may apply only that kind. */}
+              {(canApplyRecommendation || canApply) && (
+                <div className="op-rec-actions">
+                  {canApplyRecommendation && (
+                    <button
+                      type="button"
+                      className="btn primary sm"
+                      disabled={busy}
+                      onClick={() => onApply(r.id)}
+                      title="Apply the operator's recommendation"
+                    >
+                      <Icon name="check" />
+                      Apply
+                    </button>
+                  )}
+                  {canApply && (
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      disabled={busy}
+                      onClick={() => onDismiss(r.id)}
+                      title="Dismiss without acting"
+                    >
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            {/* Apply AND Dismiss are both maintainer-level (M1) — the server
-                enforces admin|maintainer for each, so hide them from lower
-                roles rather than render a button that 403s on click. */}
-            {(canApply ||
-              (r.kind === "accept_completion" && canApplyCompletion)) && (
-              <div className="op-rec-actions">
-                <button
-                  type="button"
-                  className="btn primary sm"
-                  disabled={busy}
-                  onClick={() => onApply(r.id)}
-                  title="Apply the operator's recommendation"
-                >
-                  <Icon name="check" />
-                  Apply
-                </button>
-                {canApply && (
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    disabled={busy}
-                    onClick={() => onDismiss(r.id)}
-                    title="Dismiss without acting"
-                  >
-                    Dismiss
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

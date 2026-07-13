@@ -14,7 +14,9 @@ may accept that owned task or whether ownership copy must stop promising accepta
 
 Decision: a contributor who owns the task may accept completion for that task. This is a
 task-scoped authority, not a general contributor permission. UI, policy copy, action guards, packet
-resolution, board/review personalization, and audit must all reflect it.
+resolution, board/review personalization, and audit must all reflect it. The owner and enabled-user
+binding is re-read at the acceptance/merge commit boundary; a loader-time grant cannot survive a
+later ownership change, demotion, disable or deletion.
 
 Status: answered by owner on 2026-07-13.
 
@@ -26,7 +28,9 @@ project-admin authority.
 
 Decision: organization admins have emergency project-admin power. They do not need an explicit
 project membership to perform project-admin actions. The bypass must be visible and audited as
-organization-admin authority, and loaders/controls/SSE/actions must agree.
+organization-admin authority, and loaders/controls/SSE/actions must agree. The current Better Auth
+organization role is re-read at the canonical or irreversible mutation boundary, and audit records
+`org_admin_override` only when that is the grant which actually committed the action.
 
 Status: answered by owner on 2026-07-13.
 
@@ -45,6 +49,12 @@ static ordering.
 Implemented scope: hard eligibility and candidate resource/backend facts remain project-specific;
 current workload and observed-cost context are aggregated across the organization so the operator
 does not overload an agent profile merely because its other work belongs to another project.
+
+Durability consequence: the operator's choice receives an exact routing intent id. That same id
+must bind the assignment or recommendation, persisted rationale, reviewer/primary purpose and any
+launched run `sourceIntentId`. Recovery may converge a choice only from objective evidence for that
+intent and task incarnation; a later unrelated run or a human fallback is not retroactive routing
+proof.
 
 Status: answered by owner on 2026-07-13.
 
@@ -79,7 +89,10 @@ governed Review stage under the terminal contract.
 ### D8 — project deletion identity
 
 Working ruling: deletion purges all project-keyed operational state (runs/logs, credential bindings,
-violations, notifications, provenance, and old project audit) so a recreated slug starts clean.
+violations, notifications, provenance, old project audit, pending triggers/effects, completion and
+acceptance, merge/PR-open/routing, lifecycle, and ownership-cleanup intents) so a recreated slug
+starts clean. A deletion tombstone preserves the original actor/authority until purge and the stable
+organization-wide deletion audit converge.
 
 ### D9 — referenced resources
 
@@ -99,6 +112,12 @@ Working ruling: a repository-backed task requires exactly healthy validation, ev
 approval, a linked review PR, and a real merge before Done. Acceptance without a reachable/successful
 merge records `pr.state=accepted` and stays Review/merge-pending. A healthy repo-less task may finish
 directly.
+
+Durability consequence: PR open, pinned merge and terminal completion are distinct exact intents.
+Each binds the task `createdAt` incarnation and full GitHub identity; acceptance additionally binds
+the immutable evidence fingerprint and original accepter/authority. Retry/boot converges an already
+crossed boundary without repeating GitHub work or crediting the retrier. A repo-less full-autonomy
+operator completion is recorded as explicit non-human authority rather than borrowing a user.
 
 ### D12 — simulated governance
 

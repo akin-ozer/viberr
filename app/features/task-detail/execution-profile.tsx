@@ -6,6 +6,7 @@ import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
+import type { OperatorExecutionStatus } from "./operator-execution-status";
 
 /** Client-safe view of a deployed specialist the assign menu offers (mirrors
  * the loader's DeployedSpecialistView — kept here to avoid a server import). */
@@ -14,18 +15,45 @@ export interface DeployedSpecialistView {
   name: string;
   role: string;
   backend: "codex" | "claude";
+  /** Every backend this profile explicitly supports. Assignment menus expose
+   * each pair so the chosen provider is never an implicit first-item default. */
+  backends: ("codex" | "claude")[];
   model: string;
+  stages: string[];
+  spanAll: boolean;
 }
 
-export type OperatorExecutionStatus =
-  | "not_configured"
-  | "configured"
-  | "engaged"
-  | "queued"
-  | "running"
-  | "finished"
-  | "failed"
-  | "interrupted";
+type SpecialistBackend = DeployedSpecialistView["backend"];
+
+function backendCopy(backend: SpecialistBackend): string {
+  return backend === "claude" ? "Claude Code" : "Codex";
+}
+
+function eligibleForStage(
+  specialist: DeployedSpecialistView,
+  stageId: string,
+): boolean {
+  return (
+    specialist.spanAll ||
+    specialist.stages.length === 0 ||
+    specialist.stages.includes(stageId)
+  );
+}
+
+function runEligibilityIssue(
+  specialist: DeployedSpecialistView | undefined,
+  backend: SpecialistBackend,
+  stageId: string,
+): string | null {
+  if (!specialist) return "This agent is no longer deployed to the project";
+  if (!specialist.backends.includes(backend)) {
+    return `${specialist.name} no longer declares ${backendCopy(backend)}`;
+  }
+  if (!eligibleForStage(specialist, stageId)) {
+    return `${specialist.name} is not eligible for the ${stageId} stage`;
+  }
+  return null;
+}
 
 function operatorStatusCopy(status: OperatorExecutionStatus): string {
   switch (status) {
@@ -90,7 +118,10 @@ function OwnerControl({
 }) {
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
-  const admin = myRole === "admin";
+  const canReleaseAnyOwner = roleCan(
+    myRole as ProjectRole | null,
+    "release-any-ownership",
+  );
   // Q5 tiering (XS-12): only contributor+ may take/hold ownership — a viewer is
   // read + comment only, so its take/hand-off buttons would just 403. Gate the
   // controls the same way the server does rather than render a button that fails.
@@ -137,7 +168,7 @@ function OwnerControl({
 
   // Hand-off requires owner-or-admin (owner-assign); only the owner or an admin
   // sees the candidate list.
-  const canHandOff = mine || admin;
+  const canHandOff = mine || canReleaseAnyOwner;
   // Hand-off candidates: active members minus the current owner and me.
   const candidates = canHandOff
     ? members.filter(
@@ -150,7 +181,7 @@ function OwnerControl({
 
   // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
   // viewer can't take over, hand off, or release.
-  if (!canOwn && !admin) {
+  if (!canOwn && !canReleaseAnyOwner) {
     return null;
   }
 
@@ -216,7 +247,7 @@ function OwnerControl({
               </button>
             </>
           )}
-          {!mine && admin && (
+          {!mine && canReleaseAnyOwner && (
             <>
               <div className="menu-sep" />
               <button
@@ -249,13 +280,15 @@ function OwnerControl({
 function SpecialistControl({
   projectSlug,
   specialists,
+  hasAnyDeployed,
   busy,
   onAssign,
 }: {
   projectSlug: string;
   specialists: DeployedSpecialistView[];
+  hasAnyDeployed: boolean;
   busy: boolean;
-  onAssign: (profileId: string) => void;
+  onAssign: (profileId: string, backend: SpecialistBackend) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -276,12 +309,20 @@ function SpecialistControl({
     };
   }, [open]);
 
-  if (specialists.length === 0) {
+  if (!hasAnyDeployed) {
     return (
       <span className="sub">
         No specialists deployed —{" "}
         <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
         .
+      </span>
+    );
+  }
+
+  if (specialists.length === 0) {
+    return (
+      <span className="sub">
+        No stage-eligible specialist is available outside the reviewer role.
       </span>
     );
   }
@@ -302,22 +343,26 @@ function SpecialistControl({
       {open && (
         <div className="own-menu" role="menu" aria-label="Assign a specialist">
           <div className="own-lbl">Deployed specialists</div>
-          {specialists.map((s) => (
-            <button
-              type="button"
-              className="menu-item"
-              role="menuitem"
-              key={s.id}
-              onClick={() => {
-                setOpen(false);
-                onAssign(s.id);
-              }}
-            >
-              <AgentGlyph backend={s.backend} />
-              {s.name}
-              <span className="own-role">{s.role}</span>
-            </button>
-          ))}
+          {specialists.flatMap((s) =>
+            s.backends.map((backend) => (
+              <button
+                type="button"
+                className="menu-item"
+                role="menuitem"
+                key={`${s.id}:${backend}`}
+                onClick={() => {
+                  setOpen(false);
+                  onAssign(s.id, backend);
+                }}
+              >
+                <AgentGlyph backend={backend} />
+                {s.name}
+                <span className="own-role">
+                  {s.role} · {backendCopy(backend)}
+                </span>
+              </button>
+            )),
+          )}
         </div>
       )}
     </div>
@@ -344,7 +389,7 @@ function ReviewerControl({
   /** Whether the project has any deployed specialist at all (empty-state copy). */
   hasAnyDeployed: boolean;
   busy: boolean;
-  onAssign: (profileId: string) => void;
+  onAssign: (profileId: string, backend: SpecialistBackend) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -393,25 +438,32 @@ function ReviewerControl({
           <div className="own-lbl">Deployed specialists</div>
           {specialists.length === 0 ? (
             <div className="menu-item" aria-disabled>
-              <span className="sub">All deployed specialists are already reviewers.</span>
+              <span className="sub">
+                No stage-eligible specialist is available outside the primary
+                role.
+              </span>
             </div>
           ) : (
-            specialists.map((s) => (
-              <button
-                type="button"
-                className="menu-item"
-                role="menuitem"
-                key={s.id}
-                onClick={() => {
-                  setOpen(false);
-                  onAssign(s.id);
-                }}
-              >
-                <AgentGlyph backend={s.backend} />
-                {s.name}
-                <span className="own-role">{s.role}</span>
-              </button>
-            ))
+            specialists.flatMap((s) =>
+              s.backends.map((backend) => (
+                <button
+                  type="button"
+                  className="menu-item"
+                  role="menuitem"
+                  key={`${s.id}:${backend}`}
+                  onClick={() => {
+                    setOpen(false);
+                    onAssign(s.id, backend);
+                  }}
+                >
+                  <AgentGlyph backend={backend} />
+                  {s.name}
+                  <span className="own-role">
+                    {s.role} · {backendCopy(backend)}
+                  </span>
+                </button>
+              )),
+            )
           )}
         </div>
       )}
@@ -520,11 +572,17 @@ export function ExecutionProfile({
   runActive: boolean;
   /** The assign/run fetcher is in flight. */
   runBusy: boolean;
-  onAssignSpecialist: (profileId: string) => void;
+  onAssignSpecialist: (
+    profileId: string,
+    backend: SpecialistBackend,
+  ) => void;
   onRunSpecialist: () => void;
   /** The reviewer assign/run/remove fetcher is in flight. */
   reviewerBusy: boolean;
-  onAssignReviewer: (profileId: string) => void;
+  onAssignReviewer: (
+    profileId: string,
+    backend: SpecialistBackend,
+  ) => void;
   onRunReviewer: (profileId: string) => void;
   onRemoveReviewer: (profileId: string) => void;
   /** The operator-run fetcher is in flight. */
@@ -534,9 +592,21 @@ export function ExecutionProfile({
   /** Run the operator agent with a chosen backend + autonomy. */
   onRunOperator: (backend: string, autonomy: string) => void;
 }) {
-  // Deployed specialists not already engaged as reviewers — what "Add reviewer" offers.
+  const availablePrimarySpecialists = deployedSpecialists.filter(
+    (specialist) =>
+      eligibleForStage(specialist, task.stage) &&
+      !task.reviewers.some(
+        (reviewer) => reviewer.profileId === specialist.id,
+      ),
+  );
+  // A reviewer must be eligible now, unengaged, and distinct from the primary.
   const availableReviewers = deployedSpecialists.filter(
-    (s) => !task.reviewers.some((r) => r.profileId === s.id),
+    (specialist) =>
+      eligibleForStage(specialist, task.stage) &&
+      specialist.id !== task.specialist?.profileId &&
+      !task.reviewers.some(
+        (reviewer) => reviewer.profileId === specialist.id,
+      ),
   );
   // Resolve an agent's display NAME by profile id. The AgentRef stored on the
   // task carries only profileId/backend/role (its `name` is the backend label),
@@ -545,6 +615,12 @@ export function ExecutionProfile({
   const agentNameOf = (profileId: string, fallback: string) =>
     deployedSpecialists.find((s) => s.id === profileId)?.name ?? fallback;
   const sp = task.specialist;
+  const primaryProfile = sp
+    ? deployedSpecialists.find((specialist) => specialist.id === sp.profileId)
+    : undefined;
+  const primaryRunIssue = sp
+    ? runEligibilityIssue(primaryProfile, sp.backend, task.stage)
+    : null;
   const o = task.owner && task.owner.kind === "human" ? task.owner : null;
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
@@ -621,20 +697,26 @@ export function ExecutionProfile({
                   <div className="sub">
                     {sp.role} · {sp.backend === "claude" ? "Claude Code" : "Codex"}
                   </div>
+                  {primaryRunIssue && (
+                    <div className="sub">Run unavailable · {primaryRunIssue}</div>
+                  )}
                 </span>
                 {canRunAgents && (
                   <span className="right">
                     <button
                       type="button"
                       className="btn primary sm"
-                      disabled={runBusy || runActive || closed}
+                      disabled={
+                        runBusy || runActive || closed || !!primaryRunIssue
+                      }
                       onClick={onRunSpecialist}
                       title={
                         closed
                           ? "Task is closed (terminal stage) — no runs needed"
                           : runActive
                             ? "A run is already streaming for this task"
-                            : "Start an agent run for the assigned specialist"
+                            : primaryRunIssue ??
+                              "Start an agent run for the assigned specialist"
                       }
                     >
                       <Icon name="bolt" />
@@ -650,7 +732,8 @@ export function ExecutionProfile({
                 </span>
                 <SpecialistControl
                   projectSlug={task.projectSlug}
-                  specialists={deployedSpecialists}
+                  specialists={availablePrimarySpecialists}
+                  hasAnyDeployed={deployedSpecialists.length > 0}
                   busy={runBusy}
                   onAssign={onAssignSpecialist}
                 />
@@ -668,47 +751,68 @@ export function ExecutionProfile({
               above (glyph · name / role·backend · Run), with a release (×). */}
           <div className="val revs">
             {task.reviewers.length ? (
-              task.reviewers.map((c) => (
-                <div className="rev-agent" key={c.profileId}>
-                  <AgentGlyph backend={c.backend} />
-                  <span>
-                    <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
-                    <div className="sub">
-                      {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
-                    </div>
-                  </span>
-                  {canRunAgents && (
-                    <span className="right">
-                      <button
-                        type="button"
-                        className="btn primary sm"
-                        disabled={reviewerBusy || runActive || closed}
-                        onClick={() => onRunReviewer(c.profileId)}
-                        title={
-                          closed
-                            ? "Task is closed (terminal stage) — no runs needed"
-                            : runActive
-                              ? "A run is already streaming for this task"
-                              : "Start a run for this reviewer"
-                        }
-                      >
-                        <Icon name="bolt" />
-                        {runActive ? "Running…" : "Run"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rev-x"
-                        disabled={reviewerBusy}
-                        aria-label={`Release ${c.role} reviewer`}
-                        title="Release reviewer"
-                        onClick={() => onRemoveReviewer(c.profileId)}
-                      >
-                        <Icon name="x" />
-                      </button>
+              task.reviewers.map((c) => {
+                const reviewerProfile = deployedSpecialists.find(
+                  (specialist) => specialist.id === c.profileId,
+                );
+                const reviewerRunIssue = runEligibilityIssue(
+                  reviewerProfile,
+                  c.backend,
+                  task.stage,
+                );
+                return (
+                  <div className="rev-agent" key={c.profileId}>
+                    <AgentGlyph backend={c.backend} />
+                    <span>
+                      <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
+                      <div className="sub">
+                        {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
+                      </div>
+                      {reviewerRunIssue && (
+                        <div className="sub">
+                          Run unavailable · {reviewerRunIssue}
+                        </div>
+                      )}
                     </span>
-                  )}
-                </div>
-              ))
+                    {canRunAgents && (
+                      <span className="right">
+                        <button
+                          type="button"
+                          className="btn primary sm"
+                          disabled={
+                            reviewerBusy ||
+                            runActive ||
+                            closed ||
+                            !!reviewerRunIssue
+                          }
+                          onClick={() => onRunReviewer(c.profileId)}
+                          title={
+                            closed
+                              ? "Task is closed (terminal stage) — no runs needed"
+                              : runActive
+                                ? "A run is already streaming for this task"
+                                : reviewerRunIssue ??
+                                  "Start a run for this reviewer"
+                          }
+                        >
+                          <Icon name="bolt" />
+                          {runActive ? "Running…" : "Run"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rev-x"
+                          disabled={reviewerBusy}
+                          aria-label={`Release ${c.role} reviewer`}
+                          title="Release reviewer"
+                          onClick={() => onRemoveReviewer(c.profileId)}
+                        >
+                          <Icon name="x" />
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })
             ) : (
               <span className="sub">None engaged</span>
             )}
