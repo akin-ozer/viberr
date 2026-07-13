@@ -513,7 +513,8 @@ the owner; it is not silently reclassified as resolved here.
   health/integrity OK; watcher active; 0 application warnings/errors.
 - Signed-in browser: all critical project/organization routes reviewed, 12 new screenshots captured,
   and 0 console warnings/errors.
-- Publication target: draft PR #23; final remote push/check facts are recorded after publication.
+- Publication: implementation commit `0c8c758` was pushed to draft PR #23; GitHub Actions `verify`
+  passed in 5m51s (run 29258036588).
 
 ## Documentation drift (reconciled)
 

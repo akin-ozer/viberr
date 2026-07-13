@@ -110,5 +110,5 @@ claim; the fresh organization honestly had no MCP server or GitHub connection.
   health/integrity OK; watcher active; 0 application warnings/errors.
 - Signed-in browser: critical project/organization routes passed, 12 new screenshots captured, and
   0 console warnings/errors.
-- Publication target: existing draft PR #23; final remote push/check facts are recorded after
-  publication.
+- Publication: implementation commit `0c8c758` was pushed to existing draft PR #23; GitHub Actions
+  `verify` passed in 5m51s (run 29258036588).

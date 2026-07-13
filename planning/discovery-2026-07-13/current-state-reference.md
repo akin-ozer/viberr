@@ -187,9 +187,9 @@ consistent local release gate:
   Review, Agents, Policy, GitHub, Activity, Settings and organization
   Users/Resources with 0 console warnings/errors. The 12 new captures live in
   `screenshots/post-review/`.
-- Publication target is existing draft PR #23 on
-  `codex/full-pass-2026-07-13`; remote push/check evidence is recorded only
-  after publication.
+- Publication: implementation commit `0c8c758` was pushed to existing draft
+  PR #23 on `codex/full-pass-2026-07-13`; GitHub Actions `verify` passed in
+  5m51s (run 29258036588).
 
 ## Earlier verified deployment state (before adversarial-review remediation)
 

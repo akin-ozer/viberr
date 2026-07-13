@@ -81,8 +81,9 @@ traceability but do not validate the subsequent adversarial-review remediation.
 - Signed-in browser: Home; Board; VIB-142; Review; Agents; Policy; GitHub; Activity; Settings; and
   organization Users/Resources passed with 0 console warnings/errors. Twelve new screenshots are
   indexed under `screenshots/post-review/` in `browser-walkthrough.md`.
-- Publication target: existing draft PR #23 from `codex/full-pass-2026-07-13`. Remote push/check
-  state is recorded after publication rather than inferred from local results.
+- Publication: implementation commit `0c8c758` was pushed to
+  `codex/full-pass-2026-07-13` on existing draft PR #23. GitHub Actions `verify` passed in 5m51s
+  (run 29258036588).
 
 ## Non-negotiable completion rules
 

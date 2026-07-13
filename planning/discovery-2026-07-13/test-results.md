@@ -53,11 +53,11 @@ only as evidence for the earlier F01–F41 pass.
   `screenshots/post-review/`. Browser console review across the walkthrough found 0 warnings and
   0 errors.
 
-### Publication
+### Publication: PASS
 
-- Publication target: existing draft PR #23 from `codex/full-pass-2026-07-13`.
-- Final push and remote-check evidence is recorded after publication; it is not inferred from the
-  local gate.
+- Implementation commit `0c8c758` was pushed to `codex/full-pass-2026-07-13` and existing draft
+  PR #23 was updated with the final scope and validation evidence.
+- GitHub Actions `verify` passed in 5m51s on run 29258036588. The PR remained open and draft.
 
 ## Earlier final post-fix release evidence
 

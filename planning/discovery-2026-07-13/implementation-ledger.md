@@ -91,8 +91,8 @@ history and do not substitute for H01–H08's separate final gate.
   health/integrity OK; watcher active; 0 application warnings/errors.
 - Signed-in browser: critical project/organization routes passed, 12 new screenshots were captured,
   and browser console review found 0 warnings/errors.
-- Publication target: existing draft PR #23; final remote push/check facts are recorded after
-  publication.
+- Publication: implementation commit `0c8c758` was pushed to existing draft PR #23; GitHub Actions
+  `verify` passed in 5m51s (run 29258036588).
 
 ## Previously deferred pass-4 checks folded into rows above
 
