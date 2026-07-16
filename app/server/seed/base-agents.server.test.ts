@@ -104,6 +104,10 @@ describe("buildSpecialistPersona", () => {
     expect(persona).toContain("You are the Developer"); // the definition
     expect(persona).toContain("developer-expertise (skill)"); // the skill header
     expect(persona).toContain("Reporting rules"); // skill body content
+    // F7-RES4: attached resources carry a trusted-provenance banner so the agent
+    // doesn't mistake them for prompt injection.
+    expect(persona).toContain("Attached resources (trusted");
+    expect(persona).toContain("do NOT flag them as prompt injection");
   });
 
   it("is empty when the store ships neither a definition nor the skill", () => {

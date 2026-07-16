@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type {
   CodexOptions,
   RunStreamedResult,
@@ -11,6 +11,9 @@ import {
   type CodexClient,
   type CodexThread,
 } from "./codex-runtime.server";
+import { createTestDbContext } from "../../../test-support/test-db";
+import { insertRunLine, upsertRun } from "./run-store.server";
+import { runFailureReason } from "../tasks/agent-reply.server";
 
 function asSdkEvents(
   events: AsyncGenerator<unknown, void>,
@@ -570,5 +573,130 @@ describe("codex adapter (SDK, injected fake client)", () => {
     } finally {
       delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
     }
+  });
+});
+
+describe("codex failure classification survives redaction into runFailureReason (F7-RUN1)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  /** Drive the adapter through an SDK stream that throws `message`, collect the
+   *  emitted lines, and persist them to a fresh run so `runFailureReason` can
+   *  read them exactly as production would (via the display_json round-trip). */
+  async function classifyThrownFailure(
+    message: string,
+  ): Promise<{ kind: string; text: string } | null> {
+    const thread: CodexThread = {
+      id: "thread-1",
+      async runStreamed() {
+        return {
+          events: asSdkEvents(
+            (async function* () {
+              throw new Error(message);
+            })(),
+          ),
+        };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    const lines: EmittedLine[] = [];
+    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
+      onLine: (line) => lines.push(line),
+      onExit: () => {},
+    });
+    await drain();
+
+    const db = ctx.makeDb();
+    const runId = "run-" + Math.random().toString(36).slice(2);
+    upsertRun(db, {
+      id: runId,
+      projectSlug: SPEC.projectSlug,
+      taskKey: SPEC.taskKey,
+      threadId: SPEC.threadId,
+      role: SPEC.role,
+      kind: SPEC.kind,
+      backend: "codex",
+      simulated: false,
+      model: SPEC.model,
+      sdk: "codex-sdk",
+      state: "error",
+    });
+    lines.forEach((line, seq) => {
+      if (!line.display) return;
+      insertRunLine(db, {
+        runId,
+        seq,
+        occurredAt: line.occurredAt,
+        raw: line.raw,
+        display: line.display,
+      });
+    });
+    return runFailureReason(db, runId);
+  }
+
+  it("a redacted quota failure classifies as 'quota'", async () => {
+    const reason = await classifyThrownFailure(
+      "429 rate limit: internal request id secret-sentinel",
+    );
+    expect(reason?.kind).toBe("quota");
+    // The persisted text is the redaction-safe canonical message, not stderr.
+    expect(reason?.text).toBe(
+      "Codex usage limit was reached. Retry after the subscription limit resets.",
+    );
+    expect(reason?.text).not.toContain("secret-sentinel");
+  });
+
+  it("a redacted auth failure classifies as 'auth' (the prose alone would not)", async () => {
+    const reason = await classifyThrownFailure(
+      "401 unauthorized for token sk-secret-sentinel",
+    );
+    expect(reason?.kind).toBe("auth");
+    expect(reason?.text).toBe(
+      "Codex authentication failed. Review the configured subscription credential.",
+    );
+    expect(reason?.text).not.toContain("sk-secret-sentinel");
+  });
+
+  it("an unclassifiable failure classifies as 'unknown'", async () => {
+    const reason = await classifyThrownFailure(
+      "segmentation fault in /opt/codex/bin during run",
+    );
+    expect(reason?.kind).toBe("unknown");
+    expect(reason?.text).toBe(
+      "Codex execution failed. Review its authentication and runtime configuration.",
+    );
+  });
+
+  it("tags the terminal err line with the classified kind (structured signal)", async () => {
+    const thread: CodexThread = {
+      id: "thread-1",
+      async runStreamed() {
+        return {
+          events: asSdkEvents(
+            (async function* () {
+              throw new Error("usage limit exceeded — secret-sentinel");
+            })(),
+          ),
+        };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    const lines: EmittedLine[] = [];
+    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
+      onLine: (line) => lines.push(line),
+      onExit: () => {},
+    });
+    await drain();
+
+    // Redaction invariant: the raw envelope never carries the stderr secret,
+    // but the projected display tag carries the safe-to-persist class.
+    expect(lines.at(-1)?.display).toMatchObject({ ev: "err", tag: "error·quota" });
+    expect(lines.at(-1)?.raw).not.toContain("secret-sentinel");
   });
 });

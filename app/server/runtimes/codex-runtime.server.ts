@@ -174,13 +174,25 @@ function safeCodexError(error: unknown): Error {
   return safe;
 }
 
-/** Classify provider failures in memory before redacting their raw text. This
- * preserves useful recovery routing without ever persisting stderr, command
- * lines, or credential-bearing messages. */
-function safeCodexFailureMessage(
+/** The adapter's own failure classes, matched against the raw error while it is
+ * still in memory. Persisted (as a tag suffix on the terminal err line) so the
+ * escalation path can route quota/auth without ever re-reading the redacted
+ * stderr. Mirrors the routing classes `runFailureReason` (agent-reply) returns;
+ * "unavailable" is the fail-fast (no credential) class handled upstream, never
+ * here — the codex process only reaches this classifier once it has started. */
+export type CodexFailureKind = "quota" | "auth" | "unknown";
+
+/** Classify a provider failure IN MEMORY before its raw text is redacted, and
+ * pair the class with a redaction-safe canonical message. The raw error can
+ * echo stderr, command lines, or credentials, so ONLY the class and the
+ * canonical sentence ever leave this function — the raw text is never returned,
+ * logged, or persisted. The class is what survives to `runFailureReason`; the
+ * message is deliberately generic (and does not necessarily re-match the
+ * downstream regexes), which is exactly why the class rides the tag instead. */
+function classifyCodexFailure(
   error: unknown,
   phase: "start" | "execution",
-): string {
+): { kind: CodexFailureKind; message: string } {
   const parts: string[] = [];
   let current: unknown = error;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
@@ -194,18 +206,30 @@ function safeCodexFailureMessage(
   }
   const raw = parts.join("\n");
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
-    return "Codex usage limit was reached. Retry after the subscription limit resets.";
+    return {
+      kind: "quota",
+      message:
+        "Codex usage limit was reached. Retry after the subscription limit resets.",
+    };
   }
   if (
     /unauthor|forbidden|invalid.*(?:key|token|credential)|\b401\b|\b403\b|not logged in|authenticate|authentication/i.test(
       raw,
     )
   ) {
-    return "Codex authentication failed. Review the configured subscription credential.";
+    return {
+      kind: "auth",
+      message:
+        "Codex authentication failed. Review the configured subscription credential.",
+    };
   }
-  return phase === "start"
-    ? "Codex could not start. Review its authentication and runtime configuration."
-    : "Codex execution failed. Review its authentication and runtime configuration.";
+  return {
+    kind: "unknown",
+    message:
+      phase === "start"
+        ? "Codex could not start. Review its authentication and runtime configuration."
+        : "Codex execution failed. Review its authentication and runtime configuration.",
+  };
 }
 
 let cachedFactory: CodexFactory | null = null;
@@ -280,8 +304,16 @@ export function createCodexAdapter(
 
       /** Persist a canonical, deliberately detail-free fatal event. Raw
        * SDK/CLI stderr is neither logged nor added to the task transcript,
-       * because it may contain command arguments or credentials. */
-      const emitAdapterFailure = (message: string) => {
+       * because it may contain command arguments or credentials. The classified
+       * `kind` (quota/auth/unknown — safe to persist) rides on the display tag
+       * as a `·<kind>` suffix (e.g. `error·quota`) so `runFailureReason` routes
+       * the escalation from a structured signal, not by re-regexing the generic
+       * message text. The raw envelope stays faithful; only the projected
+       * display tag is enriched. */
+      const emitAdapterFailure = (
+        message: string,
+        kind: CodexFailureKind = "unknown",
+      ) => {
         if (emittedAdapterFailure) return;
         emittedAdapterFailure = true;
         sawFatalError = true;
@@ -290,7 +322,7 @@ export function createCodexAdapter(
         const { display, facts } = projectEnvelope("codex", event, occurredAt);
         cb.onLine({
           raw: JSON.stringify(event),
-          display,
+          display: display ? { ...display, tag: `${display.tag}·${kind}` } : display,
           facts,
           occurredAt,
         });
@@ -414,7 +446,8 @@ export function createCodexAdapter(
             runId: spec.runId,
             err: safeCodexError(error),
           });
-          emitAdapterFailure(safeCodexFailureMessage(error, "execution"));
+          const failure = classifyCodexFailure(error, "execution");
+          emitAdapterFailure(failure.message, failure.kind);
           return settle("error");
         }
 
@@ -431,7 +464,8 @@ export function createCodexAdapter(
           runId: spec.runId,
           err: safeCodexError(error),
         });
-        emitAdapterFailure(safeCodexFailureMessage(error, "start"));
+        const failure = classifyCodexFailure(error, "start");
+        emitAdapterFailure(failure.message, failure.kind);
         settle("error");
       });
 

@@ -3,6 +3,24 @@
 Severity: HIGH (core flow / owner-ruled gap) · MED (wrong or misleading) · LOW (polish/debt).
 Status: OPEN / FIXED / RULED / WONTFIX. Implementation phase must close every OPEN item.
 
+## IMPLEMENTATION STATUS (branch pass7-implementation-2026-07-16)
+
+FIXED + tests green: F7-RBAC1 (D2 org-admin audited override, mutations-only audit),
+F7-RBAC2 (12 seams → project-authority.server.ts), F7-SIM1/R7-2 (no simulation: product
+fallback removed, demo-seed cut, fail-closed test gate), F7-NOTIF1 (waiting-list reconciles
+live), F7-UI1/2/3 (operator-active pill on live run only, sinceLabel=stage name, merged pill),
+F7-UI4/R7-6 (done-comment hint, comments stay allowed), F7-REV1 (reviewer runs don't
+reconcile delivery), F7-REV2 (mandatory verdict marker in reviewer skill), F7-REV3 (no
+"Review passed / failing" contradiction), F7-VAL1 (blocked packet marks readiness only +
+acceptance guards open blocked packet), F7-OP1 (server single-flight primary run),
+F7-FLOW1/R7-4 (operator rework backward transition), F7-GH5 (un-draft PR before merge),
+F7-VEST1 (seed-resumer deleted), F7-PKT1 (operator persona: resolution=choice not proof),
+F7-RES4 (trusted-resource provenance banner), audit-noise (override reads not audited).
+IN FLIGHT (isolated-cluster agents): F7-CAP1/R7-5 (3-mode specialist picker), F7-RUN1 (codex
+failure classification), F7-BOOT1 (boot recovery backoff), F7-RES3 (viberr toolkit off
+specialist MCP picker), F7-UX1 (workspace-relative report links).
+PENDING (me, after F7-RES3 lands): F7-MCP1 (MCP secret:// injection, ruling 8).
+
 ## Role bindings (the pass-7 rework focus)
 
 - **F7-RBAC1 · HIGH · OPEN (RULED R7-1: implement) — D2 org-admin emergency override is NOT implemented on main.**

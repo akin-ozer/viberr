@@ -169,26 +169,56 @@ function assistantUsage(
  * crash class (EBADF/ENOENT/EMFILE) distinctly so a host-resource failure reads
  * as "could not start", not a generic error.
  */
-function classifyClaudeError(error: unknown): string {
+/** The redaction-safe failure class the adapter derives from the raw error
+ *  BEFORE discarding it, mirroring the codex adapter (F7-RUN1). The class rides
+ *  the err line's tag as a `·<kind>` suffix so `runFailureReason` classifies
+ *  auth/quota without re-regexing the deliberately-generic message text (the
+ *  auth message says "authentication", which the downstream prose regex misses
+ *  — the symmetric bug the codex fix noted). */
+type ClaudeFailureKind = "quota" | "auth" | "unknown";
+
+function classifyClaudeError(error: unknown): {
+  kind: ClaudeFailureKind;
+  message: string;
+} {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
-    return "The agent process could not be started (the host ran out of file handles). No work was performed.";
+    return {
+      kind: "unknown",
+      message:
+        "The agent process could not be started (the host ran out of file handles). No work was performed.",
+    };
   }
   if (code === "ENOENT") {
-    return "The agent runtime executable was not found. Check the deployment's Claude CLI/SDK install.";
+    return {
+      kind: "unknown",
+      message:
+        "The agent runtime executable was not found. Check the deployment's Claude CLI/SDK install.",
+    };
   }
   const raw = error instanceof Error ? error.message : String(error ?? "");
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
-    return "The coordinating model is over its usage quota. Retry after the limit resets.";
+    return {
+      kind: "quota",
+      message:
+        "The coordinating model is over its usage quota. Retry after the limit resets.",
+    };
   }
   if (
     /unauthor|forbidden|invalid.*(?:key|token|credential)|\b401\b|\b403\b|not logged in|authenticate|authentication/i.test(
       raw,
     )
   ) {
-    return "The model credential was rejected. Review the configured Claude authentication.";
+    return {
+      kind: "auth",
+      message:
+        "The model credential was rejected. Review the configured Claude authentication.",
+    };
   }
-  return "The agent run did not complete. Review the runtime configuration.";
+  return {
+    kind: "unknown",
+    message: "The agent run did not complete. Review the runtime configuration.",
+  };
 }
 
 export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapter {
@@ -206,13 +236,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const settleError = (error: unknown) => {
         if (settled) return;
         try {
+          const failure = classifyClaudeError(error);
           cb.onLine({
             raw: "",
             display: {
               t: new Date().toISOString().slice(11, 19),
               ev: "err",
-              tag: "run·error",
-              text: classifyClaudeError(error),
+              tag: `run·error·${failure.kind}`,
+              text: failure.message,
             },
             facts: {},
             occurredAt: new Date().toISOString(),

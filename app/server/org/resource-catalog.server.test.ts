@@ -61,6 +61,37 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     expect(kbIds).toContain("ghost-kb");
   });
 
+  it("excludes the reserved viberr operator toolkit from the SPECIALIST catalog (F7-RES3)", () => {
+    const store = setupTestStore(ctx);
+    const now = new Date().toISOString();
+    // A real org MCP row a specialist SHOULD be able to attach.
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES ('mcp_y', 'notes-fixture', 'HTTP', 'https://mcp.example/sse', NULL, ?, ?)`,
+      )
+      .run(now, now);
+
+    const specialist = buildResourceCatalog(store.db, store.dataRoot, {
+      profileKind: "specialist",
+    });
+    const specialistMcps = specialist
+      .find((g) => g.key === "mcps")!
+      .items.map((i) => i.id);
+    // The operator's in-process toolkit is NOT specialist-attachable…
+    expect(specialistMcps).not.toContain("viberr");
+    // …but real org MCP servers still are.
+    expect(specialistMcps).toContain("notes-fixture");
+
+    // The operator/default catalog still surfaces viberr.
+    const operator = buildResourceCatalog(store.db, store.dataRoot, {
+      profileKind: "operator",
+    });
+    expect(
+      operator.find((g) => g.key === "mcps")!.items.map((i) => i.id),
+    ).toContain("viberr");
+  });
+
   it("handles a store with no resources without throwing", () => {
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-empty-"));
     const store = setupTestStore(ctx);

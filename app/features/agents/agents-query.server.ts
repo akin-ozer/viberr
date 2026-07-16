@@ -14,7 +14,10 @@ import {
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { capabilityById } from "~/shared/capabilities";
+import {
+  capabilityById,
+  coerceSpecialistCapabilityMode,
+} from "~/shared/capabilities";
 import type { AgentProfileView } from "./agent-types";
 
 /**
@@ -156,7 +159,21 @@ export function effectiveProfileView(
     (deployment as Record<string, unknown>).definition,
   );
   const kind = def?.kind ?? template?.kind ?? "specialist";
-  const capabilities = deployment.capabilities.map((c) => ({
+  // R7-5: on a specialist profile, a stored `recommend` grant is runtime-
+  // identical to `direct` and the picker no longer offers it — coerce it to
+  // `direct` ('Allowed') on read so the roster, matrix, policy counts and the
+  // edit-modal seed all show the honest mode. Seed/legacy files keep `recommend`
+  // on disk (no migration); this normalizes only the view. The operator keeps
+  // its real `recommend` modes. Runtime tool policy reads `deployment.capabilities`
+  // directly (not this view), so no runtime behavior changes.
+  const isSpecialist = kind !== "operator";
+  const effectiveGrants = isSpecialist
+    ? deployment.capabilities.map((c) => ({
+        capabilityId: c.capabilityId,
+        mode: coerceSpecialistCapabilityMode(c.mode),
+      }))
+    : deployment.capabilities;
+  const capabilities = effectiveGrants.map((c) => ({
     capabilityId: c.capabilityId,
     mode: c.mode,
   }));
@@ -193,7 +210,7 @@ export function effectiveProfileView(
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
     // Operator only: default autonomy (supervised unless the deployment sets it).
     autonomy: kind === "operator" ? (def?.autonomy ?? "supervised") : undefined,
-    actions: capabilitiesToActionLabels(deployment.capabilities, deployment.extras),
+    actions: capabilitiesToActionLabels(effectiveGrants, deployment.extras),
     capabilities,
     extras,
     resources: {

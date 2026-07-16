@@ -388,6 +388,45 @@ describe("CreateProfileModal", () => {
     ]);
   });
 
+  it("R7-5 — a specialist cap row offers 3 honest modes (Allowed/Human-only/Off), no Recommend", () => {
+    // Create mode ⇒ a specialist profile: the picker collapses to 3 modes.
+    const { container } = renderModal({ initial: null });
+    const seg = container.querySelector(".cap-seg")!;
+    const labels = Array.from(seg.querySelectorAll("button")).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(["Allowed", "Human-only", "Off"]);
+    // `recommend` is operator-only and never shown to a specialist.
+    expect(container.querySelector(".cap-matrix")!.textContent).not.toContain(
+      "Recommend",
+    );
+    expect(
+      container.querySelector(".cap-seg button.recommend"),
+    ).toBeNull();
+  });
+
+  it("R7-5 — the operator cap row keeps all 4 modes incl. Recommend", () => {
+    const { container } = renderModal({
+      initial: mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        icon: "shield",
+        backends: ["claude"],
+        stages: ["triage"],
+        capabilities: [
+          { capabilityId: "assign-primary-specialist", mode: "direct" },
+        ],
+      }),
+    });
+    const seg = container.querySelector(".cap-seg")!;
+    const labels = Array.from(seg.querySelectorAll("button")).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(["Direct", "Recommend", "Human", "Off"]);
+    expect(container.querySelector(".cap-seg button.recommend")).not.toBeNull();
+  });
+
   it("edit mode: seeds model + effort from the profile", async () => {
     const { container, getByText, getByDisplayValue } = renderModal({
       initial: mkProfile({ backends: ["claude"], model: "opus", effort: "max" }),

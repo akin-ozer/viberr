@@ -291,15 +291,39 @@ export function extractFullReplyText(lines: LogLine[]): string | null {
 
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
-    if (isReplyText(line)) return line.text.trim();
+    if (isReplyText(line)) return normalizeWorkspacePaths(line.text.trim());
   }
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (line.ev === "result" && line.text.trim().length > 0) {
-      return line.text.trim();
+      return normalizeWorkspacePaths(line.text.trim());
     }
   }
   return null;
+}
+
+/**
+ * An absolute host path that points INTO a task workspace clone, matched at a
+ * boundary that is not part of a URL (F7-UX1). Structure:
+ *   `<data-root>/…/tasks/<KEY>/workspace/<repo>/<rest>`  →  captured `<rest>`.
+ * The leading `/` must not follow a word char, `:`, `/`, or `.` so `http(s)://`
+ * and `file://` URLs (and interior path segments) are never anchored on. The
+ * `<rest>` capture stops at whitespace or bracket/paren so a markdown link's
+ * closing `)` / `]` is left intact.
+ */
+const WORKSPACE_ABS_PATH_RE =
+  /(?<![:\w/.])\/(?:[^\s()<>[\]]*?\/)?tasks\/[^/\s()<>[\]]+\/workspace\/[^/\s()<>[\]]+\/([^\s()<>[\]]+)/g;
+
+/**
+ * Rewrite workspace-absolute host paths in an agent reply to repo-relative ones
+ * (F7-UX1): `/Users/…/tasks/VIB-2/workspace/viberr/docs/x.md` → `docs/x.md`, so
+ * links a specialist emits are portable for every reader instead of pointing at
+ * one machine's checkout. Real URLs (http/https/file) and non-workspace paths
+ * are left untouched. Applied at reply-extraction time so the canonical timeline
+ * comment (and everything derived from it) is clean.
+ */
+export function normalizeWorkspacePaths(text: string): string {
+  return text.replace(WORKSPACE_ABS_PATH_RE, "$1");
 }
 
 /**
@@ -360,6 +384,16 @@ export function runFailureReason(
   }
   if (!last?.text) return null;
   const text = last.text.trim();
+  // An adapter that classified its OWN failure before redacting the raw stderr
+  // rides the class on the err tag as a `·<kind>` suffix (e.g. `error·quota`).
+  // Trust that structured signal directly: the redaction-safe message text is
+  // deliberately generic and may not re-match these prose regexes (the codex
+  // auth message says "authentication" while the regex below wants
+  // "authenticate"), so re-classifying the prose would drop codex quota/auth
+  // failures to `unknown`. Backends that emit no class (plain err lines) still
+  // fall through to the prose regexes below.
+  const tagged = /·(quota|auth|unavailable|unknown)$/.exec(last.tag ?? "");
+  if (tagged) return { kind: tagged[1] as RunFailureKind, text };
   const kind: RunFailureKind =
     /is unavailable|no usable credential/i.test(text)
       ? "unavailable"

@@ -355,7 +355,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         definition: "Only two caps submitted; nothing else should be granted.",
         // Only two governed (modal) caps submitted, as a partial/older client
         // would — the rest of the catalog must NOT be merged in.
-        caps: { "create-task-branch": "direct", "open-review-pr": "recommend" },
+        caps: { "create-task-branch": "direct", "open-review-pr": "direct" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
     })) as { ok: boolean };
@@ -364,15 +364,15 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const created = (await runLoader(ids.arda)).profiles.find(
       (p) => p.id === "minimal-dev",
     )!;
-    // The persisted cap set equals exactly what the form submitted (no
-    // coercions apply here). Previously the create path merged the permissive
-    // catalog defaults, so 2 submitted caps persisted as ~12.
+    // The persisted cap set equals exactly what the form submitted. Previously
+    // the create path merged the permissive catalog defaults, so 2 submitted
+    // caps persisted as ~12.
     const persisted = created.capabilities
       .map((c) => [c.capabilityId, c.mode])
       .sort();
     expect(persisted).toEqual([
       ["create-task-branch", "direct"],
-      ["open-review-pr", "recommend"],
+      ["open-review-pr", "direct"],
     ]);
     // Powers the creator never chose are ABSENT (not defaulted).
     const capIds = created.capabilities.map((c) => c.capabilityId);
@@ -382,6 +382,93 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     await postAction(ids.arda, {
       intent: "delete-profile",
       profileId: "minimal-dev",
+    });
+  });
+
+  it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
+    // The specialist picker no longer offers `recommend`, but a hostile/legacy
+    // form might still submit it. `recommend` is operator-only (runtime-
+    // identical to `direct` for a specialist; F7-CAP1), so it must persist as
+    // `direct`; `human`/`off` pass through unchanged.
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Recommender",
+        role: "Submits a stale recommend mode",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Submitted open-review-pr as recommend from an old client.",
+        caps: {
+          "open-review-pr": "recommend",
+          "commit-push-branch": "recommend",
+          "create-task-branch": "off",
+          "execute-code-or-write-repo": "human",
+        },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "recommender",
+    )!;
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
+    // Both submitted `recommend` grants coerced to `direct`.
+    expect(mode("open-review-pr")).toBe("direct");
+    expect(mode("commit-push-branch")).toBe("direct");
+    // No specialist cap is ever stored/read as `recommend`.
+    expect(created.capabilities.map((c) => c.mode)).not.toContain("recommend");
+    // Non-recommend modes are untouched.
+    expect(mode("create-task-branch")).toBe("off");
+    expect(mode("execute-code-or-write-repo")).toBe("human");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "recommender",
+    });
+  });
+
+  it("R7-5 — editing a specialist coerces a submitted `recommend` to `direct` (grantsFor path)", async () => {
+    await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Editable Dev",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Created allowed, then edited with a stale recommend mode.",
+        caps: { "open-review-pr": "direct" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+    const upd = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "editable-dev",
+      payload: JSON.stringify({
+        name: "Editable Dev",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Created allowed, then edited with a stale recommend mode.",
+        caps: { "open-review-pr": "recommend", "commit-push-branch": "recommend" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(upd.ok).toBe(true);
+
+    const edited = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "editable-dev",
+    )!;
+    const mode = (id: string) =>
+      edited.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(mode("open-review-pr")).toBe("direct");
+    expect(mode("commit-push-branch")).toBe("direct");
+    expect(edited.capabilities.map((c) => c.mode)).not.toContain("recommend");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "editable-dev",
     });
   });
 

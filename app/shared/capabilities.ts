@@ -151,6 +151,24 @@ export function capabilityIsEnforced(id: string): boolean {
   return ENFORCED_CAPABILITY_IDS.has(id);
 }
 
+/**
+ * R7-5 — specialist capability modes collapse to 3 HONEST values.
+ *
+ * `recommend` (propose a card a human applies) is an OPERATOR-only concept: at
+ * runtime a specialist holding a cap in `recommend` mode simply performs the
+ * action (identical to `direct`) — the specialist tool/prompt contract has no
+ * "recommend" behavior (`isWithheld` in specialist-tool-policy.ts denies only
+ * `human`/`off`; F7-CAP1 live proof: a Docs Writer with open-review-pr=recommend
+ * opened the PR directly). So the specialist picker offers only Allowed
+ * (`direct`) / Human-only (`human`) / Off (`off`), and any stored `recommend`
+ * grant on a specialist coerces to `direct` ('Allowed') on read AND on persist —
+ * no data migration needed. The OPERATOR keeps all 4 modes, where `recommend`
+ * has real semantics. Generic over the mode-string type so both the modal's
+ * `CapMode` and the schema's `CapabilityMode` pass through unchanged. */
+export function coerceSpecialistCapabilityMode<M extends string>(mode: M): M {
+  return (mode === "recommend" ? "direct" : mode) as M;
+}
+
 export function capabilityById(id: string): CapabilityDef | null {
   return byId.get(id) ?? null;
 }

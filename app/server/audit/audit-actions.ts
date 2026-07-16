@@ -141,6 +141,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // -- runtimes (phases 8 + 10) --------------------------------------------
   "runtime.run.started": "task",
   "runtime.run.interrupted": "task",
+  // Boot recovery re-invoked the operator for an orphaned run (F7-BOOT1); the
+  // count of these in a rolling window is the crash-loop backstop.
+  "run.recovery.reinvoked": "task",
 
   // -- store / projections & maintenance (phases 3 + 10) --------------------
   "projection.rescan": "system",
