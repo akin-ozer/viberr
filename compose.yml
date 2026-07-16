@@ -14,8 +14,13 @@ services:
       # Codex state is isolated from the host's personal ~/.codex directory.
       # Preferred subscription auth is CODEX_ACCESS_TOKEN from .env
       # (ChatGPT Business/Enterprise; no Platform API billing). Other ChatGPT
-      # plans can copy only auth.json into the dedicated runtime directory;
-      # see README. Sessions and auth stay on the existing /data backup mount.
+      # plans copy ONLY auth.json into the dedicated runtime directory:
+      #   docker compose cp ~/.codex/auth.json app:/data/runtimes/codex-home/auth.json
+      # (or drop it into ./docker-data/runtimes/codex-home/auth.json before boot).
+      # Without a CODEX_ACCESS_TOKEN or that auth.json, Viberr reports Codex
+      # UNAVAILABLE (honest degraded state) rather than starting a doomed run
+      # that dies with a redacted error (F-DOCKER1). Sessions + auth persist on
+      # the /data mount.
       CODEX_HOME: /data/runtimes/codex-home
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the
