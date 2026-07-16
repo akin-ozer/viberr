@@ -462,7 +462,7 @@ async function startCodexOperatorRun(
         });
       })
       .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
-  });
+  }, db);
 
   logger.info("operator run started (codex structured output)", {
     taskKey: input.taskKey,
@@ -710,7 +710,7 @@ async function startRealOperatorRun(
     if (finished.state === "error") {
       void escalateFailedOperatorRun(db, ctx, input, authority, runId);
     }
-  });
+  }, db);
 
   logger.info("operator run started (real)", {
     taskKey: input.taskKey,

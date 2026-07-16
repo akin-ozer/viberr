@@ -130,6 +130,38 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "error" });
   });
 
+  it("a spawn-time crash emits a redaction-safe 'could not start' err line (A3)", async () => {
+    // The queryFn itself throws with an fd-exhaustion code — the exact
+    // spawn-EBADF class that killed runs silently before A3.
+    const boom = () => {
+      const e = new Error("spawn EBADF") as Error & { code: string };
+      e.code = "EBADF";
+      throw e;
+    };
+    const adapter = createClaudeAdapter({ queryFn: boom as never });
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+    expect(exit).toMatchObject({ outcome: "error" });
+    const errLine = lines.find((l) => l.display?.ev === "err");
+    expect(errLine?.display?.text).toContain("could not be started");
+    // The raw error text (which can echo argv/creds) is NEVER surfaced.
+    expect(errLine?.display?.text).not.toContain("EBADF");
+  });
+
+  it("classifies a quota failure into a redaction-safe reason line (A3)", async () => {
+    const boom = () => {
+      throw new Error("429 usage limit reached for this org");
+    };
+    const adapter = createClaudeAdapter({ queryFn: boom as never });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    const errLine = lines.find((l) => l.display?.ev === "err");
+    expect(errLine?.display?.text).toContain("usage quota");
+  });
+
   it("threads spec.effort into options.effort (and omits it when absent)", async () => {
     const result = [
       { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },

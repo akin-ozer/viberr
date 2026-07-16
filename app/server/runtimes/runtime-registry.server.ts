@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RuntimeAdapter } from "./adapter.server";
@@ -57,6 +60,25 @@ function getState(): RegistryState {
  *     VIBERR_CODEX_USE_CLI_AUTH=1.
  * When none is present the registry falls back to the simulated backend.
  */
+/**
+ * When Codex CLI auth is the ONLY signal (no access token / API key), the
+ * subscription login lives in `$CODEX_HOME/auth.json` (default `~/.codex`).
+ * F-DOCKER1: docker-compose overrides `CODEX_HOME=/data/runtimes/codex-home`
+ * but nothing copies auth.json there, so `VIBERR_CODEX_USE_CLI_AUTH=1` used to
+ * make the registry pick the REAL adapter on a presence-only check — every run
+ * then died with a single redacted "Codex execution failed" line. Validate the
+ * file actually exists so the flag reflects USABLE auth: no auth.json → Codex is
+ * reported unavailable (honest degraded state) instead of a doomed real run.
+ */
+function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
+  const home = env.CODEX_HOME || path.join(homedir(), ".codex");
+  try {
+    return existsSync(path.join(home, "auth.json"));
+  } catch {
+    return false;
+  }
+}
+
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
   // Explicit override: force the deterministic simulated engine regardless of
   // any ambient credential (e.g. a developer's `.env` re-loaded by dotenv). The
@@ -70,12 +92,12 @@ function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.en
       isTruthy(env.VIBERR_CLAUDE_USE_CLI_AUTH)
     );
   }
-  return !!(
-    env.CODEX_ACCESS_TOKEN ||
-    env.CODEX_API_KEY ||
-    env.OPENAI_API_KEY ||
-    isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH)
-  );
+  // A real token/key is authoritative on its own; CLI-auth mode additionally
+  // requires a usable auth.json (see codexCliAuthUsable / F-DOCKER1).
+  if (env.CODEX_ACCESS_TOKEN || env.CODEX_API_KEY || env.OPENAI_API_KEY) {
+    return true;
+  }
+  return isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH) && codexCliAuthUsable(env);
 }
 
 function isTruthy(v: string | undefined): boolean {

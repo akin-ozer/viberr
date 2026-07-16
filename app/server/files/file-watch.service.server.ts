@@ -42,6 +42,39 @@ function shouldIgnore(candidate: string): boolean {
   return base.startsWith(".") || base.endsWith(".tmp");
 }
 
+/**
+ * Prune the watch TREE below the projection store's depth. Only
+ * `projects/<slug>/project.md` and `projects/<slug>/tasks/<KEY>/task.md`
+ * (plus directory unlinks down to the task dir) ever project; everything
+ * deeper — a task's `workspace/` clones above all — is runtime scratch.
+ * Without pruning, chokidar holds an open fd for EVERY file in EVERY
+ * historical workspace clone (~550 per delivered task). Past ~10 240 fds,
+ * macOS `posix_spawn` file actions fail with EBADF, so the app can no longer
+ * spawn ANY child process — Claude/Codex runs die instantly the moment
+ * enough workspaces have accumulated. Ignoring here (not in the event
+ * handler) is what stops chokidar from descending and opening the fds.
+ */
+export function shouldPruneSubtree(
+  watchRoot: string,
+  candidate: string,
+  stats?: { isDirectory(): boolean },
+): boolean {
+  const rel = path.relative(watchRoot, candidate);
+  if (rel === "" || rel.startsWith("..")) return false;
+  const depth = rel.split(path.sep).length;
+  // projects/<slug>/tasks/<KEY> = depth 3. Anything deeper than depth 4
+  // can never project; a DIRECTORY at depth 4 (workspace/, attachments/…)
+  // is the recursion mouth — prune it. Files at depth 4 (task.md) stay.
+  if (depth >= 5) return true;
+  if (depth === 4) {
+    if (stats?.isDirectory()) return true;
+    // Stats can be absent on the first ignored() pass — catch the one
+    // directory name that actually explodes, so we never descend into it.
+    return path.basename(candidate) === "workspace";
+  }
+  return false;
+}
+
 /** Starts (or returns the already-running) projects-tree watcher. */
 export function startFileWatcher(
   options: { dataRoot?: string; db?: Database.Database } = {},
@@ -138,7 +171,8 @@ export function startFileWatcher(
 
   const watcher = watch(watchedDir, {
     ignoreInitial: true,
-    ignored: (candidate: string) => shouldIgnore(candidate),
+    ignored: (candidate: string, stats?: { isDirectory(): boolean }) =>
+      shouldIgnore(candidate) || shouldPruneSubtree(watchedDir, candidate, stats),
   });
 
   const schedule = (absPath: string) => {

@@ -4,7 +4,21 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import {
+  openScopeViolation,
+  type OpenScopeViolationInput,
+} from "~/server/projections/policy-violations.server";
 import { isSecretBox } from "./secret-box.server";
+
+/** The VIB-142 pull_request:write violation these tests exercise. It used to be
+ *  migration-seeded; the squashed baseline is schema-only, so tests open it
+ *  explicitly. */
+const VIB142_VIOLATION = (slug: string): OpenScopeViolationInput => ({
+  projectSlug: slug,
+  taskKey: "VIB-142",
+  scope: "pull_request:write",
+  detail: "Project credential is missing pull_request:write.",
+});
 import {
   clearProjectCredential,
   createPat,
@@ -157,6 +171,7 @@ describe("pat-store", () => {
         store.slug,
       );
 
+    openScopeViolation(store.db, VIB142_VIOLATION(store.slug));
     const health = getProjectCredentialHealth(store.db, store.slug);
     // A policy is not a credential: no fabricated card, no leaked masked token.
     expect(health.configured).toBe(false);
@@ -205,6 +220,7 @@ describe("pat-store", () => {
       detail: "Missing scope: workflow.",
     });
 
+    openScopeViolation(store.db, VIB142_VIOLATION(store.slug));
     const health = getProjectCredentialHealth(store.db, store.slug);
     expect(health.configured).toBe(true);
     expect(health.source).toBe("pat");

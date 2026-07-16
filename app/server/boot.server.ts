@@ -13,8 +13,10 @@ import {
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
-import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
-import { recoverUnreactedAgentRuns } from "./runtimes/run-recovery.server";
+import {
+  finalizeOrphanedRuns,
+  recoverUnreactedAgentRuns,
+} from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 
@@ -121,10 +123,20 @@ export function bootServer(): void {
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
 
-  // Seed running-run resumer (Phase 8): re-register the seeded "running"
-  // runs' live lines in THIS process so the first client subscribe drips
-  // them over SSE (the seed's own registration ran in a separate process).
-  registerSeededLiveFromData(db);
+  // Finalize non-terminal runs at boot (F-RUN1 + R6-5): a run left
+  // `running`/`queued` has no live process in this fresh boot. Real orphans
+  // become `error` (interrupted-by-restart) and their tasks are re-coordinated;
+  // seeded demo runs become `finished` so they never masquerade as live
+  // (Viberr Core goes quiet unless a real agent runs). This REPLACES the old
+  // seed-resumer that re-animated seeded "running" runs over SSE. Runs BEFORE
+  // the reply recovery below so a just-finalized run is a clean terminal state.
+  try {
+    finalizeOrphanedRuns(db);
+  } catch (error) {
+    logger.error("orphaned-run finalize failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 
   // Recover dropped agent-reply reactions (NFR17, B9): if the server restarted
   // after a specialist/reviewer run finished but before its in-process reply

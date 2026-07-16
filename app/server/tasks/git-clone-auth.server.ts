@@ -24,6 +24,57 @@ export interface GitHubClonePlan {
   dispose(): void;
 }
 
+export interface GitHubAskpassEnv {
+  /** Pass only to the git child process. Carries the token until dispose. */
+  env: NodeJS.ProcessEnv;
+  /** Erases the in-memory token reference and removes the askpass program. */
+  dispose(): void;
+}
+
+/**
+ * Build a short-lived environment that authenticates ANY git invocation against
+ * github.com through the supported `GIT_ASKPASS` mechanism (shared by the clone
+ * plan and the server-side workspace push). The PAT is supplied only through
+ * the child process environment — never in argv, the remote URL, or a persisted
+ * config entry — and ambient credential helpers are reset so nothing leaks to a
+ * host credential store. Always `dispose()` after the git process exits.
+ */
+export function createGitHubAskpassEnv(input: {
+  token: string;
+  baseEnv?: NodeJS.ProcessEnv;
+}): GitHubAskpassEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...(input.baseEnv ?? process.env),
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+  };
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+
+  const askpassDir = mkdtempSync(path.join(tmpdir(), "viberr-git-askpass-"));
+  const askpassPath = path.join(askpassDir, "askpass.sh");
+  writeFileSync(askpassPath, ASKPASS_SCRIPT, { encoding: "utf8", mode: 0o700 });
+  chmodSync(askpassPath, 0o700);
+  env.GIT_ASKPASS = askpassPath;
+  env[ASKPASS_USERNAME_ENV] = "x-access-token";
+  env[ASKPASS_PASSWORD_ENV] = input.token;
+
+  let disposed = false;
+  return {
+    env,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      delete env[ASKPASS_USERNAME_ENV];
+      delete env[ASKPASS_PASSWORD_ENV];
+      delete env.GIT_ASKPASS;
+      rmSync(askpassDir, { recursive: true, force: true });
+    },
+  };
+}
+
 /** The credential-free URL that Git persists as `remote.origin.url`. */
 export function githubRepositoryUrl(repo: string): string {
   return `https://github.com/${repo}.git`;

@@ -258,6 +258,22 @@ export function runDemoSeed(
   //    lines with the in-process resumer.
   const runtimeSummary = seedRuntimes(db, { dataRoot });
 
+  // 7b. The mock's one open scope violation (viberr-core · VIB-142 ·
+  //    pull_request:write) so the rail Settings badge reads 1 out of the box.
+  //    This used to be seeded by migration 0005; it moved here when the
+  //    migrations were squashed into a schema-only baseline (mock data belongs
+  //    in the demo dataset, never the schema). INSERT OR IGNORE keeps a resolved
+  //    violation resolved across a re-seed (deterministic id).
+  db.prepare(
+    `INSERT OR IGNORE INTO scope_violations
+       (id, project_slug, task_key, scope, detail, status, created_at)
+     VALUES (?, 'viberr-core', 'VIB-142', 'pull_request:write', ?, 'open', ?)`,
+  ).run(
+    "sv_seed_vib142_pr_write",
+    "Project credential is missing `pull_request:write` — flagged by the policy engine on VIB-142. PR status can't auto-sync after merge.",
+    seededAt,
+  );
+
   // 8. Arda's Home pins — mirrors the mock's seeded `starred` flags
   //    (viberr-core + deploy-pipeline pinned; phase-4 user_prefs table).
   //    INSERT OR IGNORE: a user's own pin changes survive re-seeding.

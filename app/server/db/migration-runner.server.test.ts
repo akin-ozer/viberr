@@ -51,7 +51,8 @@ describe("runMigrations", () => {
     const db = makeDb();
     const result = runMigrations(db, DEFAULT_MIGRATIONS_DIR);
 
-    expect(result.applied).toContain("0001_app_foundation.sql");
+    // The 13-file chain was squashed into a single pre-prod baseline.
+    expect(result.applied).toContain("0001_baseline.sql");
     expect(result.alreadyApplied).toEqual([]);
 
     const tables = tableNames(db);
@@ -75,7 +76,7 @@ describe("runMigrations", () => {
     runMigrations(db, DEFAULT_MIGRATIONS_DIR);
     const second = runMigrations(db, DEFAULT_MIGRATIONS_DIR);
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toContain("0001_app_foundation.sql");
+    expect(second.alreadyApplied).toContain("0001_baseline.sql");
   });
 
   it("enforces the schema it created (role check, unique email, fk cascade)", () => {

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   codexSpawnEnv,
@@ -9,6 +12,7 @@ import {
 } from "./runtime-registry.server";
 
 describe("runtime-registry — detection & fallback", () => {
+  const tmpDirs: string[] = [];
   afterEach(() => {
     resetRegistryForTests();
     delete process.env.ANTHROPIC_API_KEY;
@@ -18,7 +22,16 @@ describe("runtime-registry — detection & fallback", () => {
     delete process.env.CODEX_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
+    delete process.env.CODEX_HOME;
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
+
+  function codexHome(withAuth: boolean): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-codex-home-"));
+    tmpDirs.push(dir);
+    if (withAuth) writeFileSync(path.join(dir, "auth.json"), "{}");
+    return dir;
+  }
 
   it("detects claude available when ANTHROPIC_API_KEY is present (no API call)", () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
@@ -45,8 +58,25 @@ describe("runtime-registry — detection & fallback", () => {
     expect(isBackendAvailable("codex")).toBe(true);
   });
 
-  it("detects codex available via the ChatGPT-plan CLI-auth opt-in flag", () => {
+  it("detects codex available via CLI-auth when $CODEX_HOME/auth.json exists", () => {
     process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = codexHome(true);
+    expect(isBackendAvailable("codex")).toBe(true);
+  });
+
+  it("reports codex UNAVAILABLE under CLI-auth when auth.json is missing (F-DOCKER1)", () => {
+    // The docker-compose case: CODEX_HOME points at an empty dir (no auth.json
+    // copied). The flag alone must NOT select the real adapter — that produced
+    // the redacted 'Codex execution failed' crash. Honest degraded state instead.
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = codexHome(false);
+    expect(isBackendAvailable("codex")).toBe(false);
+  });
+
+  it("a real CODEX_ACCESS_TOKEN is authoritative even with no auth.json", () => {
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = codexHome(false);
+    process.env.CODEX_ACCESS_TOKEN = "cat-test";
     expect(isBackendAvailable("codex")).toBe(true);
   });
 

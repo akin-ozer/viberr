@@ -159,7 +159,10 @@ describe("home loader (seeded)", () => {
     ]);
     const core = result.projects.find((p) => p.slug === "viberr-core")!;
     expect(core.total).toBe(10);
-    expect(core.running).toBe(3); // tasks with waiting === "agent"
+    // R6-5: "runs active" counts REAL (non-simulated) in-flight runs only. The
+    // seed's running runs are simulated demo dressing, so they must NOT show as
+    // live agents on Home — Viberr Core reads "quiet" until a real agent runs.
+    expect(core.running).toBe(0);
     expect(core.waiting).toBe(2); // open decision packets, project-wide
     expect(core.dist.review).toBe(2);
     expect(core.dist.done).toBe(2);

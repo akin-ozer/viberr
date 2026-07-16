@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -7,9 +8,10 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { projectDir, taskDir } from "./file-store-root.server";
+import { projectDir, projectsDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
+  shouldPruneSubtree,
   startFileWatcher,
   stopFileWatcherForTests,
 } from "./file-watch.service.server";
@@ -96,6 +98,62 @@ describe("unlinkDir handling (E13)", () => {
         store.db.prepare(`SELECT slug FROM projects WHERE slug = ?`).get(store.slug) ===
           undefined && taskCount(store) === 0,
       "project + task rows pruned",
+    );
+  }, 15000);
+});
+
+describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
+  const root = "/data/projects";
+  it("keeps project.md and task.md, prunes workspace clones", () => {
+    // Store paths that MUST be watched (they project).
+    expect(shouldPruneSubtree(root, `${root}/p/project.md`)).toBe(false);
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/task.md`)).toBe(false);
+    expect(shouldPruneSubtree(root, `${root}/p/tasks`, { isDirectory: () => true })).toBe(false);
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1`, { isDirectory: () => true })).toBe(false);
+    // The workspace dir (and anything below it) is runtime scratch — prune it so
+    // chokidar never opens an fd per cloned-repo file.
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace`, { isDirectory: () => true })).toBe(true);
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace/repo/src/index.ts`)).toBe(true);
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace/repo/package.json`)).toBe(true);
+  });
+
+  it("prunes a directory named workspace even before stats resolve", () => {
+    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace`)).toBe(true);
+  });
+
+  it("does not prune outside the watch root", () => {
+    expect(shouldPruneSubtree(root, root)).toBe(false);
+    expect(shouldPruneSubtree(root, "/somewhere/else")).toBe(false);
+  });
+
+  it("integration: a workspace-file write never reprojects; task.md edits still do", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1") });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const projectedTitle = () =>
+      (store.db
+        .prepare(`SELECT title FROM task_projections WHERE project_slug = ? AND task_key = ?`)
+        .get(store.slug, "VIB-1") as { title: string }).title;
+    const originalTitle = projectedTitle();
+
+    await startWatcherReady(store);
+
+    // Write a file deep inside the task's workspace clone — must be ignored (the
+    // pruning is what keeps chokidar from opening an fd per cloned-repo file).
+    const wsDir = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "repo", "src");
+    mkdirSync(wsDir, { recursive: true });
+    writeFileSync(path.join(wsDir, "index.ts"), "export const x = 1;\n");
+    // Give the watcher a beat; the workspace write must NOT reproject.
+    await new Promise((r) => setTimeout(r, 600));
+    expect(projectedTitle()).toBe(originalTitle);
+
+    // A real task.md edit still reprojects (proves pruning didn't kill watching).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...baseTaskFrontmatter("VIB-1"), title: "Edited title after pruning" },
+    });
+    await waitFor(
+      () => projectedTitle() === "Edited title after pruning",
+      "task.md reprojected after edit",
     );
   }, 15000);
 });

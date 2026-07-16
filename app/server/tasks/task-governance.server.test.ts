@@ -108,18 +108,51 @@ describe("P3.7 governance & lifecycle fixes", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it("packet: the OWNER cannot accept_completion — that stays admin|maintainer (C3)", async () => {
+  it("packet: the contributor OWNER CAN accept_completion (R6-2 owner exception)", async () => {
     const store = prepared();
     withTask(
       store,
       { stage: "review", ownerUserId: store.users.selin.id },
       PACKET,
     );
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, // accept_completion
+      actor(store.users.selin), // contributor who OWNS this task
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("done");
+  });
+
+  it("packet: a NON-owner contributor still cannot accept_completion (R6-2)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.arda.id }, // owned by admin, not selin
+      PACKET,
+    );
     await expect(
       resolvePacket(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, // accept_completion
-        actor(store.users.selin), // contributor owner
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.selin), // contributor, NOT the owner
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("packet: a viewer OWNER cannot accept_completion (owner exception needs contributor+)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "review", ownerUserId: store.users.elif.id }, // viewer owner
+      PACKET,
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.elif), // viewer — read+comment only, can't own or accept
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });

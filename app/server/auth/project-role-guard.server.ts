@@ -17,7 +17,7 @@ export function assertProjectAction(
   projectSlug: string,
   actorUserId: string,
   what: string,
-  opts: { dataRoot?: string } = {},
+  opts: { dataRoot?: string; allowArchived?: boolean } = {},
 ): { projectName: string; role: ProjectRole } {
   const file = readProjectFile({
     projectSlug,
@@ -28,6 +28,16 @@ export function assertProjectAction(
       code: ERROR_CODES.NOT_FOUND,
       status: 404,
       userMessage: `Project ${projectSlug} not found.`,
+      kind: "user",
+    });
+  }
+  // Archived projects are read-only (R6-3): refuse config-surface mutations
+  // until restored. Restore itself passes allowArchived.
+  if (file.parsed.frontmatter.archived === true && !opts.allowArchived) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
       kind: "user",
     });
   }

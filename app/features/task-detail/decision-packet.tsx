@@ -167,7 +167,11 @@ export function DecisionPacket({
                 onClick={() => onResolve(sel)}
               >
                 <Icon name="check" />
-                {selected ? selected.t : "Confirm"}
+                {/* A concise, stable label — echoing the full (often multi-line)
+                    option title here overflowed the flex button and rendered the
+                    text overlapping itself (F-UI1). The chosen option is already
+                    highlighted in the radiogroup above. */}
+                Confirm decision
               </button>
             );
           })()}

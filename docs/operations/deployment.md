@@ -72,6 +72,12 @@ If the host uses an OS credential store instead of `auth.json`, configure
 before logging in. A `CODEX_API_KEY` / `OPENAI_API_KEY` also works, but uses
 usage-based Platform billing.
 
+If `VIBERR_CODEX_USE_CLI_AUTH=1` is set but `$CODEX_HOME/auth.json` is missing
+(and no access token/API key is configured), Viberr reports Codex **unavailable**
+and routes Codex-assigned work to its degraded engine instead of starting a run
+that would fail with a redacted error. Copy `auth.json` (step 2 above) to enable
+real Codex runs.
+
 **Security boundary:** the dedicated `CODEX_HOME` prevents importing the host's
 full personal Codex configuration; it does not isolate that credential or the
 application data from an autonomous coding process running as the same container

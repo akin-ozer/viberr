@@ -5,10 +5,12 @@ import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "
 import { AppError } from "~/server/errors/app-error.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
+  chainRunCompletion,
   configureRunServiceForTests,
   getRunLog,
   interruptRun,
   listRunsForTask,
+  registerRunCompletion,
   resumeRun,
   startRun,
 } from "./run-service.server";
@@ -196,6 +198,65 @@ describe("run-service lifecycle (simulated)", () => {
     });
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
+  });
+});
+
+describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
+  // An adapter that finalizes SYNCHRONOUSLY inside start() models a run that
+  // crashes at spawn (spawn EBADF): its onExit fires — and finds no callback —
+  // before the caller can attach one. The fix must fire the late callback.
+  function instantExitAdapter(outcome: "finished" | "error"): RuntimeAdapter {
+    return {
+      backend: "simulated",
+      start(spec, cb) {
+        cb.onExit({ outcome, effectiveBackend: "claude", simulated: false, sessionId: null });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+  }
+
+  it("chainRunCompletion fires immediately when the run already finalized", async () => {
+    const a = instantExitAdapter("error");
+    configureRunServiceForTests({ claude: a, codex: a, simulated: a });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
+    });
+    // At this point the run is already `error` and has no live handle.
+    expect(getRun(store.db, runId)?.state).toBe("error");
+    let fired: string | null = null;
+    chainRunCompletion(runId, (f) => { fired = f.state; }, store.db);
+    expect(fired).toBe("error");
+  });
+
+  it("registerRunCompletion fires immediately when the run already finalized", async () => {
+    const a = instantExitAdapter("finished");
+    configureRunServiceForTests({ claude: a, codex: a, simulated: a });
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
+    });
+    let count = 0;
+    registerRunCompletion(runId, () => { count += 1; }, store.db);
+    expect(count).toBe(1);
+    // Not double-fired: the callback was consumed on immediate fire.
+    expect(count).toBe(1);
+  });
+
+  it("does not fire twice when the run is still in flight then finishes", async () => {
+    // keepRunning script: run stays `running` until settle drains its stream.
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go",
+      script: { lines: [{ t: "1", ev: "text", tag: "assistant", text: "a" }],
+        occurredAt: [new Date().toISOString()], sessionId: "s", backend: "claude",
+        model: "claude-sonnet-4-5", op: false, keepRunning: false, instant: false },
+      dataRoot: store.dataRoot,
+    });
+    let count = 0;
+    registerRunCompletion(runId, () => { count += 1; }, store.db);
+    await settle();
+    expect(count).toBe(1);
   });
 });
 

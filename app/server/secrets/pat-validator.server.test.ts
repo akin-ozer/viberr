@@ -11,6 +11,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
+  openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
@@ -223,6 +224,14 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Open the VIB-142 violation the grant flow resolves — it used to be
+    // migration-seeded; the squashed baseline is schema-only.
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
+      detail: "Project credential is missing pull_request:write.",
+    });
     expect(countOpenPolicyViolations(store.db, store.slug)).toBe(1);
 
     const actor = { userId: store.users.arda.id, label: "arda" };

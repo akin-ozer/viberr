@@ -27,6 +27,11 @@ export const DATA_ROOT_SUBDIRS = [
   "agents/profiles",
   "runtimes",
   "runtimes/claude-home",
+  // Codex subscription login dir under compose (CODEX_HOME=/data/runtimes/
+  // codex-home). Created so the mount target exists; the operator still copies
+  // auth.json in (F-DOCKER1) — an empty dir means Codex reports unavailable
+  // rather than dying mid-run.
+  "runtimes/codex-home",
   "kb",
   "skills",
   "state",

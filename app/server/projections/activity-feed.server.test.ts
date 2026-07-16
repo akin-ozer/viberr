@@ -123,7 +123,15 @@ describe("listActivityStream", () => {
 describe("listAuditLog", () => {
   it("renders scope violations with their own open/resolved state (ruling 5)", () => {
     const store = setupTestStore(ctx);
-    // Migration 0005 pre-seeds the mock's VIB-142 violation for viberr-core.
+    // The mock VIB-142 violation used to be migration-seeded; the squashed
+    // baseline is schema-only, so open one explicitly to render it.
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
+      detail:
+        "Project credential is missing `pull_request:write` — flagged by the policy engine on VIB-142.",
+    });
     const seeded = listAuditLog(store.db, store.slug).find(
       (e) => e.kind === "violation",
     )!;
