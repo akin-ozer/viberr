@@ -160,6 +160,37 @@ function assistantUsage(
   return { input_tokens: inTok, output_tokens: outTok, cached_input_tokens: cached };
 }
 
+/**
+ * Turn a Claude-run failure into a short, REDACTION-SAFE reason line. The raw
+ * error can echo argv, env, or credentials, so only classified phrases are
+ * surfaced — never the raw message. Persisted as a terminal `err` log line so
+ * the run panel shows WHY a run errored and `runFailureReason` (agent-reply)
+ * can classify the escalation packet (F-SPAWN3 / A3). Recognizes the spawn-time
+ * crash class (EBADF/ENOENT/EMFILE) distinctly so a host-resource failure reads
+ * as "could not start", not a generic error.
+ */
+function classifyClaudeError(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "EBADF" || code === "EMFILE" || code === "ENFILE") {
+    return "The agent process could not be started (the host ran out of file handles). No work was performed.";
+  }
+  if (code === "ENOENT") {
+    return "The agent runtime executable was not found. Check the deployment's Claude CLI/SDK install.";
+  }
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
+    return "The coordinating model is over its usage quota. Retry after the limit resets.";
+  }
+  if (
+    /unauthor|forbidden|invalid.*(?:key|token|credential)|\b401\b|\b403\b|not logged in|authenticate|authentication/i.test(
+      raw,
+    )
+  ) {
+    return "The model credential was rejected. Review the configured Claude authentication.";
+  }
+  return "The agent run did not complete. Review the runtime configuration.";
+}
+
 export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapter {
   return {
     backend: "claude",
@@ -170,6 +201,27 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let interrupted = false;
       let settled = false;
       let queryHandle: ClaudeQuery | null = null;
+
+      /** Persist a redaction-safe classified reason line, then settle error. */
+      const settleError = (error: unknown) => {
+        if (settled) return;
+        try {
+          cb.onLine({
+            raw: "",
+            display: {
+              t: new Date().toISOString().slice(11, 19),
+              ev: "err",
+              tag: "run·error",
+              text: classifyClaudeError(error),
+            },
+            facts: {},
+            occurredAt: new Date().toISOString(),
+          });
+        } catch {
+          // Never let the reason line block finalization.
+        }
+        settle("error");
+      };
 
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
@@ -310,7 +362,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             runId: spec.runId,
             err: error instanceof Error ? error : new Error(String(error)),
           });
-          return settle("error");
+          return settleError(error);
         }
 
         if (interrupted) return settle("interrupted");
@@ -318,13 +370,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         return settle("error");
       };
 
-      // Fire the async loop; failures surface through settle("error").
+      // Fire the async loop; failures surface through settleError (which
+      // persists a redaction-safe reason line before finalizing — A3).
       void run().catch((error) => {
         logger.error("claude run crashed", {
           runId: spec.runId,
           err: error instanceof Error ? error : new Error(String(error)),
         });
-        settle("error");
+        settleError(error);
       });
 
       return {

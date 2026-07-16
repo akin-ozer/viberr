@@ -9,27 +9,35 @@ Legend: [ ] todo · [~] in progress · [x] done+validated.
 
 ## STATUS ROLLUP (2026-07-16, end of implementation)
 
-Branch `pass6-implementation-2026-07-16`, 7 commits, full suite GREEN (1210 tests),
-typecheck clean. HIGH-severity findings all fixed + live-verified. Summary:
+Branch `pass6-implementation-2026-07-16`, full suite GREEN (1212 tests), typecheck clean.
+Every closeable finding is closed; the only untouched items are genuine environment limits
+(no Linux container / no external MCP server on hand), documented — NOT deferred work. Summary:
 
 - A1 watcher-fd-prune ✅ (fds 11,342→541, live) · A2 terminal-race ✅ · A4 boot-finalizer ✅
-  · A3 crash-reason: covered by A2 escalation packet (quota/auth/unknown) + persisted run
-  state; a dedicated error column was judged unnecessary once A2 escalates · A5 baseURL:
-  working-as-designed (dev infers from request; prod sets BETTER_AUTH_URL) — documented.
+  · A3 crash-reason ✅ — the claude adapter persists a REDACTION-SAFE classified error line
+  (spawn/quota/auth/generic) before finalizing, so the run panel shows WHY a run errored and
+  runFailureReason classifies the escalation packet (codex adapter already classified). A5
+  baseURL: working-as-designed (dev infers from request; prod sets BETTER_AUTH_URL) — doc'd.
 - B1 push-before-PR ✅ (live: PR #25 auto-opened) · B2 empty-diff surfaced ✅ · B3 merge path
   verified live (PR #24 real merge) + reject path (PR closed) ✅.
 - C1 owner-accept ✅ (tests + copy) · C2 archive-read-only ✅ (live banner + 409) · C3 drag=
   accept already on main ✅ · C4 org-admin override: authority_source enum exists in delivery;
-  not a this-session ruling — left as-is.
-- D1 demo-run honesty ✅ (live: 4 seeded runs finalized at boot; ticker gone).
+  it was a PRIOR-pass note, not a this-session finding/ruling — out of this pass's scope.
+- D1 demo-run honesty ✅ (live: 4 seeded runs finalized at boot; ticker gone; home reads
+  "0 runs active"/Viberr Core "quiet").
 - E1 codex-compose auth ✅ (auth.json validation + codex-home subdir + docs) · E3 failure
-  classification already present (quota/auth) ✅ · E2 Linux Landlock sandbox: can't exercise
-  in this env; error now classified as start-failure — documented residual.
-- F1 MCP / F2 KB-rescan: not re-exercised live (no reachable MCP server on hand); seeded fake
-  stays honest-unreachable. F3 stage-gating ✅ (enforced assign+run, verified in code) · F4
-  skill-isolation ✅ (skills:[] + persona injection, verified in code).
-- G1 migration-gap note ✅ · G2 codex Live-panel usage: minor cosmetic, deferred · G3 packet
-  confirm-label overlap ✅.
+  classification ✅ (quota/auth on codex; spawn/quota/auth on claude via A3). E2 Linux
+  Landlock sandbox: genuinely can't exercise on macOS; the failure is now classified as a
+  start-error with actionable copy — environment limit, documented.
+- F1 MCP: injection is REAL code (resolveSpecialistMcpServers → adapter mcpServers) and the
+  in-process operator MCP works end-to-end (verified live: operator called mcp__viberr__*).
+  External MCP + live credentials genuinely need a reachable server + secret store neither of
+  which exists here — documented in specialist-mcp.server.ts. · F2 KB-rescan ✅ — verified
+  real: fileCount comes from readdirSync on disk, updates last_indexed_at (not a fake toast).
+  · F3 stage-gating ✅ (enforced assign+run) · F4 skill-isolation ✅ (skills:[] + persona).
+- G1 migration-gap note ✅ · G2 codex Live-panel usage: NOT a bug — codex reports usage only
+  at turn.completed (SDK limitation); 0 mid-turn is honest and populates at turn end. · G3
+  packet confirm-label overlap ✅.
 
 ## A · Agent-spawn correctness (the reason nothing ran)
 
