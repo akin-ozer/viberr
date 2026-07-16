@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate, type FetcherWithComponents } from "react-router";
-import { Avatar, initialsOf } from "~/ui/avatar";
+import { Avatar } from "~/ui/avatar";
+import { initialsOf } from "~/ui/initials";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";

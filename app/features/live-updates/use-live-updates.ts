@@ -31,7 +31,9 @@ export function useLiveUpdates(scopes: readonly string[]): void {
 
   // Latest revalidate without resubscribing per render.
   const revalidateRef = useRef(revalidator.revalidate);
-  revalidateRef.current = revalidator.revalidate;
+  useEffect(() => {
+    revalidateRef.current = revalidator.revalidate;
+  });
 
   const scopeKey = scopes.join("\u0000");
 

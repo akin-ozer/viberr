@@ -61,7 +61,9 @@ export function useRunLogStream(input: {
   const { projectSlug, taskKey } = input;
   const revalidator = useRevalidator();
   const revalidateRef = useRef(revalidator.revalidate);
-  revalidateRef.current = revalidator.revalidate;
+  useEffect(() => {
+    revalidateRef.current = revalidator.revalidate;
+  });
 
   // Seed local lines from the loader on mount / thread-set change.
   const [linesByThread, setLinesByThread] = useState<Record<string, StreamedLine[]>>(() =>

@@ -30,7 +30,9 @@ export function useOrgAction(options?: {
   const push = useToast();
   const handled = useRef<unknown>(null);
   const onResultRef = useRef(options?.onResult);
-  onResultRef.current = options?.onResult;
+  useEffect(() => {
+    onResultRef.current = options?.onResult;
+  });
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;

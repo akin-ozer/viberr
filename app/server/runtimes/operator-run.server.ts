@@ -361,23 +361,19 @@ const OPERATOR_PLAN_SCHEMA = {
  * missing nullable fields, unknown tools, wrong types, and extra properties
  * before any governed action can run.
  */
-const operatorPlanActionSchema = z
-  .object({
-    tool: z.enum(OPERATOR_PLAN_TOOLS),
-    profileId: z.string().nullable(),
-    toStageId: z.string().nullable(),
-    packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
-    text: z.string().nullable(),
-    reason: z.string().nullable(),
-  })
-  .strict();
+const operatorPlanActionSchema = z.strictObject({
+  tool: z.enum(OPERATOR_PLAN_TOOLS),
+  profileId: z.string().nullable(),
+  toStageId: z.string().nullable(),
+  packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
+  text: z.string().nullable(),
+  reason: z.string().nullable(),
+});
 
-const operatorPlanRuntimeSchema = z
-  .object({
-    reasoning: z.string(),
-    actions: z.array(operatorPlanActionSchema),
-  })
-  .strict();
+const operatorPlanRuntimeSchema = z.strictObject({
+  reasoning: z.string(),
+  actions: z.array(operatorPlanActionSchema),
+});
 
 type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
 

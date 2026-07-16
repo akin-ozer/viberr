@@ -4,7 +4,7 @@
  * Unknown names fall back to "dot", exactly like the mock.
  */
 
-export const ICON_PATHS = {
+const ICON_PATHS = {
   board:
     '<rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="11" rx="1.5"/>',
   review: '<path d="M4 5h16M4 12h16M4 19h10"/>',

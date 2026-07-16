@@ -458,7 +458,7 @@ export function LiveRoster({
   deployments: AgentDeploymentView[];
   onOpen: (taskKey: string) => void;
 }) {
-  const sorted = [...deployments].sort(
+  const sorted = deployments.toSorted(
     (a, b) =>
       a.taskKey.localeCompare(b.taskKey) ||
       ENGAGEMENT_ORDER[a.engagement] - ENGAGEMENT_ORDER[b.engagement],

@@ -127,7 +127,7 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
       seen.add(key);
     }
   }
-  for (const name of [...diskNames].sort()) {
+  for (const name of diskNames.toSorted()) {
     if (!seen.has(name)) {
       order.push(name);
       seen.add(name);
