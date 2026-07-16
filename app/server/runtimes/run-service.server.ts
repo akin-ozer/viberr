@@ -86,15 +86,52 @@ function getState(): ServiceState {
 }
 
 /**
+ * If a run already reached a terminal state before its completion callback was
+ * attached, `launch()`'s onExit already fired (and found no callback), so the
+ * callback would never run. This is the spawn-crash race (F-SPAWN2): a run that
+ * dies synchronously at launch — e.g. `spawn EBADF` — finalizes before the
+ * caller can `registerRunCompletion`/`chainRunCompletion`, leaving the operator
+ * escalation, reply, or lease-release silently dropped. A finalized run has NO
+ * live handle (onExit deletes it), so "no handle + terminal state" reliably
+ * means "already finalized"; fire the callback immediately and consume it.
+ */
+function fireIfAlreadyTerminal(
+  db: Database.Database,
+  runId: string,
+): void {
+  const state = getState();
+  const cb = state.completions.get(runId);
+  if (!cb) return;
+  if (state.handles.has(runId)) return; // still in flight — onExit will fire it
+  const run = getRun(db, runId);
+  if (!run) return;
+  if (run.state !== "finished" && run.state !== "error" && run.state !== "interrupted") {
+    return;
+  }
+  state.completions.delete(runId);
+  try {
+    cb(run);
+  } catch (error) {
+    logger.error("run completion callback failed (immediate terminal fire)", {
+      runId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
  * Register a one-shot completion callback for a run id. `launch()` fires it
  * after the run's sink finalizes, then removes it. Idempotent-safe: a second
  * registration for the same run id overwrites the first (last writer wins).
+ * If the run has ALREADY finalized (spawn-crash race), fire immediately.
  */
 export function registerRunCompletion(
   runId: string,
   cb: RunCompletionCallback,
+  db?: Database.Database,
 ): void {
   getState().completions.set(runId, cb);
+  if (db) fireIfAlreadyTerminal(db, runId);
 }
 
 /**
@@ -103,10 +140,12 @@ export function registerRunCompletion(
  * never clobbers: the existing callback fires first, then `cb`. Used by the
  * operator coalesce-queue — a trigger that lands while an operator run is in
  * flight must fire AFTER that run's own completion work, not replace it.
+ * If the run has ALREADY finalized (spawn-crash race), fire immediately.
  */
 export function chainRunCompletion(
   runId: string,
   cb: RunCompletionCallback,
+  db?: Database.Database,
 ): void {
   const state = getState();
   const existing = state.completions.get(runId);
@@ -117,6 +156,7 @@ export function chainRunCompletion(
       cb(finished);
     }
   });
+  if (db) fireIfAlreadyTerminal(db, runId);
 }
 
 /** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
@@ -386,6 +426,10 @@ function launch(
   const sink = createRunSink(db, spec);
   const adapter = simulated ? state.adapters.simulated : state.adapters[spec.backend as RealBackend];
 
+  // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
+  // crash) so we skip tracking a handle for an already-terminal run.
+  let exited = false;
+
   // Mark running immediately (queued → running).
   sink.markRunning();
 
@@ -433,9 +477,15 @@ function launch(
           });
         }
       }
+      exited = true;
     },
   });
-  state.handles.set(spec.runId, handle);
+  // Only track the handle if the run is still in flight. A synchronously-exiting
+  // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
+  // deletes the not-yet-set handle; setting it here afterward would leave a
+  // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
+  // (and interrupt) think a dead run is live. Guard on the exit flag.
+  if (!exited) state.handles.set(spec.runId, handle);
 }
 
 // ---------------------------------------------- interrupt

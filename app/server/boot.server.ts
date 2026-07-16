@@ -14,7 +14,10 @@ import { startFileWatcher } from "./files/file-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import { registerSeededLiveFromData } from "./runtimes/seed-resumer.server";
-import { recoverUnreactedAgentRuns } from "./runtimes/run-recovery.server";
+import {
+  finalizeOrphanedRuns,
+  recoverUnreactedAgentRuns,
+} from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 
@@ -125,6 +128,19 @@ export function bootServer(): void {
   // runs' live lines in THIS process so the first client subscribe drips
   // them over SSE (the seed's own registration ran in a separate process).
   registerSeededLiveFromData(db);
+
+  // Finalize runs orphaned by a restart (F-RUN1): a run left `running`/`queued`
+  // has no live process in this fresh boot — flip it to error and re-coordinate
+  // its task, so the UI never shows a zombie "agent working" with a ticking
+  // elapsed. Runs BEFORE the reply recovery below so a just-finalized run is a
+  // clean terminal state. Synchronous flip; operator re-invoke is fire-and-forget.
+  try {
+    finalizeOrphanedRuns(db);
+  } catch (error) {
+    logger.error("orphaned-run finalize failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 
   // Recover dropped agent-reply reactions (NFR17, B9): if the server restarted
   // after a specialist/reviewer run finished but before its in-process reply

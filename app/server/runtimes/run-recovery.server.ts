@@ -1,7 +1,85 @@
 import type Database from "better-sqlite3";
 import { logger } from "~/server/logging/logger.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
+
+/**
+ * Boot-time finalization of runs orphaned by a restart (F-RUN1).
+ *
+ * A run row is written `running`/`queued` while its adapter drives it in THIS
+ * process. If the server dies mid-run, the row keeps that state forever: the UI
+ * then shows a perpetual "agent working" / "N runs active" badge and a ticking
+ * ELAPSED with no live process behind it — indistinguishable from real work.
+ * Nothing else recovers these (run-recovery below only touches `finished`
+ * runs). On a fresh boot there is by definition no live handle for any prior
+ * run, so every real (non-simulated) run still in a non-terminal state is an
+ * orphan; flip it to `error` (interrupted-by-restart) so state is honest, and
+ * re-invoke the operator for tasks left waiting on that dead run so they don't
+ * stall. Simulated/seed runs are left alone (they carry no live process by
+ * design and are handled by the seed layer). Idempotent: a second boot finds
+ * nothing running.
+ */
+export function finalizeOrphanedRuns(db: Database.Database): {
+  finalized: number;
+} {
+  const orphans = db
+    .prepare(
+      `SELECT id, project_slug, task_key, kind
+         FROM agent_runs
+        WHERE state IN ('running', 'queued')
+          AND simulated = 0`,
+    )
+    .all() as {
+    id: string;
+    project_slug: string;
+    task_key: string;
+    kind: string;
+  }[];
+  if (orphans.length === 0) return { finalized: 0 };
+
+  const now = new Date().toISOString();
+  for (const run of orphans) {
+    patchRun(db, run.id, {
+      state: "error",
+      finishedAt: now,
+      interruptedBy: "restart",
+    });
+  }
+  logger.info("finalized runs orphaned by restart", {
+    count: orphans.length,
+  });
+
+  // Re-invoke the operator for each affected task so a task left waiting on a
+  // now-dead run gets re-coordinated (re-dispatch or a recovery packet) instead
+  // of stalling. Fire-and-forget; never blocks boot.
+  const tasks = new Map<string, { projectSlug: string; taskKey: string }>();
+  for (const run of orphans) {
+    tasks.set(`${run.project_slug}/${run.task_key}`, {
+      projectSlug: run.project_slug,
+      taskKey: run.task_key,
+    });
+  }
+  void (async () => {
+    const { runOperator } = await import("./operator-run.server");
+    for (const t of tasks.values()) {
+      try {
+        await runOperator(db, {
+          projectSlug: t.projectSlug,
+          taskKey: t.taskKey,
+          trigger: "manual",
+        });
+      } catch (error) {
+        logger.warn("operator re-invoke after orphan finalize failed", {
+          taskKey: t.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+  })().catch(() => {});
+
+  return { finalized: orphans.length };
+}
 
 /**
  * Boot-time recovery of dropped agent-reply reactions (NFR17, B9).

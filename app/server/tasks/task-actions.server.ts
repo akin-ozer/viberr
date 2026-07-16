@@ -1511,7 +1511,7 @@ export async function registerAgentCompletion(
         err: error instanceof Error ? error : new Error(String(error)),
       });
     });
-  });
+  }, db);
 }
 
 /**
