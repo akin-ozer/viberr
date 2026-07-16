@@ -325,6 +325,32 @@ export function requireAction(
   return requireMemberRole(project, actor, [...rolesForAction(action)], what);
 }
 
+/**
+ * Accept-completion authority WITH the task-owner exception (owner ruling R6-2).
+ *
+ * A completion is accepted by the `accept-completion` tier (maintainer+) OR by
+ * the task's human OWNER — even when that owner is only a Contributor. The owner
+ * IS the task's designated reviewer/acceptance authority (the Policy page says
+ * exactly this), so a contributor who owns a task may accept its own completion,
+ * mirroring the existing resolve-packet owner exception. The owner path requires
+ * LIVE contributor+ membership (a demoted viewer-owner, or a removed member who
+ * still holds a stale ownerUserId, does not qualify). The operator never routes
+ * through here (it is gated by its own capability policy upstream).
+ */
+function requireAcceptCompletion(
+  project: ProjectContext,
+  actor: TaskActor,
+  ownerUserId: string | null | undefined,
+  what: string,
+): void {
+  const isOwner =
+    !!actor.userId &&
+    ownerUserId === actor.userId &&
+    roleCan(project.memberRoles.get(actor.userId), "own-task");
+  if (isOwner) return;
+  requireAction(project, actor, "accept-completion", what);
+}
+
 function userName(db: Database.Database, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
@@ -2173,8 +2199,14 @@ export async function transitionStage(
   } else if (boundary!.boundary === "approval") {
     requireAction(project, actor, "approve-transition", "approve stage transitions");
   } else {
-    // human boundary (review→done locked in V1): acceptance authority.
-    requireAction(project, actor, "accept-completion", "accept completion into Done");
+    // human boundary (review→done locked in V1): acceptance authority, with the
+    // task-owner exception (R6-2) — the owner may accept its own completion.
+    requireAcceptCompletion(
+      project,
+      actor,
+      existing.parsed.frontmatter.ownerUserId,
+      "accept completion into Done",
+    );
   }
 
   const event: TaskFileEvent = {
@@ -2297,6 +2329,12 @@ export async function transitionStage(
  * Best-effort review-PR open on entering the review stage. Isolated so a
  * GitHub failure (or an unconfigured repo) can never fail the governed
  * transition — every non-ok result is swallowed after logging.
+ *
+ * F-GH3: FIRST push the workspace branch via the project PAT so the remote
+ * carries the developer's real commits (they were only local — see
+ * push-workspace.server), THEN open the PR. If the branch genuinely has no diff
+ * after that (empty delivery), surface it on the timeline + notify supervisors
+ * instead of dead-ending at a swallowed "nothing_to_review" log line.
  */
 async function openReviewPrBestEffort(
   db: Database.Database,
@@ -2305,16 +2343,68 @@ async function openReviewPrBestEffort(
   taskKey: string,
   actor: TaskActor,
 ): Promise<void> {
+  const dataCtx = { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) };
   try {
+    // 1. Push the workspace commits to the remote task branch (best-effort).
+    const { pushWorkspaceBranch } = await import(
+      "~/server/github/push-workspace.server"
+    );
+    const push = await pushWorkspaceBranch({ db, projectSlug, taskKey, ...dataCtx });
+    if (push.status !== "pushed" && push.status !== "up_to_date") {
+      logger.info("workspace push before review PR did not push", {
+        taskKey,
+        status: push.status,
+      });
+    }
+
+    // 2. Open (or reuse) the review PR now that the remote carries the diff.
     const { openTaskPr } = await import("~/server/github/pr-open.server");
     const result = await openTaskPr(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+      dataCtx,
     );
-    if (result.status !== "ok") {
-      logger.info("review PR not opened", { taskKey, reason: result.status });
+    if (result.status === "ok") return;
+    logger.info("review PR not opened", { taskKey, reason: result.status });
+
+    // 3. An empty-diff branch (nothing_to_review) that ALSO had no local commits
+    //    to push means the delivery produced no change — make that visible to a
+    //    human rather than silently stalling at Review with no PR.
+    if (result.status === "nothing_to_review") {
+      try {
+        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "github",
+            actor: { kind: "system", systemId: "delivery" },
+            title: null,
+            text:
+              "No review pull request could be opened — the execution branch has no " +
+              "commits ahead of the default branch. The delivery may have produced no " +
+              "change, or the commits never reached the remote.",
+            toAgent: false,
+            evidence: null,
+          });
+        });
+        reprojectTask(db, ctx, projectSlug, taskKey);
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug,
+            taskKey,
+            kind: "policy",
+            title: "Review has no PR",
+            text: `${taskKey} reached Review but its branch has no diff — no PR was opened.`,
+          },
+          ctx,
+        );
+      } catch (surfaceErr) {
+        logger.warn("failed to surface empty-diff review", {
+          taskKey,
+          err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
+        });
+      }
     }
   } catch (error) {
     logger.warn("review PR open failed", {
@@ -2506,7 +2596,11 @@ export async function resolvePacket(
     !!actor.userId &&
     existing.parsed.frontmatter.ownerUserId === actor.userId &&
     roleCan(project.memberRoles.get(actor.userId), "own-task");
-  if (option.kind !== "accept_completion" && isOwner) {
+  if (option.kind === "accept_completion") {
+    // Acceptance is guarded below by requireAcceptCompletion (the owner exception,
+    // R6-2) — do NOT gate it here on resolve-packet, which would block a
+    // contributor-owner before the owner check runs.
+  } else if (isOwner) {
     // owner is allowed — skip the maintainer gate (the owner must still be able
     // to own the task, i.e. contributor+; a demoted viewer-owner is caught above)
   } else {
@@ -2523,8 +2617,14 @@ export async function resolvePacket(
 
   switch (option.kind) {
     case "accept_completion": {
-      // Human-only Review → Done boundary (always-human invariant).
-      requireAction(project, actor, "accept-completion", "accept completion into Done");
+      // Human-only Review → Done boundary (always-human invariant), with the
+      // task-owner exception (R6-2).
+      requireAcceptCompletion(
+        project,
+        actor,
+        existing.parsed.frontmatter.ownerUserId,
+        "accept completion into Done",
+      );
       // Refuse a standing `failing` validation (C2) — same stance as the human
       // acceptCompletion + operator (H3): a stale acceptance packet must not
       // merge work the last review rejected.
@@ -2698,9 +2798,15 @@ async function acceptCompletion(
   ctx: TaskMutationContext = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "accept-completion", "accept completion into Done");
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  // R6-2: maintainer+ OR the task's human owner (even a Contributor) may accept.
+  requireAcceptCompletion(
+    project,
+    actor,
+    existing.parsed.frontmatter.ownerUserId,
+    "accept completion into Done",
+  );
 
   // Refuse to accept a task with a standing `failing` validation (C2) — a stale
   // "accept completion" recommendation created before a reviewer rejected must
@@ -2793,13 +2899,20 @@ export async function completeTaskMerge(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; merged: boolean; message: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "accept-completion", "complete a PR merge");
   if (!actor.userId) {
     throw AppError.validation("A signed-in user is required to merge a PR.");
   }
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  // Completing a merge-pending acceptance is part of the same acceptance
+  // authority — maintainer+ OR the task's owner (R6-2).
+  requireAcceptCompletion(
+    project,
+    actor,
+    existing.parsed.frontmatter.ownerUserId,
+    "complete a PR merge",
+  );
   const pr = existing.parsed.frontmatter.pr;
   if (!pr) {
     throw AppError.validation("This task has no linked pull request to merge.");

@@ -170,7 +170,9 @@ export function HumanAccess({
           comment on any task; <strong>contributors and above</strong> may{" "}
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and
-          acceptance authority, scoped to that task); and{" "}
+          acceptance authority, scoped to that task — a contributor who owns a
+          task <strong>may accept its completion</strong> even though the table
+          reserves that column for maintainers); and{" "}
           <strong>admins may release any owner</strong> — recorded in the audit
           trail.
         </span>
