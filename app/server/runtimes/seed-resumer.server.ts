@@ -11,7 +11,6 @@ import {
   patchRun,
   listRunsForTaskRows,
 } from "./run-store.server";
-import { RUNTIME_SEED } from "./runtime-seed-data.server";
 import { projectEnvelope, rawLineFromDisplay } from "./wire-format.server";
 
 /**
@@ -68,52 +67,6 @@ export function registerSeededLive(entry: PendingLive): void {
   const state = getState();
   state.pending.set(entry.runId, entry);
   state.resumed.delete(entry.runId);
-}
-
-/**
- * Boot-time registration in the SERVER process. `npm run seed` runs in a
- * SEPARATE process, so its registerSeededLive calls never reach the running
- * server's resumer map. At boot the server re-derives the pending live lines
- * from RUNTIME_SEED for any DB run that is currently `running` — so a live
- * demo works after a fresh boot (or a CLI re-seed) without a persistent
- * process. Idempotent: registerSeededLive replaces existing entries.
- */
-export function registerSeededLiveFromData(db: Database.Database): void {
-  for (const [taskKey, runs] of Object.entries(RUNTIME_SEED)) {
-    for (const run of runs) {
-      if (run.state !== "running" || !run.live || !run.live.length) continue;
-      const runId = seedRunId(taskKey, run.id);
-      const row = getRun(db, runId);
-      if (!row || row.state !== "running") continue;
-      // Refresh started_at to boot time (F7): the run row was written once by
-      // `npm run seed` and its back-dated started_at goes stale across boots, so
-      // a demo "live run" viewed the next day showed ELAPSED 15h+. Re-anchor it
-      // to (now − its seeded elapsedSeconds) each boot so the strip ticks a
-      // realistic elapsed regardless of how long ago the store was seeded.
-      if (typeof run.elapsedSeconds === "number") {
-        patchRun(db, runId, {
-          startedAt: new Date(Date.now() - run.elapsedSeconds * 1000).toISOString(),
-        });
-      }
-      registerSeededLive({
-        runId,
-        projectSlug: row.project_slug,
-        taskKey: row.task_key,
-        threadId: run.id,
-        backend: run.backend,
-        sessionId: run.sid,
-        model: run.model,
-        op: run.kind === "operator",
-        lines: run.live,
-        keepRunning: true,
-      });
-    }
-  }
-}
-
-/** Same deterministic id the runtime seed uses. */
-function seedRunId(taskKey: string, threadId: string): string {
-  return `run_seed_${taskKey}_${threadId}`.toLowerCase().replace(/[^a-z0-9_]/g, "");
 }
 
 /**

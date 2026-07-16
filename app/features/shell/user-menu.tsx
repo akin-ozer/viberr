@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
-import { Avatar, initialsOf } from "~/ui/avatar";
+import { Avatar } from "~/ui/avatar";
+import { initialsOf } from "~/ui/initials";
 import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
 import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";

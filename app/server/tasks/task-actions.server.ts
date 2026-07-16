@@ -276,11 +276,10 @@ export function notifyTaskWatchers(
   let recipients: Set<string>;
   try {
     const project = loadProjectContext(ctx, notice.projectSlug);
-    recipients = new Set(
-      [...project.memberRoles.entries()]
-        .filter(([, role]) => role === "admin" || role === "maintainer")
-        .map(([userId]) => userId),
-    );
+    recipients = new Set<string>();
+    for (const [userId, role] of project.memberRoles) {
+      if (role === "admin" || role === "maintainer") recipients.add(userId);
+    }
     const owner = readTaskFile(
       taskRef(ctx, notice.projectSlug, notice.taskKey),
     )?.parsed.frontmatter.ownerUserId;
