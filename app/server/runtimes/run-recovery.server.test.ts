@@ -52,10 +52,14 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(getRun(store.db, "run_queued")!.state).toBe("error");
   });
 
-  it("leaves simulated runs alone (seed dressing, no live process by design)", () => {
+  it("retires simulated seed runs to finished (R6-5: no masquerading as live)", () => {
     seedRun("run_sim", { state: "running", simulated: true });
-    expect(finalizeOrphanedRuns(store.db).finalized).toBe(0);
-    expect(getRun(store.db, "run_sim")!.state).toBe("running");
+    const res = finalizeOrphanedRuns(store.db);
+    expect(res.simulated).toBe(1);
+    const row = getRun(store.db, "run_sim")!;
+    expect(row.state).toBe("finished");
+    // Not an error, not interrupted — a quiet demo completion.
+    expect(row.interrupted_by).toBeNull();
   });
 
   it("leaves already-terminal runs untouched and is idempotent", () => {

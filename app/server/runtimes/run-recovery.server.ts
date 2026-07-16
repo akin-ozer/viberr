@@ -5,80 +5,92 @@ import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
- * Boot-time finalization of runs orphaned by a restart (F-RUN1).
+ * Boot-time finalization of non-terminal runs (F-RUN1 + R6-5).
  *
  * A run row is written `running`/`queued` while its adapter drives it in THIS
- * process. If the server dies mid-run, the row keeps that state forever: the UI
- * then shows a perpetual "agent working" / "N runs active" badge and a ticking
- * ELAPSED with no live process behind it — indistinguishable from real work.
- * Nothing else recovers these (run-recovery below only touches `finished`
- * runs). On a fresh boot there is by definition no live handle for any prior
- * run, so every real (non-simulated) run still in a non-terminal state is an
- * orphan; flip it to `error` (interrupted-by-restart) so state is honest, and
- * re-invoke the operator for tasks left waiting on that dead run so they don't
- * stall. Simulated/seed runs are left alone (they carry no live process by
- * design and are handled by the seed layer). Idempotent: a second boot finds
- * nothing running.
+ * process. On a fresh boot there is by definition no live handle for any prior
+ * run, so a run still in a non-terminal state has no process behind it — a
+ * ticking ELAPSED and an "agent working" badge with nothing real running,
+ * indistinguishable from live work. Two kinds get finalized:
+ *
+ *  - REAL runs (simulated = 0) orphaned by a restart → `error`
+ *    (interrupted-by-restart), and the operator is re-invoked for each affected
+ *    task so it re-coordinates (re-dispatch or a recovery packet) rather than
+ *    stalling forever.
+ *  - SEED/demo runs (simulated = 1) that the seed wrote as `running` for
+ *    walkthrough dressing → `finished` (owner ruling R6-5: simulated runs must
+ *    not masquerade as live; Viberr Core goes quiet unless a real agent runs).
+ *    NO operator re-invoke — demo tasks must not spawn real coordination on boot.
+ *
+ * Idempotent: a second boot finds nothing non-terminal.
  */
 export function finalizeOrphanedRuns(db: Database.Database): {
   finalized: number;
+  simulated: number;
 } {
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind
+      `SELECT id, project_slug, task_key, kind, simulated
          FROM agent_runs
-        WHERE state IN ('running', 'queued')
-          AND simulated = 0`,
+        WHERE state IN ('running', 'queued')`,
     )
     .all() as {
     id: string;
     project_slug: string;
     task_key: string;
     kind: string;
+    simulated: number;
   }[];
-  if (orphans.length === 0) return { finalized: 0 };
+  if (orphans.length === 0) return { finalized: 0, simulated: 0 };
 
   const now = new Date().toISOString();
+  const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
+  let simulatedCount = 0;
   for (const run of orphans) {
-    patchRun(db, run.id, {
-      state: "error",
-      finishedAt: now,
-      interruptedBy: "restart",
-    });
+    if (run.simulated === 1) {
+      // Demo dressing — retire it quietly as a finished historical run.
+      patchRun(db, run.id, { state: "finished", finishedAt: now });
+      simulatedCount += 1;
+    } else {
+      patchRun(db, run.id, {
+        state: "error",
+        finishedAt: now,
+        interruptedBy: "restart",
+      });
+      realTasks.set(`${run.project_slug}/${run.task_key}`, {
+        projectSlug: run.project_slug,
+        taskKey: run.task_key,
+      });
+    }
   }
-  logger.info("finalized runs orphaned by restart", {
-    count: orphans.length,
+  logger.info("finalized non-terminal runs at boot", {
+    total: orphans.length,
+    simulated: simulatedCount,
+    real: orphans.length - simulatedCount,
   });
 
-  // Re-invoke the operator for each affected task so a task left waiting on a
-  // now-dead run gets re-coordinated (re-dispatch or a recovery packet) instead
-  // of stalling. Fire-and-forget; never blocks boot.
-  const tasks = new Map<string, { projectSlug: string; taskKey: string }>();
-  for (const run of orphans) {
-    tasks.set(`${run.project_slug}/${run.task_key}`, {
-      projectSlug: run.project_slug,
-      taskKey: run.task_key,
-    });
-  }
-  void (async () => {
-    const { runOperator } = await import("./operator-run.server");
-    for (const t of tasks.values()) {
-      try {
-        await runOperator(db, {
-          projectSlug: t.projectSlug,
-          taskKey: t.taskKey,
-          trigger: "manual",
-        });
-      } catch (error) {
-        logger.warn("operator re-invoke after orphan finalize failed", {
-          taskKey: t.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
+  // Re-invoke the operator ONLY for real orphaned tasks (never demo runs).
+  if (realTasks.size > 0) {
+    void (async () => {
+      const { runOperator } = await import("./operator-run.server");
+      for (const t of realTasks.values()) {
+        try {
+          await runOperator(db, {
+            projectSlug: t.projectSlug,
+            taskKey: t.taskKey,
+            trigger: "manual",
+          });
+        } catch (error) {
+          logger.warn("operator re-invoke after orphan finalize failed", {
+            taskKey: t.taskKey,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
       }
-    }
-  })().catch(() => {});
+    })().catch(() => {});
+  }
 
-  return { finalized: orphans.length };
+  return { finalized: orphans.length, simulated: simulatedCount };
 }
 
 /**
