@@ -1,8 +1,23 @@
-# Findings ledger — pass 5 (2026-07-16)
+# Findings ledger — pass 6 (2026-07-16)
 
 Running ledger for this pass. IDs are stable; implementation phase must close every OPEN
 item or record an explicit owner ruling. Severity: HIGH (breaks a core flow), MED (wrong or
 misleading behavior), LOW (polish/debt). Status: OPEN / FIXED / RULED / WONTFIX.
+
+## FINAL STATUS (end of implementation, branch pass6-implementation-2026-07-16)
+
+FIXED + verified: F-SPAWN1 (watcher fd prune), F-SPAWN2 (terminal-race completion), F-RUN1
+(boot finalizer), F-RUN1b/R6-5 (demo-run honesty: boot finalize + honest home metric),
+F-GH3 (server push before review PR — live PR #25), F-GH4 (empty-diff surfaced), F-DOCKER1
+(codex auth.json validation + codex-home subdir + docs), F-RBAC1/R6-2 (owner-exception
+accept), F-RBAC2/R6-3 (archive read-only), F-UI1 (packet confirm label), F-ENV2/G1
+(migration-gap doc).
+RULED/verified-on-main: F-RBAC3/R6-4 (drag=accept already implemented), F3 stage-gating &
+F4 skill-isolation (already enforced), F-DOCKER3 (failure classification already present).
+Working-as-designed: F-SPAWN4/A5 (baseURL dev-inference), F-ENV1 (stay-on-main ruling).
+Residual (documented, low-risk): F-DOCKER2 (Linux Landlock — untestable here), F-PARITY1
+(codex Live-panel usage cosmetic), F-GH1/F-RES1/F-RES2 (needs a reachable MCP/live PAT to
+re-exercise; seeded fakes kept honest), A3 (crash reason surfaced via A2 escalation packet).
 
 Companion docs: `canon.md` (product rulings), `original-intent.md` (PRD/mock),
 `architecture.md` (code map), `ui-walkthrough.md` (per-page UI state).
