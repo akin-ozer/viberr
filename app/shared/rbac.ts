@@ -55,6 +55,7 @@ export type RbacAction =
   | "reorder-board"
   | "update-goal"
   | "grant-github-scope"
+  | "rescan-project" // board re-scan: rebuild projections from the file store
   // admin only
   | "release-any-ownership"
   | "manage-members"
@@ -87,6 +88,7 @@ export const ACTION_ROLES: Record<RbacAction, readonly ProjectRole[]> = {
   "reorder-board": [A, M],
   "update-goal": [A, M],
   "grant-github-scope": [A, M],
+  "rescan-project": [A, M],
 
   "release-any-ownership": [A],
   "manage-members": [A],
@@ -120,6 +122,7 @@ export const RBAC_TABLE: readonly { action: string; roles: readonly ProjectRole[
   { action: "Accept completion → Done", roles: ACTION_ROLES["accept-completion"] },
   { action: "Edit the task goal", roles: ACTION_ROLES["update-goal"] },
   { action: "Run agents & reorder the board", roles: ACTION_ROLES["run-agents"] },
+  { action: "Re-scan project files & projections", roles: ACTION_ROLES["rescan-project"] },
   { action: "Release any task owner", roles: ACTION_ROLES["release-any-ownership"] },
   { action: "Manage members & roles", roles: ACTION_ROLES["manage-members"] },
   { action: "Edit workflow & policy", roles: ACTION_ROLES["edit-policy"] },

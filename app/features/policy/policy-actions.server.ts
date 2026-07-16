@@ -3,7 +3,7 @@ import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { assertProjectAction } from "~/server/auth/project-role-guard.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
@@ -54,6 +54,7 @@ function conflict(userMessage: string): AppError {
 }
 
 function requirePolicyAction(
+  db: Database.Database,
   ctx: PolicyMutationContext,
   action: "manage-members" | "edit-policy",
   projectSlug: string,
@@ -64,7 +65,7 @@ function requirePolicyAction(
   // so editing the matrix row for one (e.g. manage-members) would change its
   // enforcement independently of the other (pass-4 XS-9). Both are admin-only
   // today, but this closes the single-source bypass.
-  return assertProjectAction(action, projectSlug, actor.userId, what, {
+  return assertProjectAction(db, action, projectSlug, actor, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 }
@@ -100,6 +101,7 @@ export async function setMemberRole(
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
   const { projectName } = requirePolicyAction(
+    db,
     ctx,
     "manage-members",
     input.projectSlug,
@@ -183,7 +185,7 @@ export async function setTransitionBoundary(
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requirePolicyAction(ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
+  requirePolicyAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow & policy");
   if (!(BOUNDARY_VALUES as readonly string[]).includes(input.boundary)) {
     throw AppError.validation("Unknown boundary.");
   }

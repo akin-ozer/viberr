@@ -90,8 +90,9 @@ describe("loader — VIB-142 fidelity", () => {
       "triage", "ready", "impl", "review", "done",
     ]);
 
-    // Execution profile: operator since stage 1, codex specialist, reviewer.
-    expect(t.operator?.sinceLabel).toBe("stage 1");
+    // Execution profile: operator since Triage (stage NAME, F7-UI2), codex
+    // specialist, reviewer.
+    expect(t.operator?.sinceLabel).toBe("since Triage");
     expect(t.specialist?.backend).toBe("codex");
     expect(t.specialist?.role).toBe("Developer");
     expect(t.reviewers.map((c) => c.role)).toEqual(["Reviewer"]);

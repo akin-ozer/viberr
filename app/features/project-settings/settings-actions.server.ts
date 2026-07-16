@@ -4,8 +4,9 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { assertProjectAction } from "~/server/auth/project-role-guard.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
+import type { RbacAction } from "~/shared/rbac";
 import {
   projectDir,
   projectFilePath,
@@ -23,10 +24,11 @@ import { newId } from "~/shared/ids/new-id.server";
  * scope).
  *
  * RBAC (contracts §3.2, enforced HERE): identity/stages/override/delete =
- * "Edit workflow & policy" → admin; membership CRUD = "Manage members &
- * roles" → admin. (Grant-scope stays admin|maintainer in the route,
- * matching the GitHub view.) Guards the mock did client-side (locked
- * stages, non-empty stages, self-removal, last-admin) are re-checked
+ * `edit-policy` ("Edit workflow & policy") → admin; membership CRUD =
+ * `manage-members` ("Manage members & roles") → admin — each mutation names
+ * its honest action id (pass-7 seam 4). (Grant-scope stays admin|maintainer
+ * in the route, matching the GitHub view.) Guards the mock did client-side
+ * (locked stages, non-empty stages, self-removal, last-admin) are re-checked
  * server-side with the spec-verbatim toast copy as the error message.
  */
 
@@ -64,15 +66,6 @@ export const NEW_STAGE_COLORS = [
   "var(--teal-dark)",
 ] as const;
 
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-    kind: "user",
-  });
-}
-
 function conflict(userMessage: string): AppError {
   return new AppError({
     code: ERROR_CODES.CONFLICT,
@@ -82,16 +75,19 @@ function conflict(userMessage: string): AppError {
   });
 }
 
-function requireProjectAdmin(
+function requireProjectAction(
+  db: Database.Database,
   ctx: SettingsMutationContext,
+  action: RbacAction,
   projectSlug: string,
   actor: SettingsActor,
   what: string,
   opts: { allowArchived?: boolean } = {},
 ): { projectName: string } {
-  // Single canonical guard: project settings (identity/stages/repo/members/
-  // archive/delete) are admin-only (`edit-policy` tier in ACTION_ROLES).
-  return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
+  // Single canonical guard (project-authority.server): settings mutations name
+  // their honest action id — `edit-policy` for identity/stages/repo/archive/
+  // delete, `manage-members` for membership CRUD (both admin tier today).
+  return assertProjectAction(db, action, projectSlug, actor, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     ...(opts.allowArchived ? { allowArchived: true } : {}),
   });
@@ -122,7 +118,7 @@ export async function updateProjectIdentity(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project settings");
 
   const name = input.name.trim();
   const prefix = input.prefix.trim().toUpperCase().slice(0, 4);
@@ -173,7 +169,7 @@ export async function renameStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; changed: boolean }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
   const name = input.name.trim();
   if (!name) throw AppError.validation("Stage name is required.");
 
@@ -206,7 +202,7 @@ export async function addStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; stageId: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
 
   // Server-generated id (spec §5.2 — never the mock's Date.now scheme).
   const stageId = newId("stage").toLowerCase().replace(/_/g, "-");
@@ -241,7 +237,7 @@ export async function removeStage(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
 
   // Non-empty guard re-checked at ACTION time from projections (spec §5.2 —
   // client counts can be stale).
@@ -296,7 +292,7 @@ export async function reorderStages(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "edit workflow stages");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const stages = parsed.frontmatter.stages;
@@ -352,7 +348,9 @@ export async function inviteMember(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; userId: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "manage members & roles");
+  // Honest action id (pass-7 seam 4): inviting IS member management, not a
+  // policy edit — `manage-members`, same admin tier as before.
+  requireProjectAction(db, ctx, "manage-members", input.projectSlug, actor, "manage members & roles");
 
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
@@ -400,8 +398,12 @@ export async function removeMember(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  const { projectName } = requireProjectAdmin(
+  // Honest action id (pass-7 seam 4): removal IS member management —
+  // `manage-members`, same admin tier as before.
+  const { projectName } = requireProjectAction(
+    db,
     ctx,
+    "manage-members",
     input.projectSlug,
     actor,
     "manage members & roles",
@@ -460,7 +462,7 @@ export async function setRepoOverride(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor, "change project settings");
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project settings");
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     parsed.unknownFrontmatter.taskRepoOverride = input.enabled;
@@ -496,8 +498,10 @@ export async function setProjectArchived(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string; archived: boolean }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName } = requireProjectAction(
+    db,
     ctx,
+    "edit-policy",
     input.projectSlug,
     actor,
     input.archived ? "archive this project" : "restore this project",
@@ -538,8 +542,10 @@ export async function deleteProject(
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
 ): Promise<{ toast: string }> {
-  const { projectName } = requireProjectAdmin(
+  const { projectName } = requireProjectAction(
+    db,
     ctx,
+    "edit-policy",
     input.projectSlug,
     actor,
     "delete this project",

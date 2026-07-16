@@ -23,7 +23,6 @@ import { serializeTaskFile } from "~/server/files/task-file.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { seedRuntimes } from "~/server/runtimes/runtime-seed.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   SEED_AGENT_PROFILES,
@@ -39,6 +38,11 @@ import {
  * Demo seed (replaces the phase-1 placeholder): writes the full mock
  * dataset as REAL canonical files + projections + per-user notification
  * rows, so the app boots looking like the mock.
+ *
+ * R7-2 (don't simulate at all): the seed ships ZERO fabricated run history —
+ * no agent_runs rows, no run log lines, no scripted "running"/"finished"
+ * streams. Tasks/projects/members/notifications remain; run history only
+ * ever comes from real agent runs.
  *
  * Idempotent: users are upserted by email, files are overwritten, the
  * rescan reconciles projections, notification rows use the mock's
@@ -67,8 +71,6 @@ export interface DemoSeedSummary {
   notifications: number;
   agentProfiles: number;
   rescanChanged: number;
-  runs: number;
-  runLogLines: number;
 }
 
 const DERIVED_TABLES = [
@@ -152,7 +154,8 @@ export function runDemoSeed(
     if (existsSync(profilesRoot)) {
       rmSync(profilesRoot, { recursive: true, force: true });
     }
-    // Wipe the raw runtime .jsonl truth too (rebuilt from RUNTIME_SEED).
+    // Wipe the raw runtime .jsonl truth too — a reset store starts with no
+    // run history at all (R7-2: the seed never fabricates any).
     const runtimesRoot = path.join(dataRoot, "runtimes");
     if (existsSync(runtimesRoot)) {
       rmSync(runtimesRoot, { recursive: true, force: true });
@@ -253,10 +256,9 @@ export function runDemoSeed(
     });
   }
 
-  // 7. Runtime dataset (agent_runs + run_log_lines + raw .jsonl truth) for
-  //    every runtime-bearing task; seeded running runs register their live
-  //    lines with the in-process resumer.
-  const runtimeSummary = seedRuntimes(db, { dataRoot });
+  // 7. NO runtime dataset (R7-2). The old seed fabricated 18 agent_runs +
+  //    scripted log lines here; a demo store now starts with an empty run
+  //    history — the agent-logs panel is honestly empty until a real run.
 
   // 7b. The mock's one open scope violation (viberr-core · VIB-142 ·
   //    pull_request:write) so the rail Settings badge reads 1 out of the box.
@@ -308,8 +310,6 @@ export function runDemoSeed(
     notifications: notifications.length,
     agentProfiles: SEED_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
-    runs: runtimeSummary.runs,
-    runLogLines: runtimeSummary.lines,
   };
   logger.info("demo seed complete", { ...summary });
   return summary;

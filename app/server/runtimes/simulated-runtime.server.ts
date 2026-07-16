@@ -3,19 +3,17 @@ import type { EmittedLine, RunCallbacks, RunHandle, RunSpec, RuntimeAdapter } fr
 import { projectEnvelope, rawLineFromDisplay } from "./wire-format.server";
 
 /**
- * The simulated runtime — THE default demo engine (BUILD-PLAN Phase 8).
+ * The simulated runtime — the DETERMINISTIC TEST ENGINE. R7-2: this adapter
+ * is reachable ONLY behind the fail-closed gate (runtime-registry
+ * `simulatedRuntimePermitted`: vitest, or the Playwright harness's
+ * VIBERR_FORCE_SIMULATED_RUNTIME + VIBERR_TEST_RUNTIME_OK pair). It is no
+ * longer a product fallback or demo engine — an unavailable real backend
+ * fails its run fast instead of ever streaming from here.
+ *
  * Replays a scripted stream of display LogLines, fabricating an authentic
  * wire envelope for each via `rawLineFromDisplay` so raw_json is real
  * Claude/Codex JSON and display_json is its projection (round-trips through
  * the SAME normalizer the real adapters use). Requires no external anything.
- *
- * Two modes:
- * - script(): drive a fixed line list over realistic timers (live streaming
- *   over SSE for a "running" run; instant for a backfill). Used by the seed
- *   resumer and by real-backend fallback.
- * - The run-service constructs it with a script derived from the requested
- *   backend + the mock RUNTIME data (or a generic scripted stream for a
- *   freshly-started run with no seed).
  *
  * Interrupt stops the timer and emits no result envelope → the run ends
  * `interrupted` and stays resumable (mirrors the real SIGINT behavior).
@@ -36,12 +34,11 @@ export interface SimulatedScript {
   keepRunning?: boolean;
   /** true → replay instantly (backfill of already-persisted lines). */
   instant?: boolean;
-  /** Whether this run counts as a real-backend fallback (simulated=1 but
-   *  keeps effectiveBackend=the sim engine). Default: natively simulated. */
+  /** Effective backend stamped on the exit (defaults to the sim engine). */
   effectiveBackend?: RunBackend;
 }
 
-/** Build a script from a plain line list (used by run-service / seed resumer). */
+/** Build a script from a plain line list (identity — a typed constructor). */
 export function buildScript(input: SimulatedScript): SimulatedScript {
   return input;
 }
@@ -65,10 +62,7 @@ export function createSimulatedAdapter(timers: SimTimers = REAL_TIMERS): Runtime
   };
 }
 
-/**
- * Drives a script. Exposed for the seed resumer, which streams a specific
- * live-line list for an already-persisted running run.
- */
+/** Drives a script (exported for the adapter's unit tests). */
 export function startSimulated(
   spec: RunSpec,
   cb: RunCallbacks,

@@ -42,9 +42,7 @@ import { githubWebHost } from "~/server/github/github-client.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
-import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
-import { resumeSeededRunningRuns } from "~/server/runtimes/seed-resumer.server";
+import { requireProjectAuthority } from "~/server/auth/project-authority.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
@@ -53,7 +51,7 @@ import {
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
 import { Icon } from "~/ui/icon";
-import { roleCan } from "~/shared/rbac";
+import { rolesForAction } from "~/shared/rbac";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -88,9 +86,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
-  // Runtime (Phase 8): the per-task run projection + kick the seed-resumer so
-  // seeded "running" runs drip their live lines over SSE on first subscribe.
-  resumeSeededRunningRuns(db, params.slug, params.key);
+  // Runtime (Phase 8): the per-task run projection (the seed-resumer wiring
+  // was removed with the simulated-run seed data — R7-2 / F7-VEST1).
   const runtime = listRunsForTask(db, params.slug, params.key);
 
   // Deployed specialists the "Assign specialist" menu offers; runActive
@@ -418,24 +415,24 @@ export async function action({ request, params }: Route.ActionArgs) {
       }
       case "run-operator": {
         // Run the operator agent to coordinate the task. Triggering runtime
-        // work is admin|maintainer (contracts §3.2) — the operator's OWN
-        // capability policy governs what it may then do to the task. The
-        // backend (claude|codex) and autonomy (supervised|full) are chosen for
-        // this run; full autonomy lets the operator drive to Done.
-        const role =
-          listProjectMembers(db, projectSlug).find(
-            (m) => m.userId === actor.userId,
-          )?.role ?? null;
-        // `run-agents` in the single ACTION_ROLES source (admin|maintainer) —
-        // not a hardcoded tier (pass-4 XS-10).
-        if (!roleCan(role, "run-agents")) {
-          throw new AppError({
-            code: ERROR_CODES.FORBIDDEN,
-            status: 403,
-            userMessage: "Running the operator requires the admin or maintainer role.",
-            kind: "user",
-          });
-        }
+        // work is the `run-agents` action (single ACTION_ROLES source, pass-4
+        // XS-10) resolved through the ONE authority path — org admins pass as
+        // the audited D2 override. The operator's OWN capability policy governs
+        // what it may then do to the task. The backend (claude|codex) and
+        // autonomy (supervised|full) are chosen for this run; full autonomy
+        // lets the operator drive to Done.
+        requireProjectAuthority(
+          db,
+          {
+            slug: projectSlug,
+            memberRoles: new Map(
+              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
+            ),
+          },
+          actor,
+          rolesForAction("run-agents"),
+          { action: "run-agents", what: "run the operator" },
+        );
         const backend =
           String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude";
         const autonomy =

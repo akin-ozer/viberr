@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import { ROLE_IDS, type RoleId } from "~/features/policy/policy-data";
+import { ROLE_RANK } from "~/shared/rbac";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import {
   mergeNotifPrefs,
@@ -51,7 +52,8 @@ export interface ProfileView {
   /** All project memberships, most-active project first. */
   memberships: ProfileMembership[];
   /** Highest project role across memberships (admin > maintainer >
-   * reviewer > viewer); null when the user is in no project. */
+   * contributor > viewer, the shared ROLE_RANK scale); null when the user
+   * is in no project. */
   accessRole: RoleId | null;
   prefs: {
     notifs: NotifPrefs;
@@ -59,13 +61,6 @@ export interface ProfileView {
     tlDefault: TimelineDefault;
   };
 }
-
-const ROLE_RANK: Record<RoleId, number> = {
-  admin: 4,
-  maintainer: 3,
-  contributor: 2,
-  viewer: 1,
-};
 
 /** Memberships ordered most-active project first (task count DESC, then
  * name) — the first entry drives the "visible to X members" toast and the

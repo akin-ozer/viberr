@@ -338,16 +338,21 @@ export function fullReplyTextForRun(
   return extractFullReplyText(lines);
 }
 
+/** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
+export type RunFailureKind = "quota" | "auth" | "unavailable" | "unknown";
+
 /**
  * A human-readable failure reason for a run that ended in `error` (F8): the last
  * error line the backend emitted (e.g. a Codex "usage limit" message, an auth
  * failure, a crashed tool). Returns null when the run logged no error line.
  * Classified into a short kind so the recovery packet can be specific.
+ * "unavailable" is the R7-2 fail-fast class: the backend had no usable
+ * credential, so no agent process ever started.
  */
 export function runFailureReason(
   db: Database.Database,
   runId: string,
-): { kind: "quota" | "auth" | "unknown"; text: string } | null {
+): { kind: RunFailureKind; text: string } | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
   let last: LogLine | null = null;
   for (const l of lines) {
@@ -355,13 +360,14 @@ export function runFailureReason(
   }
   if (!last?.text) return null;
   const text = last.text.trim();
-  const kind: "quota" | "auth" | "unknown" = /usage limit|quota|rate limit|too many requests|429/i.test(
-    text,
-  )
-    ? "quota"
-    : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
-      ? "auth"
-      : "unknown";
+  const kind: RunFailureKind =
+    /is unavailable|no usable credential/i.test(text)
+      ? "unavailable"
+      : /usage limit|quota|rate limit|too many requests|429/i.test(text)
+        ? "quota"
+        : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
+          ? "auth"
+          : "unknown";
   return { kind, text };
 }
 
@@ -370,11 +376,12 @@ export function runFailureReason(
 // ---------------------------------------------------- simulated reply stream
 
 /**
- * A short simulated reply stream for a resumed session so the run produces a
- * final `assistant`/`agent_message` line (→ an agent reply comment) even with
- * NO real backend. When a real backend IS available the adapter ignores the
- * script and the real transcript carries the reply instead. `instant` so the
- * reply lands promptly (and the test is deterministic).
+ * A short scripted reply stream for a resumed session on the GATED
+ * deterministic test engine (R7-2 — the caller builds it only when the gate
+ * is open), so the resumed run produces a final `assistant`/`agent_message`
+ * line (→ an agent reply comment). On a real backend the transcript carries
+ * the reply instead; with no backend and the gate closed the resume fails
+ * fast. `instant` so the reply lands promptly (and the test is deterministic).
  */
 export function buildReplyScript(
   backend: RealBackend,

@@ -6,11 +6,8 @@ import { assertCsrf } from "~/server/auth/csrf.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
-import {
-  createTask,
-  reorderTask,
-  requireProjectRole,
-} from "~/server/tasks/task-actions.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
 import { BoardPage } from "~/features/board/board-page";
 
 /**
@@ -76,16 +73,11 @@ export async function action({ request, params }: Route.ActionArgs) {
       };
     }
     if (intent === "rescan") {
-      // Re-scan rebuilds projections instance-wide — a maintenance action, not a
-      // read. Gate it to this project's admins|maintainers (matrix "Run agents &
-      // reorder the board" tier) so a viewer or non-member can't trigger a full
-      // rebuild.
-      requireProjectRole(
-        params.slug,
-        actor,
-        ["admin", "maintainer"],
-        "re-scan the project",
-      );
+      // Re-scan rebuilds projections instance-wide — a maintenance action, not
+      // a read. Gated by the canonical `rescan-project` action (maintainer+,
+      // single-sourced in ACTION_ROLES + rendered on the Policy table) so a
+      // viewer or non-member can't trigger a full rebuild.
+      assertProjectAction(db, "rescan-project", params.slug, actor, "re-scan the project");
       const summary = rescanProjections(db, { actor });
       return { ok: true as const, ...summary };
     }

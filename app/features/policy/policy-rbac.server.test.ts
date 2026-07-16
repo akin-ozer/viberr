@@ -18,8 +18,13 @@ import {
 import {
   assignSpecialist,
 } from "~/server/tasks/specialist-run.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { updateProjectIdentity, inviteMember } from "~/features/project-settings/settings-actions.server";
+import { setMemberRole } from "~/features/policy/policy-actions.server";
+import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { ROLE_RANK, rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
+import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
  * THE binding test the matrix-as-source design promises (app/shared/rbac.ts):
@@ -33,10 +38,18 @@ import { ROLE_RANK, rolesForAction, type ProjectRole, type RbacAction } from "~/
  * succeeding OR failing with a NON-403 error (a downstream validation past the
  * gate). A 403 (forbidden) means the guard denied. That lets us test the guard
  * without every action having to fully succeed.
+ *
+ * Pass-7 (R7-1 / D2): every guard is ALSO driven as an ORG-admin who is NOT a
+ * project member — the emergency override must grant project-admin authority
+ * AND leave a `project.org_admin.override` audit row on every use, while a
+ * plain org member who is a non-member stays denied.
  */
+
+const OVERRIDE_AUDIT_ACTION = "project.org_admin.override";
 
 let ctx: TestDbContext;
 let store: TestStore;
+let orgAdmin: { id: string; email: string };
 
 function actorOf(u: { id: string; email: string }) {
   return { userId: u.id, label: u.email };
@@ -56,6 +69,17 @@ async function guardAllowed(fn: () => Promise<unknown>): Promise<boolean> {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
+  // An ORG admin who is NOT a member of the test project — the D2 override
+  // subject (test-store's arda is org admin but also the project admin, so it
+  // never exercises the override path).
+  const record = insertUser(store.db, {
+    id: "u_orgadmin",
+    email: "orgadmin@viberr.test",
+    name: "Org Admin",
+    role: "admin",
+    passwordHash: null,
+  });
+  orgAdmin = { id: record.id, email: record.email };
   // A task at the work stage with an owner, so ownership/transition/packet paths
   // have something to act on.
   writeTask(store.dataRoot, store.slug, {
@@ -82,7 +106,8 @@ function usersByRole() {
 
 /**
  * For a canonical action, assert every role's guard outcome matches
- * `rolesForAction(action)`, and that a non-member is always denied.
+ * `rolesForAction(action)`, that a non-member is always denied, and that an
+ * ORG-admin non-member is always ALLOWED via the audited D2 override.
  */
 async function assertMatchesMatrix(
   action: RbacAction,
@@ -102,10 +127,29 @@ async function assertMatchesMatrix(
       `role "${role}" on action "${action}": expected ${allowed.has(role) ? "ALLOW" : "DENY"}`,
     ).toBe(allowed.has(role));
   }
-  // Non-member (deniz) is never in any ACTION_ROLES set → always denied.
+  // Non-member (deniz, org role: member) is never in any ACTION_ROLES set →
+  // always denied.
   reset?.();
   const nm = await guardAllowed(() => run(actorOf(store.users.deniz)));
   expect(nm, `non-member on action "${action}" must be denied`).toBe(false);
+  // ORG-admin non-member → ALLOWED as the D2 emergency override, and EVERY use
+  // writes a `project.org_admin.override` audit row naming the action.
+  reset?.();
+  const before = listAuditEvents(store.db, { action: OVERRIDE_AUDIT_ACTION }).length;
+  const oa = await guardAllowed(() => run(actorOf(orgAdmin)));
+  expect(
+    oa,
+    `org-admin non-member on action "${action}" must be ALLOWED (D2 override)`,
+  ).toBe(true);
+  const rows = listAuditEvents(store.db, { action: OVERRIDE_AUDIT_ACTION });
+  expect(
+    rows.length,
+    `org-admin override on "${action}" must record an audit row`,
+  ).toBeGreaterThan(before);
+  expect(rows[0]!.details?.action).toBe(action);
+  expect(rows[0]!.details?.projectSlug).toBe(store.slug);
+  expect(rows[0]!.projectSlug).toBe(store.slug);
+  expect(rows[0]!.actorUserId).toBe(orgAdmin.id);
 }
 
 /** Rewrite VIB-1 to a known stage + rebuild (for state-dependent guards). */
@@ -129,8 +173,8 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     const actions: RbacAction[] = [
       "create-task", "own-task", "reconcile-github", "approve-transition",
       "resolve-packet", "accept-completion", "run-agents", "reorder-board",
-      "update-goal", "grant-github-scope", "release-any-ownership",
-      "manage-members", "manage-agents", "edit-policy",
+      "update-goal", "grant-github-scope", "rescan-project",
+      "release-any-ownership", "manage-members", "manage-agents", "edit-policy",
     ];
     for (const a of actions) {
       const roles = rolesForAction(a).map((r) => ROLE_RANK[r]).sort((x, y) => x - y);
@@ -191,6 +235,12 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     );
   });
 
+  it("rescan-project (board re-scan) → maintainer+ (action id, not a hardcoded role list)", async () => {
+    await assertMatchesMatrix("rescan-project", async (actor) =>
+      assertProjectAction(store.db, "rescan-project", store.slug, actor, "re-scan the project", { dataRoot: store.dataRoot }),
+    );
+  });
+
   it("ownership hand-off REQUIRES the target can own (contributor+) — a viewer target is rejected", async () => {
     // Clean tiering: a viewer can't hold the owner seat, so an admin can't hand
     // ownership TO a viewer (elif) even though the admin may otherwise assign it.
@@ -211,5 +261,103 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
       { dataRoot: store.dataRoot },
     );
     expect(ok).toBeTruthy();
+  });
+});
+
+describe("D2 org-admin emergency override (R7-1)", () => {
+  const fileCtx = () => ({ dataRoot: store.dataRoot });
+  const overrideRows = () =>
+    listAuditEvents(store.db, { action: OVERRIDE_AUDIT_ACTION });
+
+  it("config-surface guards admit an org-admin non-member — audited per use", async () => {
+    // edit-policy (project settings identity).
+    const settings = await updateProjectIdentity(
+      store.db,
+      { projectSlug: store.slug, name: "Viberr Core", prefix: "VIB", description: "Overridden." },
+      actorOf(orgAdmin),
+      fileCtx(),
+    );
+    expect(settings.toast).toBeTruthy();
+    // manage-members (invite + role change).
+    await inviteMember(
+      store.db,
+      { projectSlug: store.slug, name: "New Person", email: "newperson@viberr.test" },
+      actorOf(orgAdmin),
+      fileCtx(),
+    );
+    await setMemberRole(
+      store.db,
+      { projectSlug: store.slug, targetUserId: store.users.elif.id, role: "contributor" },
+      actorOf(orgAdmin),
+      fileCtx(),
+    );
+    const rows = overrideRows();
+    expect(rows.length).toBe(3);
+    const auditedActions = rows.map((r) => r.details?.action).sort();
+    expect(auditedActions).toEqual(["edit-policy", "manage-members", "manage-members"]);
+    for (const row of rows) {
+      expect(row.actorUserId).toBe(orgAdmin.id);
+      expect(row.projectSlug).toBe(store.slug);
+      expect(row.details?.projectSlug).toBe(store.slug);
+    }
+  });
+
+  it("the any-member route gate admits an org-admin non-member with an audit row + override flag", () => {
+    const grant = assertProjectAction(
+      store.db,
+      "any-member",
+      store.slug,
+      actorOf(orgAdmin),
+      "view this project's policy",
+      { dataRoot: store.dataRoot, allowArchived: true },
+    );
+    expect(grant.role).toBe("admin");
+    expect(grant.isOrgAdminOverride).toBe(true);
+    const rows = overrideRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.details?.action).toBe("any-member");
+  });
+
+  it("an org admin acting within their OWN sufficient membership is NOT an override (no row)", async () => {
+    // arda is org admin AND the project admin — the membership role grants.
+    const grant = assertProjectAction(
+      store.db,
+      "edit-policy",
+      store.slug,
+      actorOf(store.users.arda),
+      "change project settings",
+      { dataRoot: store.dataRoot },
+    );
+    expect(grant.role).toBe("admin");
+    expect(grant.isOrgAdminOverride).toBe(false);
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "No override here", goal: "a valid goal for the probe" },
+      actorOf(store.users.arda),
+      fileCtx(),
+    );
+    expect(overrideRows()).toHaveLength(0);
+  });
+
+  it("a plain org MEMBER non-member stays denied on config surfaces (no override, no row)", async () => {
+    await expect(
+      updateProjectIdentity(
+        store.db,
+        { projectSlug: store.slug, name: "Nope", prefix: "VIB", description: "" },
+        actorOf(store.users.deniz),
+        fileCtx(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(() =>
+      assertProjectAction(
+        store.db,
+        "any-member",
+        store.slug,
+        actorOf(store.users.deniz),
+        "view this project's policy",
+        { dataRoot: store.dataRoot, allowArchived: true },
+      ),
+    ).toThrowError(/Only project members/);
+    expect(overrideRows()).toHaveLength(0);
   });
 });

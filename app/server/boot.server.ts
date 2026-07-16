@@ -126,9 +126,9 @@ export function bootServer(): void {
   // Finalize non-terminal runs at boot (F-RUN1 + R6-5): a run left
   // `running`/`queued` has no live process in this fresh boot. Real orphans
   // become `error` (interrupted-by-restart) and their tasks are re-coordinated;
-  // seeded demo runs become `finished` so they never masquerade as live
-  // (Viberr Core goes quiet unless a real agent runs). This REPLACES the old
-  // seed-resumer that re-animated seeded "running" runs over SSE. Runs BEFORE
+  // simulated rows (historical pre-R7-2 demo/fallback data — the seed no
+  // longer creates any) become `finished` so they never masquerade as live.
+  // Runs BEFORE
   // the reply recovery below so a just-finalized run is a clean terminal state.
   try {
     finalizeOrphanedRuns(db);

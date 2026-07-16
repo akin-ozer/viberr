@@ -62,12 +62,17 @@ export function getTaskSummary(
     .get(slug, key) as TaskProjectionRow | undefined;
   if (!row) return null;
   const project = getProject(db, slug);
-  const stageIds = project ? project.stages.map((s) => s.id) : [];
+  const stages = project
+    ? project.stages.map((s) => ({ id: s.id, name: s.name }))
+    : [];
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
   return mapTaskProjectionRow(row, {
-    stageIds,
+    stages,
     owner: resolveTaskOwner(db, row.owner_user_id, memberIds),
-    accepted: isAcceptedDisplayState({ stage: row.stage, stageIds }),
+    accepted: isAcceptedDisplayState({
+      stage: row.stage,
+      stageIds: stages.map((s) => s.id),
+    }),
   });
 }
 

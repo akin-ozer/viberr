@@ -59,9 +59,10 @@ describe("HumanAccess", () => {
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
     // Grant rows (derived from PROJECT_CAP_MATRIX).
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(12);
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(13);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
+    expect(getByText("Re-scan project files & projections")).toBeTruthy();
 
     // Selecting a new role dispatches; re-selecting the current one no-ops.
     const selinSeg = container.querySelectorAll(".mini-seg")[3]!;

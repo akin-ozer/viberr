@@ -68,6 +68,17 @@ Status: OPEN / FIXED / RULED / WONTFIX. Implementation phase must close every OP
   identical reviewer dispatches (same class as F7-OP1). Related root-cause data for F7-REV1:
   VIB-5's reviewer report DID post to the timeline while VIB-2's (starting with "## Review
   verdict:" heading) did NOT — compare extraction paths on these two runs in phase 3.
+  ROOT-CAUSE PROGRESS (phase 3 inline): NOT the extractor (both runs' last assistant text
+  line was the full report: 3314/1621 chars), NOT the meaningful-comment guardrail (audit
+  `task.agent.replied {runId}` for run_Sq72KU_Vy3QV has no droppedByGuardrail), NOT compaction
+  (compactTimelineEvents guards `actor.kind !== "agent"` and there are 0 markers on VIB-2).
+  Remaining suspects for the wave: (a) `reconcileWorkspaceDelivery` runs for REVIEWER runs too
+  (kind not checked) — a reviewer's clone can be on the task branch and its read-modify-write
+  of task.md may race the just-posted comment (both awaited in applyAgentCompletionEffects but
+  the reviewer clone read/write + reproject sequence is a candidate for a lost update); (b)
+  reviewer runs shouldn't reconcile *delivery* at all (reviewers don't deliver). Repro via a
+  test that runs a reviewer completion whose reply is long + whose clone is on the task branch,
+  assert the agent reply comment survives. Also gate reconcileWorkspaceDelivery to primary kind.
 - **F7-FLOW1 · MED · OPEN — no agent-drivable rework path out of a failed review.** Developer
   is stage-eligible Ready/In Progress only (seeded default), Review's only forward edge is
   Done, and the operator can't move a task backward — every failed review requires a human to

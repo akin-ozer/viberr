@@ -234,6 +234,7 @@ export function Timeline({
   ask,
   mentionables,
   onAgentLog,
+  taskClosed,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -248,6 +249,9 @@ export function Timeline({
   /** BUG 3: when an @agent comment triggers a run, the server returns the
    *  grouped Agent-logs id to auto-select + stream. Fired once per success. */
   onAgentLog?: (threadId: string) => void;
+  /** Terminal-stage task (R7-6): comments stay ENABLED — only a subtle hint
+   *  above the composer says the task is closed. */
+  taskClosed?: boolean;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
@@ -351,6 +355,12 @@ export function Timeline({
       </div>
 
       <div className="composer">
+        {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
+        {taskClosed && (
+          <div style={{ fontSize: ".72rem", color: "var(--faint)" }}>
+            This task is closed — comments are still recorded.
+          </div>
+        )}
         <div className="composer-box">
           <div className="composer-input" style={{ position: "relative" }}>
             {/* Highlight backdrop: mirrors the draft with @mentions styled,

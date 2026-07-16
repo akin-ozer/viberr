@@ -11,6 +11,7 @@ import {
   createActorResolver,
   initialsOfName,
 } from "~/shared/mapping/actor.server";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 
 /**
  * Home (`/`) read models — the project directory + org tile summaries
@@ -19,8 +20,11 @@ import {
  * - `running`: tasks with waiting === "agent" ("agents working") — the
  *   honest Phase-4 stand-in for active runtime runs; Phase 8's run registry
  *   replaces the derivation, not the field.
- * - `waiting`: open decision packets, PROJECT-WIDE (ruling 10 — the
- *   "waiting on you" copy stays, scoping is V1-deliberate).
+ * - `waiting`: LIVE pending decisions, PROJECT-WIDE (ruling 10 — the
+ *   "waiting on you" copy stays, scoping is V1-deliberate). Same rule as the
+ *   notifications page's "Waiting on you" bucket (F7-NOTIF1): tasks with an
+ *   open packet OR a pending operator recommendation, excluding the terminal
+ *   stage — keep the two surfaces in step.
  * - `accent`: stable per-slug hash over the mock palette (the mock's
  *   index-based accents shift when projects are created — spec §8 note 6).
  */
@@ -95,7 +99,6 @@ export function listHomeProjectsForUser(
 interface HomeTaskAgg {
   total: number;
   running: number;
-  waiting: number;
   updated_at: string | null;
 }
 
@@ -106,14 +109,22 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
   // loading every task row — JSON blob columns and all — into JS just to tally
   // them (pass-4 WI-9). Two GROUP BY queries cover all projects at once.
   //
-  // Per-stage distribution:
+  // Per-stage distribution + per-stage pending decisions. `w` counts tasks
+  // with an open packet OR a pending operator recommendation — the SAME live
+  // rule the notifications "Waiting on you" bucket applies (F7-NOTIF1); the
+  // terminal stage is excluded per project below (needs the stage list).
   const distBySlug = new Map<string, Record<string, number>>();
+  const waitingByStage = new Map<string, Map<string, number>>();
   const distRows = db
     .prepare(
-      `SELECT project_slug, stage, COUNT(*) AS n FROM task_projections
+      `SELECT project_slug, stage, COUNT(*) AS n,
+              SUM(CASE WHEN (packet_json IS NOT NULL AND packet_json <> '')
+                         OR recommendation_count > 0
+                       THEN 1 ELSE 0 END) AS w
+       FROM task_projections
        GROUP BY project_slug, stage`,
     )
-    .all() as { project_slug: string; stage: string; n: number }[];
+    .all() as { project_slug: string; stage: string; n: number; w: number }[];
   for (const r of distRows) {
     let d = distBySlug.get(r.project_slug);
     if (!d) {
@@ -121,29 +132,32 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
       distBySlug.set(r.project_slug, d);
     }
     d[r.stage] = r.n;
+    let w = waitingByStage.get(r.project_slug);
+    if (!w) {
+      w = new Map();
+      waitingByStage.set(r.project_slug, w);
+    }
+    w.set(r.stage, r.w);
   }
 
-  // Per-project totals: task count, open decision packets, and the latest
-  // updatedAt. `waiting` = tasks with a non-empty packet_json.
+  // Per-project totals: task count and the latest updatedAt.
   const aggBySlug = new Map<string, HomeTaskAgg>();
   const aggRows = db
     .prepare(
       `SELECT project_slug,
               COUNT(*) AS total,
-              SUM(CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
-                       THEN 1 ELSE 0 END) AS waiting,
               MAX(updated_at) AS updated_at
        FROM task_projections
        GROUP BY project_slug`,
     )
-    .all() as { project_slug: string; total: number; waiting: number; updated_at: string }[];
+    .all() as { project_slug: string; total: number; updated_at: string }[];
 
   // `running` = "agents running" — count projects' tasks with a REAL (non-
   // simulated) run actually in flight, NOT the task's waiting=agent governance
-  // state. A seeded demo task can sit at waiting=agent with no live process
-  // (R6-5); counting that as a running agent is the exact "masquerading as live"
-  // the ruling forbids. This makes home's "N runs active" honest: it reflects
-  // genuine live agent runs only.
+  // state. The seed no longer fabricates runs (R7-2), so the simulated=0
+  // filter is mostly belt-and-braces now — it still excludes historical
+  // pre-R7-2 rows and gated test-engine runs (the column stays). This keeps
+  // home's "N runs active" honest: genuine live agent runs only.
   const runningBySlug = new Map<string, number>();
   const runningRows = db
     .prepare(
@@ -159,7 +173,6 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     aggBySlug.set(r.project_slug, {
       total: r.total,
       running: runningBySlug.get(r.project_slug) ?? 0,
-      waiting: r.waiting,
       updated_at: r.updated_at,
     });
   }
@@ -178,6 +191,13 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     });
 
     const agg = aggBySlug.get(project.slug);
+    // Live "waiting on you" (F7-NOTIF1): sum the per-stage pending-decision
+    // counts, skipping the project's terminal stage — a Done task's leftover
+    // packet/recommendation is a resolved decision, not a pending one.
+    let waiting = 0;
+    for (const [stage, w] of waitingByStage.get(project.slug) ?? []) {
+      if (!isTerminalStage(stage, project.stages)) waiting += w;
+    }
     return {
       slug: project.slug,
       name: project.name,
@@ -193,7 +213,7 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
       dist: distBySlug.get(project.slug) ?? {},
       total: agg?.total ?? 0,
       running: agg?.running ?? 0,
-      waiting: agg?.waiting ?? 0,
+      waiting,
       members,
       updatedAt: agg?.updated_at ?? project.parsedAt,
       accent: accentForSlug(project.slug),

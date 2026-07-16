@@ -86,12 +86,13 @@ a separate worker user/container with only the task workspace mounted, plus
 server-owned Git push/PR delivery so repository credentials never enter the
 agent's environment.
 
-Without any credential the app falls back to the built-in **simulated** backend (runs
-still stream in the UI, clearly labelled). Confirm what's active:
+Without any credential a backend is **unavailable**: starting a run on it fails fast
+with an honest error run + a blocked recovery packet (there is no simulated fallback).
+Confirm what's active:
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .backends
-# {"claude":"real","codex":"simulated"}   ← claude credential reached the container
+# {"claude":"real","codex":"unavailable"}   ← claude credential reached the container
 ```
 
 `real` means the credential is present (SDK executes); it is not a validity check — an

@@ -366,9 +366,10 @@ export function rebuildTaskFile(
        (project_slug, task_key, title, stage, readiness, stored_readiness,
         waiting, urgent, validation, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
-        goal, packet_json, event_count, comment_count, diagnostic_count,
-        created_at, updated_at, board_rank, source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        goal, packet_json, recommendation_count, event_count, comment_count,
+        diagnostic_count, created_at, updated_at, board_rank, source_path,
+        content_hash, parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -379,7 +380,9 @@ export function rebuildTaskFile(
        operator_json = excluded.operator_json, branch = excluded.branch,
        repo = excluded.repo, pr_json = excluded.pr_json,
        github_json = excluded.github_json, goal = excluded.goal,
-       packet_json = excluded.packet_json, event_count = excluded.event_count,
+       packet_json = excluded.packet_json,
+       recommendation_count = excluded.recommendation_count,
+       event_count = excluded.event_count,
        comment_count = excluded.comment_count,
        diagnostic_count = excluded.diagnostic_count,
        created_at = excluded.created_at, updated_at = excluded.updated_at,
@@ -406,6 +409,7 @@ export function rebuildTaskFile(
     fm.github ? JSON.stringify(fm.github) : null,
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
+    fm.recommendations.length,
     parsed.timeline.length,
     commentCount,
     allDiagnostics.length,

@@ -11,7 +11,6 @@ import type {
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -34,7 +33,11 @@ import {
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import type { LogLine } from "~/features/runtime/runtime-types";
-import { isBackendAvailable, type RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  isBackendAvailable,
+  simulatedRuntimePermitted,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -47,7 +50,8 @@ import {
 } from "~/server/runtimes/simulated-runtime.server";
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { roleCan } from "~/shared/rbac";
+import { rolesForAction } from "~/shared/rbac";
+import { requireProjectAuthority } from "~/server/auth/project-authority.server";
 import {
   type DeliveryPermissions,
   resolveDeliveryPermissions,
@@ -80,15 +84,6 @@ import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 const execFileAsync = promisify(execFile);
 
 // ----------------------------------------------------------------- helpers
-
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-    kind: "user",
-  });
-}
 
 function taskRef(
   ctx: TaskMutationContext,
@@ -235,6 +230,7 @@ export async function assignSpecialist(
   ctx: TaskMutationContext = {},
 ): Promise<AssignSpecialistResult> {
   const auditActor = runtimeAuditActor(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -320,6 +316,7 @@ export async function assignReviewer(
   ctx: TaskMutationContext = {},
 ): Promise<AssignReviewerResult> {
   const auditActor = runtimeAuditActor(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -414,7 +411,7 @@ export async function removeReviewer(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<RemoveReviewerResult> {
-  requireRuntimeRole(ctx, input.projectSlug, actor, "remove a reviewer");
+  requireRuntimeRole(db, ctx, input.projectSlug, actor, "remove a reviewer");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -495,6 +492,7 @@ export async function startSpecialistRun(
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
   const auditActor = runtimeAuditActor(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -576,9 +574,10 @@ export async function startSpecialistRun(
   const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
 
   // Best-effort clone — only when a REAL backend will actually consume a
-  // working tree. With no credential the simulated engine carries the run and
-  // needs no checkout, so we skip the network clone entirely (keeps the demo
-  // and the test suite fast + offline). Still best-effort even when real.
+  // working tree. With no credential the run either fails fast in startRun
+  // (R7-2) or the gated test engine carries it — neither needs a checkout, so
+  // we skip the network clone entirely (keeps the test suite fast + offline).
+  // Still best-effort even when real.
   const realBackend = isBackendAvailable(backend);
   const clone =
     repo && realBackend
@@ -616,14 +615,20 @@ export async function startSpecialistRun(
   });
   const prompt = analyzePrompt;
 
-  const script = buildAnalyzeScript({
-    backend,
-    model,
-    repo,
-    cloned: !!clone,
-    role: sp.role,
-    ...(input.directive ? { directive: input.directive } : {}),
-  });
+  // R7-2: the canned analyze stream feeds ONLY the gated deterministic test
+  // engine — a real run never receives one, and an unavailable backend now
+  // fails fast in startRun instead of falling back to this fabrication.
+  const script =
+    !realBackend && simulatedRuntimePermitted()
+      ? buildAnalyzeScript({
+          backend,
+          model,
+          repo,
+          cloned: !!clone,
+          role: sp.role,
+          ...(input.directive ? { directive: input.directive } : {}),
+        })
+      : undefined;
 
   const { runId, simulated } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -644,7 +649,7 @@ export async function startSpecialistRun(
     agentName,
     agentProfileId: sp.profileId,
     prompt,
-    script,
+    ...(script ? { script } : {}),
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
     // Wire the profile's declared MCP servers into the run (item-1/FR9): a
@@ -717,7 +722,7 @@ export async function startSpecialistRun(
 /**
  * Starts a REVIEWER run for a specific engaged reviewer (by profile id) —
  * the reviewer counterpart of {@link startSpecialistRun}. Same analyze prompt +
- * best-effort clone + simulated-fallback script, but the run is `kind:
+ * best-effort clone + gated test-engine script, but the run is `kind:
  * "reviewer"` on its own `r<index>-…` thread so it groups under the reviewer's
  * own Agent-logs entry. RBAC: admin|maintainer.
  */
@@ -735,6 +740,7 @@ export async function startReviewerRun(
   ctx: TaskMutationContext = {},
 ): Promise<StartSpecialistRunResult> {
   const auditActor = runtimeAuditActor(
+    db,
     ctx,
     input.projectSlug,
     actor,
@@ -833,14 +839,19 @@ export async function startReviewerRun(
   });
   const prompt = analyzePrompt;
 
-  const script = buildAnalyzeScript({
-    backend,
-    model,
-    repo,
-    cloned: !!clone,
-    role: rev.role,
-    ...(input.directive ? { directive: input.directive } : {}),
-  });
+  // R7-2: canned stream for the gated deterministic test engine only (see
+  // startSpecialistRun — same rationale).
+  const script =
+    !realBackend && simulatedRuntimePermitted()
+      ? buildAnalyzeScript({
+          backend,
+          model,
+          repo,
+          cloned: !!clone,
+          role: rev.role,
+          ...(input.directive ? { directive: input.directive } : {}),
+        })
+      : undefined;
 
   const { runId, simulated } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -857,7 +868,7 @@ export async function startReviewerRun(
     agentName,
     agentProfileId: rev.profileId,
     prompt,
-    script,
+    ...(script ? { script } : {}),
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
     ...mcpServersFor(db, mcpNames),
@@ -1070,15 +1081,18 @@ function classifyRole(role?: string): "developer" | "reviewer" {
 }
 
 /**
- * The simulated agent's CLOSING report — ROLE-AWARE, so the operator reads a
- * report that matches the agent it prompted: the Developer reports what it
- * implemented, the Reviewer reports a review verdict, the Tester reports a
- * validation verdict. When the operator engaged the agent with a directive this
- * reports the work as DONE (otherwise the operator, reading only a "findings"
- * summary, keeps re-prompting the same canned reply and spirals — the CTL-3
- * bug). The text is deterministic on purpose: if the operator ever re-prompts a
- * simulated agent, the identical repeat trips its no-progress guard and stops
- * the loop instead of spiralling. Exported for tests.
+ * The TEST-ENGINE agent's CLOSING report (R7-2: this text can only ever
+ * stream inside the gated deterministic test runtime — production/dev runs
+ * either use a real backend or fail fast, never this fabrication). ROLE-AWARE,
+ * so the operator reads a report that matches the agent it prompted: the
+ * Developer reports what it implemented, the Reviewer reports a review
+ * verdict, the Tester reports a validation verdict. When the operator engaged
+ * the agent with a directive this reports the work as DONE (otherwise the
+ * operator, reading only a "findings" summary, keeps re-prompting the same
+ * canned reply and spirals — the CTL-3 bug). The text is deterministic on
+ * purpose: if the operator ever re-prompts a simulated agent, the identical
+ * repeat trips its no-progress guard and stops the loop instead of
+ * spiralling. Exported for tests.
  */
 export function simulatedFinalReport(
   backend: RealBackend,
@@ -1113,9 +1127,10 @@ export function simulatedFinalReport(
 }
 
 /**
- * A realistic dev-agent-analyzing-a-repo stream for the simulated fallback:
- * system·init, a couple of tool_use Read/Bash lines, an assistant findings
- * summary, and a final result envelope with usage. Ignored by a real SDK run.
+ * A realistic dev-agent-analyzing-a-repo stream for the GATED deterministic
+ * test engine (R7-2 — built only when the gate is open and no real backend
+ * carries the run): system·init, a couple of tool_use Read/Bash lines, an
+ * assistant findings summary, and a final result envelope with usage.
  */
 function buildAnalyzeScript(input: {
   backend: RealBackend;
@@ -1379,22 +1394,25 @@ function reproject(
  *  human runtime RBAC. Operator authority is gated upstream by its capability
  *  policy (operator-actions.server), so operator callers skip the human check. */
 function runtimeAuditActor(
+  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
   what: string,
 ): { userId: string | null; label: string } {
   if (ctx.operatorAuthorized) return { userId: null, label: "operator" };
-  requireRuntimeRole(ctx, projectSlug, actor, what);
+  requireRuntimeRole(db, ctx, projectSlug, actor, what);
   return { userId: actor.userId, label: actor.label };
 }
 
 /**
- * RBAC gate reused by both fns: admin|maintainer against project membership
- * (contracts §3.2 "Open agent runtime sessions"). Mirrors the check
- * transition/interrupt use.
+ * RBAC gate reused by both fns: the `run-agents` action against project
+ * membership (contracts §3.2 "Open agent runtime sessions"), resolved through
+ * the ONE authority path (project-authority.server) — org admins pass as the
+ * audited D2 override. Mirrors the check transition/interrupt use.
  */
 function requireRuntimeRole(
+  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1405,14 +1423,18 @@ function requireRuntimeRole(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
-  const role = file.parsed.frontmatter.members.find(
-    (m) => m.userId === actor.userId,
-  )?.role;
-  if (!role) throw forbidden(`Only project members can ${what}.`);
-  if (!roleCan(role, "run-agents")) {
-    throw forbidden(`Your project role (${role}) cannot ${what}.`);
-  }
-  return role;
+  return requireProjectAuthority(
+    db,
+    {
+      slug: projectSlug,
+      memberRoles: new Map(
+        file.parsed.frontmatter.members.map((m) => [m.userId, m.role]),
+      ),
+    },
+    actor,
+    rolesForAction("run-agents"),
+    { action: "run-agents", what },
+  ).role;
 }
 
 /** One deployed specialist as the task-detail assign menu offers it. */

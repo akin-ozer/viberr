@@ -4,7 +4,7 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { assertProjectAction } from "~/server/auth/project-role-guard.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
@@ -92,16 +92,18 @@ function forbidden(userMessage: string): AppError {
   });
 }
 
-function requireProjectAdmin(
+function requireProjectAction(
+  db: Database.Database,
   ctx: ProfileMutationContext,
   projectSlug: string,
   actor: ProfileActor,
 ): { projectName: string } {
   // Single canonical guard: agent profile CRUD is admin-only (`manage-agents`).
   return assertProjectAction(
+    db,
     "manage-agents",
     projectSlug,
-    actor.userId,
+    actor,
     "change agent capability policy",
     { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
   );
@@ -195,7 +197,7 @@ export async function createAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  const { projectName } = requireProjectAdmin(ctx, input.projectSlug, actor);
+  const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
 
   const ref = {
@@ -267,7 +269,7 @@ export async function updateAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
 
   const ref = {
@@ -345,7 +347,7 @@ export async function deleteAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  requireProjectAction(db, ctx, input.projectSlug, actor);
 
   const ref = {
     projectSlug: input.projectSlug,

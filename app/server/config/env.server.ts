@@ -86,9 +86,9 @@ const envSchema = z.object({
     .min(8, "must be at least 8 characters")
     .optional(),
 
-  // Optional runtime-backend API keys (Phase 8). When absent the requested
-  // real backend falls back to the simulated engine (simulated=1, requested
-  // backend kept for glyph fidelity). Presence is a cheap auth check — the
+  // Optional runtime-backend API keys (Phase 8). When absent the backend is
+  // UNAVAILABLE and runs on it fail fast with an honest error (R7-2 — no
+  // simulated fallback). Presence is a cheap auth check — the
   // registry NEVER makes a paid call to detect availability.
   //  - Claude Agent SDK: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (from
   //    `claude setup-token` — the subscription/OAuth path), or set

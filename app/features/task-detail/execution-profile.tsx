@@ -462,6 +462,7 @@ export function ExecutionProfile({
   onRemoveReviewer,
   operatorBusy,
   onRunOperator,
+  operatorRunActive,
 }: {
   task: TaskSummary;
   meId: string;
@@ -476,6 +477,9 @@ export function ExecutionProfile({
   canRunAgents: boolean;
   /** A run for this task is currently running — disables Run. */
   runActive: boolean;
+  /** A LIVE operator run (queued/running) exists — the only state honest
+   * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
+  operatorRunActive: boolean;
   /** The assign/run fetcher is in flight. */
   runBusy: boolean;
   onAssignSpecialist: (profileId: string) => void;
@@ -506,20 +510,23 @@ export function ExecutionProfile({
   // G9: a task at the terminal (Done) stage is closed — its runtime action
   // buttons (Run operator / Run specialist / Run reviewer) are disabled so a
   // closed task doesn't advertise live controls.
-  const closed = task.displayReadiness === "accepted";
+  const closed =
+    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="agents" />
         <h2>Execution profile</h2>
-        {(closed || task.operator) && (
+        {(closed || operatorRunActive) && (
           <span className="right">
             {closed && (
               <Pill kind="done" sm>
                 task closed
               </Pill>
             )}
-            {task.operator && (
+            {/* F7-UI1: "operator active" means a LIVE operator run, not mere
+                attachment — an attached-but-idle operator shows nothing. */}
+            {operatorRunActive && (
               <Pill kind="agent" dot>
                 operator active
               </Pill>

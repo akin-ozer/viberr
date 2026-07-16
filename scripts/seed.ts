@@ -38,8 +38,6 @@ console.log(
     `  timeline events ${summary.events}`,
     `  notifications  ${summary.notifications}`,
     `  agent profiles ${summary.agentProfiles}`,
-    `  agent runs     ${summary.runs}`,
-    `  run log lines  ${summary.runLogLines}`,
     `  projections changed ${summary.rescanChanged}`,
     `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
     `  org skills     ${org.skills}`,

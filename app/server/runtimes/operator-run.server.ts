@@ -37,7 +37,11 @@ import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
-import { isBackendAvailable, type RealBackend } from "./runtime-registry.server";
+import {
+  isBackendAvailable,
+  simulatedRuntimePermitted,
+  type RealBackend,
+} from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
 import { buildScript } from "./simulated-runtime.server";
 
@@ -56,9 +60,13 @@ import { buildScript } from "./simulated-runtime.server";
  *     same gated operator-actions as the Claude tools — so Codex honors the
  *     identical RBAC + autonomy, it just plans-then-executes instead of
  *     calling tools live.
- *   neither backend available → SCRIPTED drive: the same operator-actions are
- *     called deterministically in code (the board still advances honestly), and
- *     a simulated run streams the narrative to the agent logs.
+ *   R7-2 test gate open (vitest / Playwright) → SCRIPTED drive: the same
+ *     operator-actions are called deterministically in code (the board still
+ *     advances honestly), and a simulated run streams the narrative to the
+ *     agent logs. Unreachable in production/dev.
+ *   no credential, gate closed → NO fabricated drive: the run starts anyway
+ *     and startRun fails it fast as an honest error; the completion hook
+ *     escalates a blocked recovery packet (F-OP1 path, "unavailable" class).
  */
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
@@ -275,7 +283,10 @@ export async function runOperator(
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
   // model emits a decision plan we execute through the same capability-gated
-  // actions). Neither available → deterministic scripted drive. The real/codex
+  // actions). The deterministic scripted drive is reachable ONLY inside the
+  // R7-2 test gate; with no credential and the gate closed the real path runs
+  // anyway — startRun fails it fast as an honest error run and the completion
+  // hook escalates (no fabricated coordination). The real/codex
   // paths release the lease on run COMPLETION (chained callback); only a
   // SYNCHRONOUS throw before that reaches the outer catch. The scripted path is
   // synchronous, so it releases in its own finally — the outer catch must NOT
@@ -288,12 +299,20 @@ export async function runOperator(
     if (backend === "codex" && isBackendAvailable("codex")) {
       return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
     }
-    try {
-      return await runScriptedOperatorDrive(db, ctx, input, authority);
-    } finally {
-      // Scripted coordination is fully synchronous with this call.
-      releaseOperatorLease(db, leaseKey, leaseToken);
+    if (simulatedRuntimePermitted()) {
+      try {
+        return await runScriptedOperatorDrive(db, ctx, input, authority);
+      } finally {
+        // Scripted coordination is fully synchronous with this call.
+        releaseOperatorLease(db, leaseKey, leaseToken);
+      }
     }
+    // R7-2 fail-fast: the backend is unavailable and no test engine is
+    // permitted. Start the honest error run through the backend's own path —
+    // its completion callback releases the lease and escalates the failure.
+    return backend === "codex"
+      ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken)
+      : await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
   } catch (error) {
     releaseOperatorLease(db, leaseKey, leaseToken);
     throw error;
@@ -738,7 +757,9 @@ async function escalateFailedOperatorRun(
         ? "the coordinating model is over its usage quota"
         : reason?.kind === "auth"
           ? "the coordinating model's credential was rejected"
-          : "the coordinating run did not complete";
+          : reason?.kind === "unavailable"
+            ? "the coordinating backend has no usable credential configured (the run was refused — no agent process started)"
+            : "the coordinating run did not complete";
     logger.warn("real operator run failed — escalating", {
       taskKey: input.taskKey,
       runId,

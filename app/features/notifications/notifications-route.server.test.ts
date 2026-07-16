@@ -75,16 +75,27 @@ describe("/notifications", () => {
     expect(bil.projectName).toBe("Billing Service");
   });
 
-  it("splits packets+approvals into the needs-you panel; unread filter applies to both", async () => {
+  it("splits LIVE packets+approvals into the needs-you panel; unread filter applies to both", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const { notifications } = await runLoader(cookie);
 
     const all = splitNotifications(notifications, "all");
-    expect(all.needs).toHaveLength(5); // 3 packets + 2 approvals
+    // F7-NOTIF1: the waiting bucket holds only decisions still pending on the
+    // LIVE task record — 3 open packets (VIB-160 / DEP-31 / VIB-142) + BIL-9's
+    // pending transition recommendation. The n-145-approval row is seeded
+    // STALE (VIB-145 already sits in Review with no pending recommendation),
+    // so it belongs to the stream, not "Waiting on you".
+    expect(all.needs.map((n) => n.id).sort()).toEqual([
+      "n-142-packet",
+      "n-160-packet",
+      "n-bil-9",
+      "n-dep-31",
+    ]);
     expect(
       all.needs.every((n) => n.kind === "packet" || n.kind === "approval"),
     ).toBe(true);
-    expect(all.rest).toHaveLength(5); // mentions / quality / policy
+    expect(all.rest).toHaveLength(6); // mentions / quality / policy + stale approval
+    expect(all.rest.map((n) => n.id)).toContain("n-145-approval");
 
     const unread = splitNotifications(notifications, "unread");
     expect(unread.needs.every((n) => n.unread)).toBe(true);
@@ -112,6 +123,13 @@ describe("/notifications", () => {
     expect(
       after.notifications.find((n) => n.id === "n-142-packet")?.unread,
     ).toBe(false);
+    // F7-NOTIF1: the resolved packet's row also leaves the waiting bucket —
+    // reconciled against the live task record at read time, not deleted.
+    const resolved = after.notifications.find((n) => n.id === "n-142-packet")!;
+    expect(resolved.waitingOnYou).toBe(false);
+    expect(
+      splitNotifications(after.notifications, "all").rest.map((n) => n.id),
+    ).toContain("n-142-packet");
   });
 
   it("mark-all-read via the ONE shared read action drops unread to zero", async () => {

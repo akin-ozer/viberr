@@ -5,14 +5,21 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
 
 /**
  * Route-level tests for the Phase-8 runtime wiring on routes/project.task:
- * the loader's `runtime` projection shape (VIB-142/151/166) and the
- * `run-interrupt` action's RBAC + audit through a real Request.
+ * the loader's `runtime` projection shape and the `run-interrupt` action's
+ * RBAC + audit through a real Request.
  *
+ * R7-2: the demo seed ships ZERO fabricated runs, so this file creates its
+ * own runs through the run-service (the gated deterministic test engine —
+ * vitest is inside the gate) instead of reading seeded run history:
+ *   - a finished run on VIB-142 (persisted lines + raw envelopes),
+ *   - a keepRunning run on VIB-151 (the interrupt target).
  * One seed per file; read-only assertions before the mutating interrupt.
  */
 
 let app: AppTestContext;
 let ids: { arda: string; selin: string };
+let finishedRunId: string;
+let runningRunId: string;
 
 type LoaderData = Awaited<ReturnType<typeof taskLoader>>;
 type ActionData = Awaited<ReturnType<typeof taskAction>>;
@@ -26,6 +33,85 @@ beforeAll(async () => {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
     selin: findUserByEmail(app.db, "selin@viberr.dev")!.id,
   };
+
+  // The seed ships no run history (R7-2) — materialize this file's runs on
+  // the deterministic test engine.
+  const { configureRunServiceForTests, startRun } = await import(
+    "~/server/runtimes/run-service.server"
+  );
+  configureRunServiceForTests();
+
+  const finished = await startRun(app.db, {
+    projectSlug: "viberr-core",
+    taskKey: "VIB-142",
+    threadId: "primary-test",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "codex",
+    model: "gpt-5.4-codex",
+    prompt: "analyze",
+    dataRoot: app.dataRoot,
+    script: {
+      lines: [
+        { t: "", ev: "init", tag: "thread.started", text: "thread x" },
+        { t: "", ev: "text", tag: "agent_message", text: "analysis done" },
+        {
+          t: "",
+          ev: "result",
+          tag: "turn.completed",
+          text: "done",
+          usage: { input_tokens: 128034, cached_input_tokens: 0, output_tokens: 6188 },
+        },
+      ],
+      occurredAt: [
+        new Date().toISOString(),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
+      sessionId: "sess-142",
+      backend: "codex",
+      model: "gpt-5.4-codex",
+      op: false,
+      keepRunning: false,
+      instant: true,
+    },
+  });
+  finishedRunId = finished.runId;
+
+  const running = await startRun(app.db, {
+    projectSlug: "viberr-core",
+    taskKey: "VIB-151",
+    threadId: "primary-live",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "claude",
+    model: "claude-sonnet-4-5",
+    prompt: "work",
+    dataRoot: app.dataRoot,
+    script: {
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      occurredAt: [new Date().toISOString()],
+      sessionId: "sess-151",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      op: false,
+      keepRunning: true, // stays running until interrupted below
+      instant: true,
+    },
+  });
+  runningRunId = running.runId;
+
+  // Both runs settle through async timers — wait for their target states.
+  const state = (id: string) =>
+    (app.db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(id) as
+      | { state: string }
+      | undefined)?.state;
+  for (let i = 0; i < 200; i++) {
+    if (state(finishedRunId) === "finished" && state(runningRunId) === "running") break;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  expect(state(finishedRunId)).toBe("finished");
+  expect(state(runningRunId)).toBe("running");
 });
 afterAll(() => app.cleanup());
 
@@ -55,23 +141,23 @@ async function postIntent(key: string, userId: string, fields: Record<string, st
 }
 
 describe("loader — runtime projection shape", () => {
-  it("VIB-142: op idle (finished-no-label), primary+reviewer done, stored order", async () => {
+  it("VIB-142: the finished run projects with lines, raw envelopes, and real usage", async () => {
     const { runtime } = await runLoader("VIB-142", ids.arda);
-    expect(runtime.map((r) => r.id)).toEqual(["op", "primary", "c0"]);
-    expect(runtime[0]).toMatchObject({ op: true, state: "idle", who: { name: "Operator" } });
-    expect(runtime[1]).toMatchObject({ backend: "codex", state: "done", finished: "9:41" });
-    expect(runtime[1]!.raw.length).toBe(runtime[1]!.lines.length);
+    const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
+    expect(run).toMatchObject({ backend: "codex", state: "done" });
+    expect(run.lines.length).toBeGreaterThan(0);
+    expect(run.raw.length).toBe(run.lines.length);
     // Real usage — codex turn.completed in+out tokens (no fabrication).
-    expect(runtime[1]!.tokens).toBe(128034 + 6188);
+    expect(run.tokens).toBe(128034 + 6188);
   });
 
-  it("VIB-151: 2 running specialists + 1 idle operator", async () => {
+  it("VIB-151: the live run projects as running", async () => {
     const { runtime } = await runLoader("VIB-151", ids.arda);
-    expect(runtime.filter((r) => r.state === "running").length).toBe(2);
-    expect(runtime.filter((r) => r.op).length).toBe(1);
+    const run = runtime.find((r) => r.serverRunId === runningRunId)!;
+    expect(run.state).toBe("running");
   });
 
-  it("VIB-166 (triage): no runtime threads", async () => {
+  it("VIB-166: no runtime threads (the seed fabricates NO run history — R7-2)", async () => {
     const { runtime } = await runLoader("VIB-166", ids.arda);
     expect(runtime).toEqual([]);
   });
@@ -79,20 +165,22 @@ describe("loader — runtime projection shape", () => {
 
 describe("action — run-interrupt RBAC + audit", () => {
   it("reviewer (selin) is denied (403)", async () => {
-    const { runtime } = await runLoader("VIB-151", ids.selin);
-    const running = runtime.find((r) => r.state === "running")!;
-    const result = await postIntent("VIB-151", ids.selin, { intent: "run-interrupt", runId: running.serverRunId });
+    const result = await postIntent("VIB-151", ids.selin, {
+      intent: "run-interrupt",
+      runId: runningRunId,
+    });
     expect("init" in result && result.init?.status).toBe(403);
   });
 
   it("admin (arda) interrupts a running run → interrupted + audit event", async () => {
-    const { runtime } = await runLoader("VIB-151", ids.arda);
-    const running = runtime.find((r) => r.state === "running")!;
-    const result = await postIntent("VIB-151", ids.arda, { intent: "run-interrupt", runId: running.serverRunId });
+    const result = await postIntent("VIB-151", ids.arda, {
+      intent: "run-interrupt",
+      runId: runningRunId,
+    });
     expect("ok" in result && result.ok).toBe(true);
 
     const after = await runLoader("VIB-151", ids.arda);
-    const interrupted = after.runtime.find((r) => r.serverRunId === running.serverRunId)!;
+    const interrupted = after.runtime.find((r) => r.serverRunId === runningRunId)!;
     expect(interrupted.lifecycle).toBe("interrupted");
     expect(interrupted.interruptedBy?.userId).toBe(ids.arda);
 
@@ -102,9 +190,10 @@ describe("action — run-interrupt RBAC + audit", () => {
   });
 
   it("interrupting an already-terminal run is a friendly no-op", async () => {
-    const { runtime } = await runLoader("VIB-142", ids.arda);
-    const done = runtime.find((r) => r.state === "done")!;
-    const result = await postIntent("VIB-142", ids.arda, { intent: "run-interrupt", runId: done.serverRunId });
+    const result = await postIntent("VIB-142", ids.arda, {
+      intent: "run-interrupt",
+      runId: finishedRunId,
+    });
     expect("ok" in result && result.ok).toBe(true);
     // "already finished" toast copy.
     expect("toast" in result && String(result.toast)).toContain("already finished");

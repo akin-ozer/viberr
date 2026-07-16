@@ -327,6 +327,85 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 });
 
+describe("R7-2 fail-fast through the specialist start path (no fake runs)", () => {
+  it("startSpecialistRun on an unavailable backend errors fast → blocked event with 'unavailable' copy + recovery packet", async () => {
+    // Deploy an operator with generate-packets (opens the recovery packet).
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Close the R7-2 gate: models prod/dev where the simulated engine must be
+    // unreachable — the credential-less claude backend now FAILS the run fast.
+    const { setSimulatedRuntimePermittedForTests } = await import(
+      "~/server/runtimes/runtime-registry.server"
+    );
+    setSimulatedRuntimePermittedForTests(false);
+    try {
+      const result = await startSpecialistRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.simulated).toBe(false); // NEVER a fake run
+      const row = store.db
+        .prepare(`SELECT state, simulated FROM agent_runs WHERE id = ?`)
+        .get(result.runId) as { state: string; simulated: number };
+      expect(row.state).toBe("error");
+      expect(row.simulated).toBe(0);
+
+      // The EXISTING error-run path (F8) surfaces it: typed blocked event
+      // with the "unavailable" classification + a recovery packet + the
+      // waiting flag flipped back to human. The effects run async off the
+      // immediately-fired completion callback — poll for them.
+      const surfaced = await waitFor(() => {
+        const parsed = taskFile().parsed;
+        return (
+          parsed.timeline.some(
+            (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+          ) && parsed.packet?.type === "blocked"
+        );
+      });
+      expect(surfaced, "blocked event + recovery packet must land").toBe(true);
+      const parsed = taskFile().parsed;
+      const failureEvent = parsed.timeline.find(
+        (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+      )!;
+      expect(failureEvent.text).toContain("no usable credential");
+      expect(failureEvent.text).toContain("Configure a credential");
+      expect(parsed.frontmatter.waiting).toBe("human");
+    } finally {
+      setSimulatedRuntimePermittedForTests(undefined);
+    }
+  });
+});
+
 describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => {
   it("startReviewerRun's own hook records the verdict when the run finishes", async () => {
     await assignReviewer(

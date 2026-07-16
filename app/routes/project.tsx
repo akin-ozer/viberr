@@ -40,12 +40,21 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
   const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
-  const myRole =
+  const memberRole =
     board.members.find((m) => m.userId === user.id)?.role ?? null;
+  // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on
+  // every project. When they view a project they're NOT a member of, the UI
+  // unlocks the admin affordances the server would grant anyway (each use is
+  // audited server-side as `project.org_admin.override`) and the topbar shows
+  // an honest "org-admin override" pill instead of silently pretending
+  // membership. `user.role` is the session's resolved org role.
+  const orgAdminOverride = memberRole === null && user.role === "admin";
+  const myRole = memberRole ?? (orgAdminOverride ? ("admin" as const) : null);
   return {
     user,
     board,
     myRole,
+    orgAdminOverride,
     taskCount: tasks.length,
     reviewCount: (() => {
       const reviewId = resolveStageRoles(
@@ -99,6 +108,7 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
         <Topbar
           projectSlug={board.project.slug}
           projectName={board.project.name}
+          orgAdminOverride={loaderData.orgAdminOverride}
           openTask={openTask}
           user={{
             id: user.id,

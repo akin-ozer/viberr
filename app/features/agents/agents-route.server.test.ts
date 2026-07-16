@@ -14,6 +14,9 @@ import type { AgentProfileView, AgentDeploymentView } from "./agent-types";
  * deployment projection incl. VIB-151's running runs, profile CRUD round
  * trips through real Requests (project.md writers + audit), and the RBAC
  * denials (profile CRUD is admin-only).
+ *
+ * R7-2: the demo seed ships ZERO run history, so the VIB-151 running runs
+ * the deployment projection joins against are inserted here directly.
  */
 
 let app: AppTestContext;
@@ -36,6 +39,40 @@ beforeAll(async () => {
     selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project reviewer
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // NOT a member
   };
+
+  // VIB-151's live crew: a running claude primary + a running codex reviewer
+  // (thread r0 → reviewers[0]). The seed no longer fabricates these (R7-2);
+  // insert the run rows this projection test needs directly.
+  const { upsertRun } = await import("~/server/runtimes/run-store.server");
+  const startedAt = new Date().toISOString();
+  upsertRun(app.db, {
+    id: "run_test_vib151_primary",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-151",
+    threadId: "primary",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "claude",
+    simulated: false,
+    model: "claude-sonnet-4-5",
+    sdk: "Claude Agent SDK",
+    state: "running",
+    startedAt,
+  } as Parameters<typeof upsertRun>[1]);
+  upsertRun(app.db, {
+    id: "run_test_vib151_reviewer",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-151",
+    threadId: "r0",
+    role: "Reviewer",
+    kind: "reviewer",
+    backend: "codex",
+    simulated: false,
+    model: "gpt-5.4-codex",
+    sdk: "Codex SDK",
+    state: "running",
+    startedAt,
+  } as Parameters<typeof upsertRun>[1]);
 });
 afterAll(() => app.cleanup());
 
@@ -133,7 +170,7 @@ describe("loader", () => {
     ]);
   });
 
-  it("derives live deployments from the seed — VIB-151 crew incl. its running runs", async () => {
+  it("derives live deployments — VIB-151 crew incl. its running runs (inserted above, not seeded)", async () => {
     const data = await runLoader(ids.arda);
     const vib151 = data.deployments.filter((d) => d.taskKey === "VIB-151");
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
@@ -141,7 +178,7 @@ describe("loader", () => {
       ["developer", "primary", "working"],
       ["reviewer", "reviewer", "anchored · on call"],
     ]);
-    // Phase-8 seeds VIB-151 with a running claude primary + codex c0.
+    // The running claude primary + codex r0 reviewer inserted in beforeAll.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
     expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
 

@@ -4,9 +4,9 @@ import type { loader as projectLoader } from "./project";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { requireAuth } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
-import { listProjectMembers } from "~/server/projections/board-query.server";
 import {
   runClearCredential,
   runGrantScope,
@@ -15,7 +15,7 @@ import {
 } from "~/features/github/github-actions.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
 import { GithubViewPage } from "~/features/github/github-view";
-import { type RbacAction, roleCan } from "~/shared/rbac";
+import type { RbacAction } from "~/shared/rbac";
 
 /**
  * /projects/:slug/github — the GitHub surface (github-view spec), replacing
@@ -45,38 +45,30 @@ export async function action({ request, params }: Route.ActionArgs) {
   const actor = { userId: ctx.user.id, label: ctx.user.email };
   const intent = String(formData.get("intent") ?? "");
 
-  // RBAC — consult the single ACTION_ROLES source (rbac.ts), never a hardcoded
-  // role string, so the Policy page and this guard can never drift (pass-4
-  // XS-10). reconcile = `reconcile-github` (contributor+); credential changes =
-  // `grant-github-scope` (maintainer+).
-  const myRole =
-    listProjectMembers(db, params.slug).find((m) => m.userId === ctx.user.id)
-      ?.role ?? null;
-  const deny = (action: RbacAction, what: string) =>
-    data(
-      { ok: false as const, error: `Your role can't ${what}.` },
-      { status: 403 },
-    );
+  // RBAC — the single guard path (project-authority.server) consulting the
+  // ACTION_ROLES source (rbac.ts), never a hardcoded role string, so the
+  // Policy page and this guard can never drift (pass-4 XS-10); org admins pass
+  // as the audited D2 override. reconcile = `reconcile-github` (contributor+);
+  // credential changes = `grant-github-scope` (maintainer+). The archived gate
+  // is deliberately skipped here (unchanged from the pre-consolidation checks).
+  const requireGithubAction = (action: RbacAction, what: string) =>
+    assertProjectAction(db, action, params.slug, actor, what, {
+      allowArchived: true,
+    });
 
   try {
     if (intent === "reconcile") {
-      if (!roleCan(myRole, "reconcile-github")) {
-        return deny("reconcile-github", "reconcile with GitHub");
-      }
+      requireGithubAction("reconcile-github", "reconcile with GitHub");
       return await runReconcile(db, params.slug, actor);
     }
     if (intent === "grant-scope") {
-      if (!roleCan(myRole, "grant-github-scope")) {
-        return deny("grant-github-scope", "re-check the credential");
-      }
+      requireGithubAction("grant-github-scope", "re-check the credential");
       return await runGrantScope(db, params.slug, actor);
     }
     // Attach/rotate + remove the project credential — same credential-change
     // RBAC as grant-scope (`grant-github-scope`, maintainer+).
     if (intent === "set-credential" || intent === "clear-credential") {
-      if (!roleCan(myRole, "grant-github-scope")) {
-        return deny("grant-github-scope", "change the credential");
-      }
+      requireGithubAction("grant-github-scope", "change the credential");
       return intent === "set-credential"
         ? runSetCredential(db, params.slug, actor)
         : runClearCredential(db, params.slug, actor);

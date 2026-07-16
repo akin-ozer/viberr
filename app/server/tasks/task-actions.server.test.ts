@@ -84,7 +84,7 @@ describe("createTask", () => {
     );
     expect(result.task.operator).toMatchObject({
       assignedAtStageId: "ready",
-      sinceLabel: "stage 2",
+      sinceLabel: "since Ready", // real stage NAME, not a bare index (F7-UI2)
     });
   });
 

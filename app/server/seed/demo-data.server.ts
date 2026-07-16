@@ -404,6 +404,9 @@ function fm(input: {
   github?: TaskFrontmatter["github"];
   createdAt: string;
   updatedAt: string;
+  /** Pending operator recommendations — only where the inbox promises one
+   *  (F7-NOTIF1: an approval notification must match a LIVE decision). */
+  recommendations?: TaskFrontmatter["recommendations"];
 }): TaskFrontmatter {
   return {
     key: input.key,
@@ -415,7 +418,7 @@ function fm(input: {
     specialist: input.specialist,
     reviewers: input.reviewers,
     operator: input.operator,
-    recommendations: [],
+    recommendations: input.recommendations ?? [],
     urgent: input.urgent,
     validation: input.validation,
     branch: input.branch,
@@ -859,6 +862,19 @@ export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
         pr: null,
         createdAt: yesterdayAt(8, 30),
         updatedAt: todayAt(8, 47),
+        // The n-bil-9 approval notification promises a pending transition
+        // decision — the task record carries it for real (F7-NOTIF1: the
+        // "Waiting on you" bucket reconciles against live task state).
+        recommendations: [
+          {
+            id: "rec-bil-9-transition",
+            kind: "transition",
+            toStageId: "doing",
+            label: "Approve transition: To do → In progress",
+            detail:
+              "Strict human-gate project — execution can't start without a maintainer approval.",
+          },
+        ],
       }),
       goal: "Prorate charges when a customer changes plan mid-cycle; execution can't start until a maintainer approves the strict human gate.",
       packet: null,

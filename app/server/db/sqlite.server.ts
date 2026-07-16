@@ -46,6 +46,13 @@ export function getDb(): Database.Database {
     // Heal added-column drift from edited migrations before any projection
     // rebuild reads/writes the schema (pass-4 F-MIG1).
     const healed = reconcileSchemaFromMigrations(db);
+    // A healed task-projection column sits at its DEFAULT on every
+    // pre-existing row until that task file is reprojected — invalidate the
+    // content hashes so the boot rescan's short-circuit doesn't skip them
+    // and the new column gets real values immediately.
+    if (healed.some((c) => c.startsWith("task_projections."))) {
+      db.prepare(`UPDATE task_projections SET content_hash = ''`).run();
+    }
     logger.info("sqlite ready", {
       dbPath,
       migrationsApplied: result.applied,
