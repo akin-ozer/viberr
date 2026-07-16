@@ -123,27 +123,42 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     d[r.stage] = r.n;
   }
 
-  // Per-project totals: task count, agents-working (waiting = 'agent'), open
-  // decision packets, and the latest updatedAt. `waiting`/`running` mirror the
-  // prior JS predicates exactly (`t.waiting === "agent"`, `t.packet !== null`
-  // ⇔ a non-empty packet_json).
+  // Per-project totals: task count, open decision packets, and the latest
+  // updatedAt. `waiting` = tasks with a non-empty packet_json.
   const aggBySlug = new Map<string, HomeTaskAgg>();
   const aggRows = db
     .prepare(
       `SELECT project_slug,
               COUNT(*) AS total,
-              SUM(CASE WHEN waiting = 'agent' THEN 1 ELSE 0 END) AS running,
               SUM(CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
                        THEN 1 ELSE 0 END) AS waiting,
               MAX(updated_at) AS updated_at
        FROM task_projections
        GROUP BY project_slug`,
     )
-    .all() as (HomeTaskAgg & { project_slug: string })[];
+    .all() as { project_slug: string; total: number; waiting: number; updated_at: string }[];
+
+  // `running` = "agents running" — count projects' tasks with a REAL (non-
+  // simulated) run actually in flight, NOT the task's waiting=agent governance
+  // state. A seeded demo task can sit at waiting=agent with no live process
+  // (R6-5); counting that as a running agent is the exact "masquerading as live"
+  // the ruling forbids. This makes home's "N runs active" honest: it reflects
+  // genuine live agent runs only.
+  const runningBySlug = new Map<string, number>();
+  const runningRows = db
+    .prepare(
+      `SELECT project_slug, COUNT(DISTINCT task_key) AS running
+         FROM agent_runs
+        WHERE state = 'running' AND simulated = 0
+        GROUP BY project_slug`,
+    )
+    .all() as { project_slug: string; running: number }[];
+  for (const r of runningRows) runningBySlug.set(r.project_slug, r.running);
+
   for (const r of aggRows) {
     aggBySlug.set(r.project_slug, {
       total: r.total,
-      running: r.running,
+      running: runningBySlug.get(r.project_slug) ?? 0,
       waiting: r.waiting,
       updated_at: r.updated_at,
     });
