@@ -87,11 +87,13 @@ function requireProjectAdmin(
   projectSlug: string,
   actor: SettingsActor,
   what: string,
+  opts: { allowArchived?: boolean } = {},
 ): { projectName: string } {
   // Single canonical guard: project settings (identity/stages/repo/members/
   // archive/delete) are admin-only (`edit-policy` tier in ACTION_ROLES).
   return assertProjectAction("edit-policy", projectSlug, actor.userId, what, {
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    ...(opts.allowArchived ? { allowArchived: true } : {}),
   });
 }
 
@@ -499,6 +501,8 @@ export async function setProjectArchived(
     input.projectSlug,
     actor,
     input.archived ? "archive this project" : "restore this project",
+    // Restore must run ON an archived project — exempt it from the read-only gate.
+    { allowArchived: !input.archived },
   );
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
@@ -539,6 +543,8 @@ export async function deleteProject(
     input.projectSlug,
     actor,
     "delete this project",
+    // Deleting an archived project is a valid terminal action — don't block it.
+    { allowArchived: true },
   );
   if (input.confirmName.trim() !== projectName) {
     throw AppError.validation("Type the project name to confirm deletion.");

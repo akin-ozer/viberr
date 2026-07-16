@@ -23,11 +23,16 @@ export async function requireProjectMember(
 ): Promise<AuthContext> {
   const ctx = await requireAuth(request);
   try {
+    // Route-level READ authorization ("view this surface"): archived projects
+    // stay fully readable (R6-3 freezes mutations, not reads), so exempt this
+    // membership check from the archived gate.
     requireProjectRole(
       projectSlug,
       { userId: ctx.user.id, label: ctx.user.email },
       allowed,
       what,
+      {},
+      { allowArchived: true },
     );
   } catch (error) {
     if (isAppError(error)) {

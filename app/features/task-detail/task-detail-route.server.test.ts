@@ -273,15 +273,14 @@ describe("comment action — @agent routing detection", () => {
 /* ------------------------------------------------------- resolvePacket */
 
 describe("resolve-packet action — kind dispatch + RBAC", () => {
-  it("rejects non-privileged members on packet resolution (admin|maintainer only)", async () => {
-    // Resolving a decision packet — including accepting completion — steers the
-    // task and is admin|maintainer only; a contributor is rejected at the base
-    // gate before the option-specific accept-completion re-gate.
+  it("rejects a non-owner contributor accepting a completion packet (R6-2)", async () => {
+    // Accepting a completion is admin|maintainer OR the task's owner (R6-2).
+    // selin is a contributor and NOT VIB-142's owner, so the accept path denies.
     const result = (await postIntent("VIB-142", ids.selin, {
       intent: "resolve-packet", option: "0",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(403);
-    expect(result.data.error).toContain("cannot resolve decision packets");
+    expect(result.data.error).toContain("accept completion into Done");
   });
 
   it("rejects non-members entirely", async () => {

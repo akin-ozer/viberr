@@ -11,6 +11,7 @@ import {
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { sseScopes } from "~/features/live-updates/event-types";
+import { Icon } from "~/ui/icon";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
 import { Topbar } from "~/features/shell/topbar";
@@ -110,6 +111,16 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           notifications={loaderData.notifications}
           unread={loaderData.unread}
         />
+        {board.project.archived ? (
+          <div className="archived-banner" role="status">
+            <Icon name="lock" />
+            <span>
+              This project is <strong>archived</strong> — it’s read-only.
+              Timelines and audit stay visible; restore it from{" "}
+              <strong>Settings → Danger zone</strong> to make changes.
+            </span>
+          </div>
+        ) : null}
         <Outlet />
       </div>
     </div>

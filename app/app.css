@@ -1636,6 +1636,18 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
   font-size: .8rem; color: var(--yellow-dark); line-height: 1.4;
 }
 .cred-warn .ico { width: 14px; height: 14px; flex: none; }
+
+/* Archived-project read-only banner (R6-3): pinned under the topbar across
+   every workspace view of an archived project. */
+.archived-banner {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .6rem 1.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow-dark), transparent 72%);
+  background: color-mix(in srgb, var(--orange-light), var(--surface) 40%);
+  font-size: .82rem; color: var(--yellow-dark); line-height: 1.4;
+}
+.archived-banner .ico { width: 15px; height: 15px; flex: none; }
+.archived-banner strong { color: var(--fg); }
 .cred-ok {
   display: flex; align-items: center; gap: .5rem;
   margin-top: .75rem; padding: .55rem .7rem;

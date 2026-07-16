@@ -152,6 +152,9 @@ interface ProjectContext {
     boundary: "auto" | "approval" | "human";
   }[];
   memberRoles: Map<string, ProjectRole>;
+  /** Archived projects are read-only (owner ruling R6-3): every governed
+   *  mutation is refused until the project is restored. */
+  archived: boolean;
 }
 
 function loadProjectContext(
@@ -173,7 +176,27 @@ function loadProjectContext(
       boundary: w.boundary,
     })),
     memberRoles: new Map(fm.members.map((m) => [m.userId, m.role])),
+    archived: fm.archived === true,
   };
+}
+
+/**
+ * Archived projects are read-only (owner ruling R6-3): a project moved to the
+ * Home "Archived" section refuses every governed mutation (tasks, comments,
+ * agent runs, policy, settings) until an admin restores it — timelines and
+ * audit stay readable. Throws a 409 with actionable copy. The ONE exemption is
+ * the restore action itself (setProjectArchived passes `allowArchived`), so an
+ * archived project can be brought back. Reads never call this.
+ */
+export function requireProjectMutable(project: ProjectContext, what: string): void {
+  if (project.archived) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
+      kind: "user",
+    });
+  }
 }
 
 function stageName(project: ProjectContext, stageId: string): string {
@@ -209,8 +232,11 @@ export function requireProjectRole(
   allowed: ProjectRole[] | "any-member",
   what: string,
   ctx: TaskMutationContext = {},
+  opts: { allowArchived?: boolean } = {},
 ): ProjectRole {
-  return requireMemberRole(loadProjectContext(ctx, projectSlug), actor, allowed, what);
+  const project = loadProjectContext(ctx, projectSlug);
+  if (!opts.allowArchived) requireProjectMutable(project, what);
+  return requireMemberRole(project, actor, allowed, what);
 }
 
 /** The operator's canonical notification actor. */
@@ -322,6 +348,10 @@ export function requireAction(
   action: RbacAction,
   what: string,
 ): ProjectRole {
+  // Archived projects are read-only (R6-3). Every governed mutation names an
+  // RbacAction and routes through here, so this is the single chokepoint that
+  // freezes an archived project's mutations while leaving reads intact.
+  requireProjectMutable(project, what);
   return requireMemberRole(project, actor, [...rolesForAction(action)], what);
 }
 
@@ -636,6 +666,11 @@ export async function appendComment(
 ): Promise<AppendCommentResult> {
   const text = input.text.trim();
   if (!text) throw AppError.validation("Comment text is required.");
+
+  // Archived projects are read-only (R6-3). Commenting is app-wide (not gated by
+  // requireAction), so guard it explicitly — an archived project's timeline is
+  // frozen until it is restored.
+  requireProjectMutable(loadProjectContext(ctx, input.projectSlug), "comment on this task");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) {
