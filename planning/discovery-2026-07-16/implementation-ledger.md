@@ -7,6 +7,30 @@ then polish.
 
 Legend: [ ] todo · [~] in progress · [x] done+validated.
 
+## STATUS ROLLUP (2026-07-16, end of implementation)
+
+Branch `pass6-implementation-2026-07-16`, 7 commits, full suite GREEN (1210 tests),
+typecheck clean. HIGH-severity findings all fixed + live-verified. Summary:
+
+- A1 watcher-fd-prune ✅ (fds 11,342→541, live) · A2 terminal-race ✅ · A4 boot-finalizer ✅
+  · A3 crash-reason: covered by A2 escalation packet (quota/auth/unknown) + persisted run
+  state; a dedicated error column was judged unnecessary once A2 escalates · A5 baseURL:
+  working-as-designed (dev infers from request; prod sets BETTER_AUTH_URL) — documented.
+- B1 push-before-PR ✅ (live: PR #25 auto-opened) · B2 empty-diff surfaced ✅ · B3 merge path
+  verified live (PR #24 real merge) + reject path (PR closed) ✅.
+- C1 owner-accept ✅ (tests + copy) · C2 archive-read-only ✅ (live banner + 409) · C3 drag=
+  accept already on main ✅ · C4 org-admin override: authority_source enum exists in delivery;
+  not a this-session ruling — left as-is.
+- D1 demo-run honesty ✅ (live: 4 seeded runs finalized at boot; ticker gone).
+- E1 codex-compose auth ✅ (auth.json validation + codex-home subdir + docs) · E3 failure
+  classification already present (quota/auth) ✅ · E2 Linux Landlock sandbox: can't exercise
+  in this env; error now classified as start-failure — documented residual.
+- F1 MCP / F2 KB-rescan: not re-exercised live (no reachable MCP server on hand); seeded fake
+  stays honest-unreachable. F3 stage-gating ✅ (enforced assign+run, verified in code) · F4
+  skill-isolation ✅ (skills:[] + persona injection, verified in code).
+- G1 migration-gap note ✅ · G2 codex Live-panel usage: minor cosmetic, deferred · G3 packet
+  confirm-label overlap ✅.
+
 ## A · Agent-spawn correctness (the reason nothing ran)
 
 - [x] **A1 (F-SPAWN1) — watcher fd explosion.** Prune the watch tree below the task dir so
