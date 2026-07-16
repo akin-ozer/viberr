@@ -1,30 +1,41 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Golden path (d): the runtime UI on a seeded task.
+ * Golden path (d): the runtime UI, from an honestly-empty store to a live run.
  *
- * Under R6-5 (demo-run honesty), seeded "running" runs are RETIRED to finished
- * at boot — they no longer masquerade as live (no phantom run strip, no SSE
- * drip of demo lines). So this path now validates the DURABLE runtime surface:
- * the agent-logs console renders the run's persisted lines, the raw toggle
- * switches to wire-format JSON, and — the R6-5 assertion — a finished seeded run
- * shows NO live run strip. The live-strip-while-running behavior itself is
- * covered by the LiveRunPanel component tests (runs-panels.test.tsx).
+ * Under R7-2 (don't simulate at all) the demo seed ships ZERO fabricated run
+ * history, so a fresh task renders NO runtime panels at all — no phantom run
+ * strip, no scripted console history. This path then starts a run through the
+ * product's own "Run" affordance (carried by the deterministic test engine —
+ * the e2e server opens the R7-2 gate via VIBERR_FORCE_SIMULATED_RUNTIME +
+ * VIBERR_TEST_RUNTIME_OK) and validates the durable runtime surface: the
+ * console streams persisted lines and the raw toggle switches to wire-format
+ * JSON.
  */
 
-test("VIB-151 agent logs render + raw toggle; no phantom live strip (R6-5)", async ({ page }) => {
+test("VIB-151: no fabricated seed runs; Run streams a run; raw toggle", async ({ page }) => {
   await page.goto("/projects/viberr-core/tasks/VIB-151");
 
-  // Agent logs console with the seeded run's persisted lines.
+  // R7-2: the seed fabricates NO run history — the runtime panels are
+  // entirely absent (the layout suppresses them for a task with no threads).
+  await expect(page.locator(".panel-head", { hasText: "Execution profile" })).toBeVisible();
+  await expect(page.locator(".console")).toHaveCount(0);
+  await expect(page.locator(".runbar")).toHaveCount(0);
+
+  // Start a run for the assigned specialist through the product control.
+  // Exact "Run" excludes "Run operator"; the first match is the primary
+  // specialist's (the engaged reviewer's Run button follows it).
+  const runButton = page.getByRole("button", { name: "Run", exact: true }).first();
+  await expect(runButton).toBeEnabled();
+  await runButton.click();
+
+  // The run streams into the agent-logs console (persisted lines over SSE).
   const console_ = page.locator(".console");
-  await expect(console_).toBeVisible();
+  await expect(console_).toBeVisible({ timeout: 15_000 });
   const lines = console_.locator(".log-line");
   await expect(async () => {
     expect(await lines.count()).toBeGreaterThan(0);
-  }).toPass({ timeout: 10_000 });
-
-  // R6-5: the seeded run is finished demo history — no zombie live run strip.
-  await expect(page.locator(".runbar")).toHaveCount(0);
+  }).toPass({ timeout: 15_000 });
 
   // Raw mode shows the persisted wire envelopes (JSON) for every line.
   const rawToggle = page.locator("button", { hasText: "raw" }).first();

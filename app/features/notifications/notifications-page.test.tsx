@@ -29,6 +29,7 @@ const ITEMS: NotificationPageItem[] = [
     taskKey: "VIB-160",
     occurredAt: iso(0, 10, 31),
     unread: true,
+    waitingOnYou: true,
     from: { name: "Operator" },
   },
   {
@@ -42,6 +43,7 @@ const ITEMS: NotificationPageItem[] = [
     taskKey: "DEP-31",
     occurredAt: iso(0, 10, 12),
     unread: true,
+    waitingOnYou: true,
     from: { name: "Operator" },
   },
   {
@@ -55,6 +57,7 @@ const ITEMS: NotificationPageItem[] = [
     taskKey: "VIB-145",
     occurredAt: iso(0, 9, 12),
     unread: false,
+    waitingOnYou: true,
     from: { name: "Operator" },
   },
   {
@@ -68,6 +71,7 @@ const ITEMS: NotificationPageItem[] = [
     taskKey: "VIB-148",
     occurredAt: iso(0, 8, 20),
     unread: true,
+    waitingOnYou: false,
     from: { name: "Elif Demir" },
   },
   {
@@ -81,6 +85,7 @@ const ITEMS: NotificationPageItem[] = [
     taskKey: "VIB-145",
     occurredAt: iso(1, 16, 4),
     unread: false,
+    waitingOnYou: false,
     from: { name: "Policy engine" },
   },
 ];
@@ -105,7 +110,7 @@ function renderPage(
 }
 
 describe("splitNotifications", () => {
-  it("routes packets+approvals to needs-you, the rest to the stream", () => {
+  it("routes LIVE packets+approvals to needs-you, the rest to the stream", () => {
     const { needs, rest } = splitNotifications(ITEMS, "all");
     expect(needs.map((n) => n.id)).toEqual([
       "n-160-packet",
@@ -116,6 +121,15 @@ describe("splitNotifications", () => {
       "n-148-mention",
       "n-145-blockedact",
     ]);
+  });
+
+  it("resolved decisions (waitingOnYou=false) fall to the stream, not the waiting bucket (F7-NOTIF1)", () => {
+    // The same rows after their decisions resolved live (packet cleared /
+    // rec applied / task Done) — kind alone no longer earns "Waiting on you".
+    const resolved = ITEMS.map((n) => ({ ...n, waitingOnYou: false }));
+    const { needs, rest } = splitNotifications(resolved, "all");
+    expect(needs).toEqual([]);
+    expect(rest.map((n) => n.id)).toEqual(resolved.map((n) => n.id));
   });
 
   it("the Unread filter applies to both panels", () => {

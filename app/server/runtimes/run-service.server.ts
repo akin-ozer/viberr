@@ -9,8 +9,9 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { roleCan } from "~/shared/rbac";
-import type { RunHandle, RunSpec } from "./adapter.server";
+import { rolesForAction } from "~/shared/rbac";
+import { requireProjectAuthority } from "~/server/auth/project-authority.server";
+import type { RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
 import { createRunSink } from "./run-sink.server";
@@ -26,9 +27,11 @@ import {
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
+  simulatedRuntimePermitted,
   type AdapterDeps,
   type AdapterSet,
   type RealBackend,
+  type SelectResult,
 } from "./runtime-registry.server";
 import type { SimulatedScript } from "./simulated-runtime.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -165,7 +168,11 @@ export function configureRunServiceForTests(
 ): void {
   // Deterministic: force both real backends unavailable so runs use the
   // simulated engine regardless of any ambient credential in the dev `.env`
-  // (e.g. a CLAUDE_CODE_OAUTH_TOKEN). A test that wants the real path injects
+  // (e.g. a CLAUDE_CODE_OAUTH_TOKEN). Under vitest the R7-2 gate is open
+  // (NODE_ENV === "test"), so unavailable backends still fall through to the
+  // deterministic test engine; a test exercising the PRODUCTION fail-fast
+  // path additionally calls setSimulatedRuntimePermittedForTests(false).
+  // A test that wants the real path injects
   // a fake adapter AND calls setBackendAvailability(backend, true) after this.
   resetRegistryForTests();
   setBackendAvailability("claude", false);
@@ -229,10 +236,11 @@ export interface StartRunInput {
   /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
    *  specialist's git to its workspace). Merged on top of the adapter env. */
   env?: Record<string, string>;
-  /** Force the simulated engine regardless of backend credential. The operator
-   *  scripted-drive uses this to stream a narration run for a backend that has
-   *  no in-process tools (Codex) or when Claude is unavailable — the real work
-   *  is done by the operator-actions calls, this run is the log of it. */
+  /** Request the simulated engine explicitly. Only the operator scripted
+   *  drive (itself reachable only inside the R7-2 test gate) sets this — the
+   *  real work is done by the operator-actions calls, this run is the log of
+   *  it. Outside the gate the request FAILS the run honestly instead of ever
+   *  converting into a paid real run or a fake stream. */
   simulate?: boolean;
 }
 
@@ -246,9 +254,17 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
 };
 
 /**
- * Starts a run: selects the adapter (real if the CLI is available, else the
- * simulated engine with simulated=1), inserts the queued row, wires the sink
- * and adapter callbacks, and kicks the adapter. Returns the run id.
+ * Starts a run: selects the adapter (the real one when its credential is
+ * present, or the gated test engine with simulated=1), inserts the queued
+ * row, wires the sink and adapter callbacks, and kicks the adapter.
+ *
+ * R7-2: when the requested backend is UNAVAILABLE (and the test gate is
+ * closed) there is no fabricated fallback stream anymore — the run row is
+ * still created but FAILS FAST: one classified terminal `err` line + state
+ * `error`. That routes the failure through the EXISTING error-run path
+ * (completion callbacks fire immediately, `applyAgentCompletionEffects`
+ * posts the typed blocked event and escalation packet via runFailureReason).
+ * Returns the run id.
  */
 export async function startRun(
   db: Database.Database,
@@ -260,8 +276,16 @@ export async function startRun(
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
-  const { simulated: detected } = selectAdapter(input.backend, state.adapters);
-  const simulated = input.simulate === true ? true : detected;
+  // An explicit simulate request is honored ONLY inside the R7-2 gate; a
+  // credential-based selection otherwise. Both funnel into one honest
+  // outcome: real adapter, gated test engine, or fail-fast `unavailable`.
+  const selection: SelectResult =
+    input.simulate === true
+      ? simulatedRuntimePermitted()
+        ? { kind: "simulated", adapter: state.adapters.simulated }
+        : { kind: "unavailable" }
+      : selectAdapter(input.backend, state.adapters);
+  const simulated = selection.kind === "simulated";
 
   upsertRun(db, {
     id: runId,
@@ -296,6 +320,8 @@ export async function startRun(
       kind: input.kind,
       simulated,
       resumed: Boolean(input.resumeSessionId),
+      // R7-2 fail-fast marker: the run never spawned a backend process.
+      ...(selection.kind === "unavailable" ? { failedUnavailable: true } : {}),
     },
   });
 
@@ -324,8 +350,48 @@ export async function startRun(
     ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),
   };
 
-  launch(db, spec, simulated);
+  if (selection.kind === "unavailable") {
+    failRunUnavailable(db, spec);
+    return { runId, simulated: false };
+  }
+
+  launch(db, spec, selection.adapter);
   return { runId, simulated };
+}
+
+/**
+ * R7-2 fail-fast: finalize a run whose backend has no usable credential as an
+ * honest `error` — one classified terminal err line (the copy is what
+ * `runFailureReason` classifies as "unavailable") and no backend process.
+ * Persisting through the regular sink keeps the SSE/log/state plumbing
+ * identical to any other terminal run, so registered completion callbacks
+ * fire immediately via the already-terminal path and the F8 escalation runs.
+ */
+function failRunUnavailable(db: Database.Database, spec: RunSpec): void {
+  const sink = createRunSink(db, spec);
+  sink.markRunning();
+  const now = new Date().toISOString();
+  const text = backendUnavailableMessage(spec.backend as RealBackend);
+  sink.line({
+    // An honest server-authored envelope — NOT a fabricated backend wire line.
+    raw: JSON.stringify({ type: "error", source: "viberr", message: text }),
+    display: { t: now.slice(11, 19), ev: "err", tag: "run·unavailable", text },
+    facts: {},
+    occurredAt: now,
+  });
+  sink.finalize({
+    outcome: "error",
+    effectiveBackend: spec.backend,
+    simulated: false,
+    sessionId: spec.resumeSessionId ?? null,
+  });
+}
+
+/** Actionable copy for a run refused because its backend has no credential. */
+export function backendUnavailableMessage(backend: RealBackend): string {
+  return backend === "claude"
+    ? "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started."
+    : "Codex is unavailable — no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
 }
 
 /**
@@ -374,9 +440,9 @@ export async function resumeRun(
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
-  if (prev.backend === "simulated") {
-    // Purely-simulated runs resume as simulated too.
-  }
+  // Historical `simulated` rows (pre-R7-2 fallback/demo data) resume onto the
+  // claude backend — startRun then applies the same honest selection as any
+  // fresh run (real, gated test engine, or fail-fast unavailable).
   const backend: RealBackend = prev.backend === "codex" ? "codex" : "claude";
   // A resume creates a NEW run row (a fresh stream) that shares the PROVIDER
   // session id. It must NOT reuse the prior thread_id — agent_runs is unique
@@ -420,11 +486,10 @@ export async function resumeRun(
 function launch(
   db: Database.Database,
   spec: RunSpec & { script?: SimulatedScript },
-  simulated: boolean,
+  adapter: RuntimeAdapter,
 ): void {
   const state = getState();
   const sink = createRunSink(db, spec);
-  const adapter = simulated ? state.adapters.simulated : state.adapters[spec.backend as RealBackend];
 
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.
@@ -513,19 +578,20 @@ export function interruptRun(
   }
 
   // RBAC — the `run-agents` action (rbac.ts single source: admin|maintainer),
-  // the same tier that opens runtime sessions. Consult ACTION_ROLES, never a
-  // hardcoded role string, so the Policy display and this guard can't drift
-  // (pass-4 XS-10).
+  // the same tier that opens runtime sessions, resolved through the ONE
+  // authority path (project-authority.server) so the Policy display and this
+  // guard can't drift — and org admins pass as the audited D2 override.
   const members = listProjectMembers(db, input.projectSlug);
-  const role = members.find((m) => m.userId === actor.userId)?.role ?? null;
-  if (!roleCan(role, "run-agents")) {
-    throw new AppError({
-      code: ERROR_CODES.FORBIDDEN,
-      status: 403,
-      userMessage: "Interrupting a runtime session requires the admin or maintainer role.",
-      kind: "user",
-    });
-  }
+  requireProjectAuthority(
+    db,
+    {
+      slug: input.projectSlug,
+      memberRoles: new Map(members.map((m) => [m.userId, m.role])),
+    },
+    actor,
+    rolesForAction("run-agents"),
+    { action: "run-agents", what: "interrupt this runtime session" },
+  );
 
   if (run.state !== "running" && run.state !== "queued") {
     // Idempotent no-op — the run already reached a terminal state.

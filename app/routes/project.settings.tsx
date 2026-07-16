@@ -4,9 +4,9 @@ import type { loader as projectLoader } from "./project";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { requireAuth } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
-import { listProjectMembers } from "~/server/projections/board-query.server";
 import {
   runClearCredential,
   runGrantScope,
@@ -26,18 +26,6 @@ import {
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
 import { SettingsPage } from "~/features/project-settings/settings-page";
-import { type ProjectRole, roleCan } from "~/shared/rbac";
-
-/** This member's project role (null when not a member) — for ACTION_ROLES guards. */
-function myRoleFor(
-  db: ReturnType<typeof getDb>,
-  slug: string,
-  userId: string,
-): ProjectRole | null {
-  return (
-    listProjectMembers(db, slug).find((m) => m.userId === userId)?.role ?? null
-  );
-}
 
 /**
  * /projects/:slug/settings — the project-admin surface (project-settings
@@ -147,25 +135,21 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, toast: result.toast };
       }
       case "grant-scope": {
-        // Consult the single ACTION_ROLES source: `grant-github-scope`
-        // (maintainer+), same as the GitHub view's action (pass-4 XS-10).
-        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
-          return data(
-            { ok: false as const, error: "Your role can't re-check the credential." },
-            { status: 403 },
-          );
-        }
+        // The single guard path consulting the ACTION_ROLES source:
+        // `grant-github-scope` (maintainer+), same as the GitHub view's action
+        // (pass-4 XS-10); org admins pass as the audited D2 override. Archived
+        // gate skipped, unchanged from the pre-consolidation check.
+        assertProjectAction(db, "grant-github-scope", slug, actor, "re-check the credential", {
+          allowArchived: true,
+        });
         return await runGrantScope(db, slug, actor);
       }
       case "set-credential":
       case "clear-credential": {
         // Attach/rotate + remove the credential — `grant-github-scope` tier.
-        if (!roleCan(myRoleFor(db, slug, ctx.user.id), "grant-github-scope")) {
-          return data(
-            { ok: false as const, error: "Your role can't change the credential." },
-            { status: 403 },
-          );
-        }
+        assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential", {
+          allowArchived: true,
+        });
         return intent === "set-credential"
           ? runSetCredential(db, slug, actor)
           : runClearCredential(db, slug, actor);

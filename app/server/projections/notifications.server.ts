@@ -94,7 +94,13 @@ export function createNotification(
 }
 
 /** Newest-first by real timestamp (deliberate divergence from the mock's
- * splice order — ruling 9). Joins project display names where resolvable. */
+ * splice order — ruling 9). Joins project display names where resolvable,
+ * plus the LIVE task decision state (F7-NOTIF1): packet/approval rows are
+ * reconciled against task_projections at read time — same-database join,
+ * no per-mutation notification writes — so `waitingOnYou` reflects whether
+ * the decision is actually still open. Home's per-project decisions counter
+ * (home-query.server.ts) applies the same open-packet/pending-rec +
+ * non-terminal-stage rule; keep them in step. */
 export function listNotifications(
   db: Database.Database,
   userId: string,
@@ -102,9 +108,14 @@ export function listNotifications(
 ): NotificationRecord[] {
   const rows = db
     .prepare(
-      `SELECT n.*, p.name AS project_name
+      `SELECT n.*, p.name AS project_name, p.stages_json AS project_stages_json,
+              t.stage AS task_stage,
+              (t.packet_json IS NOT NULL AND t.packet_json <> '') AS task_has_packet,
+              t.recommendation_count AS task_recommendation_count
        FROM notifications n
        LEFT JOIN projects p ON p.slug = n.project_slug
+       LEFT JOIN task_projections t
+         ON t.project_slug = n.project_slug AND t.task_key = n.task_key
        WHERE n.user_id = ?
        ORDER BY n.occurred_at DESC, n.id DESC
        LIMIT ?`,

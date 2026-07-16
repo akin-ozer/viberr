@@ -20,6 +20,11 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
+  isSecretBox,
+  openSecret,
+  sealSecret,
+} from "~/server/secrets/secret-box.server";
+import {
   kbDirPath,
   kbRootDir,
   skillDirPath,
@@ -375,7 +380,11 @@ export interface McpView {
   name: string;
   transport: "HTTP" | "stdio";
   target: string;
-  cred: string | null;
+  /** Whether an encrypted credential is configured for this server. The sealed
+   *  secret NEVER leaves the server (F7-MCP1) — only this boolean is exposed so
+   *  the UI can show "auth configured" without the value; injection reads the
+   *  sealed value via `getMcpCredential`. */
+  hasCred: boolean;
   tools: number | null;
   /** true up · false down · null never probed / not probeable (stdio). */
   up: boolean | null;
@@ -399,11 +408,34 @@ function mapMcp(row: McpRow): McpView {
     name: row.name,
     transport: row.transport === "stdio" ? "stdio" : "HTTP",
     target: row.target,
-    cred: row.cred_ref,
+    hasCred: !!row.cred_ref,
     tools: row.tools_count,
     up: row.up === null ? null : row.up === 1,
     lastCheckedAt: row.last_checked_at,
   };
+}
+
+/**
+ * Server-only accessor for an MCP server's DECRYPTED credential (F7-MCP1). Used
+ * exclusively by the run-spawn injection path (specialist-mcp) — never a loader
+ * or a client-facing surface. Returns null when no credential is configured or
+ * the stored value isn't a sealed box (legacy plaintext refs are ignored, not
+ * leaked). Failures to open (e.g. a rotated key) return null rather than throw,
+ * so a run degrades to no-auth instead of crashing.
+ */
+export function getMcpCredential(
+  db: Database.Database,
+  name: string,
+): string | null {
+  const row = db
+    .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE name = ?`)
+    .get(name) as { cred_ref: string | null } | undefined;
+  if (!row?.cred_ref || !isSecretBox(row.cred_ref)) return null;
+  try {
+    return openSecret(row.cred_ref);
+  } catch {
+    return null;
+  }
 }
 
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
@@ -622,7 +654,22 @@ export async function saveMcpServer(
   const name = slugify(input.name);
   const target = input.target.trim();
   const transport = input.transport === "stdio" ? "stdio" : "HTTP";
-  const cred = input.cred.trim() || null;
+  // F7-MCP1: the credential is SEALED at rest (AES-256-GCM secret-box) and never
+  // stored or returned in plaintext. On EDIT a blank field keeps the existing
+  // sealed value (the UI never round-trips the secret back), so a plain re-save
+  // doesn't wipe the credential. A non-empty field replaces it.
+  const rawCred = input.cred.trim();
+  let cred: string | null;
+  if (rawCred) {
+    cred = isSecretBox(rawCred) ? rawCred : sealSecret(rawCred);
+  } else if (input.id) {
+    const existing = db
+      .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE id = ?`)
+      .get(input.id) as { cred_ref: string | null } | undefined;
+    cred = existing?.cred_ref ?? null;
+  } else {
+    cred = null;
+  }
   if (name.length < 2) throw AppError.validation("Give the server a name.");
   if (target.length < 4) {
     throw AppError.validation(

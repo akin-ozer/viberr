@@ -58,9 +58,10 @@ readiness downgrade (tolerant parsing):
 
 ## Agent runtimes
 
-- With no `ANTHROPIC_API_KEY` / `CODEX_API_KEY`, runs use the **simulated** backend
-  (labelled as such) so the app is fully functional offline. Add a key and restart to
-  enable the real Claude Agent SDK / Codex SDK backends.
+- With no `ANTHROPIC_API_KEY` / `CODEX_API_KEY`, the backend is **unavailable**: a run
+  started on it fails fast with an honest "backend unavailable" error and a blocked
+  recovery packet (no simulated fallback). Add a key and restart to enable the real
+  Claude Agent SDK / Codex SDK backends.
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/`; the log
   panel projects them. Interrupt is admin/maintainer-gated and audited.
 

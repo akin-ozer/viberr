@@ -26,16 +26,21 @@ import { createSimulatedAdapter } from "./simulated-runtime.server";
  *   - codex: CODEX_ACCESS_TOKEN (ChatGPT workspace subscription),
  *     CODEX_API_KEY | OPENAI_API_KEY, or an explicitly opted-in cached
  *     `codex login`.
- * Overridable per process (cached HMR-safe global symbol). When the
- * requested real backend is unavailable, the registry returns the SIMULATED
- * adapter but the run-service keeps the requested backend on the row and
- * sets simulated=1 — real-vs-sim is a separate flag from the glyph backend.
+ * Overridable per process (cached HMR-safe global symbol).
+ *
+ * R7-2 (don't simulate at all): an unavailable backend NO LONGER falls back
+ * to the simulated engine. Selection reports `unavailable` and the
+ * run-service fails the run fast with an honest error. The simulated adapter
+ * survives ONLY as a deterministic test engine behind a fail-closed gate
+ * (see simulatedRuntimePermitted).
  */
 
 export type RealBackend = "claude" | "codex";
 
 interface RegistryState {
   detected: Partial<Record<RealBackend, boolean>>;
+  /** Test override for the R7-2 simulated-runtime gate (undefined → env). */
+  simPermitted?: boolean;
 }
 
 const REGISTRY_KEY = Symbol.for("viberr.runtimeRegistry");
@@ -58,7 +63,8 @@ function getState(): RegistryState {
  *     for machines whose `claude` CLI is already logged in (keychain auth).
  *   - codex: CODEX_ACCESS_TOKEN, CODEX_API_KEY / OPENAI_API_KEY, or
  *     VIBERR_CODEX_USE_CLI_AUTH=1.
- * When none is present the registry falls back to the simulated backend.
+ * When none is present the backend is UNAVAILABLE (R7-2: runs on it fail
+ * fast with an honest error — no simulated fallback).
  */
 /**
  * When Codex CLI auth is the ONLY signal (no access token / API key), the
@@ -79,12 +85,42 @@ function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
   }
 }
 
+/**
+ * R7-2 fail-closed gate: the simulated engine is reachable ONLY when this
+ * returns true. Two ways in, both test-scoped:
+ *   - NODE_ENV === "test" (vitest) — the unit suite drives the whole
+ *     coordination pipeline on the deterministic engine;
+ *   - VIBERR_FORCE_SIMULATED_RUNTIME=1 AND VIBERR_TEST_RUNTIME_OK=1 — the
+ *     Playwright harness (its app server boots NODE_ENV=development).
+ * Design note: gating on NODE_ENV !== "production" is NOT enough — dev
+ * servers are exactly where the old silent fallback fabricated demo runs, so
+ * dev must be as honest as prod. The force flag alone therefore has NO effect
+ * outside a test env: a stray VIBERR_FORCE_SIMULATED_RUNTIME=1 in prod/dev
+ * neither forces nor permits the simulated engine (fail-closed).
+ */
+export function simulatedRuntimePermitted(env: NodeJS.ProcessEnv = process.env): boolean {
+  const override = getState().simPermitted;
+  if (override !== undefined) return override;
+  if (env.NODE_ENV === "test") return true;
+  return (
+    isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME) && isTruthy(env.VIBERR_TEST_RUNTIME_OK)
+  );
+}
+
+/** Test-only: override the R7-2 gate (fail-fast paths are testable). */
+export function setSimulatedRuntimePermittedForTests(value: boolean | undefined): void {
+  getState().simPermitted = value;
+}
+
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
   // Explicit override: force the deterministic simulated engine regardless of
   // any ambient credential (e.g. a developer's `.env` re-loaded by dotenv). The
   // e2e harness sets this so the golden-path specs run against the synchronous
-  // scripted operator instead of live, non-deterministic agent runs.
-  if (isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME)) return false;
+  // scripted operator instead of live, non-deterministic agent runs. Only
+  // honored inside the R7-2 gate — outside it the flag is inert.
+  if (isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME) && simulatedRuntimePermitted(env)) {
+    return false;
+  }
   if (backend === "claude") {
     return !!(
       env.ANTHROPIC_API_KEY ||
@@ -269,18 +305,24 @@ function safeEnv(): {
   }
 }
 
-export interface SelectResult {
-  adapter: RuntimeAdapter;
-  /** True on fallback: the requested backend is kept, simulated engine used. */
-  simulated: boolean;
-}
+export type SelectResult =
+  | { kind: "real"; adapter: RuntimeAdapter }
+  /** The gated deterministic test engine (simulated=1 on the run row). */
+  | { kind: "simulated"; adapter: RuntimeAdapter }
+  /** No credential, no test gate — the caller must FAIL the run honestly. */
+  | { kind: "unavailable" };
 
 /**
  * Selects the adapter for a requested real backend: the real one when its
- * credential is present, else the simulated engine (simulated=true; the
- * caller keeps the requested backend on the run row for glyph fidelity).
+ * credential is present; the simulated TEST engine only inside the R7-2 gate
+ * (the caller keeps the requested backend on the run row for glyph fidelity);
+ * otherwise `unavailable` — there is NO silent simulated fallback anymore, an
+ * unavailable backend must produce an honest error run, never a fake stream.
  */
 export function selectAdapter(backend: RealBackend, adapters: AdapterSet): SelectResult {
-  if (isBackendAvailable(backend)) return { adapter: adapters[backend], simulated: false };
-  return { adapter: adapters.simulated, simulated: true };
+  if (isBackendAvailable(backend)) return { kind: "real", adapter: adapters[backend] };
+  if (simulatedRuntimePermitted()) {
+    return { kind: "simulated", adapter: adapters.simulated };
+  }
+  return { kind: "unavailable" };
 }

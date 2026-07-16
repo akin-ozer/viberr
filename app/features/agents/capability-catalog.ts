@@ -55,7 +55,11 @@ export const CAP_MODAL_CATALOG: readonly ModalCapGroup[] = [
       // Edit/Write/MultiEdit/NotebookEdit + denies git commit) but was
       // previously inexpressible in the modal.
       cap("execute-code-or-write-repo", "direct"),
-      cap("open-review-pr", "recommend"),
+      // R7-5: `open-review-pr` defaults to `direct` ("Allowed"), not `recommend`
+      // — the specialist picker no longer offers `recommend` (it is meaningless
+      // for a specialist; a specialist just opens the PR directly). The former
+      // `recommend` default coerces to `direct` on read anyway.
+      cap("open-review-pr", "direct"),
     ],
   },
   {
@@ -119,10 +123,23 @@ export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
     OPERATOR_CAP_CATALOG.flatMap((g) => g.caps.map((c) => [c.id, c.def])),
   );
 
-export const CAP_MODES: readonly { id: CapMode; label: string }[] = [
+/** The OPERATOR capability picker's modes — all 4, because `recommend`
+ * (propose a card a human applies) has real semantics for the operator. */
+export const OPERATOR_CAP_MODES: readonly { id: CapMode; label: string }[] = [
   { id: "direct", label: "Direct" },
   { id: "recommend", label: "Recommend" },
   { id: "human", label: "Human" },
+  { id: "off", label: "Off" },
+];
+
+/** The SPECIALIST capability picker's modes — 3 HONEST values (R7-5).
+ * `recommend` is omitted: it is an operator-only concept, and at runtime a
+ * specialist `recommend` grant is identical to `direct` (F7-CAP1). Labels are
+ * chosen for a specialist's mental model — "Allowed" persists `direct`,
+ * "Human-only" persists `human`, "Off" persists `off`. */
+export const SPECIALIST_CAP_MODES: readonly { id: CapMode; label: string }[] = [
+  { id: "direct", label: "Allowed" },
+  { id: "human", label: "Human-only" },
   { id: "off", label: "Off" },
 ];
 

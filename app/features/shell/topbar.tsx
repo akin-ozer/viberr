@@ -23,6 +23,7 @@ import { workspaceViewFromPathname, workspaceViewLabel } from "./nav";
 export function Topbar({
   projectSlug,
   projectName,
+  orgAdminOverride = false,
   openTask,
   user,
   theme,
@@ -31,6 +32,9 @@ export function Topbar({
 }: {
   projectSlug: string;
   projectName: string;
+  /** D2 honesty pill: the viewer is an ORG admin who is NOT a member of this
+   *  project — every action here is the audited emergency override. */
+  orgAdminOverride?: boolean;
   /** Open task (crumb state) — supplied by the layout from route matches. */
   openTask: { key: string; title: string } | null;
   user: MenuUser;
@@ -116,6 +120,14 @@ export function Topbar({
           <span className="cur">{workspaceViewLabel(view)}</span>
         )}
       </div>
+      {orgAdminOverride && (
+        <span
+          className="pill risk sm"
+          title="You are not a member of this project — you're acting with org-admin emergency authority. Every override is recorded in the audit log."
+        >
+          org-admin override
+        </span>
+      )}
       <div className="top-search">
         <Icon name="search" />
         <input

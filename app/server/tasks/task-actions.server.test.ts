@@ -84,7 +84,7 @@ describe("createTask", () => {
     );
     expect(result.task.operator).toMatchObject({
       assignedAtStageId: "ready",
-      sinceLabel: "stage 2",
+      sinceLabel: "since Ready", // real stage NAME, not a bare index (F7-UI2)
     });
   });
 
@@ -552,9 +552,15 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       "VIB-1",
       "Verdict: approve — looks fine to me.",
     );
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
-    expect(fm.validation).toBe("failing");
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.validation).toBe("failing");
+    // F7-REV3: the approve-that-didn't-clear quality event must NOT read the
+    // self-contradictory "Review passed / Validation: failing"; it is an honest
+    // "Approval noted — rework still needed".
+    const quality = file.parsed.timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Approval noted — rework still needed");
+    expect(quality?.text).toContain("Validation:** failing");
+    expect(quality?.text).not.toContain("approved the work");
   });
 
   it("re-entering review resets ANY stale validation to 'changed'", async () => {

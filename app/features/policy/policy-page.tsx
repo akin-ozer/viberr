@@ -166,15 +166,21 @@ export function HumanAccess({
         <Icon name="message" />
         <span>
           Rules that reach beyond project roles:{" "}
-          <strong>commenting is app-wide</strong> — every registered user may
-          comment on any task; <strong>contributors and above</strong> may{" "}
+          <strong>viewing and commenting are app-wide</strong> — every
+          registered user may read boards, tasks &amp; timelines and comment on
+          any task (the table's View/Comment rows show project roles, but the
+          server only requires a signed-in user);{" "}
+          <strong>contributors and above</strong> may{" "}
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and
           acceptance authority, scoped to that task — a contributor who owns a
           task <strong>may accept its completion</strong> even though the table
-          reserves that column for maintainers); and{" "}
+          reserves that column for maintainers);{" "}
           <strong>admins may release any owner</strong> — recorded in the audit
-          trail.
+          trail; and <strong>org admins hold emergency project-admin
+          authority on every project</strong> — even without membership — with
+          every override recorded in the audit trail as{" "}
+          <em>org-admin override</em>.
         </span>
       </div>
     </div>

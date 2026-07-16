@@ -32,6 +32,11 @@ const E2E_ENV = {
   // the explicit runtime override — the golden-path specs assert on the
   // synchronous scripted operator, not live non-deterministic agent runs.
   VIBERR_FORCE_SIMULATED_RUNTIME: "1",
+  // R7-2 fail-closed gate: the force flag above is inert unless NODE_ENV is
+  // "test" OR this second explicit ack is set. The e2e app server boots
+  // NODE_ENV=development, so the ack opens the test-engine gate here — and a
+  // stray force flag in a real dev/prod env stays harmless.
+  VIBERR_TEST_RUNTIME_OK: "1",
 };
 
 export default defineConfig({

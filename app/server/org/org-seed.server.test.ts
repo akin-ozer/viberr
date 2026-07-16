@@ -33,7 +33,8 @@ describe("seedOrgResources", () => {
     // Existing seed output regression (brief contract). 12 tasks = 10
     // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 3 profiles after the
     // Advisor/consultant removal AND the Tester→Reviewer merge (operator +
-    // developer + reviewer).
+    // developer + reviewer). No `runs` — the seed fabricates ZERO run
+    // history (R7-2).
     expect(demo).toMatchObject({
       users: 5,
       projects: 3,
@@ -41,7 +42,6 @@ describe("seedOrgResources", () => {
       events: 36,
       notifications: 10,
       agentProfiles: 3,
-      runs: 18,
     });
 
     expect(org).toMatchObject({

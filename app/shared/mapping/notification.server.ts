@@ -1,3 +1,4 @@
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import type { ActorRender } from "./actor.server";
 
 /**
@@ -29,6 +30,14 @@ export interface NotificationRow {
   created_at: string;
   /** Joined from projects when resolvable (soft ref otherwise). */
   project_name?: string | null;
+  /** Joined from projects — stage list JSON for the terminal-stage check. */
+  project_stages_json?: string | null;
+  /** Joined from task_projections (F7-NOTIF1 live state) — all null when the
+   * task row doesn't resolve locally. */
+  task_stage?: string | null;
+  /** 1 when the task has an open packet, else 0/null (SQL boolean). */
+  task_has_packet?: number | null;
+  task_recommendation_count?: number | null;
 }
 
 export interface NotificationRecord {
@@ -48,6 +57,30 @@ export interface NotificationRecord {
   occurredAt: string;
   unread: boolean;
   readAt: string | null;
+  /** F7-NOTIF1: this packet/approval notification's decision is STILL pending
+   * on the live task record — the only state that belongs in "Waiting on you".
+   * Always false for non-decision kinds; recomputed at read time (a resolved
+   * packet / applied recommendation / Done task drops out with no row write). */
+  waitingOnYou: boolean;
+}
+
+/**
+ * Live "waiting on you" reconciliation (F7-NOTIF1): a decision notification
+ * waits only while the projected task still carries that KIND of pending
+ * decision (packet → open packet; approval → any pending recommendation) AND
+ * the task is not in its terminal stage. A task that doesn't resolve locally
+ * (deleted, or a foreign soft ref) has no live decision to wait on.
+ */
+function liveWaitingOnYou(row: NotificationRow): boolean {
+  if (row.kind !== "packet" && row.kind !== "approval") return false;
+  if (row.task_stage == null) return false; // no local task row → nothing pending
+  const stages = row.project_stages_json
+    ? (JSON.parse(row.project_stages_json) as { id: string }[])
+    : [];
+  if (isTerminalStage(row.task_stage, stages)) return false; // Done → resolved
+  return row.kind === "packet"
+    ? row.task_has_packet === 1
+    : (row.task_recommendation_count ?? 0) > 0;
 }
 
 export function mapNotificationRow(row: NotificationRow): NotificationRecord {
@@ -65,5 +98,6 @@ export function mapNotificationRow(row: NotificationRow): NotificationRecord {
     occurredAt: row.occurred_at,
     unread: row.read_at === null,
     readAt: row.read_at,
+    waitingOnYou: liveWaitingOnYou(row),
   };
 }

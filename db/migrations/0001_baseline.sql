@@ -87,6 +87,10 @@ CREATE TABLE task_projections (
   github_json TEXT,
   goal TEXT NOT NULL DEFAULT '',
   packet_json TEXT,
+  -- Pending operator recommendations on the task file (F7-NOTIF1): projected
+  -- as a count so read paths (notifications "Waiting on you", home decisions)
+  -- can reconcile decision notifications against LIVE state without file I/O.
+  recommendation_count INTEGER NOT NULL DEFAULT 0,
   event_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
   diagnostic_count INTEGER NOT NULL DEFAULT 0,

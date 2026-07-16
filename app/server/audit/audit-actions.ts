@@ -82,6 +82,10 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "project.member.removed": "project",
   "project.member.role_changed": "project",
   "project.policy.boundary_changed": "project",
+  // D2 (pass-7 R7-1): an ORG admin exercised the emergency project-admin
+  // override on a project where their membership alone would be denied.
+  // details: { action, what, projectSlug, memberRole } — recorded on EVERY use.
+  "project.org_admin.override": "project",
   "project.agent_profile.created": "project",
   "project.agent_profile.updated": "project",
   "project.agent_profile.deleted": "project",
@@ -137,6 +141,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // -- runtimes (phases 8 + 10) --------------------------------------------
   "runtime.run.started": "task",
   "runtime.run.interrupted": "task",
+  // Boot recovery re-invoked the operator for an orphaned run (F7-BOOT1); the
+  // count of these in a rolling window is the crash-loop backstop.
+  "run.recovery.reinvoked": "task",
 
   // -- store / projections & maintenance (phases 3 + 10) --------------------
   "projection.rescan": "system",

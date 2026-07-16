@@ -1,7 +1,7 @@
 import { data } from "react-router";
-import type { ProjectRole } from "~/schemas/project-file.schema";
+import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
-import { requireProjectRole } from "~/server/tasks/task-actions.server";
+import { assertProjectAction } from "./project-authority.server";
 import { requireAuth, type AuthContext } from "./require-user.server";
 
 /**
@@ -11,27 +11,28 @@ import { requireAuth, type AuthContext } from "./require-user.server";
  * FR4 keeps the board, task detail, and timelines readable app-wide (anyone may
  * comment on any task), but the configuration surfaces — RBAC policy, agent
  * capability matrix, workflow settings, and GitHub connection health — are for
- * project members only. This wraps the canonical `requireProjectRole` guard and
- * converts its AppError into a proper thrown Response so a non-member sees a
- * clean 403 page instead of a generic crash.
+ * project members only. This wraps the canonical `assertProjectAction` guard
+ * ("any-member") and converts its AppError into a proper thrown Response so a
+ * non-member sees a clean 403 page instead of a generic crash. ORG admins pass
+ * as the audited D2 emergency override (project-authority.server), so they can
+ * open any project's config surfaces — the shell shows the override pill.
  */
 export async function requireProjectMember(
   request: Request,
   projectSlug: string,
   what: string,
-  allowed: ProjectRole[] | "any-member" = "any-member",
 ): Promise<AuthContext> {
   const ctx = await requireAuth(request);
   try {
     // Route-level READ authorization ("view this surface"): archived projects
     // stay fully readable (R6-3 freezes mutations, not reads), so exempt this
     // membership check from the archived gate.
-    requireProjectRole(
+    assertProjectAction(
+      getDb(),
+      "any-member",
       projectSlug,
       { userId: ctx.user.id, label: ctx.user.email },
-      allowed,
       what,
-      {},
       { allowArchived: true },
     );
   } catch (error) {

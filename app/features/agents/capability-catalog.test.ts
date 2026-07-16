@@ -7,6 +7,8 @@ import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
   MODAL_CAP_IDS,
+  OPERATOR_CAP_MODES,
+  SPECIALIST_CAP_MODES,
 } from "./capability-catalog";
 import { capabilitiesToActionLabels } from "./agents-query.server";
 
@@ -56,8 +58,36 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     ]);
     // XS-8: the enforced "write to the repo" capability is now expressible.
     expect(CAP_MODAL_DEFAULTS["execute-code-or-write-repo"]).toBe("direct");
-    expect(CAP_MODAL_DEFAULTS["open-review-pr"]).toBe("recommend");
+    // R7-5: `open-review-pr` now defaults to `direct` ("Allowed") — the
+    // specialist picker no longer offers `recommend`.
+    expect(CAP_MODAL_DEFAULTS["open-review-pr"]).toBe("direct");
     expect(CAP_MODAL_DEFAULTS["merge-pull-request"]).toBe("human");
+    // No specialist modal default may be `recommend` (an operator-only mode).
+    expect(Object.values(CAP_MODAL_DEFAULTS)).not.toContain("recommend");
+  });
+
+  it("R7-5 — the specialist picker offers 3 honest modes, the operator keeps 4", () => {
+    // The specialist collapses to Allowed/Human-only/Off — `recommend` is
+    // operator-only (runtime-identical to `direct` for a specialist; F7-CAP1).
+    expect(SPECIALIST_CAP_MODES.map((m) => m.id)).toEqual([
+      "direct",
+      "human",
+      "off",
+    ]);
+    expect(SPECIALIST_CAP_MODES.map((m) => m.label)).toEqual([
+      "Allowed",
+      "Human-only",
+      "Off",
+    ]);
+    expect(SPECIALIST_CAP_MODES.map((m) => m.id)).not.toContain("recommend");
+    // The operator keeps all 4, where `recommend` has real propose-a-card
+    // semantics.
+    expect(OPERATOR_CAP_MODES.map((m) => m.id)).toEqual([
+      "direct",
+      "recommend",
+      "human",
+      "off",
+    ]);
   });
 
   it("the always-human invariant ids are all in the modal catalog, defaulted human", () => {

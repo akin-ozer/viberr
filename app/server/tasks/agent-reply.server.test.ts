@@ -18,12 +18,18 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
+import {
+  insertRunLine,
+  listRunsForTaskRows,
+  upsertRun,
+} from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   extractReplyText,
+  normalizeWorkspacePaths,
   resumeWorkdir,
   resolveMentionedAgent,
+  runFailureReason,
 } from "./agent-reply.server";
 import {
   assignSpecialist,
@@ -247,6 +253,140 @@ describe("extractReplyText", () => {
     const { extractFullReplyText } = await import("./agent-reply.server");
     const out = extractFullReplyText([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBe(5000);
+  });
+
+  it("rewrites a workspace-absolute path to repo-relative but leaves real URLs (F7-UX1)", () => {
+    const reply =
+      "See [the doc](/Users/akinozer/projects/viberr/data/store/projects/viberr-core/tasks/VIB-2/workspace/viberr/docs/x.md) " +
+      "and also /Users/akinozer/.../tasks/PLG-1/workspace/my-repo/src/index.ts — " +
+      "full report at https://example.com/tasks/VIB-2/workspace/viberr/docs/x.md";
+    const out = extractReplyText([line({ tag: "assistant", text: reply })])!;
+    // Workspace-absolute host paths collapse to repo-relative.
+    expect(out).toContain("[the doc](docs/x.md)");
+    expect(out).toContain(" src/index.ts ");
+    // The rewritten paths' host prefix is gone.
+    expect(out).not.toContain("/Users/akinozer");
+    // A real http URL that happens to contain the same segments is untouched
+    // (its `/workspace/` survives precisely because URLs are never rewritten).
+    expect(out).toContain("https://example.com/tasks/VIB-2/workspace/viberr/docs/x.md");
+  });
+
+  it("normalizeWorkspacePaths leaves non-workspace absolute paths and bare URLs alone", () => {
+    // Not a task workspace → unchanged.
+    expect(normalizeWorkspacePaths("/etc/hosts and /var/log/app.log")).toBe(
+      "/etc/hosts and /var/log/app.log",
+    );
+    // Bare workspace path (no markdown) still collapses.
+    expect(
+      normalizeWorkspacePaths("/data/tasks/VIB-9/workspace/repo/README.md"),
+    ).toBe("README.md");
+    // file:// URL is a real URL → untouched.
+    const fileUrl = "file:///data/tasks/VIB-9/workspace/repo/README.md";
+    expect(normalizeWorkspacePaths(fileUrl)).toBe(fileUrl);
+  });
+});
+
+/* --------------------------------------------------------- runFailureReason */
+
+describe("runFailureReason (F7-RUN1)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  /** Persist the given display lines to a fresh run, then classify it. */
+  function classify(displays: LogLine[]): { kind: string; text: string } | null {
+    const db = ctx.makeDb();
+    const runId = "run-" + Math.random().toString(36).slice(2);
+    upsertRun(db, {
+      id: runId,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "codex",
+      simulated: false,
+      model: "gpt-5.4-codex",
+      sdk: "codex-sdk",
+      state: "error",
+    });
+    displays.forEach((display, seq) => {
+      insertRunLine(db, {
+        runId,
+        seq,
+        occurredAt: new Date().toISOString(),
+        raw: "",
+        display,
+      });
+    });
+    return runFailureReason(db, runId);
+  }
+
+  const errLine = (partial: Partial<LogLine>): LogLine => ({
+    t: "", ev: "err", tag: "error", text: "", ...partial,
+  });
+
+  it("trusts the structured `·<kind>` tag over the generic prose (codex path)", () => {
+    // The redaction-safe auth message does NOT match the auth prose regex on
+    // its own; the classified tag is what routes it correctly.
+    expect(
+      classify([
+        errLine({
+          tag: "error·auth",
+          text: "Codex authentication failed. Review the configured subscription credential.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "auth" });
+
+    expect(
+      classify([
+        errLine({
+          tag: "error·quota",
+          text: "Codex usage limit was reached. Retry after the subscription limit resets.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "quota" });
+
+    expect(
+      classify([
+        errLine({
+          tag: "error·unknown",
+          text: "Codex could not start. Review its authentication and runtime configuration.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "unknown" });
+  });
+
+  it("falls back to prose regexes for lines that carry no class (claude path)", () => {
+    expect(
+      classify([
+        errLine({
+          tag: "run·error",
+          text: "The coordinating model is over its usage quota. Retry after the limit resets.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "quota" });
+
+    expect(
+      classify([
+        errLine({
+          tag: "run·error",
+          text: "codex is unavailable — no usable credential is configured.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "unavailable" });
+  });
+
+  it("returns the last err line and null when no failure line exists", () => {
+    expect(
+      classify([
+        errLine({ tag: "error·quota", text: "earlier quota blip" }),
+        errLine({ tag: "error·auth", text: "final auth failure" }),
+      ]),
+    ).toMatchObject({ kind: "auth", text: "final auth failure" });
+
+    expect(
+      classify([{ t: "", ev: "text", tag: "assistant", text: "all good" }]),
+    ).toBeNull();
   });
 });
 

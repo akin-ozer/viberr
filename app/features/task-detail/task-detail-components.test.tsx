@@ -436,6 +436,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         deployedSpecialists={deployedFixture}
         canRunAgents
         runActive={false}
+        operatorRunActive={false}
         runBusy={false}
         onAssignSpecialist={onAssign}
         onRunSpecialist={onRun}
@@ -535,6 +536,38 @@ describe("ExecutionProfile — assign menu + run button", () => {
     ).toBe(false);
     // The read-only "None yet …" copy is shown instead.
     expect(container.textContent).toContain("the operator assigns one");
+  });
+});
+
+describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
+  const attachedOperator = {
+    name: "Operator" as const,
+    assignedAtStageId: "impl",
+    sinceStageIndex: 3,
+    sinceLabel: "since In Progress",
+  };
+
+  it("an attached-but-idle operator shows NO pill (attachment ≠ activity)", () => {
+    const { container } = renderExec(execTask({ operator: attachedOperator }));
+    expect(container.textContent).not.toContain("operator active");
+  });
+
+  it("a live operator run shows the pill", () => {
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorRunActive: true,
+    });
+    expect(container.textContent).toContain("operator active");
+  });
+
+  it("a closed task keeps its 'task closed' pill without a phantom 'operator active'", () => {
+    const { container } = renderExec(
+      execTask({
+        operator: attachedOperator,
+        displayReadiness: "accepted",
+      } as unknown as Partial<TaskSummary>),
+    );
+    expect(container.textContent).toContain("task closed");
+    expect(container.textContent).not.toContain("operator active");
   });
 });
 

@@ -1,10 +1,13 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
-import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  coerceSpecialistCapabilityMode,
+} from "~/shared/capabilities";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { assertProjectAction } from "~/server/auth/project-role-guard.server";
+import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
@@ -92,16 +95,18 @@ function forbidden(userMessage: string): AppError {
   });
 }
 
-function requireProjectAdmin(
+function requireProjectAction(
+  db: Database.Database,
   ctx: ProfileMutationContext,
   projectSlug: string,
   actor: ProfileActor,
 ): { projectName: string } {
   // Single canonical guard: agent profile CRUD is admin-only (`manage-agents`).
   return assertProjectAction(
+    db,
     "manage-agents",
     projectSlug,
-    actor.userId,
+    actor,
     "change agent capability policy",
     { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
   );
@@ -137,14 +142,21 @@ const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
  * transition-to-done, change project policy) can NEVER be stored in an
  * actionable mode — whatever the submitted form says, it is coerced to
  * `human`. This is the enforcement point the catalog comment refers to; no
- * write path can persist an always-human grant an agent could act on. */
+ * write path can persist an always-human grant an agent could act on.
+ *
+ * R7-5: for a SPECIALIST profile (`specialist: true`), a submitted `recommend`
+ * is coerced to `direct` ('Allowed') — the specialist picker never offers
+ * `recommend`, so this keeps a hostile/legacy form honest. The operator
+ * (`specialist: false`) keeps its real `recommend` modes. */
 function grantsFor(
   caps: Record<string, CapMode>,
   defaults: Readonly<Record<string, CapMode>>,
+  { specialist }: { specialist: boolean },
 ): { capabilityId: string; mode: CapabilityMode }[] {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
     let mode = caps[capabilityId] ?? def;
+    if (specialist) mode = coerceSpecialistCapabilityMode(mode);
     // Always-human caps are coerced to `human` whatever the form says.
     if (ALWAYS_HUMAN.has(capabilityId)) mode = "human";
     // Persist EVERY grant, including `off` (withheld). Dropping `off` here made
@@ -166,14 +178,19 @@ function grantsFor(
  * persisted ~12, silently granting repo-mutating power (create-task-branch,
  * commit-push-branch, open-review-pr) the creator never chose. A capability the
  * form omits now stays ABSENT — off, not direct. Only governed modal-catalog
- * ids are persisted; anything outside the curated set is ignored. */
+ * ids are persisted; anything outside the curated set is ignored.
+ *
+ * Create is ALWAYS a specialist profile, so a submitted `recommend` coerces to
+ * `direct` ('Allowed') per R7-5; always-human ids stay `human`. */
 function createModalGrants(
   caps: Record<string, CapMode>,
 ): { capabilityId: string; mode: CapabilityMode }[] {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, submitted] of Object.entries(caps)) {
     if (!MODAL_CAP_IDS.has(capabilityId)) continue;
-    const mode = ALWAYS_HUMAN.has(capabilityId) ? "human" : submitted;
+    const mode = ALWAYS_HUMAN.has(capabilityId)
+      ? "human"
+      : coerceSpecialistCapabilityMode(submitted);
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   return grants;
@@ -195,7 +212,7 @@ export async function createAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  const { projectName } = requireProjectAdmin(ctx, input.projectSlug, actor);
+  const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
 
   const ref = {
@@ -267,7 +284,7 @@ export async function updateAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
 
   const ref = {
@@ -293,7 +310,10 @@ export async function updateAgentProfile(
     const preserved = deployment.capabilities.filter(
       (c) => !governedIds.has(c.capabilityId),
     );
-    deployment.capabilities = [...grantsFor(form.caps, governedDefaults), ...preserved];
+    deployment.capabilities = [
+      ...grantsFor(form.caps, governedDefaults, { specialist: !isOperator }),
+      ...preserved,
+    ];
 
     // Full-definition override. Both kinds now store the picked backend + model
     // + effort (the operator no longer keeps the "orchestration runtime"
@@ -345,7 +365,7 @@ export async function deleteAgentProfile(
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
-  requireProjectAdmin(ctx, input.projectSlug, actor);
+  requireProjectAction(db, ctx, input.projectSlug, actor);
 
   const ref = {
     projectSlug: input.projectSlug,

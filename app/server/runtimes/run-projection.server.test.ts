@@ -137,6 +137,24 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.altBackend).toBe("claude"); // codex failed → offer claude
   });
 
+  it("flags an R7-2 fail-fast 'unavailable' run via its structured tag (D4 retry)", () => {
+    // The no-credential fail-fast (failRunUnavailable) emits an err line tagged
+    // `run·unavailable` whose prose ("…is unavailable — no usable credential…")
+    // matches none of the quota/rate-limit signatures. The projection must key
+    // off the tag so the "retry on the other backend" affordance still renders.
+    insert({ id: "run_u", threadId: "primary", kind: "primary", backend: "claude", state: "error" });
+    insertRunLine(db, {
+      runId: "run_u",
+      seq: 0,
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      raw: JSON.stringify({ type: "error", source: "viberr", message: "Claude Code is unavailable — no usable credential is configured." }),
+      display: { t: "00:00:00", ev: "err", tag: "run·unavailable", text: "Claude Code is unavailable — no usable credential is configured." } as never,
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.failedBackendUnavailable).toBe(true);
+    expect(view!.altBackend).toBe("codex"); // claude failed → offer codex
+  });
+
   it("does NOT flag a genuine task failure as backend-unavailable", () => {
     insert({ id: "run_f", threadId: "primary", kind: "primary", backend: "codex", state: "error" });
     insertRunLine(db, {

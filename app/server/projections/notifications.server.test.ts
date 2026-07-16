@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 import { insertUser } from "~/server/auth/user-store.server";
 import { hashPassword } from "~/server/auth/password.server";
+import { rebuildAll } from "./rebuilder.server";
 import {
   onProjectionEvent,
   type ProjectionEvent,
@@ -222,5 +229,99 @@ describe("createNotification routing prefs (FIX #4)", () => {
     setPref(db, "u_1", NOTIFS_PREF_KEY, { policy: { app: false } });
     expect(createNotification(db, { userId: "u_1", kind: "policy", text: "t" })).toBeNull();
     expect(createNotification(db, { userId: "u_2", kind: "policy", text: "t" })).not.toBeNull();
+  });
+});
+
+describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
+  const PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Pick one",
+    body: "",
+    observations: [],
+    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+  };
+
+  const REC = {
+    id: "rec-1",
+    kind: "transition" as const,
+    toStageId: "review",
+    label: "Approve transition",
+    detail: "",
+  };
+
+  it("packet notification: waiting while the packet is open, drops out once resolved", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    createNotification(store.db, { id: "p", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-101" });
+    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(true);
+
+    // Packet resolved (cleared from the file) — the notification leaves the
+    // waiting bucket WITHOUT being deleted or auto-read.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const after = listNotifications(store.db, "u_1");
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: "p", waitingOnYou: false, unread: true });
+  });
+
+  it("approval notification: waiting while a recommendation is pending, drops out once applied", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-102", { stage: "impl", recommendations: [REC] }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    createNotification(store.db, { id: "a", userId: "u_1", kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-102" });
+    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(true);
+
+    // Recommendation applied/dismissed (cleared from the file).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-102", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(false);
+  });
+
+  it("a task in the terminal stage is never waiting — leftover packet/rec notwithstanding", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-103", {
+        stage: "done",
+        waiting: "none",
+        recommendations: [REC],
+      }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    createNotification(store.db, { id: "p", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
+    createNotification(store.db, { id: "a", userId: "u_1", kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
+    expect(listNotifications(store.db, "u_1").map((n) => n.waitingOnYou)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it("unresolvable task refs and non-decision kinds are never waiting", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review" }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Foreign/deleted soft ref — no local task row to reconcile against.
+    createNotification(store.db, { id: "x", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "other-org-project", taskKey: "OTH-1" });
+    // A mention on a task with an open packet is still not a decision.
+    createNotification(store.db, { id: "m", userId: "u_1", kind: "mention", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
+    expect(listNotifications(store.db, "u_1").map((n) => n.waitingOnYou)).toEqual([
+      false,
+      false,
+    ]);
   });
 });

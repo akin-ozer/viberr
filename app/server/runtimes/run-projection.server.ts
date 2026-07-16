@@ -119,11 +119,18 @@ function projectRow(
 
   const finished = finishedLabel(row.finished_at);
   // A run can end in `error` because its BACKEND was unavailable / quota-limited
-  // rather than because the task genuinely failed. Detect that from the log tail
-  // so the UI can offer a one-click retry on the OTHER backend (D4) instead of
-  // leaving the task stalled on an opaque error.
+  // rather than because the task genuinely failed. Detect that so the UI can
+  // offer a one-click retry on the OTHER backend (D4) instead of leaving the
+  // task stalled on an opaque error. The R7-2 fail-fast path emits a STRUCTURED
+  // `run·unavailable` err tag (its prose "…is unavailable — no usable
+  // credential…" doesn't match the quota/rate-limit signatures), so trust the
+  // tag directly and fall back to the prose scan for real backend errors that
+  // carry no tag.
   const failedBackendUnavailable =
-    row.state === "error" && !op && isBackendUnavailableError(raw);
+    row.state === "error" &&
+    !op &&
+    (lines.some((l) => l.ev === "err" && l.tag === "run·unavailable") ||
+      isBackendUnavailableError(raw));
   const altBackend: "claude" | "codex" = backend === "codex" ? "claude" : "codex";
   return {
     id: row.thread_id,

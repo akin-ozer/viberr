@@ -6,6 +6,11 @@ import type {
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
+import {
+  requireProjectAuthority,
+  requireProjectMutable,
+  resolveProjectAuthority,
+} from "~/server/auth/project-authority.server";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
   compactTimelineEvents,
@@ -180,24 +185,9 @@ function loadProjectContext(
   };
 }
 
-/**
- * Archived projects are read-only (owner ruling R6-3): a project moved to the
- * Home "Archived" section refuses every governed mutation (tasks, comments,
- * agent runs, policy, settings) until an admin restores it — timelines and
- * audit stay readable. Throws a 409 with actionable copy. The ONE exemption is
- * the restore action itself (setProjectArchived passes `allowArchived`), so an
- * archived project can be brought back. Reads never call this.
- */
-export function requireProjectMutable(project: ProjectContext, what: string): void {
-  if (project.archived) {
-    throw new AppError({
-      code: ERROR_CODES.CONFLICT,
-      status: 409,
-      userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
-      kind: "user",
-    });
-  }
-}
+// The archived read-only gate (R6-3) — ONE implementation, shared with the
+// config-surface guard. Re-exported so existing importers keep working.
+export { requireProjectMutable };
 
 function stageName(project: ProjectContext, stageId: string): string {
   return project.stages.find((s) => s.id === stageId)?.name ?? stageId;
@@ -216,27 +206,6 @@ function reviewStageIdOf(project: ProjectContext): string | null {
 /** The terminal (Done-equivalent) stage id. */
 function terminalStageIdOf(project: ProjectContext): string | null {
   return stageRolesOf(project).terminalId;
-}
-
-/**
- * Route-level project-membership guard. Use in loaders/actions of project-scoped
- * config surfaces (policy / agents / settings / github) and instance-wide
- * triggers reached from a project (board rescan). Throws 404 for an unknown
- * project and 403 when the actor isn't a member (or lacks the required role).
- * Returns the actor's role. Reads the canonical project.md fresh every call
- * (no session caching), consistent with every other governed mutation.
- */
-export function requireProjectRole(
-  projectSlug: string,
-  actor: TaskActor,
-  allowed: ProjectRole[] | "any-member",
-  what: string,
-  ctx: TaskMutationContext = {},
-  opts: { allowArchived?: boolean } = {},
-): ProjectRole {
-  const project = loadProjectContext(ctx, projectSlug);
-  if (!opts.allowArchived) requireProjectMutable(project, what);
-  return requireMemberRole(project, actor, allowed, what);
 }
 
 /** The operator's canonical notification actor. */
@@ -318,30 +287,32 @@ export function notifyTaskWatchers(
   return notified;
 }
 
-function requireMemberRole(
+/** The loosest membership gate: ANY live member (idempotent/no-op paths).
+ *  Routes through the single authority resolution, so an org admin passes as
+ *  the audited D2 override. */
+function requireAnyMember(
+  db: Database.Database,
   project: ProjectContext,
   actor: TaskActor,
-  allowed: ProjectRole[] | "any-member",
   what: string,
 ): ProjectRole {
-  const role = project.memberRoles.get(actor.userId);
-  if (!role) {
-    throw forbidden(`Only project members can ${what}.`);
-  }
-  if (allowed !== "any-member" && !allowed.includes(role)) {
-    throw forbidden(`Your project role (${role}) cannot ${what}.`);
-  }
-  return role;
+  return requireProjectAuthority(db, project, actor, "any-member", {
+    action: "any-member",
+    what,
+  }).role;
 }
 
 /**
- * THE canonical project-role guard: resolves the actor's role and checks it
- * against the single-source `ACTION_ROLES` map (app/shared/rbac.ts) — the same
- * object the Policy page renders. Every governed project mutation names its
- * `RbacAction` here instead of hard-coding a role list, so enforcement and
- * display can never drift. Returns the actor's role for downstream branching.
+ * THE canonical project-role guard: resolves the actor's authority through the
+ * single-source `ACTION_ROLES` map (app/shared/rbac.ts) — the same object the
+ * Policy page renders. Every governed project mutation names its `RbacAction`
+ * here instead of hard-coding a role list, so enforcement and display can never
+ * drift. Org admins pass as the audited D2 emergency override when their
+ * membership alone would be denied. Returns the EFFECTIVE role for downstream
+ * branching ("admin" under an override).
  */
 export function requireAction(
+  db: Database.Database,
   project: ProjectContext,
   actor: TaskActor,
   action: RbacAction,
@@ -351,7 +322,30 @@ export function requireAction(
   // RbacAction and routes through here, so this is the single chokepoint that
   // freezes an archived project's mutations while leaving reads intact.
   requireProjectMutable(project, what);
-  return requireMemberRole(project, actor, [...rolesForAction(action)], what);
+  return requireProjectAuthority(db, project, actor, rolesForAction(action), {
+    action,
+    what,
+  }).role;
+}
+
+/**
+ * The ONE task-owner exception (owner rulings Q2 + R6-2): the task's human
+ * OWNER — whatever their tier — holds review/acceptance authority for THAT
+ * task, provided they still hold LIVE `own-task` membership (contributor+; a
+ * demoted viewer-owner or a removed member with a stale ownerUserId never
+ * qualifies). Shared by requireAcceptCompletion and resolvePacket.
+ */
+function ownerException(
+  project: ProjectContext,
+  actor: TaskActor,
+  ownerUserId: string | null | undefined,
+): boolean {
+  return (
+    !!actor.userId &&
+    !!ownerUserId &&
+    ownerUserId === actor.userId &&
+    roleCan(project.memberRoles.get(actor.userId), "own-task")
+  );
 }
 
 /**
@@ -361,23 +355,19 @@ export function requireAction(
  * the task's human OWNER — even when that owner is only a Contributor. The owner
  * IS the task's designated reviewer/acceptance authority (the Policy page says
  * exactly this), so a contributor who owns a task may accept its own completion,
- * mirroring the existing resolve-packet owner exception. The owner path requires
- * LIVE contributor+ membership (a demoted viewer-owner, or a removed member who
- * still holds a stale ownerUserId, does not qualify). The operator never routes
- * through here (it is gated by its own capability policy upstream).
+ * mirroring the resolve-packet owner exception (same `ownerException` helper).
+ * The operator never routes through here (it is gated by its own capability
+ * policy upstream).
  */
 function requireAcceptCompletion(
+  db: Database.Database,
   project: ProjectContext,
   actor: TaskActor,
   ownerUserId: string | null | undefined,
   what: string,
 ): void {
-  const isOwner =
-    !!actor.userId &&
-    ownerUserId === actor.userId &&
-    roleCan(project.memberRoles.get(actor.userId), "own-task");
-  if (isOwner) return;
-  requireAction(project, actor, "accept-completion", what);
+  if (ownerException(project, actor, ownerUserId)) return;
+  requireAction(db, project, actor, "accept-completion", what);
 }
 
 function userName(db: Database.Database, userId: string): string {
@@ -455,7 +445,7 @@ export async function createTask(
   ctx: TaskMutationContext = {},
 ): Promise<{ key: string; task: TaskSummary; stageName: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "create-task", "create tasks");
+  requireAction(db, project, actor, "create-task", "create tasks");
 
   const title = input.title.trim();
   if (title.length < 3) {
@@ -553,7 +543,7 @@ export async function updateTaskGoal(
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "update-goal", "edit the task goal");
+  requireAction(db, project, actor, "update-goal", "edit the task goal");
   const goal = input.goal.trim();
   if (goal.length < 3) {
     throw AppError.validation("A goal of at least 3 characters is required.");
@@ -863,7 +853,7 @@ export async function commentToAgent(
 
   // 3. RBAC: only admin|maintainer trigger runtime work. A lower role still
   //    got their comment recorded above — just skip the run (no throw).
-  if (!hasRuntimeRole(ctx, input.projectSlug, actor)) {
+  if (!hasRuntimeRole(db, ctx, input.projectSlug, actor)) {
     return {
       ...base,
       agent: agentIdentity,
@@ -924,10 +914,17 @@ export async function commentToAgent(
       repo,
       ctx.dataRoot,
     );
-    const script = buildReplyScript(
-      target.session.backend === "codex" ? "codex" : "claude",
-      target.model,
+    // R7-2: the canned reply stream feeds ONLY the gated deterministic test
+    // engine — outside the gate the resume runs real, or fails fast honestly.
+    const { simulatedRuntimePermitted } = await import(
+      "~/server/runtimes/runtime-registry.server"
     );
+    const script = simulatedRuntimePermitted()
+      ? buildReplyScript(
+          target.session.backend === "codex" ? "codex" : "claude",
+          target.model,
+        )
+      : undefined;
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
@@ -956,7 +953,7 @@ export async function commentToAgent(
       agentName: target.name,
       agentProfileId: target.profileId,
       autonomous: true,
-      script,
+      ...(script ? { script } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
       actor: { userId: actor.userId, label: actor.label },
     });
@@ -1070,8 +1067,11 @@ function resolveReplyLogThread(
   }
 }
 
-/** admin|maintainer against project membership (runtime-action gate). */
+/** `run-agents` against project membership (runtime-action gate) — the single
+ *  authority resolution, so an org admin passes as the audited D2 override.
+ *  Non-throwing: a lower role's comment is still recorded, the run is skipped. */
 function hasRuntimeRole(
+  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1080,10 +1080,19 @@ function hasRuntimeRole(
     projectSlug,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  const role = file?.parsed.frontmatter.members.find(
-    (m) => m.userId === actor.userId,
-  )?.role;
-  return roleCan(role, "run-agents");
+  if (!file) return false;
+  return resolveProjectAuthority(
+    db,
+    {
+      slug: projectSlug,
+      memberRoles: new Map(
+        file.parsed.frontmatter.members.map((m) => [m.userId, m.role]),
+      ),
+    },
+    actor,
+    rolesForAction("run-agents"),
+    { action: "run-agents", what: "trigger an agent run by @mention" },
+  ).allowed;
 }
 
 function projectRepoFor(
@@ -1444,12 +1453,14 @@ export async function recordReviewerVerdict(
 ): Promise<void> {
   const verdict = classifyReviewerVerdict(replyText);
   if (!verdict) return;
-  const summary =
-    verdict === "request_changes"
-      ? "Reviewer requested changes."
-      : "Reviewer approved the work.";
-  const title = verdict === "request_changes" ? "Changes requested" : "Review passed";
   let validation: "failing" | "healthy" = "healthy";
+  // The title/summary are computed from the RESOLVED validation, not the raw
+  // verdict, so the event can never read "Review passed / Validation: failing"
+  // (F7-REV3): an approve that lands on a still-failing task (a prior rejection
+  // with no rework since — see below) is an "Approval noted, rework still
+  // needed", NOT a pass.
+  let title = "";
+  let summary = "";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       // A request_changes always fails. An APPROVE clears a standing `failing`
@@ -1462,16 +1473,28 @@ export async function recordReviewerVerdict(
       //   · a rejection is NOT a life sentence (the old bug: re-review after a
       //     real fix could never restore health, so the operator refused
       //     acceptance forever and stalled the task).
+      const approveDidNotClear =
+        verdict === "approve" &&
+        parsed.frontmatter.validation === "failing" &&
+        !hasReworkSinceLastRejection(
+          parsed.timeline,
+          parsed.frontmatter.specialist,
+        );
       validation =
-        verdict === "request_changes"
-          ? "failing"
-          : parsed.frontmatter.validation === "failing" &&
-              !hasReworkSinceLastRejection(
-                parsed.timeline,
-                parsed.frontmatter.specialist,
-              )
-            ? "failing"
-            : "healthy";
+        verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
+      if (verdict === "request_changes") {
+        title = "Changes requested";
+        summary = "Reviewer requested changes.";
+      } else if (approveDidNotClear) {
+        // Honest: the reviewer approved, but a standing rejection with no rework
+        // since still governs — validation stays failing until the work moves.
+        title = "Approval noted — rework still needed";
+        summary =
+          "Reviewer approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.";
+      } else {
+        title = "Review passed";
+        summary = "Reviewer approved the work.";
+      }
       parsed.frontmatter.validation = validation;
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -1641,9 +1664,11 @@ export async function applyAgentCompletionEffects(
         ? `${backendLabel} is over its usage quota`
         : failure?.kind === "auth"
           ? `${backendLabel} rejected the credentials`
-          : failText
-            ? `${backendLabel} run failed: ${failText}`
-            : `the ${backendLabel} run ended in an error`;
+          : failure?.kind === "unavailable"
+            ? `${backendLabel} is unavailable (no usable credential configured — the run was refused, no agent process started)`
+            : failText
+              ? `${backendLabel} run failed: ${failText}`
+              : `the ${backendLabel} run ended in an error`;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -1653,7 +1678,9 @@ export async function applyAgentCompletionEffects(
         text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}. No changes were delivered.${
           failure?.kind === "quota" || failure?.kind === "auth"
             ? " Retry on the other backend, or fix the credential and re-run."
-            : ""
+            : failure?.kind === "unavailable"
+              ? " Configure a credential for this backend, or retry on the other backend."
+              : ""
         }`,
         toAgent: false,
         evidence: null,
@@ -1679,8 +1706,18 @@ export async function applyAgentCompletionEffects(
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
-  // 2. Reconcile agent-side delivery (NFR15) — real runs only.
-  if (finished.state === "finished" && !finished.simulated) {
+  // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
+  //    reviewer (F7-REV1) delivers nothing: it clones the repo to READ the diff,
+  //    so its workspace HEAD/branch is incidental. Reconciling delivery off a
+  //    reviewer's clone raced the reviewer's just-posted reply comment (its
+  //    read-modify-write of task.md could drop it) and could stamp task.md's
+  //    branch/pr from the reviewer's checkout. Only the specialist that produced
+  //    the change reconciles delivery.
+  if (
+    input.kind === "primary" &&
+    finished.state === "finished" &&
+    !finished.simulated
+  ) {
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
@@ -1965,6 +2002,7 @@ export async function setOwner(
 ): Promise<TaskSummary> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const actorRole = requireAction(
+    db,
     project,
     actor,
     "own-task",
@@ -1977,9 +2015,11 @@ export async function setOwner(
 
   const isTake = input.targetUserId === actor.userId;
   if (!isTake) {
-    // Hand off: current owner or project admin only; target must be able to OWN
+    // Hand off: current owner, or the tier that may manage OTHERS' ownership
+    // (`release-any-ownership` — admin today, single-sourced in ACTION_ROLES
+    // instead of a hardcoded role literal); target must be able to OWN
     // (contributor+ — a viewer is read+comment only and can't hold the owner seat).
-    if (currentOwnerId !== actor.userId && actorRole !== "admin") {
+    if (currentOwnerId !== actor.userId && !roleCan(actorRole, "release-any-ownership")) {
       throw forbidden("Only the current owner or a project admin can hand off ownership.");
     }
     const targetRole = project.memberRoles.get(input.targetUserId);
@@ -2087,17 +2127,17 @@ export async function releaseOwner(
   if (!currentOwnerId) {
     // Idempotent: nothing to release. Still require membership so a non-member
     // can't probe task state through this path.
-    requireMemberRole(project, actor, "any-member", "release task ownership");
+    requireAnyMember(db, project, actor, "release task ownership");
     return summaryOrThrow(db, input.projectSlug, input.taskKey);
   }
 
   const isSelf = currentOwnerId === actor.userId;
   if (isSelf) {
     // Releasing your OWN seat: needs the own-task capability (contributor+).
-    requireAction(project, actor, "own-task", "release task ownership");
+    requireAction(db, project, actor, "own-task", "release task ownership");
   } else {
     // Releasing SOMEONE ELSE's seat: admin only (release-any-ownership).
-    requireAction(project, actor, "release-any-ownership", "release another member's ownership");
+    requireAction(db, project, actor, "release-any-ownership", "release another member's ownership");
   }
 
   const text = isSelf
@@ -2158,6 +2198,12 @@ export async function transitionStage(
      *  admin|maintainer (the transition authority). Governed flows (packets,
      *  recommendations, operator) never set this and keep boundary-only rules. */
     manual?: boolean;
+    /** Operator rework routing (R7-4): a BACKWARD move to an earlier stage on a
+     *  task whose latest review is `failing`, so the operator can send a
+     *  rejected task back to the developer without a human. Only honored under
+     *  operator authority; validated below (must be backward + validation
+     *  failing). Off-graph like `manual`, but operator-scoped and rework-gated. */
+    rework?: boolean;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2184,7 +2230,18 @@ export async function transitionStage(
   const boundary = project.workflow.find(
     (w) => w.from === fromStageId && w.to === input.toStageId,
   );
-  if (!boundary && !input.manual) {
+  // Operator rework routing (R7-4): a backward move on a `failing` task is a
+  // legitimate off-graph transition (the governed graph is forward-only). Vet it
+  // here so it can't be abused for a forward jump or on a healthy task.
+  const fromIndex = project.stages.findIndex((s) => s.id === fromStageId);
+  const toIndex = project.stages.findIndex((s) => s.id === input.toStageId);
+  const isReworkMove =
+    input.rework === true &&
+    ctx.operatorAuthorized === true &&
+    toIndex >= 0 &&
+    toIndex < fromIndex &&
+    existing.parsed.frontmatter.validation === "failing";
+  if (!boundary && !input.manual && !isReworkMove) {
     throw AppError.validation(
       `No governed boundary from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
     );
@@ -2225,17 +2282,18 @@ export async function transitionStage(
   } else if (input.manual) {
     // Manual stage override (board/task dropdown) — a maintainer-level action,
     // regardless of the boundary crossed (forward, backward, or off-graph).
-    requireAction(project, actor, "approve-transition", "change the task stage");
+    requireAction(db, project, actor, "approve-transition", "change the task stage");
   } else if (boundary!.boundary === "auto") {
     // An auto boundary crossed by a human (unreachable from the UI, which always
     // sends manual:true) — the loosest gate: any member.
-    requireMemberRole(project, actor, "any-member", "move this task");
+    requireAnyMember(db, project, actor, "move this task");
   } else if (boundary!.boundary === "approval") {
-    requireAction(project, actor, "approve-transition", "approve stage transitions");
+    requireAction(db, project, actor, "approve-transition", "approve stage transitions");
   } else {
     // human boundary (review→done locked in V1): acceptance authority, with the
     // task-owner exception (R6-2) — the owner may accept its own completion.
     requireAcceptCompletion(
+      db,
       project,
       actor,
       existing.parsed.frontmatter.ownerUserId,
@@ -2514,7 +2572,7 @@ export async function reorderTask(
   acceptedIntoDone: boolean;
 }> {
   const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(project, actor, "reorder-board", "reorder the board");
+  requireAction(db, project, actor, "reorder-board", "reorder the board");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -2621,15 +2679,12 @@ export async function resolvePacket(
   // `accept_completion` option is the one exception: merging + moving to Done
   // stays admin|maintainer (re-gated below), preserving the human-only-Done
   // authority split.
-  // The owner path additionally requires CURRENT project membership
+  // `ownerException` additionally requires CURRENT contributor+ membership
   // (adversarial-review #8) — a user removed from the project who still holds a
-  // stale ownerUserId must not resolve packets. `memberRoles.has` is the live
-  // membership check.
+  // stale ownerUserId must not resolve packets.
   const isOwner =
     !ctx.operatorAuthorized &&
-    !!actor.userId &&
-    existing.parsed.frontmatter.ownerUserId === actor.userId &&
-    roleCan(project.memberRoles.get(actor.userId), "own-task");
+    ownerException(project, actor, existing.parsed.frontmatter.ownerUserId);
   if (option.kind === "accept_completion") {
     // Acceptance is guarded below by requireAcceptCompletion (the owner exception,
     // R6-2) — do NOT gate it here on resolve-packet, which would block a
@@ -2638,7 +2693,7 @@ export async function resolvePacket(
     // owner is allowed — skip the maintainer gate (the owner must still be able
     // to own the task, i.e. contributor+; a demoted viewer-owner is caught above)
   } else {
-    requireAction(project, actor, "resolve-packet", "resolve decision packets");
+    requireAction(db, project, actor, "resolve-packet", "resolve decision packets");
   }
 
   const now = new Date().toISOString();
@@ -2654,6 +2709,7 @@ export async function resolvePacket(
       // Human-only Review → Done boundary (always-human invariant), with the
       // task-owner exception (R6-2).
       requireAcceptCompletion(
+        db,
         project,
         actor,
         existing.parsed.frontmatter.ownerUserId,
@@ -2836,6 +2892,7 @@ async function acceptCompletion(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   // R6-2: maintainer+ OR the task's human owner (even a Contributor) may accept.
   requireAcceptCompletion(
+    db,
     project,
     actor,
     existing.parsed.frontmatter.ownerUserId,
@@ -2849,6 +2906,22 @@ async function acceptCompletion(
   if (!input.force && existing.parsed.frontmatter.validation === "failing") {
     throw conflict(
       "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+    );
+  }
+
+  // Refuse to accept while an operator-raised BLOCKED decision is still open
+  // (F7-VAL1/F7-PKT1). A blocked packet means the operator hit something it
+  // couldn't resolve (a denied commit, a crashed run); accepting would bury that
+  // decision. This replaces the old validation="failing"-on-block hack: the
+  // packet, not a fake review verdict, is what holds acceptance. Resolving the
+  // packet clears readiness → acceptance proceeds.
+  if (
+    !input.force &&
+    existing.parsed.frontmatter.readiness === "blocked" &&
+    existing.parsed.packet?.type === "blocked"
+  ) {
+    throw conflict(
+      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
     );
   }
 
@@ -2942,6 +3015,7 @@ export async function completeTaskMerge(
   // Completing a merge-pending acceptance is part of the same acceptance
   // authority — maintainer+ OR the task's owner (R6-2).
   requireAcceptCompletion(
+    db,
     project,
     actor,
     existing.parsed.frontmatter.ownerUserId,
@@ -3101,7 +3175,7 @@ export async function dismissRecommendation(
   // Dismissing an operator recommendation resolves a pending governance decision
   // (the non-packet equivalent of resolving a packet) — admin|maintainer only,
   // symmetric with resolvePacket.
-  requireAction(project, actor, "resolve-packet", "dismiss recommendations");
+  requireAction(db, project, actor, "resolve-packet", "dismiss recommendations");
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);

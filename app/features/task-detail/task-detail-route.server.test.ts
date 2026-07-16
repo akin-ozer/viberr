@@ -90,8 +90,9 @@ describe("loader — VIB-142 fidelity", () => {
       "triage", "ready", "impl", "review", "done",
     ]);
 
-    // Execution profile: operator since stage 1, codex specialist, reviewer.
-    expect(t.operator?.sinceLabel).toBe("stage 1");
+    // Execution profile: operator since Triage (stage NAME, F7-UI2), codex
+    // specialist, reviewer.
+    expect(t.operator?.sinceLabel).toBe("since Triage");
     expect(t.specialist?.backend).toBe("codex");
     expect(t.specialist?.role).toBe("Developer");
     expect(t.reviewers.map((c) => c.role)).toEqual(["Reviewer"]);
@@ -597,6 +598,23 @@ describe("assign-specialist + run-specialist intents", () => {
 
   it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
     // VIB-166 now has the developer specialist assigned (from the earlier test).
+    // The earlier assign/transition auto-invoked the operator, which may have
+    // already started a primary run — F7-OP1 single-flight then (correctly)
+    // refuses a second concurrent run. Clear any in-flight primary first so this
+    // test verifies the human "Run" action on a task with no active run.
+    const before = await runLoader("VIB-166", ids.arda);
+    const { interruptRun: stopExisting } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    for (const r of before.runtime.filter(
+      (r) => r.kind === "primary" && (r.state === "running" || r.state === "idle"),
+    )) {
+      stopExisting(
+        app.db,
+        { projectSlug: "viberr-core", taskKey: "VIB-166", runId: r.serverRunId },
+        { userId: ids.arda, label: "arda@viberr.dev" },
+      );
+    }
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "run-specialist",
     })) as { ok: true; toast: string };

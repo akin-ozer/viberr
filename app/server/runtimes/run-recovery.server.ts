@@ -1,8 +1,24 @@
 import type Database from "better-sqlite3";
+import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
+
+/**
+ * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
+ * finalizes a real orphan re-fires the operator; if that operator run itself
+ * crashes the process, the NEXT boot re-orphans it and re-fires again — a loop
+ * that re-runs real, costed operator coordination on every restart. We cap the
+ * re-invokes per task inside a rolling window: each actual re-invoke records an
+ * audit row, and once `RECOVERY_REINVOKE_CAP` rows exist for a task within
+ * `RECOVERY_WINDOW_MS`, further boots still finalize the orphan row but SKIP the
+ * operator re-invoke. A restart that lands after the window has elapsed sees a
+ * clean count and re-invokes normally (the common single-boot case).
+ */
+export const RECOVERY_REINVOKE_CAP = 3;
+const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
 
 /**
  * Boot-time finalization of non-terminal runs (F-RUN1 + R6-5).
@@ -27,6 +43,10 @@ import type { RealBackend } from "./runtime-registry.server";
 export function finalizeOrphanedRuns(db: Database.Database): {
   finalized: number;
   simulated: number;
+  /** Real orphaned tasks for which the operator was re-invoked this boot. */
+  reinvoked: number;
+  /** Real orphaned tasks whose re-invoke was skipped by the crash-loop cap. */
+  capped: number;
 } {
   const orphans = db
     .prepare(
@@ -41,7 +61,8 @@ export function finalizeOrphanedRuns(db: Database.Database): {
     kind: string;
     simulated: number;
   }[];
-  if (orphans.length === 0) return { finalized: 0, simulated: 0 };
+  if (orphans.length === 0)
+    return { finalized: 0, simulated: 0, reinvoked: 0, capped: 0 };
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
@@ -69,11 +90,60 @@ export function finalizeOrphanedRuns(db: Database.Database): {
     real: orphans.length - simulatedCount,
   });
 
-  // Re-invoke the operator ONLY for real orphaned tasks (never demo runs).
-  if (realTasks.size > 0) {
+  // Re-invoke the operator ONLY for real orphaned tasks (never demo runs), and
+  // only for tasks under the crash-loop cap (F7-BOOT1). The gate is resolved
+  // synchronously — each pass records its own audit row so the NEXT boot counts
+  // it — then the (costly) operator runs fire-and-forget for the survivors.
+  const windowStart = new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString();
+  const toReinvoke: { projectSlug: string; taskKey: string }[] = [];
+  let capped = 0;
+  for (const t of realTasks.values()) {
+    const priorReinvokes = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n
+             FROM audit_events
+            WHERE action = ?
+              AND project_slug = ?
+              AND task_key = ?
+              AND occurred_at >= ?`,
+        )
+        .get(
+          RECOVERY_REINVOKE_ACTION,
+          t.projectSlug,
+          t.taskKey,
+          windowStart,
+        ) as { n: number }
+    ).n;
+    if (priorReinvokes >= RECOVERY_REINVOKE_CAP) {
+      capped += 1;
+      logger.warn("recovery re-invoke capped (crash-loop backstop)", {
+        taskKey: t.taskKey,
+        projectSlug: t.projectSlug,
+        priorReinvokes,
+        cap: RECOVERY_REINVOKE_CAP,
+      });
+      continue;
+    }
+    recordAudit(db, {
+      // String literal (not RECOVERY_REINVOKE_ACTION) so the audit-coverage
+      // static sweep can parse this call site; the SQL count above still uses
+      // the constant. Both must stay in sync with the catalog entry.
+      action: "run.recovery.reinvoked",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: t.taskKey,
+      projectSlug: t.projectSlug,
+      taskKey: t.taskKey,
+      details: { attempt: priorReinvokes + 1 },
+    });
+    toReinvoke.push(t);
+  }
+
+  if (toReinvoke.length > 0) {
     void (async () => {
       const { runOperator } = await import("./operator-run.server");
-      for (const t of realTasks.values()) {
+      for (const t of toReinvoke) {
         try {
           await runOperator(db, {
             projectSlug: t.projectSlug,
@@ -90,7 +160,12 @@ export function finalizeOrphanedRuns(db: Database.Database): {
     })().catch(() => {});
   }
 
-  return { finalized: orphans.length, simulated: simulatedCount };
+  return {
+    finalized: orphans.length,
+    simulated: simulatedCount,
+    reinvoked: toReinvoke.length,
+    capped,
+  };
 }
 
 /**

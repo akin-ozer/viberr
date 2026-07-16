@@ -467,6 +467,7 @@ function ExecutionSection({
   deployedSpecialists,
   canRunAgents,
   runActive,
+  operatorRunActive,
 }: {
   task: TaskDetail;
   meId: string;
@@ -478,6 +479,8 @@ function ExecutionSection({
   deployedSpecialists: DeployedSpecialistView[];
   canRunAgents: boolean;
   runActive: boolean;
+  /** A live (queued/running) OPERATOR run exists (F7-UI1 pill honesty). */
+  operatorRunActive: boolean;
 }) {
   const csrf = useCsrfToken();
   const specialistFetcher = useFetcher<ActionResult>();
@@ -562,6 +565,7 @@ function ExecutionSection({
       deployedSpecialists={deployedSpecialists}
       canRunAgents={canRunAgents}
       runActive={runActive}
+      operatorRunActive={operatorRunActive}
       runBusy={specialistBusy}
       onAssignSpecialist={onAssignSpecialist}
       onRunSpecialist={onRunSpecialist}
@@ -797,6 +801,17 @@ export function TaskDetailPage({
     task.owner?.kind === "human" && task.owner.userId === me.id && canOwn;
   const canResolvePacket = canRunAgents || isOwner;
 
+  // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
+  // never mere attachment. The runtime projection already carries kind+state.
+  const operatorRunActive = runtime.some(
+    (r) =>
+      r.kind === "operator" &&
+      (r.lifecycle === "running" || r.lifecycle === "queued"),
+  );
+  // Terminal-stage task — closed for new work (comments stay open, R7-6).
+  const taskClosed =
+    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
   // live lines via run.log-appended; revalidates on run.state-changed.
@@ -956,6 +971,7 @@ export function TaskDetailPage({
           deployedSpecialists={deployedSpecialists}
           canRunAgents={canRunAgents}
           runActive={runActive}
+          operatorRunActive={operatorRunActive}
         />
 
         <AgentLogsSlot
@@ -976,6 +992,7 @@ export function TaskDetailPage({
           ask={ask}
           mentionables={mentionables}
           onAgentLog={onAgentLog}
+          taskClosed={taskClosed}
         />
       </div>
 

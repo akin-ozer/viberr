@@ -8,9 +8,10 @@ import type { AgentProfileView } from "./agent-types";
 import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
-  CAP_MODES,
   OPERATOR_CAP_CATALOG,
   OPERATOR_CAP_DEFAULTS,
+  OPERATOR_CAP_MODES,
+  SPECIALIST_CAP_MODES,
   type CapMode,
   type ModalCapGroup,
   type ResCatalogGroup,
@@ -405,12 +406,16 @@ function DefinitionField({
 
 function CapabilityGrants({
   capCatalog,
+  capModes,
   caps,
   setCaps,
   openGroups,
   setOpenGroups,
 }: {
   capCatalog: readonly ModalCapGroup[];
+  /** The mode buttons offered per row: 4 for the operator, 3 honest ones
+   *  (Allowed/Human-only/Off) for a specialist (R7-5). */
+  capModes: readonly { id: CapMode; label: string }[];
   caps: Record<string, CapMode>;
   setCaps: Dispatch<SetStateAction<Record<string, CapMode>>>;
   openGroups: Record<string, boolean>;
@@ -475,7 +480,7 @@ function CapabilityGrants({
                     <div className="cap-mrow" key={capDef.id}>
                       <span className="cap-mname">{capDef.label}</span>
                       <div className="cap-seg">
-                        {CAP_MODES.map((m) => (
+                        {capModes.map((m) => (
                           <button
                             type="button"
                             key={m.id}
@@ -641,6 +646,9 @@ export function CreateProfileModal({
   const isOperator = initial?.kind === "operator";
   const capCatalog = isOperator ? OPERATOR_CAP_CATALOG : CAP_MODAL_CATALOG;
   const capDefaults = isOperator ? OPERATOR_CAP_DEFAULTS : CAP_MODAL_DEFAULTS;
+  // R7-5: the specialist picker offers 3 honest modes (Allowed/Human-only/Off);
+  // the operator keeps all 4 (`recommend` is real for the operator only).
+  const capModes = isOperator ? OPERATOR_CAP_MODES : SPECIALIST_CAP_MODES;
   const dialogRef = useDialog(onClose);
   const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
@@ -806,6 +814,7 @@ export function CreateProfileModal({
 
         <CapabilityGrants
           capCatalog={capCatalog}
+          capModes={capModes}
           caps={caps}
           setCaps={setCaps}
           openGroups={openGroups}

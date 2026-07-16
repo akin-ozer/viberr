@@ -47,8 +47,10 @@ export type ReadinessValue =
   | "inconsistency_risk_detected"
   | "blocked";
 
-/** Readiness plus the derived "accepted" display state (done + accepted). */
-export type ReadinessDisplayValue = ReadinessValue | "accepted";
+/** Readiness plus the derived terminal-stage display states: "accepted"
+ * (human accepted; merge may still be pending) and "merged" (the review PR
+ * really merged — F7-UI3: "accepted" must not read stale next to GitHub). */
+export type ReadinessDisplayValue = ReadinessValue | "accepted" | "merged";
 
 const READINESS_DISPLAY: Record<
   ReadinessDisplayValue,
@@ -59,6 +61,7 @@ const READINESS_DISPLAY: Record<
   inconsistency_risk_detected: { kind: "risk", label: "inconsistency risk" },
   blocked: { kind: "blocked", label: "blocked" },
   accepted: { kind: "done", label: "accepted" },
+  merged: { kind: "done", label: "merged" },
 };
 
 /** Always dotted (mock contract). Unknown values fall back to `ready`. */

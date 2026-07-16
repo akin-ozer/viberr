@@ -512,8 +512,14 @@ export async function operatorOpenPacket(
     parsed.packet = packet;
     parsed.frontmatter.waiting = "human";
     if (input.packetType === "blocked") {
+      // Blocked-ness lives on `readiness` alone (F7-VAL1). It used to ALSO set
+      // validation="failing", but `validation` is REVIEW health — only a
+      // reviewer verdict or an acceptance owns it. A blocked packet from an
+      // unrelated cause (e.g. a commit was denied, a run crashed) then made the
+      // acceptance gate refuse with "the latest review is failing — rework and
+      // re-review", which is nonsense when no review ever ran. The readiness
+      // flag already gates the board; validation stays whatever review left it.
       parsed.frontmatter.readiness = "blocked";
-      parsed.frontmatter.validation = "failing"; // blocked work is unhealthy (FR24)
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
@@ -1090,8 +1096,14 @@ export async function operatorTransitionStage(
   // strands at a pre-work stage (e.g. Ready→In Progress "when a specialist is
   // assigned") with a recommendation nobody needs to approve. Governed
   // boundaries (`approval`/`human`) still route through the recommend/deny gate.
+  // R7-4 rework routing: a BACKWARD move to an earlier stage on a task whose
+  // latest review is `failing` sends the rejected work back to the developer.
+  // The operator does this directly (no human, no recommendation) so a failed
+  // review re-drives itself; transitionStage vets that it is genuinely backward
+  // + failing before honoring the off-graph move.
+  const isRework = isReworkMove(db, ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
-  if (g === "recommend" && boundary !== "auto") {
+  if (g === "recommend" && boundary !== "auto" && !isRework) {
     const name = stageNameOf(db, ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
       db,
@@ -1107,7 +1119,12 @@ export async function operatorTransitionStage(
     );
     return { outcome: "recommended", message: `Recommended moving the task to ${name}.` };
   }
-  const task = await transitionStage(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const task = await transitionStage(
+    db,
+    { ...input, ...(isRework ? { rework: true } : {}) },
+    OPERATOR_TASK_ACTOR,
+    opCtx(ctx),
+  );
   return { outcome: "done", message: `Moved ${input.taskKey} to ${task.stage}.` };
 }
 
@@ -1123,6 +1140,30 @@ function stageNameOf(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
+}
+
+/** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):
+ *  a BACKWARD step to an earlier stage on a task whose latest review is
+ *  `failing`. The operator performs these directly to route a rejected task
+ *  back to the developer without a human. */
+function isReworkMove(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  toStageId: string,
+): boolean {
+  const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const project = readProjectFile({
+    projectSlug,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  if (!task || !project) return false;
+  if (task.parsed.frontmatter.validation !== "failing") return false;
+  const stages = project.parsed.frontmatter.stages;
+  const fromIndex = stages.findIndex((s) => s.id === task.parsed.frontmatter.stage);
+  const toIndex = stages.findIndex((s) => s.id === toStageId);
+  return toIndex >= 0 && fromIndex >= 0 && toIndex < fromIndex;
 }
 
 /** The workflow boundary the operator would cross to move a task from its
@@ -1180,6 +1221,23 @@ export async function operatorAcceptCompletion(
     return {
       outcome: "noop",
       message: `${input.taskKey} has an open "changes requested" verdict — not accepting until it's resolved.`,
+    };
+  }
+
+  // Never accept a task with an open BLOCKED decision (mirrors the human
+  // acceptCompletion guard, task-actions.server.ts). F7-VAL1 decoupled a blocked
+  // packet from validation="failing" (blocked-ness lives on `readiness` now), so
+  // the `validation` check above no longer catches it — without this guard the
+  // full-autonomy operator would auto-accept a task whose operator-raised
+  // decision (a denied commit, a crashed run) is still unresolved, silently
+  // burying it. Recommend and auto-accept are BOTH suppressed until it clears.
+  if (
+    file.parsed.frontmatter.readiness === "blocked" &&
+    file.parsed.packet?.type === "blocked"
+  ) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} has an open blocked decision — not accepting until the packet is resolved.`,
     };
   }
 

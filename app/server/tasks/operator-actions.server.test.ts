@@ -651,6 +651,60 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
   });
+
+  it("R7-4: a SUPERVISED operator routes a FAILING review BACK to the work stage directly (no recommendation)", async () => {
+    // A reviewer requested changes (validation=failing) at Review. review→impl
+    // is a backward, off-graph move — but on a failing task it is a rework
+    // transition the operator performs itself so the fix re-drives the developer
+    // without a human, instead of escalating "no path back to Implementation".
+    deployRoster(DEFAULT_POLICY);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        validation: "failing",
+        title: "Rework routing",
+      }),
+      goal: "Prove the operator routes a failing review back.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(
+      task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator"),
+    ).toBe(true);
+  });
+
+  it("R7-4 guard: a HEALTHY task cannot be moved backward by the operator (no rework license)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        validation: "healthy",
+        title: "No rework license",
+      }),
+      goal: "A healthy review must not slide backward.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        authority("full"),
+      ),
+    ).rejects.toThrow(/no governed boundary/i);
+    expect(task().frontmatter.stage).toBe("review");
+  });
 });
 
 describe("auto-invoke on stage transition", () => {
@@ -734,6 +788,47 @@ describe("operatorAcceptCompletion", () => {
     expect(task().frontmatter.validation).toBe("healthy");
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+
+  it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
+    // The human accept path refuses a task with an open blocked packet; the
+    // full-autonomy operator must refuse it too, or it silently buries the
+    // unresolved decision. F7-VAL1 decoupled blocked-ness from validation, so a
+    // blocked task's `validation` is NOT "failing" — this guard is what stops it.
+    deployRoster([
+      ...DEFAULT_POLICY.filter(
+        (c) =>
+          c.capabilityId !== "completion-for-acceptance" &&
+          c.capabilityId !== "generate-packets",
+      ),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Delivery stalled — needs a human",
+        options: [{ kind: "block_on_policy", title: "Update the credential policy" }],
+      },
+      authority("full"),
+    );
+    expect(task().frontmatter.readiness).toBe("blocked");
+    expect(task().frontmatter.validation).not.toBe("failing"); // the point of F7-VAL1
+
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(task().frontmatter.stage).toBe("review"); // NOT moved to Done
+    expect(task().packet?.type).toBe("blocked"); // decision still open
   });
 
   it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {
@@ -825,6 +920,11 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet!.options[0]!.rec).toBe(true);
     // Emits a typed `blocked` timeline event, not a plain comment.
     expect(task().timeline[0]!.type).toBe("blocked");
+    // F7-VAL1: a blocked packet marks readiness, NOT validation — `validation`
+    // is review health (only a reviewer verdict / acceptance owns it). It used
+    // to set validation="failing", which bricked acceptance with a "review is
+    // failing" 409 even when no review had ever run.
+    expect(task().frontmatter.validation).not.toBe("failing");
   });
 
   it("is withheld when generate-packets is off (capability gate)", async () => {

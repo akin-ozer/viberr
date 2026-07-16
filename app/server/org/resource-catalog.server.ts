@@ -22,10 +22,19 @@ import { listMcpServers, listSkills } from "./resources.server";
  *
  * `id` is the reference the run layer resolves (skill name, MCP name, KB dir),
  * so a grant made here actually reaches the agent's context.
+ *
+ * `profileKind` scopes the MCP set (F7-RES3): the in-process `viberr` toolkit is
+ * the OPERATOR's own coordination server and is never resolvable through a
+ * specialist's `resources.mcps` (specialist-mcp.server.ts skips it), so it must
+ * not be offered as a specialist-attachable MCP. It stays in the general/operator
+ * catalog (the default) so existing operator surfaces are unchanged.
  */
+export const RESERVED_OPERATOR_MCP = "viberr";
+
 export function buildResourceCatalog(
   db: Database.Database,
   dataRoot?: string,
+  opts: { profileKind?: "operator" | "specialist" } = {},
 ): ResCatalogGroup[] {
   const skillIds = new Set<string>(dirNames(skillsRootDir(dataRoot)));
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
@@ -37,8 +46,16 @@ export function buildResourceCatalog(
     kbIds.add(row.dir);
   }
 
-  const mcpIds = new Set<string>(["viberr"]);
-  for (const m of safe(() => listMcpServers(db))) mcpIds.add(m.name);
+  const mcpIds =
+    opts.profileKind === "specialist"
+      ? new Set<string>()
+      : new Set<string>([RESERVED_OPERATOR_MCP]);
+  for (const m of safe(() => listMcpServers(db))) {
+    if (opts.profileKind === "specialist" && m.name === RESERVED_OPERATOR_MCP) {
+      continue; // never let a real org row shadow the reserved operator toolkit
+    }
+    mcpIds.add(m.name);
+  }
 
   return [
     {

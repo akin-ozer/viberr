@@ -19,7 +19,10 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { SimulatedScript } from "./simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RunSpec, RuntimeAdapter } from "./adapter.server";
-import type { AdapterSet } from "./runtime-registry.server";
+import {
+  setSimulatedRuntimePermittedForTests,
+  type AdapterSet,
+} from "./runtime-registry.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -198,6 +201,83 @@ describe("run-service lifecycle (simulated)", () => {
     });
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
+  });
+});
+
+describe("R7-2 fail-fast — unavailable backend produces an honest error run, never a fake stream", () => {
+  afterEach(() => {
+    setSimulatedRuntimePermittedForTests(undefined);
+  });
+
+  async function startUnavailable(simulate?: boolean) {
+    // Gate CLOSED (models prod/dev) + both backends credential-less (from
+    // configureRunServiceForTests in beforeEach).
+    setSimulatedRuntimePermittedForTests(false);
+    return startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      ...(simulate !== undefined ? { simulate } : {}),
+      dataRoot: store.dataRoot,
+    });
+  }
+
+  it("startRun finalizes the run as `error` with a classified terminal err line (simulated=0)", async () => {
+    const { runId, simulated } = await startUnavailable();
+    expect(simulated).toBe(false); // NEVER a fake run
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("error"); // fail-fast: terminal synchronously
+    expect(run.simulated).toBe(0);
+    expect(run.backend).toBe("claude");
+    const lines = listRunLines(store.db, runId);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.display.ev).toBe("err");
+    // The copy is actionable and classifies as the "unavailable" failure class.
+    expect(lines[0]!.display.text).toContain("no usable credential");
+    expect(lines[0]!.display.text).toContain("ANTHROPIC_API_KEY");
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    expect(runFailureReason(store.db, runId)?.kind).toBe("unavailable");
+  });
+
+  it("a completion callback registered after the fail-fast still fires (F8 escalation path)", async () => {
+    const { runId } = await startUnavailable();
+    let fired: string | null = null;
+    registerRunCompletion(runId, (finished) => { fired = finished.state; }, store.db);
+    expect(fired).toBe("error");
+  });
+
+  it("audits runtime.run.started with the failedUnavailable marker", async () => {
+    await startUnavailable();
+    const audits = listAuditEvents(store.db, { action: "runtime.run.started" });
+    expect(audits.length).toBe(1);
+    expect(audits[0]!.details).toMatchObject({
+      backend: "claude",
+      simulated: false,
+      failedUnavailable: true,
+    });
+  });
+
+  it("an EXPLICIT simulate request outside the gate also fails fast (never converts to a paid run)", async () => {
+    const { runId, simulated } = await startUnavailable(true);
+    expect(simulated).toBe(false);
+    expect(getRun(store.db, runId)!.state).toBe("error");
+  });
+
+  it("inside the gate (vitest default) the unavailable backend still uses the test engine", async () => {
+    // No override — NODE_ENV === "test" keeps the gate open for the suite.
+    const { runId, simulated } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "m", prompt: "go",
+      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "x" }]),
+      dataRoot: store.dataRoot,
+    });
+    expect(simulated).toBe(true);
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
   });
 });
 

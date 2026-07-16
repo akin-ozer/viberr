@@ -14,6 +14,9 @@ import type { AgentProfileView, AgentDeploymentView } from "./agent-types";
  * deployment projection incl. VIB-151's running runs, profile CRUD round
  * trips through real Requests (project.md writers + audit), and the RBAC
  * denials (profile CRUD is admin-only).
+ *
+ * R7-2: the demo seed ships ZERO run history, so the VIB-151 running runs
+ * the deployment projection joins against are inserted here directly.
  */
 
 let app: AppTestContext;
@@ -36,6 +39,40 @@ beforeAll(async () => {
     selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project reviewer
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // NOT a member
   };
+
+  // VIB-151's live crew: a running claude primary + a running codex reviewer
+  // (thread r0 → reviewers[0]). The seed no longer fabricates these (R7-2);
+  // insert the run rows this projection test needs directly.
+  const { upsertRun } = await import("~/server/runtimes/run-store.server");
+  const startedAt = new Date().toISOString();
+  upsertRun(app.db, {
+    id: "run_test_vib151_primary",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-151",
+    threadId: "primary",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "claude",
+    simulated: false,
+    model: "claude-sonnet-4-5",
+    sdk: "Claude Agent SDK",
+    state: "running",
+    startedAt,
+  } as Parameters<typeof upsertRun>[1]);
+  upsertRun(app.db, {
+    id: "run_test_vib151_reviewer",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-151",
+    threadId: "r0",
+    role: "Reviewer",
+    kind: "reviewer",
+    backend: "codex",
+    simulated: false,
+    model: "gpt-5.4-codex",
+    sdk: "Codex SDK",
+    state: "running",
+    startedAt,
+  } as Parameters<typeof upsertRun>[1]);
 });
 afterAll(() => app.cleanup());
 
@@ -133,7 +170,7 @@ describe("loader", () => {
     ]);
   });
 
-  it("derives live deployments from the seed — VIB-151 crew incl. its running runs", async () => {
+  it("derives live deployments — VIB-151 crew incl. its running runs (inserted above, not seeded)", async () => {
     const data = await runLoader(ids.arda);
     const vib151 = data.deployments.filter((d) => d.taskKey === "VIB-151");
     expect(vib151.map((d) => [d.profileId, d.engagement, d.status])).toEqual([
@@ -141,7 +178,7 @@ describe("loader", () => {
       ["developer", "primary", "working"],
       ["reviewer", "reviewer", "anchored · on call"],
     ]);
-    // Phase-8 seeds VIB-151 with a running claude primary + codex c0.
+    // The running claude primary + codex r0 reviewer inserted in beforeAll.
     expect(vib151.find((d) => d.engagement === "primary")!.running).toBe(true);
     expect(vib151.find((d) => d.engagement === "reviewer")!.running).toBe(true);
 
@@ -318,7 +355,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         definition: "Only two caps submitted; nothing else should be granted.",
         // Only two governed (modal) caps submitted, as a partial/older client
         // would — the rest of the catalog must NOT be merged in.
-        caps: { "create-task-branch": "direct", "open-review-pr": "recommend" },
+        caps: { "create-task-branch": "direct", "open-review-pr": "direct" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
     })) as { ok: boolean };
@@ -327,15 +364,15 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const created = (await runLoader(ids.arda)).profiles.find(
       (p) => p.id === "minimal-dev",
     )!;
-    // The persisted cap set equals exactly what the form submitted (no
-    // coercions apply here). Previously the create path merged the permissive
-    // catalog defaults, so 2 submitted caps persisted as ~12.
+    // The persisted cap set equals exactly what the form submitted. Previously
+    // the create path merged the permissive catalog defaults, so 2 submitted
+    // caps persisted as ~12.
     const persisted = created.capabilities
       .map((c) => [c.capabilityId, c.mode])
       .sort();
     expect(persisted).toEqual([
       ["create-task-branch", "direct"],
-      ["open-review-pr", "recommend"],
+      ["open-review-pr", "direct"],
     ]);
     // Powers the creator never chose are ABSENT (not defaulted).
     const capIds = created.capabilities.map((c) => c.capabilityId);
@@ -345,6 +382,93 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     await postAction(ids.arda, {
       intent: "delete-profile",
       profileId: "minimal-dev",
+    });
+  });
+
+  it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
+    // The specialist picker no longer offers `recommend`, but a hostile/legacy
+    // form might still submit it. `recommend` is operator-only (runtime-
+    // identical to `direct` for a specialist; F7-CAP1), so it must persist as
+    // `direct`; `human`/`off` pass through unchanged.
+    const result = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Recommender",
+        role: "Submits a stale recommend mode",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Submitted open-review-pr as recommend from an old client.",
+        caps: {
+          "open-review-pr": "recommend",
+          "commit-push-branch": "recommend",
+          "create-task-branch": "off",
+          "execute-code-or-write-repo": "human",
+        },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const created = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "recommender",
+    )!;
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
+    // Both submitted `recommend` grants coerced to `direct`.
+    expect(mode("open-review-pr")).toBe("direct");
+    expect(mode("commit-push-branch")).toBe("direct");
+    // No specialist cap is ever stored/read as `recommend`.
+    expect(created.capabilities.map((c) => c.mode)).not.toContain("recommend");
+    // Non-recommend modes are untouched.
+    expect(mode("create-task-branch")).toBe("off");
+    expect(mode("execute-code-or-write-repo")).toBe("human");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "recommender",
+    });
+  });
+
+  it("R7-5 — editing a specialist coerces a submitted `recommend` to `direct` (grantsFor path)", async () => {
+    await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        name: "Editable Dev",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Created allowed, then edited with a stale recommend mode.",
+        caps: { "open-review-pr": "direct" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+    const upd = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "editable-dev",
+      payload: JSON.stringify({
+        name: "Editable Dev",
+        role: "Implementation",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Created allowed, then edited with a stale recommend mode.",
+        caps: { "open-review-pr": "recommend", "commit-push-branch": "recommend" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    })) as { ok: boolean };
+    expect(upd.ok).toBe(true);
+
+    const edited = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === "editable-dev",
+    )!;
+    const mode = (id: string) =>
+      edited.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(mode("open-review-pr")).toBe("direct");
+    expect(mode("commit-push-branch")).toBe("direct");
+    expect(edited.capabilities.map((c) => c.mode)).not.toContain("recommend");
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: "editable-dev",
     });
   });
 

@@ -9,6 +9,8 @@ import {
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
+  setSimulatedRuntimePermittedForTests,
+  simulatedRuntimePermitted,
 } from "./runtime-registry.server";
 
 describe("runtime-registry — detection & fallback", () => {
@@ -23,6 +25,8 @@ describe("runtime-registry — detection & fallback", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
     delete process.env.CODEX_HOME;
+    delete process.env.VIBERR_FORCE_SIMULATED_RUNTIME;
+    delete process.env.VIBERR_TEST_RUNTIME_OK;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
@@ -94,17 +98,71 @@ describe("runtime-registry — detection & fallback", () => {
   it("selectAdapter returns the real adapter when available", () => {
     setBackendAvailability("claude", true);
     const adapters = createAdapters();
-    const { adapter, simulated } = selectAdapter("claude", adapters);
-    expect(simulated).toBe(false);
-    expect(adapter).toBe(adapters.claude);
+    expect(selectAdapter("claude", adapters)).toEqual({
+      kind: "real",
+      adapter: adapters.claude,
+    });
   });
 
-  it("selectAdapter falls back to the simulated engine when unavailable (simulated flag set)", () => {
+  it("R7-2: an unavailable backend is `unavailable` — the gated test engine only inside the gate, never a silent fallback", () => {
     setBackendAvailability("codex", false);
     const adapters = createAdapters();
-    const { adapter, simulated } = selectAdapter("codex", adapters);
-    expect(simulated).toBe(true);
-    expect(adapter).toBe(adapters.simulated);
+    setSimulatedRuntimePermittedForTests(false);
+    expect(selectAdapter("codex", adapters)).toEqual({ kind: "unavailable" });
+    setSimulatedRuntimePermittedForTests(true);
+    expect(selectAdapter("codex", adapters)).toEqual({
+      kind: "simulated",
+      adapter: adapters.simulated,
+    });
+  });
+
+  it("R7-2 gate: env matrix — test env or force-flag+ack only; fail-closed elsewhere", () => {
+    const env = (e: Record<string, string>) => e as NodeJS.ProcessEnv;
+    // vitest: NODE_ENV=test is inside the gate with no flags at all.
+    expect(simulatedRuntimePermitted(env({ NODE_ENV: "test" }))).toBe(true);
+    // e2e harness: force flag + the explicit second ack under development.
+    expect(
+      simulatedRuntimePermitted(
+        env({ NODE_ENV: "development", VIBERR_FORCE_SIMULATED_RUNTIME: "1", VIBERR_TEST_RUNTIME_OK: "1" }),
+      ),
+    ).toBe(true);
+    // A stray force flag alone (dev or prod) is INERT — fail-closed.
+    expect(
+      simulatedRuntimePermitted(
+        env({ NODE_ENV: "development", VIBERR_FORCE_SIMULATED_RUNTIME: "1" }),
+      ),
+    ).toBe(false);
+    expect(
+      simulatedRuntimePermitted(
+        env({ NODE_ENV: "production", VIBERR_FORCE_SIMULATED_RUNTIME: "1" }),
+      ),
+    ).toBe(false);
+    // The ack without the force flag opens the gate for nothing real either
+    // way (no force → credentials rule), but bare prod stays closed.
+    expect(simulatedRuntimePermitted(env({ NODE_ENV: "production" }))).toBe(false);
+  });
+
+  it("R7-2 gate: an inert force flag does not mask a real credential outside the gate", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.VIBERR_FORCE_SIMULATED_RUNTIME = "1";
+    setSimulatedRuntimePermittedForTests(false); // model a prod/dev process
+    try {
+      expect(isBackendAvailable("claude")).toBe(true);
+    } finally {
+      setSimulatedRuntimePermittedForTests(undefined);
+      delete process.env.VIBERR_FORCE_SIMULATED_RUNTIME;
+    }
+  });
+
+  it("R7-2 gate: inside the gate the force flag masks credentials (e2e determinism)", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.VIBERR_FORCE_SIMULATED_RUNTIME = "1";
+    try {
+      // vitest: NODE_ENV === "test" → gate open → the flag takes effect.
+      expect(isBackendAvailable("claude")).toBe(false);
+    } finally {
+      delete process.env.VIBERR_FORCE_SIMULATED_RUNTIME;
+    }
   });
 
   it("codexSpawnEnv preserves runtime essentials but filters unrelated server secrets", () => {

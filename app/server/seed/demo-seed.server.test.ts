@@ -39,6 +39,11 @@ describe("demo seed", () => {
     expect(rows(`SELECT count(*) AS c FROM project_members`)).toBe(7);
     // Clean dataset: no parse diagnostics on seeded files.
     expect(rows(`SELECT count(*) AS c FROM diagnostics`)).toBe(0);
+    // R7-2 (don't simulate at all): the seed ships ZERO fabricated run
+    // history — no agent_runs rows, no scripted run log lines. Run history
+    // only ever comes from real agent runs.
+    expect(rows(`SELECT count(*) AS c FROM agent_runs`)).toBe(0);
+    expect(rows(`SELECT count(*) AS c FROM run_log_lines`)).toBe(0);
   });
 
   it("is idempotent — running twice keeps the same counts", () => {
@@ -84,10 +89,12 @@ describe("demo seed", () => {
     expect(byStage.review).toEqual(["VIB-142", "VIB-145"]);
     expect(byStage.done).toEqual(["VIB-139", "VIB-141"]);
 
-    // Done tasks derive the accepted display state (never stored).
+    // Done tasks derive the terminal display state (never stored) — VIB-139's
+    // PR is seeded merged, so the pill says "merged", not a stale "accepted"
+    // (F7-UI3).
     const vib139 = byStage.done && board.columns[4]!.tasks[0]!;
     expect(vib139.readiness).toBe("ready");
-    expect(vib139.displayReadiness).toBe("accepted");
+    expect(vib139.displayReadiness).toBe("merged");
 
     // Lightweight template stub (ruling 15).
     const billing = getBoard(db, "billing-service")!;
@@ -112,7 +119,7 @@ describe("demo seed", () => {
     expect(task.owner).toMatchObject({ name: "Arda Kaya" });
     expect(task.specialist).toMatchObject({ profileId: "developer", backend: "codex", role: "Developer" });
     expect(task.reviewers[0]).toMatchObject({ backend: "claude", role: "Reviewer" });
-    expect(task.operator).toMatchObject({ assignedAtStageId: "triage", sinceLabel: "stage 1" });
+    expect(task.operator).toMatchObject({ assignedAtStageId: "triage", sinceLabel: "since Triage" });
     expect(task.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
 
     // Packet — verbatim strings + stable option kinds (ruling 7).

@@ -37,6 +37,8 @@ export interface TaskProjectionRow {
   github_json: string | null;
   goal: string;
   packet_json: string | null;
+  /** Pending operator recommendations on the task file (F7-NOTIF1). */
+  recommendation_count: number;
   event_count: number;
   comment_count: number;
   diagnostic_count: number;
@@ -58,13 +60,14 @@ export interface AgentRender {
   role: string;
 }
 
-/** Operator cell render (ruling 16: stage id stored; label is 1-based). */
+/** Operator cell render (ruling 16: stage id stored). */
 export interface OperatorRender {
   name: "Operator";
   assignedAtStageId: string;
   /** 1-based index into the project's stage list; null if unknown stage. */
   sinceStageIndex: number | null;
-  /** "stage 2" — precomputed display copy. */
+  /** "since Ready" — precomputed display copy using the REAL stage name
+   * (F7-UI2: "stage 2" was a bare index, dishonest for renamed stages). */
   sinceLabel: string;
 }
 
@@ -81,15 +84,16 @@ export interface PacketRender {
 }
 
 /** Board-card / summary shape. `readiness` is always the canonical enum;
- * `displayReadiness` adds the derived "accepted" state (done-stage tasks) —
- * feed it straight into ReadinessPill. */
+ * `displayReadiness` adds the derived terminal-stage states — "accepted"
+ * (human accepted; PR merge may still be pending) and "merged" (the review
+ * PR really merged, F7-UI3) — feed it straight into ReadinessPill. */
 export interface TaskSummary {
   projectSlug: string;
   key: string;
   title: string;
   stage: string;
   readiness: Readiness;
-  displayReadiness: Readiness | "accepted";
+  displayReadiness: Readiness | "accepted" | "merged";
   waiting: Waiting;
   urgent: boolean;
   validation: Validation;
@@ -132,16 +136,18 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
 
 export function mapOperatorRef(
   ref: OperatorRef | null,
-  stageIds: string[],
+  stages: { id: string; name: string }[],
 ): OperatorRender | null {
   if (!ref) return null;
-  const idx = stageIds.indexOf(ref.assignedAtStageId);
+  const idx = stages.findIndex((s) => s.id === ref.assignedAtStageId);
   const sinceStageIndex = idx === -1 ? null : idx + 1;
   return {
     name: "Operator",
     assignedAtStageId: ref.assignedAtStageId,
     sinceStageIndex,
-    sinceLabel: sinceStageIndex === null ? "stage —" : `stage ${sinceStageIndex}`,
+    // The real stage NAME (F7-UI2) — an unknown/removed stage id renders "—"
+    // rather than pretending a position.
+    sinceLabel: idx === -1 ? "since —" : `since ${stages[idx]!.name}`,
   };
 }
 
@@ -157,7 +163,8 @@ export function mapPacket(packet: TaskPacket | null): PacketRender | null {
 export function mapTaskProjectionRow(
   row: TaskProjectionRow,
   context: {
-    stageIds: string[];
+    /** Project stages in order — id for position, name for display copy. */
+    stages: { id: string; name: string }[];
     /** Resolved owner render shape (null when unowned/unknown). */
     owner: ActorRender | null;
     accepted: boolean;
@@ -170,11 +177,12 @@ export function mapTaskProjectionRow(
     .map((c) => mapAgentRef(c))
     .filter((c): c is AgentRender => c !== null);
   const operator = row.operator_json
-    ? mapOperatorRef(JSON.parse(row.operator_json) as OperatorRef, context.stageIds)
+    ? mapOperatorRef(JSON.parse(row.operator_json) as OperatorRef, context.stages)
     : null;
   const github = row.github_json
     ? (JSON.parse(row.github_json) as GithubCache)
     : null;
+  const pr = row.pr_json ? (JSON.parse(row.pr_json) as PrRef) : null;
 
   return {
     projectSlug: row.project_slug,
@@ -182,7 +190,15 @@ export function mapTaskProjectionRow(
     title: row.title,
     stage: row.stage,
     readiness: row.readiness,
-    displayReadiness: context.accepted ? "accepted" : row.readiness,
+    // Terminal-stage display state (F7-UI3): once the review PR is REALLY
+    // merged the pill says "merged" — "accepted" is reserved for the
+    // merge-pending window (or no-PR acceptance), so it never reads stale
+    // next to the GitHub card's own "merged".
+    displayReadiness: context.accepted
+      ? pr?.state === "merged"
+        ? "merged"
+        : "accepted"
+      : row.readiness,
     waiting: row.waiting,
     urgent: row.urgent === 1,
     validation: row.validation,
@@ -192,7 +208,7 @@ export function mapTaskProjectionRow(
     operator,
     branch: row.branch,
     repo: row.repo,
-    pr: row.pr_json ? (JSON.parse(row.pr_json) as PrRef) : null,
+    pr,
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
     goal: row.goal,

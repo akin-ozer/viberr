@@ -110,7 +110,10 @@ export function listProjectTasks(
   slug: string,
 ): TaskSummary[] {
   const project = getProject(db, slug);
-  const stageIds = project ? project.stages.map((s) => s.id) : [];
+  const stages = project
+    ? project.stages.map((s) => ({ id: s.id, name: s.name }))
+    : [];
+  const stageIds = stages.map((s) => s.id);
   const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
   // ONE actor resolver for the whole query — createActorResolver caches user
   // lookups behind a single prepared statement (its own doc: "create one per
@@ -127,7 +130,7 @@ export function listProjectTasks(
     .all(slug) as TaskProjectionRow[];
   return rows.map((row) =>
     mapTaskProjectionRow(row, {
-      stageIds,
+      stages,
       owner: row.owner_user_id
         ? resolveActor({
             kind: "human",
