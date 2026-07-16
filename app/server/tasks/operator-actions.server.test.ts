@@ -651,6 +651,60 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator")).toBe(true);
   });
+
+  it("R7-4: a SUPERVISED operator routes a FAILING review BACK to the work stage directly (no recommendation)", async () => {
+    // A reviewer requested changes (validation=failing) at Review. review→impl
+    // is a backward, off-graph move — but on a failing task it is a rework
+    // transition the operator performs itself so the fix re-drives the developer
+    // without a human, instead of escalating "no path back to Implementation".
+    deployRoster(DEFAULT_POLICY);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        validation: "failing",
+        title: "Rework routing",
+      }),
+      goal: "Prove the operator routes a failing review back.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(
+      task().timeline.some((e) => e.type === "transition" && e.actor.kind === "operator"),
+    ).toBe(true);
+  });
+
+  it("R7-4 guard: a HEALTHY task cannot be moved backward by the operator (no rework license)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        validation: "healthy",
+        title: "No rework license",
+      }),
+      goal: "A healthy review must not slide backward.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      operatorTransitionStage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        authority("full"),
+      ),
+    ).rejects.toThrow(/no governed boundary/i);
+    expect(task().frontmatter.stage).toBe("review");
+  });
 });
 
 describe("auto-invoke on stage transition", () => {
@@ -825,6 +879,11 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet!.options[0]!.rec).toBe(true);
     // Emits a typed `blocked` timeline event, not a plain comment.
     expect(task().timeline[0]!.type).toBe("blocked");
+    // F7-VAL1: a blocked packet marks readiness, NOT validation — `validation`
+    // is review health (only a reviewer verdict / acceptance owns it). It used
+    // to set validation="failing", which bricked acceptance with a "review is
+    // failing" 409 even when no review had ever run.
+    expect(task().frontmatter.validation).not.toBe("failing");
   });
 
   it("is withheld when generate-packets is off (capability gate)", async () => {

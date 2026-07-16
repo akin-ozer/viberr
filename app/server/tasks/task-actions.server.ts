@@ -1453,12 +1453,14 @@ export async function recordReviewerVerdict(
 ): Promise<void> {
   const verdict = classifyReviewerVerdict(replyText);
   if (!verdict) return;
-  const summary =
-    verdict === "request_changes"
-      ? "Reviewer requested changes."
-      : "Reviewer approved the work.";
-  const title = verdict === "request_changes" ? "Changes requested" : "Review passed";
   let validation: "failing" | "healthy" = "healthy";
+  // The title/summary are computed from the RESOLVED validation, not the raw
+  // verdict, so the event can never read "Review passed / Validation: failing"
+  // (F7-REV3): an approve that lands on a still-failing task (a prior rejection
+  // with no rework since — see below) is an "Approval noted, rework still
+  // needed", NOT a pass.
+  let title = "";
+  let summary = "";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       // A request_changes always fails. An APPROVE clears a standing `failing`
@@ -1471,16 +1473,28 @@ export async function recordReviewerVerdict(
       //   · a rejection is NOT a life sentence (the old bug: re-review after a
       //     real fix could never restore health, so the operator refused
       //     acceptance forever and stalled the task).
+      const approveDidNotClear =
+        verdict === "approve" &&
+        parsed.frontmatter.validation === "failing" &&
+        !hasReworkSinceLastRejection(
+          parsed.timeline,
+          parsed.frontmatter.specialist,
+        );
       validation =
-        verdict === "request_changes"
-          ? "failing"
-          : parsed.frontmatter.validation === "failing" &&
-              !hasReworkSinceLastRejection(
-                parsed.timeline,
-                parsed.frontmatter.specialist,
-              )
-            ? "failing"
-            : "healthy";
+        verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
+      if (verdict === "request_changes") {
+        title = "Changes requested";
+        summary = "Reviewer requested changes.";
+      } else if (approveDidNotClear) {
+        // Honest: the reviewer approved, but a standing rejection with no rework
+        // since still governs — validation stays failing until the work moves.
+        title = "Approval noted — rework still needed";
+        summary =
+          "Reviewer approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.";
+      } else {
+        title = "Review passed";
+        summary = "Reviewer approved the work.";
+      }
       parsed.frontmatter.validation = validation;
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -1692,8 +1706,18 @@ export async function applyAgentCompletionEffects(
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
-  // 2. Reconcile agent-side delivery (NFR15) — real runs only.
-  if (finished.state === "finished" && !finished.simulated) {
+  // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
+  //    reviewer (F7-REV1) delivers nothing: it clones the repo to READ the diff,
+  //    so its workspace HEAD/branch is incidental. Reconciling delivery off a
+  //    reviewer's clone raced the reviewer's just-posted reply comment (its
+  //    read-modify-write of task.md could drop it) and could stamp task.md's
+  //    branch/pr from the reviewer's checkout. Only the specialist that produced
+  //    the change reconciles delivery.
+  if (
+    input.kind === "primary" &&
+    finished.state === "finished" &&
+    !finished.simulated
+  ) {
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
@@ -2174,6 +2198,12 @@ export async function transitionStage(
      *  admin|maintainer (the transition authority). Governed flows (packets,
      *  recommendations, operator) never set this and keep boundary-only rules. */
     manual?: boolean;
+    /** Operator rework routing (R7-4): a BACKWARD move to an earlier stage on a
+     *  task whose latest review is `failing`, so the operator can send a
+     *  rejected task back to the developer without a human. Only honored under
+     *  operator authority; validated below (must be backward + validation
+     *  failing). Off-graph like `manual`, but operator-scoped and rework-gated. */
+    rework?: boolean;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2200,7 +2230,18 @@ export async function transitionStage(
   const boundary = project.workflow.find(
     (w) => w.from === fromStageId && w.to === input.toStageId,
   );
-  if (!boundary && !input.manual) {
+  // Operator rework routing (R7-4): a backward move on a `failing` task is a
+  // legitimate off-graph transition (the governed graph is forward-only). Vet it
+  // here so it can't be abused for a forward jump or on a healthy task.
+  const fromIndex = project.stages.findIndex((s) => s.id === fromStageId);
+  const toIndex = project.stages.findIndex((s) => s.id === input.toStageId);
+  const isReworkMove =
+    input.rework === true &&
+    ctx.operatorAuthorized === true &&
+    toIndex >= 0 &&
+    toIndex < fromIndex &&
+    existing.parsed.frontmatter.validation === "failing";
+  if (!boundary && !input.manual && !isReworkMove) {
     throw AppError.validation(
       `No governed boundary from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
     );
@@ -2865,6 +2906,22 @@ async function acceptCompletion(
   if (!input.force && existing.parsed.frontmatter.validation === "failing") {
     throw conflict(
       "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
+    );
+  }
+
+  // Refuse to accept while an operator-raised BLOCKED decision is still open
+  // (F7-VAL1/F7-PKT1). A blocked packet means the operator hit something it
+  // couldn't resolve (a denied commit, a crashed run); accepting would bury that
+  // decision. This replaces the old validation="failing"-on-block hack: the
+  // packet, not a fake review verdict, is what holds acceptance. Resolving the
+  // packet clears readiness → acceptance proceeds.
+  if (
+    !input.force &&
+    existing.parsed.frontmatter.readiness === "blocked" &&
+    existing.parsed.packet?.type === "blocked"
+  ) {
+    throw conflict(
+      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
     );
   }
 

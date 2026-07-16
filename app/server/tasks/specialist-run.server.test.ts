@@ -222,6 +222,36 @@ describe("startSpecialistRun", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it("F7-OP1: refuses a second PRIMARY run while one is already in flight (server single-flight)", async () => {
+    await assign();
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    // A primary run is already live on this task (e.g. a prior operator turn
+    // started it). A second startSpecialistRun must not spawn a rival agent in
+    // the same workspace clone.
+    upsertRun(store.db, {
+      id: "run_inflight_primary",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary-inflight",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      simulated: false,
+      model: "claude-sonnet-4-5",
+      sdk: "Claude Agent SDK",
+      state: "running",
+      startedAt: "2026-07-16T00:00:00.000Z",
+    } as Parameters<typeof upsertRun>[1]);
+    await expect(
+      startSpecialistRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
   it("rejects RUNNING an already-assigned specialist at a stage it isn't eligible for (F1 run boundary)", async () => {
     // Re-deploy `dev` scoped to the REVIEW stage only, assigned to VIB-1.
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;

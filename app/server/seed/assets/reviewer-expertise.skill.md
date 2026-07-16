@@ -34,6 +34,13 @@ The operator engages you with a comment addressed to you — for example, **"@re
 
 The operator reads the **comment you post**, not your logs. Make the verdict unambiguous and the findings actionable:
 
+- **Open with a machine-readable verdict line, exactly one of:**
+  `Verdict: approve` — or — `Verdict: request-changes`.
+  This MUST be the first line of your report and MUST be one of those two forms
+  (the operator parses it — a vague "looks fine, maybe" or "this appears already
+  done" with no verdict line reads as no verdict, and the task stalls waiting for
+  a re-review). If you genuinely cannot decide, pick `request-changes` and say
+  what evidence you are missing. Never omit the line.
 - **Verdict first** — approve, or request-changes.
 - **Findings that matter**, ordered blocking first. Each finding: the file and line, and *why it matters* (what breaks, and when). Distinguish a blocker from a nit — label nits as nits.
 - **If you approve**, say what you verified (goal met, paths checked, tests adequate) so the human can accept with confidence.

@@ -766,6 +766,23 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict("No blocking issues, ready to accept.")).toBe("approve");
   });
 
+  it("parses the required machine-readable verdict marker (F7-REV2)", () => {
+    // The reviewer skill now mandates an opening `Verdict: approve` /
+    // `Verdict: request-changes` line so the classifier never returns null and
+    // the operator never re-runs the reviewer chasing an ambiguous report.
+    expect(classifyReviewerVerdict("Verdict: approve\n\nChecked the diff.")).toBe("approve");
+    expect(
+      classifyReviewerVerdict("Verdict: request-changes\n\nMissing a null guard."),
+    ).toBe("request_changes");
+    // The exact prose that stalled VIB-5 live — now prefixed with a marker,
+    // it classifies instead of returning null.
+    expect(
+      classifyReviewerVerdict(
+        "Verdict: approve\n\nThe task already appears complete; the file is present and correct.",
+      ),
+    ).toBe("approve");
+  });
+
   it("does NOT misread a clean APPROVE that mentions negated fail/blocker words", () => {
     // The live VSW-3 bug: a thorough approval that says "no blockers" / "no
     // tests fail" must classify as approve, not request_changes.

@@ -126,19 +126,27 @@ export function resolveProjectAuthority(
     return { allowed: true, role: memberRole, isOrgAdminOverride: false };
   }
   if (isOrgAdmin(db, actor.userId)) {
-    recordAudit(db, {
-      action: "project.org_admin.override",
-      actor: { userId: actor.userId, label: actor.label },
-      subjectKind: "project",
-      subjectId: project.slug,
-      projectSlug: project.slug,
-      details: {
-        action: audit.action,
-        what: audit.what,
+    // Audit the override for governance MUTATIONS only. The `"any-member"` gate
+    // is the config-surface route READ (Policy/Settings/Agents/GitHub loaders)
+    // plus a couple of idempotent no-op paths (auto-boundary, owner-release with
+    // no owner) — auditing an override there wrote a row on every page load an
+    // org-admin non-member opened (F7-pass7 audit-noise). Every real governed
+    // mutation the override enables names a concrete RbacAction and IS audited.
+    if (audit.action !== "any-member") {
+      recordAudit(db, {
+        action: "project.org_admin.override",
+        actor: { userId: actor.userId, label: actor.label },
+        subjectKind: "project",
+        subjectId: project.slug,
         projectSlug: project.slug,
-        memberRole,
-      },
-    });
+        details: {
+          action: audit.action,
+          what: audit.what,
+          projectSlug: project.slug,
+          memberRole,
+        },
+      });
+    }
     return { allowed: true, role: "admin", isOrgAdminOverride: true };
   }
   return { allowed: false, memberRole };

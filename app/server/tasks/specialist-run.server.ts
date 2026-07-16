@@ -11,6 +11,7 @@ import type {
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -49,6 +50,7 @@ import {
   type SimulatedScript,
 } from "~/server/runtimes/simulated-runtime.server";
 import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
+import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { rolesForAction } from "~/shared/rbac";
 import { requireProjectAuthority } from "~/server/auth/project-authority.server";
@@ -507,6 +509,25 @@ export async function startSpecialistRun(
     throw AppError.validation(
       "Assign a specialist before starting a run.",
     );
+  }
+  // Server-side single-flight for the PRIMARY specialist (F7-OP1). Two operator
+  // turns racing (e.g. a packet resolve + a manual backward transition in quick
+  // succession) each used to start a codex/claude run in the SAME
+  // tasks/<KEY>/workspace clone — two agent processes fighting over one git
+  // index/branch, risking a double push. The operator lease guards operator
+  // runs only; the specialist dispatch had no in-flight guard. One live primary
+  // run per task: refuse a second until the first finishes or is interrupted.
+  const livePrimary = listRunsForTaskRows(db, input.projectSlug, input.taskKey).find(
+    (r) => r.kind === "primary" && (r.state === "running" || r.state === "queued"),
+  );
+  if (livePrimary) {
+    throw new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage:
+        "A specialist run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
+      kind: "user",
+    });
   }
   const backend: RealBackend =
     input.backendOverride ?? (sp.backend === "codex" ? "codex" : "claude");

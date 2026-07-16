@@ -302,7 +302,13 @@ describe("D2 org-admin emergency override (R7-1)", () => {
     }
   });
 
-  it("the any-member route gate admits an org-admin non-member with an audit row + override flag", () => {
+  it("the any-member route READ gate admits an org-admin non-member (override flag) but does NOT audit", () => {
+    // The `any-member` gate is the config-surface route READ (Policy/Settings/
+    // Agents/GitHub loaders); an org-admin non-member opens those constantly, so
+    // auditing an override there would write a row per page load (the F7 audit-
+    // noise fix). The override flag is still set so the UI shows the honest
+    // override pill — only the audit is suppressed for reads. Every genuine
+    // governed MUTATION names a concrete RbacAction and IS audited (below).
     const grant = assertProjectAction(
       store.db,
       "any-member",
@@ -313,9 +319,7 @@ describe("D2 org-admin emergency override (R7-1)", () => {
     );
     expect(grant.role).toBe("admin");
     expect(grant.isOrgAdminOverride).toBe(true);
-    const rows = overrideRows();
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.details?.action).toBe("any-member");
+    expect(overrideRows()).toHaveLength(0);
   });
 
   it("an org admin acting within their OWN sufficient membership is NOT an override (no row)", async () => {
