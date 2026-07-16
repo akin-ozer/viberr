@@ -126,7 +126,10 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
     initial ? initial.transport : "HTTP",
   );
   const [target, setTarget] = useState(initial ? initial.target : "");
-  const [cred, setCred] = useState(initial ? (initial.cred ?? "") : "");
+  // The stored credential is sealed and never round-tripped to the client
+  // (F7-MCP1); the edit field always starts empty. Blank on save keeps the
+  // existing sealed value; a non-empty value replaces it.
+  const [cred, setCred] = useState("");
   const { action, err, setErr } = useModalAction(() => onClose());
   const canSave = !action.busy && slugify(name).length > 1 && target.trim().length > 3;
   return (
@@ -208,21 +211,26 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
       </div>
       <div className="field">
         <label className="flabel" htmlFor="mcp-cred">
-          Credential <span className="fhint">optional · secret reference</span>
+          Credential{" "}
+          <span className="fhint">
+            optional · token / API key
+            {initial?.hasCred ? " · a credential is set — leave blank to keep it" : ""}
+          </span>
         </label>
         <input
           id="mcp-cred"
-          type="text"
+          type="password"
           className="mono"
           value={cred}
-          placeholder="secret://mcp/…"
+          placeholder={initial?.hasCred ? "•••••••• (unchanged)" : "paste a token or API key"}
           onChange={(e) => setCred(e.target.value)}
         />
         <div className="def-note">
           <Icon name="lock" />
           <span>
-            Referenced at runtime only. Secrets never appear in task timelines, comments,
-            or audit records.
+            Encrypted at rest and injected only into the agent run (Authorization header
+            or MCP_CREDENTIAL env). Never shown again, and never in task timelines,
+            comments, or audit records.
           </span>
         </div>
       </div>
@@ -722,7 +730,7 @@ function McpPanel({
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
                     : "not health-checked yet"}
-                {m.cred ? " · auth: " + m.cred : ""}
+                {m.hasCred ? " · auth: configured" : ""}
               </span>
             </span>
             <span className="rsrc-acts">

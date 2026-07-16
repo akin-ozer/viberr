@@ -275,9 +275,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    cred: "secret://mcp/github", tools: 14, up: true, lastCheckedAt: new Date().toISOString() },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString() },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    cred: null, tools: 0, up: false, lastCheckedAt: new Date().toISOString() },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString() },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -311,7 +311,7 @@ describe("ResourcesPanel", () => {
     const { getByText } = renderResources();
     expect(getByText("store://kb/architecture-notes/ · 2 docs")).toBeTruthy();
     expect(getByText(/read live · re-scanned just now/)).toBeTruthy();
-    expect(getByText(/14 tools · checked just now · auth: secret:\/\/mcp\/github/)).toBeTruthy();
+    expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
       getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 profiles/),

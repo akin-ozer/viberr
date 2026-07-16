@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { listMcpServers } from "~/server/org/resources.server";
+import { getMcpCredential, listMcpServers } from "~/server/org/resources.server";
 
 /**
  * Resolve a specialist profile's declared MCP names to portable runtime
@@ -7,19 +7,19 @@ import { listMcpServers } from "~/server/org/resources.server";
  * decorative — a profile's `resources.mcps` reached no run. This turns each
  * declared name into a real server config. The Claude adapter accepts this
  * shape directly; the Codex adapter translates it to `mcp_servers` config:
- *   - HTTP  → `{ type: "http", url: <target> }`
- *   - stdio → `{ command, args }` (target is the shell command line)
+ *   - HTTP  → `{ type: "http", url: <target>, headers?: { Authorization } }`
+ *   - stdio → `{ command, args, env?: { MCP_CREDENTIAL } }`
  *
  * `viberr` is skipped (it is the OPERATOR's in-process governance server, built
  * separately and never offered to specialists). Unknown names are skipped.
  * Returns `{}` when nothing resolves, so callers can spread it unconditionally.
  *
- * NOTE (honest scope): credentials are NOT injected here. The registry stores a
- * `secret://…` ref, not the token; wiring the real auth header requires the
- * secret store and a working external server, neither of which is exercised in
- * this environment (the seeded MCP targets are placeholders). This makes the
- * declared MCP a real, connectable server config; supplying live credentials is
- * the remaining step for a production MCP.
+ * CREDENTIALS (F7-MCP1, ruling 8 — now WIRED): a server's credential is stored
+ * SEALED in the org registry (secret-box). When present it is decrypted only
+ * here, at run-spawn time, and injected — as an `Authorization: Bearer <token>`
+ * header for HTTP, or the `MCP_CREDENTIAL` env var for stdio. The plaintext
+ * never touches task files, timelines, logs, or any client surface. Servers
+ * with no credential connect unauthenticated (e.g. a local stdio tool).
  */
 export function resolveSpecialistMcpServers(
   db: Database.Database,
@@ -39,13 +39,22 @@ export function resolveSpecialistMcpServers(
     if (name === "viberr") continue; // operator's in-process server, not for specialists
     const row = byName.get(name);
     if (!row || !row.target) continue;
+    const token = getMcpCredential(db, name);
     if (row.transport === "stdio") {
       const parts = row.target.trim().split(/\s+/);
       const command = parts[0];
       if (!command) continue;
-      servers[name] = { command, args: parts.slice(1) };
+      servers[name] = {
+        command,
+        args: parts.slice(1),
+        ...(token ? { env: { MCP_CREDENTIAL: token } } : {}),
+      };
     } else {
-      servers[name] = { type: "http", url: row.target };
+      servers[name] = {
+        type: "http",
+        url: row.target,
+        ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      };
     }
   }
   return servers;
