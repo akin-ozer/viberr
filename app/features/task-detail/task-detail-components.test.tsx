@@ -91,15 +91,19 @@ describe("DecisionPacket", () => {
     );
   });
 
-  it("primary button carries the selected option title and resolves by index", () => {
+  it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
       <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
-    expect(primary.textContent).toContain("Accept completion");
-    fireEvent.click(container.querySelectorAll('.options [role="radio"]')[1]!);
-    expect(primary.textContent).toContain("Request one edit");
+    // F-UI1: the button no longer echoes the (often long, multi-line) option
+    // title — it shows a concise, stable label; the selection lives in the radios.
+    expect(primary.textContent).toContain("Confirm decision");
+    const radios = container.querySelectorAll('.options [role="radio"]');
+    expect(radios[0]!.getAttribute("aria-checked")).toBe("true"); // rec preselected
+    fireEvent.click(radios[1]!);
+    expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(primary);
     expect(onResolve).toHaveBeenCalledWith(1);
   });

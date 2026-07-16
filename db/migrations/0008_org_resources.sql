@@ -1,3 +1,8 @@
+-- Note: there is no 0007 — the number was skipped during development (a planned
+-- migration was folded into others). The runner applies files in filename order
+-- and records applied names, so a gap is harmless; do NOT renumber existing
+-- files (that would re-run them). New migrations continue from the highest number.
+--
 -- 0008_org_resources: phase 9B (org settings — instance-level admin).
 --
 -- github_connections: org-level GitHub OWNER connections (org-settings
