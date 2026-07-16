@@ -438,6 +438,29 @@ export async function mergeTaskPr(
   });
   if (gh.status !== "ok") return gh;
 
+  // F7-GH5: an agent that opened the PR via `gh pr create --draft` (or the
+  // account default) leaves it a DRAFT, which GitHub refuses to merge (405
+  // "Pull Request is still a draft") — acceptance then dead-ends with no fix.
+  // A draft can only be cleared through GraphQL (`markPullRequestReadyForReview`,
+  // REST can't unset `draft`), so mark it ready with the project PAT before the
+  // merge. Best-effort: if the un-draft fails, the merge attempt below still
+  // returns GitHub's own actionable message.
+  const prView = await gh.client.request<{ draft?: boolean; node_id?: string }>(
+    "GET",
+    `/repos/${gh.repo}/pulls/${prNumber}`,
+  );
+  if (prView.ok && prView.data.draft === true && prView.data.node_id) {
+    await gh.client
+      .request<unknown>("POST", "https://api.github.com/graphql", {
+        body: {
+          query:
+            "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}",
+          variables: { id: prView.data.node_id },
+        },
+      })
+      .catch(() => undefined);
+  }
+
   const merge = await gh.client.request<GhMergeResponse>(
     "PUT",
     `/repos/${gh.repo}/pulls/${prNumber}/merge`,

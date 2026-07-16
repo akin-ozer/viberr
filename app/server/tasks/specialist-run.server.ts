@@ -1071,9 +1071,9 @@ function buildAnalyzePrompt(input: {
     if (canCommitPush) {
       prompt +=
         `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
-        `- Push the branch${canOpenPr ? " and open a pull request that references " + input.taskKey + " in its title/body" : ""}.\n`;
+        `- Push the branch${canOpenPr ? " and open a pull request (ready for review, NOT a draft) that references " + input.taskKey + " in its title/body" : ""}.\n`;
     } else if (canOpenPr) {
-      prompt += `- Open a pull request that references ${input.taskKey} in its title/body.\n`;
+      prompt += `- Open a pull request (ready for review, NOT a draft) that references ${input.taskKey} in its title/body.\n`;
     }
     // Reflect what the profile's capabilities actually allow so the run never
     // attempts (and fails) a step its tools deny.

@@ -547,6 +547,51 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     expect(prov).toHaveLength(1);
   });
 
+  it("F7-GH5: a DRAFT PR is marked ready-for-review via GraphQL before the merge", async () => {
+    const { store, actor } = setupWithPr();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, draft: true, node_id: "PR_node318" },
+      },
+      "POST /graphql": {
+        body: { data: { markPullRequestReadyForReview: { clientMutationId: null } } },
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "mergesha02", message: "merged" },
+      },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-142" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toEqual({ status: "merged", prNumber: 318, sha: "mergesha02" });
+    // The un-draft GraphQL mutation was issued with the PR's node id.
+    const graphql = gh.calls.find((c) => c.url.pathname === "/graphql");
+    expect(graphql).toBeDefined();
+    expect(JSON.stringify(graphql!.body)).toContain("PR_node318");
+    expect(JSON.stringify(graphql!.body)).toContain("markPullRequestReadyForReview");
+  });
+
+  it("a NON-draft PR is merged without any GraphQL un-draft call", async () => {
+    const { store, actor } = setupWithPr();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: { body: { number: 318, draft: false, node_id: "PR_node318" } },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "mergesha03", message: "merged" },
+      },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-142" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result.status).toBe("merged");
+    expect(gh.calls.some((c) => c.url.pathname === "/graphql")).toBe(false);
+  });
+
   it("405 → not_mergeable, 409 → head_changed, 404 → pr_not_found, 401 → auth_failed", async () => {
     const { store, actor } = setupWithPr();
     const cases: [number, string, string][] = [
