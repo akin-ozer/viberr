@@ -3,7 +3,27 @@
 Severity: HIGH (core flow / owner-ruled gap) · MED (wrong or misleading) · LOW (polish/debt).
 Status: OPEN / FIXED / RULED / WONTFIX. Implementation phase must close every OPEN item.
 
-## IMPLEMENTATION STATUS (branch pass7-implementation-2026-07-16)
+## FINAL STATUS — ALL ITEMS CLOSED (branch pass7-implementation-2026-07-16)
+
+Full unit suite GREEN (127 files / 1262 tests), typecheck clean. Every finding below is FIXED
+with test coverage unless marked otherwise. Commits: wave1 (RBAC+D2, no-sim, notif+pills),
+wave2a (reviewer honesty, blocked-packet, operator rework+single-flight), F7-GH5, wave2b
+(R7-5, failure classification, boot backoff, RES3/UX1/RES4/PKT1), F7-MCP1.
+
+FIXED: F7-RBAC1 (D2 override, mutation-only audit), F7-RBAC2 (12 seams consolidated),
+F7-SIM1/R7-2 (no simulation), F7-NOTIF1 (live waiting-list), F7-UI1/2/3 (pills),
+F7-UI4/R7-6 (done comments allowed + hint), F7-REV1 (reviewer no-reconcile),
+F7-REV2 (verdict marker), F7-REV3 (no contradictory quality event), F7-OP1 (single-flight),
+F7-VAL1 (blocked≠failing + acceptance guard), F7-FLOW1/R7-4 (operator rework transition),
+F7-CAP1/R7-5 (3-mode specialist picker), F7-RUN1 (codex+claude failure class),
+F7-BOOT1 (recovery backoff), F7-VEST1 (seed-resumer removed), F7-RES3 (viberr off specialist
+picker), F7-RES4 (trusted-resource banner), F7-UX1 (repo-relative links), F7-PKT1 (operator
+persona), F7-GH5 (un-draft before merge), F7-MCP1 (sealed credential injection).
+CARRIED (environment-bound, documented): F7-DOCKER2 (Linux Landlock — untestable on macOS/here),
+F-PARITY1 (codex live TURNS/TOKENS cosmetic). Minor: a benign test-teardown warning (completion
+handler after DB close) — all tests pass; left as a follow-up.
+
+## (superseded) IN-FLIGHT STATUS (branch pass7-implementation-2026-07-16)
 
 FIXED + tests green: F7-RBAC1 (D2 org-admin audited override, mutations-only audit),
 F7-RBAC2 (12 seams → project-authority.server.ts), F7-SIM1/R7-2 (no simulation: product
