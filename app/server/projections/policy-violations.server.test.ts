@@ -16,8 +16,18 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
-  it("a fresh database carries the migration-seeded VIB-142 violation (rail badge = 1)", () => {
+  it("a fresh (empty) database carries NO scope violations (schema is seed-free)", () => {
+    // The mock VIB-142 violation moved out of the schema into the demo seed when
+    // migrations were squashed — a fresh DB (production/empty dev) starts clean.
     const db = ctx.makeDb();
+    expect(countOpenPolicyViolations(db, "viberr-core")).toBe(0);
+    expect(listScopeViolations(db, "viberr-core", { status: "open" })).toHaveLength(0);
+  });
+
+  it("the demo seed re-adds the mock VIB-142 violation (rail badge = 1)", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    runDemoSeed(db, { dataRoot });
     expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
     expect(countOpenPolicyViolations(db, "deploy-pipeline")).toBe(0);
     const open = listScopeViolations(db, "viberr-core", { status: "open" });
@@ -40,16 +50,27 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
   });
 
   it("openScopeViolation is idempotent per (project, scope, task)", () => {
+    // A fresh (empty) DB carries no scope violations — the mock seed moved out of
+    // the schema when migrations were squashed. The FIRST open creates the row.
     const db = ctx.makeDb();
     const first = openScopeViolation(db, {
       projectSlug: "viberr-core",
       taskKey: "VIB-142",
       scope: "pull_request:write",
+      detail: "first attempt",
+    });
+    expect(first.created).toBe(true);
+    expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
+
+    // A second open for the SAME (project, task, scope) reuses that row.
+    const dup = openScopeViolation(db, {
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
       detail: "dup attempt",
     });
-    // The migration-seeded row is reused — nothing new is created.
-    expect(first.created).toBe(false);
-    expect(first.violation.id).toBe("sv_seed_vib142_pr_write");
+    expect(dup.created).toBe(false);
+    expect(dup.violation.id).toBe(first.violation.id);
     expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
 
     // A different task or scope IS a new violation.
@@ -72,6 +93,13 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
 
   it("resolve closes exactly one row, is idempotent, and reopening works after", () => {
     const db = ctx.makeDb();
+    // Open the violation to resolve (a fresh DB is seed-free after the squash).
+    openScopeViolation(db, {
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
+      detail: "flagged",
+    });
     const seeded = findOpenScopeViolation(
       db,
       "viberr-core",

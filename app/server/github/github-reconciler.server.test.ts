@@ -16,6 +16,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
+  openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
@@ -489,12 +490,21 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Open the VIB-142 pull_request:write violation explicitly — it used to be
+    // seeded by migration 0005; the squashed baseline is schema-only, so tests
+    // that resolve it now create it (self-contained, no reliance on a mock seed).
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      scope: "pull_request:write",
+      detail: "Project credential is missing pull_request:write.",
+    });
     return { store, actor };
   }
 
   it("merges, flips the cache, writes the github event, resolves the task's pull_request:write violation", async () => {
     const { store, actor } = setupWithPr();
-    // The migration-seeded VIB-142 violation is open on this slug.
+    // The VIB-142 violation opened in setup is open on this slug.
     expect(countOpenPolicyViolations(store.db, store.slug)).toBe(1);
 
     const gh = fakeGithubFetch({
