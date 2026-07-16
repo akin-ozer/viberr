@@ -70,6 +70,15 @@ function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
   for (const [name, value] of Object.entries(servers ?? {})) {
     if (!name || !isRecord(value) || value.type === "sdk") continue;
 
+    // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
+    // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
+    // Those are DELIBERATELY NOT carried onto Codex: the codex SDK passes this
+    // config to the CLI as `--config key=value` argv, so a literal secret here
+    // would be visible in `ps auxww` (the standing codex-argv exposure the owner
+    // scoped out). So a credentialed org MCP authenticates on Claude runs only;
+    // on Codex it connects unauthenticated. This is an honest, documented
+    // limitation (same class as the S3 codex tool-confinement gap), not a silent
+    // drop — the specialist-mcp docstring says so.
     if (value.type === "http" && typeof value.url === "string") {
       translated[name] = {
         url: value.url,

@@ -790,6 +790,47 @@ describe("operatorAcceptCompletion", () => {
     expect(audits).toContain("task.operator.accepted_completion");
   });
 
+  it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
+    // The human accept path refuses a task with an open blocked packet; the
+    // full-autonomy operator must refuse it too, or it silently buries the
+    // unresolved decision. F7-VAL1 decoupled blocked-ness from validation, so a
+    // blocked task's `validation` is NOT "failing" — this guard is what stops it.
+    deployRoster([
+      ...DEFAULT_POLICY.filter(
+        (c) =>
+          c.capabilityId !== "completion-for-acceptance" &&
+          c.capabilityId !== "generate-packets",
+      ),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Delivery stalled — needs a human",
+        options: [{ kind: "block_on_policy", title: "Update the credential policy" }],
+      },
+      authority("full"),
+    );
+    expect(task().frontmatter.readiness).toBe("blocked");
+    expect(task().frontmatter.validation).not.toBe("failing"); // the point of F7-VAL1
+
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(task().frontmatter.stage).toBe("review"); // NOT moved to Done
+    expect(task().packet?.type).toBe("blocked"); // decision still open
+  });
+
   it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {
     // The shipped default operator holds completion-for-acceptance:recommend.
     // Under full autonomy that must NOT silently promote to an agent-close.

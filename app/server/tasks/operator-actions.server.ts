@@ -1224,6 +1224,23 @@ export async function operatorAcceptCompletion(
     };
   }
 
+  // Never accept a task with an open BLOCKED decision (mirrors the human
+  // acceptCompletion guard, task-actions.server.ts). F7-VAL1 decoupled a blocked
+  // packet from validation="failing" (blocked-ness lives on `readiness` now), so
+  // the `validation` check above no longer catches it — without this guard the
+  // full-autonomy operator would auto-accept a task whose operator-raised
+  // decision (a denied commit, a crashed run) is still unresolved, silently
+  // burying it. Recommend and auto-accept are BOTH suppressed until it clears.
+  if (
+    file.parsed.frontmatter.readiness === "blocked" &&
+    file.parsed.packet?.type === "blocked"
+  ) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} has an open blocked decision — not accepting until the packet is resolved.`,
+    };
+  }
+
   // Supervised (or without the completion capability) → recommend only: post an
   // actionable "accept completion → Done" recommendation card (symmetric with the
   // other stage-transition cards, so the review→done boundary gets the same clear

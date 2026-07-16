@@ -14,12 +14,20 @@ import { getMcpCredential, listMcpServers } from "~/server/org/resources.server"
  * separately and never offered to specialists). Unknown names are skipped.
  * Returns `{}` when nothing resolves, so callers can spread it unconditionally.
  *
- * CREDENTIALS (F7-MCP1, ruling 8 — now WIRED): a server's credential is stored
- * SEALED in the org registry (secret-box). When present it is decrypted only
- * here, at run-spawn time, and injected — as an `Authorization: Bearer <token>`
- * header for HTTP, or the `MCP_CREDENTIAL` env var for stdio. The plaintext
- * never touches task files, timelines, logs, or any client surface. Servers
- * with no credential connect unauthenticated (e.g. a local stdio tool).
+ * CREDENTIALS (F7-MCP1, ruling 8): a server's credential is stored SEALED in the
+ * org registry (secret-box). When present it is decrypted only here, at
+ * run-spawn time, and attached — as an `Authorization: Bearer <token>` header
+ * for HTTP, or the `MCP_CREDENTIAL` env var for stdio. The plaintext never
+ * touches task files, timelines, logs, or any client surface. Servers with no
+ * credential connect unauthenticated (e.g. a local stdio tool).
+ *
+ * BACKEND SCOPE: the credential is honored on CLAUDE runs (the Agent SDK accepts
+ * `headers`/`env` on an mcpServer directly). On CODEX it is intentionally
+ * dropped — the codex SDK serializes MCP config into `--config` argv, so a
+ * literal secret there would be `ps`-visible (the standing codex-argv exposure
+ * the owner scoped out of security work). See `codexMcpServers` in
+ * codex-runtime.server.ts. A credentialed org MCP therefore authenticates on
+ * Claude-backed specialists only; on Codex it connects unauthenticated.
  */
 export function resolveSpecialistMcpServers(
   db: Database.Database,
