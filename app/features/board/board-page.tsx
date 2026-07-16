@@ -376,7 +376,7 @@ function NewTaskModal({
   }>();
   const csrf = useCsrfToken();
   const push = useToast();
-  const panelRef = useDialog(onClose);
+  const { ref: panelRef, close } = useDialog(onClose);
   const busy = fetcher.state !== "idle";
   const closedRef = useRef(false);
 
@@ -430,7 +430,7 @@ function NewTaskModal({
         <button
           type="button"
           className="icon-btn modal-close"
-          onClick={onClose}
+          onClick={close}
           aria-label="Close"
         >
           <Icon name="x" />
@@ -504,7 +504,7 @@ function NewTaskModal({
               : "A title is required."}
         </span>
         <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" onClick={close}>
             Cancel
           </button>
           <button

@@ -20,9 +20,12 @@ import { Icon } from "./icon";
 export interface Toast {
   id: string;
   text: string;
+  /** Exit phase: `.leaving` plays the 200 ms fade-down before unmount. */
+  leaving?: boolean;
 }
 
 const TOAST_DISMISS_MS = 2600;
+const TOAST_EXIT_MS = 200;
 
 export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -38,10 +41,19 @@ export function useToasts(): { toasts: Toast[]; push: (text: string) => void } {
   const push = useCallback((text: string) => {
     const id = crypto.randomUUID();
     setToasts((t) => [...t, { id, text }]);
+    // Two-phase dismissal: mark `leaving` (CSS plays the exit transition,
+    // mirroring the `rise` entrance path), then unmount after it settles.
+    timers.current.push(
+      setTimeout(() => {
+        setToasts((t) =>
+          t.map((x) => (x.id === id ? { ...x, leaving: true } : x)),
+        );
+      }, TOAST_DISMISS_MS),
+    );
     timers.current.push(
       setTimeout(() => {
         setToasts((t) => t.filter((x) => x.id !== id));
-      }, TOAST_DISMISS_MS),
+      }, TOAST_DISMISS_MS + TOAST_EXIT_MS),
     );
   }, []);
 
@@ -52,7 +64,7 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
   return (
     <div className="toast-wrap" role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div className="toast" key={t.id}>
+        <div className={"toast" + (t.leaving ? " leaving" : "")} key={t.id}>
           <Icon name="check" />
           {t.text}
         </div>

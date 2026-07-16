@@ -169,7 +169,7 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const dialogRef = useDialog(onCancel);
+  const { ref: dialogRef, close } = useDialog(onCancel);
   // Native <dialog>: backdrop click and Escape dismiss are handled by
   // useDialog; the ::backdrop pseudo-element renders the scrim.
   return (
@@ -200,7 +200,7 @@ function DeleteConfirm({
         )}
       </p>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn danger" onClick={onConfirm}>

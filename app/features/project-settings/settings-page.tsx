@@ -601,7 +601,7 @@ function DeleteProjectDialog({
   onCancel: () => void;
   onConfirm: (confirmName: string) => void;
 }) {
-  const dialogRef = useDialog(onCancel);
+  const { ref: dialogRef, close } = useDialog(onCancel);
   const [confirmName, setConfirmName] = useState("");
   const matches = confirmName.trim() === projectName;
   return (
@@ -632,7 +632,7 @@ function DeleteProjectDialog({
         />
       </div>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button

@@ -151,7 +151,7 @@ function RemoveCredentialDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const ref = useDialog(onCancel);
+  const { ref, close } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -169,7 +169,7 @@ function RemoveCredentialDialog({
         in org settings.
       </p>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn danger" onClick={onConfirm}>

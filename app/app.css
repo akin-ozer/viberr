@@ -1079,6 +1079,12 @@ h1, h2, h3, h4 {
   animation: rise .3s ease;
 }
 .toast .ico { width: 16px; height: 16px; color: var(--teal-light); }
+/* Exit mirrors the rise entrance path (same edge), faster than the enter. */
+.toast.leaving {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity .2s ease, transform .2s ease;
+}
 @keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 .empty { color: var(--placeholder); font-size: .86rem; text-align: center; padding: 2rem 1rem; }
@@ -1289,6 +1295,19 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
   from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
+/* Animated close — useDialog sets [data-closing], plays the reverse of
+   pop-center faster than the enter, then unmounts on transitionend. */
+dialog[data-closing] {
+  animation: none;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -46%) scale(.97);
+  transition: opacity .15s ease, transform .15s ease;
+}
+dialog[data-closing]::backdrop {
+  opacity: 0;
+  transition: opacity .15s ease;
+}
 .confirm-icon {
   display: grid; place-items: center;
   width: 40px; height: 40px; margin-bottom: .9rem;
@@ -1393,7 +1412,9 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
 .cap-msum { margin-left: auto; display: inline-flex; gap: .55rem; }
 .cap-msum .cs { display: inline-flex; align-items: center; gap: .28rem; font-family: var(--font-mono); font-size: .72rem; color: var(--faint); }
 .cap-msum .cs .d { width: .5rem; height: .5rem; border-radius: 50%; }
-.cap-mbody { padding: .2rem .8rem .5rem; }
+/* Entrance matches the rotating chevron's .15s beat (reuses the board's
+   dropPreviewIn keyframes); collapse stays instant — exits faster than enters. */
+.cap-mbody { padding: .2rem .8rem .5rem; animation: dropPreviewIn .16s ease; }
 .cap-mrow { display: flex; align-items: center; gap: .8rem; padding: .42rem 0; border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
 .cap-mbody .cap-mrow:last-child { border-bottom: 0; }
 .cap-mname { flex: 1; min-width: 160px; font-size: .85rem; color: var(--fg); }
@@ -1919,6 +1940,9 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
   background: var(--blue); color: #fff;
   font-family: var(--font-mono); font-size: .64rem; font-weight: 700; line-height: 1;
   border: 2px solid var(--bg);
+  /* Passive state change (SSE) — the pulse is the only signal something
+     arrived; keyed on the unread count so each change re-triggers it. */
+  animation: stagePulse .45s ease;
 }
 
 .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); flex: none; margin-top: .55rem; }
@@ -2449,6 +2473,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border: 1px solid var(--hairline);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-card);
+  animation: rise .3s ease;
   padding: 2.2rem 2rem 1.6rem;
   display: flex; flex-direction: column; gap: 1.1rem;
 }

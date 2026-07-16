@@ -33,7 +33,7 @@ export function MiniModal({
   children: ReactNode;
   screen?: string;
 }) {
-  const ref = useDialog(onClose);
+  const { ref, close } = useDialog(onClose);
   return (
     <dialog
       ref={ref}
@@ -49,7 +49,7 @@ export function MiniModal({
           <h2>{title}</h2>
           {sub && <div className="mh-sub">{sub}</div>}
         </span>
-        <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+        <button type="button" className="icon-btn modal-close" onClick={close} aria-label="Close">
           <Icon name="x" />
         </button>
       </div>
@@ -57,7 +57,7 @@ export function MiniModal({
       <div className="modal-foot">
         {footHint && <span className="foot-hint mono">{footHint}</span>}
         <span className="foot-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" onClick={close}>
             Cancel
           </button>
           <button
@@ -87,7 +87,7 @@ export function ConfirmDelete({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const ref = useDialog(onCancel);
+  const { ref, close } = useDialog(onCancel);
   return (
     // role="alertdialog" on a native <dialog> keeps the stronger semantics.
     <dialog ref={ref} className="confirm-card" role="alertdialog" aria-label={`Remove ${what}?`}>
@@ -97,7 +97,7 @@ export function ConfirmDelete({
       <h3>Remove {what}?</h3>
       <p>{detail}</p>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn danger" onClick={onConfirm}>

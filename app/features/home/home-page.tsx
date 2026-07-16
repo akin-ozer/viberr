@@ -575,7 +575,7 @@ function NewProjectModal({
   }>();
   const csrf = useCsrfToken();
   const push = useToast();
-  const panelRef = useDialog(onClose);
+  const { ref: panelRef, close } = useDialog(onClose);
   const closedRef = useRef(false);
 
   useEffect(() => {
@@ -650,7 +650,7 @@ function NewProjectModal({
         <button
           type="button"
           className="icon-btn modal-close"
-          onClick={onClose}
+          onClick={close}
           aria-label="Close"
         >
           <Icon name="x" />
@@ -691,12 +691,14 @@ function NewProjectModal({
           </div>
         )}
       </div>
+      {/* Cancel routes through the animated close; the success unmount
+          (fetcher effect above) keeps the raw onClose. */}
       <NewProjectFooter
         storeRoot={storeRoot}
         slug={slug}
         ok={ok}
         busy={busy}
-        onClose={onClose}
+        onClose={close}
         submit={submit}
       />
     </dialog>
@@ -1367,7 +1369,7 @@ function RebuildConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const ref = useDialog(onCancel);
+  const { ref, close } = useDialog(onCancel);
   return (
     // Native <dialog>; role="alertdialog" kept for the stronger semantics.
     // Escape + backdrop-click close come from showModal() + useDialog.
@@ -1388,7 +1390,7 @@ function RebuildConfirm({
         wrong.
       </p>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn primary" onClick={onConfirm}>

@@ -45,7 +45,7 @@ export function CapabilityMatrixModal({
   projectName: string;
   onClose: () => void;
 }) {
-  const dialogRef = useDialog(onClose);
+  const { ref: dialogRef, close } = useDialog(onClose);
 
   const known = new Set(
     CAP_MODAL_CATALOG.flatMap((g) => g.caps.map((c) => c.label)),
@@ -86,7 +86,7 @@ export function CapabilityMatrixModal({
         <button
           type="button"
           className="icon-btn modal-close"
-          onClick={onClose}
+          onClick={close}
           aria-label="Close"
         >
           <Icon name="x" />

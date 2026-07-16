@@ -391,7 +391,7 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const ref = useDialog(onCancel);
+  const { ref, close } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -422,7 +422,7 @@ function DeleteConfirm({
           : "The file is removed from the store. Agents lose it on their next context load."}
       </p>
       <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={onCancel}>
+        <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn danger" onClick={onConfirm}>
@@ -655,10 +655,12 @@ export function StoreBrowser({
 
   // ---- layered close on the native <dialog>: the nested DeleteConfirm is
   // topmost while open, so its own `cancel` handles that layer; here an
-  // open new-folder input dismisses before the modal itself closes.
-  const dialogRef = useDialog(() => {
-    if (newIn) setNewIn(null);
-    else onClose();
+  // open new-folder input consumes the dismiss (onDismissRequest → true, no
+  // exit animation) before the modal itself closes.
+  const { ref: dialogRef, close } = useDialog(onClose, () => {
+    if (!newIn) return false;
+    setNewIn(null);
+    return true;
   });
 
   const createFolder = (path: string[], name: string) => {
@@ -703,7 +705,7 @@ export function StoreBrowser({
             <h2>{title}</h2>
             <div className="mh-sub mono">{subMono}</div>
           </span>
-          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-btn modal-close" onClick={close} aria-label="Close">
             <Icon name="x" />
           </button>
         </div>
@@ -747,7 +749,7 @@ export function StoreBrowser({
             {metaTail ? " · " + metaTail : ""}
           </span>
           <span className="foot-actions">
-            <button type="button" className="btn primary" onClick={onClose}>
+            <button type="button" className="btn primary" onClick={close}>
               Done
             </button>
           </span>

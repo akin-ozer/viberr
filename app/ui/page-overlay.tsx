@@ -17,7 +17,7 @@ export function PageOverlay({
   onClose: () => void;
   children: ReactNode;
 }) {
-  const panelRef = useDialog(onClose);
+  const { ref: panelRef, close } = useDialog(onClose);
 
   return (
     <dialog
@@ -29,7 +29,7 @@ export function PageOverlay({
       <button
         type="button"
         className="icon-btn overlay-x"
-        onClick={onClose}
+        onClick={close}
         aria-label="Close"
       >
         <Icon name="x" />

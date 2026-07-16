@@ -129,7 +129,12 @@ export function TopBell({
         onClick={() => setOpen((b) => !b)}
       >
         <Icon name="bell" />
-        {unread > 0 && <span className="bell-badge">{unread}</span>}
+        {unread > 0 && (
+          // key re-mounts on count change so the pulse animation re-fires.
+          <span className="bell-badge" key={unread}>
+            {unread}
+          </span>
+        )}
       </button>
     </div>
   );

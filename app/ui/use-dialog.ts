@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 
 /**
  * Dialog behavior required on EVERY dialog by orchestrator ruling 16, now on
@@ -6,18 +6,65 @@ import { useEffect, useRef, type RefObject } from "react";
  * trap, initial focus, Escape (cancel event), top-layer stacking and the
  * ::backdrop scrim. This hook adds what the platform doesn't: body scroll
  * lock, backdrop-click close (the old `.confirm-scrim` affordance), focus
- * restore on unmount, and keeping React's imperative autoFocus (showModal
- * would otherwise move focus off it).
+ * restore on unmount, keeping React's imperative autoFocus (showModal
+ * would otherwise move focus off it), and an animated close — `close()`
+ * marks the dialog with [data-closing] so CSS can play the exit transition
+ * (reverse of pop-center), then invokes onClose to unmount.
  *
- * Usage: const ref = useDialog(onClose); <dialog className="modal-card" ref={ref}>
+ * Usage: const { ref, close } = useDialog(onClose);
+ *        <dialog className="modal-card" ref={ref}> … <button onClick={close}>
+ * Escape and backdrop clicks route through the same animated close. A caller
+ * with an inner layer (store-browser's new-folder row) passes
+ * onDismissRequest: return true to consume the Escape/backdrop dismiss
+ * without closing (no exit animation plays); explicit close() always closes.
  */
 
-export function useDialog(onClose: () => void): RefObject<HTMLDialogElement | null> {
+export interface DialogHandle {
+  ref: RefObject<HTMLDialogElement | null>;
+  /** Plays the [data-closing] exit transition, then calls onClose. */
+  close: () => void;
+}
+
+export function useDialog(
+  onClose: () => void,
+  onDismissRequest?: () => boolean,
+): DialogHandle {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
+  const onDismissRef = useRef(onDismissRequest);
   useEffect(() => {
     onCloseRef.current = onClose;
+    onDismissRef.current = onDismissRequest;
   });
+
+  const close = useCallback(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.dataset.closing !== undefined) return;
+    dialog.dataset.closing = "";
+    // dialog[data-closing]'s transition-duration, read after the attribute
+    // lands: 0/NaN in jsdom (no stylesheet) and ~0 under [data-motion=
+    // "reduce"] — both mean close synchronously.
+    const seconds = parseFloat(getComputedStyle(dialog).transitionDuration);
+    if (!(seconds > 0.02)) {
+      onCloseRef.current();
+      return;
+    }
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      onCloseRef.current();
+    };
+    // Only the dialog's own transition counts — transitionend BUBBLES, and a
+    // descendant's (e.g. the pressed Cancel button's transform) would end the
+    // close mid-fade.
+    const onTransitionEnd = (event: TransitionEvent) => {
+      if (event.target === dialog) finish();
+    };
+    dialog.addEventListener("transitionend", onTransitionEnd);
+    // Fallback in case transitionend never fires (display:none ancestor …).
+    setTimeout(finish, seconds * 1000 + 50);
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -36,10 +83,12 @@ export function useDialog(onClose: () => void): RefObject<HTMLDialogElement | nu
     preFocused?.focus();
 
     // Escape fires `cancel`; suppress the native close so React state stays
-    // the source of truth (the caller unmounts the dialog).
+    // the source of truth (the caller unmounts the dialog after the exit
+    // transition).
     const onCancel = (event: Event) => {
       event.preventDefault();
-      onCloseRef.current();
+      if (onDismissRef.current?.()) return;
+      close();
     };
     // Backdrop clicks land on the <dialog> element itself with coordinates
     // outside the card box; clicks on the card's own padding also target the
@@ -52,7 +101,10 @@ export function useDialog(onClose: () => void): RefObject<HTMLDialogElement | nu
         event.clientX <= rect.right &&
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom;
-      if (!inside) onCloseRef.current();
+      if (!inside) {
+        if (onDismissRef.current?.()) return;
+        close();
+      }
     };
     dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("click", onClick);
@@ -64,7 +116,7 @@ export function useDialog(onClose: () => void): RefObject<HTMLDialogElement | nu
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
-  }, []);
+  }, [close]);
 
-  return dialogRef;
+  return { ref: dialogRef, close };
 }

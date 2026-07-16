@@ -649,7 +649,7 @@ export function CreateProfileModal({
   // R7-5: the specialist picker offers 3 honest modes (Allowed/Human-only/Off);
   // the operator keeps all 4 (`recommend` is real for the operator only).
   const capModes = isOperator ? OPERATOR_CAP_MODES : SPECIALIST_CAP_MODES;
-  const dialogRef = useDialog(onClose);
+  const { ref: dialogRef, close } = useDialog(onClose);
   const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
   const [role, setRole] = useState(initial ? initial.role : "");
@@ -773,7 +773,7 @@ export function CreateProfileModal({
       aria-label={editing ? "Edit profile" : "New specialist profile"}
       ref={dialogRef}
     >
-      <ModalHead editing={editing} initialName={initial?.name} onClose={onClose} />
+      <ModalHead editing={editing} initialName={initial?.name} onClose={close} />
 
       <div className="modal-body">
         <IdentityFields
@@ -836,7 +836,7 @@ export function CreateProfileModal({
         error={error}
         busy={busy}
         editing={editing}
-        onClose={onClose}
+        onClose={close}
         onSubmitClick={submit}
       />
     </dialog>

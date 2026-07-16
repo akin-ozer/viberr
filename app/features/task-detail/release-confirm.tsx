@@ -32,7 +32,7 @@ export function ReleaseConfirm({
   onConfirm: () => void;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
 }) {
-  const panelRef = useDialog(onCancel);
+  const { ref: panelRef, close } = useDialog(onCancel);
   // Defensive: the dialog should only open when owned (mock guard kept).
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const o = owner ?? {
@@ -70,7 +70,7 @@ export function ReleaseConfirm({
         <button
           type="button"
           className="icon-btn modal-close"
-          onClick={onCancel}
+          onClick={close}
           aria-label="Close"
         >
           <Icon name="x" />
@@ -160,7 +160,7 @@ export function ReleaseConfirm({
             : "Admin release — recorded as a typed event and in the audit trail."}
         </span>
         <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={onCancel}>
+          <button type="button" className="btn ghost" onClick={close}>
             {mine ? "Keep ownership" : "Cancel"}
           </button>
           <button
