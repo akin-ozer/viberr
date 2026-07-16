@@ -25,7 +25,11 @@ import type {
   HomeOrgSummary,
   HomeProjectCard,
 } from "./home-query.server";
-import { keyFromName, slugifyProjectName } from "./project-name";
+import {
+  keyFromName,
+  projectNameFromRepo,
+  slugifyProjectName,
+} from "./project-name";
 
 /**
  * Home — multi-project landing, ported from design/html-app/app/home.jsx.
@@ -583,9 +587,25 @@ function NewProjectModal({
   }, []);
 
   const effKey = keyTouched ? key : keyFromName(name);
-  const effRepo =
-    repo || slugifyProjectName(name);
+  const effRepo = repo || slugifyProjectName(name);
   const slug = slugifyProjectName(name);
+  // Name ↔ repo are a linked pair (one value, two notations): typing the name
+  // fills the repo with its kebab-case slug, typing the repo re-derives the
+  // name. Clearing the repo leaves the name alone — name is the primary field,
+  // and effRepo falls back to the derived form so the grey placeholder shows
+  // what will actually be created.
+  const editName = (v: string) => {
+    setName(v);
+    setRepo(slugifyProjectName(v));
+  };
+  const editRepo = (raw: string) => {
+    const v = raw
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9._-]/g, "");
+    setRepo(v);
+    if (v) setName(projectNameFromRepo(v));
+  };
   const busy = fetcher.state !== "idle";
   // The effective repo owner: a picked connection, or a manually-typed owner when
   // there are none. Empty owner ⇒ a repo-less project (F10).
@@ -660,7 +680,7 @@ function NewProjectModal({
         <NewProjectNameFields
           nameRef={nameRef}
           name={name}
-          setName={setName}
+          setName={editName}
           effKey={effKey}
           setKey={setKey}
           setKeyTouched={setKeyTouched}
@@ -675,7 +695,7 @@ function NewProjectModal({
         />
         <NewProjectRepoField
           repo={repo}
-          setRepo={setRepo}
+          setRepo={editRepo}
           effOwner={effOwner}
           effRepo={effRepo}
         />

@@ -21,3 +21,13 @@ export function slugifyProjectName(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+/** Inverse direction of the New-project modal's linked name↔repo pair:
+ * derive a display name from a repo name ("payments-gateway" / "core_api" →
+ * "Payments Gateway" / "Core Api"). Forward direction is slugifyProjectName. */
+export function projectNameFromRepo(repo: string): string {
+  return repo
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .replace(/(?:^| )[a-z]/g, (c) => c.toUpperCase());
+}
