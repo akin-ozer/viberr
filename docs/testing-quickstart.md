@@ -26,5 +26,5 @@ Install Chromium once with `npx playwright install chromium`, then run:
 npm run e2e
 ```
 
-For hermetic local or CI runs, use `VIBERR_DATA_ROOT=$(mktemp -d) npm run e2e`.
-This isolates files, SQLite projections, and logs from real data.
+For hermetic CI, run `export VIBERR_DATA_ROOT="$(mktemp -d)"` before the test gates.
+Playwright also resets and uses its own `e2e/.tmp-data` sandbox.
