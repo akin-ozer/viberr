@@ -163,7 +163,7 @@ export async function openTaskPr(
     // confirmed — fall through to the normal head-dedup + create path.
   }
 
-  const branch = fm.branch ?? taskBranchName(input.taskKey, fm.title);
+  const branch = fm.branch ?? taskBranchName(input.taskKey);
   if (!branch) return { status: "no_branch" };
 
   const owner = gh.repo.split("/")[0] ?? "";
