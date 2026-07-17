@@ -4,6 +4,7 @@ import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getBoard } from "~/server/projections/board-query.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
 import {
   countUnreadNotifications,
   listNotifications,
@@ -40,6 +41,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
   const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
+  // R8-3: annotate each task with whether an open decision here needs THIS
+  // viewer's action (the single member-scoped source), so the board's
+  // "Waiting on me" chip + per-card badge stop reading the project-wide
+  // `waiting === "human"` enum. Mutates the fresh getBoard task objects.
+  const myDecisions = new Set(
+    decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
+      (d) => d.taskKey,
+    ),
+  );
+  for (const t of tasks) t.waitingOnMe = myDecisions.has(t.key);
   const memberRole =
     board.members.find((m) => m.userId === user.id)?.role ?? null;
   // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on

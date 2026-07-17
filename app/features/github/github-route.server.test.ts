@@ -16,7 +16,7 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
  */
 
 let app: AppTestContext;
-let ids: { arda: string; selin: string; deniz: string };
+let ids: { arda: string; murat: string; selin: string; deniz: string };
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -25,7 +25,8 @@ beforeAll(async () => {
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project reviewer
+    murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // project maintainer
+    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project contributor
     deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // NOT a member
   };
 });
@@ -186,8 +187,15 @@ describe("action RBAC + degraded no-PAT results", () => {
     expect(result.init?.status).toBe(403);
   });
 
-  it("allows a reviewer to reconcile (non-viewer member)", async () => {
+  it("rejects a contributor from reconcile (R8-4: maintainer+, aligned with rescan)", async () => {
     const result = (await postAction(ids.selin, "reconcile")) as {
+      init?: { status?: number };
+    };
+    expect(result.init?.status).toBe(403);
+  });
+
+  it("allows a maintainer to reconcile", async () => {
+    const result = (await postAction(ids.murat, "reconcile")) as {
       ok: boolean;
       toast: string;
       result: string;

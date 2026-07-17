@@ -144,6 +144,13 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           {p.waiting} waiting on you
         </Pill>
       )}
+      {p.waiting === 0 && p.overrideWaiting > 0 && (
+        <span title="You are not a member — these need a decision you could make with your org-admin override.">
+          <Pill kind="neutral" sm>
+            {p.overrideWaiting} override-available
+          </Pill>
+        </span>
+      )}
     </div>
   );
 }

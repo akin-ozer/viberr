@@ -12,6 +12,7 @@ import {
   type NotificationRow,
 } from "~/shared/mapping/notification.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
 
 /**
  * Per-user notification rows (orchestrator ruling 9): SQLite-owned,
@@ -124,9 +125,26 @@ export function listNotifications(
   // E1: `from` actors are baked at creation — overlay the current
   // users-table identity so renames reflect in the inbox immediately.
   const overlay = createActorRenderOverlay(db);
+  // R8-3: "Waiting on you" is member-scoped — a decision notification waits on
+  // THIS user only if its task is in the user's actionable decision set (the
+  // shared `decisionsRequiring` helper: maintainer+ / task-owner, and NOT the
+  // org-admin override). This subsumes the old live-decision check AND drops
+  // decisions the viewer can't act on (non-member inflation) and superseded
+  // packets (the set keys off live task state, one decision per task).
+  const mine = new Set(
+    decisionsRequiring(db, userId).mine.map((d) => `${d.projectSlug}::${d.taskKey}`),
+  );
   return rows.map((row) => {
     const record = mapNotificationRow(row);
-    return record.from ? { ...record, from: overlay(record.from) } : record;
+    const scoped: NotificationRecord = {
+      ...record,
+      waitingOnYou:
+        (record.kind === "packet" || record.kind === "approval") &&
+        record.projectSlug != null &&
+        record.taskKey != null &&
+        mine.has(`${record.projectSlug}::${record.taskKey}`),
+    };
+    return scoped.from ? { ...scoped, from: overlay(scoped.from) } : scoped;
   });
 }
 

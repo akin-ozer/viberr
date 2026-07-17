@@ -137,7 +137,7 @@ export function ReviewQueuePage({
         <div className="panel">
           <div className="panel-head">
             <Icon name="activity" />
-            <h2>Still with agents</h2>
+            <h2>Still in review</h2>
             <span
               className="right sub"
               style={{ fontSize: ".76rem", color: "var(--faint)" }}

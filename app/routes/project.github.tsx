@@ -48,13 +48,12 @@ export async function action({ request, params }: Route.ActionArgs) {
   // RBAC — the single guard path (project-authority.server) consulting the
   // ACTION_ROLES source (rbac.ts), never a hardcoded role string, so the
   // Policy page and this guard can never drift (pass-4 XS-10); org admins pass
-  // as the audited D2 override. reconcile = `reconcile-github` (contributor+);
-  // credential changes = `grant-github-scope` (maintainer+). The archived gate
-  // is deliberately skipped here (unchanged from the pre-consolidation checks).
+  // as the audited D2 override. reconcile = `reconcile-github` (maintainer+,
+  // R8-4); credential changes = `grant-github-scope` (maintainer+). The archived
+  // read-only gate IS enforced (R8-5): a frozen project can't reconcile or
+  // rotate/clear its credential — restore it first.
   const requireGithubAction = (action: RbacAction, what: string) =>
-    assertProjectAction(db, action, params.slug, actor, what, {
-      allowArchived: true,
-    });
+    assertProjectAction(db, action, params.slug, actor, what);
 
   try {
     if (intent === "reconcile") {

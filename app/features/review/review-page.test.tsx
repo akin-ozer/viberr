@@ -71,7 +71,7 @@ describe("ReviewQueuePage", () => {
     // Panel heads + "X of Y" count pair.
     expect(getByText("Waiting on your acceptance")).toBeTruthy();
     expect(getByText("1 of 2")).toBeTruthy();
-    expect(getByText("Still with agents")).toBeTruthy();
+    expect(getByText("Still in review")).toBeTruthy();
     // The pol-note acceptance explainer always renders.
     expect(container.querySelector(".pol-note")!.textContent).toContain(
       "always a human action, always in the audit log",

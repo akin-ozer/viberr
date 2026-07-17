@@ -31,6 +31,8 @@ import {
   type GithubContextFailure,
 } from "./github-context.server";
 import { findPrForBranch, type PrFacts } from "./pr-linker.server";
+import { getProject } from "~/server/projections/board-query.server";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
   POLICY_ENGINE_ACTOR,
   flagScopeViolation,
@@ -124,6 +126,13 @@ export type TaskReconcileResult =
   | { status: "scope_violation"; taskKey: string; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
+
+/** Notification sender for R8-6 GitHub divergence alerts (an `ActorRender`
+ * system identity, matching the "Policy engine" timeline actor). */
+const POLICY_ENGINE_NOTIFY_FROM = {
+  kind: "system" as const,
+  name: "Policy engine",
+};
 
 /**
  * Reconciles ONE task with GitHub. Idempotent: unchanged facts produce no
@@ -243,6 +252,24 @@ export async function reconcileTask(
     newPr?.state === "closed" &&
     fm.pr.number === newPr.number;
 
+  // R8-6: out-of-band GitHub actions that leave the governed task stranded. A
+  // PR merged or closed DIRECTLY on GitHub (not through Viberr's accept flow)
+  // diverges from the task's stage. We SURFACE it (typed timeline event +
+  // notification to the humans who govern the task) so a human can close the
+  // loop — we NEVER auto-advance the task (files stay canonical).
+  const project = getProject(db, input.projectSlug);
+  const taskTerminal = isTerminalStage(fm.stage, project?.stages ?? []);
+  // Fire only on the TRANSITION into the terminal PR state (newly merged/closed
+  // since the last cache), so a persistent divergence isn't re-announced each
+  // reconcile.
+  const prJustMerged = newPr?.state === "merged" && fm.pr?.state !== "merged";
+  const prJustClosed =
+    newPr?.state === "closed" &&
+    fm.pr?.state !== "closed" &&
+    !acceptedClosedExternally;
+  const mergedButNotDone = prJustMerged && !taskTerminal;
+  const closedButActive = prJustClosed && !taskTerminal;
+
   const changed =
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
     JSON.stringify({ pr: newPr, github: newGithub });
@@ -261,9 +288,49 @@ export async function reconcileTask(
         evidence: null,
       });
     }
+    // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
+    // notification below). Never auto-advances — a human closes the loop.
+    const divergenceText = mergedButNotDone
+      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr — its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
+      : closedButActive
+        ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
+        : null;
+    if (divergenceText) {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "policy",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text: divergenceText,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     rebuildPath(db, resolveTaskFilePath(ref), {
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
+    // Notify the task's supervisors (owner + admins/maintainers) so the
+    // divergence reaches an inbox, not just the timeline. Dynamic import keeps
+    // the reconciler free of a static task-actions cycle (mirrors mergeTaskPr).
+    if (divergenceText) {
+      const { notifyTaskWatchers } = await import(
+        "~/server/tasks/task-actions.server"
+      );
+      notifyTaskWatchers(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          kind: "policy",
+          title: mergedButNotDone
+            ? `PR #${newPr!.number} merged on GitHub — accept ${fm.key}`
+            : `PR #${newPr!.number} closed on GitHub — ${fm.key} needs a decision`,
+          text: divergenceText,
+          from: POLICY_ENGINE_NOTIFY_FROM,
+        },
+        ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      );
+    }
   }
 
   const sync = deriveSyncState({

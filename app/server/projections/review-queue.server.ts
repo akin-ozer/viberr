@@ -48,6 +48,7 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: Database.Database,
   slug: string,
+  opts: { mineTaskKeys?: Set<string> } = {},
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
@@ -82,9 +83,14 @@ export function getReviewQueue(
     validation: t.validation,
   }));
 
+  // R8-3: "Waiting on your acceptance" is member-scoped — a task only lands in
+  // `ready` if the VIEWER can act on its decision (maintainer+ / owner). When no
+  // scoping set is passed the split stays state-based (any human-waiting task).
+  const isMine = (key: string) =>
+    opts.mineTaskKeys === undefined || opts.mineTaskKeys.has(key);
   return {
-    ready: rows.filter((r) => r.waiting === "human"),
-    working: rows.filter((r) => r.waiting !== "human"),
+    ready: rows.filter((r) => r.waiting === "human" && isMine(r.key)),
+    working: rows.filter((r) => !(r.waiting === "human" && isMine(r.key))),
     total: rows.length,
   };
 }

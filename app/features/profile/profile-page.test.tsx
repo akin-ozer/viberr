@@ -143,10 +143,11 @@ describe("ProfilePage", () => {
   it("Your access renders the shared RBAC table for the REAL role", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("Your access")).toBeTruthy();
-    // Maintainer holds 10 of 13 rows (all but release-any-owner, manage
-    // members, and edit workflow/policy).
-    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(10);
-    expect(container.querySelectorAll(".rbac-no")).toHaveLength(3);
+    // Maintainer holds 13 of the 17 rows (all but release-any-owner, manage
+    // members, manage agent profiles, and edit workflow/policy) — the total
+    // table (R8-2) now surfaces every enforced action.
+    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(13);
+    expect(container.querySelectorAll(".rbac-no")).toHaveLength(4);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Policy → Human access")).toBeTruthy();
   });

@@ -60,10 +60,12 @@ function WaitTag({ task }: { task: TaskSummary }) {
     );
   }
   if (task.waiting === "human") {
+    // R8-3: only the viewer who can act on the decision sees "waiting on you";
+    // everyone else sees the honest project-wide "waiting on a human".
     return (
       <span className="wait-tag human">
         <Icon name="hand" />
-        waiting on you
+        {task.waitingOnMe ? "waiting on you" : "waiting on a human"}
       </span>
     );
   }
@@ -619,11 +621,12 @@ function BoardHeader({
 
 function FilterBar({
   filter,
-  waitingHuman,
+  waitingOnMe,
   setParam,
 }: {
   filter: BoardFilterId;
-  waitingHuman: number;
+  /** R8-3: member-scoped count for the "Waiting on me" chip. */
+  waitingOnMe: number;
   setParam: (key: string, value: string | null) => void;
 }) {
   return (
@@ -638,8 +641,8 @@ function FilterBar({
         >
           <Icon name={f.icon} />
           {f.label}
-          {f.id === "human" && waitingHuman > 0 && (
-            <span style={{ opacity: 0.7 }}>· {waitingHuman}</span>
+          {f.id === "human" && waitingOnMe > 0 && (
+            <span style={{ opacity: 0.7 }}>· {waitingOnMe}</span>
           )}
         </button>
       ))}
@@ -888,7 +891,10 @@ export function BoardPage({
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
     [columns, orphanTasks],
   );
+  // Subtitle stat: project-wide "waiting on a human decision" (honest, unscoped).
   const waitingHuman = allTasks.filter((t) => t.waiting === "human").length;
+  // R8-3: the "Waiting on me" chip is member-scoped — decisions THIS viewer can act on.
+  const waitingOnMe = allTasks.filter((t) => t.waitingOnMe).length;
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
     ? (allTasks.find((t) => t.key === drag.key) ?? null)
@@ -949,7 +955,7 @@ export function BoardPage({
 
       <FilterBar
         filter={filter}
-        waitingHuman={waitingHuman}
+        waitingOnMe={waitingOnMe}
         setParam={setParam}
       />
 

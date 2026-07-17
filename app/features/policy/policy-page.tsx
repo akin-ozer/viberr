@@ -144,19 +144,28 @@ export function HumanAccess({
           </thead>
           <tbody>
             {RBAC_ROWS.map((row) => (
-              <tr key={row.action}>
+              <tr key={row.action} className={row.appWide ? "rbac-appwide" : undefined}>
                 <td className="act">{row.action}</td>
-                {ROLE_IDS.map((r) => (
-                  <td key={r}>
-                    {row.grant[r] ? (
-                      <span className="rbac-yes">
-                        <Icon name="check" />
-                      </span>
-                    ) : (
-                      <span className="rbac-no">—</span>
-                    )}
+                {row.appWide ? (
+                  <td className="rbac-appwide-cell" colSpan={ROLE_IDS.length}>
+                    <span className="rbac-yes">
+                      <Icon name="check" />
+                    </span>{" "}
+                    Any signed-in user · membership not required
                   </td>
-                ))}
+                ) : (
+                  ROLE_IDS.map((r) => (
+                    <td key={r}>
+                      {row.grant[r] ? (
+                        <span className="rbac-yes">
+                          <Icon name="check" />
+                        </span>
+                      ) : (
+                        <span className="rbac-no">—</span>
+                      )}
+                    </td>
+                  ))
+                )}
               </tr>
             ))}
           </tbody>
@@ -168,8 +177,7 @@ export function HumanAccess({
           Rules that reach beyond project roles:{" "}
           <strong>viewing and commenting are app-wide</strong> — every
           registered user may read boards, tasks &amp; timelines and comment on
-          any task (the table's View/Comment rows show project roles, but the
-          server only requires a signed-in user);{" "}
+          any task, member or not (the View/Comment rows above say so directly);{" "}
           <strong>contributors and above</strong> may{" "}
           <strong>take or release their own task ownership</strong> (viewers are
           read + comment only; the owner is the task's human reviewer and
@@ -235,18 +243,32 @@ export function AgentCapability({
               <span className="sub">{p.role}</span>
             </span>
             <span className="pcap-counts">
-              <span className="cs">
-                <span className="d" style={{ background: "var(--teal-dark)" }}></span>
-                {p.actions.direct.length} direct
-              </span>
-              <span className="cs">
-                <span className="d" style={{ background: "var(--blue)" }}></span>
-                {p.actions.recommend.length} recommend
-              </span>
-              <span className="cs">
-                <span className="d" style={{ background: "var(--coral-dark)" }}></span>
-                {p.actions.forbidden.length} human
-              </span>
+              {p.actions.direct.length +
+                p.actions.recommend.length +
+                p.actions.forbidden.length ===
+              0 ? (
+                <span
+                  className="cs pcap-readonly"
+                  title="This profile holds no gated capabilities — it acts read-only (e.g. reviews the diff and reports a verdict)."
+                >
+                  read-only · no gated capabilities
+                </span>
+              ) : (
+                <>
+                  <span className="cs">
+                    <span className="d" style={{ background: "var(--teal-dark)" }}></span>
+                    {p.actions.direct.length} direct
+                  </span>
+                  <span className="cs">
+                    <span className="d" style={{ background: "var(--blue)" }}></span>
+                    {p.actions.recommend.length} recommend
+                  </span>
+                  <span className="cs">
+                    <span className="d" style={{ background: "var(--coral-dark)" }}></span>
+                    {p.actions.forbidden.length} human
+                  </span>
+                </>
+              )}
             </span>
           </button>
         ))}

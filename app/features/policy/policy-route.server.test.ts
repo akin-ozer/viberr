@@ -62,26 +62,43 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
   it("carries the canonical rows in broadest→narrowest order", () => {
     expect(RBAC_ROWS.map((r) => r.action)).toEqual([
       "View board, tasks & timelines",
-      "Comment on tasks (app-wide)",
+      "Comment on tasks",
       "Create tasks",
       "Take / release own task ownership",
       "Approve stage transitions",
       "Resolve decision packets",
       "Accept completion → Done",
       "Edit the task goal",
-      "Run agents & reorder the board",
+      "Run agents",
+      "Reorder the board",
+      "Reconcile GitHub state",
+      "Grant GitHub scope",
       "Re-scan project files & projections",
       "Release any task owner",
       "Manage members & roles",
+      "Manage agent profiles",
       "Edit workflow & policy",
     ]);
     expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
     // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
     // comment; the contributor tier adds "Create tasks" AND task ownership.
+    // R8-4: reconcile-github is now maintainer+ (was contributor+).
     expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]);
+    // view/comment are app-wide (informational role columns); the table row
+    // renders them as "any signed-in user".
+    expect(RBAC_ROWS.filter((r) => r.appWide).map((r) => r.action)).toEqual([
+      "View board, tasks & timelines",
+      "Comment on tasks",
+    ]);
+    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([
+      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([
+      1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+    ]);
   });
 });
 

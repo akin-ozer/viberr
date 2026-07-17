@@ -13,6 +13,7 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { listNotifications } from "~/server/projections/notifications.server";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
@@ -295,6 +296,48 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("merged"); // real terminal state overrides "accepted"
+  });
+
+  it("R8-6: a PR merged out-of-band while the task isn't Done surfaces a divergence event + notifies supervisors, WITHOUT auto-advancing", async () => {
+    const { store, actor } = setup(); // VIB-301 at "review", owner arda (admin)
+    const routes = happyRoutes();
+    // GitHub reports the PR merged directly (not through Viberr's accept flow).
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    // Stage is UNCHANGED — files stay canonical, no auto-advance.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.stage).toBe("review");
+    // A typed divergence event landed on the timeline (projected to task_events).
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events.some((e) => /\*\*Divergence:\*\* PR #318 was merged on GitHub/.test(e.text))).toBe(true);
+    // The supervisor (arda: admin + owner) got a policy notification.
+    const notifs = listNotifications(store.db, store.users.arda.id);
+    expect(notifs.some((n) => n.kind === "policy" && /merged on GitHub/.test(n.text))).toBe(true);
+    // Idempotent: a second reconcile (PR still merged in the cache) does NOT
+    // re-announce the divergence.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const events2 = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events2.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
   });
 
   it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {

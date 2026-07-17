@@ -12,6 +12,7 @@ import {
   initialsOfName,
 } from "~/shared/mapping/actor.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
 
 /**
  * Home (`/`) read models — the project directory + org tile summaries
@@ -64,7 +65,12 @@ export interface HomeProjectCard {
   dist: Record<string, number>;
   total: number;
   running: number;
+  /** Open decisions THIS viewer can act on (R8-3, member-scoped — set by
+   * `listHomeProjectsForUser`; the base list leaves it 0). */
   waiting: number;
+  /** Open decisions the viewer could act on ONLY via the org-admin override
+   * (non-member org admins). Surfaced distinctly, never folded into `waiting`. */
+  overrideWaiting: number;
   members: HomeMember[];
   updatedAt: string | null;
   accent: string;
@@ -81,7 +87,24 @@ export function listHomeProjectsForUser(
   viewer: { id: string; role: "admin" | "member" },
 ): HomeProjectCard[] {
   const all = listHomeProjects(db);
-  if (viewer.role === "admin") return all; // org admins see everything
+  // R8-3: the card's "waiting on you" must mean decisions THIS viewer can act
+  // on — not a project-global tally. `decisionsRequiring` resolves each open
+  // decision against the viewer's project role + task ownership, splitting
+  // override-eligible (non-member org-admin reach) out of the personal count.
+  const decisions = decisionsRequiring(db, viewer.id);
+  const mineBySlug = new Map<string, number>();
+  const overrideBySlug = new Map<string, number>();
+  for (const d of decisions.mine)
+    mineBySlug.set(d.projectSlug, (mineBySlug.get(d.projectSlug) ?? 0) + 1);
+  for (const d of decisions.overrideEligible)
+    overrideBySlug.set(d.projectSlug, (overrideBySlug.get(d.projectSlug) ?? 0) + 1);
+  const scoped = all.map((p) => ({
+    ...p,
+    waiting: mineBySlug.get(p.slug) ?? 0,
+    overrideWaiting: overrideBySlug.get(p.slug) ?? 0,
+  }));
+
+  if (viewer.role === "admin") return scoped; // org admins see every project
   // Single membership pass (pass-4 WI-9): one query for the slugs this viewer
   // belongs to, instead of re-running listProjectMembers once per project on
   // top of the pass listHomeProjects already made for the member avatars.
@@ -92,7 +115,7 @@ export function listHomeProjectsForUser(
         .all(viewer.id) as { project_slug: string }[]
     ).map((r) => r.project_slug),
   );
-  return all.filter((p) => memberSlugs.has(p.slug));
+  return scoped.filter((p) => memberSlugs.has(p.slug));
 }
 
 /** Per-project task aggregates for the home cards. */
@@ -213,7 +236,11 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
       dist: distBySlug.get(project.slug) ?? {},
       total: agg?.total ?? 0,
       running: agg?.running ?? 0,
+      // Project-global pending-decision count. `listHomeProjectsForUser`
+      // replaces this with the viewer's member-scoped `mine` count (R8-3);
+      // kept here as a fallback for any non-user-scoped caller.
       waiting,
+      overrideWaiting: 0,
       members,
       updatedAt: agg?.updated_at ?? project.parsedAt,
       accent: accentForSlug(project.slug),

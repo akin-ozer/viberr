@@ -4,6 +4,7 @@ import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { ReviewQueuePage } from "~/features/review/review-page";
 
 /**
@@ -23,11 +24,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // unlike the app-wide board/task read surfaces it's project-scoped, like
   // policy/agents/settings/github. Guard membership FIRST (matching those
   // siblings), then the 404 — a non-member must not learn a project exists (WI-13).
-  await requireProjectMember(request, params.slug, "view the review queue");
+  const ctx = await requireProjectMember(request, params.slug, "view the review queue");
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  const queue = getReviewQueue(db, params.slug);
+  // R8-3: "Waiting on your acceptance" is member-scoped — only tasks whose
+  // decision THIS viewer can act on (maintainer+ / owner) land in `ready`.
+  const mineTaskKeys = new Set(
+    decisionsRequiring(db, ctx.user.id, { projectSlug: params.slug }).mine.map(
+      (d) => d.taskKey,
+    ),
+  );
+  const queue = getReviewQueue(db, params.slug, { mineTaskKeys });
   return { slug: params.slug, ...queue };
 }
 
