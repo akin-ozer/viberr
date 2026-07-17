@@ -553,9 +553,11 @@ function NewProjectModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
   const [repo, setRepo] = useState("");
+  const [repoTouched, setRepoTouched] = useState(false);
   const [template, setTemplate] = useState<"governed" | "light">("governed");
   const [policy, setPolicy] = useState<"strict" | "balanced" | "auto">(
     "balanced",
@@ -581,14 +583,16 @@ function NewProjectModal({
   const effKey = keyTouched ? key : keyFromName(name);
   const effRepo = repo || slugifyProjectName(name);
   const slug = slugifyProjectName(name);
-  // Name ↔ repo are a linked pair (one value, two notations): typing the name
-  // fills the repo with its kebab-case slug, typing the repo re-derives the
-  // name. Clearing the repo leaves the name alone — name is the primary field,
-  // and effRepo falls back to the derived form so the grey placeholder shows
-  // what will actually be created.
+  // Name ↔ repo AUTOCOMPLETE (not a persistent two-way lock — pass-8 P1 ruling):
+  // typing into an empty/untouched field fills the OTHER, but once a field has
+  // been edited by hand it is `*Touched` and the other's derive no longer
+  // overwrites it. This lets a project bind to an existing repo under a distinct
+  // name (e.g. repo `viberr`, name "Viberr QA") without the two fighting.
+  // `effRepo` still falls back to the derived slug for the grey placeholder.
   const editName = (v: string) => {
     setName(v);
-    setRepo(slugifyProjectName(v));
+    setNameTouched(true);
+    if (!repoTouched) setRepo(slugifyProjectName(v));
   };
   const editRepo = (raw: string) => {
     const v = raw
@@ -596,7 +600,8 @@ function NewProjectModal({
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9._-]/g, "");
     setRepo(v);
-    if (v) setName(projectNameFromRepo(v));
+    setRepoTouched(true);
+    if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
   const busy = fetcher.state !== "idle";
   // The effective repo owner: a picked connection. A repository (and therefore
