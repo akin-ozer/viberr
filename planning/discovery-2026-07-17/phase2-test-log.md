@@ -114,3 +114,42 @@ Legend: ✅ pass · ⚠️ finding · ❌ fail · ⏳ running
 19. Codex delivery from viberr's eye = at parity with claude (assign→implement→push→PR→recommend)
 20. @mention RBAC gating (admin/maintainer triggers; lower role records comment, run denied — code)
 Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trace, style-reviewer.
+- **TC19 ✅ Skill loading PRECISION (owner's key concern).** VIB-10 docs-writer specialist run
+  (run_513n2IO9NWxr) injected ONLY its bound docs-style skill (DOCS-STYLE marker, "Scope blockquote",
+  "sentence-case", "Last reviewed", "house style") and ZERO content from reviewer-expertise /
+  developer-expertise / viberr-app-expertise. Correct skill loaded; unrelated org skills NOT loaded.
+- **TC15/16/17 ✅ RBAC per-role (live).** Contributor (Deniz): create-task 200 (allow), transition impl→review
+  403 (deny — approve-transition maintainer+), @operator mention recorded but NO run triggered (runtimeDenied).
+  Maintainer (Elif): setMemberRole 403 (deny — manage-members admin-only). Admin (Arda): full authority.
+- **TC8 ✅ Ownership tiers (live).** Contributor owner-take (self) 200 + owner-release 200; admin owner-assign
+  (another user) 200 (VIB-9 owner→Elif); maintainer owner-assign-to-another 403. Confirms take/release-own =
+  contributor+, assign/release-ANY = admin (release-any-ownership). setOwner's separate predicate works.
+- **TC7 ✅ Secondary reviewer (live).** style-reviewer added to VIB-5 (review stage) alongside reviewer (200);
+  assign to a stage-ineligible task (VIB-3 impl) correctly rejected 400 (assertStageEligible).
+- **TC22 ✅ Create new agent profile (live).** agent-save (Arda) → "QA Reviewer" (claude, review stage,
+  reviewer-expertise skill) persisted as data/agents/profiles/qa-reviewer.md; available to deploy.
+- **TC23 ✅ Capability enforcement.** specialist-tool-policy.test.ts (13 tests) confirms withheld caps →
+  `disallowedTools` denylist at spawn (Claude-enforced; Codex is advisory — the known, labeled limitation).
+  Combined with the phase-1 3-mode picker observation (R7-5). New profile QA Reviewer created with
+  capabilities:[] — the W3 read-only affordance covers it.
+
+## Owner-named dimension coverage (complete)
+| Owner asked to test | Status | Evidence |
+|---|---|---|
+| create new projects | ✅ (+finding P1) | modal create works; P1 name↔repo sync |
+| create new tasks | ✅ | VIB-6..11 + probes via UI + API |
+| create new agents | ✅ | QA Reviewer profile created (TC22) |
+| operator chooses correct agents | ✅ | docs→Docs Writer, code→Developer/codex, review→Style Reviewer |
+| user assignments | ✅ | ownership take/release/assign tiers (TC8) |
+| stage transitions | ✅ | auto/approval/human boundaries; contributor denied transition |
+| reviewers | ✅ | reviewer runs + verdicts (VIB-6) |
+| secondary assignments | ✅ | 2nd reviewer added to VIB-5 (TC7) |
+| comment usage | ✅ | @mention triggers operator; Done-comment; contributor gating |
+| RBAC triggering | ✅ | all 4 roles + org-admin override + tiers (TC14-17) |
+| operator behaving correctly | ✅ | selection, triage gate, escalation, divergence reconcile |
+| agents do what they need | ✅ | codex+claude deliver; reviewer reviews |
+| mcps work | ✅ | connectivity live (TC20) + cred injection unit-tested |
+| skills correctly loaded (not unrelated) | ✅ | docs-writer loads ONLY docs-style (TC19) |
+| codex & claude same from viberr's eye | ✅ | both deliver identically (TC4) |
+| PR merge/reject via gh reflected in app | ✅ | W4 divergence, both paths (TC24/25) |
+| capability enforcement | ✅ | tool-policy 13 tests + 3-mode picker (TC23) |
