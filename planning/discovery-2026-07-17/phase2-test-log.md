@@ -153,3 +153,29 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
 | codex & claude same from viberr's eye | ✅ | both deliver identically (TC4) |
 | PR merge/reject via gh reflected in app | ✅ | W4 divergence, both paths (TC24/25) |
 | capability enforcement | ✅ | tool-policy 13 tests + 3-mode picker (TC23) |
+
+## Broad app-logic sweep (whole-app coverage)
+- **Project config edits ✅** (viberr-qa-lab, Arda): rename (save-project), add-stage "QA Gate", set workflow
+  boundary impl→review=human — all 200.
+- **Org resource CRUD ✅**: kb-save (create pass8-kb) 200; skill-save (create pass8-skill) 200.
+- **R6-3 archive read-only freeze ✅ (live)**: archived project → create-task 409.
+- **R8-5 archive credential freeze ✅ (MY implementation, LIVE)**: grant-scope on archived project → 409
+  (previously allowed via allowArchived:true). Restore → 200. Confirms R8-5 end-to-end in the running app.
+- **P1 FIX ✅ (owner ruling, implemented + verified live)**: name↔repo autocomplete-when-untouched; created
+  "Viberr QA Lab" bound to akin-ozer/viberr under slug viberr-qa-lab (distinct name, existing repo — no collision).
+- **Accept / complete-merge + divergence reconciliation ✅ (live).** VIB-10: applied "move to review" then
+  "accept completion" (Arda) → stage=done, pr.state=merged, validation=healthy. Acceptance reconciled the
+  out-of-band-merged PR (#38) — closing the W4 divergence loop the operator had recommended.
+- **TC6 review-reject path (live, with nuances).** Forced a failing review by committing a house-style
+  violation into VIB-13's local workspace + re-running the style-reviewer → verdict "failing / Reviewer
+  requested changes" (vs earlier "healthy / PASS" on the clean commit) — reviewer CATCHES violations;
+  F7-REV3 honesty holds (consistent event text). Operator refused a stale-verdict accept: "this commit is
+  newer than the one the reviewer last passed (881ad55)... re-engage Style Reviewer before any accept move."
+  R7-4 backward transition is a full-autonomy-DIRECT behavior (under supervised autonomy the operator
+  RECOMMENDS transitions) — code-verified + unit-tested.
+  - **FINDING (MED, coherence):** a stale `accept_completion` recommendation persisted after validation
+    flipped to `failing`; applying it would still be blocked by the acceptance gate (F7-VAL1, safe) but the
+    card is misleading — recommendations should be superseded/cleared when validation turns failing.
+  - **OBS (likely WAD):** the reviewer reviews the LOCAL workspace clone (honestly cites its commit), not a
+    fresh remote-PR-HEAD pull — fine for the normal flow (specialist+reviewer share the workspace); only
+    matters if the remote branch diverges out-of-band.
