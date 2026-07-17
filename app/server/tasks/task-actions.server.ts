@@ -1529,6 +1529,17 @@ export async function recordReviewerVerdict(
         summary = "Reviewer approved the work.";
       }
       parsed.frontmatter.validation = validation;
+      // A failing verdict makes a pending accept-completion recommendation stale
+      // (the acceptance gate would 409 on a failing task — F7-VAL1), so drop it:
+      // the UI must not show a misleading "Accept completion" card next to a
+      // failing validation. The operator re-recommends the right next step
+      // (rework / re-review) on its next turn. (pass-8 review-reject finding.)
+      if (validation === "failing") {
+        parsed.frontmatter.recommendations =
+          parsed.frontmatter.recommendations.filter(
+            (r) => r.kind !== "accept_completion",
+          );
+      }
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "quality",

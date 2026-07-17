@@ -15,6 +15,7 @@ import { getBoard } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
+  recordReviewerVerdict,
   reorderTask,
   resolvePacket,
   transitionStage,
@@ -958,6 +959,54 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
     expect(classifyReviewerVerdict("Approved. No failures were observed.")).toBe(
       "approve",
     );
+  });
+});
+
+describe("recordReviewerVerdict — failing verdict drops a stale accept-completion rec (pass-8)", () => {
+  it("clears accept_completion recommendations when the reviewer requests changes", async () => {
+    const store = prepared();
+    // Review stage, previously clean (validation healthy) with a pending
+    // accept-completion recommendation from that earlier pass.
+    withTask(store, {
+      stage: "review",
+      validation: "healthy",
+      recommendations: [
+        { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "Clean review." },
+        { id: "rec-tr", kind: "transition", toStageId: "review", label: "Move to Review", detail: "" },
+      ],
+    });
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Requesting changes: the heading is ALL CAPS and the Scope blockquote is missing.",
+    );
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+    // The stale "Accept completion" card is gone; unrelated recs survive.
+    expect(fm.recommendations.map((r) => r.kind)).toEqual(["transition"]);
+  });
+
+  it("keeps accept_completion when the reviewer approves (validation stays healthy)", async () => {
+    const store = prepared();
+    withTask(store, {
+      stage: "review",
+      validation: "healthy",
+      recommendations: [
+        { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+      ],
+    });
+    await recordReviewerVerdict(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      "Approve — looks good, all four checks pass.",
+    );
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.validation).toBe("healthy");
+    expect(fm.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
   });
 });
 
