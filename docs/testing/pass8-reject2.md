@@ -1,3 +1,6 @@
-# PASS-8 REVIEW REJECT TEST!!!
+> Scope: pass-8 review-reject test doc
 
-this document DELIBERATELY violates the house style to exercise the reviewer reject path. there is no scope blockquote at the top. the heading is ALL CAPS with punctuation. there is no last-reviewed closer. this single line is intentionally very very long to blow well past any reasonable line-length limit the house style imposes on documentation files, which the docs style reviewer should flag at the review boundary as a clear violation requiring changes.
+# Pass-8 review-reject test
+
+This doc records the pass-8 review-reject test for task VIB-13.
+Last reviewed: 2026-07-18
