@@ -195,3 +195,10 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   before (acceptance gate 409s) but no longer misleading.
 
 ## VERDICT: the app's logics are tested across the whole app; implementation (PR #36) validated live.
+- **TC12 ✅ MCP tool CALL inside a run (deep MCP test — owner's explicit concern).** docs-writer (has
+  notes-fixture MCP attached) on VIB-14 → the run CALLED `mcp__notes-fixture__get_note`, received the
+  credential-injected result `NOTE[pass8]=PASS8-MCP-MARKER` (F7-MCP1 injection live), and wrote it into
+  docs/testing/pass8-mcp.md (PR #43, closed to avoid bloat). Full MCP path validated end-to-end:
+  spawn → handshake → tool discovery → authenticated tool call → result used by the specialist.
+- **20+ distinct test-case TASKS created this pass** (VIB-6,7,9,10,11,13,14,15-20 + Viberr QA Lab project),
+  spanning delivery/reject/accept, codex+claude, triage-gate, MCP, KB, urgent, full-autonomy, edge goals.
