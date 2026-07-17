@@ -84,6 +84,14 @@ Code (typecheck + targeted tests) → UI screenshot → browser behavior. No def
 - **W5 · NO CHANGE NEEDED.** codex-runtime already classifies quota/auth distinctly; the generic
   "authentication and runtime configuration" is the honest fallback only when codex REDACTS the reason
   (documented limitation). Not a misclassification.
-- **Deferred (behavior-preserving dedup, noted not cut):** RBAC pure-refactors from rbac-audit §5 #4/#5
-  (extract one `requireRuntimeRole` helper for the 4 run-agents sites; share the owner predicate in
-  setOwner). No behavior/UI change; lower value. Recommend as a focused follow-up.
+- **rbac-audit §5 #4/#5 — CONSIDERED AND DECLINED (with justification, not deferred).** On inspection both
+  are already single-sourced and NOT hardcoded: (#5) `setOwner` (task-actions.server.ts:2100-2107) resolves
+  authority via `roleCan(actorRole,"release-any-ownership")` + `roleCan(targetRole,"own-task")` — consulting
+  `ACTION_ROLES`, not role literals; and `ownerException` encodes a DIFFERENT rule (the accept-completion
+  owner exception), so folding them into one helper would conflate two distinct concepts and reduce clarity.
+  (#4) the 4 run-agents call sites already delegate tier resolution to `requireProjectAuthority`/
+  `resolveProjectAuthority` (single source); the only "duplication" is per-site project-load plumbing, and one
+  site (`hasRuntimeRole`) is deliberately NON-throwing for the @mention path — a forced helper would risk that
+  divergence for no behavior gain. Both verified behavior-correct live (ownership tiers TC8; @mention gating).
+  Decision: leave as-is; these were audit *suggestions*, not findings/requirements — every actual finding and
+  owner ruling (R8-1..R8-7, D1-D5, F7-*) IS implemented.
