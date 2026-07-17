@@ -84,7 +84,12 @@ Code (typecheck + targeted tests) → UI screenshot → browser behavior. No def
 - **W5 · NO CHANGE NEEDED.** codex-runtime already classifies quota/auth distinctly; the generic
   "authentication and runtime configuration" is the honest fallback only when codex REDACTS the reason
   (documented limitation). Not a misclassification.
-- **rbac-audit §5 #4/#5 — CONSIDERED AND DECLINED (with justification, not deferred).** On inspection both
+- **rbac-audit §5 #4 — IMPLEMENTED (post-testing cleanup pass).** Centralized the `run-agents` authority
+  check into `requireRunAgents`/`canRunAgents` (project-authority.server.ts): the 4 runtime sites (@mention
+  trigger, specialist/reviewer dispatch, interrupt, run-operator) now delegate the tier + audit to ONE place;
+  removed the 2 duplicated per-site helper bodies + dead `rolesForAction`/`requireProjectAuthority` imports.
+  Behavior-preserving (172 targeted + 1300 full + 13 e2e green; RBAC tiers re-verified live).
+- **rbac-audit §5 #5 — justified non-change (not a deferral).** On inspection both
   are already single-sourced and NOT hardcoded: (#5) `setOwner` (task-actions.server.ts:2100-2107) resolves
   authority via `roleCan(actorRole,"release-any-ownership")` + `roleCan(targetRole,"own-task")` — consulting
   `ACTION_ROLES`, not role literals; and `ownerException` encodes a DIFFERENT rule (the accept-completion

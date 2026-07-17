@@ -56,8 +56,7 @@ import {
 } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { rolesForAction } from "~/shared/rbac";
-import { requireProjectAuthority } from "~/server/auth/project-authority.server";
+import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   type DeliveryPermissions,
   resolveDeliveryPermissions,
@@ -1567,7 +1566,8 @@ function requireRuntimeRole(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
-  return requireProjectAuthority(
+  // Shared run-agents helper — the tier + audit live in project-authority (§4g).
+  return requireRunAgents(
     db,
     {
       slug: projectSlug,
@@ -1576,8 +1576,7 @@ function requireRuntimeRole(
       ),
     },
     actor,
-    rolesForAction("run-agents"),
-    { action: "run-agents", what },
+    what,
   ).role;
 }
 

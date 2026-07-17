@@ -7,9 +7,9 @@ import type {
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import {
+  canRunAgents,
   requireProjectAuthority,
   requireProjectMutable,
-  resolveProjectAuthority,
 } from "~/server/auth/project-authority.server";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
@@ -1107,7 +1107,8 @@ function hasRuntimeRole(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   if (!file) return false;
-  return resolveProjectAuthority(
+  // Delegate the run-agents tier + audit to the ONE shared helper (§4g dedup).
+  return canRunAgents(
     db,
     {
       slug: projectSlug,
@@ -1116,9 +1117,8 @@ function hasRuntimeRole(
       ),
     },
     actor,
-    rolesForAction("run-agents"),
-    { action: "run-agents", what: "trigger an agent run by @mention" },
-  ).allowed;
+    "trigger an agent run by @mention",
+  );
 }
 
 function projectRepoFor(

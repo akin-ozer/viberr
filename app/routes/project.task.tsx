@@ -42,7 +42,7 @@ import { githubWebHost } from "~/server/github/github-client.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
-import { requireProjectAuthority } from "~/server/auth/project-authority.server";
+import { requireRunAgents } from "~/server/auth/project-authority.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
@@ -51,7 +51,6 @@ import {
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
 import { Icon } from "~/ui/icon";
-import { rolesForAction } from "~/shared/rbac";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -425,7 +424,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // what it may then do to the task. The backend (claude|codex) and
         // autonomy (supervised|full) are chosen for this run; full autonomy
         // lets the operator drive to Done.
-        requireProjectAuthority(
+        requireRunAgents(
           db,
           {
             slug: projectSlug,
@@ -434,8 +433,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             ),
           },
           actor,
-          rolesForAction("run-agents"),
-          { action: "run-agents", what: "run the operator" },
+          "run the operator",
         );
         const backend =
           String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude";

@@ -9,8 +9,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { rolesForAction } from "~/shared/rbac";
-import { requireProjectAuthority } from "~/server/auth/project-authority.server";
+import { requireRunAgents } from "~/server/auth/project-authority.server";
 import type { RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
@@ -582,15 +581,14 @@ export function interruptRun(
   // authority path (project-authority.server) so the Policy display and this
   // guard can't drift — and org admins pass as the audited D2 override.
   const members = listProjectMembers(db, input.projectSlug);
-  requireProjectAuthority(
+  requireRunAgents(
     db,
     {
       slug: input.projectSlug,
       memberRoles: new Map(members.map((m) => [m.userId, m.role])),
     },
     actor,
-    rolesForAction("run-agents"),
-    { action: "run-agents", what: "interrupt this runtime session" },
+    "interrupt this runtime session",
   );
 
   if (run.state !== "running" && run.state !== "queued") {

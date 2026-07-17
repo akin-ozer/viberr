@@ -175,6 +175,41 @@ export function requireProjectAuthority(
 }
 
 /**
+ * The `run-agents` authority check (start/interrupt runs, @mention triggers),
+ * centralized so the action id + audit copy live in ONE place. The runtime call
+ * sites — @mention trigger (task-actions), specialist/reviewer dispatch
+ * (specialist-run), interrupt (run-service), run-operator (route) — each build
+ * the `memberRoles` map from wherever they have it (file store or DB projection)
+ * and delegate the tier + audit here (pass-8 rbac-audit §4g dedup). Throws on
+ * deny with the canonical 403 copy.
+ */
+export function requireRunAgents(
+  db: Database.Database,
+  project: AuthorityProject,
+  actor: AuthorityActor,
+  what: string,
+): ProjectAuthority {
+  return requireProjectAuthority(db, project, actor, rolesForAction("run-agents"), {
+    action: "run-agents",
+    what,
+  });
+}
+
+/** Non-throwing sibling of {@link requireRunAgents} for the @mention path: a
+ *  lower-role commenter's mention is recorded, but the run is silently skipped. */
+export function canRunAgents(
+  db: Database.Database,
+  project: AuthorityProject,
+  actor: AuthorityActor,
+  what: string,
+): boolean {
+  return resolveProjectAuthority(db, project, actor, rolesForAction("run-agents"), {
+    action: "run-agents",
+    what,
+  }).allowed;
+}
+
+/**
  * The server-side guard for callers that have only a project SLUG (config
  * surfaces, route gates): reads the canonical project.md fresh, applies the
  * archived read-only gate (unless `allowArchived`), and resolves authority
