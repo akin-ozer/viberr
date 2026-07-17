@@ -202,3 +202,8 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   spawn → handshake → tool discovery → authenticated tool call → result used by the specialist.
 - **20+ distinct test-case TASKS created this pass** (VIB-6,7,9,10,11,13,14,15-20 + Viberr QA Lab project),
   spanning delivery/reject/accept, codex+claude, triage-gate, MCP, KB, urgent, full-autonomy, edge goals.
+- **Single-flight (F7-OP1) ✅ live.** Two concurrent `run-specialist` dispatches on one task → the 2nd
+  returned 409; exactly one primary run existed. Server-side single-flight guard confirmed.
+- **Interrupt-run**: wiring verified (run-interrupt takes runId, looks up the run; missing id → 404); the
+  tiny docs run finished before a mid-flight catch — interrupt LOGIC (interruptRun: writes interrupted state
+  + audit, idempotent) is unit-tested.
