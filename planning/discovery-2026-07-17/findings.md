@@ -73,6 +73,25 @@ Status: OPEN / CONFIRMED / RULED / WONTFIX. Every OPEN item must be closed or ru
   branch reachable when validation resolves `healthy`; can't coexist with `validation=failing`. VIB-5's contradictory
   event is confirmed pre-fix historical residue.
 
+## Phase-2 live testing (2026-07-18) — see phase2-test-log.md for the full 20+ tally
+- **CORRECTION — CODEX WORKS.** VIB-7 (code task) → operator assigned Developer(codex) → codex DELIVERED
+  (added the file, passed typecheck/test/build, opened PR #37), at full parity with claude. My phase-1 T23
+  conclusion "codex fails at execution here" was based on STALE PLG-2 residue — not the current state.
+  Codex from viberr's eye = identical loop to claude (assign→implement→push→PR→recommend). Turns/tokens
+  captured (codex reads whole-repo context in fewer turns; claude is incremental).
+- **W4 divergence VERIFIED LIVE (both paths).** `gh pr close #37` → reconcile → close-divergence event +
+  supervisor notifications; `gh pr merge #38` → reconcile → merge-divergence event; stage unchanged in both;
+  the operator (on @mention) then reconciled by RECOMMENDING acceptance (recommend-mode). W1+W4+operator compose.
+- **W1 decision counts confirmed live-coherent** across home/cards/notifications/board (Arda admin sees her
+  actionable decisions; Playground shows "override-available"; viewer sees 0).
+- **Operator quality is high**: correct specialist routing, triage-gate flagging (VIB-9), and it did the math
+  to escalate a self-contradictory spec upstream (VIB-11) instead of burning a doomed run.
+- **P1 · LOW/edge · NEW FINDING (needs owner ruling — may be intended).** New-project modal NAME and GITHUB
+  REPOSITORY fields are bidirectionally auto-synced, so you can't bind a NEW project to an EXISTING repo under
+  a distinct name (reusing `viberr` forces name="Viberr"→slug collision). Could be intended UX (name defaults
+  to repo). Observed via automated input — verify human-speed before changing. NOT changed (don't alter
+  possibly-intended behavior without confirmation).
+
 ## Positive confirmations (working well)
 - Operator reasoning on VIB-5 (self-contradictory review + unverified-identity comment) is excellent.
 - RBAC Policy surface is honest + thorough post-R7-1 (13-action matrix, footnote explains every asymmetry).
