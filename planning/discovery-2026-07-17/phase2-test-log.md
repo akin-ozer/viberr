@@ -179,3 +179,19 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   - **OBS (likely WAD):** the reviewer reviews the LOCAL workspace clone (honestly cites its commit), not a
     fresh remote-PR-HEAD pull — fine for the normal flow (specialist+reviewer share the workspace); only
     matters if the remote branch diverges out-of-band.
+
+## Final CRUD / lifecycle sweep (remaining surfaces — all wired & working)
+- Notifications mark-all-read 200 · task update-goal 200 · board reorder 200 · KB reindex 200.
+- Stage CRUD: add-stage 200 (creates a "New stage" placeholder — name set via rename-stage after),
+  rename-stage 200, remove-stage 200 (project restored to 5 stages).
+- Org user FULL lifecycle: invite-local → user-role → user-disable → user-enable → user-reset-password →
+  user-remove — all 200.
+- Config edits (rename/description/prefix, workflow boundary) + org resource CRUD (KB/skill/agent-profile/MCP)
+  all verified. Archive/restore + R6-3/R8-5 freeze verified live.
+
+## Fixes landed from testing (no deferrals)
+- **P1** New-project name↔repo autocomplete-when-untouched (owner ruling) — implemented + verified live.
+- **Stale accept-completion rec on failing verdict** — recordReviewerVerdict now drops it (+2 tests). Safe
+  before (acceptance gate 409s) but no longer misleading.
+
+## VERDICT: the app's logics are tested across the whole app; implementation (PR #36) validated live.
