@@ -55,6 +55,7 @@ import {
   startSpecialistRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
+import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 
 /**
  * Operator-authorized, capability-GATED task mutations — the layer the
@@ -421,6 +422,10 @@ export interface OperatorPacketOptionInput {
   recommended?: boolean;
   /** Pre-authored timeline text written when a human chooses this option. */
   ev?: string;
+  /** retry_other_backend — the backend to re-run the failed agent on. */
+  backend?: "codex" | "claude";
+  /** retry_other_backend — a reviewer retry names its profile. */
+  profileId?: string;
 }
 
 export interface OperatorOpenPacketInput {
@@ -490,6 +495,8 @@ export async function operatorOpenPacket(
       d: (o.detail ?? "").trim(),
       rec,
       ...(o.ev ? { ev: o.ev } : {}),
+      ...(o.backend ? { backend: o.backend } : {}),
+      ...(o.profileId ? { profileId: o.profileId } : {}),
     };
   });
   if (!recSeen && options[0]) options[0].rec = true;
@@ -565,6 +572,68 @@ export async function operatorOpenPacket(
   };
 }
 
+/**
+ * WITHDRAW the task's open decision packet — the operator's own cleanup for a
+ * packet that has become moot (the input it asked for was provided out-of-band,
+ * e.g. a human edited the goal instead of clicking an option). Same authority
+ * as opening one (generate-packets). Restores `readiness` when the packet was
+ * the thing that blocked it, and writes a typed timeline note so the decision
+ * log shows WHY the packet disappeared. No-op when no packet is open.
+ */
+export async function operatorResolvePacket(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "generate-packets") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot manage decision packets in this project.",
+    };
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) {
+    return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
+  }
+  const packet = existing.parsed.packet;
+  if (!packet) {
+    return { outcome: "noop", message: "No open decision packet to resolve." };
+  }
+  const reason =
+    (input.reason ?? "").trim() ||
+    "The input it asked for has since been provided.";
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.packet = null;
+    // A blocked packet set readiness=blocked when it opened — withdrawing the
+    // packet lifts that (a genuine standing block would re-assert itself).
+    if (packet.type === "blocked" && parsed.frontmatter.readiness === "blocked") {
+      parsed.frontmatter.readiness = "ready";
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "transition",
+      actor: { kind: "operator" },
+      title: null,
+      text: `**Packet withdrawn:** ${packet.title} — ${reason}`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.packet_withdrawn",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { title: packet.title, reason },
+  });
+  return { outcome: "done", message: `Withdrew the packet "${packet.title}".` };
+}
+
 /** Resolve a deployed specialist's display name for a recommendation label. */
 function specialistName(
   db: Database.Database,
@@ -609,6 +678,15 @@ export interface OperatorTaskSnapshot {
     eligibleForCurrentStage: boolean;
   })[];
   openPacket: boolean;
+  /** The open decision packet's CONTENT (null when none) — the operator needs
+   *  it to judge whether the packet is now moot (resolve_decision_packet)
+   *  rather than only knowing "a packet exists". */
+  packet: {
+    type: "input" | "blocked";
+    title: string;
+    body: string;
+    options: string[];
+  } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
@@ -681,13 +759,24 @@ export function operatorSnapshot(
       eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
     })),
     openPacket: !!file.parsed.packet,
+    packet: file.parsed.packet
+      ? {
+          type: file.parsed.packet.type,
+          title: file.parsed.packet.title,
+          body: file.parsed.packet.body,
+          options: file.parsed.packet.options.map((o) => o.t),
+        }
+      : null,
     recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
       type: e.type,
       actor:
         e.actor.kind === "human"
           ? (e.actor.nameHint ?? "human")
           : e.actor.kind,
-      text: e.text,
+      // Timeline comments store the agent's FULL report (no 1,200-char cap
+      // since 2026-07-17) — cap here so six entries can't balloon the prompt.
+      text:
+        e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
     })),
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),

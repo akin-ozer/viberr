@@ -166,7 +166,14 @@ function TaskCard({
         <div className="card-top">
           <span className="key">{task.key}</span>
           <span className="spacer" />
-          <ReadinessPill value={task.displayReadiness} sm />
+          {task.waiting === "agent" &&
+          task.displayReadiness === "input_required" ? (
+            <Pill kind="agent" sm dot>
+              agent working
+            </Pill>
+          ) : (
+            <ReadinessPill value={task.displayReadiness} sm />
+          )}
         </div>
         <h3>{task.title}</h3>
         <div className="owner-row">
@@ -344,7 +351,14 @@ function ListView({
             <span className="pill neutral sm">{stageName(t.stage)}</span>
             <OwnerLine task={t} />
             <ReviewerStack task={t} label />
-            <ReadinessPill value={t.displayReadiness} sm />
+            {t.waiting === "agent" &&
+            t.displayReadiness === "input_required" ? (
+              <Pill kind="agent" sm dot>
+                agent working
+              </Pill>
+            ) : (
+              <ReadinessPill value={t.displayReadiness} sm />
+            )}
             <WaitTag task={t} />
           </Link>
         ))}

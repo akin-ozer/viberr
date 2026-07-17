@@ -152,4 +152,15 @@ describe("resolveDeliveryPermissions", () => {
       ]),
     ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
   });
+
+  it("a withheld execute-code-or-write-repo gates ALL delivery — the prompt may not instruct a commit the tool layer denies (VIB-1 incident)", () => {
+    expect(
+      resolveDeliveryPermissions([
+        grant("execute-code-or-write-repo", "human"),
+        grant("create-task-branch", "direct"),
+        grant("commit-push-branch", "direct"),
+        grant("open-review-pr", "direct"),
+      ]),
+    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
+  });
 });

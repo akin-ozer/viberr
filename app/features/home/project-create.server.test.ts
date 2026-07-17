@@ -64,24 +64,20 @@ describe("createProject — GitHub connection wiring", () => {
     expect(row.default_branch).toBe("master");
   });
 
-  it("falls back to main and binds nothing when the connection is unknown", async () => {
+  it("rejects an owner with NO connection behind it (PAT required)", async () => {
     const store = setupTestStore(ctx);
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await createProject(
-      store.db,
-      { name: "Ghostly", key: "GHO", owner: "nobody", repoName: "ghost", template: "governed", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-
-    expect(getProjectCredential(store.db, result.slug)).toBeNull();
+    await expect(
+      createProject(
+        store.db,
+        { name: "Ghostly", key: "GHO", owner: "nobody", repoName: "ghost", template: "governed", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/No GitHub connection for "nobody"/);
     expect(fetchSpy).not.toHaveBeenCalled();
-    const row = store.db
-      .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
-      .get(result.slug) as { default_branch: string };
-    expect(row.default_branch).toBe("main");
   });
 });
 
@@ -99,10 +95,11 @@ describe("createProject — policy preset shapes REAL governance", () => {
 
   it("balanced = template defaults (pre-work auto, supervised operator)", async () => {
     const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Bal", key: "BAL", owner: "nobody", repoName: "b", template: "governed", policy: "balanced" },
+      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", template: "governed", policy: "balanced" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -114,10 +111,11 @@ describe("createProject — policy preset shapes REAL governance", () => {
 
   it("strict = human-gates the pre-work boundaries (no operator auto-advance)", async () => {
     const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Strict", key: "STR", owner: "nobody", repoName: "s", template: "governed", policy: "strict" },
+      { name: "Strict", key: "STR", owner: "akin-ozer", repoName: "s", template: "governed", policy: "strict" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -132,10 +130,11 @@ describe("createProject — policy preset shapes REAL governance", () => {
 
   it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {
     const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Auto", key: "AUT", owner: "nobody", repoName: "a", template: "governed", policy: "auto" },
+      { name: "Auto", key: "AUT", owner: "akin-ozer", repoName: "a", template: "governed", policy: "auto" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -151,32 +150,36 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("direct");
   });
 
-  it("an EMPTY repo field creates a repo-less project (repo: null) — no fabricated repo (X12)", async () => {
+  // Repo-bound projects only (2026-07-17 ruling, reverses F10): a repository +
+  // PAT connection are mandatory — repo-less creation is rejected in every form.
+  it("an EMPTY repo field is rejected (repo-less projects were cut)", async () => {
     const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
-    const r = await createProject(
-      store.db,
-      { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", template: "governed", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    expect(fm(store, r.slug).repo).toBeNull();
+    await expect(
+      createProject(
+        store.db,
+        { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", template: "governed", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/GitHub repository is required/i);
   });
 
-  it("a fresh instance with NO connection (empty owner + empty repo) still self-serves a repo-less project (F10)", async () => {
+  it("empty owner + empty repo is rejected (no more F10 self-serve repo-less)", async () => {
     const store = setupTestStore(ctx);
     vi.stubGlobal("fetch", vi.fn());
-    const r = await createProject(
-      store.db,
-      { name: "First Project", key: "FST", owner: "", repoName: "", template: "governed", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    expect(fm(store, r.slug).repo).toBeNull();
-    expect(r.slug).toBe("first-project");
+    await expect(
+      createProject(
+        store.db,
+        { name: "First Project", key: "FST", owner: "", repoName: "", template: "governed", policy: "balanced" },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/GitHub repository is required/i);
   });
 
-  it("a repo NAME without an owner is rejected with a helpful message (F10)", async () => {
+  it("a repo NAME without an owner is rejected", async () => {
     const store = setupTestStore(ctx);
     await expect(
       createProject(
@@ -185,6 +188,6 @@ describe("createProject — policy preset shapes REAL governance", () => {
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/repo owner/i);
+    ).rejects.toThrow(/GitHub repository is required/i);
   });
 });

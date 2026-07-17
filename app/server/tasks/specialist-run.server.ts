@@ -49,7 +49,11 @@ import {
   buildScript,
   type SimulatedScript,
 } from "~/server/runtimes/simulated-runtime.server";
-import { listRunsForTask, startRun } from "~/server/runtimes/run-service.server";
+import {
+  chainRunCompletion,
+  listRunsForTask,
+  startRun,
+} from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { rolesForAction } from "~/shared/rbac";
@@ -62,6 +66,7 @@ import {
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import {
   cloneFailureLogDetails,
+  createGitHubAskpassEnv,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
 } from "./git-clone-auth.server";
@@ -529,8 +534,22 @@ export async function startSpecialistRun(
       kind: "user",
     });
   }
+  // Resolve the CURRENT deployment before picking the backend: the run follows
+  // the live profile, not the assign-time snapshot in task.md, so switching a
+  // profile to the other backend takes effect on the very next run (manual,
+  // operator prompt or @mention) instead of pinning the task forever.
+  let resolvedSpec: ResolvedSpecialist | null = null;
+  try {
+    resolvedSpec = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+  } catch {
+    // Profile may have been undeployed since assignment — snapshot fallback.
+  }
+  // Backend: an explicit D4 retry override wins; then the live deployment;
+  // then the snapshot (undeployed profile).
   const backend: RealBackend =
-    input.backendOverride ?? (sp.backend === "codex" ? "codex" : "claude");
+    input.backendOverride ??
+    resolvedSpec?.backend ??
+    (sp.backend === "codex" ? "codex" : "claude");
   // Resolve the model + effort from the deployment (falls back to a sane
   // default). Effort is threaded into the run so the SDK gets the profile's
   // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
@@ -546,29 +565,24 @@ export async function startSpecialistRun(
   // specialist without push/PR/merge rights literally cannot run those
   // commands). Empty when nothing is withheld.
   let disallowedTools: string[] = [];
-  let resolvedSpec: ResolvedSpecialist | null = null;
-  try {
-    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
-    resolvedSpec = resolved;
-    agentName = resolved.name;
-    skills = resolved.skills;
-    kb = resolved.kb;
-    mcpNames = resolved.mcps;
-    disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
+  if (resolvedSpec) {
+    agentName = resolvedSpec.name;
+    skills = resolvedSpec.skills;
+    kb = resolvedSpec.kb;
+    mcpNames = resolvedSpec.mcps;
+    disallowedTools = resolveSpecialistDisallowedTools(resolvedSpec.capabilities);
     // The profile's model/effort are specific to ITS native backend. When this
     // run overrides to a DIFFERENT backend (D4 retry-on-other-backend), the
     // native model id is invalid there (e.g. Claude's "opus" sent to Codex) —
     // re-resolve model + effort for the actual run backend so the retry works
     // instead of hard-failing. Same-backend runs keep the profile's exact values.
-    if (backend === resolved.backend) {
-      model = resolved.model;
-      effort = resolved.effort;
+    if (backend === resolvedSpec.backend) {
+      model = resolvedSpec.model;
+      effort = resolvedSpec.effort;
     } else {
       model = resolveRunModel(backend, undefined); // backend default
-      effort = resolveRunEffort(backend, resolved.effort);
+      effort = resolveRunEffort(backend, resolvedSpec.effort);
     }
-  } catch {
-    // Profile may have been undeployed since assignment — keep the default.
   }
   // Stage eligibility holds at the RUN boundary too (F1): an already-assigned
   // specialist must not be re-run after the task moved to a stage it isn't
@@ -623,15 +637,26 @@ export async function startSpecialistRun(
     mkdirSync(runWorkdir, { recursive: true });
   }
 
+  const delivery = resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []);
+  // The run env: git confinement, plus ephemeral push credentials when the
+  // profile's grants make "push the branch" a real instruction (see
+  // resolveRunPushAuth). Computed BEFORE the prompt so the delivery contract
+  // can tell the truth about whether a push can succeed here.
+  const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
+  const pushAuth =
+    realBackend && repo
+      ? resolveRunPushAuth(db, input.projectSlug, delivery, baseRunEnv)
+      : null;
   const analyzePrompt = buildAnalyzePrompt({
     role: sp.role,
     taskKey: input.taskKey,
     title,
     goal,
     repo,
-    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
+    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
     cloned: !!clone,
-    delivery: resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []),
+    delivery,
+    pushCredentialed: !!pushAuth,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -677,19 +702,31 @@ export async function startSpecialistRun(
     // profile that declares an org MCP gets it on both supported SDKs.
     ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend
-      ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
-      : {}),
+    ...(realBackend ? { env: pushAuth?.env ?? baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+  // The askpass tmp file lives for the run; completion removes it.
+  if (pushAuth) chainRunCompletion(runId, pushAuth.dispose);
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
+  const switched = sp.backend !== backend;
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
+      // Keep the assignment snapshot in step with the backend that actually
+      // ran (deployment edit or D4 retry): the exec-profile label stays honest
+      // and every later resolution (operator prompt, @mention) follows it.
+      if (
+        parsed.frontmatter.specialist &&
+        parsed.frontmatter.specialist.backend !== backend
+      ) {
+        parsed.frontmatter.specialist.backend = backend;
+      }
       parsed.timeline.unshift(
         agentEvent(
-          `Started a ${backendLabel} run for the ${sp.role} specialist — streaming to the agent logs.`,
+          switched
+            ? `Started a ${backendLabel} run for the ${sp.role} specialist (switched from ${sp.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
+            : `Started a ${backendLabel} run for the ${sp.role} specialist — streaming to the agent logs.`,
         ),
       );
     },
@@ -779,8 +816,19 @@ export async function startReviewerRun(
     );
   }
   const rev = reviewers[index]!;
+  // Same deployment-first resolution as startSpecialistRun: the live profile's
+  // backend wins over the engage-time snapshot so a backend edit applies to
+  // the next reviewer run too.
+  let resolvedRev: ResolvedSpecialist | null = null;
+  try {
+    resolvedRev = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
+  } catch {
+    // Profile may have been undeployed since engagement — snapshot fallback.
+  }
   const backend: RealBackend =
-    input.backendOverride ?? (rev.backend === "codex" ? "codex" : "claude");
+    input.backendOverride ??
+    resolvedRev?.backend ??
+    (rev.backend === "codex" ? "codex" : "claude");
 
   let model = defaultModelFor(backend);
   let effort = "";
@@ -789,25 +837,20 @@ export async function startReviewerRun(
   let kb: string[] = [];
   let mcpNames: string[] = [];
   let disallowedTools: string[] = [];
-  let resolvedRev: ResolvedSpecialist | null = null;
-  try {
-    const resolved = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
-    resolvedRev = resolved;
-    agentName = resolved.name;
-    skills = resolved.skills;
-    kb = resolved.kb;
-    mcpNames = resolved.mcps;
-    disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
+  if (resolvedRev) {
+    agentName = resolvedRev.name;
+    skills = resolvedRev.skills;
+    kb = resolvedRev.kb;
+    mcpNames = resolvedRev.mcps;
+    disallowedTools = resolveSpecialistDisallowedTools(resolvedRev.capabilities);
     // Cross-backend retry (D4): re-resolve model + effort for the run backend.
-    if (backend === resolved.backend) {
-      model = resolved.model;
-      effort = resolved.effort;
+    if (backend === resolvedRev.backend) {
+      model = resolvedRev.model;
+      effort = resolvedRev.effort;
     } else {
       model = resolveRunModel(backend, undefined);
-      effort = resolveRunEffort(backend, resolved.effort);
+      effort = resolveRunEffort(backend, resolvedRev.effort);
     }
-  } catch {
-    // Profile may have been undeployed since engagement — keep the default.
   }
   // Stage eligibility at the RUN boundary (F1) — same rationale as
   // startSpecialistRun: an engaged reviewer must not be re-run at a stage its
@@ -847,15 +890,24 @@ export async function startReviewerRun(
     mkdirSync(runWorkdir, { recursive: true });
   }
 
+  const delivery = resolveDeliveryPermissions(resolvedRev?.capabilities ?? []);
+  // Same env composition as the primary run: confinement + ephemeral push
+  // credentials when this reviewer's grants actually permit pushing.
+  const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
+  const pushAuth =
+    realBackend && repo
+      ? resolveRunPushAuth(db, input.projectSlug, delivery, baseRunEnv)
+      : null;
   const analyzePrompt = buildAnalyzePrompt({
     role: rev.role,
     taskKey: input.taskKey,
     title,
     goal,
     repo,
-    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey, title),
+    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
     cloned: !!clone,
-    delivery: resolveDeliveryPermissions(resolvedRev?.capabilities ?? []),
+    delivery,
+    pushCredentialed: !!pushAuth,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -894,19 +946,29 @@ export async function startReviewerRun(
     ...(disallowedTools.length ? { disallowedTools } : {}),
     ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend
-      ? { env: workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot) }
-      : {}),
+    ...(realBackend ? { env: pushAuth?.env ?? baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
+  if (pushAuth) chainRunCompletion(runId, pushAuth.dispose);
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
+  const switched = rev.backend !== backend;
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
+      // Keep this reviewer's engage-time snapshot in step with the backend
+      // that actually ran (deployment edit or D4 retry).
+      const engaged = parsed.frontmatter.reviewers.find(
+        (r) => r.profileId === rev.profileId,
+      );
+      if (engaged && engaged.backend !== backend) {
+        engaged.backend = backend;
+      }
       parsed.timeline.unshift(
         agentEvent(
-          `Started a ${backendLabel} run for the ${rev.role} reviewer — streaming to the agent logs.`,
+          switched
+            ? `Started a ${backendLabel} run for the ${rev.role} reviewer (switched from ${rev.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
+            : `Started a ${backendLabel} run for the ${rev.role} reviewer — streaming to the agent logs.`,
         ),
       );
     },
@@ -1066,6 +1128,9 @@ function buildAnalyzePrompt(input: {
   cloned: boolean;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
+  /** Whether the run env actually carries push credentials (a granted
+   *  commit-push with no bound project PAT must not promise a working push). */
+  pushCredentialed?: boolean;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
 }): string {
@@ -1093,14 +1158,18 @@ function buildAnalyzePrompt(input: {
     if (canCommitPush) {
       prompt +=
         `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
-        `- Push the branch${canOpenPr ? " and open a pull request (ready for review, NOT a draft) that references " + input.taskKey + " in its title/body" : ""}.\n`;
-    } else if (canOpenPr) {
-      prompt += `- Open a pull request (ready for review, NOT a draft) that references ${input.taskKey} in its title/body.\n`;
-    }
-    // Reflect what the profile's capabilities actually allow so the run never
-    // attempts (and fails) a step its tools deny.
-    if (!canBranch && !canCommitPush && !canOpenPr) {
-      prompt += `- Your profile does not grant branch/commit/PR delivery — do the analysis and any in-workspace edits, then report findings; do NOT attempt to branch, commit, push, or open a PR.\n`;
+        (input.pushCredentialed
+          ? `- Push the branch (push credentials are provided via git's askpass — plain \`git push\` works).\n`
+          : `- This workspace has NO push credentials: commit locally, do NOT retry a failing \`git push\`, and report the ready branch + commit SHA — the platform (or a human) delivers it.\n`) +
+        (canOpenPr && input.pushCredentialed
+          ? `- If the \`gh\` CLI is available, open a pull request (ready for review, NOT a draft) that references ${input.taskKey} in its title/body; if it is not, just push and say so — the platform opens the review PR when the task enters Review.\n`
+          : "");
+    } else {
+      // An EXPLICIT prohibition, not a silent omission: an operator directive
+      // may still say "push updates" — the contract must override it, or the
+      // agent obeys the directive into denied `git commit` attempts (XS-4,
+      // observed live on VIB-1).
+      prompt += `- Repo delivery is HUMAN-gated for your profile: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Make the changes in the workspace and report exactly what you changed (files + summary); the governed Review transition (or a human) delivers them to the branch/PR.\n`;
     }
     prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
   }
@@ -1335,6 +1404,38 @@ export function resolveResumeConfinement(
     // Profile not a current deployment — still apply the conservative settings.
     return { disallowedTools: resolveSpecialistDisallowedTools([]), env };
   }
+}
+
+/**
+ * Ephemeral PUSH credentials for a run whose profile GRANTS commit-push —
+ * the delivery contract made real. The clone is deliberately credential-free
+ * (askpass authenticates only the clone; the remote is sanitized), so without
+ * this, a granted "push the branch" instruction dead-ends on "could not read
+ * Username for 'https://github.com'" in any clean environment (observed live:
+ * VIB-1 in the container, 2026-07-17). Reuses the server-side push's
+ * GIT_ASKPASS mechanism — the token rides the child env, never argv or
+ * `.git/config`. Granting `commit-push-branch` to an agent MEANS handing its
+ * run a push-capable credential; the capability grant is the admin's consent.
+ * Returns null when the capability is withheld or no project PAT is bound.
+ * Callers MUST dispose() on run completion (removes the askpass tmp file).
+ */
+export function resolveRunPushAuth(
+  db: Database.Database,
+  projectSlug: string,
+  delivery: DeliveryPermissions,
+  baseEnv: Record<string, string>,
+): { env: Record<string, string>; dispose: () => void } | null {
+  if (!delivery.canCommitPush) return null;
+  const cred = getProjectCredential(db, projectSlug);
+  const token = cred ? getPatToken(db, cred.id) : null;
+  if (!token) return null;
+  const auth = createGitHubAskpassEnv({ token, baseEnv });
+  // RunSpec.env is Record<string, string> — drop non-string entries.
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(auth.env)) {
+    if (typeof v === "string") env[k] = v;
+  }
+  return { env, dispose: auth.dispose };
 }
 
 function workspaceRunEnv(

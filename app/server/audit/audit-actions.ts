@@ -113,6 +113,7 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.operator.recommended_completion": "task",
   "task.operator.accepted_completion": "task",
   "task.operator.packet_opened": "task",
+  "task.operator.packet_withdrawn": "task",
   // Human resolution of operator recommendation cards.
   "task.recommendation.applied": "task",
   "task.recommendation.dismissed": "task",

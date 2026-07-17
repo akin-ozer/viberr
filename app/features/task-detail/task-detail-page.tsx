@@ -36,7 +36,7 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
  */
 
 type ActionResult =
-  | { ok: true; toast?: string; navigateTo?: string }
+  | { ok: true; toast?: string; navigateTo?: string; kind?: string }
   | { ok: false; error: string };
 
 /** Toast + optional redirect once per completed fetcher submission. */
@@ -312,10 +312,19 @@ function TaskHero({
   task,
   stage,
   canEditGoal,
+  agentWorking = false,
+  editGoalSignal = 0,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
   canEditGoal: boolean;
+  /** A live run is in flight — the triage "input required" pill would read as
+   *  "waiting on you RIGHT NOW", which is false mid-run, so it yields to an
+   *  agent-working pill. Real states (blocked / risk) still show. */
+  agentWorking?: boolean;
+  /** Increments when a packet's `edit_goal` decision is confirmed — opens the
+   *  goal editor so the human can start typing immediately. */
+  editGoalSignal?: number;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -330,6 +339,11 @@ function TaskHero({
       setEditing(false);
     }
   }, [goalFetcher.state, goalFetcher.data, editing]);
+  // A confirmed edit_goal packet decision drops the human straight into the
+  // editor (the textarea's autoFocus scrolls it into view).
+  useEffect(() => {
+    if (editGoalSignal > 0 && canEditGoal) setEditing(true);
+  }, [editGoalSignal, canEditGoal]);
 
   return (
     <div className="task-hero">
@@ -347,7 +361,13 @@ function TaskHero({
           />
           {stage?.name ?? ""}
         </Pill>
-        <ReadinessPill value={task.displayReadiness} />
+        {agentWorking && task.displayReadiness === "input_required" ? (
+          <Pill kind="agent" dot>
+            agent working
+          </Pill>
+        ) : (
+          <ReadinessPill value={task.displayReadiness} />
+        )}
         <ValidationPill value={task.validation} />
         <span className="hero-file">
           <Icon name="file" />
@@ -369,6 +389,9 @@ function TaskHero({
             onChange={(e) => setDraft(e.currentTarget.value)}
             rows={4}
             aria-label="Task goal and acceptance criteria"
+            // Focus lands here whether the editor opened via the Edit button
+            // or an edit_goal packet decision — the browser scrolls it into view.
+            autoFocus
           />
           <div className="goal-edit-actions">
             <button
@@ -783,6 +806,18 @@ export function TaskDetailPage({
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const runBusy = runFetcher.state !== "idle";
+  // A confirmed edit_goal packet decision drops the human straight into the
+  // goal editor (TaskHero opens + focuses it on this signal).
+  const [editGoalSignal, setEditGoalSignal] = useState(0);
+  useEffect(() => {
+    if (
+      resolveFetcher.state === "idle" &&
+      resolveFetcher.data?.ok &&
+      resolveFetcher.data.kind === "edit_goal"
+    ) {
+      setEditGoalSignal((n) => n + 1);
+    }
+  }, [resolveFetcher.state, resolveFetcher.data]);
 
   // Agent affordances (assign/run specialist, reviewers, operator, apply
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
@@ -808,6 +843,14 @@ export function TaskDetailPage({
       r.kind === "operator" &&
       (r.lifecycle === "running" || r.lifecycle === "queued"),
   );
+  // ANY live run (operator / specialist / reviewer) — drives the hero's
+  // agent-working pill. `waiting` covers windows the runtime rows miss (the
+  // scripted operator coordinates before its row exists).
+  const anyRunLive =
+    task.waiting === "agent" ||
+    runtime.some(
+      (r) => r.lifecycle === "running" || r.lifecycle === "queued",
+    );
   // Terminal-stage task — closed for new work (comments stay open, R7-6).
   const taskClosed =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
@@ -838,15 +881,25 @@ export function TaskDetailPage({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
-  // Retry the assigned specialist on the OTHER backend after a backend
-  // availability / quota failure (D4). admin|maintainer; server re-checks.
+  // Retry the failed run's agent on the OTHER backend after a backend
+  // availability / quota failure (D4). Routes by the failed run's kind —
+  // a reviewer retries as THAT reviewer, not as the primary. The override
+  // also persists to the assignment snapshot server-side, so the operator's
+  // next prompt follows the switched backend. admin|maintainer; server
+  // re-checks.
   const onRetryBackend =
     canRunAgents && !runActive
-      ? (backend: "claude" | "codex") => {
+      ? (backend: "claude" | "codex", run: RunView) => {
           if (runBusy) return;
           const fd = new FormData();
           fd.set("_csrf", csrf);
-          fd.set("intent", "run-specialist");
+          fd.set(
+            "intent",
+            run.kind === "reviewer" ? "run-reviewer" : "run-specialist",
+          );
+          if (run.kind === "reviewer" && run.profileId) {
+            fd.set("profileId", run.profileId);
+          }
           fd.set("backend", backend);
           runFetcher.submit(fd, { method: "post" });
         }
@@ -932,7 +985,13 @@ export function TaskDetailPage({
       data-screen-label={"Task " + task.key}
     >
       <div className="detail-main">
-        <TaskHero task={task} stage={stage} canEditGoal={canRunAgents} />
+        <TaskHero
+          task={task}
+          stage={stage}
+          canEditGoal={canRunAgents}
+          agentWorking={anyRunLive}
+          editGoalSignal={editGoalSignal}
+        />
 
         <LiveRunSlot
           runtime={runtime}

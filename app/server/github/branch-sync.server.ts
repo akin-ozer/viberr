@@ -28,25 +28,15 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
 // --------------------------------------------------------------- naming
 
 /**
- * `<key-lowercase>-<slug-of-title>`, e.g.
- * taskBranchName("VIB-142", "Attach execution workspace to task runtime")
- * → "vib-142-attach-execution-workspace" (slug capped at 4 words to match
- * the mock's naming style).
+ * The task's ONE branch: the lowercased key and nothing else —
+ * taskBranchName("VIB-142") → "vib-142". The old `<key>-<title-slug>` form
+ * (owner ruling 2026-07-17) added no identity (the key IS the identifier)
+ * and produced awkward truncations like "vib-1-list-files-in-the"; one
+ * task, one predictable branch. Existing tasks keep whatever `branch:`
+ * their frontmatter already stores — this only defaults NEW branches.
  */
-export function taskBranchName(taskKey: string, title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/\u0131/g, "i") // dotless \u0131 has no NFKD decomposition
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // strip combining diacritics
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .split("-")
-    .filter(Boolean)
-    .slice(0, 4)
-    .join("-");
-  const key = taskKey.toLowerCase();
-  return slug ? `${key}-${slug}` : key;
+export function taskBranchName(taskKey: string): string {
+  return taskKey.toLowerCase();
 }
 
 // -------------------------------------------------------------- compare
@@ -195,8 +185,7 @@ export async function ensureTaskBranch(
   if (gh.status !== "ok") return gh;
 
   const branch =
-    file.parsed.frontmatter.branch ??
-    taskBranchName(input.taskKey, file.parsed.frontmatter.title);
+    file.parsed.frontmatter.branch ?? taskBranchName(input.taskKey);
 
   // 1. Does the ref already exist? (idempotency first)
   const existing = await gh.client.request<GhRef>(

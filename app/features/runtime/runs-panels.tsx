@@ -327,8 +327,10 @@ export function AgentLogsPanel({
   sel: string | null;
   onSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
-  /** Retry the assigned specialist on the other backend (D4). */
-  onRetryBackend?: (backend: "claude" | "codex") => void;
+  /** Retry the failed run's agent (primary specialist or reviewer) on the
+   *  other backend (D4). Receives the failed run so the caller can route the
+   *  right intent (run-specialist vs run-reviewer + profileId). */
+  onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
   retrying?: boolean;
 }) {
   const [follow, setFollow] = useState(true);
@@ -371,7 +373,8 @@ export function AgentLogsPanel({
   // offer the retry inline instead of a dead "continuity error" (D4).
   const canRetryBackend =
     !!onRetryBackend &&
-    cur!.kind === "primary" &&
+    (cur!.kind === "primary" ||
+      (cur!.kind === "reviewer" && !!cur!.profileId)) &&
     cur!.state === "error" &&
     !!cur!.failedBackendUnavailable &&
     !!cur!.altBackend;
@@ -417,8 +420,8 @@ export function AgentLogsPanel({
             type="button"
             className="btn primary sm"
             disabled={retrying}
-            onClick={() => onRetryBackend!(cur!.altBackend!)}
-            title={`Re-run the specialist on ${altLabel} — the current backend was unavailable`}
+            onClick={() => onRetryBackend!(cur!.altBackend!, cur!)}
+            title={`Re-run the ${cur!.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel} — the current backend was unavailable`}
           >
             <Icon name="refresh" />
             Retry on {altLabel}

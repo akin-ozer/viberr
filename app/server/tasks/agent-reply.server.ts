@@ -197,8 +197,12 @@ export function resolveMentionedAgent(
   if (handleSet.has("agent") && primaryRef) {
     const sp =
       specialists.find((s) => s.id === primaryRef.profileId) ?? null;
+    // Prefer the CURRENT deployment's backend over the assign-time snapshot —
+    // a profile switched to the other backend replies there. Sessions never
+    // match across backends, so the first reply after a switch starts a fresh
+    // run (fresh context) instead of resuming the dead backend's session.
     const backend: RealBackend =
-      primaryRef.backend === "codex" ? "codex" : "claude";
+      sp?.backend ?? (primaryRef.backend === "codex" ? "codex" : "claude");
     const role = sp?.role ?? primaryRef.role;
     return {
       profileId: primaryRef.profileId,
@@ -327,9 +331,10 @@ export function normalizeWorkspacePaths(text: string): string {
 }
 
 /**
- * The timeline-comment form of the reply: the full text truncated to a readable
- * length with a pointer to the full transcript. The raw transcript remains in
- * the run's agent logs.
+ * The reply truncated to a readable preview length with a pointer to the full
+ * transcript. NO LONGER the stored timeline form (2026-07-17: comments store
+ * the FULL reply and the timeline UI clamps + expands) — kept for previews and
+ * the recovery reconciler's has-a-reply check.
  */
 export function extractReplyText(lines: LogLine[]): string | null {
   const full = extractFullReplyText(lines);
@@ -363,7 +368,12 @@ export function fullReplyTextForRun(
 }
 
 /** Classified failure classes for an errored run (F8 + R7-2 fail-fast). */
-export type RunFailureKind = "quota" | "auth" | "unavailable" | "unknown";
+export type RunFailureKind =
+  | "quota"
+  | "auth"
+  | "unavailable"
+  | "max_turns"
+  | "unknown";
 
 /**
  * A human-readable failure reason for a run that ended in `error` (F8): the last
@@ -392,7 +402,7 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  const tagged = /·(quota|auth|unavailable|unknown)$/.exec(last.tag ?? "");
+  const tagged = /·(quota|auth|unavailable|max_turns|unknown)$/.exec(last.tag ?? "");
   if (tagged) return { kind: tagged[1] as RunFailureKind, text };
   const kind: RunFailureKind =
     /is unavailable|no usable credential/i.test(text)

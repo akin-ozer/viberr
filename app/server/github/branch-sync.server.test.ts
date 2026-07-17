@@ -58,14 +58,9 @@ function compareRoute(ahead: { sha: string; message: string }[], behindBy = 0) {
 }
 
 describe("taskBranchName", () => {
-  it("builds <key-lowercase>-<title-slug> capped at 4 words", () => {
-    expect(
-      taskBranchName("VIB-142", "Attach execution workspace to task runtime"),
-    ).toBe("vib-142-attach-execution-workspace-to");
-    expect(taskBranchName("VIB-9", "Şema — türkçe başlık!")).toBe(
-      "vib-9-sema-turkce-baslik",
-    );
-    expect(taskBranchName("VIB-7", "···")).toBe("vib-7");
+  it("is the lowercased task key — one task, one predictable branch (2026-07-17 ruling)", () => {
+    expect(taskBranchName("VIB-142")).toBe("vib-142");
+    expect(taskBranchName("VIB-7")).toBe("vib-7");
   });
 });
 
@@ -95,7 +90,7 @@ describe("taskCommits ([VIB-n] prefix convention)", () => {
 describe("ensureTaskBranch", () => {
   it("creates the branch from the default branch and writes it into task.md", async () => {
     const store = setupWithCredential();
-    const branch = "vib-201-attach-execution-workspace-to";
+    const branch = "vib-201";
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads%2F${branch}`]: {
         status: 404,

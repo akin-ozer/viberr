@@ -146,6 +146,33 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     expect(result.detail).toContain("unreachable");
   });
 
+  it("/user 5xx (GitHub outage) → network_error saying the token was NOT rejected", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { status: 503, body: "upstream unavailable" },
+    });
+    const result = await validatePatToken(CLASSIC, { fetchImpl: gh.fetchImpl });
+    expect(result.status).toBe("network_error");
+    expect(result.detail).toContain("degraded");
+    expect(result.detail).toContain("NOT rejected");
+  });
+
+  it("repo probe 5xx (GitHub outage) → network_error, not repo_not_found/insufficient_scope", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "repo, workflow, read:org" },
+      },
+      "GET /repos/akin-ozer/viberr": { status: 503, body: "upstream unavailable" },
+    });
+    const result = await validatePatToken(CLASSIC, {
+      repo: REPO,
+      requiredScopes: SCOPES,
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(result.status).toBe("network_error");
+    expect(result.detail).toContain("NOT rejected");
+  });
+
   it("fine-grained token: probes what it can, assumes the rest (honestly labeled)", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } }, // no scopes header
