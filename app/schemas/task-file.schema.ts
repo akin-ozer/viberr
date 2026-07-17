@@ -59,6 +59,13 @@ export const PACKET_OPTION_KINDS = [
   "block_on_policy",
   "hold_runtime_debug",
   "redirect",
+  // Backend-failure recovery (D4): re-run the failed agent on the named
+  // backend. Payload: `backend` (target), `profileId` (reviewer retries only).
+  "retry_other_backend",
+  // "A human refines the task goal": confirming opens the goal editor; the
+  // packet stays (stamped `awaiting: goal_edit`) and clears the moment the
+  // edited goal is saved — the decision is then fully carried out.
+  "edit_goal",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -182,6 +189,11 @@ export const packetOptionSchema = z
     // legacy `accept:` key in an existing task.md parseable, just ignored.)
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
+    /** retry_other_backend — the backend to re-run the failed agent on. */
+    backend: z.enum(["codex", "claude"]).optional(),
+    /** retry_other_backend — a reviewer retry names its profile (the primary
+     *  specialist needs none). */
+    profileId: z.string().optional(),
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;
@@ -197,6 +209,9 @@ export const taskPacketSchema = z
     body: z.string().default(""),
     observations: z.array(packetObservationSchema).default([]),
     options: z.array(packetOptionSchema).default([]),
+    /** Set when an `edit_goal` option was confirmed: the packet is decided
+     *  and auto-clears when the edited goal lands (updateTaskGoal). */
+    awaiting: z.enum(["goal_edit"]).optional(),
   })
   .loose();
 export type TaskPacket = z.infer<typeof taskPacketSchema>;

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -20,6 +21,7 @@ import {
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
+  resolveRunPushAuth,
   startReviewerRun,
   startSpecialistRun,
 } from "./specialist-run.server";
@@ -54,8 +56,10 @@ async function waitForLines(
   }
 }
 
-/** Re-write the store's project.md with a deployed `dev` specialist (claude). */
-function deployDevSpecialist(): void {
+/** Re-write the store's project.md with a deployed `dev` specialist (claude
+ *  by default; pass ["codex"] to simulate editing the profile to the other
+ *  backend after assignment). */
+function deployDevSpecialist(backends: string[] = ["claude"]): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
   const fm = file.parsed.frontmatter;
   writeProject(store.dataRoot, {
@@ -73,7 +77,7 @@ function deployDevSpecialist(): void {
           kind: "specialist",
           name: "dev",
           role: "developer",
-          backends: ["claude"],
+          backends,
           model: "sonnet",
           effort: "xhigh",
         },
@@ -340,6 +344,62 @@ describe("startSpecialistRun", () => {
     expect(startAudit.length).toBe(1); // not double-counted
   });
 
+  it("follows the CURRENT deployment backend and persists it to the assignment snapshot", async () => {
+    await assign(); // snapshot captured with backend: claude
+    deployDevSpecialist(["codex"]); // profile later edited to the other backend
+
+    const result = await startSpecialistRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The run follows the live deployment, not the assign-time snapshot …
+    expect(result.backend).toBe("codex");
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda),
+    );
+
+    // … and the snapshot is refreshed so every later resolution (operator
+    // prompt, @mention, exec-profile label) follows the switch too.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+    expect(file.parsed.timeline[0]!.text).toContain("switched from Claude Code");
+  });
+
+  it("persists a D4 backendOverride to the snapshot so later prompts follow it", async () => {
+    await assign(); // snapshot: claude
+    const result = await startSpecialistRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "codex" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.backend).toBe("codex");
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId },
+      actor(store.users.arda),
+    );
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+  });
+
   it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
     const { simulatedFinalReport } = await import("./specialist-run.server");
     for (const backend of ["claude", "codex"] as const) {
@@ -544,5 +604,67 @@ describe("startReviewerRun", () => {
       if (!replied) await new Promise((r) => setTimeout(r, 25));
     }
     expect(replied).toBe(true);
+  });
+});
+
+describe("resolveRunPushAuth — a granted commit-push gets REAL push credentials", () => {
+  it("builds an askpass env from the bound project PAT; dispose removes the script", async () => {
+    const { createPat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const pat = createPat(
+      store.db,
+      {
+        userId: store.users.arda.id,
+        label: "connection · test",
+        token: "ghp_pushpushpushpushpushpushpush0000",
+      },
+      actor(store.users.arda),
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor(store.users.arda),
+    );
+
+    const auth = resolveRunPushAuth(
+      store.db,
+      store.slug,
+      { canBranch: true, canCommitPush: true, canOpenPr: true },
+      { GIT_CEILING_DIRECTORIES: "/probe" },
+    );
+    expect(auth).not.toBeNull();
+    // Base run env survives the merge…
+    expect(auth!.env.GIT_CEILING_DIRECTORIES).toBe("/probe");
+    // …and git authenticates through askpass (token in env, never argv).
+    expect(auth!.env.GIT_ASKPASS).toBeTruthy();
+    expect(existsSync(auth!.env.GIT_ASKPASS!)).toBe(true);
+    expect(auth!.env.VIBERR_GIT_ASKPASS_USERNAME).toBe("x-access-token");
+    expect(auth!.env.VIBERR_GIT_ASKPASS_PASSWORD).toBe(
+      "ghp_pushpushpushpushpushpushpush0000",
+    );
+    auth!.dispose();
+    expect(existsSync(auth!.env.GIT_ASKPASS!)).toBe(false);
+  });
+
+  it("returns null when the capability is withheld or no project PAT is bound", () => {
+    // No grant → no credentials, regardless of any bound PAT.
+    expect(
+      resolveRunPushAuth(
+        store.db,
+        store.slug,
+        { canBranch: true, canCommitPush: false, canOpenPr: false },
+        {},
+      ),
+    ).toBeNull();
+    // Grant but no bound PAT (fresh store) → nothing to hand out.
+    expect(
+      resolveRunPushAuth(
+        store.db,
+        store.slug,
+        { canBranch: true, canCommitPush: true, canOpenPr: true },
+        {},
+      ),
+    ).toBeNull();
   });
 });

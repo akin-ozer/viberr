@@ -54,8 +54,8 @@ export function AgentLogsSlot({
   logSel: string | null;
   onLogSel: (id: string | null) => void;
   linesByThread: Record<string, StreamedLine[]>;
-  /** Retry the assigned specialist on the other backend (D4). */
-  onRetryBackend?: (backend: "claude" | "codex") => void;
+  /** Retry the failed run's agent (primary or reviewer) on the other backend (D4). */
+  onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
   retrying?: boolean;
 }) {
   // Suppress the panel entirely (incl. the mock's empty state) only when the

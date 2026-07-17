@@ -111,9 +111,19 @@ export function resolveDeliveryPermissions(
   grants: readonly CapabilityGrant[],
 ): DeliveryPermissions {
   const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  // The headline repo-write capability gates ALL delivery. The tool layer
+  // already denies `git commit` when `execute-code-or-write-repo` is withheld
+  // (CAP_DENY_RULES above) — but this prompt-side resolution used to consult
+  // only the three fine-grained delivery capabilities, so the run prompt
+  // still said "commit and push" while the permission layer denied it. The
+  // agent then obeyed the prompt, failed three times, and reported a
+  // "blocked commit" (observed live, VIB-1 2026-07-17). Prompt and
+  // enforcement must tell the same story (XS-4).
+  const repoWriteWithheld = isWithheld(modeById, "execute-code-or-write-repo");
   return {
-    canBranch: !isWithheld(modeById, "create-task-branch"),
-    canCommitPush: !isWithheld(modeById, "commit-push-branch"),
-    canOpenPr: !isWithheld(modeById, "open-review-pr"),
+    canBranch: !repoWriteWithheld && !isWithheld(modeById, "create-task-branch"),
+    canCommitPush:
+      !repoWriteWithheld && !isWithheld(modeById, "commit-push-branch"),
+    canOpenPr: !repoWriteWithheld && !isWithheld(modeById, "open-review-pr"),
   };
 }

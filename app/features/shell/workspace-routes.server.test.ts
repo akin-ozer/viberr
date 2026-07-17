@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
@@ -311,6 +311,40 @@ describe("theme action", () => {
 });
 
 describe("create-project action (home)", () => {
+  // Projects are repo-bound (2026-07-17 ruling): creation requires a PAT
+  // connection for the chosen owner, seeded here the way org settings would.
+  // The bound PAT makes createProject probe the repo's default branch — stub
+  // fetch so the suite stays offline.
+  afterAll(() => vi.unstubAllGlobals());
+  beforeAll(async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ default_branch: "main" }), {
+            status: 200,
+          }),
+      ),
+    );
+    const { createPat } = await import("~/server/secrets/pat-store.server");
+    const pat = createPat(
+      app.db,
+      {
+        userId: seedIds.arda,
+        label: "connection · akin-ozer",
+        token: "ghp_testtesttesttesttesttesttesttest0000",
+      },
+      { userId: seedIds.arda, label: "arda@viberr.dev" },
+    );
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+         VALUES (?, ?, ?, 1, 1, ?, ?)`,
+      )
+      .run("akin-ozer", "akin-ozer", pat.id, now, now);
+  });
+
   async function postCreateProject(name: string) {
     const { action } = await import("~/routes/_index");
     const { cookie, sessionId } = await app.cookieFor(seedIds.arda);

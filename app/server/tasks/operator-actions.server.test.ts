@@ -33,6 +33,7 @@ import {
   operatorAssignSpecialist,
   operatorOpenPacket,
   operatorPostComment,
+  operatorResolvePacket,
   operatorPromptReviewer,
   operatorPromptSpecialist,
   operatorRunReviewer,
@@ -896,6 +897,66 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "task.operator.packet_opened",
     );
+  });
+
+  it("operatorResolvePacket withdraws a moot packet: cleared, blocked readiness lifted, timeline notes why", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("triage");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Scope needed before Triage → Ready",
+        options: [{ kind: "request_edit", title: "Human refines the goal" }],
+      },
+      authority("supervised"),
+    );
+    expect(task().packet).not.toBeNull();
+    expect(task().frontmatter.readiness).toBe("blocked");
+
+    const res = await operatorResolvePacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        reason: "the goal now specifies scope + acceptance criteria",
+      },
+      authority("supervised"),
+    );
+    expect(res.outcome).toBe("done");
+    expect(task().packet).toBeNull();
+    // The packet's own block lifts with it.
+    expect(task().frontmatter.readiness).toBe("ready");
+    expect(task().timeline[0]!.text).toContain("Packet withdrawn");
+    expect(task().timeline[0]!.text).toContain("scope + acceptance criteria");
+    expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
+      "task.operator.packet_withdrawn",
+    );
+  });
+
+  it("operatorResolvePacket is a noop with no open packet and denied without generate-packets", async () => {
+    deployRoster([{ capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    const noop = await operatorResolvePacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(noop.outcome).toBe("noop");
+
+    deployRoster([{ capabilityId: "append-typed-events", mode: "direct" }]);
+    const denied = await operatorResolvePacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("supervised"),
+    );
+    expect(denied.outcome).toBe("denied");
   });
 
   it("a blocked packet also marks the task blocked", async () => {

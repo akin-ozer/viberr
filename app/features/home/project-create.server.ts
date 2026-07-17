@@ -161,13 +161,13 @@ export async function createProject(
   }
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
-  // F10: a repo owner is required only when a repo NAME is given (a bound repo
-  // needs `<owner>/<name>`). A brand-new instance with no GitHub connections yet
-  // (honest empty slate) can still self-serve its first project as a repo-LESS
-  // project — creation is not blocked behind adding a PAT.
-  if (repoName && !owner) {
+  // Repo-bound projects only (owner ruling 2026-07-17, reverses F10): every
+  // project needs `<owner>/<name>` — agents deliver through GitHub, so a
+  // repo-less project dead-ends the moment execution starts. Creation is
+  // therefore gated behind adding a PAT connection.
+  if (!owner || !repoName) {
     throw AppError.validation(
-      "Enter a repo owner (or pick a GitHub connection) for a repository-bound project — or leave the repo empty to create a repo-less project.",
+      "A GitHub repository is required — pick a GitHub connection and a repository name. Add a PAT in Viberr settings → GitHub connections first.",
     );
   }
   const slug = slugifyProjectName(name);
@@ -184,18 +184,22 @@ export async function createProject(
   }
   const template =
     input.template === "light" ? LIGHTWEIGHT_TEMPLATE : GOVERNED_TEMPLATE;
-  // An empty repo field creates a repo-LESS project (repo: null) — a supported
-  // state — instead of fabricating a nonexistent `<owner>/<slug>` that every
-  // GitHub surface would then render as a dead configured repo (X12).
-  const repo = repoName ? `${owner}/${repoName}` : null;
+  const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
   // "connected" to GitHub just by holding a repo string; branch/PR sync and
   // credential health need the credential bound (project_github_credentials).
+  // The connection is REQUIRED (same ruling as above): an owner string without
+  // a PAT behind it can't deliver anything.
   const connection = getConnection(db, owner);
+  if (!connection) {
+    throw AppError.validation(
+      `No GitHub connection for "${owner}" — add a PAT for that owner in Viberr settings → GitHub connections first.`,
+    );
+  }
   let defaultBranch = "main";
-  if (repo && connection) {
+  {
     const token = getPatToken(db, connection.patId);
     if (token) {
       const remote = await fetchRemoteDefaultBranch(token, repo);
@@ -250,11 +254,8 @@ export async function createProject(
   });
 
   // Bind the selected connection's PAT to the project so credential health,
-  // branch creation, and PR sync work against the real repo. Skip for a
-  // repo-less project — there's nothing to sync against.
-  if (repo && connection) {
-    setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
-  }
+  // branch creation, and PR sync work against the real repo.
+  setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
 
   recordAudit(db, {
     action: "project.created",

@@ -143,6 +143,17 @@ export async function validatePatToken(
           "GitHub rejected the token (bad credentials) — it was revoked or never valid.",
       };
     }
+    // A GitHub-side outage (5xx) never evaluated the token — say so, or a
+    // degraded GitHub reads as "your token is bad" in the connection modal.
+    if (user.kind === "http" && user.status >= 500) {
+      return {
+        ...base,
+        status: "network_error",
+        detail:
+          `GitHub's API is degraded right now (HTTP ${user.status} on /user) — ` +
+          "the token was NOT rejected. Try again in a few minutes.",
+      };
+    }
     return {
       ...base,
       status: "network_error",
@@ -172,6 +183,15 @@ export async function validatePatToken(
         ...withIdentity,
         status: "network_error",
         detail: `GitHub is unreachable: ${repoResult.message}`,
+      };
+    } else if (repoResult.kind === "http" && repoResult.status >= 500) {
+      // Same honesty rule as /user: an outage is not a repo-access verdict.
+      return {
+        ...withIdentity,
+        status: "network_error",
+        detail:
+          `GitHub's API is degraded right now (HTTP ${repoResult.status} on /repos/${repo}) — ` +
+          "the token was NOT rejected. Try again in a few minutes.",
       };
     } else if (repoResult.kind === "http" && repoResult.status === 404) {
       return {
@@ -218,7 +238,12 @@ export async function validatePatToken(
       const orgs = await client.request<unknown[]>("GET", "/user/orgs", {
         searchParams: { per_page: 1 },
       });
-      orgReadOk = orgs.ok ? true : orgs.kind === "http" ? false : null;
+      // 4xx = the probe was refused; 5xx/network = unknown (assumed, not failed).
+      orgReadOk = orgs.ok
+        ? true
+        : orgs.kind === "http" && orgs.status < 500
+          ? false
+          : null;
     }
     let pullsReadOk: boolean | null = null;
     if (repo && requiredScopes.includes("pull_request:write")) {
@@ -227,7 +252,11 @@ export async function validatePatToken(
         `/repos/${repo}/pulls`,
         { searchParams: { per_page: 1, state: "all" } },
       );
-      pullsReadOk = pulls.ok ? true : pulls.kind === "http" ? false : null;
+      pullsReadOk = pulls.ok
+        ? true
+        : pulls.kind === "http" && pulls.status < 500
+          ? false
+          : null;
     }
     for (const id of requiredScopes) {
       if (id === "repo" && repoAccessible !== null) {

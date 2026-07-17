@@ -335,19 +335,15 @@ function NewProjectConnectionField({
   connections,
   connOwner,
   setConnOwner,
-  manualOwner,
-  setManualOwner,
 }: {
   connections: string[];
   connOwner: string;
   setConnOwner: (owner: string) => void;
-  manualOwner: string;
-  setManualOwner: (owner: string) => void;
 }) {
   return (
     <div className="field">
       <span className="flabel">
-        GitHub connection{" "}
+        GitHub connection<span className="req">*</span>{" "}
         <span className="fhint">sets the repository root</span>
       </span>
       <div className="pick-chips">
@@ -364,25 +360,17 @@ function NewProjectConnectionField({
         ))}
       </div>
       {connections.length === 0 && (
-        <>
-          <input
-            id="np-owner"
-            type="text"
-            className="np-owner-input"
-            value={manualOwner}
-            placeholder="github owner / org (optional)"
-            onChange={(e) => setManualOwner(e.target.value.trim())}
-          />
-          <div className="def-note">
-            <Icon name="alert" />
-            <span>
-              No GitHub connections yet. Type a repo owner to bind a
-              repository, or leave it blank to create a{" "}
-              <b>repo-less project</b> — add a PAT later in{" "}
-              <b>Viberr settings → GitHub connections</b>.
-            </span>
-          </div>
-        </>
+        <div className="def-note">
+          <Icon name="alert" />
+          <span>
+            No GitHub connections yet — every project needs a repository. Add
+            a PAT in{" "}
+            <Link to="/org/settings?tab=connections">
+              <b>Viberr settings → GitHub connections</b>
+            </Link>
+            , then come back.
+          </span>
+        </div>
       )}
     </div>
   );
@@ -402,11 +390,11 @@ function NewProjectRepoField({
   return (
     <div className="field">
       <label className="flabel" htmlFor="np-repo">
-        GitHub repository{" "}
+        GitHub repository<span className="req">*</span>{" "}
         <span className="fhint">
           {effOwner
             ? "project default · task-level override later"
-            : "no owner set · this will be a repo-less project"}
+            : "requires a GitHub connection"}
         </span>
       </label>
       <div className="repo-input">
@@ -566,9 +554,6 @@ function NewProjectModal({
     "balanced",
   );
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
-  // F10: with no connections yet, the owner can be typed manually (or left blank
-  // for a repo-less project) so a fresh instance can still create its first project.
-  const [manualOwner, setManualOwner] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const fetcher = useFetcher<{
     ok: boolean;
@@ -607,10 +592,16 @@ function NewProjectModal({
     if (v) setName(projectNameFromRepo(v));
   };
   const busy = fetcher.state !== "idle";
-  // The effective repo owner: a picked connection, or a manually-typed owner when
-  // there are none. Empty owner ⇒ a repo-less project (F10).
-  const effOwner = connections.length > 0 ? connOwner : manualOwner.trim();
-  const ok = name.trim().length > 1 && effKey.length >= 2;
+  // The effective repo owner: a picked connection. A repository (and therefore
+  // a PAT connection) is REQUIRED — repo-less projects were cut (2026-07-17,
+  // reverses F10): agents deliver through GitHub, so a project without a repo
+  // dead-ends at execution.
+  const effOwner = connOwner;
+  const ok =
+    name.trim().length > 1 &&
+    effKey.length >= 2 &&
+    effOwner.length > 0 &&
+    effRepo.length > 0;
   const serverError =
     fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
@@ -634,9 +625,7 @@ function NewProjectModal({
     fd.set("name", name.trim());
     fd.set("key", effKey);
     fd.set("owner", effOwner);
-    // No owner ⇒ repo-less project: don't send a repo name (avoids a dead
-    // `<owner>/<slug>` repo the GitHub surfaces would render as configured).
-    fd.set("repoName", effOwner ? effRepo || "new-project" : "");
+    fd.set("repoName", effRepo);
     fd.set("template", template);
     fd.set("policy", policy);
     fetcher.submit(fd, { method: "post" });
@@ -690,8 +679,6 @@ function NewProjectModal({
           connections={connections}
           connOwner={connOwner}
           setConnOwner={setConnOwner}
-          manualOwner={manualOwner}
-          setManualOwner={setManualOwner}
         />
         <NewProjectRepoField
           repo={repo}
@@ -705,7 +692,7 @@ function NewProjectModal({
         />
         <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />
         {serverError && (
-          <div className="def-note">
+          <div className="form-err">
             <Icon name="alert" />
             <span>{serverError}</span>
           </div>

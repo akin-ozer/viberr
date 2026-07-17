@@ -177,6 +177,18 @@ function assistantUsage(
  *  — the symmetric bug the codex fix noted). */
 type ClaudeFailureKind = "quota" | "auth" | "unknown";
 
+/** Turn cap for a claude run — a RUNAWAY guard, not a work budget. The old
+ *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live:
+ *  a completed implementation died at turn 51 on `gh --version`). Default is
+ *  deliberately huge (owner ruling 2026-07-17) — real runs should never hit
+ *  it; deployments tune it with VIBERR_CLAUDE_MAX_TURNS in .env. */
+const DEFAULT_CLAUDE_MAX_TURNS = 2000;
+function resolveMaxTurns(): number {
+  const raw = process.env.VIBERR_CLAUDE_MAX_TURNS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLAUDE_MAX_TURNS;
+}
+
 function classifyClaudeError(error: unknown): {
   kind: ClaudeFailureKind;
   message: string;
@@ -228,6 +240,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawResult = false;
       let resultIsError = false;
+      let resultSubtype: string | null = null;
       let interrupted = false;
       let settled = false;
       let queryHandle: ClaudeQuery | null = null;
@@ -276,7 +289,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // human at the CLI). acceptEdits still gated non-edit tools like
           // Bash; bypassPermissions runs unattended end-to-end.
           permissionMode: spec.autonomous ? "bypassPermissions" : "default",
-          maxTurns: 50,
+          // A runaway guard, NOT a work budget: 50 cut off real dev runs
+          // mid-delivery (a finished implementation died at turn 51). Default
+          // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
+          maxTurns: resolveMaxTurns(),
           // SDK isolation: never load the host machine's ~/.claude settings
           // tiers into a Viberr run, and enable ZERO skills — Viberr injects
           // its own skill/KB as system-prompt text, so a run must see exactly
@@ -369,6 +385,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             if (facts.isResult) {
               sawResult = true;
               resultIsError = !!facts.isError;
+              resultSubtype =
+                (message as { subtype?: string }).subtype ?? null;
             } else {
               const u = assistantUsage(message);
               if (u) {
@@ -398,6 +416,27 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
 
         if (interrupted) return settle("interrupted");
         if (sawResult && !resultIsError) return settle("finished");
+        // A turn-capped run is CUT OFF, not failed by the task — without this
+        // classified reason line it surfaced as `run·error·unknown` with
+        // "review the runtime configuration" copy (observed live: a completed
+        // implementation died at turn 51 running `gh --version`).
+        if (resultSubtype === "error_max_turns") {
+          const now = new Date().toISOString();
+          cb.onLine({
+            raw: "",
+            display: {
+              t: now.slice(11, 19),
+              ev: "err",
+              tag: "run·error·max_turns",
+              text:
+                `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
+                "not a task failure. Re-prompt the agent to continue from its " +
+                "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
+            },
+            facts: {},
+            occurredAt: now,
+          });
+        }
         return settle("error");
       };
 

@@ -88,6 +88,9 @@ export interface RunView {
   op?: boolean;
   role: string;
   kind: RunKind;
+  /** Deployed profile behind this run (null for operator / legacy rows) —
+   *  identifies WHICH reviewer to re-run on the D4 retry. */
+  profileId?: string | null;
   who: RunWho;
   backend: "claude" | "codex";
   /** True when the simulated engine produced this run (real fallback or seed). */

@@ -199,7 +199,11 @@ export async function action({ request, params }: Route.ActionArgs) {
               ? "Task held on policy · opening repository settings"
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug — the session is recorded per audit policy"
-                : `Decision recorded: ${option.t}`;
+                : option.kind === "retry_other_backend"
+                  ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                  : option.kind === "edit_goal"
+                    ? "Decision recorded — type the new goal; the packet clears when it lands"
+                    : `Decision recorded: ${option.t}`;
         return {
           ok: true as const,
           intent,

@@ -690,6 +690,142 @@ describe("resolvePacket kind matrix", () => {
     );
   });
 
+  it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", async () => {
+    const { configureRunServiceForTests, interruptRun } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    configureRunServiceForTests(); // no real keys → simulated engine
+    const store = prepared();
+    const RETRY_PACKET: TaskPacket = {
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Work stalled — pick a recovery path",
+      body: "",
+      observations: [],
+      options: [
+        {
+          kind: "retry_other_backend",
+          t: "Retry on Claude Code",
+          d: "",
+          rec: true,
+          backend: "claude",
+        },
+        { kind: "redirect", t: "Redirect", d: "", rec: false },
+      ],
+    };
+    // The failed codex assignment the packet recovers from.
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "human",
+        readiness: "blocked",
+        specialist: { profileId: "dev", backend: "codex", role: "developer" },
+      },
+      RETRY_PACKET,
+    );
+
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.waiting).toBe("agent");
+    expect(task.readiness).toBe("ready");
+    expect(task.packet).toBeNull();
+
+    // The promised run actually started — on the OTHER backend.
+    const { listRunsForTaskRows } = await import(
+      "~/server/runtimes/run-store.server"
+    );
+    const runs = listRunsForTaskRows(store.db, store.slug, "VIB-1");
+    expect(runs.length).toBe(1);
+    expect(runs[0]!.backend).toBe("claude");
+    expect(runs[0]!.kind).toBe("primary");
+    interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: runs[0]!.id },
+      actor(store.users.murat),
+    );
+
+    // The switch persisted to the assignment snapshot (D4 stickiness).
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.specialist?.backend).toBe("claude");
+    const texts = file.parsed.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("switched from Codex"))).toBe(true);
+    expect(
+      texts.some((t) => t.includes("**Decision:** Retry on Claude Code")),
+    ).toBe(true);
+  });
+
+  it("edit_goal: packet stays (stamped awaiting goal_edit) until the edited goal lands, then clears instantly", async () => {
+    const store = prepared();
+    const SCOPE_PACKET: TaskPacket = {
+      type: "blocked",
+      kind: "Blocked decision",
+      from: "operator",
+      title: "Scope needed: goal is a placeholder",
+      body: "",
+      observations: [],
+      options: [
+        { kind: "edit_goal", t: "Human specifies the goal", d: "", rec: true },
+        { kind: "hold_runtime_debug", t: "Hold", d: "", rec: false },
+      ],
+    };
+    withTask(
+      store,
+      { stage: "triage", waiting: "human", readiness: "blocked" },
+      SCOPE_PACKET,
+    );
+
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    // The decision is recorded but the packet's ask isn't fulfilled yet.
+    expect(task.waiting).toBe("human");
+    expect(task.packet).not.toBeNull();
+    const stamped = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(stamped.packet?.awaiting).toBe("goal_edit");
+    expect(stamped.timeline[0]!.text).toContain("Waiting for the edited goal");
+
+    // The edit itself fulfills the decision — packet clears with no operator
+    // round-trip, and the blocked readiness lifts with it.
+    await updateTaskGoal(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        goal: "List all files under the repo root, output as a markdown table.",
+      },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const after = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(after.packet).toBeNull();
+    expect(after.frontmatter.readiness).toBe("ready");
+    const texts = after.timeline.map((e) => e.text);
+    expect(
+      texts.some((t) => t.includes("**Packet resolved:** the requested goal edit landed.")),
+    ).toBe(true);
+  });
+
   it("resolving an already-resolved packet → 409 conflict, no crash", async () => {
     const store = prepared();
     withTask(store, { stage: "review" }, PACKET);

@@ -2511,14 +2511,16 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .login-div::before, .login-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .login-form { display: flex; flex-direction: column; gap: .9rem; }
 .login-foot { display: flex; justify-content: flex-end; }
-.login-err {
+/* .form-err shares the login error's framed red treatment — the ONE way an
+   inline form/server error looks anywhere (login, New-project modal, …). */
+.login-err, .form-err {
   display: flex; align-items: flex-start; gap: .5rem;
   padding: .55rem .7rem; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 70%);
   background: color-mix(in srgb, var(--red-light), var(--surface) 45%);
   font-size: .8rem; color: var(--coral-dark); line-height: 1.45;
 }
-.login-err .ico { width: 14px; height: 14px; flex: none; margin-top: .1rem; }
+.login-err .ico, .form-err .ico { width: 14px; height: 14px; flex: none; margin-top: .1rem; }
 .login-tag { text-align: center; font-family: var(--font-mono); font-size: .68rem; color: var(--placeholder); line-height: 1.6; }
 
 .gmark { font-family: var(--font-display); font-weight: 800; font-size: .72rem; line-height: 1; color: var(--muted); }

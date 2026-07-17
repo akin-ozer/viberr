@@ -12,6 +12,7 @@ import {
   operatorAssignReviewer,
   operatorAssignSpecialist,
   operatorOpenPacket,
+  operatorResolvePacket,
   operatorPostComment,
   operatorPromptReviewer,
   operatorPromptSpecialist,
@@ -114,7 +115,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "open_decision_packet",
-        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. The human resolves it from the task page.",
+        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. The human resolves it from the task page.",
         {
           packetType: z
             .enum(["input", "blocked"])
@@ -177,6 +178,27 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "open_decision_packet",
+    );
+    add(
+      tool(
+        "resolve_decision_packet",
+        "WITHDRAW the task's open decision packet when it has become MOOT — the input it asked for was provided out-of-band (e.g. a human edited the goal/scope directly instead of clicking an option), or circumstances changed so the decision no longer applies. Give a short `reason`; it is written to the timeline so the decision log shows why the packet was withdrawn. Do NOT withdraw a packet that still genuinely awaits a human decision.",
+        {
+          reason: z
+            .string()
+            .describe("Why the packet is moot, e.g. 'the goal now specifies scope + acceptance criteria'."),
+        },
+        async (args) =>
+          resultText(
+            await operatorResolvePacket(
+              db,
+              ctx,
+              { ...base, reason: prose(args.reason) },
+              authority,
+            ),
+          ),
+      ),
+      "resolve_decision_packet",
     );
   }
 

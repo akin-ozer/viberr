@@ -138,6 +138,7 @@ function projectRow(
     op: op ? true : undefined,
     role: row.role,
     kind: row.kind,
+    profileId: row.agent_profile_id ?? null,
     who,
     backend,
     simulated: row.simulated === 1,

@@ -26,6 +26,7 @@ import {
   operatorRunSpecialist,
   operatorSnapshot,
   operatorTransitionStage,
+  operatorResolvePacket,
   resolveOperatorAuthority,
   type OperatorAuthority,
   type OperatorAutonomy,
@@ -86,12 +87,16 @@ export interface RunOperatorInput {
    *     report and propose the next state change (recommend/perform the transition
    *     or accept completion), rather than re-prompting.
    */
-  trigger?: "create" | "transition" | "agent-reply" | "manual";
+  trigger?: "create" | "transition" | "agent-reply" | "goal-updated" | "manual";
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
   /** A human's `@operator …` comment to address in this run (when a person
    *  talks to the operator directly). The operator reads it and responds. */
   humanComment?: string;
+  /** agent-reply trigger: the finished agent's FULL report, straight from the
+   *  run store — the react prompt embeds it so the operator's next directive
+   *  never depends on the timeline comment having survived. */
+  agentReply?: string;
   dataRoot?: string;
   actor?: AuditActor;
 }
@@ -140,7 +145,18 @@ function inFlightOperatorRun(
  * exactly once on release.
  */
 interface OperatorLeaseState {
-  held: Map<string, { runId: string | null; backend: RealBackend; autonomy: OperatorAutonomy }>;
+  held: Map<
+    string,
+    {
+      runId: string | null;
+      backend: RealBackend;
+      autonomy: OperatorAutonomy;
+      /** Task ref carried for the waiting-flag settle on release. */
+      projectSlug: string;
+      taskKey: string;
+      dataRoot?: string;
+    }
+  >;
   pending: Map<string, RunOperatorInput>;
 }
 
@@ -180,7 +196,14 @@ function releaseOperatorLease(
   if (token !== undefined && current !== token) return; // stale release — ignore
   state.held.delete(key);
   const queued = state.pending.get(key);
-  if (!queued) return;
+  if (!queued) {
+    // Last drive for now: flip `waiting: agent` back to human once nothing is
+    // live on the task (runOperator set it at drive start; a specialist the
+    // operator prompted keeps its own completion-chain flip — the live check
+    // stays out of its way).
+    settleWaitingAfterOperator(db, current ?? leaseRefFromKey(key));
+    return;
+  }
   state.pending.delete(key);
   logger.info("operator lease released — firing the queued trigger", {
     key,
@@ -192,6 +215,57 @@ function releaseOperatorLease(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   });
+}
+
+/** Recover the task ref from a lease key (slugs are kebab-case — the first
+ *  "/" is the separator). Fallback for releases with no held entry. */
+function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } {
+  const i = key.indexOf("/");
+  return { projectSlug: key.slice(0, i), taskKey: key.slice(i + 1) };
+}
+
+/** After the last operator drive ends with no queued follow-up: if no run is
+ *  still live on the task, flip `waiting: agent` → human. Fire-and-forget —
+ *  a failed settle only leaves the board reading "working" until the next
+ *  task mutation reprojects. */
+function settleWaitingAfterOperator(
+  db: Database.Database,
+  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+): void {
+  void (async () => {
+    try {
+      const live = inFlightAgentRun(db, ref.projectSlug, ref.taskKey);
+      if (live) return;
+      const { clearWaitingToHuman } = await import(
+        "~/server/tasks/task-actions.server"
+      );
+      const ctx: TaskMutationContext =
+        ref.dataRoot !== undefined ? { dataRoot: ref.dataRoot } : {};
+      await clearWaitingToHuman(db, ctx, ref.projectSlug, ref.taskKey);
+    } catch (error) {
+      logger.warn("settleWaitingAfterOperator failed", {
+        taskKey: ref.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  })();
+}
+
+/** Any queued/running run (operator, specialist or reviewer) on the task. */
+function inFlightAgentRun(
+  db: Database.Database,
+  projectSlug: string,
+  taskKey: string,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT id FROM agent_runs
+       WHERE project_slug = ? AND task_key = ?
+         AND state IN ('queued', 'running')
+       LIMIT 1`,
+    )
+    .get(projectSlug, taskKey);
+  return !!row;
 }
 
 /** Test-only: drop all leases/queued triggers (fresh state per test). */
@@ -267,6 +341,9 @@ export async function runOperator(
     runId: null as string | null,
     backend,
     autonomy: authority.autonomy,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -279,6 +356,13 @@ export async function runOperator(
     autonomy: authority.autonomy,
     reactDepth: input.reactDepth ?? 0,
   };
+
+  // The operator is itself an agent working the task: the board should read
+  // "working" for the duration of the drive, not "waiting on you" (the
+  // specialist starters do the same). Settled back to human on lease release
+  // once nothing is live (settleWaitingAfterOperator).
+  const { markWaitingAgent } = await import("~/server/tasks/task-actions.server");
+  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
   // Claude: real tool-driven operator (in-process MCP tools). Codex: no
   // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
@@ -330,6 +414,9 @@ export async function runOperator(
 const OPERATOR_PLAN_TOOLS = [
   "post_comment",
   "open_packet",
+  // Withdraw YOUR OWN open packet when it became moot (its asked-for input was
+  // provided out-of-band, e.g. a human edited the goal). `reason` explains why.
+  "resolve_packet",
   "assign_specialist",
   "run_specialist",
   "prompt_specialist",
@@ -431,6 +518,7 @@ async function startCodexOperatorRun(
     snapshot,
     input.trigger ?? "manual",
     input.humanComment,
+    input.agentReply,
   );
 
   const { runId } = await startRun(db, {
@@ -644,6 +732,14 @@ async function executeCodexPlan(
         case "accept_completion":
           await operatorAcceptCompletion(db, ctx, base, authority);
           break;
+        case "resolve_packet":
+          await operatorResolvePacket(
+            db,
+            ctx,
+            { ...base, ...(a.reason ? { reason: a.reason } : a.text ? { reason: a.text } : {}) },
+            authority,
+          );
+          break;
       }
     } catch (error) {
       // ABORT the remaining plan on a governed-action failure: executing later
@@ -688,7 +784,12 @@ async function startRealOperatorRun(
     taskKey: input.taskKey,
     authority,
   });
-  const prompt = buildOperatorTurnPrompt(snapshot, input.trigger ?? "manual", input.humanComment);
+  const prompt = buildOperatorTurnPrompt(
+    snapshot,
+    input.trigger ?? "manual",
+    input.humanComment,
+    input.agentReply,
+  );
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -1119,17 +1220,31 @@ export function buildOperatorSystemPrompt(
  */
 export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "manual",
+  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
   humanComment?: string,
+  agentReply?: string,
 ): string {
+  // Same rationale as the claude turn prompt: the react decision carries the
+  // agent's report verbatim so directives can quote concrete findings.
+  const reportBlock =
+    trigger === "agent-reply" && agentReply?.trim()
+      ? `\n\n# The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""})\n\n"""\n${agentReply.slice(0, 4000)}\n"""`
+      : "";
   const decision = humanComment?.trim()
     ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
-    : trigger === "agent-reply"
-      ? "An agent you prompted has just REPORTED BACK (its latest reply is in recentTimeline). React to it: " +
+    : trigger === "goal-updated"
+      ? "A human just EDITED THE TASK GOAL (the snapshot's `goal` is the new one). If the open packet (snapshot `packet`) " +
+        "asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, include a " +
+        "`resolve_packet` action with a short `reason` — the packet is moot. Then continue coordination for the current " +
+        "stage (prompt the right agent anchored on the NEW goal, or advance a pre-work stage). If the goal is still not " +
+        "actionable, say what's missing in `reasoning` — do NOT open a duplicate packet."
+      : trigger === "agent-reply"
+      ? "An agent you prompted has just REPORTED BACK (its report is included above verbatim). React to it: " +
         "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
-        "toward review if the implementation looks complete, or accept_completion if the review is clean. Only " +
-        "re-prompt the same agent (prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not " +
-        "prompt just to repeat yourself."
+        "toward review if the implementation looks complete, or accept_completion if the review is clean. If the " +
+        "review REQUESTED CHANGES, re-prompt the specialist and QUOTE the reviewer's specific findings in the " +
+        "action's `text` (the specialist does not see this report otherwise). Only re-prompt the same agent " +
+        "(prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not prompt just to repeat yourself."
       : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
         "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
         "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
@@ -1138,8 +1253,9 @@ export function buildCodexOperatorPrompt(
     "# This task\n\n" +
     "```json\n" +
     JSON.stringify(snapshot, null, 2) +
-    "\n```\n\n" +
-    "# Your decision\n\n" +
+    "\n```" +
+    reportBlock +
+    "\n\n# Your decision\n\n" +
     "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
     "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions.\n\n" +
     decision +
@@ -1160,8 +1276,9 @@ export function buildCodexOperatorPrompt(
  */
 export function buildOperatorTurnPrompt(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "manual",
+  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
   humanComment?: string,
+  agentReply?: string,
 ): string {
   const header =
     `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
@@ -1182,16 +1299,37 @@ export function buildOperatorTurnPrompt(
     );
   }
 
-  if (trigger === "agent-reply") {
+  if (trigger === "goal-updated") {
     return (
       header +
-      "An agent you prompted has just REPORTED BACK (see the latest comment on the timeline).\n\n" +
+      "A human just EDITED THE TASK GOAL (the goal above is the new one).\n\n" +
       "Do this now:\n" +
-      "1. Call get_task and read the agent's latest report in recentTimeline.\n" +
+      "1. Call get_task — read the new goal and the open decision packet (`packet`), if any.\n" +
+      "2. If your open packet asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, call resolve_decision_packet with a short reason — the packet is moot, do not leave it standing.\n" +
+      "3. Then continue coordination for the current stage: prompt the right agent with a directive anchored on the NEW goal, or advance a pre-work stage if nothing needs to run here.\n" +
+      "4. If the new goal is still not actionable, post ONE brief comment saying exactly what is missing — do NOT open a duplicate packet while one is already standing.\n\n" +
+      "Respect your capability policy at every step. Keep comments concise."
+    );
+  }
+
+  if (trigger === "agent-reply") {
+    // Embed the report verbatim (capped): the operator's next directive must
+    // carry the agent's actual findings even when the timeline comment was
+    // dropped or trimmed.
+    const reportBlock = agentReply?.trim()
+      ? `The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""}):\n"""\n${agentReply.slice(0, 4000)}\n"""\n\n`
+      : "";
+    return (
+      header +
+      "An agent you prompted has just REPORTED BACK.\n\n" +
+      reportBlock +
+      "Do this now:\n" +
+      "1. Call get_task and read the live state (the report above is the agent's reply).\n" +
       "2. Post a brief comment summarizing what the agent reported.\n" +
       "3. Based on that report, PROPOSE THE NEXT STATE CHANGE:\n" +
       "   · if the implementation looks complete → transition_stage toward review (or recommend it under supervised);\n" +
       "   · if the review looks clean → accept_completion (or recommend acceptance under supervised);\n" +
+      "   · if the review REQUESTED CHANGES → re-prompt the specialist and QUOTE the reviewer's specific findings in your directive (the specialist does not see this report otherwise — a directive that just says \"see the reviewer's comments\" hands it nothing);\n" +
       "   · only if the work is clearly incomplete, re-prompt the SAME agent with prompt_specialist/prompt_reviewer, and say why.\n" +
       "Do NOT prompt a fresh agent turn just to repeat yourself. React to the report, then act or recommend.\n\n" +
       "Respect your capability policy at every step. Keep comments concise."

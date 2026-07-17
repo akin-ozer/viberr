@@ -554,8 +554,29 @@ export async function updateTaskGoal(
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
   }
 
+  let clearedPacket = false;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.goal = goal;
+    // A confirmed `edit_goal` packet decision is fulfilled by THIS edit —
+    // clear the packet immediately (no operator round-trip). A blocked packet
+    // lifted its own readiness gate with it.
+    if (parsed.packet?.awaiting === "goal_edit") {
+      const wasBlocked = parsed.packet.type === "blocked";
+      parsed.packet = null;
+      clearedPacket = true;
+      if (wasBlocked && parsed.frontmatter.readiness === "blocked") {
+        parsed.frontmatter.readiness = "ready";
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "transition",
+        actor: humanActorRef(db, actor),
+        title: null,
+        text: "**Packet resolved:** the requested goal edit landed.",
+        toAgent: false,
+        evidence: null,
+      });
+    }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
       type: "policy",
@@ -566,6 +587,9 @@ export async function updateTaskGoal(
       evidence: null,
     });
   });
+  if (clearedPacket) {
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.goal.updated",
@@ -576,8 +600,10 @@ export async function updateTaskGoal(
     taskKey: input.taskKey,
     details: {},
   });
-  // Re-engage the operator so it reads the amended goal on its next turn.
-  void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  // Re-engage the operator so it reads the amended goal on its next turn —
+  // the dedicated trigger tells it to withdraw a now-moot scope packet
+  // (resolve_decision_packet) instead of treating this as a generic poke.
+  void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "goal-updated");
 
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
@@ -597,7 +623,7 @@ async function autoInvokeOperator(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  trigger: "create" | "transition",
+  trigger: "create" | "transition" | "goal-updated",
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -1275,6 +1301,10 @@ async function openStuckLoopPacket(
     taskKey: string;
     agentHandle: string;
     reason: string;
+    /** Failure-specific recovery options prepended to the standard three
+     *  (e.g. retry_other_backend after a backend-unavailability failure). A
+     *  recommended extra takes the recommendation from the default redirect. */
+    extraOptions?: import("./operator-actions.server").OperatorPacketOptionInput[];
   },
 ): Promise<void> {
   try {
@@ -1284,6 +1314,8 @@ async function openStuckLoopPacket(
       "./operator-actions.server"
     );
     const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
+    const extra = input.extraOptions ?? [];
+    const extraRecommended = extra.some((o) => o.recommended);
     const result = await operatorOpenPacket(
       db,
       ctx,
@@ -1298,11 +1330,12 @@ async function openStuckLoopPacket(
           { k: "Signal", v: input.reason },
         ],
         options: [
+          ...extra,
           {
             kind: "redirect",
             title: "Redirect with sharper guidance",
             detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-            recommended: true,
+            ...(extraRecommended ? {} : { recommended: true }),
           },
           {
             kind: "request_edit",
@@ -1626,7 +1659,11 @@ export async function applyAgentCompletionEffects(
     backend: input.backend,
     role: input.role,
   };
-  const commentText = replyTextForRun(db, finished.id);
+  // The timeline comment stores the FULL reply (2026-07-17 ruling — the old
+  // 1,200-char cap made "(truncated — full report in the agent logs)" the only
+  // way to read a long report; the timeline UI clamps + expands instead). The
+  // operator snapshot caps per-comment text on ITS side, so prompts stay
+  // bounded.
   const fullText = fullReplyTextForRun(db, finished.id);
   const prevReply = latestAgentReplyText(
     ctx,
@@ -1641,7 +1678,7 @@ export async function applyAgentCompletionEffects(
     taskKey: input.taskKey,
     runId: finished.id,
     actorRef,
-    replyText: commentText,
+    replyText: fullText,
   });
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
   //     trace on the timeline and never re-invoked the operator — the task just
@@ -1666,32 +1703,66 @@ export async function applyAgentCompletionEffects(
           ? `${backendLabel} rejected the credentials`
           : failure?.kind === "unavailable"
             ? `${backendLabel} is unavailable (no usable credential configured — the run was refused, no agent process started)`
-            : failText
-              ? `${backendLabel} run failed: ${failText}`
-              : `the ${backendLabel} run ended in an error`;
+            : failure?.kind === "max_turns"
+              ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work — not a task failure (its partial report, if any, is above)`
+              : failText
+                ? `${backendLabel} run failed: ${failText}`
+                : `the ${backendLabel} run ended in an error`;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "blocked",
         actor: actorRef,
         title: null,
-        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}. No changes were delivered.${
+        text: `The ${input.role} ${roleLabel} run did not complete — ${reasonText}.${
+          failure?.kind === "max_turns" ? "" : " No changes were delivered."
+        }${
           failure?.kind === "quota" || failure?.kind === "auth"
             ? " Retry on the other backend, or fix the credential and re-run."
             : failure?.kind === "unavailable"
               ? " Configure a credential for this backend, or retry on the other backend."
-              : ""
+              : failure?.kind === "max_turns"
+                ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
+                : ""
         }`,
         toAgent: false,
         evidence: null,
       });
     });
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    // Backend-level failure (quota / auth / no credential): the packet's first
+    // recovery option is a one-click retry on the OTHER backend (D4) — the
+    // switch persists to the assignment, so later operator prompts follow it.
+    const backendFailure =
+      failure?.kind === "quota" ||
+      failure?.kind === "auth" ||
+      failure?.kind === "unavailable";
+    const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
+    const altLabel = altBackend === "claude" ? "Claude Code" : "Codex";
+    // A reviewer retry must name its profile; the run row carries it.
+    const failedProfileId =
+      input.kind === "reviewer"
+        ? (getRun(db, finished.id)?.agent_profile_id ?? null)
+        : null;
+    const retryOption =
+      backendFailure && (input.kind === "primary" || failedProfileId)
+        ? [
+            {
+              kind: "retry_other_backend" as const,
+              title: `Retry on ${altLabel}`,
+              detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks — later prompts follow it.`,
+              recommended: true,
+              backend: altBackend,
+              ...(failedProfileId ? { profileId: failedProfileId } : {}),
+            },
+          ]
+        : [];
     await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       agentHandle: input.agentHandle,
       reason: `The ${input.role} ${roleLabel} run failed — ${reasonText}.`,
+      ...(retryOption.length ? { extraOptions: retryOption } : {}),
     });
     notifyTaskWatchers(
       db,
@@ -1759,23 +1830,23 @@ export async function applyAgentCompletionEffects(
     reactAutonomy = authority.autonomy;
     currentDepth = 0;
   }
-  // No-progress detection compares the TRUNCATED comment forms (adversarial-
-  // review #4): `prevReply` is the prior reply's stored (truncated) timeline
-  // comment, so comparing it against the current UNtruncated `fullText` could
-  // never match for a >1200-char reply, defeating the CTL-3 spiral guard. Use
-  // `commentText` (same truncated form) for the react/no-progress decision;
-  // `fullText` stays reserved for the reviewer verdict above.
+  // No-progress detection compares the STORED comment forms (adversarial-
+  // review #4): both sides must be the same form or a repeat never matches.
+  // Comments now store the FULL reply, so compare `fullText` against
+  // `prevReply` (the prior stored comment — also full for new comments; a
+  // legacy truncated prevReply simply won't match, which errs toward reacting
+  // and is bounded by the depth cap).
   const shouldReact = operatorShouldReactToReply(
     finished.state,
-    commentText,
+    fullText,
     prevReply,
     currentDepth,
   );
   if (!shouldReact) {
     const noProgress =
-      !!commentText && prevReply !== null && prevReply.trim() === commentText.trim();
+      !!fullText && prevReply !== null && prevReply.trim() === fullText.trim();
     const depthCapped =
-      !!commentText &&
+      !!fullText &&
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
@@ -1821,13 +1892,20 @@ export async function applyAgentCompletionEffects(
     reactDepth: currentDepth + 1,
     backend: reactBackend,
     autonomy: reactAutonomy,
+    // Hand the reply DIRECTLY to the react turn. The operator used to depend
+    // on the timeline comment for the agent's report — when that comment went
+    // missing (stale bind-mount read, guardrail drop), the operator re-prompted
+    // the next agent with no findings ("pull up the reviewer's comments…").
+    // The run store is the source of truth for the reply; the prompt carries it.
+    ...(fullText ? { agentReply: fullText } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 }
 
 /** Flip a task from `waiting: agent` back to `waiting: human` once no further
- *  agent work follows a completion. No-op when it's already not agent-waiting. */
-async function clearWaitingToHuman(
+ *  agent work follows a completion. No-op when it's already not agent-waiting.
+ *  Exported for the operator lease release (settle after the last drive). */
+export async function clearWaitingToHuman(
   db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -2649,6 +2727,13 @@ export async function reorderTask(
  *   block_on_policy     readiness → blocked, waiting → human, packet KEPT,
  *                       `blocked` event.
  *   hold_runtime_debug  readiness → blocked, packet KEPT, `blocked` event.
+ *   retry_other_backend waiting → agent, readiness → ready, packet cleared,
+ *                       then the failed agent RESTARTS on `option.backend`
+ *                       (reviewer retries carry `option.profileId`); the
+ *                       switch persists to the assignment snapshot (D4).
+ *   edit_goal           packet KEPT but stamped `awaiting: goal_edit` — the
+ *                       UI opens the goal editor, and updateTaskGoal clears
+ *                       the packet the moment the edited goal is saved.
  *
  * Idempotent: a task without an open packet → 409 conflict (already
  * resolved elsewhere), never a crash. Every resolve marks the task's
@@ -2796,6 +2881,52 @@ export async function resolvePacket(
       };
       break;
     }
+    case "edit_goal": {
+      // The human chose to refine the goal themselves. The packet's ask is
+      // only fulfilled when the edit LANDS, so the packet stays open (stamped)
+      // and updateTaskGoal clears it the moment the new goal is saved — no
+      // operator round-trip needed. The UI reads this option kind and opens
+      // the goal editor.
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. Waiting for the edited goal — the packet clears as soon as it lands.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "human";
+      };
+      break;
+    }
+    case "retry_other_backend": {
+      // Backend-failure recovery (D4): the run restarts below on the option's
+      // target backend; startSpecialistRun/startReviewerRun persist the switch
+      // to the assignment snapshot so later prompts follow it.
+      const targetLabel =
+        (option.backend ?? "claude") === "claude" ? "Claude Code" : "Codex";
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. Re-running on ${targetLabel} with a fresh context.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "agent";
+        fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       event = {
@@ -2825,6 +2956,11 @@ export async function resolvePacket(
     }
     mutate(parsed.frontmatter);
     if (clearPacket) parsed.packet = null;
+    // edit_goal keeps the packet but marks the decision made — updateTaskGoal
+    // clears it when the edited goal lands.
+    if (option.kind === "edit_goal" && parsed.packet) {
+      parsed.packet.awaiting = "goal_edit";
+    }
     parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -2856,6 +2992,62 @@ export async function resolvePacket(
     option.kind === "custom";
   if (sentBackToAgent) {
     void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  }
+
+  // retry_other_backend: actually start the promised run. Operator-authorized
+  // like the redirect path's re-engage (the packet is the human decision; the
+  // execution is coordination machinery — an owner-contributor may resolve).
+  // A start failure must not un-resolve the packet: record it on the timeline.
+  if (option.kind === "retry_other_backend") {
+    const target: RealBackend = option.backend === "codex" ? "codex" : "claude";
+    const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
+    try {
+      const { startSpecialistRun, startReviewerRun } = await import(
+        "./specialist-run.server"
+      );
+      if (typeof option.profileId === "string" && option.profileId) {
+        await startReviewerRun(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: option.profileId,
+            backendOverride: target,
+          },
+          OPERATOR_TASK_ACTOR,
+          opCtx,
+        );
+      } else {
+        await startSpecialistRun(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            backendOverride: target,
+          },
+          OPERATOR_TASK_ACTOR,
+          opCtx,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("retry_other_backend start failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "operator" },
+          title: null,
+          text: `The retry could not start — ${message}`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
   }
 
   return {

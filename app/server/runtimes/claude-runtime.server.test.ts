@@ -121,6 +121,24 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(exit).toMatchObject({ outcome: "error" });
   });
 
+  it("a turn-capped run emits a classified run·error·max_turns reason line (cut off ≠ failed)", async () => {
+    const { q } = fakeQuery([
+      { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 51, usage: {} },
+    ]);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+    expect(exit).toMatchObject({ outcome: "error" });
+    const reason = lines.find((l) => l.display?.tag === "run·error·max_turns");
+    expect(reason).toBeTruthy();
+    const display = reason!.display!;
+    expect(display.ev).toBe("err");
+    expect(display.text).toContain("turn cap");
+    expect(display.text).toContain("VIBERR_CLAUDE_MAX_TURNS");
+  });
+
   it("errors when the stream ends with no result envelope (aborted)", async () => {
     const { q } = fakeQuery([{ type: "assistant", message: { content: [{ type: "text", text: "partial" }] } }]);
     const adapter = createClaudeAdapter({ queryFn: () => q });
