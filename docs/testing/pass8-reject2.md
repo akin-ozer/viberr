@@ -1,6 +1,3 @@
-> Scope: pass-8 review-reject test note (R7-4)
+# PASS-8 REVIEW REJECT TEST!!!
 
-# Pass-8 review-reject test
-
-Verifies R7-4: a rejected pass-8 review blocks delivery until fixes land.
-Last reviewed: 2026-07-18
+this document DELIBERATELY violates the house style to exercise the reviewer reject path. there is no scope blockquote at the top. the heading is ALL CAPS with punctuation. there is no last-reviewed closer. this single line is intentionally very very long to blow well past any reasonable line-length limit the house style imposes on documentation files, which the docs style reviewer should flag at the review boundary as a clear violation requiring changes.
