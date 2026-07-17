@@ -14,7 +14,9 @@ test("review queue shows VIB-142 with the agents after the request-edit decision
   const waitingPanel = page.locator(".panel", {
     hasText: "Waiting on your acceptance",
   });
-  const agentsPanel = page.locator(".panel", { hasText: "Still with agents" });
+  // R8-3: the working panel was renamed "Still with agents" → "Still in review"
+  // (it now holds agent-side tasks AND human-waiting tasks not in this viewer's set).
+  const agentsPanel = page.locator(".panel", { hasText: "Still in review" });
   await expect(waitingPanel).toBeVisible();
   await expect(agentsPanel).toBeVisible();
 
