@@ -80,9 +80,11 @@ Creation flow, `viberr-sandbox`:
   reconciles via `decisionsRequiring`. **MCP empty state** — a fresh seed genuinely has 0 MCPs.
 
 ### OPEN / low-priority (candidate implementation items)
-- **O-1 (copy)** VIB-181 review row: "no specialist was ever assigned" when a specialist WAS assigned
-  but its backend was down (produced no diff). Distinguish "assigned-but-never-ran" from "never
-  assigned". Low priority; arose from an artificial sequence.
+- **O-1 → IMPLEMENTED (commit 4ad29c8).** The operator narrated an assigned-but-failed specialist run
+  ("no specialist was ever assigned") inaccurately. Added operator-definition guidance (rule 5d):
+  describe it by what actually happened ("the assigned specialist's run did not complete"), checking
+  `get_task` for the assigned specialist + run outcome first. (Injected into the operator persona; it
+  shapes fresh runs — not unit-assertable, but it is the implementation of the fix.)
 - **O-2 → INVESTIGATED, NOT A CHANGE.** The seed profiles list `run-unit-integration-validation`/
   `move-task-to-review`/`report-validation-verdict`. These ARE real catalog capability defs
   (`app/shared/capabilities.ts`) kept DELIBERATELY as descriptive labels (`capability-catalog.ts:43`:
@@ -127,8 +129,17 @@ task-detail UI panel, audit actions, +6 tests. Live-verified in docker (VIB-208 
 operator run). Tick is `VIBERR_SCHEDULE_TICK_MS` (default 60s). Per the owner's standing
 instruction to be consulted on product-design decisions, this is greenlit-then-built, not built blind.
 
-## 5. Verdict
-Every goal-named test dimension is covered with a concrete case + result; 3 real defects were found
-and fixed and re-verified live; would-be findings were checked and correctly dismissed. PR #36's
-branch is implementation-ready and green. Remaining backlog = O-1/O-2 (minor polish) + O-3 (a product
-question). This doc is the authoritative index for the implementation phase.
+## 5. Verdict — EVERY item dispositioned (nothing open)
+Every goal-named test dimension is covered with a concrete case + result; would-be findings were
+checked and correctly dismissed. Every todo is now closed:
+- **FIX-1 subagent-task denylist** — DONE (7b17b1b), live-verified.
+- **FIX-2 Codex/Claude server-side delivery** — DONE (5b287be), live-verified.
+- **FIX-3 seed prose consistency** — DONE (1eb77be).
+- **O-1 operator honesty (assigned-but-failed run)** — DONE (4ad29c8).
+- **O-2 seed descriptive caps** — investigated; a change would be a REGRESSION, so correctly NOT
+  changed (documented, resolved).
+- **O-3 scheduled operator re-runs** — BUILT end-to-end (2eac909 + 825e131), live-verified in docker.
+- Prior W1–W5, adversarial A–D, MED-1 — DONE (PR #36 body / MASTER-STATUS).
+
+Full suite 1326 green · typecheck clean. There is no remaining open code item; the branch is complete.
+Ready to keep iterating on any NEW target the owner names.
