@@ -171,22 +171,24 @@ deliveries on `akin-ozer/viberr` (goal constrained to ONE 1-line marker file eac
      without merging, but VIB-205 is still active — rework and reopen, or archive"), no auto-advance.
    Confirms R8-6 (surface, never auto-advance) end-to-end against the real repo.
 
-### FINDING — Codex agent-side `git push` fails in the container (Claude/Codex parity gap)
-The Developer's `commit-push-branch` is **mode: direct**, the project PAT was bound *before* the run,
-and the token is valid (the server-side push used it successfully). viberr therefore set
-`pushCredentialed=true` and told the Codex agent to push (`git push -u origin vib-204` → open PR).
-Codex's push FAILED: *"the commit is complete, but `git push` failed because this process received no
-HTTPS credentials or askpass helper **despite the delivery contract's expectation**"* — it inspected
-`core.askpass`/`env` and found none. `pushAuth.env` (GIT_ASKPASS + token) IS threaded into the
-RunSpec (`specialist-run.server.ts:704`) and codex-runtime merges `spec.env`, so the gap is that the
-askpass helper — written to the **host tmpdir** (`git-clone-auth.server.ts` `mkdtempSync(tmpdir())`)
-— isn't reachable/executable inside the **Codex sandbox** (Claude runs + the unsandboxed server-side
-push both get it). Effect: a misleading "push blocked on missing GitHub credentials" decision packet
-for what the governed server-side path delivers fine.
-**Open product-design question (for the owner):** either (a) fix Codex askpass by writing the helper
-into the sandbox-accessible workspace, or (b) — cleaner, backend-agnostic, and already the "governed
-delivery" model — stop instructing agents to push at all and always deliver via the server-side
-`pushWorkspaceBranch` on the Review transition. Leaning (b).
+### FINDING → FIXED — Codex agent-side `git push` (Claude/Codex parity) → server-side delivery for both
+Root cause (confirmed, not the sandbox): Codex's `shell_environment_policy: { inherit: "core" }`
+(`codex-runtime.server.ts`) **intentionally strips `GIT_ASKPASS` + the token from Codex tool shells**
+(only `GIT_CEILING_DIRECTORIES` is passed through) — a token-safety boundary (the same reason secrets
+must not ride Codex `--config` argv, visible in `ps auxww`). So Codex's `git push` failed with *"could
+not read Username for 'https://github.com': No such device or address"* even after a sandbox-mode
+experiment (verified: the mode wasn't the blocker). Claude passes the token via the child env, so its
+push works — but handing a coding agent the token is exactly what's unsafe on Codex.
+
+**Owner ruling: "server-side for both, but the agent still writes the commit message." → IMPLEMENTED.**
+Agents now AUTHOR their commits locally (own `[TASK]`-prefixed messages) and are told NOT to push or
+open a PR; **viberr delivers server-side** (`pushWorkspaceBranch` → `openTaskPr`) on the Review
+transition — one token-safe, backend-identical path. Removed `resolveRunPushAuth` + `pushCredentialed`
+(no run gets a push credential); rewrote the delivery-contract prompt; +2 `buildAnalyzePrompt` tests.
+Live-verified (VIB-207/PR #61): Codex committed `b4bccce [VIB-207] …`, reported *"I did not push or
+open a PR; Viberr handles both when entering Review"* (NO more "push blocked" packet — the operator
+instead cleanly recommended "Move to Review"), and on transition viberr opened the PR carrying
+**Codex's own commit message**. Full suite 1320 green + typecheck.
 
 ### Repo hygiene
 PR #59 merged one 1-line marker (`planning/live-test/viberr-live-A.md`, "safe to delete") to `main`;

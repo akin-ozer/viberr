@@ -50,7 +50,6 @@ import {
   type SimulatedScript,
 } from "~/server/runtimes/simulated-runtime.server";
 import {
-  chainRunCompletion,
   listRunsForTask,
   startRun,
 } from "~/server/runtimes/run-service.server";
@@ -65,7 +64,6 @@ import {
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import {
   cloneFailureLogDetails,
-  createGitHubAskpassEnv,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
 } from "./git-clone-auth.server";
@@ -637,15 +635,16 @@ export async function startSpecialistRun(
   }
 
   const delivery = resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []);
-  // The run env: git confinement, plus ephemeral push credentials when the
-  // profile's grants make "push the branch" a real instruction (see
-  // resolveRunPushAuth). Computed BEFORE the prompt so the delivery contract
-  // can tell the truth about whether a push can succeed here.
+  // The run env: git confinement only. Delivery is SERVER-SIDE for BOTH backends
+  // (F-GH3): the agent commits locally with its own `[TASK]` message but NEVER
+  // pushes — viberr pushes the workspace branch + opens the PR on the Review
+  // transition (`pushWorkspaceBranch`). This is the sole token-safe, backend-
+  // agnostic path: handing the agent a push credential works on Claude (child
+  // env) but is impossible on Codex without leaking the token into `--config`
+  // argv (Codex's `shell_environment_policy: inherit "core"` strips GIT_ASKPASS
+  // from tool shells — parity gap found live 2026-07-18). So no run gets push
+  // credentials; the platform delivers.
   const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
-  const pushAuth =
-    realBackend && repo
-      ? resolveRunPushAuth(db, input.projectSlug, delivery, baseRunEnv)
-      : null;
   const analyzePrompt = buildAnalyzePrompt({
     role: sp.role,
     taskKey: input.taskKey,
@@ -655,7 +654,6 @@ export async function startSpecialistRun(
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
     cloned: !!clone,
     delivery,
-    pushCredentialed: !!pushAuth,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -701,11 +699,9 @@ export async function startSpecialistRun(
     // profile that declares an org MCP gets it on both supported SDKs.
     ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend ? { env: pushAuth?.env ?? baseRunEnv } : {}),
+    ...(realBackend ? { env: baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  // The askpass tmp file lives for the run; completion removes it.
-  if (pushAuth) chainRunCompletion(runId, pushAuth.dispose);
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
   const switched = sp.backend !== backend;
@@ -890,13 +886,9 @@ export async function startReviewerRun(
   }
 
   const delivery = resolveDeliveryPermissions(resolvedRev?.capabilities ?? []);
-  // Same env composition as the primary run: confinement + ephemeral push
-  // credentials when this reviewer's grants actually permit pushing.
+  // Confinement only — same server-side delivery model as the primary run: the
+  // agent commits locally but never pushes; viberr delivers on Review.
   const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
-  const pushAuth =
-    realBackend && repo
-      ? resolveRunPushAuth(db, input.projectSlug, delivery, baseRunEnv)
-      : null;
   const analyzePrompt = buildAnalyzePrompt({
     role: rev.role,
     taskKey: input.taskKey,
@@ -906,7 +898,6 @@ export async function startReviewerRun(
     branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
     cloned: !!clone,
     delivery,
-    pushCredentialed: !!pushAuth,
     ...(input.directive ? { directive: input.directive } : {}),
   });
   const prompt = analyzePrompt;
@@ -945,10 +936,9 @@ export async function startReviewerRun(
     ...(disallowedTools.length ? { disallowedTools } : {}),
     ...mcpServersFor(db, mcpNames),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend ? { env: pushAuth?.env ?? baseRunEnv } : {}),
+    ...(realBackend ? { env: baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  if (pushAuth) chainRunCompletion(runId, pushAuth.dispose);
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
   const switched = rev.backend !== backend;
@@ -1116,7 +1106,7 @@ export function buildSpecialistPersona(input: {
 
 // ----------------------------------------------------------------- prompt/script
 
-function buildAnalyzePrompt(input: {
+export function buildAnalyzePrompt(input: {
   role: string;
   taskKey: string;
   title: string;
@@ -1127,9 +1117,6 @@ function buildAnalyzePrompt(input: {
   cloned: boolean;
   /** Which delivery steps the profile's capabilities permit (XS-4). */
   delivery: DeliveryPermissions;
-  /** Whether the run env actually carries push credentials (a granted
-   *  commit-push with no bound project PAT must not promise a working push). */
-  pushCredentialed?: boolean;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
 }): string {
@@ -1142,7 +1129,7 @@ function buildAnalyzePrompt(input: {
   // per-task cwd, and Git's ceiling prevents accidental parent-repo discovery.
   // This prompt is guidance, not an OS filesystem boundary.
   if (input.repo) {
-    const { canBranch, canCommitPush, canOpenPr } = input.delivery;
+    const { canBranch, canCommitPush } = input.delivery;
     prompt +=
       `\n\n## Workspace & delivery contract (follow exactly)\n` +
       `- Work ONLY inside the current working directory — it is the dedicated ` +
@@ -1155,14 +1142,14 @@ function buildAnalyzePrompt(input: {
       prompt += `- Do all work on the branch \`${input.branch}\` (create it from the default branch if it does not exist): \`git checkout -B ${input.branch}\`.\n`;
     }
     if (canCommitPush) {
+      // Server-side delivery (F-GH3): the agent AUTHORS the commit(s) — its own
+      // message, its own history — but never pushes. viberr pushes the workspace
+      // branch and opens the review PR on the Review transition, so the delivery
+      // path is identical + token-safe on BOTH backends (a push credential can't
+      // reach a Codex tool shell without leaking the token into argv).
       prompt +=
-        `- Prefix every commit message with \`[${input.taskKey}]\` so commits trace back to this task.\n` +
-        (input.pushCredentialed
-          ? `- Push the branch (push credentials are provided via git's askpass — plain \`git push\` works).\n`
-          : `- This workspace has NO push credentials: commit locally, do NOT retry a failing \`git push\`, and report the ready branch + commit SHA — the platform (or a human) delivers it.\n`) +
-        (canOpenPr && input.pushCredentialed
-          ? `- If the \`gh\` CLI is available, open a pull request (ready for review, NOT a draft) that references ${input.taskKey} in its title/body; if it is not, just push and say so — the platform opens the review PR when the task enters Review.\n`
-          : "");
+        `- Commit your work locally on the branch with clear messages, each prefixed \`[${input.taskKey}]\` so it traces back to this task. Write real, descriptive commit messages — this history is delivered as-is.\n` +
+        `- Do NOT run \`git push\` and do NOT open a PR: this workspace has no push credentials by design, and retrying a failing push wastes the run. Viberr delivers your commits (pushes the branch + opens the review PR) when the task enters Review. Just report the branch name and commit SHA(s) in your reply.\n`;
     } else {
       // An EXPLICIT prohibition, not a silent omission: an operator directive
       // may still say "push updates" — the contract must override it, or the
@@ -1405,37 +1392,11 @@ export function resolveResumeConfinement(
   }
 }
 
-/**
- * Ephemeral PUSH credentials for a run whose profile GRANTS commit-push —
- * the delivery contract made real. The clone is deliberately credential-free
- * (askpass authenticates only the clone; the remote is sanitized), so without
- * this, a granted "push the branch" instruction dead-ends on "could not read
- * Username for 'https://github.com'" in any clean environment (observed live:
- * VIB-1 in the container, 2026-07-17). Reuses the server-side push's
- * GIT_ASKPASS mechanism — the token rides the child env, never argv or
- * `.git/config`. Granting `commit-push-branch` to an agent MEANS handing its
- * run a push-capable credential; the capability grant is the admin's consent.
- * Returns null when the capability is withheld or no project PAT is bound.
- * Callers MUST dispose() on run completion (removes the askpass tmp file).
- */
-export function resolveRunPushAuth(
-  db: Database.Database,
-  projectSlug: string,
-  delivery: DeliveryPermissions,
-  baseEnv: Record<string, string>,
-): { env: Record<string, string>; dispose: () => void } | null {
-  if (!delivery.canCommitPush) return null;
-  const cred = getProjectCredential(db, projectSlug);
-  const token = cred ? getPatToken(db, cred.id) : null;
-  if (!token) return null;
-  const auth = createGitHubAskpassEnv({ token, baseEnv });
-  // RunSpec.env is Record<string, string> — drop non-string entries.
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(auth.env)) {
-    if (typeof v === "string") env[k] = v;
-  }
-  return { env, dispose: auth.dispose };
-}
+// NOTE: agent runs are NO LONGER handed push credentials — delivery is
+// server-side for both backends (see the delivery-contract comment in
+// `startSpecialistRun`). The GIT_ASKPASS push credential now lives ONLY in the
+// server-side `pushWorkspaceBranch` (push-workspace.server), whose process env
+// is token-safe and backend-agnostic.
 
 function workspaceRunEnv(
   projectSlug: string,

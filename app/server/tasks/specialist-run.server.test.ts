@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -18,10 +17,10 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   assignReviewer,
   assignSpecialist,
+  buildAnalyzePrompt,
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
-  resolveRunPushAuth,
   startReviewerRun,
   startSpecialistRun,
 } from "./specialist-run.server";
@@ -607,64 +606,39 @@ describe("startReviewerRun", () => {
   });
 });
 
-describe("resolveRunPushAuth — a granted commit-push gets REAL push credentials", () => {
-  it("builds an askpass env from the bound project PAT; dispose removes the script", async () => {
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const pat = createPat(
-      store.db,
-      {
-        userId: store.users.arda.id,
-        label: "connection · test",
-        token: "ghp_pushpushpushpushpushpushpush0000",
-      },
-      actor(store.users.arda),
-    );
-    setProjectCredential(
-      store.db,
-      { projectSlug: store.slug, patId: pat.id },
-      actor(store.users.arda),
-    );
+describe("buildAnalyzePrompt — server-side delivery contract (both backends)", () => {
+  const base = {
+    role: "Implementation",
+    taskKey: "VIB-42",
+    title: "t",
+    goal: "g",
+    repo: "acme/app",
+    branch: "vib-42",
+    cloned: true,
+  };
 
-    const auth = resolveRunPushAuth(
-      store.db,
-      store.slug,
-      { canBranch: true, canCommitPush: true, canOpenPr: true },
-      { GIT_CEILING_DIRECTORIES: "/probe" },
-    );
-    expect(auth).not.toBeNull();
-    // Base run env survives the merge…
-    expect(auth!.env.GIT_CEILING_DIRECTORIES).toBe("/probe");
-    // …and git authenticates through askpass (token in env, never argv).
-    expect(auth!.env.GIT_ASKPASS).toBeTruthy();
-    expect(existsSync(auth!.env.GIT_ASKPASS!)).toBe(true);
-    expect(auth!.env.VIBERR_GIT_ASKPASS_USERNAME).toBe("x-access-token");
-    expect(auth!.env.VIBERR_GIT_ASKPASS_PASSWORD).toBe(
-      "ghp_pushpushpushpushpushpushpush0000",
-    );
-    auth!.dispose();
-    expect(existsSync(auth!.env.GIT_ASKPASS!)).toBe(false);
+  it("a commit-push grant AUTHORS commits but is told NOT to push or open a PR", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+    });
+    // Agent still writes the commit + its own `[TASK]`-prefixed message.
+    expect(prompt).toContain("Commit your work locally");
+    expect(prompt).toContain("[VIB-42]");
+    // …but NEVER pushes or opens a PR — viberr delivers server-side on Review.
+    expect(prompt).toContain("Do NOT run `git push`");
+    expect(prompt).toContain("Viberr delivers your commits");
+    // No push-credential promise leaks into the contract on any backend.
+    expect(prompt).not.toContain("plain `git push` works");
+    expect(prompt).not.toContain("open a pull request");
   });
 
-  it("returns null when the capability is withheld or no project PAT is bound", () => {
-    // No grant → no credentials, regardless of any bound PAT.
-    expect(
-      resolveRunPushAuth(
-        store.db,
-        store.slug,
-        { canBranch: true, canCommitPush: false, canOpenPr: false },
-        {},
-      ),
-    ).toBeNull();
-    // Grant but no bound PAT (fresh store) → nothing to hand out.
-    expect(
-      resolveRunPushAuth(
-        store.db,
-        store.slug,
-        { canBranch: true, canCommitPush: true, canOpenPr: true },
-        {},
-      ),
-    ).toBeNull();
+  it("a human-gated profile is prohibited from committing at all", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: false, canOpenPr: false },
+    });
+    expect(prompt).toContain("Repo delivery is HUMAN-gated");
+    expect(prompt).toContain("do NOT run `git commit`");
   });
 });
