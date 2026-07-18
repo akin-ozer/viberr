@@ -241,19 +241,23 @@ describe("claude adapter (SDK, injected fake query)", () => {
     };
 
     // Operator: Bash/Edit/Write/NotebookEdit/Task are removed from context so it
-    // genuinely cannot write code — its job is the mcp__viberr__* tools.
-    expect((await run({ ...SPEC, kind: "operator" }))?.disallowedTools).toEqual(
-      expect.arrayContaining(["Bash", "Edit", "Write", "NotebookEdit"]),
+    // genuinely cannot write code — its job is the mcp__viberr__* tools. The
+    // SDK-bundled `Skill` tool is denied for it too (base denylist).
+    const opDenied = (await run({ ...SPEC, kind: "operator" }))?.disallowedTools;
+    expect(opDenied).toEqual(
+      expect.arrayContaining(["Skill", "Bash", "Edit", "Write", "NotebookEdit"]),
     );
 
-    // A specialist with no withheld caps keeps the full toolset (it does the
-    // dev work) — no denylist is imposed.
-    expect((await run({ ...SPEC, kind: "primary" }))?.disallowedTools).toBeUndefined();
+    // EVERY run denies the SDK-bundled `Skill` tool (docker-verified: `skills: []`
+    // does not strip the SDK's ~16 first-party skills, so denying the tool is what
+    // makes them uninvokable). A specialist with no withheld caps therefore has
+    // exactly `["Skill"]` — the coding toolset is otherwise unconfined.
+    expect((await run({ ...SPEC, kind: "primary" }))?.disallowedTools).toEqual(["Skill"]);
 
-    // A specialist WITH withheld caps has exactly those denied (nothing extra).
+    // A specialist WITH withheld caps has Skill PLUS exactly those (nothing else).
     expect(
       (await run({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] }))?.disallowedTools,
-    ).toEqual(["Bash(git push:*)"]);
+    ).toEqual(["Skill", "Bash(git push:*)"]);
   });
 
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {
