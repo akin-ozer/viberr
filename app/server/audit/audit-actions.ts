@@ -95,6 +95,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.comment": "task",
   "task.transition": "task",
   "task.packet.resolved": "task",
+  // A successful agent run withdrew a stale "work stalled" recovery packet
+  // (owner ruling 2026-07-18 — supersession auto-withdraw).
+  "task.packet.withdrawn_superseded": "task",
   "task.ownership.taken": "task",
   "task.ownership.handed_off": "task",
   "task.ownership.released": "task",
