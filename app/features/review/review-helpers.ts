@@ -14,9 +14,12 @@ export interface ReviewRowView {
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 14, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
-  return t.packet
-    ? t.packet.kind + " — " + t.packet.title
-    : t.latestEventText
-      ? plainText(t.latestEventText)
-      : "Agent working — the packet arrives at the boundary.";
+  if (t.packet) return t.packet.kind + " — " + t.packet.title;
+  if (t.latestEventText) return plainText(t.latestEventText);
+  // No packet, no timeline event yet. Don't claim "agent working" on a task
+  // that is waiting on a HUMAN (R8-3, same fix as the wait-tag) — a human-
+  // waiting row needs a person, not an agent.
+  return t.waiting === "human"
+    ? "Waiting at the review boundary — needs a human decision."
+    : "Agent working — the packet arrives at the boundary.";
 }

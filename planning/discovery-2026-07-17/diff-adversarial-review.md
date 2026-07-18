@@ -60,7 +60,20 @@ The SAME task is attributed to the maintainer, never inflated onto the contribut
 the fix Murat's count would have been 2 and VIB-900 would have read "waiting on you" for him.
 Fixture removed afterward (data/ is gitignored; watcher dropped it from the projection).
 
-## Tests added (+9)
+## Live cross-role verification — Finding C (2026-07-18, dev app)
+Throwaway fixture VIB-901 on `viberr`: a review-stage task at waiting=human with NO packet/rec
+(the degenerate stall). Walked across roles:
+- **Elif (maintainer):** review queue → VIB-901 under "**Waiting on your acceptance**" / "your
+  acceptance". A maintainer can accept it.
+- **Selin (viewer):** review queue → "Waiting on your acceptance" = **0 of 3** ("Nothing waits on
+  you"); VIB-901 + the two real review tasks sit under "**Still in review**" labeled "**waiting on
+  a human**" — NOT the pre-fix "agent working".
+Also fixed a matching subline mislabel found during this walk: `reviewRowSub`'s no-packet/no-event
+fallback said "Agent working — the packet arrives at the boundary" even on a human-waiting row; it
+now reads "Waiting at the review boundary — needs a human decision" when waiting=human (verified
+live on VIB-901; +4 unit tests in review-helpers.test.ts). Fixture removed afterward.
+
+## Tests added (+9 → +13)
 - decisions: contributor-owner does NOT hold a transition rec; DOES hold accept_completion;
   org-admin below-tier member → overrideEligible.
 - review-queue: maintainer sees bare human-waiting in ready; viewer sees it in working still
