@@ -38,6 +38,14 @@ All were MINOR/polish; the core product is mature and wired (fresh-discovery ver
 **RESOLVED 2026-07-18 (owner: "close everything P1+P2, but first check the tools make sense"):**
 
 ### P1 — DONE
+- **[RUNTIME] Async subagent-task family leaked past the singular `Task` deny → FIXED + live-verified
+  in docker (2026-07-18).** The fresh 20-task suite re-run in the **production container** surfaced
+  `TaskCreate/TaskGet/TaskList/TaskOutput/TaskStop/TaskUpdate` still present in a real operator init
+  (under `bypassPermissions` these can spawn an unrestricted subagent → bypass). Added the whole
+  family to `BASE_DENIED_BUILTINS`; a fresh `up --build` operator run dropped 25→19 tools, family
+  gone, ToolSearch + `mcp__viberr__*` intact. Also confirmed there: **Codex executes** once
+  `auth.json` is placed in `codex-home` (the earlier "codex-fails-at-exec" was the honest
+  availability-gate, not a bug). See `fresh-20-task-suite-docker-2026-07-18.md`.
 - **[RUNTIME] Residual SDK-bundled-tool leak → FIXED (commit 775c10b), selectively.** Owner's caution
   paid off: `ToolSearch` is NOT inert — **137 real calls** load the operator's deferred `mcp__viberr__*`
   governance tools; denying it would break the operator, so it is KEPT. Denied the rest (`Task`,

@@ -148,7 +148,20 @@ const OPERATOR_DENIED_BUILTINS = [
  */
 const BASE_DENIED_BUILTINS = [
   "Skill", // viberr injects each agent's declared skill as system-prompt text
-  "Task", // spawns UNGOVERNED subagents — orchestration is the operator's job
+  // The subagent-spawning family — a denied-tools run must not be able to spawn
+  // an SDK subagent (`claude`/`general-purpose`/…) that would inherit an
+  // UNRESTRICTED toolset (Bash/Write/Edit) and bypass this very denylist. Under
+  // `bypassPermissions` the denylist is the only gate, so all spawn entrypoints
+  // are closed: the synchronous `Task` AND the async task family (verified
+  // present in the production docker init — `TaskCreate`/`TaskGet`/… leaked past
+  // the singular `Task` deny). Orchestration is the operator's job.
+  "Task",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskOutput",
+  "TaskStop",
+  "TaskUpdate",
   "Workflow", // self-orchestration bypasses the operator
   "CronCreate", // scheduling is viberr's job (a future mcp__viberr__schedule_* cap)
   "CronDelete",

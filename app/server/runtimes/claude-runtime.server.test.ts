@@ -248,7 +248,16 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(primaryDenied).toEqual(
       expect.arrayContaining([
         "Skill",
+        // The whole subagent-spawn family — sync `Task` AND the async
+        // `TaskCreate`/`TaskGet`/… variants (both leak past the SDK in the
+        // production docker init; either can spawn an unrestricted subagent).
         "Task",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
         "Workflow",
         "CronCreate",
         "ScheduleWakeup",
