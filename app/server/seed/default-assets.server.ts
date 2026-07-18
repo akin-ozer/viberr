@@ -63,7 +63,15 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
   ).map((p) => ({
     rel: path.join("agents", "profiles", `${p.frontmatter.id}.md`),
     content: serializeAgentProfile({
-      frontmatter: p.frontmatter,
+      // Drop KB grants for the BASE template only (non-mutating copy — the
+      // shared SEED_AGENT_PROFILES is also the DEMO seed's source, which DOES
+      // create the backing KBs). The base install seeds on-disk skills but no
+      // knowledge bases, so a KB grant here would dangle in every non-demo
+      // store as the "N of 0" ghost (2026-07-18 owner fix).
+      frontmatter: {
+        ...p.frontmatter,
+        resources: { ...p.frontmatter.resources, kb: [] },
+      },
       description: p.description,
     }),
   }));
