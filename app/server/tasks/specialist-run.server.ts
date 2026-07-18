@@ -10,6 +10,11 @@ import {
   type FileActorRef,
   type TaskFileEvent,
 } from "~/schemas/task-file.schema";
+import {
+  AGENT_OUTCOME_JSON_SCHEMA,
+  resolveAgentCollab,
+} from "./agent-outcome.server";
+import { buildAgentToolkit } from "./agent-toolkit.server";
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -634,6 +639,20 @@ export async function startAgentRun(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
+  // Collaboration gates (G3/G4) from the deployment's grants — the SAME
+  // resolution the completion pipeline re-derives (agent-outcome.server.ts).
+  const collab = resolveAgentCollab(resolved?.capabilities ?? [], delivers);
+  // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
+  const agentActorRef: FileActorRef = {
+    kind: "agent",
+    backend,
+    profileId: engagement.profileId,
+    roleHint: engagement.role,
+  };
+  // Staging key linking a Claude report_outcome tool call to THIS dispatch's
+  // completion (the runId doesn't exist until startRun returns).
+  const outcomeKey = newId("oc");
+
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
   const repo =
@@ -673,7 +692,7 @@ export async function startAgentRun(
     input.taskKey,
     ctx.dataRoot,
   );
-  const prompt = buildAnalyzePrompt({
+  const basePrompt = buildAnalyzePrompt({
     role: engagement.role,
     taskKey: input.taskKey,
     title,
@@ -684,6 +703,36 @@ export async function startAgentRun(
     delivery,
     ...(input.directive ? { directive: input.directive } : {}),
   });
+  // Collaboration guidance (G3/G4): tell the agent about its channel so the
+  // capabilities are actually exercised, per-transport.
+  const collabNotes: string[] = [];
+  if (backend === "claude" && realBackend) {
+    if (collab.comment) {
+      collabNotes.push(
+        "- `post_comment` — post a material mid-run progress note or finding to the task timeline.",
+      );
+    }
+    if (collab.ask) {
+      collabNotes.push(
+        "- `ask_human` — raise a question you are blocked on as a decision card for the humans (you will not get the answer in this run; note it in your report).",
+      );
+    }
+    if (collab.verdict) {
+      collabNotes.push(
+        "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification, then finish with your full findings.",
+      );
+    }
+  } else if (backend === "codex" && realBackend && (collab.verdict || collab.ask)) {
+    collabNotes.push(
+      '- Your FINAL message must be the structured outcome JSON: {"summary": "<your full report, markdown>"' +
+        (collab.verdict ? ', "verdict": "approve" | "request_changes" (required when you judged the work)' : "") +
+        (collab.ask ? ', "question": {"title", "body", "options"} (only when blocked on a human decision)' : "") +
+        "}.",
+    );
+  }
+  const prompt = collabNotes.length
+    ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
+    : basePrompt;
 
   // R7-2: the canned analyze stream feeds ONLY the gated deterministic test
   // engine — a real run never receives one, and an unavailable backend fails
@@ -713,6 +762,33 @@ export async function startAgentRun(
     (delivers ? "primary-" : `r${supportingIndex}-`) +
     newId("t").replace("t_", "").slice(0, 8);
 
+  // Collaboration transports (G3/G4):
+  //   Claude → in-process toolkit tools (post_comment / ask_human /
+  //            report_outcome), merged with the profile's declared MCPs;
+  //   Codex  → the outcome-envelope outputSchema on the final reply (the codex
+  //            SDK can't mount our in-process tools) — only when a structured
+  //            field (verdict/question) is actually usable, so a plain
+  //            developer's report stays natural prose.
+  const declaredMcps = mcpServersFor(db, mcpNames);
+  const toolkit =
+    backend === "claude" && realBackend
+      ? buildAgentToolkit({
+          db,
+          ctx,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          actorRef: agentActorRef,
+          outcomeKey,
+          collab,
+        })
+      : null;
+  const mergedMcpServers = {
+    ...(declaredMcps.mcpServers ?? {}),
+    ...(toolkit?.mcpServers ?? {}),
+  };
+  const useEnvelopeSchema =
+    backend === "codex" && realBackend && (collab.verdict || collab.ask);
+
   const { runId, simulated } = await startRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -733,8 +809,11 @@ export async function startAgentRun(
     ...(script ? { script } : {}),
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
-    // Wire the profile's declared MCP servers into the run (item-1/FR9).
-    ...mcpServersFor(db, mcpNames),
+    // Profile MCPs (item-1/FR9) + the collaboration toolkit (Claude).
+    ...(Object.keys(mergedMcpServers).length
+      ? { mcpServers: mergedMcpServers }
+      : {}),
+    ...(useEnvelopeSchema ? { outputSchema: AGENT_OUTCOME_JSON_SCHEMA } : {}),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend ? { env: baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
@@ -802,7 +881,8 @@ export async function startAgentRun(
     backend,
     profileId: engagement.profileId,
     role: engagement.role,
-    kind: delivers ? "primary" : "reviewer",
+    delivers,
+    outcomeKey,
     workdir: runWorkdir,
     agentHandle: agentHandleFor(engagement.role),
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
@@ -1173,12 +1253,24 @@ function taskWorkspaceRoot(
 export function resolveResumeConfinement(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    /** The resumed run's backend + engagement shape — rebuilds the same
+     *  collaboration transport the fresh-run path mounts (toolkit on Claude;
+     *  the Codex envelope re-parses from the reply, no resume config needed). */
+    backend?: RealBackend;
+    role?: string;
+    delivers?: boolean;
+  },
 ): {
   disallowedTools: string[];
   env: Record<string, string>;
   mcpServers?: Record<string, unknown>;
   systemPrompt?: string;
+  /** Staging key for a Claude report_outcome on this resumed turn. */
+  outcomeKey?: string;
 } {
   const env = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
   try {
@@ -1195,13 +1287,36 @@ export function resolveResumeConfinement(
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
+    // Same collaboration toolkit the fresh-run path mounts (XS-1 parity).
+    let outcomeKey: string | undefined;
+    let toolkitServers: Record<string, unknown> = {};
+    if (input.backend === "claude") {
+      const delivers = input.delivers ?? false;
+      const collab = resolveAgentCollab(resolved.capabilities, delivers);
+      outcomeKey = newId("oc");
+      const toolkit = buildAgentToolkit({
+        db,
+        ctx,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        actorRef: {
+          kind: "agent",
+          backend: "claude",
+          profileId: input.profileId,
+          roleHint: input.role ?? resolved.role,
+        },
+        outcomeKey,
+        collab,
+      });
+      if (toolkit) toolkitServers = toolkit.mcpServers;
+    }
+    const merged = { ...mcpServers, ...toolkitServers };
     return {
       disallowedTools: resolveSpecialistDisallowedTools(resolved.capabilities),
       env,
-      ...(mcpServers && Object.keys(mcpServers).length
-        ? { mcpServers }
-        : {}),
+      ...(Object.keys(merged).length ? { mcpServers: merged } : {}),
       ...(persona ? { systemPrompt: persona } : {}),
+      ...(outcomeKey ? { outcomeKey } : {}),
     };
   } catch {
     // Profile not a current deployment — still apply the conservative settings.

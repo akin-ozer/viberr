@@ -304,7 +304,7 @@ export async function recoverUnreactedAgentRuns(
           backend: row.backend as RealBackend,
           profileId: row.agent_profile_id ?? null,
           role: row.role,
-          kind: row.kind === "reviewer" ? "reviewer" : "primary",
+          delivers: row.kind === "primary",
           workdir: null,
           agentHandle: row.role.trim().split(/[\s/&]+/)[0]?.toLowerCase() ?? row.role,
         },

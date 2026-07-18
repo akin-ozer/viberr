@@ -112,6 +112,10 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // replaced task.specialist.run_started / task.reviewer.run_started.
   "task.agent.run_started": "task",
   "task.agent.replied": "task",
+  // Generic-agent collaboration tools (G3): a mid-run agent-authored comment,
+  // and an agent-raised ask-human question packet.
+  "task.agent.commented": "task",
+  "task.agent.packet_opened": "task",
   "task.quality.flagged": "task",
   "task.goal.updated": "task",
   // Operator-authored governance actions (operator-actions.server).

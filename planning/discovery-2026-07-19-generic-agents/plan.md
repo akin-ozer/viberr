@@ -71,8 +71,13 @@ Full inventory in the workflow synthesis; anchors:
   delivers?}]` replaces `specialist` + `reviewers[]`. `role` is a display snapshot
   taken from the live profile at engage time. Exactly 0..1 entries have
   `delivers: true`.
-- **RunKind** collapses to `operator | agent`. Run rows keep `agent_profile_id`;
-  legacy `primary`/`reviewer` values map to `agent` on read (no DB migration).
+- **RunKind** — AMENDED during implementation: the stored enum stays
+  `operator|primary|reviewer` as a **derived storage/grouping label**
+  (`delivers ? "primary" : "reviewer"`); all BEHAVIOR keys off engagement data
+  (`delivers` + capability grants), never off kind. Rationale: session resume,
+  recovery filters, run projection and UI retry all key on the stored values —
+  collapsing them buys no behavioral uniformity (already achieved) at real R5
+  risk. `roleShort` now reads `run.kind`, never string-matches role labels.
 - **Actor ref**: `agent:<backend>/<profileId>`. Decoder NEVER returns null for a
   well-formed `agent:` ref; unknown/legacy slugs decode to an agent actor with the
   raw slug as label (display resolves the profile name when the id matches).
@@ -101,10 +106,20 @@ Full inventory in the workflow synthesis; anchors:
   (verdict event attributed to the agent + validation frontmatter) — then delivery
   reconcile iff `delivers`, packet-retry options profileId-stamped for all, operator
   react unchanged (depth cap covers tool-posted events — R3).
-- **Verdict recording**: `recordAgentVerdict` (renamed) — same state machine
-  (`hasReworkSinceLastRejection` rework gate, acceptance blocking), fed by envelope
-  or (fallback, verdict-granted only) regex. Rework detection identity-matches via
-  the delivers-engagement profileId; role-regex fallback deleted (R4).
+- **Verdict recording**: `recordAgentCompletion` — ONE atomic write per finished
+  run (reply + verdict event ATTRIBUTED TO THE AGENT + validation + optional
+  question packet); same state machine (`hasReworkSinceLastRejection` rework
+  gate, acceptance blocking), fed by envelope or (fallback, verdict-granted
+  only) regex. Rework detection identity-matches via the delivers-engagement
+  profileId; role-regex fallback deleted (R4).
+- **Verdict-grant transition rule** (AMENDED — G2 without breaking live data):
+  an EXPLICIT `report-validation-verdict` grant is authoritative; an ABSENT
+  grant defaults to `direct` on a NON-delivering engagement (exactly today's
+  reviewer behavior — pre-grant deployments keep working) and `off` on a
+  delivering one (a developer's "tests pass" prose can never flip validation —
+  R1/R2). The seed now grants verdict explicitly to the reviewer only and
+  REMOVED the developer's legacy `recommend` verdict grant (which coerced to
+  direct and would have armed the R1 hazard).
 
 ### Operator selection
 

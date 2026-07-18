@@ -240,8 +240,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request"],
-      recommend: ["Move the task to Review", "Report a validation verdict"],
+      direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Comment on the task", "Ask the human a question"],
+      recommend: ["Move the task to Review"],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
     "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
@@ -261,7 +261,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // The single quality specialist: reviews the diff AND authors/runs the
       // validation suite (the former Tester role is folded in here).
-      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task"],
+      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task", "Ask the human a question", "Report a validation verdict"],
       recommend: ["Approve the review", "Request changes"],
       // The reviewer must NOT push/commit — use the exact catalog label so this
       // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
