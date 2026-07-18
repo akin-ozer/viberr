@@ -188,7 +188,9 @@ The authoritative planning artifacts live in [`planning/planning-artifacts/`](pl
 (PRD, architecture, epics, UX spec). Build-time documentation — phase-by-phase reports,
 conventions, cross-cutting contracts — lives in [`docs/build/`](docs/build/). Canonical
 file formats (project.md / task.md / timeline event grammar) are specified in
-[`docs/architecture/file-formats.md`](docs/architecture/file-formats.md).
+[`docs/architecture/file-formats.md`](docs/architecture/file-formats.md). Task ownership
+and the RBAC rules governing who can assign/act on a task owner are documented in
+[`docs/architecture/owner-assignment-rbac.md`](docs/architecture/owner-assignment-rbac.md).
 
 ## Screenshots / design parity
 

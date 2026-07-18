@@ -64,7 +64,10 @@ workflow:                         # governed boundaries: auto|approval|human
     locked: true
 members:                          # project roles (4-role system, contracts §3.2)
   - userId: u_abc123
-    role: admin                   # admin | maintainer | reviewer | viewer
+    role: admin                   # admin | maintainer | contributor | viewer
+                                   # (legacy "reviewer" files are coerced to
+                                   # "contributor" at parse time — see
+                                   # owner-assignment-rbac.md §2)
 agents:                           # per-project DEPLOYMENT of profile templates
   - profileId: developer
     capabilities:                 # id-based against CAP_CATALOG (ruling 2)
