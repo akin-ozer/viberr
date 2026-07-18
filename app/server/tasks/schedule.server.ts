@@ -347,11 +347,3 @@ export function startScheduleRunner(db: Database.Database): void {
   // Don't keep the process alive for the timer (tests, graceful shutdown).
   if (typeof runnerHandle.unref === "function") runnerHandle.unref();
 }
-
-/** Stop the runner (tests). */
-export function stopScheduleRunner(): void {
-  if (runnerHandle) {
-    clearInterval(runnerHandle);
-    runnerHandle = null;
-  }
-}

@@ -24,6 +24,7 @@ import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
+import { formatDayDotTime } from "~/shared/dates/format";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
@@ -233,7 +234,7 @@ function PolicyPanel({
         <h2>Permissions</h2>
         <span
           className="right sub"
-          style={{ fontSize: ".72rem", color: "var(--faint)" }}
+          style={{ fontSize: ".75rem", color: "var(--faint)" }}
         >
           V1 rules
         </span>
@@ -241,7 +242,7 @@ function PolicyPanel({
       <p
         style={{
           margin: "0 0 .55rem",
-          fontSize: ".74rem",
+          fontSize: ".75rem",
           lineHeight: 1.4,
           color: "var(--faint)",
         }}
@@ -334,16 +335,26 @@ function TaskHero({
   // Surface a failed save as a toast instead of silently leaving the editor
   // open with no explanation (WI-11); on success the effect below closes it.
   useActionFeedback(goalFetcher);
-  // Close the editor once a save round-trips successfully.
+  // Close the editor once a save round-trips successfully. Handled-ref dedup
+  // (timeline-composer pattern): `goalFetcher.data` persists after idle, so
+  // without it the stale `ok` would instantly close every later re-open.
+  const goalSaveHandled = useRef<unknown>(null);
   useEffect(() => {
-    if (goalFetcher.state === "idle" && goalFetcher.data?.ok && editing) {
-      setEditing(false);
-    }
-  }, [goalFetcher.state, goalFetcher.data, editing]);
+    if (goalFetcher.state !== "idle" || !goalFetcher.data?.ok) return;
+    if (goalSaveHandled.current === goalFetcher.data) return;
+    goalSaveHandled.current = goalFetcher.data;
+    setEditing(false);
+  }, [goalFetcher.state, goalFetcher.data]);
   // A confirmed edit_goal packet decision drops the human straight into the
-  // editor (the textarea's autoFocus scrolls it into view).
+  // editor (the textarea's autoFocus scrolls it into view). Once-per-bump ref
+  // (timeline `ask` pattern) so a later `canEditGoal` flip can't replay a
+  // stale bump.
+  const seenEditGoal = useRef(editGoalSignal);
   useEffect(() => {
-    if (editGoalSignal > 0 && canEditGoal) setEditing(true);
+    if (editGoalSignal > 0 && editGoalSignal !== seenEditGoal.current) {
+      seenEditGoal.current = editGoalSignal;
+      if (canEditGoal) setEditing(true);
+    }
   }, [editGoalSignal, canEditGoal]);
 
   return (
@@ -529,7 +540,7 @@ function ScheduledActions({
             <li key={s.id} className="sched-row">
               <div className="sched-when">
                 <Icon name="clock" />
-                <span>{new Date(s.dueAt).toLocaleString()}</span>
+                <span>{formatDayDotTime(s.dueAt)}</span>
               </div>
               <div className="sched-meta">
                 operator · {s.autonomy} · {s.backend === "claude" ? "Claude Code" : "Codex"}
@@ -874,6 +885,121 @@ function CurrentStatePanel({
   );
 }
 
+/**
+ * Run-control mutations (interrupt / retry-on-other-backend / complete the
+ * real merge). One fetcher backs all three, so a single in-flight run action
+ * disables the others.
+ */
+function useRunControls({
+  csrf,
+  runtime,
+  myRole,
+  canRunAgents,
+  runActive,
+}: {
+  csrf: string;
+  runtime: RunView[];
+  myRole: string | null;
+  canRunAgents: boolean;
+  runActive: boolean;
+}) {
+  const runFetcher = useFetcher<ActionResult>();
+  useActionFeedback(runFetcher);
+  const runBusy = runFetcher.state !== "idle";
+  // Interrupt is admin|maintainer (contracts §3.2); the button hides for
+  // everyone else. Server re-checks RBAC regardless.
+  const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
+  const onInterrupt = (runThreadId: string) => {
+    if (runBusy) return;
+    const run = runtime.find((r) => r.id === runThreadId);
+    if (!run) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-interrupt");
+    fd.set("runId", run.serverRunId);
+    runFetcher.submit(fd, { method: "post" });
+  };
+  // Retry the failed run's agent on the OTHER backend after a backend
+  // availability / quota failure (D4). Routes by the failed run's kind —
+  // a reviewer retries as THAT reviewer, not as the primary. The override
+  // also persists to the assignment snapshot server-side, so the operator's
+  // next prompt follows the switched backend. admin|maintainer; server
+  // re-checks.
+  const onRetryBackend =
+    canRunAgents && !runActive
+      ? (backend: "claude" | "codex", run: RunView) => {
+          if (runBusy) return;
+          const fd = new FormData();
+          fd.set("_csrf", csrf);
+          fd.set(
+            "intent",
+            run.kind === "reviewer" ? "run-reviewer" : "run-specialist",
+          );
+          if (run.kind === "reviewer" && run.profileId) {
+            fd.set("profileId", run.profileId);
+          }
+          fd.set("backend", backend);
+          runFetcher.submit(fd, { method: "post" });
+        }
+      : undefined;
+  // Complete the real merge of an accepted (merge-pending) PR (S2).
+  // admin|maintainer only; server re-checks.
+  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
+  const onCompleteMerge = canMerge
+    ? () => {
+        if (runBusy) return;
+        const fd = new FormData();
+        fd.set("_csrf", csrf);
+        fd.set("intent", "complete-merge");
+        runFetcher.submit(fd, { method: "post" });
+      }
+    : undefined;
+  return { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge };
+}
+
+/**
+ * BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
+ * scrolls the Agent-logs panel into view. The reply run is the group
+ * representative → selecting its id shows its live output (streamed by the
+ * existing useRunLogStream). Revalidation (fired by the comment fetcher)
+ * brings the run into `runtime`; the pending id is kept until it appears so
+ * the selection lands after revalidation, not before it.
+ */
+function useLogSelection(runtime: RunView[]) {
+  const [logSel, setLogSel] = useState<string | null>(null);
+  const [pendingLogSel, setPendingLogSel] = useState<string | null>(null);
+  // Derived selection (no confirm-effect): once revalidation lands the pending
+  // reply run in `runtime` it wins over `logSel`; until then the user's own
+  // selection shows. A manual pick made after the pending run landed evicts
+  // the pending marker so it can't snap the selection back later.
+  const pendingLogReady =
+    pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
+  const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
+  const selectLog = (id: string | null) => {
+    if (pendingLogReady) setPendingLogSel(null);
+    setLogSel(id);
+  };
+  const onViewLogs = (id: string) => {
+    selectLog(id);
+    // Scroll the logs panel into view (spec §5.2 addition).
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+  const onAgentLog = (threadId: string) => {
+    setPendingLogSel(threadId);
+    setLogSel(threadId);
+    requestAnimationFrame(() => {
+      document
+        .querySelector('[data-comment-anchor="agent-logs"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+  return { shownLogSel, selectLog, onViewLogs, onAgentLog };
+}
+
 export function TaskDetailPage({
   task,
   runtime,
@@ -916,7 +1042,6 @@ export function TaskDetailPage({
   githubHost?: string;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
-  const [logSel, setLogSel] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
   const [ask, setAsk] = useState(0);
   const csrf = useCsrfToken();
@@ -932,13 +1057,10 @@ export function TaskDetailPage({
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
-  const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
-  useActionFeedback(runFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
-  const runBusy = runFetcher.state !== "idle";
   // A confirmed edit_goal packet decision drops the human straight into the
   // goal editor (TaskHero opens + focuses it on this signal).
   const [editGoalSignal, setEditGoalSignal] = useState(0);
@@ -1001,90 +1123,10 @@ export function TaskDetailPage({
     })),
   });
 
-  // Interrupt is admin|maintainer (contracts §3.2); the button hides for
-  // everyone else. Server re-checks RBAC regardless.
-  const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
-  const onInterrupt = (runThreadId: string) => {
-    if (runBusy) return;
-    const run = runtime.find((r) => r.id === runThreadId);
-    if (!run) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "run-interrupt");
-    fd.set("runId", run.serverRunId);
-    runFetcher.submit(fd, { method: "post" });
-  };
-  // Retry the failed run's agent on the OTHER backend after a backend
-  // availability / quota failure (D4). Routes by the failed run's kind —
-  // a reviewer retries as THAT reviewer, not as the primary. The override
-  // also persists to the assignment snapshot server-side, so the operator's
-  // next prompt follows the switched backend. admin|maintainer; server
-  // re-checks.
-  const onRetryBackend =
-    canRunAgents && !runActive
-      ? (backend: "claude" | "codex", run: RunView) => {
-          if (runBusy) return;
-          const fd = new FormData();
-          fd.set("_csrf", csrf);
-          fd.set(
-            "intent",
-            run.kind === "reviewer" ? "run-reviewer" : "run-specialist",
-          );
-          if (run.kind === "reviewer" && run.profileId) {
-            fd.set("profileId", run.profileId);
-          }
-          fd.set("backend", backend);
-          runFetcher.submit(fd, { method: "post" });
-        }
-      : undefined;
-  // Complete the real merge of an accepted (merge-pending) PR (S2).
-  // admin|maintainer only; server re-checks.
-  const canMerge = roleCan(myRole as ProjectRole | null, "accept-completion");
-  const onCompleteMerge = canMerge
-    ? () => {
-        if (runBusy) return;
-        const fd = new FormData();
-        fd.set("_csrf", csrf);
-        fd.set("intent", "complete-merge");
-        runFetcher.submit(fd, { method: "post" });
-      }
-    : undefined;
-  // BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
-  // scrolls the Agent-logs panel into view. The reply run is the group
-  // representative → selecting its id shows its live output (streamed by the
-  // existing useRunLogStream). Revalidation (fired by the comment fetcher)
-  // brings the run into `runtime`; the pending id is kept until it appears so
-  // the selection lands after revalidation, not before it.
-  const [pendingLogSel, setPendingLogSel] = useState<string | null>(null);
-  // Derived selection (no confirm-effect): once revalidation lands the pending
-  // reply run in `runtime` it wins over `logSel`; until then the user's own
-  // selection shows. A manual pick made after the pending run landed evicts
-  // the pending marker so it can't snap the selection back later.
-  const pendingLogReady =
-    pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
-  const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
-  const selectLog = (id: string | null) => {
-    if (pendingLogReady) setPendingLogSel(null);
-    setLogSel(id);
-  };
-  const onViewLogs = (id: string) => {
-    selectLog(id);
-    // Scroll the logs panel into view (spec §5.2 addition).
-    requestAnimationFrame(() => {
-      document
-        .querySelector('[data-comment-anchor="agent-logs"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
-  const onAgentLog = (threadId: string) => {
-    setPendingLogSel(threadId);
-    setLogSel(threadId);
-    requestAnimationFrame(() => {
-      document
-        .querySelector('[data-comment-anchor="agent-logs"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
+  const { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge } =
+    useRunControls({ csrf, runtime, myRole, canRunAgents, runActive });
+  const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
+    useLogSelection(runtime);
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;

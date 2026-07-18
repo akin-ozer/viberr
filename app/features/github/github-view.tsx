@@ -115,7 +115,7 @@ export function RepositoryPanel({
               <span
                 style={{
                   flexBasis: "100%",
-                  fontSize: ".72rem",
+                  fontSize: ".75rem",
                   fontWeight: 400,
                   color: "var(--faint)",
                   lineHeight: 1.4,

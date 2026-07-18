@@ -357,7 +357,7 @@ export function Timeline({
       <div className="composer">
         {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
         {taskClosed && (
-          <div style={{ fontSize: ".72rem", color: "var(--faint)" }}>
+          <div style={{ fontSize: ".75rem", color: "var(--faint)" }}>
             This task is closed — comments are still recorded.
           </div>
         )}
@@ -408,12 +408,12 @@ export function Timeline({
             />
           </div>
           <div className="composer-foot">
-            <span style={{ fontSize: ".72rem", color: "var(--placeholder)" }}>
+            <span style={{ fontSize: ".75rem", color: "var(--placeholder)" }}>
               Open to every registered user · @mentions route to agents
             </span>
             {commentError && (
               <span
-                style={{ fontSize: ".72rem", color: "var(--coral-dark)" }}
+                style={{ fontSize: ".75rem", color: "var(--coral-dark)" }}
                 role="alert"
               >
                 {commentError}
@@ -422,7 +422,7 @@ export function Timeline({
             <span
               style={{
                 marginLeft: "auto",
-                fontSize: ".72rem",
+                fontSize: ".75rem",
                 color: "var(--placeholder)",
               }}
               className="mono"
