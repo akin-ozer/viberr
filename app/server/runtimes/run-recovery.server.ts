@@ -19,6 +19,8 @@ import type { RealBackend } from "./runtime-registry.server";
 export const RECOVERY_REINVOKE_CAP = 3;
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
+/** Same crash-loop backstop for the reply-recovery re-invoke path (below). */
+const RECOVERY_REPLAY_ACTION = "run.recovery.reply_replayed";
 
 /**
  * Boot-time finalization of non-terminal runs (F-RUN1 + R6-5).
@@ -187,11 +189,20 @@ export function finalizeOrphanedRuns(db: Database.Database): {
  *  - Idempotent: `postAgentReplyComment` writes the `task.agent.replied` audit
  *    row, so a recovered run is not reprocessed on the next boot.
  *  - Fire-and-forget per run; one failure never blocks the others or boot.
+ *  - Crash-loop backstop (mirrors `finalizeOrphanedRuns`): recovery re-invokes
+ *    the operator via `applyAgentCompletionEffects`. If the reply-comment write
+ *    keeps failing (so the `task.agent.replied` idempotency audit never lands),
+ *    the run is re-selected on EVERY boot and re-fires costed operator
+ *    coordination — a tight boot→recover→crash loop if that operator run itself
+ *    kills the process. Each replay records a `run.recovery.reply_replayed` audit
+ *    row BEFORE running the effects; once `RECOVERY_REINVOKE_CAP` rows exist for a
+ *    run within `RECOVERY_WINDOW_MS`, further boots SKIP that run (logged) instead
+ *    of re-firing. A restart after the window elapses sees a clean count.
  */
 export async function recoverUnreactedAgentRuns(
   db: Database.Database,
   ctx: TaskMutationContext = {},
-): Promise<{ recovered: number }> {
+): Promise<{ recovered: number; capped: number }> {
   const rows = db
     .prepare(
       `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind
@@ -217,7 +228,7 @@ export async function recoverUnreactedAgentRuns(
     kind: string;
   }[];
 
-  if (rows.length === 0) return { recovered: 0 };
+  if (rows.length === 0) return { recovered: 0, capped: 0 };
   logger.info("recovering dropped agent-reply reactions after restart", {
     count: rows.length,
   });
@@ -228,11 +239,55 @@ export async function recoverUnreactedAgentRuns(
       import("~/server/tasks/agent-reply.server"),
     ]);
 
+  const windowStart = new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString();
   let recovered = 0;
+  let capped = 0;
   for (const row of rows) {
     try {
       const replyText = replyTextForRun(db, row.id);
       if (!replyText) continue;
+      // Crash-loop backstop (see docstring): count prior replays for THIS run in
+      // the rolling window; once at the cap, skip re-firing costed operator
+      // coordination. The count keys on runId (in details_json) so distinct runs
+      // on the same task each get their own budget — never a shared task counter.
+      const priorReplays = (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM audit_events
+              WHERE action = ?
+                AND task_key = ?
+                AND details_json LIKE '%"runId":"' || ? || '"%'
+                AND occurred_at >= ?`,
+          )
+          .get(RECOVERY_REPLAY_ACTION, row.task_key, row.id, windowStart) as {
+          n: number;
+        }
+      ).n;
+      if (priorReplays >= RECOVERY_REINVOKE_CAP) {
+        capped += 1;
+        logger.warn("agent-reply recovery capped (crash-loop backstop)", {
+          runId: row.id,
+          taskKey: row.task_key,
+          priorReplays,
+          cap: RECOVERY_REINVOKE_CAP,
+        });
+        continue;
+      }
+      // Record the ATTEMPT before running effects so the next boot counts it even
+      // if the effects (or the whole process) die mid-flight. String literal (not
+      // RECOVERY_REPLAY_ACTION) so the audit-coverage static sweep can parse this
+      // call site; the SQL count above uses the constant. Keep both in sync with
+      // the catalog entry.
+      recordAudit(db, {
+        action: "run.recovery.reply_replayed",
+        actor: SYSTEM_ACTOR,
+        subjectKind: "task",
+        subjectId: row.task_key,
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        details: { runId: row.id, attempt: priorReplays + 1 },
+      });
       // Run the SAME completion effects the lost in-process callback would have:
       // reply → workspace-delivery reconcile → (reviewer) verdict → operator
       // REACT (trigger `agent-reply`, fresh chain at depth 0) or stuck-packet/
@@ -261,6 +316,6 @@ export async function recoverUnreactedAgentRuns(
       });
     }
   }
-  logger.info("agent-reply recovery complete", { recovered });
-  return { recovered };
+  logger.info("agent-reply recovery complete", { recovered, capped });
+  return { recovered, capped };
 }

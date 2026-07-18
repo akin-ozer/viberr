@@ -145,6 +145,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // Boot recovery re-invoked the operator for an orphaned run (F7-BOOT1); the
   // count of these in a rolling window is the crash-loop backstop.
   "run.recovery.reinvoked": "task",
+  // Boot recovery replayed a dropped agent-reply reaction (NFR17/B9); the count
+  // per run in a rolling window is that path's crash-loop backstop.
+  "run.recovery.reply_replayed": "task",
 
   // -- store / projections & maintenance (phases 3 + 10) --------------------
   "projection.rescan": "system",
