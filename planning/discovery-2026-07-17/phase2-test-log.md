@@ -222,3 +222,7 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
 - **SSE / live-updates ✅ live (end-to-end).** Subscribed to /resources/events?scope=project:viberr → got
   `stream.open`; fired a comment on VIB-3 → the stream immediately emitted `event: task.updated`
   {entityId:"viberr/VIB-3"}. Real-time projection events flow to subscribed clients — genuinely wired, not a mock.
+- **Projection rebuild integrity ✅ live (files-are-canonical).** rebuild-projections (drop all + re-project
+  from files) reconstructed the exact same state (3 projects, 25 tasks), health ok — no data loss. Confirms
+  SQLite is a rebuildable projection; the files are the source of truth. (Direct POST to `/` needs `?index`
+  per RR index-route convention — the UI button handles it; not a bug.)
