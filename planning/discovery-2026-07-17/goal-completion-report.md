@@ -39,12 +39,19 @@ github.com/akin-ozer/viberr.
 5. **Copy honesty**: RBAC table now total (17 rows incl. FR4 app-wide), reviewer read-only affordance,
    stale-MCP-health amber, accurate assigned-but-failed operator descriptions, pluralization idiom.
 
-## Current state (2026-07-18 evening)
-- `main` = the fully-implemented product (PR #36 + #63 merged). Suite 1330 green, typecheck clean.
-- **Open: PR #64** (codex availability self-heal + state-aware copy + pluralization) — verified,
-  awaiting the owner's merge decision.
-- Owner's fresh compose env: VIB-1 driven by the owner through packet→re-prompt→delivery, now at
-  **review with a codex reviewer running** — the product exercising itself.
-- **Open product question** (owner's call, both defensible): should a later successful run
-  auto-withdraw a stale "work stalled" packet (mirroring divergence→rec), or does packet resolution
-  stay strictly human (current behavior)?
+## Current state (2026-07-18 close)
+- `main` = the fully-implemented product: PR #36 + #63 + **#64** (codex availability self-heal,
+  state-aware unavailable copy, pluralization — owner-approved merge) + **#65** (packet
+  supersession, below). Suite **1335 green**, typecheck clean.
+- **Both open questions RESOLVED by the owner (AskUserQuestion, 2026-07-18 evening):**
+  1. PR #64 → **merged**.
+  2. Packet supersession → **auto-withdraw ruled and IMPLEMENTED (PR #65, merged)**: a successful
+     run withdraws a stale `type: "blocked"` work-stalled packet about the same agent (subject
+     joined on the retry option's profileId; accept_completion packets never touched; timeline
+     note + `task.packet.withdrawn_superseded` audit; withdrawal lands BEFORE the operator reacts).
+     5 targeted tests drive the real completion-effects pipeline.
+  3. Testing phase → **closed by the owner** (the 20-task suite ran twice; the owner hand-drove the
+     final acceptance themselves).
+- Owner's compose env: **VIB-1 reached Done** under the owner's own hands — create → codex fail →
+  packet → "send back" decision → sharpened re-prompt → delivery → review → reviewer → human
+  acceptance. The complete governed loop, end to end, on the final build.
