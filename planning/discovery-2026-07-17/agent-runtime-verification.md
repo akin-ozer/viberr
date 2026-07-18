@@ -37,15 +37,23 @@ Both backends ran as primary specialists and delivered (codex: VIB-1,2,7,18; cla
 route through the one canonical completion pipeline; codex reports `turns=1` (single SDK turn) vs
 claude incremental — cosmetic (F-PARITY1), already known.
 
-## OPEN QUESTION for the owner (skill leak)
-In THIS dev environment, every Claude run's SDK init lists 16 unrelated HOST skills even though the
-runtime passes `skills:[]`. They are inert (0 Skill-tool calls, and the intended docs-style still
-arrives via prompt text), so there's no observed functional impact. BUT it contradicts the code's
-stated intent ("`[]` = none listed → the model sees no skills") — the SDK appears to surface host
-`~/.claude` skills into the run context regardless of the option. Prior notes call this a dev-nesting
-artifact (the dev server is launched INSIDE a Claude Code session) that a standalone deploy avoids.
-Worth confirming on a standalone deploy (server NOT nested in a Claude session, host with global
-skills installed) that the init truly lists zero — because if the SDK ignores `skills:[]`, a
-production host with global skills would leak them into every run's context too (wasted context /
-subtle steer), which the current design assumes it doesn't. Not a security ask; a correctness/context-
-hygiene one.
+## RESOLVED (docker-verified 2026-07-18, commit 51f29f5) — skill leak is REAL in production
+The open skill-leak question was chased via `docker compose` at the owner's request, and the answer
+overturns the prior assumption:
+- Built + ran the STANDALONE container (compose.yml): production node process, pristine
+  `CLAUDE_CONFIG_DIR=/data/runtimes/claude-home`, NO host `~/.claude`, non-root `node` user — i.e.
+  NOT nested in any Claude Code session.
+- A Claude run's init there STILL listed all **16** skills AND exposed the **`Skill` tool** (38 tools).
+- Source confirmed: the 16 are COMPILED INTO `@anthropic-ai/claude-agent-sdk-*/claude` (the SDK
+  binary). `skills:[]` cannot strip them. So this is NOT the "dev-nested in a Claude session" artifact
+  the code claimed — it is present in production, and an agent COULD invoke `deep-research`/
+  `code-review`/`dataviz`/`doctor`/`run-skill-generator`/… (0 invocations observed, but not prevented).
+- **Fix**: `BASE_DENIED_BUILTINS = ["Skill"]` denies the Skill tool on EVERY run (viberr injects its
+  own skills as prompt text and never uses the SDK Skill tool), making the bundled skills uninvokable.
+  Corrected the false "standalone is clean / dev-only" comment. **Verified live**: after the fix a
+  standalone container run no longer exposes `Skill` (37 tools, was 38); the 16 stay listed in the init
+  (SDK discovery, cosmetic) but can no longer be invoked. Unit test updated; full suite 1317 green.
+- Residual (noted, not fixed): the init also leaks other SDK-bundled tools (CronCreate, Monitor,
+  RemoteTrigger, ScheduleWakeup…) and subagents (Explore, Plan, general-purpose) via the same
+  SDK-binary channel. Inert in observed runs; a broader denylist could close them, but that risks the
+  coding toolset — out of scope for the skill question.
