@@ -219,3 +219,6 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   apply/patch/file_change/tool) — parity with claude's tool_use/tool_result. Only cosmetic diff: codex
   `turns`=1 always (single SDK turn) vs claude incremental (F-PARITY1, honest). Both deliver identically
   (VIB-7 PR#37, VIB-18 PR#47). "Codex and claude work the same from viberr's eye" — confirmed.
+- **SSE / live-updates ✅ live (end-to-end).** Subscribed to /resources/events?scope=project:viberr → got
+  `stream.open`; fired a comment on VIB-3 → the stream immediately emitted `event: task.updated`
+  {entityId:"viberr/VIB-3"}. Real-time projection events flow to subscribed clients — genuinely wired, not a mock.
