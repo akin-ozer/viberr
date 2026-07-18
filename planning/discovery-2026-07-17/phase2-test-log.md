@@ -226,3 +226,11 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   from files) reconstructed the exact same state (3 projects, 25 tasks), health ok — no data loss. Confirms
   SQLite is a rebuildable projection; the files are the source of truth. (Direct POST to `/` needs `?index`
   per RR index-route convention — the UI button handles it; not a bug.)
+
+## Push-further phase (owner: "push further on a specific area") — deeper subsystem validation
+Beyond the 20+ tasks, deepened the LEAST-tested subsystems live:
+- Interrupt-mid-run ✅ · Single-flight (F7-OP1) ✅ · Codex↔Claude parity at run-projection data level ✅
+- SSE/live-updates end-to-end ✅ (mutation → task.updated streamed) · Projection rebuild integrity ✅ (files-canonical)
+- Boot recovery re-invoked operator for an orphaned run after restart, no crash-loop ✅
+- Board visual regression check post-restart ✅ (Waiting-on-me chip member-scoped=14, per-card badges render)
+- Critical code audit of SSE/boot/codex/operator/notifications dispatched (subagent) → findings to triage.
