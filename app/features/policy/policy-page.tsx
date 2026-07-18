@@ -92,7 +92,7 @@ export function HumanAccess({
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {members.length} members
+          {members.length} member{members.length === 1 ? "" : "s"}
         </span>
       </div>
       <div className="pol-note">

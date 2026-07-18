@@ -38,7 +38,10 @@ import { createSimulatedAdapter } from "./simulated-runtime.server";
 export type RealBackend = "claude" | "codex";
 
 interface RegistryState {
+  /** Last PROBED value per backend — kept only to log on change. */
   detected: Partial<Record<RealBackend, boolean>>;
+  /** Explicit overrides (setBackendAvailability) — sticky, never re-probed. */
+  overrides: Partial<Record<RealBackend, boolean>>;
   /** Test override for the R7-2 simulated-runtime gate (undefined → env). */
   simPermitted?: boolean;
 }
@@ -49,7 +52,7 @@ function getState(): RegistryState {
   const cache = globalThis as unknown as Record<symbol, RegistryState | undefined>;
   let state = cache[REGISTRY_KEY];
   if (!state) {
-    state = { detected: {} };
+    state = { detected: {}, overrides: {} };
     cache[REGISTRY_KEY] = state;
   }
   return state;
@@ -77,12 +80,35 @@ function getState(): RegistryState {
  * reported unavailable (honest degraded state) instead of a doomed real run.
  */
 function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
+  return codexCliAuthDiagnostics(env).authJsonExists;
+}
+
+/**
+ * Why-is-Codex-unavailable diagnostics for actionable error copy: whether the
+ * CLI-auth opt-in is set, where auth.json is expected, and whether it exists.
+ * The docker-compose recurring trap: `CODEX_HOME=/data/runtimes/codex-home`
+ * lives on the wiped-able volume, so recreating `docker-data` silently drops
+ * auth.json while the opt-in flag (from .env) stays set — the error must name
+ * the missing FILE, not re-suggest the flag.
+ */
+export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
+  optIn: boolean;
+  authJsonPath: string;
+  authJsonExists: boolean;
+} {
   const home = env.CODEX_HOME || path.join(homedir(), ".codex");
+  const authJsonPath = path.join(home, "auth.json");
+  let authJsonExists = false;
   try {
-    return existsSync(path.join(home, "auth.json"));
+    authJsonExists = existsSync(authJsonPath);
   } catch {
-    return false;
+    authJsonExists = false;
   }
+  return {
+    optIn: isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH),
+    authJsonPath,
+    authJsonExists,
+  };
 }
 
 /**
@@ -141,29 +167,39 @@ function isTruthy(v: string | undefined): boolean {
 }
 
 /**
- * Cached backend availability. First call reads the env; subsequent calls
- * return the cached boolean (an explicit override via
- * `setBackendAvailability` wins).
+ * Live backend availability. An explicit override (`setBackendAvailability`)
+ * wins and is sticky; otherwise the (cheap: env reads + one existsSync)
+ * detection runs on EVERY call, logging only on change. Re-probing is what
+ * makes the docker codex-home trap self-healing: a backend that was
+ * unavailable because `$CODEX_HOME/auth.json` was missing becomes available
+ * the moment the file is dropped in — no restart. (The old first-probe-wins
+ * cache pinned "unavailable" for the process lifetime.)
  */
 export function isBackendAvailable(backend: RealBackend): boolean {
   const state = getState();
-  if (state.detected[backend] === undefined) {
-    const ok = hasCredential(backend);
+  const override = state.overrides[backend];
+  if (override !== undefined) return override;
+  const ok = hasCredential(backend);
+  if (state.detected[backend] !== ok) {
     state.detected[backend] = ok;
     logger.info("runtime backend detection", { backend, available: ok });
   }
-  return state.detected[backend]!;
+  return ok;
 }
 
-/** Test-only: clear the detection cache. */
+/** Test-only: clear detection state and overrides. */
 export function resetRegistryForTests(): void {
   const cache = globalThis as unknown as Record<symbol, RegistryState | undefined>;
   cache[REGISTRY_KEY] = undefined;
 }
 
-/** Force a cached detection result (tests / an explicit override). */
+/**
+ * Force availability (tests / an explicit override). Sticky: unlike detected
+ * values it is never re-probed, so the test harness's "both backends
+ * unavailable" hold can't be flipped back by an ambient dev-`.env` credential.
+ */
 export function setBackendAvailability(backend: RealBackend, available: boolean): void {
-  getState().detected[backend] = available;
+  getState().overrides[backend] = available;
 }
 
 // ---------------------------------------------------------- selection

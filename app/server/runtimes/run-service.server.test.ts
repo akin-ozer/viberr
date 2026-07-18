@@ -5,6 +5,7 @@ import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "
 import { AppError } from "~/server/errors/app-error.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
+  backendUnavailableMessage,
   chainRunCompletion,
   configureRunServiceForTests,
   getRunLog,
@@ -477,5 +478,38 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     );
     expect(resumeSpec.mcpServers).toEqual({ viberr: { type: "sdk" } });
     expect(resumeSpec.systemPrompt).toBe("You are the Developer.");
+  });
+});
+
+describe("backendUnavailableMessage — state-aware codex copy", () => {
+  const cleanupDirs: string[] = [];
+  afterEach(async () => {
+    delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
+    delete process.env.CODEX_HOME;
+    const { rmSync } = await import("node:fs");
+    for (const d of cleanupDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("names the missing auth.json + the docker copy command when the CLI-auth opt-in IS set", async () => {
+    // The docker volume-wipe trap: flag on (from .env), file gone. Re-suggesting
+    // the flag the user already set is what made the breakage look mysterious.
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = (await import("node:path")).default;
+    const home = mkdtempSync(path.join(tmpdir(), "viberr-codex-msg-"));
+    cleanupDirs.push(home);
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    process.env.CODEX_HOME = home; // empty — no auth.json
+    const msg = backendUnavailableMessage("codex");
+    expect(msg).toContain(`missing at ${path.join(home, "auth.json")}`);
+    expect(msg).toContain("docker compose cp");
+    expect(msg).toContain("without a restart");
+    expect(msg).not.toContain("opt in with VIBERR_CODEX_USE_CLI_AUTH"); // flag is already set
+  });
+
+  it("keeps the generic no-credential copy when the opt-in is NOT set", () => {
+    const msg = backendUnavailableMessage("codex");
+    expect(msg).toContain("no usable credential");
+    expect(msg).toContain("opt in with VIBERR_CODEX_USE_CLI_AUTH=1");
   });
 });

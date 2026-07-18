@@ -22,6 +22,7 @@ import {
   type AgentRunRow,
 } from "./run-store.server";
 import {
+  codexCliAuthDiagnostics,
   createAdapters,
   resetRegistryForTests,
   selectAdapter,
@@ -386,11 +387,23 @@ function failRunUnavailable(db: Database.Database, spec: RunSpec): void {
   });
 }
 
-/** Actionable copy for a run refused because its backend has no credential. */
+/**
+ * Actionable copy for a run refused because its backend has no credential.
+ * State-aware for the codex CLI-auth trap: when the opt-in flag IS set but
+ * `$CODEX_HOME/auth.json` is missing (the docker-compose volume-wipe case),
+ * re-suggesting the flag is actively misleading — name the missing file and
+ * the exact copy command instead. Availability re-probes live, so once the
+ * file lands the next run works with no restart.
+ */
 export function backendUnavailableMessage(backend: RealBackend): string {
-  return backend === "claude"
-    ? "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started."
-    : "Codex is unavailable — no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
+  if (backend === "claude") {
+    return "Claude Code is unavailable — no usable credential is configured. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (or opt in with VIBERR_CLAUDE_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
+  }
+  const diag = codexCliAuthDiagnostics();
+  if (diag.optIn && !diag.authJsonExists) {
+    return `Codex is unavailable — VIBERR_CODEX_USE_CLI_AUTH=1 is set, but the Codex CLI login file is missing at ${diag.authJsonPath}. Copy it from a logged-in machine (docker: \`docker compose cp ~/.codex/auth.json app:${diag.authJsonPath}\`) — the next run picks it up without a restart. Or set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY, or run this agent on another backend. No agent process was started.`;
+  }
+  return "Codex is unavailable — no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
 }
 
 /**

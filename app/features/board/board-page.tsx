@@ -575,7 +575,8 @@ function BoardHeader({
       <div>
         <h1>Board</h1>
         <div className="sub">
-          {taskCount} tasks · {waitingHuman} waiting on a human decision
+          {taskCount} task{taskCount === 1 ? "" : "s"} · {waitingHuman} waiting
+          on a human decision
         </div>
       </div>
       <div className="board-tools">
