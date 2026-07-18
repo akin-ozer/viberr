@@ -38,7 +38,7 @@ function setup() {
       {
         occurredAt: "2026-07-02T09:41:00.000Z",
         type: "completion",
-        actor: { kind: "agent", backend: "codex", role: "Developer" },
+        actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" },
         title: "Completion report",
         text: "Implemented.",
         toAgent: false,

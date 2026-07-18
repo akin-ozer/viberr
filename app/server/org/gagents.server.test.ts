@@ -43,6 +43,7 @@ function writeTemplate(
         kind,
         name: id[0]!.toUpperCase() + id.slice(1),
         role: "Implementation",
+        desc: "Short operator-facing summary.",
         icon: "branch",
         backends: ["codex", "claude"],
         model: "codex-large",
@@ -169,6 +170,8 @@ describe("global agent profiles", () => {
     expect(parsed!.frontmatter.extras).toEqual([
       { label: "Run the validation suite", mode: "direct" },
     ]);
+    // `desc` is another field the modal doesn't own — preserved on edit.
+    expect(parsed!.frontmatter.desc).toBe("Short operator-facing summary.");
     expect(parsed!.frontmatter.backends).toEqual(["claude"]);
     expect(parsed!.frontmatter.stages).toEqual(["impl"]);
     expect(parsed!.frontmatter.resources.skills).toEqual(["conventional-commits"]);

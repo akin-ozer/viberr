@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
-import type {
-  AgentRef,
-  FileActorRef,
-  TaskFileEvent,
+import {
+  deliveringEngagement,
+  supportingEngagements,
+  type AgentRef,
+  type FileActorRef,
+  type TaskFileEvent,
 } from "~/schemas/task-file.schema";
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -264,7 +266,10 @@ export async function assignSpecialist(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.specialist = ref;
+      parsed.frontmatter.engagements = [
+        { ...ref, delivers: true },
+        ...supportingEngagements(parsed.frontmatter),
+      ];
       // Clear any pending "assign specialist" recommendation — it's now done.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => r.kind !== "assign_specialist",
@@ -337,9 +342,9 @@ export async function assignReviewer(
   );
   assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
 
-  const alreadyEngaged = existing.parsed.frontmatter.reviewers.some(
-    (r) => r.profileId === reviewer.profileId,
-  );
+  const alreadyEngaged = supportingEngagements(
+    existing.parsed.frontmatter,
+  ).some((r) => r.profileId === reviewer.profileId);
   if (alreadyEngaged) {
     return {
       profileId: reviewer.profileId,
@@ -363,7 +368,7 @@ export async function assignReviewer(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.reviewers.push(ref);
+      parsed.frontmatter.engagements.push({ ...ref, delivers: false });
       // Clear a matching pending "engage reviewer" recommendation.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
@@ -420,7 +425,7 @@ export async function removeReviewer(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const target = existing.parsed.frontmatter.reviewers.find(
+  const target = supportingEngagements(existing.parsed.frontmatter).find(
     (r) => r.profileId === input.profileId,
   );
   if (!target) return { profileId: input.profileId, removed: false };
@@ -437,8 +442,8 @@ export async function removeReviewer(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.reviewers = parsed.frontmatter.reviewers.filter(
-        (r) => r.profileId !== input.profileId,
+      parsed.frontmatter.engagements = parsed.frontmatter.engagements.filter(
+        (r) => r.delivers || r.profileId !== input.profileId,
       );
       parsed.timeline.unshift(event);
     },
@@ -506,7 +511,7 @@ export async function startSpecialistRun(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const sp = existing.parsed.frontmatter.specialist;
+  const sp = deliveringEngagement(existing.parsed.frontmatter);
   if (!sp) {
     throw AppError.validation(
       "Assign a specialist before starting a run.",
@@ -711,11 +716,9 @@ export async function startSpecialistRun(
       // Keep the assignment snapshot in step with the backend that actually
       // ran (deployment edit or D4 retry): the exec-profile label stays honest
       // and every later resolution (operator prompt, @mention) follows it.
-      if (
-        parsed.frontmatter.specialist &&
-        parsed.frontmatter.specialist.backend !== backend
-      ) {
-        parsed.frontmatter.specialist.backend = backend;
+      const delivering = deliveringEngagement(parsed.frontmatter);
+      if (delivering && delivering.backend !== backend) {
+        delivering.backend = backend;
       }
       parsed.timeline.unshift(
         agentEvent(
@@ -760,6 +763,7 @@ export async function startSpecialistRun(
     taskKey: input.taskKey,
     runId,
     backend,
+    profileId: sp.profileId,
     role: sp.role,
     kind: "primary",
     workdir: runWorkdir,
@@ -803,7 +807,7 @@ export async function startReviewerRun(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const reviewers = existing.parsed.frontmatter.reviewers;
+  const reviewers = supportingEngagements(existing.parsed.frontmatter);
   const index = reviewers.findIndex((r) => r.profileId === input.profileId);
   if (index < 0) {
     throw AppError.validation(
@@ -947,7 +951,7 @@ export async function startReviewerRun(
     (parsed) => {
       // Keep this reviewer's engage-time snapshot in step with the backend
       // that actually ran (deployment edit or D4 retry).
-      const engaged = parsed.frontmatter.reviewers.find(
+      const engaged = supportingEngagements(parsed.frontmatter).find(
         (r) => r.profileId === rev.profileId,
       );
       if (engaged && engaged.backend !== backend) {
@@ -991,6 +995,7 @@ export async function startReviewerRun(
     taskKey: input.taskKey,
     runId,
     backend,
+    profileId: rev.profileId,
     role: rev.role,
     kind: "reviewer",
     workdir: runWorkdir,

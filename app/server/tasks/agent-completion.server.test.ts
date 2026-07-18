@@ -197,6 +197,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: "reviewer",
         role: "Reviewer",
         kind: "reviewer",
         workdir: null,
@@ -229,12 +230,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await applyAgentCompletionEffects(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
         { id: runId, state: "finished", simulated: false },
       );
       const tl = taskFile().parsed.timeline;
       const reviewerComment = tl.find(
-        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
       );
       const quality = tl.find((e) => e.type === "quality");
       expect(reviewerComment, `reviewer reply must be posted (${wantValidation})`).toBeTruthy();
@@ -268,7 +269,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
       { id: runId, state: "finished", simulated: false },
     );
 
@@ -292,7 +293,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
     const tl = taskFile().parsed.timeline;
     const reviewerComment = tl.find(
-      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
     );
     expect(reviewerComment, "reviewer reply must survive the stale-read write").toBeTruthy();
     expect(reviewerComment!.text).toContain("@operator the inventory is verified");
@@ -316,6 +317,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: "developer",
         role: "developer",
         kind: "primary",
         workdir: null,
@@ -403,6 +405,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "codex",
+        profileId: "developer",
         role: "Developer",
         kind: "primary",
         workdir: null,
@@ -629,6 +632,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: "developer",
         role: "developer",
         kind,
         workdir: null,

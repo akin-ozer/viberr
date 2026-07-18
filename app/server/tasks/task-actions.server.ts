@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
-import type {
-  PacketOption,
-  TaskFileEvent,
-  TaskFrontmatter,
+import {
+  deliveringEngagement,
+  type PacketOption,
+  type TaskFileEvent,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
@@ -22,6 +23,10 @@ import {
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  agentRoleDisplay,
+  roleToSlug,
+} from "~/server/files/actor-ref.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
@@ -475,8 +480,7 @@ export async function createTask(
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,
-    specialist: null,
-    reviewers: [],
+    engagements: [],
     recommendations: [],
     schedules: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
@@ -995,7 +999,8 @@ export async function commentToAgent(
     //         is assigned as the primary specialist and run as primary;
     //       · anyone else is engaged as a reviewer (idempotent) and run as a
     //         reviewer on its own thread.
-    const hasPrimary = !!existing?.parsed.frontmatter.specialist;
+    const hasPrimary =
+      !!existing && !!deliveringEngagement(existing.parsed.frontmatter);
     if (target.isPrimary || !hasPrimary) {
       const { assignSpecialist, startSpecialistRun } = await import(
         "./specialist-run.server"
@@ -1052,6 +1057,7 @@ export async function commentToAgent(
       taskKey: input.taskKey,
       runId,
       backend: target.session?.backend === "codex" ? "codex" : "claude",
+      profileId: target.profileId,
       role: target.role,
       kind: target.isPrimary ? "primary" : "reviewer",
       workdir: null,
@@ -1299,15 +1305,18 @@ export async function postAgentReplyComment(
  * operator-actions before they reach this direct-execution path.
  */
 /**
- * The agent's most-recent reply comment text on a task (matched by backend +
- * role), or null when it has never replied. Used to detect a no-progress repeat
- * before re-inviting the operator to react.
+ * The agent's most-recent reply comment text on a task, or null when it has
+ * never replied. Identity match: profileId (D7) with a legacy fallback on the
+ * displayed role (pre-profileId events encoded a role slug — their displayed
+ * role still equals the live role snapshot). Used to detect a no-progress
+ * repeat before re-inviting the operator to react.
  */
 function latestAgentReplyText(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   backend: RealBackend,
+  profileId: string | null,
   role: string,
 ): string | null {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -1317,7 +1326,8 @@ function latestAgentReplyText(
       e.type === "comment" &&
       e.actor.kind === "agent" &&
       e.actor.backend === backend &&
-      e.actor.role === role
+      ((profileId !== null && e.actor.profileId === profileId) ||
+        agentRoleDisplay(e.actor) === role)
     ) {
       return e.text;
     }
@@ -1586,7 +1596,7 @@ export function classifyReviewerVerdict(
  */
 export function hasReworkSinceLastRejection(
   timeline: readonly TaskFileEvent[],
-  primary?: { backend: string; role: string } | null,
+  primary?: { profileId: string; backend: string; role: string } | null,
 ): boolean {
   for (const e of timeline) {
     // Newest-first walk: everything seen BEFORE the failing quality event is
@@ -1596,9 +1606,14 @@ export function hasReworkSinceLastRejection(
     }
     if (e.type === "transition") return true;
     if (e.type === "comment" && e.actor.kind === "agent") {
+      // Identity: profileId (D7); legacy events (role-slug refs) fall back to
+      // the displayed role + backend. No delivering engagement at all -> the
+      // historical role-heuristic fallback (Phase-4 cleanup, R4).
       const isPrimary = primary
-        ? e.actor.backend === primary.backend && e.actor.role === primary.role
-        : !/review|valid|qa|test/i.test(e.actor.role);
+        ? e.actor.profileId === primary.profileId ||
+          (e.actor.backend === primary.backend &&
+            agentRoleDisplay(e.actor) === primary.role)
+        : !/review|valid|qa|test/i.test(agentRoleDisplay(e.actor));
       if (isPrimary) return true; // a primary-specialist reply landed after the rejection
     }
   }
@@ -1664,7 +1679,7 @@ export async function recordReviewerVerdict(
           parsed.frontmatter.validation === "failing" &&
           !hasReworkSinceLastRejection(
             parsed.timeline,
-            parsed.frontmatter.specialist,
+            deliveringEngagement(parsed.frontmatter),
           );
         validation =
           verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
@@ -1781,6 +1796,9 @@ export async function registerAgentCompletion(
     taskKey: string;
     runId: string;
     backend: RealBackend;
+    /** The engaged profile's id (identity for actor refs, D7); null only for
+     *  legacy recovered runs that predate identity columns. */
+    profileId: string | null;
     role: string;
     kind: "primary" | "reviewer";
     workdir: string | null;
@@ -1821,6 +1839,7 @@ export async function applyAgentCompletionEffects(
     projectSlug: string;
     taskKey: string;
     backend: RealBackend;
+    profileId: string | null;
     role: string;
     kind: "primary" | "reviewer";
     workdir: string | null;
@@ -1835,7 +1854,10 @@ export async function applyAgentCompletionEffects(
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
-    role: input.role,
+    // Legacy recovered runs may lack an identity - fall back to the role slug
+    // (exactly the pre-D7 ref), so their events keep their historical shape.
+    profileId: input.profileId ?? roleToSlug(input.role),
+    roleHint: input.role,
   };
   // The timeline comment stores the FULL reply (2026-07-17 ruling — the old
   // 1,200-char cap made "(truncated — full report in the agent logs)" the only
@@ -1848,6 +1870,7 @@ export async function applyAgentCompletionEffects(
     input.projectSlug,
     input.taskKey,
     input.backend,
+    input.profileId,
     input.role,
   );
   // 1. Land the reply first so a reacting operator reads it in its snapshot.
@@ -1997,6 +2020,7 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       backend: input.backend,
+      profileId: input.profileId,
       role: input.role,
       simulated: false,
       ...(input.workdir ? { workdir: input.workdir } : {}),
@@ -2635,7 +2659,7 @@ export async function transitionStage(
         stale !== "failing" ||
         hasReworkSinceLastRejection(
           parsed.timeline,
-          parsed.frontmatter.specialist,
+          deliveringEngagement(parsed.frontmatter),
         )
       ) {
         parsed.frontmatter.validation = "changed";

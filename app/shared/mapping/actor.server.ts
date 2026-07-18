@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import {
   agentBackendName,
+  agentRoleDisplay,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
 
@@ -100,10 +101,14 @@ export function createActorResolver(
           kind: "agent",
           backend: ref.backend,
           name: agentBackendName(ref.backend),
-          role: ref.role,
+          role: agentRoleDisplay(ref),
         };
       case "system":
         return { kind: "system", name: systemIdToName(ref.systemId) };
+      // Tolerantly-kept unrecognized author (D7) — render as a system chip so
+      // the event stays visible instead of vanishing.
+      case "unknown":
+        return { kind: "system", name: "Unknown actor" };
       case "human": {
         let row = cache.get(ref.userId);
         if (row === undefined) {

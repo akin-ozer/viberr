@@ -12,8 +12,9 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     readiness: "input_required",
     waiting: "human",
     ownerUserId: "u_abc",
-    specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-    reviewers: [],
+    engagements: [
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+    ],
     operator: { assignedAtStageId: "triage" },
     urgent: true,
     validation: "changed",
@@ -31,6 +32,9 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect(result.frontmatter.key).toBe("VIB-142");
     expect(result.frontmatter.readiness).toBe("input_required");
     expect(result.frontmatter.urgent).toBe(true);
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+    ]);
     expect(result.unknown).toEqual({});
   });
 
@@ -64,34 +68,73 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect(legacy.frontmatter.pr).toMatchObject({ number: 318, state: "review" });
   });
 
-  it("reads the pre-rename `consultants` key as `reviewers` (back-compat)", () => {
-    const legacy = {
+  it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
+    const legacy: Record<string, unknown> = {
       ...valid,
-      reviewers: undefined,
-      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
     };
-    delete (legacy as Record<string, unknown>).reviewers;
+    delete legacy.engagements;
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
     expect(result.diagnostics).toEqual([]);
-    expect(result.frontmatter.reviewers).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+    ]);
+    // Legacy slots are absorbed, NOT preserved as unknown fields (so a
+    // rewrite emits only `engagements:`, never both forms).
+    expect(result.unknown).toEqual({});
+  });
+
+  it("reads the pre-rename `consultants` key as supporting engagements (back-compat)", () => {
+    const legacy: Record<string, unknown> = {
+      ...valid,
+      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    };
+    delete legacy.engagements;
+    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
     ]);
     // The legacy alias is absorbed, NOT preserved as an unknown field (so a
-    // rewrite emits only `reviewers:`, never both keys).
+    // rewrite emits only `engagements:`, never both keys).
     expect(result.unknown).toEqual({});
   });
 
   it("prefers `reviewers` over a stale `consultants` when both are present", () => {
-    const both = {
+    const both: Record<string, unknown> = {
       ...valid,
       reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
       consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
     };
+    delete both.engagements;
     const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
-    expect(result.frontmatter.reviewers).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer" },
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
     ]);
     expect(result.unknown).toEqual({});
+  });
+
+  it("demotes every delivering engagement after the first (single-writer invariant)", () => {
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        engagements: [
+          { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+          { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: true },
+        ],
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+    ]);
+    const demotion = result.diagnostics.find(
+      (d) => d.code === "frontmatter.multiple_deliverers",
+    );
+    expect(demotion?.severity).toBe("warning");
   });
 
   it("missing required fields → warnings + safe fallbacks, never a throw", () => {

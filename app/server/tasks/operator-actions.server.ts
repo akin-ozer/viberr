@@ -1,12 +1,14 @@
 import type Database from "better-sqlite3";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import type {
-  PacketOption,
-  PacketOptionKind,
-  Recommendation,
-  RecommendationKind,
-  TaskFileEvent,
-  TaskPacket,
+import {
+  deliveringEngagement,
+  supportingEngagements,
+  type PacketOption,
+  type PacketOptionKind,
+  type Recommendation,
+  type RecommendationKind,
+  type TaskFileEvent,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import {
@@ -737,14 +739,17 @@ export function operatorSnapshot(
     readiness: fm.readiness,
     waiting: fm.waiting,
     owner: ownerName,
-    specialist: fm.specialist
-      ? {
-          profileId: fm.specialist.profileId,
-          role: fm.specialist.role,
-          backend: fm.specialist.backend,
-        }
-      : null,
-    reviewers: fm.reviewers.map((r) => ({
+    specialist: (() => {
+      const delivering = deliveringEngagement(fm);
+      return delivering
+        ? {
+            profileId: delivering.profileId,
+            role: delivering.role,
+            backend: delivering.backend,
+          }
+        : null;
+    })(),
+    reviewers: supportingEngagements(fm).map((r) => ({
       profileId: r.profileId,
       role: r.role,
       backend: r.backend,
@@ -1056,7 +1061,9 @@ export async function operatorPromptSpecialist(
 
   // direct: assign as primary if it isn't already, then prompt + run.
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  const currentPrimary = file?.parsed.frontmatter.specialist?.profileId ?? null;
+  const currentPrimary = file
+    ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
+    : null;
   if (currentPrimary !== input.profileId) {
     await assignSpecialist(
       db,

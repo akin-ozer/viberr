@@ -94,8 +94,10 @@ describe("loader — VIB-142 fidelity", () => {
     // specialist, reviewer.
     expect(t.operator?.sinceLabel).toBe("since Triage");
     expect(t.specialist?.backend).toBe("codex");
-    expect(t.specialist?.role).toBe("Developer");
-    expect(t.reviewers.map((c) => c.role)).toEqual(["Reviewer"]);
+    // Role snapshots come from the LIVE seeded profiles (generic-agents seed
+    // hygiene - hand-written snapshots shielded the VIB-12 codec bug).
+    expect(t.specialist?.role).toBe("Implementation");
+    expect(t.reviewers.map((c) => c.role)).toEqual(["Review & validation"]);
     expect(t.owner?.kind).toBe("human");
 
     // Decision packet: stable option kinds (ruling 7), observations, rec.

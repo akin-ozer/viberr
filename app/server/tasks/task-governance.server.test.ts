@@ -6,7 +6,10 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import type { TaskPacket } from "~/schemas/task-file.schema";
+import {
+  deliveringEngagement,
+  type TaskPacket,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -722,7 +725,9 @@ describe("resolvePacket kind matrix", () => {
         stage: "impl",
         waiting: "human",
         readiness: "blocked",
-        specialist: { profileId: "dev", backend: "codex", role: "developer" },
+        engagements: [
+          { profileId: "dev", backend: "codex", role: "developer", delivers: true },
+        ],
       },
       RETRY_PACKET,
     );
@@ -757,7 +762,7 @@ describe("resolvePacket kind matrix", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("claude");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("claude");
     const texts = file.parsed.timeline.map((e) => e.text);
     expect(texts.some((t) => t.includes("switched from Codex"))).toBe(true);
     expect(

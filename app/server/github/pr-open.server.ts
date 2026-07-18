@@ -299,7 +299,14 @@ async function writePrToTask(
       type: "github",
       actor: actor.userId
         ? { kind: "human", userId: actor.userId, nameHint }
-        : { kind: "agent", backend: "claude", role: "Implementation" },
+        : {
+            kind: "agent",
+            backend: "claude",
+            // Synthetic fallback author (no engaged profile in scope here) -
+            // renders as "Implementation" exactly as before.
+            profileId: "implementation",
+            roleHint: "Implementation",
+          },
       title: null,
       text: `Opened **PR #${pr.number}** for review.`,
       toAgent: false,

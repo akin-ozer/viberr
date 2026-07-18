@@ -10,6 +10,7 @@ import type {
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { roleToSlug } from "~/server/files/actor-ref.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -102,8 +103,10 @@ export interface ReconcileWorkspaceDeliveryInput {
    *  `<taskDir>/workspace` itself — whichever contains a git repo. */
   workdir?: string | null;
   dataRoot?: string;
-  /** The finished run's backend + role — attribution for the typed events. */
+  /** The finished run's backend + identity — attribution for the typed
+   *  events (D7: profileId is the identity; role is the display snapshot). */
   backend?: RealBackend;
+  profileId?: string | null;
   role?: string;
   /** Skip entirely for a simulated run (it did no real git work). */
   simulated?: boolean;
@@ -262,7 +265,12 @@ export async function reconcileWorkspaceDelivery(
       return noop("no_workspace", "no workspace git repo found");
     }
 
-    const actor: FileActorRef = { kind: "agent", backend, role };
+    const actor: FileActorRef = {
+      kind: "agent",
+      backend,
+      profileId: input.profileId ?? roleToSlug(role),
+      roleHint: role,
+    };
 
     // 1. Current branch.
     const branchRes = await exec(

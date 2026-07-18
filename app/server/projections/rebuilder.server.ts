@@ -3,6 +3,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
+import {
+  deliveringEngagement,
+  supportingEngagements,
+} from "~/schemas/task-file.schema";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -403,8 +407,11 @@ export function rebuildTaskFile(
     fm.urgent ? 1 : 0,
     fm.validation,
     fm.ownerUserId,
-    fm.specialist ? JSON.stringify(fm.specialist) : null,
-    JSON.stringify(fm.reviewers),
+    // Derived legacy projection shapes (G1): the delivering engagement fills
+    // the `specialist` column, the supporting engagements fill `reviewers`.
+    // The extra `delivers` key rides along harmlessly in the JSON.
+    deliveringEngagement(fm) ? JSON.stringify(deliveringEngagement(fm)) : null,
+    JSON.stringify(supportingEngagements(fm)),
     fm.operator ? JSON.stringify(fm.operator) : null,
     fm.branch,
     fm.repo ?? project?.repo ?? null,
@@ -436,10 +443,12 @@ export function rebuildTaskFile(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   parsed.timeline.forEach((event, position) => {
+    // Tolerantly-kept unrecognized authors project as system actors so their
+    // events stay visible in feeds (D7 — never dropped over an author).
     const actorKind =
       event.actor.kind === "human"
         ? "human"
-        : event.actor.kind === "system"
+        : event.actor.kind === "system" || event.actor.kind === "unknown"
           ? "system"
           : event.actor.kind === "operator"
             ? "operator"
@@ -448,10 +457,12 @@ export function rebuildTaskFile(
       event.actor.kind === "human"
         ? event.actor.userId
         : event.actor.kind === "agent"
-          ? `${event.actor.backend}/${event.actor.role.toLowerCase().replace(/\s+/g, "-")}`
+          ? `${event.actor.backend}/${event.actor.profileId}`
           : event.actor.kind === "system"
             ? event.actor.systemId
-            : "operator";
+            : event.actor.kind === "unknown"
+              ? event.actor.raw
+              : "operator";
     insertEvent.run(
       slug,
       fm.key,

@@ -509,7 +509,12 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_rework",
-      actorRef: { kind: "agent", backend: "claude", role: "developer" },
+      actorRef: {
+        kind: "agent",
+        backend: "claude",
+        profileId: "developer",
+        roleHint: "developer",
+      },
       replyText: "Fixed the violation and pushed a new commit.",
     });
 

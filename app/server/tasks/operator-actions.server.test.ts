@@ -7,6 +7,10 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import {
+  deliveringEngagement,
+  supportingEngagements,
+} from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -182,7 +186,7 @@ describe("operatorAssignSpecialist", () => {
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
   });
 
   it("recommend mode adds an actionable recommendation and does NOT assign", async () => {
@@ -195,7 +199,7 @@ describe("operatorAssignSpecialist", () => {
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
-    expect(task().frontmatter.specialist).toBeNull();
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
     // A structured, ACTIONABLE recommendation is added to the task frontmatter…
     const recs = task().frontmatter.recommendations;
     expect(recs).toHaveLength(1);
@@ -216,7 +220,7 @@ describe("operatorAssignSpecialist", () => {
       authority("full"), // even full autonomy cannot override an `off` capability
     );
     expect(r.outcome).toBe("denied");
-    expect(task().frontmatter.specialist).toBeNull();
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
   });
 });
 
@@ -311,7 +315,9 @@ describe("operatorAssignReviewer", () => {
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(
+      supportingEngagements(task().frontmatter).map((x) => x.profileId),
+    ).toContain("reviewer");
   });
 });
 
@@ -350,7 +356,7 @@ describe("operatorPromptSpecialist", () => {
     );
     expect(r.outcome).toBe("done");
     // The specialist is assigned…
-    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
     // …a routed-to-agent operator comment prompts it about the task…
     const prompt = task().timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
@@ -397,7 +403,7 @@ describe("operatorPromptSpecialist", () => {
       authority("supervised"),
     );
     expect(r.outcome).toBe("recommended");
-    expect(task().frontmatter.specialist).toBeNull();
+    expect(deliveringEngagement(task().frontmatter)).toBeNull();
     expect(task().frontmatter.recommendations[0]?.kind).toBe("assign_specialist");
     // No run was triggered.
     await new Promise((res) => setTimeout(res, 40));
@@ -416,7 +422,9 @@ describe("operatorPromptReviewer", () => {
       authority("supervised"),
     );
     expect(r.outcome).toBe("done");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(
+      supportingEngagements(task().frontmatter).map((x) => x.profileId),
+    ).toContain("reviewer");
     const prompt = task().timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
@@ -487,7 +495,9 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
     // Full autonomy performed impl→review and then coordinated review by
     // engaging + prompting a reviewer.
     expect(task().frontmatter.stage).toBe("review");
-    expect(task().frontmatter.reviewers.map((x) => x.profileId)).toContain("reviewer");
+    expect(
+      supportingEngagements(task().frontmatter).map((x) => x.profileId),
+    ).toContain("reviewer");
     interruptRunningRuns("VIB-1");
   });
 
@@ -526,7 +536,9 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
         ownerUserId: store.users.arda.id,
         operator: { assignedAtStageId: "triage" },
         title: "Ineligible engaged reviewer",
-        reviewers: [{ profileId: "reviewer", backend: "claude", role: "Code review" }],
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false },
+        ],
       }),
       goal: "Prove the operator skips an ineligible engaged reviewer.",
     });
@@ -724,7 +736,7 @@ describe("auto-invoke on stage transition", () => {
     const opDone = await waitForFinishedRun("VIB-1", (r) => r.op === true);
     expect(opDone).toBe(true);
     // The operator picked the task up at the new stage and prompted its specialist.
-    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
     expect(
       task().timeline.some((e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent),
     ).toBe(true);
@@ -1055,7 +1067,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     );
     expect(res.label).toContain("Dev");
     // The recommended assignment was performed…
-    expect(task().frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
     // …and the recommendation card was cleared.
     expect(task().frontmatter.recommendations).toHaveLength(0);
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
@@ -1120,7 +1132,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
       actor,
       { dataRoot: store.dataRoot },
     );
-    expect(task().frontmatter.specialist).toBeNull(); // NOT assigned
+    expect(deliveringEngagement(task().frontmatter)).toBeNull(); // NOT assigned
     expect(task().frontmatter.recommendations).toHaveLength(0);
   });
 
@@ -1194,7 +1206,7 @@ describe("auto-invoke on task creation", () => {
     // human approval needed until impl→review.
     const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
     expect(t.frontmatter.stage).toBe("impl");
-    expect(t.frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(t.frontmatter)?.profileId).toBe("developer");
     interruptRunningRuns(key);
   });
 
@@ -1216,7 +1228,7 @@ describe("auto-invoke on task creation", () => {
     expect(opDone).toBe(true);
     const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
     // The operator assigned the specialist and prompted it with an @mention.
-    expect(t.frontmatter.specialist?.profileId).toBe("developer");
+    expect(deliveringEngagement(t.frontmatter)?.profileId).toBe("developer");
     const prompt = t.timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
     );
@@ -1234,7 +1246,7 @@ describe("auto-invoke on task creation", () => {
     );
     await new Promise((r) => setTimeout(r, 60));
     const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
-    expect(t.frontmatter.specialist).toBeNull();
+    expect(deliveringEngagement(t.frontmatter)).toBeNull();
     expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
   });
 });

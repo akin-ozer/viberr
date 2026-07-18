@@ -29,6 +29,11 @@ export const agentProfileFrontmatterSchema = z
     kind: z.enum(["operator", "specialist"]),
     name: z.string().min(1),
     role: z.string().min(1),
+    /** Short scannable description (one paragraph) — what the OPERATOR reads
+     * when picking a profile for a task (generic-agents G-selection). Distinct
+     * from the markdown body, which is the long persona/instructions. Empty →
+     * views fall back to the body's first paragraph. */
+    desc: z.string().default(""),
     icon: z.string().default("cpu"),
     backends: z.array(z.enum(["codex", "claude"])).default([]),
     model: z.string().default(""),

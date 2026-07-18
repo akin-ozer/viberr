@@ -8,6 +8,10 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  deliveringEngagement,
+  supportingEngagements,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -155,10 +159,11 @@ describe("assignSpecialist", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist).toMatchObject({
+    expect(deliveringEngagement(file.parsed.frontmatter)).toMatchObject({
       profileId: "dev",
       backend: "claude",
       role: "developer",
+      delivers: true,
     });
     const event = file.parsed.timeline[0]!;
     expect(event.type).toBe("agent");
@@ -286,7 +291,9 @@ describe("startSpecialistRun", () => {
         stage: "impl",
         ownerUserId: store.users.arda.id,
         title: "Attach execution workspace",
-        specialist: { profileId: "dev", backend: "claude", role: "developer" },
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+        ],
       }),
       goal: "Let the operator attach a repo and run the specialist.",
     });
@@ -370,7 +377,7 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
     expect(file.parsed.timeline[0]!.text).toContain("switched from Claude Code");
   });
 
@@ -396,7 +403,7 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
   });
 
   it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
@@ -460,8 +467,8 @@ describe("assignReviewer / removeReviewer", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.reviewers).toEqual([
-      { profileId: "dev", backend: "claude", role: "developer" },
+    expect(supportingEngagements(file.parsed.frontmatter)).toEqual([
+      { profileId: "dev", backend: "claude", role: "developer", delivers: false },
     ]);
     expect(file.parsed.timeline[0]!.text).toContain("Engaged **dev**");
     expect(file.parsed.timeline[0]!.text).toContain("as a reviewer");
@@ -476,7 +483,7 @@ describe("assignReviewer / removeReviewer", () => {
     const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     expect(again.alreadyEngaged).toBe(true);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    expect(file.parsed.frontmatter.reviewers).toHaveLength(1);
+    expect(supportingEngagements(file.parsed.frontmatter)).toHaveLength(1);
   });
 
   it("removeReviewer drops the ref (+ event/audit); missing id is a no-op", async () => {
@@ -485,7 +492,7 @@ describe("assignReviewer / removeReviewer", () => {
     const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     expect(removed.removed).toBe(true);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    expect(file.parsed.frontmatter.reviewers).toEqual([]);
+    expect(supportingEngagements(file.parsed.frontmatter)).toEqual([]);
     expect(file.parsed.timeline[0]!.text).toContain("Released reviewer **dev**");
     expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]?.taskKey).toBe("VIB-1");
 
