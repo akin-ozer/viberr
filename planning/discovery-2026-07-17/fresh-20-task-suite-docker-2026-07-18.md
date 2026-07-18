@@ -152,13 +152,46 @@ backend was down so it produced no diff. Wording conflates "assigned but never r
 assigned." Low priority; arose from an artificial test sequence (reviewer engaged before the
 specialist ever ran, Codex-down). Open product question: should the copy distinguish the two?
 
-## The one credential-gated dimension not re-run in docker
-Real **PR lifecycle (push→PR→merge/reject→W4 divergence)** needs a GitHub repo credential in the
-container (fresh seed has 0 connections/PATs — observed via Codex's honest clone-blocked report). It
-was validated live in prior sessions (`live-delivery-w4-verification`, 50 PRs on `akin-ozer/viberr`)
-and is unit-tested (`github-reconciler.server.test.ts`). Not driven autonomously here to avoid
-uncontrolled AI-authored writes to the repo; the docker run instead demonstrated the honest
-no-credential degradation end-to-end.
+## PR lifecycle + W4 divergence — driven live in docker (owner: "wire credential + run it")
+Wired a real GitHub credential through the app (org `connection-add` with the host token → project
+`set-credential` → `reconcile`, all governed, org-admin), then drove two controlled tiny-file
+deliveries on `akin-ozer/viberr` (goal constrained to ONE 1-line marker file each):
+
+1. **Agent delivery (real):** operator (Claude, full autonomy) assigned the Developer (Codex); Codex
+   cloned, created the single file `planning/live-test/viberr-live-{A,B}.md`, validated the diff
+   (exact content, single-file, clean worktree), committed locally. **viberr's governed delivery**
+   then pushed the branch server-side (project PAT) and opened the PR on the Review transition
+   (`openReviewPrBestEffort`→`pushWorkspaceBranch`→`openTaskPr`) — PR **#59** (VIB-204) and **#60**
+   (VIB-205), each **+1/−0, single file**, no bloat.
+2. **W4 divergence, both directions (via `gh`, out-of-band):**
+   - `gh pr merge 59` → reconcile → viberr: `pr.state: merged`, typed **Divergence** event ("merged
+     on GitHub, but VIB-204 hasn't been accepted through Viberr — its stage is unchanged"), **no
+     auto-advance**. UI GitHub panel shows the `merged` badge + diff.
+   - `gh pr close 60` → reconcile → viberr: `pr.state: closed`, **Divergence** event ("closed
+     without merging, but VIB-205 is still active — rework and reopen, or archive"), no auto-advance.
+   Confirms R8-6 (surface, never auto-advance) end-to-end against the real repo.
+
+### FINDING — Codex agent-side `git push` fails in the container (Claude/Codex parity gap)
+The Developer's `commit-push-branch` is **mode: direct**, the project PAT was bound *before* the run,
+and the token is valid (the server-side push used it successfully). viberr therefore set
+`pushCredentialed=true` and told the Codex agent to push (`git push -u origin vib-204` → open PR).
+Codex's push FAILED: *"the commit is complete, but `git push` failed because this process received no
+HTTPS credentials or askpass helper **despite the delivery contract's expectation**"* — it inspected
+`core.askpass`/`env` and found none. `pushAuth.env` (GIT_ASKPASS + token) IS threaded into the
+RunSpec (`specialist-run.server.ts:704`) and codex-runtime merges `spec.env`, so the gap is that the
+askpass helper — written to the **host tmpdir** (`git-clone-auth.server.ts` `mkdtempSync(tmpdir())`)
+— isn't reachable/executable inside the **Codex sandbox** (Claude runs + the unsandboxed server-side
+push both get it). Effect: a misleading "push blocked on missing GitHub credentials" decision packet
+for what the governed server-side path delivers fine.
+**Open product-design question (for the owner):** either (a) fix Codex askpass by writing the helper
+into the sandbox-accessible workspace, or (b) — cleaner, backend-agnostic, and already the "governed
+delivery" model — stop instructing agents to push at all and always deliver via the server-side
+`pushWorkspaceBranch` on the Review transition. Leaning (b).
+
+### Repo hygiene
+PR #59 merged one 1-line marker (`planning/live-test/viberr-live-A.md`, "safe to delete") to `main`;
+PR #60's branch was deleted on close. Both are within the "small test files only" rule; the marker is
+trivially revertible on request.
 
 ## Verdict
 The whole app was re-exercised in the **production Docker Compose container**: 20/20 governance +
