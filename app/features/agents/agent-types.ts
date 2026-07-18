@@ -56,6 +56,10 @@ export interface AgentProfileView {
   effort: string;
   scope: string;
   desc: string;
+  /** The profile's LONG persona/instructions (template body, D6) — what an
+   * agent run receives as its system-prompt persona when no shipped
+   * agents/definitions/<id>.md overrides it. Empty when the profile has none. */
+  definition: string;
   stages: string[];
   spanAll: boolean;
   /** Operator only: default autonomy (supervised | full); undefined for specialists. */

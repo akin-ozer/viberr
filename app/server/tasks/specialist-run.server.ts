@@ -118,6 +118,9 @@ export interface ResolvedSpecialist {
   kb: string[];
   /** The agent's declared MCP servers — wired into the selected SDK. */
   mcps: string[];
+  /** The profile's long persona/instructions (template body, D6). A shipped
+   *  agents/definitions/<id>.md still overrides it (built-in transition aid). */
+  definition: string;
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
   capabilities: CapabilityGrant[];
@@ -150,6 +153,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
     mcps: view.resources.mcps ?? [],
+    definition: view.definition,
     capabilities: [],
     stages: view.stages ?? [],
     spanAll: view.spanAll ?? false,
@@ -626,6 +630,7 @@ export async function startAgentRun(
     profileId: engagement.profileId,
     skills,
     kb,
+    ...(resolved?.definition ? { definition: resolved.definition } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
@@ -857,10 +862,16 @@ export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
   kb?: string[];
+  /** The profile's own persona body (D6) — used when the store ships no
+   *  agents/definitions/<id>.md override. Custom profiles finally run AS
+   *  themselves instead of persona-less on the generic analyze prompt. */
+  definition?: string;
   dataRoot?: string;
 }): string {
   const parts: string[] = [];
-  const definition = readAgentDefinition(input.profileId, input.dataRoot);
+  const definition =
+    readAgentDefinition(input.profileId, input.dataRoot) ||
+    (input.definition ?? "").trim();
   if (definition) parts.push(definition);
   // Collect the actually-resolvable resource bodies first, so the trusted-
   // provenance banner (F7-RES4) is emitted ONLY when there is real attached
@@ -1180,6 +1191,7 @@ export function resolveResumeConfinement(
       profileId: input.profileId,
       skills: resolved.skills,
       kb: resolved.kb,
+      ...(resolved.definition ? { definition: resolved.definition } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
