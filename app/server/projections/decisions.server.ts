@@ -19,12 +19,15 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
  *
  * Member-scoping (the fix): a decision is `mine` iff the user can actually act
  * on it — maintainer+ on that project (resolve-packet / accept-completion /
- * approve-transition all share the maintainer+ tier) OR the task's owner (a
- * contributor who owns a task governs its packet/completion). A decision the
- * user could act on ONLY through the D2 org-admin emergency override (they are
- * an org admin but NOT a project member) is `overrideEligible`, never `mine` —
- * it is governance reach, not a personal inbox. Viewers and non-members with no
- * override see nothing.
+ * approve-transition all share the maintainer+ tier) OR the task's owner acting
+ * within the NARROW owner exception (Q2/R6-2): an owner governs its packet and
+ * its `accept_completion` recommendation, but NOT transition/assign/run
+ * recommendations (maintainer-only — an owner would 403 on both apply AND
+ * dismiss). A decision the user could act on ONLY through the D2 org-admin
+ * emergency override (org admin whose own project role — none, viewer, or a
+ * below-tier membership — is insufficient) is `overrideEligible`, never `mine`:
+ * governance reach, not a personal inbox. Viewers and contributor-non-owners
+ * with no override see nothing.
  *
  * This is a READ (no audit): it classifies by project role + task ownership
  * directly, never calling the audited `resolveProjectAuthority` mutation path.
@@ -34,6 +37,17 @@ export interface DecisionRef {
   taskKey: string;
   kind: "packet" | "recommendation";
   stage: string;
+}
+
+/** Does the projected recommendation-kinds array contain an owner-actionable
+ * `accept_completion`? Tolerant of a malformed/legacy value (treated as none). */
+function hasAcceptCompletionRec(recommendationKinds: string): boolean {
+  try {
+    const kinds = JSON.parse(recommendationKinds) as unknown;
+    return Array.isArray(kinds) && kinds.includes("accept_completion");
+  } catch {
+    return false;
+  }
 }
 
 export interface DecisionsForUser {
@@ -50,6 +64,7 @@ interface OpenDecisionRow {
   owner_user_id: string | null;
   has_packet: number;
   recommendation_count: number;
+  recommendation_kinds: string;
 }
 
 export function decisionsRequiring(
@@ -76,7 +91,7 @@ export function decisionsRequiring(
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id,
               (CASE WHEN packet_json IS NOT NULL AND packet_json <> '' THEN 1 ELSE 0 END) AS has_packet,
-              recommendation_count
+              recommendation_count, recommendation_kinds
          FROM task_projections
         WHERE ((packet_json IS NOT NULL AND packet_json <> '') OR recommendation_count > 0)
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
@@ -100,19 +115,33 @@ export function decisionsRequiring(
       stage: row.stage,
     };
 
-    // Maintainer+ holds every governing action; a contributor who OWNS the task
-    // governs its packet/completion (rbac.ts owner allowance).
+    // Maintainer+ holds every governing action (resolve-packet / accept-
+    // completion / approve-transition / dismiss-recommendation all share the
+    // maintainer+ tier), so a maintainer+ can act on ANY open decision.
     const canGovern = roleCan(role, "resolve-packet");
-    const isOwner =
-      row.owner_user_id === userId && roleCan(role, "own-task");
+    // The task OWNER exception (Q2/R6-2) is NARROW: an owner (contributor+) can
+    // resolve its packet and accept its completion — but NOT act on transition/
+    // assign/run recommendations (those need approve-transition/run-agents, and
+    // even DISMISSING a recommendation needs resolve-packet, none with an owner
+    // exception). So an owner's decision is `mine` only when it is a packet OR an
+    // `accept_completion` recommendation; a maintainer-only recommendation on an
+    // owned task is NOT the owner's to act on (it would 403 on apply and dismiss).
+    const isOwner = row.owner_user_id === userId && roleCan(role, "own-task");
+    const ownerCanAct =
+      isOwner &&
+      (row.has_packet === 1 || hasAcceptCompletionRec(row.recommendation_kinds));
 
-    if (canGovern || isOwner) {
+    if (canGovern || ownerCanAct) {
       mine.push(ref);
-    } else if (!role && orgAdmin) {
-      // Non-member org admin: actionable only through the audited D2 override.
+    } else if (orgAdmin) {
+      // Org admin who can't act under their own project role (non-member, viewer,
+      // or a below-tier member) — actionable only through the audited D2 override
+      // (resolveProjectAuthority grants it whenever the member role is below the
+      // required tier, not only to non-members).
       overrideEligible.push(ref);
     }
-    // viewer / contributor-non-owner / non-member-without-override → nothing.
+    // viewer / contributor-non-owner (or owner of a maintainer-only rec) with no
+    // org-admin override → nothing.
   }
 
   return { mine, overrideEligible };

@@ -4,7 +4,6 @@ import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
-import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { ReviewQueuePage } from "~/features/review/review-page";
 
 /**
@@ -28,14 +27,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!getProject(db, params.slug)) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // R8-3: "Waiting on your acceptance" is member-scoped — only tasks whose
-  // decision THIS viewer can act on (maintainer+ / owner) land in `ready`.
-  const mineTaskKeys = new Set(
-    decisionsRequiring(db, ctx.user.id, { projectSlug: params.slug }).mine.map(
-      (d) => d.taskKey,
-    ),
-  );
-  const queue = getReviewQueue(db, params.slug, { mineTaskKeys });
+  // R8-3: "Waiting on your acceptance" is member-scoped by acceptance authority
+  // (maintainer+ / owner), computed per review-stage task inside getReviewQueue.
+  const queue = getReviewQueue(db, params.slug, { viewerUserId: ctx.user.id });
   return { slug: params.slug, ...queue };
 }
 

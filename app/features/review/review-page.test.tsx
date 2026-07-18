@@ -109,6 +109,23 @@ describe("ReviewQueuePage", () => {
     expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
   });
 
+  it("labels a human-waiting row in the working panel 'waiting on a human', never 'agent working'", () => {
+    // R8-3: a review task waiting on a human someone ELSE must accept lands in
+    // "Still in review" — it must read "waiting on a human", not the false
+    // "agent working" (no agent is running on a human-waiting task).
+    const humanNotMine: ReviewRowView = {
+      ...rowAgent,
+      key: "VIB-150",
+      waiting: "human",
+    };
+    const { container } = renderQueue([], [humanNotMine]);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.querySelector(".wait-tag.human")!.textContent).toContain(
+      "waiting on a human",
+    );
+    expect(row.querySelector(".wait-tag.agent")).toBeNull();
+  });
+
   it("renders both empty states with exact copy (no all-empty hero)", () => {
     const { getByText } = renderQueue([], []);
     expect(

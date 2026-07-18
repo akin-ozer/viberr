@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Validation, Waiting } from "~/schemas/task-file.schema";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
 
@@ -12,10 +13,15 @@ import { getProject, listProjectTasks } from "./board-query.server";
  * badge uses (routes/project.tsx), so the two counts can never drift — on a
  * Lightweight board (`todo/doing/done`) the review role is `doing`, and a
  * literal-"review" filter left this queue permanently empty while the rail
- * showed a count (pass-4 WI-1). The panel split is purely on `waiting`:
- * `human` → "Waiting on your acceptance", anything else — including the
- * legal `review + none` combination — lands in "Still with agents"
- * (ruling 10 / contracts §2.2, ported 1:1).
+ * showed a count (pass-4 WI-1). Panel split (R8-3, member-scoped): a
+ * review-stage task waiting on a human lands in "Waiting on your acceptance"
+ * ONLY for a viewer who can ACCEPT it — maintainer+ (resolve-packet tier) or
+ * the task owner (owner exception, R6-2). Everything else — waiting on an agent,
+ * the legal `review + none` combination, OR a human-waiting task another human
+ * must accept — lands in "Still in review", where the page labels a human-
+ * waiting row "waiting on a human" (never the false "agent working"). Passing no
+ * viewer keeps the split state-based (any human-waiting task → ready), which the
+ * tests and non-scoped callers rely on.
  *
  * Ordering (spec §8.2 decision): deterministic task-key number ASC — the
  * order `listProjectTasks` already guarantees, which reproduces the mock's
@@ -48,7 +54,7 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: Database.Database,
   slug: string,
-  opts: { mineTaskKeys?: Set<string> } = {},
+  opts: { viewerUserId?: string } = {},
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
@@ -83,14 +89,40 @@ export function getReviewQueue(
     validation: t.validation,
   }));
 
-  // R8-3: "Waiting on your acceptance" is member-scoped — a task only lands in
-  // `ready` if the VIEWER can act on its decision (maintainer+ / owner). When no
-  // scoping set is passed the split stays state-based (any human-waiting task).
-  const isMine = (key: string) =>
-    opts.mineTaskKeys === undefined || opts.mineTaskKeys.has(key);
+  // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,
+  // not by decision-object presence — a review-stage task waiting on a human can
+  // have no packet/recommendation (the operator couldn't open a completion
+  // packet) yet still need a human to accept it. A viewer can accept iff they are
+  // maintainer+ (resolve-packet tier) OR the task's owner (owner exception, R6-2,
+  // which requires the own-task role). No viewer → state-based (any human-waiting
+  // task), preserving the unscoped/test behavior.
+  const viewerRole: ProjectRole | null =
+    opts.viewerUserId === undefined
+      ? null
+      : ((
+          db
+            .prepare(
+              `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
+            )
+            .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
+        )?.role ?? null);
+  const viewerCanGovern = roleCan(viewerRole, "resolve-packet");
+  const viewerCanOwn = roleCan(viewerRole, "own-task");
+  const ownerByKey = new Map(
+    inReview.map((t) => [
+      t.key,
+      t.owner && t.owner.kind === "human" ? t.owner.userId : null,
+    ]),
+  );
+  const canAccept = (key: string): boolean => {
+    if (opts.viewerUserId === undefined) return true; // unscoped
+    if (viewerCanGovern) return true;
+    const owner = ownerByKey.get(key) ?? null;
+    return owner !== null && owner === opts.viewerUserId && viewerCanOwn;
+  };
   return {
-    ready: rows.filter((r) => r.waiting === "human" && isMine(r.key)),
-    working: rows.filter((r) => !(r.waiting === "human" && isMine(r.key))),
+    ready: rows.filter((r) => r.waiting === "human" && canAccept(r.key)),
+    working: rows.filter((r) => !(r.waiting === "human" && canAccept(r.key))),
     total: rows.length,
   };
 }

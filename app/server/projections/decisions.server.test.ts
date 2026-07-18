@@ -59,6 +59,84 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
     expect(decisionsRequiring(store.db, store.users.deniz.id).mine).toHaveLength(0);
   });
 
+  it("a contributor-owner does NOT hold a maintainer-only recommendation (transition/assign/run)", () => {
+    const store = setupTestStore(ctx);
+    // A recommendation-ONLY task (no packet) owned by a contributor. Applying a
+    // `transition` needs approve-transition (maintainer+) and even DISMISSING any
+    // recommendation needs resolve-packet (maintainer+) — neither has an owner
+    // exception, so the owner can act on NEITHER: it must not count as `mine`.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-210", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.selin.id,
+        recommendations: [
+          { id: "r1", kind: "transition", toStageId: "done", label: "Accept", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // selin (contributor + owner) can neither apply nor dismiss it → not hers.
+    expect(decisionsRequiring(store.db, store.users.selin.id).mine).toHaveLength(0);
+    // A maintainer holds it (maintainer+ can act on any decision).
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey),
+    ).toEqual(["VIB-210"]);
+  });
+
+  it("a contributor-owner DOES hold an accept_completion recommendation (owner exception)", () => {
+    const store = setupTestStore(ctx);
+    // accept_completion is the ONE recommendation kind an owner can act on — the
+    // owner exception (R6-2) lets a contributor-owner accept their task's
+    // completion, exactly like resolving a completion packet.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-211", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.selin.id,
+        recommendations: [
+          {
+            id: "r1",
+            kind: "accept_completion",
+            toStageId: "done",
+            label: "Accept completion",
+            detail: "",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(
+      decisionsRequiring(store.db, store.users.selin.id).mine.map((d) => d.taskKey),
+    ).toEqual(["VIB-211"]);
+    // A contributor who is NOT the owner still can't accept → not theirs.
+    // (Reuse deniz — a non-member — for the clearly-nothing case.)
+    expect(decisionsRequiring(store.db, store.users.deniz.id).mine).toHaveLength(0);
+  });
+
+  it("an org admin who is a below-tier project member gets overrideEligible (not dropped)", () => {
+    const store = setupTestStore(ctx);
+    seedOpenDecision(store, "VIB-212");
+    // An ORG admin who is ALSO a project VIEWER (below the maintainer+ tier).
+    // resolveProjectAuthority would grant them the audited D2 override, so the
+    // decision must surface as overrideEligible — NOT silently dropped.
+    const admin = insertUser(store.db, {
+      id: "u_orgadmin_viewer",
+      email: "orgadmin-viewer@viberr.test",
+      name: "Org Admin Viewer",
+      role: "admin",
+      passwordHash: null,
+    });
+    store.db
+      .prepare(
+        `INSERT INTO project_members (project_slug, user_id, role) VALUES (?, ?, 'viewer')`,
+      )
+      .run(store.slug, admin.id);
+    const result = decisionsRequiring(store.db, admin.id);
+    expect(result.mine).toHaveLength(0);
+    expect(result.overrideEligible.map((d) => d.taskKey)).toEqual(["VIB-212"]);
+  });
+
   it("a non-member ORG ADMIN gets `overrideEligible`, never `mine`", () => {
     const store = setupTestStore(ctx);
     seedOpenDecision(store, "VIB-203");
