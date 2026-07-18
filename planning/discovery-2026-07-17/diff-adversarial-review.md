@@ -48,6 +48,18 @@ who must accept it, AND landed in "Still in review" rendered "agent working" —
 `review-queue.server.ts` + `review-page.tsx` comments claiming a "project-wide, purely on waiting"
 split were rewritten to the member-scoped (acceptance-authority) behavior.
 
+## Live cross-role verification (2026-07-18, dev app)
+Created a throwaway fixture VIB-900 on the `viberr` project: owned by Murat (a **contributor**),
+one open decision = a `transition` recommendation, no packet. Projected correctly with
+`recommendation_kinds = ["transition"]`. Then walked it across roles in the browser:
+- **Murat (contributor-owner):** Home "1 waiting on you" on viberr (= VIB-4, a packet he CAN
+  resolve); board "Waiting on me · 1"; VIB-900 card reads **"waiting on a human"** — excluded.
+- **Elif (maintainer):** board "Waiting on me · 15"; VIB-900 card reads **"waiting on you"**
+  (confirmed via DOM: `…Murat · owner…waiting on you`) — she can apply the transition rec.
+The SAME task is attributed to the maintainer, never inflated onto the contributor-owner. Before
+the fix Murat's count would have been 2 and VIB-900 would have read "waiting on you" for him.
+Fixture removed afterward (data/ is gitignored; watcher dropped it from the projection).
+
 ## Tests added (+9)
 - decisions: contributor-owner does NOT hold a transition rec; DOES hold accept_completion;
   org-admin below-tier member → overrideEligible.
