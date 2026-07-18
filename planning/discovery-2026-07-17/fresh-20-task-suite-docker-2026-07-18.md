@@ -123,6 +123,25 @@ the fresh volume's `codex-home` had no `auth.json`. Placing it (compose-document
   subagent-spawn bypass; parity-consistent — no Codex analog). Test updated. Typecheck + full unit
   suite green.
 
+## Creation flows — new project + new agent + operator agent-selection (live in docker)
+Exercised the "create new projects, new agents, let operator choose correct agents" slice end-to-end:
+- **New project** via `POST /?index` `create-project` (self-serve; creator seeded as admin): **Viberr
+  Sandbox** (`viberr-sandbox`, key VSB, akin-ozer/viberr, governed template) — auto-seeded
+  operator/developer/reviewer.
+- **New agent profile** via `create-profile`: a Claude-backed **Docs Writer** (Documentation, stage
+  impl, `changelog-writer` skill) — UI confirms it attached with its definition + skill.
+- **Operator agent-selection**: created a documentation task (VSB-1 "Write the README section") and ran
+  the operator (supervised) — it correctly deployed **Docs Writer (Claude)** as the primary specialist
+  for a docs task, NOT the Codex Developer. Visible in the task's Execution profile ("2 agents running").
+- **Two potential findings verified as NON-issues (checked, not over-claimed):** (a) skill loading — a
+  grep of the run jsonl found no skill text, but that's because the Claude SDK does NOT echo the system
+  prompt (where the persona+skill inject) and this skill has no output marker; the UI confirms
+  `changelog-writer` is attached and `effectiveProfileView`→`readSkillBody` loads the existing SKILL.md.
+  (b) Only 5 of 8 submitted capabilities persisted — DELIBERATE: `createModalGrants` persists only the 7
+  runtime-effective `MODAL_CAP_IDS`; `move-task-to-review`/`report-validation-verdict`/
+  `run-unit-integration-validation` are documented "pruned fake toggles" (no runtime effect), so the
+  create path correctly ignores them (only legacy seed profiles still list them cosmetically).
+
 ## UI verification pass (browser against the live docker container, signed in as arda/admin)
 Screenshotted the key surfaces to confirm the API-level results actually render — the pass-8
 changes are all wired, no mocks on any inspected surface:
