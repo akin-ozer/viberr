@@ -1140,6 +1140,95 @@ function projectRepoFor(
  * never propagated (the run already finished; the transcript is in the logs).
  * When the run produced no usable text, we skip posting a comment.
  */
+/** The outcome of building an agent-reply comment: a ready-to-unshift timeline
+ *  event, an empty reply (no comment), or a guardrail drop. */
+type PreparedReply =
+  | { status: "empty" }
+  | { status: "dropped" }
+  | { status: "event"; event: TaskFileEvent };
+
+/**
+ * Builds the agent-reply timeline comment (anti-noise guardrails + evidence
+ * separation + simulated-run marking) WITHOUT writing it. Extracted so the
+ * REVIEWER path can unshift the reply comment ATOMICALLY with its verdict event
+ * in a single updateTaskFile: they used to be two separate writes, and a
+ * bind-mount read-your-own-writes gap (VirtioFS) let the verdict's
+ * read-modify-write read the pre-comment file and erase the reviewer's reply
+ * (VIB-1/2/3/4, deterministic in docker). One write can't split them.
+ */
+async function prepareAgentReplyEvent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  runId: string,
+  actorRef: FileActorRef,
+  replyText: string | null,
+): Promise<PreparedReply> {
+  if (!replyText) return { status: "empty" };
+  // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
+  // chatter is rejected; raw output dumps are trimmed to a head + reference
+  // (the full transcript stays in the agent logs). Both per-project toggles.
+  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
+    "./comment-guardrails.server"
+  );
+  if (
+    guardrailOn(ctx, projectSlug, "meaningful-comment") &&
+    isMeaninglessComment(replyText)
+  ) {
+    return { status: "dropped" };
+  }
+  const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
+    ? separateEvidence(replyText)
+    : replyText;
+  // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
+  // fabricated (canned text with no real work). Mark it as such in the canonical
+  // timeline — the source of truth agents and humans re-anchor on.
+  const simulated =
+    (
+      db.prepare(`SELECT simulated FROM agent_runs WHERE id = ?`).get(runId) as
+        | { simulated: number }
+        | undefined
+    )?.simulated === 1;
+  const text = simulated
+    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
+    : separated;
+  return {
+    status: "event",
+    event: {
+      occurredAt: new Date().toISOString(),
+      type: "comment",
+      actor: actorRef,
+      title: null,
+      text,
+      toAgent: false,
+      evidence: null,
+    },
+  };
+}
+
+/** Records the boot-recovery idempotency audit for a processed reply (keyed on
+ *  `task.agent.replied`), noting a guardrail drop so a dropped reply isn't
+ *  reprocessed on every restart (adversarial-review #11). */
+function recordAgentRepliedAudit(
+  db: Database.Database,
+  projectSlug: string,
+  taskKey: string,
+  runId: string,
+  dropped: boolean,
+): void {
+  recordAudit(db, {
+    action: "task.agent.replied",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: taskKey,
+    projectSlug,
+    taskKey,
+    details: dropped
+      ? { runId, droppedByGuardrail: "meaningful-comment" }
+      : { runId },
+  });
+}
+
 export async function postAgentReplyComment(
   db: Database.Database,
   ctx: TaskMutationContext,
@@ -1151,87 +1240,38 @@ export async function postAgentReplyComment(
     replyText: string | null;
   },
 ): Promise<void> {
-  if (!input.replyText) {
+  const prepared = await prepareAgentReplyEvent(
+    db,
+    ctx,
+    input.projectSlug,
+    input.runId,
+    input.actorRef,
+    input.replyText,
+  );
+  if (prepared.status === "empty") {
     logger.info("agent reply run produced no text — no comment posted", {
       taskKey: input.taskKey,
       runId: input.runId,
     });
-    return Promise.resolve();
+    return;
   }
-  // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
-  // chatter is rejected before it reaches the canonical record, and raw output
-  // dumps are trimmed to a head + reference (the full transcript stays in the
-  // agent logs). Both per-project toggles.
-  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
-    "./comment-guardrails.server"
-  );
-  if (
-    guardrailOn(ctx, input.projectSlug, "meaningful-comment") &&
-    isMeaninglessComment(input.replyText)
-  ) {
+  if (prepared.status === "dropped") {
     logger.info("agent reply dropped by the meaningful-comment guardrail", {
       taskKey: input.taskKey,
       runId: input.runId,
     });
-    // Record the reply audit EVEN when dropping the comment (adversarial-review
-    // #11) — boot recovery keys idempotency on the `task.agent.replied` audit
-    // row, so without this a dropped-by-guardrail run would be reprocessed on
-    // every restart (re-triggering the operator forever).
-    recordAudit(db, {
-      action: "task.agent.replied",
-      actor: OPERATOR_AUDIT_ACTOR,
-      subjectKind: "task",
-      subjectId: input.taskKey,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      details: { runId: input.runId, droppedByGuardrail: "meaningful-comment" },
-    });
-    return Promise.resolve();
+    recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, true);
+    return;
   }
-  const separated = guardrailOn(ctx, input.projectSlug, "evidence-separation")
-    ? separateEvidence(input.replyText)
-    : input.replyText;
-  // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
-  // fabricated (canned "done: implemented…" text with no real work). Mark it as
-  // such in the canonical timeline — the run row already carries simulated=1, but
-  // the timeline is the source of truth agents and humans re-anchor on, and an
-  // unmarked fabricated "tests pass" is exactly the theater the PRD warns about.
-  const simulated =
-    (
-      db
-        .prepare(`SELECT simulated FROM agent_runs WHERE id = ?`)
-        .get(input.runId) as { simulated: number } | undefined
-    )?.simulated === 1;
-  const replyText = simulated
-    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
-    : separated;
-  const event: TaskFileEvent = {
-    occurredAt: new Date().toISOString(),
-    type: "comment",
-    actor: input.actorRef,
-    title: null,
-    text: replyText,
-    toAgent: false,
-    evidence: null,
-  };
   // Returns the write promise so a caller (the operator react loop) can await
-  // the reply landing before it re-reads the task; other callers ignore it
-  // (fire-and-forget). Errors are logged, never propagated — the run already
-  // finished and the transcript is in the logs.
+  // the reply landing before it re-reads the task. Errors are logged, never
+  // propagated — the run finished and the transcript is in the logs.
   return updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
+    parsed.timeline.unshift(prepared.event);
   })
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      recordAudit(db, {
-        action: "task.agent.replied",
-        actor: { userId: null, label: "operator" },
-        subjectKind: "task",
-        subjectId: input.taskKey,
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        details: { runId: input.runId },
-      });
+      recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
     })
     .catch((error: unknown) => {
       logger.error("agent reply comment write failed", {
@@ -1572,9 +1612,32 @@ export async function recordReviewerVerdict(
   projectSlug: string,
   taskKey: string,
   replyText: string | null,
+  // The reviewer's own run: when present, its reply comment is posted in the
+  // SAME write as the verdict event (atomic — see prepareAgentReplyEvent). The
+  // reviewer must show its voice on the timeline whether it approves or requests
+  // changes; the two-write split silently lost that comment on the docker mount.
+  reply?: { actorRef: FileActorRef; runId: string },
 ): Promise<void> {
   const verdict = classifyReviewerVerdict(replyText);
-  if (!verdict) return;
+  const prepared = reply
+    ? await prepareAgentReplyEvent(
+        db,
+        ctx,
+        projectSlug,
+        reply.runId,
+        reply.actorRef,
+        replyText,
+      )
+    : ({ status: "empty" } as const);
+  // Nothing to record: no classifiable verdict AND no postable reply comment.
+  if (!verdict && prepared.status !== "event") {
+    // Still stamp the recovery-idempotency audit for a guardrail-dropped reply,
+    // so boot recovery doesn't reprocess it forever.
+    if (reply && prepared.status === "dropped") {
+      recordAgentRepliedAudit(db, projectSlug, taskKey, reply.runId, true);
+    }
+    return;
+  }
   let validation: "failing" | "healthy" = "healthy";
   // The title/summary are computed from the RESOLVED validation, not the raw
   // verdict, so the event can never read "Review passed / Validation: failing"
@@ -1585,84 +1648,99 @@ export async function recordReviewerVerdict(
   let summary = "";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      // A request_changes always fails. An APPROVE clears a standing `failing`
-      // ONLY when the work has demonstrably moved since the rejection — a
-      // primary-specialist reply or a stage transition after the failing
-      // quality event (rework evidence). That keeps both properties:
-      //   · same-round masking is impossible (reviewer B's simultaneous
-      //     approve can't silently bury reviewer A's rejection — nothing
-      //     changed in between), and
-      //   · a rejection is NOT a life sentence (the old bug: re-review after a
-      //     real fix could never restore health, so the operator refused
-      //     acceptance forever and stalled the task).
-      const approveDidNotClear =
-        verdict === "approve" &&
-        parsed.frontmatter.validation === "failing" &&
-        !hasReworkSinceLastRejection(
-          parsed.timeline,
-          parsed.frontmatter.specialist,
-        );
-      validation =
-        verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
-      if (verdict === "request_changes") {
-        title = "Changes requested";
-        summary = "Reviewer requested changes.";
-      } else if (approveDidNotClear) {
-        // Honest: the reviewer approved, but a standing rejection with no rework
-        // since still governs — validation stays failing until the work moves.
-        title = "Approval noted — rework still needed";
-        summary =
-          "Reviewer approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.";
-      } else {
-        title = "Review passed";
-        summary = "Reviewer approved the work.";
-      }
-      parsed.frontmatter.validation = validation;
-      // A failing verdict makes a pending accept-completion recommendation stale
-      // (the acceptance gate would 409 on a failing task — F7-VAL1), so drop it:
-      // the UI must not show a misleading "Accept completion" card next to a
-      // failing validation. The operator re-recommends the right next step
-      // (rework / re-review) on its next turn. (pass-8 review-reject finding.)
-      if (validation === "failing") {
-        parsed.frontmatter.recommendations =
-          parsed.frontmatter.recommendations.filter(
-            (r) => r.kind !== "accept_completion",
+      if (verdict) {
+        // A request_changes always fails. An APPROVE clears a standing `failing`
+        // ONLY when the work has demonstrably moved since the rejection — a
+        // primary-specialist reply or a stage transition after the failing
+        // quality event (rework evidence). That keeps both properties:
+        //   · same-round masking is impossible (reviewer B's simultaneous
+        //     approve can't silently bury reviewer A's rejection — nothing
+        //     changed in between), and
+        //   · a rejection is NOT a life sentence (the old bug: re-review after a
+        //     real fix could never restore health, so the operator refused
+        //     acceptance forever and stalled the task).
+        const approveDidNotClear =
+          verdict === "approve" &&
+          parsed.frontmatter.validation === "failing" &&
+          !hasReworkSinceLastRejection(
+            parsed.timeline,
+            parsed.frontmatter.specialist,
           );
+        validation =
+          verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
+        if (verdict === "request_changes") {
+          title = "Changes requested";
+          summary = "Reviewer requested changes.";
+        } else if (approveDidNotClear) {
+          // Honest: the reviewer approved, but a standing rejection with no
+          // rework since still governs — validation stays failing until the
+          // work moves.
+          title = "Approval noted — rework still needed";
+          summary =
+            "Reviewer approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.";
+        } else {
+          title = "Review passed";
+          summary = "Reviewer approved the work.";
+        }
+        parsed.frontmatter.validation = validation;
+        // A failing verdict makes a pending accept-completion recommendation
+        // stale (the acceptance gate would 409 on a failing task — F7-VAL1), so
+        // drop it: the UI must not show a misleading "Accept completion" card
+        // next to a failing validation. The operator re-recommends the right
+        // next step on its next turn. (pass-8 review-reject finding.)
+        if (validation === "failing") {
+          parsed.frontmatter.recommendations =
+            parsed.frontmatter.recommendations.filter(
+              (r) => r.kind !== "accept_completion",
+            );
+        }
       }
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "quality",
-        actor: { kind: "operator" },
-        title,
-        text: `**Validation:** ${validation}. ${summary}`,
-        toAgent: false,
-        evidence: null,
-      });
+      // ATOMIC: the reviewer's reply comment and its verdict land in this ONE
+      // write. Unshift the reply first, then the verdict, so the verdict reads
+      // newest and the reviewer's reply sits just below it.
+      if (prepared.status === "event") parsed.timeline.unshift(prepared.event);
+      if (verdict) {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "quality",
+          actor: { kind: "operator" },
+          title,
+          text: `**Validation:** ${validation}. ${summary}`,
+          toAgent: false,
+          evidence: null,
+        });
+      }
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
-    recordAudit(db, {
-      action: "task.quality.flagged",
-      actor: OPERATOR_AUDIT_ACTOR,
-      subjectKind: "task",
-      subjectId: taskKey,
-      projectSlug,
-      taskKey,
-      details: { verdict, validation },
-    });
-    // Ping the owner + supervisors so the quality inbox card appears on real
-    // runs (not just seed). Each recipient's `quality` routing pref is honored
-    // inside notifyTaskWatchers → createNotification.
-    notifyTaskWatchers(
-      db,
-      {
+    // Recovery-idempotency audit for the reply (posted or guardrail-dropped).
+    if (reply && prepared.status !== "empty") {
+      recordAgentRepliedAudit(
+        db,
         projectSlug,
         taskKey,
-        kind: "quality",
-        title,
-        text: summary,
-      },
-      ctx,
-    );
+        reply.runId,
+        prepared.status === "dropped",
+      );
+    }
+    if (verdict) {
+      recordAudit(db, {
+        action: "task.quality.flagged",
+        actor: OPERATOR_AUDIT_ACTOR,
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: { verdict, validation },
+      });
+      // Ping the owner + supervisors so the quality inbox card appears on real
+      // runs (not just seed). Each recipient's `quality` routing pref is honored
+      // inside notifyTaskWatchers → createNotification.
+      notifyTaskWatchers(
+        db,
+        { projectSlug, taskKey, kind: "quality", title, text: summary },
+        ctx,
+      );
+    }
   } catch (error) {
     logger.warn("reviewer verdict recording failed", {
       taskKey,
@@ -1773,13 +1851,22 @@ export async function applyAgentCompletionEffects(
     input.role,
   );
   // 1. Land the reply first so a reacting operator reads it in its snapshot.
-  await postAgentReplyComment(db, ctx, {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    runId: finished.id,
-    actorRef,
-    replyText: fullText,
-  });
+  //    A FINISHED reviewer run is the exception: its reply comment is posted
+  //    ATOMICALLY with the verdict event in step 3 (recordReviewerVerdict).
+  //    Posting it here too was a separate earlier write that the verdict's
+  //    read-modify-write erased on the docker bind mount (read-your-own-writes
+  //    gap) — the reviewer's comment vanished while only the verdict survived.
+  //    A non-finished reviewer (interrupted) has no step-3 verdict, so it still
+  //    reports its partial reply here.
+  if (input.kind !== "reviewer" || finished.state !== "finished") {
+    await postAgentReplyComment(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef,
+      replyText: fullText,
+    });
+  }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
   //     trace on the timeline and never re-invoked the operator — the task just
   //     silently reverted to waiting=human (F8). Surface the failure as a typed
@@ -1925,6 +2012,7 @@ export async function applyAgentCompletionEffects(
       input.projectSlug,
       input.taskKey,
       fullText,
+      { actorRef, runId: finished.id },
     );
   }
   // 4. React: continue an operator chain, or start a fresh one against the

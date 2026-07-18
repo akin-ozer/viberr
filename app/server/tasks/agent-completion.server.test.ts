@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -7,7 +8,12 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import {
+  readTaskFile,
+  resolveTaskFilePath,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
@@ -134,8 +140,12 @@ describe("waiting-state bookkeeping (A2)", () => {
 describe("applyAgentCompletionEffects (the shared effects)", () => {
   /** Start a real (simulated-engine) run whose final assistant text is `text`,
    *  wait for it to finish, and return its run id. `autonomous` — no default
-   *  completion hook is registered by startRun itself. */
+   *  completion hook is registered by startRun itself. Session/thread ids are
+   *  unique per call so a test can drive more than one run without colliding on
+   *  the (project, task, thread) uniqueness. */
+  let runSeq = 0;
   async function finishedRunWith(text: string): Promise<string> {
+    runSeq += 1;
     const script = buildScript({
       lines: [
         { t: "", ev: "init", tag: "system·init", text: "test session" },
@@ -143,7 +153,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { t: "", ev: "result", tag: "result", text: "done" },
       ],
       occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-      sessionId: "t",
+      sessionId: `t-${runSeq}`,
       backend: "claude",
       model: "sonnet",
       op: false,
@@ -163,6 +173,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       script,
       dataRoot: store.dataRoot,
       actor: actor(store.users.arda),
+      threadId: `th-${runSeq}`,
     });
     await waitFor(() => {
       const row = store.db
@@ -197,6 +208,102 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(fm.validation).toBe("failing");
     const quality = taskFile().parsed.timeline.find((e) => e.type === "quality");
     expect(quality).toBeTruthy();
+  });
+
+  it("posts the reviewer's OWN reply comment atomically with the verdict — pass AND fail", async () => {
+    // Regression (VIB-1…4, docker): the reviewer's reply comment used to be a
+    // separate earlier write that the verdict's read-modify-write erased on the
+    // VirtioFS mount, so only the operator's derived verdict event survived and
+    // the reviewer never "spoke" on the timeline. Now they're ONE write.
+    for (const [reply, wantValidation] of [
+      ["Verdict: approve\n\n@operator the inventory is complete and accurate.", "healthy"],
+      ["Verdict: request changes\n\n@operator six symlinks are missing.", "failing"],
+    ] as const) {
+      // fresh task each iteration
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id }),
+        goal: "Exercise the reviewer reply + verdict.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+        { id: runId, state: "finished", simulated: false },
+      );
+      const tl = taskFile().parsed.timeline;
+      const reviewerComment = tl.find(
+        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+      );
+      const quality = tl.find((e) => e.type === "quality");
+      expect(reviewerComment, `reviewer reply must be posted (${wantValidation})`).toBeTruthy();
+      expect(reviewerComment!.text).toContain("@operator");
+      expect(quality).toBeTruthy();
+      expect(taskFile().parsed.frontmatter.validation).toBe(wantValidation);
+    }
+  });
+
+  it("the reviewer's reply survives a following stale-read write (VirtioFS read-after-write loss)", async () => {
+    // The VIB-1 incident, end to end: the reviewer completion posts its reply
+    // comment + verdict, then an operator-style read-modify-write reacts
+    // seconds later while the bind mount still serves the PRE-completion file
+    // content. Before the canonical cache, that second write's stale base
+    // erased the reviewer's comment permanently.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+      }),
+      goal: "Exercise reviewer completion followed by a stale-read write.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const absPath = resolveTaskFilePath(ref);
+    const preCompletion = readFileSync(absPath, "utf8");
+
+    const runId = await finishedRunWith(
+      "Verdict: approve\n\n@operator the inventory is verified — ship it.",
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+      { id: runId, state: "finished", simulated: false },
+    );
+
+    // VirtioFS serves the PRE-completion content to the next reader: revert
+    // the on-disk file (the completion's write "hasn't landed" for readers).
+    writeFileSync(absPath, preCompletion);
+
+    // The operator reacts — a locked read-modify-write appending its comment.
+    const operatorComment: TaskFileEvent = {
+      occurredAt: new Date().toISOString(),
+      type: "comment",
+      actor: { kind: "operator" },
+      title: "Recommendation",
+      text: "Recommendation: accept — reviewer approved.",
+      toAgent: false,
+      evidence: null,
+    };
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift(operatorComment);
+    });
+
+    const tl = taskFile().parsed.timeline;
+    const reviewerComment = tl.find(
+      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+    );
+    expect(reviewerComment, "reviewer reply must survive the stale-read write").toBeTruthy();
+    expect(reviewerComment!.text).toContain("@operator the inventory is verified");
+    expect(tl.some((e) => e.type === "quality")).toBe(true);
+    expect(tl.some((e) => e.text?.includes("Recommendation: accept"))).toBe(true);
+
+    // And the canonical FILE was repaired by the operator's write — the
+    // reviewer's comment persists on disk, not just in memory.
+    const disk = readFileSync(absPath, "utf8");
+    expect(disk).toContain("@operator the inventory is verified");
+    expect(disk).toContain("Recommendation: accept");
   });
 
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {
