@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { AgentDeploymentView, AgentProfileView } from "./agent-types";
+import type { ResCatalogGroup } from "./capability-catalog";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
@@ -45,6 +46,7 @@ function renderModal(props: {
   error?: string | null;
   onSubmit?: (p: ProfileFormPayload) => void;
   onClose?: () => void;
+  resourceCatalog?: ResCatalogGroup[];
 }): RenderResult {
   const Stub = createRoutesStub([
     {
@@ -58,6 +60,9 @@ function renderModal(props: {
           error={props.error ?? null}
           onClose={props.onClose ?? (() => {})}
           onSubmit={props.onSubmit ?? (() => {})}
+          {...(props.resourceCatalog
+            ? { resourceCatalog: props.resourceCatalog }
+            : {})}
         />
       ),
     },
@@ -362,6 +367,53 @@ describe("CreateProfileModal", () => {
     // A fresh profile starts with NO resources pre-granted (RES_DEFAULTS empty).
     expect(payload.resources.skills).toEqual([]);
     expect(container.querySelector(".cap-matrix")).not.toBeNull();
+  });
+
+  it("surfaces dangling resource grants (deleted KBs) as removable 'missing' chips, count stays sane", () => {
+    // The live 'viberr' repro: the profile grants 2 KBs but the store offers 0
+    // — the old render was "2 of 0" with the two grants INVISIBLE (no chip to
+    // click) and thus un-removable.
+    const onSubmit = vi.fn();
+    const { container, getByText, getAllByTitle } = renderModal({
+      onSubmit,
+      initial: mkProfile({
+        resources: {
+          skills: ["developer-expertise"],
+          mcps: [],
+          kb: ["architecture-notes", "api-contracts"],
+        },
+      }),
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [{ id: "developer-expertise", def: false }],
+        },
+        { group: "MCP servers", key: "mcps", mono: true, items: [] },
+        // The store has ZERO knowledge bases — both grants dangle.
+        { group: "Knowledge bases", key: "kb", mono: false, items: [] },
+      ],
+    });
+
+    // Count is "2 of 2" (selected of shown), never the nonsensical "2 of 0".
+    // Shown in the group header even while collapsed.
+    expect(getByText("2 of 2")).toBeTruthy();
+
+    // Expand the Knowledge bases group to reveal the grants.
+    fireEvent.click(getByText("Knowledge bases"));
+    // Both dangling ids now render AS chips, flagged missing + removable.
+    const ghosts = getAllByTitle(
+      "No longer in the store — click to remove this grant",
+    );
+    expect(ghosts).toHaveLength(2);
+    expect(container.querySelectorAll(".pick-chip.missing")).toHaveLength(2);
+
+    // Clicking a ghost removes the grant; submitting proves it's gone.
+    fireEvent.click(getByText("architecture-notes"));
+    fireEvent.click(getByText("Save changes"));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].resources.kb).toEqual(["api-contracts"]);
   });
 
   it("shows Model + Effort dropdowns populated from the catalog for the selected backend", async () => {

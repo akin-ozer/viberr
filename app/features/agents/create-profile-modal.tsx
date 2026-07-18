@@ -540,6 +540,18 @@ function ResourcePicker({
           const open = !!openRes[g.group];
           const sel = res[g.key];
           const selSet = new Set(sel);
+          const catalogIds = new Set(g.items.map((it) => it.id));
+          // Dangling grants: ids this profile still references but the live
+          // store no longer offers (a KB/skill/MCP deleted from org settings).
+          // Surface them so the count is honest AND they stay removable — the
+          // catalog is profile-agnostic, so without this a ghost grant reads as
+          // "N of 0" and can never be unchecked (there's no chip to click).
+          const displayItems: { id: string; missing?: boolean }[] = [
+            ...g.items,
+            ...sel
+              .filter((id) => !catalogIds.has(id))
+              .map((id) => ({ id, missing: true })),
+          ];
           return (
             <div className={"cap-mgroup" + (open ? " open" : "")} key={g.group}>
               <button
@@ -554,21 +566,27 @@ function ResourcePicker({
                 <span className="cap-msum">
                   <span className="cs">
                     <span className="d" style={{ background: "var(--blue)" }} />
-                    {sel.length} of {g.items.length}
+                    {sel.length} of {displayItems.length}
                   </span>
                 </span>
               </button>
               {open && (
                 <div className="cap-mbody">
                   <div className="pick-chips">
-                    {g.items.map((it) => (
+                    {displayItems.map((it) => (
                       <button
                         type="button"
                         key={it.id}
                         className={
                           "pick-chip" +
                           (g.mono ? " mono" : "") +
-                          (selSet.has(it.id) ? " on" : "")
+                          (selSet.has(it.id) ? " on" : "") +
+                          (it.missing ? " missing" : "")
+                        }
+                        title={
+                          it.missing
+                            ? "No longer in the store — click to remove this grant"
+                            : undefined
                         }
                         onClick={() => toggleRes(g.key, it.id)}
                       >
@@ -577,6 +595,12 @@ function ResourcePicker({
                       </button>
                     ))}
                   </div>
+                  {displayItems.length === 0 && (
+                    <p className="ctx-empty">
+                      None in the store yet — add {g.group.toLowerCase()} in org
+                      settings.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
