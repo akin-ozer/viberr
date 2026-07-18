@@ -100,3 +100,9 @@ Code (typecheck + targeted tests) → UI screenshot → browser behavior. No def
   divergence for no behavior gain. Both verified behavior-correct live (ownership tiers TC8; @mention gating).
   Decision: leave as-is; these were audit *suggestions*, not findings/requirements — every actual finding and
   owner ruling (R8-1..R8-7, D1-D5, F7-*) IS implemented.
+- **critical-audit-2 MED-1 — FIXED (commit 0ee6d99).** Crash-loop cap on `recoverUnreactedAgentRuns`'s operator
+  re-invoke, mirroring `finalizeOrphanedRuns`: `run.recovery.reply_replayed` audit recorded before the effects +
+  per-run rolling-window skip. New catalog action; 4 unit tests. Full suite (1304) + typecheck + 13 e2e green.
+- **critical-audit-2 LOW-1 — REJECTED (false positive).** The violations rail badge is rendered only by
+  `routes/project.tsx` (project scope), which already receives `violation.updated`; there is no global every-page
+  badge. `broadcast:true` would leak project-scoped events to all users. No change. See critical-audit-2.md RESOLUTION.

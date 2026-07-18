@@ -10,6 +10,24 @@ the single-flight lease, the SSE broker, and the boot crash-loop cap are all
 correctly implemented and defended in depth. Two genuine gaps below (1 MED, 1 LOW),
 then the verification notes proving the rest is clean.
 
+## RESOLUTION (2026-07-18, commit 0ee6d99)
+- **MED-1 → FIXED.** Gave `recoverUnreactedAgentRuns` the same crash-loop backstop as
+  `finalizeOrphanedRuns`: a `run.recovery.reply_replayed` audit row recorded *before*
+  the effects run, and a per-run skip once `RECOVERY_REINVOKE_CAP` replays exist in the
+  rolling window (keyed on runId so sibling runs on one task keep independent budgets).
+  Chose the cap over "write `task.agent.replied` unconditionally" — the latter would
+  silently drop a recoverable reply on a *transient* write failure. New catalog action
+  registered; 4 unit tests added; full suite (1304) + typecheck + 13 e2e green.
+- **LOW-1 → REJECTED (false positive on re-verification).** The premise "the
+  policy-violation rail badge is global (shell, every page)" is factually wrong. `<Rail>`
+  (the only violations badge) is rendered *exclusively* by `app/routes/project.tsx:116`,
+  whose loader subscribes `project:<slug>` — a scope `violation.updated` already matches,
+  so the badge live-updates correctly where it is shown. The Notifications route is a
+  top-level overlay that renders WITHOUT the project shell, so the badge is not present
+  there to go stale. Adding `broadcast: true` would push project-scoped violation events
+  to every connected user's browser regardless of membership — a regression, not a fix.
+  No change made.
+
 ---
 
 ## MED-1 — Boot reply-recovery has NO crash-loop cap (asymmetric with `finalizeOrphanedRuns`)
