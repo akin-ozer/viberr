@@ -214,3 +214,8 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
   later API/UI create can reuse the key. Normal creation always goes through createTask (increments); only
   disk-write test setup hits this. Boot recovery correctly re-invoked the operator for the orphaned run after a
   server restart (F7-BOOT1 recovery path exercised, no crash-loop).
+- **Codex↔Claude parity at the DATA level ✅.** Codex runs capture the same projection fields as claude
+  (session_id, input/output_tokens, model, state) + rich tool activity in NDJSON (command_execution/exec/
+  apply/patch/file_change/tool) — parity with claude's tool_use/tool_result. Only cosmetic diff: codex
+  `turns`=1 always (single SDK turn) vs claude incremental (F-PARITY1, honest). Both deliver identically
+  (VIB-7 PR#37, VIB-18 PR#47). "Codex and claude work the same from viberr's eye" — confirmed.
