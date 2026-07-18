@@ -78,5 +78,10 @@ USER node
 
 EXPOSE 3000
 
+# Seeds the Codex CLI login from the optional read-only host mount into the
+# writable $CODEX_HOME when the volume lacks it (see the script's rationale),
+# then execs the CMD. `sh`-prefixed so the file's exec bit can't matter.
+ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
+
 # react-router-serve honors $PORT (default above: 3000).
 CMD ["npm", "run", "start"]
