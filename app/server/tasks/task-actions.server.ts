@@ -1002,7 +1002,7 @@ export async function commentToAgent(
     const hasPrimary =
       !!existing && !!deliveringEngagement(existing.parsed.frontmatter);
     if (target.isPrimary || !hasPrimary) {
-      const { assignSpecialist, startSpecialistRun } = await import(
+      const { assignSpecialist, startAgentRun } = await import(
         "./specialist-run.server"
       );
       if (!hasPrimary) {
@@ -1013,7 +1013,7 @@ export async function commentToAgent(
           ctx,
         );
       }
-      const started = await startSpecialistRun(
+      const started = await startAgentRun(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
         actor,
@@ -1021,7 +1021,7 @@ export async function commentToAgent(
       );
       runId = started.runId;
     } else {
-      const { assignReviewer, startReviewerRun } = await import(
+      const { assignReviewer, startAgentRun } = await import(
         "./specialist-run.server"
       );
       // Engage as a reviewer if not already (idempotent), then run as reviewer.
@@ -1031,7 +1031,7 @@ export async function commentToAgent(
         actor,
         ctx,
       );
-      const started = await startReviewerRun(
+      const started = await startAgentRun(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
         actor,
@@ -2213,15 +2213,13 @@ export async function operatorPromptAgent(
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
-  const { startSpecialistRun, startReviewerRun } = await import(
-    "./specialist-run.server"
-  );
+  const { startAgentRun } = await import("./specialist-run.server");
   let runId: string;
   if (input.kind === "reviewer") {
     if (!input.profileId) {
       throw AppError.validation("A reviewer profile id is required to run a reviewer.");
     }
-    const started = await startReviewerRun(
+    const started = await startAgentRun(
       db,
       {
         projectSlug: input.projectSlug,
@@ -2234,7 +2232,7 @@ export async function operatorPromptAgent(
     );
     runId = started.runId;
   } else {
-    const started = await startSpecialistRun(
+    const started = await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
       OPERATOR_TASK_ACTOR,
@@ -2244,7 +2242,7 @@ export async function operatorPromptAgent(
   }
 
   // 3. The completion handler (reply → reconcile → verdict → react) is already
-  //    installed by startSpecialistRun/startReviewerRun above, which read
+  //    installed by startAgentRun above, which read
   //    `ctx.operatorRun` from opCtx (preserved from this operator run) and pass
   //    the real workspace clone dir. So the chain continues at depth+1 with the
   //    correct workdir — no separate registration here.
@@ -3227,33 +3225,20 @@ export async function resolvePacket(
     const target: RealBackend = option.backend === "codex" ? "codex" : "claude";
     const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
     try {
-      const { startSpecialistRun, startReviewerRun } = await import(
-        "./specialist-run.server"
+      const { startAgentRun } = await import("./specialist-run.server");
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          ...(typeof option.profileId === "string" && option.profileId
+            ? { profileId: option.profileId }
+            : {}),
+          backendOverride: target,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
       );
-      if (typeof option.profileId === "string" && option.profileId) {
-        await startReviewerRun(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            profileId: option.profileId,
-            backendOverride: target,
-          },
-          OPERATOR_TASK_ACTOR,
-          opCtx,
-        );
-      } else {
-        await startSpecialistRun(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            backendOverride: target,
-          },
-          OPERATOR_TASK_ACTOR,
-          opCtx,
-        );
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("retry_other_backend start failed", {
@@ -3514,19 +3499,19 @@ export async function applyRecommendation(
       ctx,
     );
   } else if (rec.kind === "run_specialist") {
-    // The operator recommended starting the primary specialist's run (it can't
-    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked in
-    // startSpecialistRun) starts the run.
-    const { startSpecialistRun } = await import("./specialist-run.server");
-    await startSpecialistRun(
+    // The operator recommended starting the delivering agent's run (it can't
+    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked
+    // in startAgentRun) starts the run.
+    const { startAgentRun } = await import("./specialist-run.server");
+    await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
       actor,
       ctx,
     );
   } else if (rec.kind === "run_reviewer" && rec.profileId) {
-    const { startReviewerRun } = await import("./specialist-run.server");
-    await startReviewerRun(
+    const { startAgentRun } = await import("./specialist-run.server");
+    await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
       actor,

@@ -106,10 +106,11 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.schedule.cancelled": "task",
   "task.schedule.fired": "task",
   "task.specialist.assigned": "task",
-  "task.specialist.run_started": "task",
   "task.reviewer.assigned": "task",
   "task.reviewer.removed": "task",
-  "task.reviewer.run_started": "task",
+  // ONE run-start action for every engaged agent (details.delivers = which);
+  // replaced task.specialist.run_started / task.reviewer.run_started.
+  "task.agent.run_started": "task",
   "task.agent.replied": "task",
   "task.quality.flagged": "task",
   "task.goal.updated": "task",

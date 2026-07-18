@@ -38,7 +38,7 @@ import {
 import {
   assignSpecialist,
   resolveResumeConfinement,
-  startSpecialistRun,
+  startAgentRun,
 } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -197,7 +197,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("returns the most-recent run WITH a session_id once one exists", async () => {
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -489,7 +489,7 @@ describe("commentToAgent", () => {
 
   it("RESUMES the agent's existing session (reusing its session_id) on a later comment", async () => {
     // First run establishes a session.
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -604,7 +604,7 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
   it("@analyst does NOT inherit the primary dev's claude session (matched by identity, not backend)", async () => {
     deployTwoSpecialists();
     // The PRIMARY dev gets a real session on the SAME backend (claude) as analyst.
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),

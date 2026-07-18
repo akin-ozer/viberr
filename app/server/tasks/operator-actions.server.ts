@@ -53,8 +53,7 @@ import {
   assignSpecialist,
   listDeployedSpecialists,
   specialistEligibleForStage,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
@@ -874,7 +873,7 @@ export async function operatorRunSpecialist(
     );
     return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
   }
-  const result = await startSpecialistRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} specialist.`,
@@ -940,7 +939,7 @@ export async function operatorRunReviewer(
     );
     return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
   }
-  const result = await startReviewerRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} reviewer.`,

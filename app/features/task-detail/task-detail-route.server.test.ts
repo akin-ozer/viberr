@@ -595,7 +595,7 @@ describe("assign-specialist + run-specialist intents", () => {
       intent: "run-specialist",
     })) as { data: { ok: false; error: string }; init: { status: number } };
     expect(result.init.status).toBe(400);
-    expect(result.data.error).toContain("Assign a specialist");
+    expect(result.data.error).toContain("Engage a delivering agent");
   });
 
   it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
@@ -627,7 +627,7 @@ describe("assign-specialist + run-specialist intents", () => {
     // A primary run now exists on the task.
     const primary = after.runtime.find((r) => r.kind === "primary");
     expect(primary).toBeDefined();
-    expect(after.task.timeline[0]!.text).toContain("run for the Implementation specialist");
+    expect(after.task.timeline[0]!.text).toContain("run for the Implementation agent");
 
     // Stop the run's realistic-cadence timer so it does not outlive the suite
     // and write to the DB after afterAll() closes it (the sink guards this,

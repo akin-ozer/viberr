@@ -34,8 +34,7 @@ import {
   hasRunningRun,
   listDeployedSpecialists,
   removeReviewer,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
@@ -341,7 +340,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // An optional `backend` forces the run onto the other engine — the
         // "retry on the other backend" affordance after an availability/quota
         // failure (D4).
-        const result = await startSpecialistRun(
+        const result = await startAgentRun(
           db,
           { projectSlug, taskKey, ...backendOverride(formData) },
           actor,
@@ -370,7 +369,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "run-reviewer": {
         // Start a run for a specific engaged reviewer (optional `backend`
         // override for the retry-on-other-backend affordance — D4).
-        const result = await startReviewerRun(
+        const result = await startAgentRun(
           db,
           {
             projectSlug,

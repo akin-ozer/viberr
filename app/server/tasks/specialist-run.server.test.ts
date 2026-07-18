@@ -25,8 +25,7 @@ import {
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
 } from "./specialist-run.server";
 
 /**
@@ -221,7 +220,7 @@ describe("startSpecialistRun", () => {
 
   it("errors when no specialist is assigned", async () => {
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -251,7 +250,7 @@ describe("startSpecialistRun", () => {
       startedAt: "2026-07-16T00:00:00.000Z",
     } as Parameters<typeof upsertRun>[1]);
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -300,7 +299,7 @@ describe("startSpecialistRun", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -311,7 +310,7 @@ describe("startSpecialistRun", () => {
 
   it("creates a run row with the specialist backend + a simulated stream (>0 lines)", async () => {
     await assign();
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -323,7 +322,8 @@ describe("startSpecialistRun", () => {
     const run = getRun(store.db, result.runId)!;
     expect(run.backend).toBe("claude"); // requested backend kept for glyph fidelity
     expect(run.kind).toBe("primary");
-    expect(run.role).toBe("Primary specialist");
+    // Run rows carry the engagement's live role snapshot, not a kind literal.
+    expect(run.role).toBe("developer");
     expect(run.simulated).toBe(1);
     // The simulated fallback streams a realistic analyze transcript (>0 lines).
     const lineCount = await waitForLines(result.runId, 1);
@@ -344,7 +344,7 @@ describe("startSpecialistRun", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(file.parsed.timeline[0]!.text).toContain("Started a Claude Code run");
-    const audit = listAuditEvents(store.db, { action: "task.specialist.run_started" });
+    const audit = listAuditEvents(store.db, { action: "task.agent.run_started" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
     const startAudit = listAuditEvents(store.db, { action: "runtime.run.started" });
     expect(startAudit.length).toBe(1); // not double-counted
@@ -354,7 +354,7 @@ describe("startSpecialistRun", () => {
     await assign(); // snapshot captured with backend: claude
     deployDevSpecialist(["codex"]); // profile later edited to the other backend
 
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -383,7 +383,7 @@ describe("startSpecialistRun", () => {
 
   it("persists a D4 backendOverride to the snapshot so later prompts follow it", async () => {
     await assign(); // snapshot: claude
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "codex" },
       actor(store.users.arda),
@@ -441,7 +441,7 @@ describe("startSpecialistRun", () => {
     await assign();
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
-        startSpecialistRun(
+        startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1" },
           actor(user),
@@ -546,7 +546,7 @@ describe("startReviewerRun", () => {
 
   it("errors when the profile is not an engaged reviewer", async () => {
     await expect(
-      startReviewerRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
         actor(store.users.arda),
@@ -557,7 +557,7 @@ describe("startReviewerRun", () => {
 
   it("creates a kind='reviewer' run on its own thread with a simulated stream", async () => {
     await engage();
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda),
@@ -565,7 +565,7 @@ describe("startReviewerRun", () => {
     );
     const run = getRun(store.db, result.runId)!;
     expect(run.kind).toBe("reviewer");
-    expect(run.role).toBe("Reviewer");
+    expect(run.role).toBe("developer");
     expect(run.thread_id.startsWith("r0-")).toBe(true);
     expect(run.agent_profile_id).toBe("dev");
     const lineCount = await waitForLines(result.runId, 1);
@@ -578,13 +578,13 @@ describe("startReviewerRun", () => {
       actor(store.users.arda),
     );
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.agent.run_started" })[0]?.taskKey,
     ).toBe("VIB-1");
   });
 
   it("posts the reviewer's reply as a comment when the run finishes (Run-button path)", async () => {
     await engage();
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda),

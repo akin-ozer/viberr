@@ -26,8 +26,7 @@ import {
 } from "./task-actions.server";
 import {
   assignReviewer,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
   assignSpecialist,
 } from "./specialist-run.server";
 
@@ -121,7 +120,7 @@ describe("waiting-state bookkeeping (A2)", () => {
       { dataRoot: store.dataRoot },
     );
     expect(taskFile().parsed.frontmatter.waiting).not.toBe("agent");
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -477,7 +476,7 @@ describe("R7-2 fail-fast through the specialist start path (no fake runs)", () =
     );
     setSimulatedRuntimePermittedForTests(false);
     try {
-      const result = await startSpecialistRun(
+      const result = await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -527,7 +526,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
     // With a directive the simulated reviewer report closes with an explicit
     // "Verdict: **approve**" — the completion hook must classify it and flip
     // validation to healthy without any operator/@mention involvement.
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       {
         projectSlug: store.slug,
