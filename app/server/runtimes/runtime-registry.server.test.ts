@@ -89,10 +89,31 @@ describe("runtime-registry — detection & fallback", () => {
     expect(isBackendAvailable("codex")).toBe(false);
   });
 
-  it("caches the first detection result", () => {
+  it("re-probes an unavailable detection — a credential fixed at runtime heals it", () => {
     expect(isBackendAvailable("claude")).toBe(false);
     process.env.ANTHROPIC_API_KEY = "sk-ant-test"; // set AFTER first probe
-    expect(isBackendAvailable("claude")).toBe(false); // still cached false
+    expect(isBackendAvailable("claude")).toBe(true); // live re-probe picks it up
+  });
+
+  it("self-heals the docker codex-home trap: auth.json dropped in AFTER the first probe", () => {
+    // The recurring compose breakage: a wiped ./docker-data volume empties
+    // CODEX_HOME, codex probes unavailable, and the old first-probe-wins cache
+    // pinned that for the process lifetime — even `docker compose cp`ing the
+    // file back kept runs refused until a restart. Now the next run just works.
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    const home = codexHome(false);
+    process.env.CODEX_HOME = home;
+    expect(isBackendAvailable("codex")).toBe(false); // fresh volume: no auth.json
+    writeFileSync(path.join(home, "auth.json"), "{}"); // docker compose cp …
+    expect(isBackendAvailable("codex")).toBe(true); // no restart needed
+  });
+
+  it("an explicit setBackendAvailability override is sticky — never re-probed", () => {
+    // The test harness forces both backends unavailable; an ambient dev-.env
+    // credential must NOT flip that back via the live re-probe.
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    setBackendAvailability("claude", false);
+    expect(isBackendAvailable("claude")).toBe(false);
   });
 
   it("selectAdapter returns the real adapter when available", () => {

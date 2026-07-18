@@ -21,6 +21,10 @@ services:
       # UNAVAILABLE (honest degraded state) rather than starting a doomed run
       # that dies with a redacted error (F-DOCKER1). Sessions + auth persist on
       # the /data mount.
+      # RECURRING TRAP: auth.json lives on ./docker-data — wiping/recreating the
+      # volume removes it and ONLY Codex silently degrades (Claude's token rides
+      # .env and survives every wipe). Re-copy the file after a wipe; the app
+      # re-probes availability live, so the next run works with no restart.
       CODEX_HOME: /data/runtimes/codex-home
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the

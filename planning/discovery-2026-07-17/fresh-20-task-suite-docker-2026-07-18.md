@@ -220,3 +220,29 @@ role-binding matrix, 75+ real agent runs, operator correctness, skill-leak (+ a 
 subagent-task leak fixed and re-verified live), MCP wiring, tool isolation, and **Claude↔Codex
 parity now shown with Codex actually executing**. One real defect found and fixed; two test
 assumptions corrected against FR4 / stage-eligibility. PR #36 remains implementation-ready.
+
+## Addendum (post-merge, 2026-07-18 evening): the recurring "Codex broke again" trap — root-caused + fixed
+Owner hit it live on a fresh compose volume (VIB-1, "no usable credential"). Root cause chain:
+1. **Asymmetric credential storage.** Claude's credential is `CLAUDE_CODE_OAUTH_TOKEN` in `.env` —
+   re-injected on every boot, survives anything. Codex-via-CLI-auth is a FILE on the volume
+   (`CODEX_HOME=/data/runtimes/codex-home/auth.json`, isolated from host `~/.codex` by design).
+   Wiping/recreating `./docker-data` deletes it → ONLY Codex silently degrades, every time.
+2. **State-blind error copy.** The refusal said "opt in with VIBERR_CODEX_USE_CLI_AUTH=1" — a flag
+   the owner already had set; the actual problem (missing file) was never named. That's why it felt
+   mysterious.
+3. **First-probe-wins cache.** `isBackendAvailable` pinned the first detection for the process
+   lifetime — even after `docker compose cp`-ing the file back, runs stayed refused until a restart.
+
+**Fixed (branch `codex-availability-selfheal`):**
+- `isBackendAvailable` now live-re-probes (cheap: env reads + one existsSync) and logs only on
+  change; `setBackendAvailability` became a sticky explicit override (test-harness holds can't be
+  flipped back by an ambient dev-`.env` credential).
+- `backendUnavailableMessage` is state-aware: opt-in set + file missing → names the exact path and
+  the exact `docker compose cp` command, and notes no restart is needed.
+- compose.yml documents the trap at the `CODEX_HOME` override.
+
+**Live-verified in the owner's container (no restarts anywhere):** remove auth.json → health flips
+`codex: unavailable` → run refused with the new copy → restore the file → health flips `real` →
+next run is a REAL codex run (`thread.started` → agent output). Suite 1330 green + typecheck clean.
+Note: bind-mount attribute caching can delay the container's view of a host-side file change by a
+few seconds — probe again before concluding.
