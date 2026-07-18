@@ -83,8 +83,12 @@ Creation flow, `viberr-sandbox`:
 - **O-1 (copy)** VIB-181 review row: "no specialist was ever assigned" when a specialist WAS assigned
   but its backend was down (produced no diff). Distinguish "assigned-but-never-ran" from "never
   assigned". Low priority; arose from an artificial sequence.
-- **O-2 (cosmetic)** legacy seed profiles list vestigial "fake toggle" capabilities (F-CAPS) that have
-  no runtime effect — prune from the seed for honesty (optional).
+- **O-2 → INVESTIGATED, NOT A CHANGE.** The seed profiles list `run-unit-integration-validation`/
+  `move-task-to-review`/`report-validation-verdict`. These ARE real catalog capability defs
+  (`app/shared/capabilities.ts`) kept DELIBERATELY as descriptive labels (`capability-catalog.ts:43`:
+  excluded from the create-modal because zero runtime references, but retained in the full catalog so
+  seeded profiles can describe their role). They gate no tool (absent from `specialist-tool-policy`).
+  Removing them would STRIP intentional descriptive richness — a regression, not a fix. Leave as-is.
 - **O-3 (product Q, open)** should a scheduled/recurring capability exist for not-yet-Done tasks? The
   parity-correct form is a governed `mcp__viberr__schedule_*` tool (works for both backends), not the
   Claude Cron tool. Noted in `plan-bundled-tool-isolation.md`, not built.
