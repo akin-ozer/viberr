@@ -34,28 +34,38 @@ phase + the external (gpt-5.6) code review. Branch `pass8-decision-counts-rbac-d
    `agent-runtime-verification`.
 
 ## OPEN ITEMS (prioritized) — the actual implementation-phase backlog
-All are MINOR/polish; the core product is mature and wired (fresh-discovery verdict: no mocks found).
+All were MINOR/polish; the core product is mature and wired (fresh-discovery verdict: no mocks found).
+**RESOLVED 2026-07-18 (owner: "close everything P1+P2, but first check the tools make sense"):**
 
-### P1 — worth doing
-- **[RUNTIME] Residual SDK-bundled-tool leak.** Same SDK-binary channel that leaked `Skill` also
-  exposes `CronCreate/Delete/List`, `Monitor`, `RemoteTrigger`, `ScheduleWakeup`, `Workflow`,
-  `Task`(→subagents), `ToolSearch`, `DesignSync`, `Enter/ExitWorktree`, `PushNotification`,
-  `SendMessage` in every run. Inert (0 uses observed) but not isolated. Fix: extend
-  `BASE_DENIED_BUILTINS` with the clearly-unneeded orchestration tools (keep Bash/Read/Write/Edit/
-  Grep/Glob/WebFetch/WebSearch/mcp__*), verify in the container. *(Owner deferred once in favor of the
-  discovery pass — pick back up on request.)* — `agent-runtime-verification` §residual.
-- **[TEST-INFRA] notes-fixture MCP is non-portable + stale-green health.** Points at a session-scoped
-  `/private/tmp/…/<sid>/scratchpad/notes-mcp-server.mjs` that no longer exists, but the resources UI
-  shows it GREEN ("checked 11h ago"). Fix: (a) bundle a self-contained notes MCP under the data root so
-  a fresh install has a live one; (b) re-verify MCP health on the resources-page load (or render a
-  stale-check badge) so a dead server never shows green. — `fresh-discovery-2026-07-18` §resources.
+### P1 — DONE
+- **[RUNTIME] Residual SDK-bundled-tool leak → FIXED (commit 775c10b), selectively.** Owner's caution
+  paid off: `ToolSearch` is NOT inert — **137 real calls** load the operator's deferred `mcp__viberr__*`
+  governance tools; denying it would break the operator, so it is KEPT. Denied the rest (`Task`,
+  `Workflow`, `Cron*`, `ScheduleWakeup`, `RemoteTrigger`, `Monitor`, `Push/SendMessage`, `DesignSync`,
+  `Enter/ExitWorktree`) — 0-use, Claude-only (no Codex analog → parity), and bypass concerns viberr
+  owns. Coding/web/mcp tools kept. Docker-verified: operator keeps ToolSearch + loads mcp__viberr__* +
+  runs clean; denied tools gone. Codex needs no change. See `plan-bundled-tool-isolation.md`.
+  (Cron / "scheduled action on a not-yet-Done task": correct form is a future governed
+  `mcp__viberr__schedule_*` capability that works for both backends — noted, not built.)
+- **[MCP] Stale MCP health shows fresh-green → FIXED (commit after 775c10b).** The health MODEL was
+  already sound (real stdio spawn+handshake, on-demand retest, staleness timestamp); the only issue was
+  an `up` dot for an hours-old check over-implying "healthy now". Now: a >1h-old check renders AMBER
+  ("stale, retest"). Live-verified on the dev notes-fixture (12h → amber). *(The notes-fixture itself
+  pointing at a temp scratchpad is DEV TEST DATA, not a product bug — a fresh seed has 0 MCPs.)*
 
-### P2 — cosmetic / coherence
-- **[GITHUB] PAT expiry not surfaced** — connection shows "expires —"; surface the real expiry or
-  "unknown". — `fresh-discovery-2026-07-18` §connections.
-- **[NOTIFS] Superseded recommendation notifications not dimmed** — a "ready for review" recommendation
-  notification stays as-is after the PR is rejected + a divergence fires. Dim/annotate superseded
-  recommendation notifications against live packet/rec state. — `fresh-discovery-2026-07-18` §notifs.
+### P2 — NON-ISSUES (verified) + one owner product-question
+- **[GITHUB] PAT expiry → NON-ISSUE.** The app ALREADY fetches expiry from GitHub's
+  `github-authentication-token-expiration` header (`github-client.server.ts`), stores it
+  (`pat-validator`), and renders it (`connections-panel.tsx:235`). "expires —" is the honest display for
+  a classic no-expiry PAT / unknown. No change needed.
+- **[NOTIFS] Superseded recommendation notifications → NON-ISSUE at the notification level.**
+  `notifications.server.ts` ALREADY reconciles against live state via `decisionsRequiring` — a
+  resolved/applied/Done decision drops out of "Waiting on you" (F7-NOTIF1). VIB-22's "Move to Review"
+  rec is genuinely STILL PENDING (never applied/dismissed), so its notification is correct.
+  → **OWNER PRODUCT-QUESTION (surfaced, not decided):** when a GitHub *divergence* fires (PR closed
+  out-of-band) on a task with a now-moot pending transition recommendation, should the divergence
+  auto-supersede/replace that recommendation, or leave both for the human to reconcile? That's a
+  governance-semantics call, not a UI bug.
 
 ### Considered & DECLINED (not deferrals — documented rationale)
 - rbac-audit §5 #4/#5 owner-predicate / run-agents helper folding — already single-sourced; folding
