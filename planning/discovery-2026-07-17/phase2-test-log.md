@@ -207,3 +207,10 @@ Plus code audits: full RBAC matrix (all 4 roles + override), decision-count trac
 - **Interrupt-run**: wiring verified (run-interrupt takes runId, looks up the run; missing id → 404); the
   tiny docs run finished before a mid-flight catch — interrupt LOGIC (interruptRun: writes interrupted state
   + audit, idempotent) is unit-tested.
+- **Interrupt-mid-run ✅ live.** A long-enough codex Developer run was interrupted mid-flight via run-interrupt
+  → run state `interrupted`, `interrupted_by`=the acting admin, audit `runtime.run.interrupted` recorded.
+  (Completes the earlier interrupt test that a too-fast docs run couldn't catch.)
+- **OBS (minor, not a bug):** a task created by DIRECT DISK-WRITE doesn't bump project.md `nextTaskNumber`, so a
+  later API/UI create can reuse the key. Normal creation always goes through createTask (increments); only
+  disk-write test setup hits this. Boot recovery correctly re-invoked the operator for the orphaned run after a
+  server restart (F7-BOOT1 recovery path exercised, no crash-loop).
