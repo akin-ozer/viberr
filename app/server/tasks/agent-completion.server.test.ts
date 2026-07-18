@@ -134,8 +134,12 @@ describe("waiting-state bookkeeping (A2)", () => {
 describe("applyAgentCompletionEffects (the shared effects)", () => {
   /** Start a real (simulated-engine) run whose final assistant text is `text`,
    *  wait for it to finish, and return its run id. `autonomous` — no default
-   *  completion hook is registered by startRun itself. */
+   *  completion hook is registered by startRun itself. Session/thread ids are
+   *  unique per call so a test can drive more than one run without colliding on
+   *  the (project, task, thread) uniqueness. */
+  let runSeq = 0;
   async function finishedRunWith(text: string): Promise<string> {
+    runSeq += 1;
     const script = buildScript({
       lines: [
         { t: "", ev: "init", tag: "system·init", text: "test session" },
@@ -143,7 +147,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { t: "", ev: "result", tag: "result", text: "done" },
       ],
       occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-      sessionId: "t",
+      sessionId: `t-${runSeq}`,
       backend: "claude",
       model: "sonnet",
       op: false,
@@ -163,6 +167,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       script,
       dataRoot: store.dataRoot,
       actor: actor(store.users.arda),
+      threadId: `th-${runSeq}`,
     });
     await waitFor(() => {
       const row = store.db
@@ -197,6 +202,40 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(fm.validation).toBe("failing");
     const quality = taskFile().parsed.timeline.find((e) => e.type === "quality");
     expect(quality).toBeTruthy();
+  });
+
+  it("posts the reviewer's OWN reply comment atomically with the verdict — pass AND fail", async () => {
+    // Regression (VIB-1…4, docker): the reviewer's reply comment used to be a
+    // separate earlier write that the verdict's read-modify-write erased on the
+    // VirtioFS mount, so only the operator's derived verdict event survived and
+    // the reviewer never "spoke" on the timeline. Now they're ONE write.
+    for (const [reply, wantValidation] of [
+      ["Verdict: approve\n\n@operator the inventory is complete and accurate.", "healthy"],
+      ["Verdict: request changes\n\n@operator six symlinks are missing.", "failing"],
+    ] as const) {
+      // fresh task each iteration
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id }),
+        goal: "Exercise the reviewer reply + verdict.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+        { id: runId, state: "finished", simulated: false },
+      );
+      const tl = taskFile().parsed.timeline;
+      const reviewerComment = tl.find(
+        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+      );
+      const quality = tl.find((e) => e.type === "quality");
+      expect(reviewerComment, `reviewer reply must be posted (${wantValidation})`).toBeTruthy();
+      expect(reviewerComment!.text).toContain("@operator");
+      expect(quality).toBeTruthy();
+      expect(taskFile().parsed.frontmatter.validation).toBe(wantValidation);
+    }
   });
 
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {

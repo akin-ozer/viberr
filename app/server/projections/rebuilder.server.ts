@@ -13,6 +13,7 @@ import {
 } from "~/server/files/file-store-root.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
+import { readCoherentTaskContent } from "~/server/files/task-writer.server";
 import {
   referenceDiagnostics,
 } from "~/server/interpretation/diagnostics-policy.server";
@@ -315,7 +316,11 @@ export function rebuildTaskFile(
     return { action: "ignored", kind: "task", projectSlug: slug, taskKey: key };
   }
 
-  const content = readFileSync(absPath, "utf8");
+  // Coherent read (read-your-own-writes): on the docker VirtioFS mount a raw
+  // read right after a write can be stale, so a reproject fired by the write
+  // could publish a task_events timeline MISSING the just-written comment (the
+  // reviewer-comment loss). This trusts our own recent write when disk lags.
+  const content = readCoherentTaskContent(absPath) ?? readFileSync(absPath, "utf8");
   const contentHash = sha256(content);
   const existing = db
     .prepare(

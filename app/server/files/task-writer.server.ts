@@ -79,34 +79,60 @@ function rememberWrite(absPath: string, content: string): void {
   lastWritten.set(absPath, { content, wroteAtMs: Date.now() });
 }
 
-/** The freshest content for a locked read: disk, unless it is provably a
- *  stale cache of our own earlier write. */
+/**
+ * Read-your-own-writes slack. VirtioFS can serve a stale read (or a stale
+ * content cache under a freshly-advanced mtime) for a surprisingly long window
+ * after our own rename — 100 ms was too tight and let concurrent completions
+ * (a reviewer verdict landing while the operator reacts) read a pre-write file
+ * and erase each other's timeline entries. Only THIS process writes task.md
+ * (the app is the single writer; humans edit through the UI), and the chokidar
+ * watcher re-projects any genuine external edit on its own, so a generous
+ * window that trusts our own recent write is safe.
+ */
+const STALE_READ_SLACK_MS = 4000;
+
+/**
+ * The freshest content for a path: the disk read, unless it is provably a stale
+ * cache of our own recent write (content disagrees with what we last wrote AND
+ * the file's mtime has not advanced past our write by the slack — i.e. no
+ * external writer touched it since). Centralized so BOTH the locked
+ * read-modify-write AND the projector read coherently — the projector used to
+ * read raw and could publish a timeline missing a just-written comment.
+ */
+export function coherentTaskContent(absPath: string, diskContent: string): string {
+  const remembered = lastWritten.get(absPath);
+  if (!remembered || diskContent === remembered.content) return diskContent;
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(absPath).mtimeMs;
+  } catch {
+    return diskContent;
+  }
+  if (mtimeMs > remembered.wroteAtMs + STALE_READ_SLACK_MS) return diskContent;
+  logger.warn("stale task-file read served from the in-process write cache", { absPath });
+  return remembered.content;
+}
+
+/** Coherent disk read of a task file (null when absent) — for readers outside
+ *  updateTaskFile (the projector). */
+export function readCoherentTaskContent(absPath: string): string | null {
+  let disk: string;
+  try {
+    disk = readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
+  return coherentTaskContent(absPath, disk);
+}
+
 function repairStaleRead(
   absPath: string,
   current: TaskFileReadResult,
   ref: TaskFileRef,
 ): ParsedTaskFile {
-  const remembered = lastWritten.get(absPath);
-  if (!remembered || current.content === remembered.content) {
-    return current.parsed;
-  }
-  let mtimeMs: number;
-  try {
-    mtimeMs = statSync(absPath).mtimeMs;
-  } catch {
-    return current.parsed;
-  }
-  // 100 ms slack for mtime granularity/clock skew between the write and the
-  // rename's recorded time. An external writer lands AFTER our write, so its
-  // mtime exceeds wroteAtMs + slack and disk wins.
-  if (mtimeMs > remembered.wroteAtMs + 100) return current.parsed;
-  logger.warn("stale task-file read repaired from the in-process write cache", {
-    taskKey: ref.taskKey,
-    absPath,
-  });
-  return parseTaskFileContent(remembered.content, {
-    fallbackKey: ref.taskKey,
-  }).parsed;
+  const coherent = coherentTaskContent(absPath, current.content);
+  if (coherent === current.content) return current.parsed;
+  return parseTaskFileContent(coherent, { fallbackKey: ref.taskKey }).parsed;
 }
 
 /**
