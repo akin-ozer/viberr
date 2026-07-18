@@ -1174,6 +1174,136 @@ export async function operatorPromptReviewer(
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */
+
+// ------------------------------------------------- generic agent dispatch
+
+/**
+ * Generic engagement dispatch (generic-agents phase 3): ONE tool surface —
+ * engage_agent / run_agent / prompt_agent — replacing the six kind-tools.
+ * `delivers` selects the engagement shape; the capability GATES keep their
+ * existing ids (assign-primary-specialist governs delivering engagements,
+ * summon-reviewers the supporting ones), so no deployment grant migrates.
+ */
+export async function operatorEngageAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    delivers: boolean;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const { profileId, projectSlug, taskKey } = input;
+  const base = { projectSlug, taskKey, profileId };
+  return input.delivers
+    ? operatorAssignSpecialist(
+        db,
+        ctx,
+        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
+        authority,
+      )
+    : operatorAssignReviewer(
+        db,
+        ctx,
+        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
+        authority,
+      );
+}
+
+/** Resolve whether `profileId` names the task's delivering engagement (or the
+ * intended one): explicit hint wins; an engaged profile keeps its shape; an
+ * unengaged profile delivers iff the task has no deliverer yet. */
+function resolveDeliversIntent(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  profileId: string | undefined,
+  hint: boolean | undefined,
+): boolean {
+  if (hint !== undefined) return hint;
+  const file = readTaskFile({
+    projectSlug,
+    taskKey,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  const fm = file?.parsed.frontmatter;
+  if (!fm) return !profileId;
+  const delivering = deliveringEngagement(fm);
+  if (!profileId) return true;
+  if (delivering?.profileId === profileId) return true;
+  if (fm.engagements.some((e) => e.profileId === profileId)) return false;
+  return delivering === null;
+}
+
+export async function operatorRunAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId?: string;
+    delivers?: boolean;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const delivers = resolveDeliversIntent(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.profileId,
+    input.delivers,
+  );
+  const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  if (delivers) return operatorRunSpecialist(db, ctx, base, authority);
+  if (!input.profileId) {
+    return {
+      outcome: "denied",
+      message: "A profileId is required to run a supporting agent.",
+    };
+  }
+  return operatorRunReviewer(
+    db,
+    ctx,
+    { ...base, profileId: input.profileId },
+    authority,
+  );
+}
+
+export async function operatorPromptAgentGeneric(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    directive?: string;
+    delivers?: boolean;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const delivers = resolveDeliversIntent(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.profileId,
+    input.delivers,
+  );
+  const base = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    profileId: input.profileId,
+    ...(input.directive ? { directive: input.directive } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+  };
+  return delivers
+    ? operatorPromptSpecialist(db, ctx, base, authority)
+    : operatorPromptReviewer(db, ctx, base, authority);
+}
+
 export async function operatorTransitionStage(
   db: Database.Database,
   ctx: TaskMutationContext,

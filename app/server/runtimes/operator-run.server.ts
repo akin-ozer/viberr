@@ -16,14 +16,11 @@ import { newId } from "~/shared/ids/new-id.server";
 import {
   gate,
   operatorAcceptCompletion,
-  operatorAssignReviewer,
-  operatorAssignSpecialist,
+  operatorEngageAgent,
   operatorOpenPacket,
   operatorPostComment,
-  operatorPromptReviewer,
-  operatorPromptSpecialist,
-  operatorRunReviewer,
-  operatorRunSpecialist,
+  operatorPromptAgentGeneric,
+  operatorRunAgent,
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
@@ -417,6 +414,14 @@ const OPERATOR_PLAN_TOOLS = [
   // Withdraw YOUR OWN open packet when it became moot (its asked-for input was
   // provided out-of-band, e.g. a human edited the goal). `reason` explains why.
   "resolve_packet",
+  // Generic engagement actions (generic-agents phase 3): `delivers` selects
+  // the engagement shape (true = the delivering builder; false = supporting,
+  // e.g. verdict-capable review).
+  "engage_agent",
+  "run_agent",
+  "prompt_agent",
+  // Legacy aliases (pre-generic plans / model drift) — dispatched to the same
+  // generic handlers with the delivers flag implied by the name.
   "assign_specialist",
   "run_specialist",
   "prompt_specialist",
@@ -448,13 +453,14 @@ const OPERATOR_PLAN_SCHEMA = {
             type: "string",
             enum: OPERATOR_PLAN_TOOLS,
           },
-          profileId: { type: ["string", "null"], description: "For assign_/run_/prompt_ actions, else null." },
+          profileId: { type: ["string", "null"], description: "For engage_/run_/prompt_ agent actions, else null." },
+          delivers: { type: ["boolean", "null"], description: "engage_agent/prompt_agent: true = the delivering builder (owns branch/PR, one per task); false = supporting (review). Else null." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
           text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
         },
-        required: ["tool", "profileId", "toStageId", "packetType", "text", "reason"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason"],
       },
     },
   },
@@ -470,6 +476,8 @@ const OPERATOR_PLAN_SCHEMA = {
 const operatorPlanActionSchema = z.strictObject({
   tool: z.enum(OPERATOR_PLAN_TOOLS),
   profileId: z.string().nullable(),
+  // Optional (not just nullable): legacy stored plans predate the field.
+  delivers: z.boolean().nullable().optional(),
   toStageId: z.string().nullable(),
   packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
   text: z.string().nullable(),
@@ -678,45 +686,68 @@ async function executeCodexPlan(
             );
           break;
         }
+        // Generic engagement actions + legacy aliases → ONE dispatch. The
+        // alias implies the delivers flag its name always meant.
+        case "engage_agent":
         case "assign_specialist":
-          if (a.profileId)
-            await operatorAssignSpecialist(
-              db,
-              ctx,
-              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
-              authority,
-            );
-          break;
-        case "run_specialist":
-          await operatorRunSpecialist(db, ctx, base, authority);
-          break;
-        case "prompt_specialist":
-          if (a.profileId)
-            await operatorPromptSpecialist(
-              db,
-              ctx,
-              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
-              authority,
-            );
-          break;
         case "assign_reviewer":
           if (a.profileId)
-            await operatorAssignReviewer(
+            await operatorEngageAgent(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.reason ? { reason: a.reason } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                delivers:
+                  a.tool === "assign_specialist"
+                    ? true
+                    : a.tool === "assign_reviewer"
+                      ? false
+                      : (a.delivers ?? true),
+                ...(a.reason ? { reason: a.reason } : {}),
+              },
               authority,
             );
           break;
+        case "run_agent":
+        case "run_specialist":
         case "run_reviewer":
-          if (a.profileId) await operatorRunReviewer(db, ctx, { ...base, profileId: a.profileId }, authority);
+          await operatorRunAgent(
+            db,
+            ctx,
+            {
+              ...base,
+              ...(a.profileId ? { profileId: a.profileId } : {}),
+              ...(a.tool === "run_specialist"
+                ? { delivers: true }
+                : a.tool === "run_reviewer"
+                  ? { delivers: false }
+                  : a.delivers != null
+                    ? { delivers: a.delivers }
+                    : {}),
+            },
+            authority,
+          );
           break;
+        case "prompt_agent":
+        case "prompt_specialist":
         case "prompt_reviewer":
           if (a.profileId)
-            await operatorPromptReviewer(
+            await operatorPromptAgentGeneric(
               db,
               ctx,
-              { ...base, profileId: a.profileId, ...(a.text ? { directive: a.text } : {}) },
+              {
+                ...base,
+                profileId: a.profileId,
+                ...(a.text ? { directive: a.text } : {}),
+                ...(a.tool === "prompt_specialist"
+                  ? { delivers: true }
+                  : a.tool === "prompt_reviewer"
+                    ? { delivers: false }
+                    : a.delivers != null
+                      ? { delivers: a.delivers }
+                      : {}),
+              },
               authority,
             );
           break;
@@ -958,7 +989,14 @@ async function runScriptedOperatorDrive(
           if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
             for (const rev of revIds) {
               say(
-                (await operatorPromptReviewer(db, ctx, { projectSlug, taskKey, profileId: rev }, authority)).message,
+                (
+                  await operatorPromptAgentGeneric(
+                    db,
+                    ctx,
+                    { projectSlug, taskKey, profileId: rev, delivers: false },
+                    authority,
+                  )
+                ).message,
               );
             }
           }
@@ -976,7 +1014,14 @@ async function runScriptedOperatorDrive(
             assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
           if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
             say(
-              (await operatorPromptSpecialist(db, ctx, { projectSlug, taskKey, profileId: pick.id }, authority)).message,
+              (
+                await operatorPromptAgentGeneric(
+                  db,
+                  ctx,
+                  { projectSlug, taskKey, profileId: pick.id, delivers: true },
+                  authority,
+                )
+              ).message,
             );
           }
           return;
@@ -1101,9 +1146,15 @@ function pickSpecialist(snap: OperatorTaskSnapshot) {
   const specs = snap.deployedSpecialists.filter((s) =>
     specialistEligibleForStage(s, snap.stage),
   );
+  // Capability-first (generic-agents D11): a DELIVERY-capable profile is the
+  // structural signal for build work — no hardcoded ids. The legacy role
+  // heuristics remain only as last-resort tie-breakers for deployments with no
+  // capability grants at all.
   return (
-    specs.find((s) => /develop|implement/i.test(s.role) || s.id === "developer") ??
-    specs.find((s) => !/review/i.test(s.role)) ??
+    specs.find((s) => s.capabilities.delivery && !s.capabilities.verdict) ??
+    specs.find((s) => s.capabilities.delivery) ??
+    specs.find((s) => /develop|implement/i.test(s.role)) ??
+    specs.find((s) => !s.capabilities.verdict && !/review/i.test(s.role)) ??
     specs[0] ??
     null
   );
@@ -1117,8 +1168,11 @@ function pickReviewer(snap: OperatorTaskSnapshot) {
       !snap.reviewers.some((r) => r.profileId === s.id) &&
       s.id !== snap.specialist?.profileId,
   );
+  // Capability-first (D11): verdict capability IS what makes review-engaging a
+  // profile meaningful — its verdicts gate acceptance (G2).
   return (
-    specs.find((s) => /review/i.test(s.role) || s.id === "reviewer") ??
+    specs.find((s) => s.capabilities.verdict) ??
+    specs.find((s) => /review/i.test(s.role)) ??
     specs[0] ??
     null
   );
@@ -1257,12 +1311,15 @@ export function buildCodexOperatorPrompt(
     reportBlock +
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
-    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions.\n\n" +
+    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions. " +
+    "SELECT the right agent by reading each profile's `desc` (its purpose) and `capabilities` " +
+    "(delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — " +
+    "never by guessing from names.\n\n" +
     decision +
     "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
     "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
     "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_specialist", "profileId": "…", "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
+    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_agent", "profileId": "…", "delivers": true, "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
     "Include a short reason on each governed action (it is shown on the recommendation card)."
   );
 }

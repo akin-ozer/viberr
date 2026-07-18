@@ -12,8 +12,10 @@ import {
 } from "~/schemas/task-file.schema";
 import {
   AGENT_OUTCOME_JSON_SCHEMA,
+  effectiveCollabMode,
   resolveAgentCollab,
 } from "./agent-outcome.server";
+import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
 import { buildAgentToolkit } from "./agent-toolkit.server";
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -1483,6 +1485,22 @@ export interface DeployedSpecialistView {
   /** Reasoning effort (empty when unset) — carried so a comment-resume can
    *  apply the agent's current effort, not the prior run's. */
   effort: string;
+  /** Short scannable profile description — WHAT THE OPERATOR SELECTS BY
+   *  (generic-agents D11): purpose/strengths, one paragraph. */
+  desc: string;
+  /** Granted collaboration/delivery capabilities, as display labels — the
+   *  operator's second selection input (e.g. "reports validation verdicts"
+   *  identifies a review-capable profile without a hardcoded id). */
+  capabilities: {
+    /** May own the workspace/branch/PR when engaged as the deliverer. */
+    delivery: boolean;
+    /** Holds report-validation-verdict → its verdicts gate acceptance. */
+    verdict: boolean;
+    /** May raise ask-human question packets. */
+    askHuman: boolean;
+  };
+  /** Declared resources (skills/MCPs/KBs) — selection context. */
+  resources: { skills: string[]; mcps: string[]; kb: string[] };
   /** Stage ids this profile is eligible to work (F1 — now enforced, not just
    *  displayed). Empty when spanAll. */
   stages: string[];
@@ -1543,6 +1561,15 @@ export function listDeployedSpecialists(
     const view = effectiveProfileView(deployment, ctx.dataRoot);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
+    const grants = deployment.capabilities;
+    // Delivery capability: any repo-write grant in direct mode (the same set
+    // the tool denylist binds on).
+    const granted = (id: string) =>
+      grants.some(
+        (g) =>
+          g.capabilityId === id &&
+          coerceSpecialistCapabilityMode(g.mode) === "direct",
+      );
     out.push({
       id: resolved.profileId,
       name: resolved.name,
@@ -1550,6 +1577,24 @@ export function listDeployedSpecialists(
       backend: resolved.backend,
       model: resolved.model,
       effort: resolved.effort,
+      desc: view.desc,
+      capabilities: {
+        delivery:
+          granted("execute-code-or-write-repo") ||
+          granted("commit-push-branch") ||
+          granted("create-task-branch"),
+        // EXPLICIT grant only — the completion-time transition default
+        // (absent grant → verdict-on for supporting engagements) is a
+        // RECORDING rule, not a selection signal; applying it here made every
+        // profile look review-capable and mis-picked the reviewer.
+        verdict: granted("report-validation-verdict"),
+        askHuman: effectiveCollabMode(grants, "ask-human", false) === "direct",
+      },
+      resources: {
+        skills: resolved.skills,
+        mcps: resolved.mcps,
+        kb: resolved.kb,
+      },
       stages: resolved.stages,
       spanAll: resolved.spanAll,
     });
