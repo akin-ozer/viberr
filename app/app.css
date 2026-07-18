@@ -1025,6 +1025,20 @@ h1, h2, h3, h4 {
 .composer-foot { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 .composer-hint { font-size: .74rem; color: var(--placeholder); }
 .composer-hint .at { font-family: var(--font-mono); font-weight: 700; color: var(--agent-dark); }
+
+/* O-3 — scheduled operator re-runs */
+.sched-list { list-style: none; margin: 0 0 .6rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .7rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; }
+.sched-when { display: inline-flex; align-items: center; gap: .35rem; font-family: var(--font-mono); font-size: .78rem; font-weight: 700; }
+.sched-when .ico, .sched-when svg { width: 13px; height: 13px; color: var(--agent-dark); }
+.sched-meta { grid-column: 1 / -1; font-size: .76rem; color: var(--placeholder); }
+.sched-cancel { grid-row: 1; grid-column: 3; }
+.sched-form { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.sched-controls { display: flex; flex-wrap: wrap; gap: .6rem; }
+.sched-controls .flabel { display: inline-flex; flex-direction: column; gap: .2rem; }
+.sched-controls select { padding: .3rem .4rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
+.sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
+.sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .26rem; border-radius: 5px; }
 .addressees { display: flex; gap: .35rem; }
 .addr {

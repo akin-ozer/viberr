@@ -585,6 +585,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       myRole={layout.myRole}
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
+      schedules={loaderData.schedules}
       githubHost={loaderData.githubHost}
     />
   );
