@@ -246,3 +246,38 @@ Owner hit it live on a fresh compose volume (VIB-1, "no usable credential"). Roo
 next run is a REAL codex run (`thread.started` → agent output). Suite 1330 green + typecheck clean.
 Note: bind-mount attribute caching can delay the container's view of a host-side file change by a
 few seconds — probe again before concluding.
+
+## Acceptance sweep of the FINAL merged build (2026-07-18 evening, owner's fresh docker env)
+Page-by-page UI walkthrough (screenshots) of post-merge `main` running in the owner's fresh-volume
+compose environment (their new `viberr` project on akin-ozer/viberr, real GitHub credential wired,
+owner actively driving VIB-1). All 10 surfaces render coherently against live state:
+- **Sign-in**: honest "GitHub/Google — not configured" degraded OAuth affordances.
+- **Board**: the three waiting-signals (card "agent working" / chip "Waiting on me · 1" / header
+  "0 waiting on a human decision") were verified to DISAGREE CORRECTLY — a codex run was genuinely
+  active while a packet decision was simultaneously open for the viewer; each signal measures a
+  different thing (live agent activity vs member-scoped decisions vs project-wide waiting enum). R8-3
+  member-scoping working as designed on the final build.
+- **Task detail (VIB-1)**: packet card with honestly-classified codex failure; branch chip + "no PR"
+  (analysis-only run: branch pushed, no commits → correctly no PR); O-3 "Schedule operator re-run"
+  card present. Agent-logs picker groups Operator (Claude SDK) + Developer (Codex SDK) threads.
+- **Review queue**: honest empty states + the human-only Review→Done lock chip.
+- **Agents**: live counts (1 active task, Developer running / Reviewer idle), 3-mode capability policy.
+- **Policy**: total RBAC table with FR4 app-wide rows ("Any signed-in user · membership not
+  required"), per-role counts, agent-capability counts, ALWAYS-HUMAN list, last-change audit chip.
+- **GitHub**: connected credential with granted scopes, honest "No pull requests yet" + merge-stays-
+  human explainer, execution-branch table showing `vib-1`.
+- **Activity**: the owner's own packet resolution ("Send back for another attempt") visibly translated
+  by the operator into a sharpened @dev re-prompt — packet→operator→specialist loop live.
+- **Settings / Home**: stage counts, member invite, credential panel; member-scoped headline
+  ("1 run active … 1 decision waiting on you") matches actual run/decision state.
+
+**Defect found + fixed (only one): pluralization.** Five count-labels skipped the codebase's own
+`n === 1 ? "" : "s"` idiom — board header ("1 tasks"), policy members ("1 members"), home org card
+("1 admins · 0 members"), github branches ("1 task-key branches"), rebuild toast. Fixed inline in the
+surrounding idiom; feature tests 110 green + typecheck clean. (Deliberately NOT rebuilt into the
+owner's running container mid-run — lands on their next `up --build`.)
+
+**Also observed (no change, flagged as a product question):** a later SUCCESSFUL specialist run does
+not auto-withdraw a stale "work stalled" packet — the operator explicitly asks a human to dismiss it.
+Consistent with always-human packet resolution; supersession-auto-withdraw would mirror the
+divergence→rec ruling if the owner ever wants it.

@@ -242,7 +242,7 @@ export function BranchesPanel({
         <Icon name="branch" />
         <h2>Execution branches</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {branches.length} task-key branches
+          {branches.length} task-key branch{branches.length === 1 ? "" : "es"}
         </span>
       </div>
       <div className="gh-table">

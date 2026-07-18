@@ -1087,7 +1087,8 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
                 {org.users.total} user{org.users.total === 1 ? "" : "s"}
               </span>
               <div className="sub">
-                {org.users.admins} admins · {org.users.members} members
+                {org.users.admins} admin{org.users.admins === 1 ? "" : "s"} ·{" "}
+                {org.users.members} member{org.users.members === 1 ? "" : "s"}
               </div>
             </span>
           </span>
@@ -1276,7 +1277,7 @@ export function HomePage({
       const d = rebuildFetcher.data;
       push(
         d.ok
-          ? `Projections rebuilt from files — ${d.projects} projects, ${d.tasks} tasks re-projected`
+          ? `Projections rebuilt from files — ${d.projects} project${d.projects === 1 ? "" : "s"}, ${d.tasks} task${d.tasks === 1 ? "" : "s"} re-projected`
           : (d.error ?? "Rebuild failed — check the server log"),
       );
     }
