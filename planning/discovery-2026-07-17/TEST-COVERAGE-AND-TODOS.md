@@ -98,6 +98,26 @@ Creation flow, `viberr-sandbox`:
 - Codex/Claude delivery = **server-side for both**, agent still authors the commit message — IMPLEMENTED (FIX-2).
 - Repo hygiene: only tiny test files; merged marker reverted; all test PRs closed/branches deleted.
 
+## 4b. Systematic mock/unwired audit (2026-07-18) — CLEAN
+Code-level sweep of `app/` (TS/TSX, excl. tests) for `mock|stub|placeholder|TODO|FIXME|not
+implemented|unimplemented|hardcoded|coming soon|no-op|dead code`: **no lingering mocks/stubs/TODOs in
+production code.** The only hits are (a) the `todo/doing/done` Lightweight-board stage names, (b)
+comments documenting that past mocks were REPLACED (`resource-catalog.server.ts:11` "replaces the
+hardcoded mock RES_CATALOG"; `templates.ts:11` defines stages the original mock left undefined), and
+(c) comments that deliberately AVOID hardcoding (GHE host, model fallback). No unwired UI handlers, no
+`Math.random`/faker fake-data generators in loaders. Substantiates the fresh-discovery "no mocks"
+verdict with an actual sweep.
+
+## 4c. O-3 feasibility (why it needs an owner greenlight, not an autonomous build)
+The app has **no periodic-scheduler infrastructure**: `boot.server.ts` runs `recoverUnreactedAgentRuns`
+ONCE at startup; there is no interval/tick/cron loop anywhere. A governed `schedule_*` capability
+therefore requires a NET-NEW subsystem: (1) a durable schedule store, (2) a periodic executor that is
+single-flight across restarts + idempotent (the hard part — no existing tick to extend), (3) the
+capability + MCP tool threaded to both backends, (4) UI, (5) tests. This is large new architecture
+with real design trade-offs (durability model, execution/failure semantics) — and the code itself
+files it as "a future capability" (`claude-runtime.server.ts:145`). Per the owner's standing
+instruction to be consulted on product-design decisions, this is greenlit-then-built, not built blind.
+
 ## 5. Verdict
 Every goal-named test dimension is covered with a concrete case + result; 3 real defects were found
 and fixed and re-verified live; would-be findings were checked and correctly dismissed. PR #36's
