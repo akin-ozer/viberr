@@ -7,7 +7,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
@@ -435,4 +435,158 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
     expect(changed).toBe(true);
     expect(result.runId).toBeTruthy();
   }, 30_000);
+});
+
+describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
+  /** A finished simulated run whose final assistant text is `text` (local copy
+   *  of the shared-effects describe's helper — that one is block-scoped).
+   *  Session ids are unique so two runs in ONE test don't collide on the
+   *  (project, task, thread) uniqueness. */
+  let runSeq = 0;
+  async function finishedRunWith(text: string): Promise<string> {
+    const script = buildScript({
+      lines: [
+        { t: "", ev: "init", tag: "system·init", text: "test session" },
+        { t: "", ev: "text", tag: "assistant", text },
+        { t: "", ev: "result", tag: "result", text: "done" },
+      ],
+      occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
+      sessionId: `t-${++runSeq}`,
+      backend: "claude",
+      model: "sonnet",
+      op: false,
+      keepRunning: false,
+      instant: true,
+    });
+    const started = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      kind: "reviewer",
+      role: "Reviewer",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "review",
+      workdir: store.dataRoot,
+      autonomous: true,
+      script,
+      dataRoot: store.dataRoot,
+      actor: actor(store.users.arda),
+      // Distinct thread per helper call — two runs in one test otherwise
+      // collide on the (project, task, thread) uniqueness.
+      threadId: `th-${runSeq}`,
+    });
+    await waitFor(() => {
+      const row = store.db
+        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+        .get(started.runId) as { state: string } | undefined;
+      return row?.state === "finished";
+    });
+    return started.runId;
+  }
+
+  /** Write a `type: "blocked"` work-stalled packet straight into the task file
+   *  (the schema shape operatorOpenPacket produces). */
+  async function openBlockedPacket(
+    options: Array<Record<string, unknown>>,
+  ): Promise<void> {
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.packet = {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "operator",
+          title: "Work stalled — pick a recovery path",
+          body: "The run failed. Coordination is paused until a human chooses how to proceed.",
+          observations: [],
+          options,
+        } as never;
+        parsed.frontmatter.readiness = "blocked";
+      },
+    );
+  }
+
+  const redirect = { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false };
+  const retryPrimary = { kind: "retry_other_backend", t: "Retry on Claude Code", d: "", rec: true, backend: "claude" };
+  const retryReviewer = { ...retryPrimary, profileId: "style" };
+
+  async function runEffects(
+    runId: string,
+    kind: "primary" | "reviewer",
+    state = "finished",
+  ): Promise<void> {
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        role: "developer",
+        kind,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state, simulated: false },
+    );
+  }
+
+  it("a successful PRIMARY run withdraws a primary-subject packet, lifts readiness, and audits", async () => {
+    await openBlockedPacket([retryPrimary, redirect]);
+    const runId = await finishedRunWith("Recovered — the work is delivered.");
+    await runEffects(runId, "primary");
+    const parsed = taskFile().parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    const note = parsed.timeline.find((e) =>
+      (e.text ?? "").includes("**Packet withdrawn:**"),
+    );
+    expect(note).toBeTruthy();
+    expect(note!.text).toContain("Work stalled — pick a recovery path");
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    expect(
+      listAuditEvents(store.db).some(
+        (e) => e.action === "task.packet.withdrawn_superseded",
+      ),
+    ).toBe(true);
+  });
+
+  it("a FAILED run does not withdraw — the packet stays for the human", async () => {
+    await openBlockedPacket([retryPrimary, redirect]);
+    const runId = await finishedRunWith("It broke again.");
+    await runEffects(runId, "primary", "error");
+    expect(taskFile().parsed.packet).not.toBeNull();
+  });
+
+  it("an accept_completion packet is never auto-withdrawn (completion stays human)", async () => {
+    await openBlockedPacket([
+      { kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true },
+      redirect,
+    ]);
+    const runId = await finishedRunWith("More work landed.");
+    await runEffects(runId, "primary");
+    expect(taskFile().parsed.packet).not.toBeNull();
+  });
+
+  it("a reviewer-subject packet ignores a primary success but withdraws when THAT reviewer profile succeeds", async () => {
+    await openBlockedPacket([retryReviewer, redirect]);
+    // Primary success — different subject, packet must stay.
+    const primaryRun = await finishedRunWith("Primary delivered.");
+    await runEffects(primaryRun, "primary");
+    expect(taskFile().parsed.packet).not.toBeNull();
+    // The named reviewer profile succeeds — withdrawn.
+    const reviewerRun = await finishedRunWith("Review passed cleanly.");
+    store.db
+      .prepare(`UPDATE agent_runs SET agent_profile_id = ? WHERE id = ?`)
+      .run("style", reviewerRun);
+    await runEffects(reviewerRun, "reviewer");
+    expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  it("an agent-agnostic packet (no retry option) withdraws on any successful run", async () => {
+    await openBlockedPacket([redirect]);
+    const runId = await finishedRunWith("Unblocked and finished.");
+    await runEffects(runId, "primary");
+    expect(taskFile().parsed.packet).toBeNull();
+  });
 });

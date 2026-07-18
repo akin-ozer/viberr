@@ -1367,6 +1367,94 @@ async function openStuckLoopPacket(
 }
 
 /**
+ * Owner ruling (2026-07-18): a SUCCESSFUL agent run withdraws a stale
+ * "work stalled" recovery packet about that same agent — the question answered
+ * itself, so no human should have to dismiss it (mirrors the divergence →
+ * moot-recommendation ruling). Strictly scoped:
+ *   - only `type: "blocked"` packets carrying NO `accept_completion` option —
+ *     completion authorization (Review→Done) stays human, untouched;
+ *   - subject match via the retry option's profileId (the join key — never the
+ *     role string): a `retry_other_backend` option WITH profileId marks a
+ *     reviewer-subject packet (withdrawn only when THAT reviewer profile
+ *     succeeds); one WITHOUT marks the primary specialist. A packet with no
+ *     retry option (redirect/hold-only) is agent-agnostic — any successful
+ *     specialist/reviewer run falsifies "work stalled", so it withdraws.
+ * The withdrawal is announced on the timeline and audited; the pending
+ * decision drops out of "Waiting on you" through decisionsRequiring on the
+ * reproject (F7-NOTIF1), so no extra notification is needed.
+ */
+async function withdrawSupersededStuckPacket(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    kind: "primary" | "reviewer";
+    role: string;
+    runProfileId: string | null;
+  },
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    const packet = existing?.parsed.packet;
+    if (!packet || packet.type !== "blocked") return;
+    if (packet.options.some((o) => o.kind === "accept_completion")) return;
+    const retryOptions = packet.options.filter(
+      (o) => o.kind === "retry_other_backend",
+    );
+    if (retryOptions.length > 0) {
+      const subjectProfileId =
+        retryOptions.find((o) => o.profileId)?.profileId ?? null;
+      const matches = subjectProfileId
+        ? input.kind === "reviewer" && input.runProfileId === subjectProfileId
+        : input.kind === "primary";
+      if (!matches) return;
+    }
+    const roleLabel = input.kind === "reviewer" ? "reviewer" : "specialist";
+    let withdrawn = false;
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      const p = parsed.packet;
+      // Re-check inside the write — the read above raced other writers.
+      if (!p || p.type !== "blocked") return;
+      if (p.options.some((o) => o.kind === "accept_completion")) return;
+      parsed.packet = null;
+      // A blocked packet held the readiness gate down with it (same lift as the
+      // goal-edit auto-clear above).
+      if (parsed.frontmatter.readiness === "blocked") {
+        parsed.frontmatter.readiness = "ready";
+      }
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "transition",
+        actor: { kind: "operator" },
+        title: null,
+        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} ${roleLabel} run completed successfully after it was opened.`,
+        toAgent: false,
+        evidence: null,
+      });
+      withdrawn = true;
+    });
+    if (!withdrawn) return;
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    recordAudit(db, {
+      action: "task.packet.withdrawn_superseded",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { kind: input.kind, role: input.role },
+    });
+  } catch (error) {
+    logger.warn("superseded-packet withdrawal failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
  * Classify a reviewer's reply into a verdict (FR15/FR35). Conservative: returns
  * a verdict only on a clear signal, else null (no validation change). Pure —
  * exported for tests.
@@ -1788,6 +1876,19 @@ export async function applyAgentCompletionEffects(
     );
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
+  }
+  // 1c. A SUCCESSFUL run withdraws a stale "work stalled" packet about this
+  //     same agent (owner ruling 2026-07-18) — done BEFORE the operator reacts
+  //     so its snapshot already sees the packet gone instead of asking a human
+  //     to dismiss it. Completion/acceptance packets are never touched.
+  if (finished.state === "finished") {
+    await withdrawSupersededStuckPacket(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: input.kind,
+      role: input.role,
+      runProfileId: getRun(db, finished.id)?.agent_profile_id ?? null,
+    });
   }
   // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
   //    reviewer (F7-REV1) delivers nothing: it clones the repo to READ the diff,
