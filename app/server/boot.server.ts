@@ -19,6 +19,7 @@ import {
 } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
+import { startScheduleRunner } from "./tasks/schedule.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -148,6 +149,12 @@ export function bootServer(): void {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   });
+
+  // Start the server-side schedule runner (O-3): fire due scheduled operator
+  // re-runs once at boot (catching any that came due while down), then on an
+  // interval. Backend-agnostic — it calls runOperator, so Claude & Codex behave
+  // identically. Idempotent start; the timer is unref'd so it never blocks exit.
+  startScheduleRunner(db);
 
   logBootIntegrity(db);
 

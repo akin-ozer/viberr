@@ -43,6 +43,10 @@ import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.ser
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
+import {
+  cancelScheduledAction,
+  scheduleTaskAction,
+} from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
 import type { TaskMemberView } from "~/features/task-detail/execution-profile";
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
@@ -104,10 +108,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // loader revalidates on every SSE task change, so applied/dismissed ones drop.
   const taskFile = readTaskFile({ projectSlug: params.slug, taskKey: params.key });
   const recommendations = taskFile?.parsed.frontmatter.recommendations ?? [];
+  // Pending scheduled operator re-runs (O-3), rendered as cancellable cards.
+  const schedules = (taskFile?.parsed.frontmatter.schedules ?? []).filter(
+    (s) => s.status === "pending",
+  );
 
   return {
     task: { ...detail, timeline: slice.events },
     recommendations,
+    schedules,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
@@ -457,6 +466,64 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast:
             `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy` +
             (result.mode === "scripted" ? " (scripted)" : ""),
+        };
+      }
+      case "schedule-action": {
+        // Schedule a future operator re-run (O-3). Triggering agent work later
+        // is still `run-agents` (maintainer+); the server-side runner fires it.
+        requireRunAgents(
+          db,
+          {
+            slug: projectSlug,
+            memberRoles: new Map(
+              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
+            ),
+          },
+          actor,
+          "schedule an operator re-run",
+        );
+        const minutes = Math.max(1, Math.round(Number(formData.get("delayMinutes")) || 0));
+        const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
+        const sched = await scheduleTaskAction(
+          db,
+          {
+            projectSlug,
+            taskKey,
+            dueAt,
+            backend: String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude",
+            autonomy: String(formData.get("autonomy") ?? "supervised") === "full" ? "full" : "supervised",
+            note: String(formData.get("note") ?? ""),
+          },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `Scheduled · operator re-run in ${minutes} min`,
+          scheduleId: sched.id,
+        };
+      }
+      case "cancel-schedule": {
+        requireRunAgents(
+          db,
+          {
+            slug: projectSlug,
+            memberRoles: new Map(
+              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
+            ),
+          },
+          actor,
+          "cancel a scheduled operator re-run",
+        );
+        const result = await cancelScheduledAction(
+          db,
+          { projectSlug, taskKey, scheduleId: String(formData.get("scheduleId") ?? "") },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: result.cancelled ? "Schedule cancelled" : "That schedule was already resolved",
         };
       }
       default:

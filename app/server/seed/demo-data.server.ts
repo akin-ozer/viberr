@@ -419,6 +419,7 @@ function fm(input: {
     reviewers: input.reviewers,
     operator: input.operator,
     recommendations: input.recommendations ?? [],
+    schedules: [],
     urgent: input.urgent,
     validation: input.validation,
     branch: input.branch,

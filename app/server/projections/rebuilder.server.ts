@@ -367,10 +367,10 @@ export function rebuildTaskFile(
         waiting, urgent, validation, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, recommendation_count, recommendation_kinds,
-        event_count, comment_count,
+        schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -384,6 +384,7 @@ export function rebuildTaskFile(
        packet_json = excluded.packet_json,
        recommendation_count = excluded.recommendation_count,
        recommendation_kinds = excluded.recommendation_kinds,
+       schedules_json = excluded.schedules_json,
        event_count = excluded.event_count,
        comment_count = excluded.comment_count,
        diagnostic_count = excluded.diagnostic_count,
@@ -413,6 +414,7 @@ export function rebuildTaskFile(
     parsed.packet ? JSON.stringify(parsed.packet) : null,
     fm.recommendations.length,
     JSON.stringify(fm.recommendations.map((r) => r.kind)),
+    JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,
     allDiagnostics.length,
