@@ -276,6 +276,35 @@ export async function reconcileTask(
 
   if (changed) {
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
+    // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
+    // notification below). Never auto-advances the STAGE — a human closes the loop.
+    const divergenceText = mergedButNotDone
+      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr — its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
+      : closedButActive
+        ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
+        : null;
+    // Owner decision 2026-07-18: a divergence WITHDRAWS the now-moot pending
+    // recommendations that assumed the prior delivery could be moved forward as-is
+    // — otherwise a human is nudged to "Move to Review" a task whose PR is gone.
+    //  · `transition` recs are moot on ANY divergence (the PR state changed under
+    //    the premise for advancing).
+    //  · `accept_completion` is moot ONLY when the PR was CLOSED (nothing to
+    //    accept); when the PR MERGED out-of-band, accepting is exactly the right
+    //    action, so that rec SURVIVES (the divergence text points the human at it).
+    //  · assign_/run_ recs SURVIVE — doing more work is compatible with "rework".
+    const supersededRecs = divergenceText
+      ? fm.recommendations.filter(
+          (r) =>
+            r.kind === "transition" ||
+            (r.kind === "accept_completion" && closedButActive),
+        )
+      : [];
+    if (supersededRecs.length > 0) {
+      const supersededIds = new Set(supersededRecs.map((r) => r.id));
+      patch.recommendations = fm.recommendations.filter(
+        (r) => !supersededIds.has(r.id),
+      );
+    }
     await patchTaskFrontmatter(ref, patch);
     if (acceptedClosedExternally) {
       await appendTimelineEvent(ref, {
@@ -288,20 +317,19 @@ export async function reconcileTask(
         evidence: null,
       });
     }
-    // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
-    // notification below). Never auto-advances — a human closes the loop.
-    const divergenceText = mergedButNotDone
-      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr — its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
-      : closedButActive
-        ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
-        : null;
     if (divergenceText) {
+      const supersededNote =
+        supersededRecs.length > 0
+          ? ` The now-moot ${supersededRecs
+              .map((r) => `“${r.label}”`)
+              .join(", ")} recommendation${supersededRecs.length === 1 ? " was" : "s were"} withdrawn.`
+          : "";
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
         type: "policy",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
-        text: divergenceText,
+        text: divergenceText + supersededNote,
         toAgent: false,
         evidence: null,
       });

@@ -340,6 +340,56 @@ describe("reconcileTask", () => {
     expect(events2.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
   });
 
+  function seedWithRecs(store: TestStore) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        recommendations: [
+          { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+          { id: "r-assign", kind: "assign_specialist", profileId: "developer", label: "Assign Developer", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("R8-6: a CLOSED-out-of-band divergence withdraws the moot transition + accept_completion recs (assign survives)", async () => {
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // transition + accept_completion withdrawn (PR is gone); assign_specialist survives.
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-assign"]);
+    const events = store.db.prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`).all() as { text: string }[];
+    expect(events.some((e) => /closed on GitHub without merging/.test(e.text) && /withdrawn/.test(e.text))).toBe(true);
+  });
+
+  it("R8-6: a MERGED-out-of-band divergence withdraws transition but KEEPS accept_completion (accepting reflects the merge)", async () => {
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1 },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // transition withdrawn; accept_completion SURVIVES (the divergence tells the human to accept).
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign"]);
+  });
+
   it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {
     // A real agent committed WITHOUT the `[VIB-301]` prefix; the workspace
     // reconcile cached those commits. The server reconcile's prefix filter
