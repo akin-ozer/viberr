@@ -62,10 +62,11 @@ All were MINOR/polish; the core product is mature and wired (fresh-discovery ver
   `notifications.server.ts` ALREADY reconciles against live state via `decisionsRequiring` — a
   resolved/applied/Done decision drops out of "Waiting on you" (F7-NOTIF1). VIB-22's "Move to Review"
   rec is genuinely STILL PENDING (never applied/dismissed), so its notification is correct.
-  → **OWNER PRODUCT-QUESTION (surfaced, not decided):** when a GitHub *divergence* fires (PR closed
-  out-of-band) on a task with a now-moot pending transition recommendation, should the divergence
-  auto-supersede/replace that recommendation, or leave both for the human to reconcile? That's a
-  governance-semantics call, not a UI bug.
+  → **OWNER DECISION 2026-07-18: divergence dismisses the moot rec → IMPLEMENTED.** `reconcileTask`
+  now withdraws pending `transition` recs on any divergence, and `accept_completion` recs on a CLOSED
+  (not merged) divergence; assign_/run_ recs and (on a merge) accept_completion survive. The divergence
+  event names the withdrawn rec. +2 tests; live-verified (VIB-22 "Move to Review" card withdrawn on
+  reconcile after PR #50 closed). Stage still never auto-advances.
 
 ### Considered & DECLINED (not deferrals — documented rationale)
 - rbac-audit §5 #4/#5 owner-predicate / run-agents helper folding — already single-sourced; folding
