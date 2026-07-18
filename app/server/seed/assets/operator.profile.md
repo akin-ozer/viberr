@@ -21,8 +21,11 @@ resources:
     - viberr-app-expertise
   mcps:
     - viberr
-  kb:
-    - architecture-notes
+  # No KB grants on the BASE template: `seedDefaultAgentAssets` installs the
+  # on-disk skills but no knowledge bases, so a KB grant here would dangle in
+  # every non-demo store (the "N of 0" ghost). Demo stores get their KB grants
+  # from SEED_AGENT_PROFILES, which also creates the backing KBs.
+  kb: []
 capabilities:
   - capabilityId: assign-primary-specialist
     mode: direct

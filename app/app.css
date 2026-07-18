@@ -1416,6 +1416,14 @@ dialog[data-closing]::backdrop {
 }
 .pick-chip:hover { border-color: var(--border); color: var(--fg); }
 .pick-chip.on { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
+/* A granted resource the live store no longer offers (deleted KB/skill/MCP a
+   profile still references) — amber so it reads as broken, and still clickable
+   to remove the dangling grant. */
+.pick-chip.missing, .pick-chip.missing.on {
+  border-color: color-mix(in srgb, var(--yellow-dark), transparent 55%);
+  background: color-mix(in srgb, var(--yellow-dark), transparent 90%);
+  color: var(--yellow-dark);
+}
 .pick-chip .sdot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--placeholder); flex: none; }
 .pick-chip.mono { font-family: var(--font-mono); font-weight: 500; font-size: .78rem; }
 .pick-chip .ico { width: 13px; height: 13px; }
@@ -1445,6 +1453,7 @@ dialog[data-closing]::backdrop {
 /* Entrance matches the rotating chevron's .15s beat (reuses the board's
    dropPreviewIn keyframes); collapse stays instant — exits faster than enters. */
 .cap-mbody { padding: .2rem .8rem .5rem; animation: dropPreviewIn .16s var(--ease-out); }
+.ctx-empty { margin: .3rem 0 .1rem; font-size: .78rem; color: var(--faint); }
 .cap-mrow { display: flex; align-items: center; gap: .8rem; padding: .42rem 0; border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
 .cap-mbody .cap-mrow:last-child { border-bottom: 0; }
 .cap-mname { flex: 1; min-width: 160px; font-size: .85rem; color: var(--fg); }

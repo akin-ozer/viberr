@@ -82,6 +82,29 @@ describe("seedDefaultAgentAssets", () => {
     expect(read("agents", "profiles", "developer.md")).toContain("developer-expertise");
   });
 
+  it("base profile templates ship NO knowledge-base grants (no dangling 'N of 0' ghosts)", () => {
+    // Owner fix 2026-07-18: seedDefaultAgentAssets installs on-disk skills but
+    // no KBs, so a KB grant on a base template dangles in every non-demo store.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const read = (id: string) =>
+      readFileSync(path.join(dataRoot, "agents", "profiles", `${id}.md`), "utf8");
+    for (const id of ["operator", "developer", "reviewer"]) {
+      const md = read(id);
+      expect(md, `${id} base template must grant no KBs`).toContain("kb: []");
+      expect(md).not.toContain("architecture-notes");
+      expect(md).not.toContain("api-contracts");
+      // Backed grants are untouched — the on-disk skills still ship.
+      expect(md).toMatch(/skills:\s*\n\s*-\s/);
+    }
+
+    // The DEMO source is unchanged: it still grants KBs (and demo-seeds the
+    // backing KB folders), so demos keep their populated context.
+    const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
+    expect(dev.frontmatter.resources.kb).toContain("architecture-notes");
+    expect(dev.frontmatter.resources.kb).toContain("api-contracts");
+  });
+
   it("never clobbers an existing asset (idempotent)", () => {
     const dataRoot = ctx.makeTempDir();
     const dest = path.join(dataRoot, "agents", "definitions", "developer.md");
