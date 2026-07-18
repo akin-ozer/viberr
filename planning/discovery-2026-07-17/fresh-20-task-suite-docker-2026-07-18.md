@@ -123,6 +123,35 @@ the fresh volume's `codex-home` had no `auth.json`. Placing it (compose-document
   subagent-spawn bypass; parity-consistent — no Codex analog). Test updated. Typecheck + full unit
   suite green.
 
+## UI verification pass (browser against the live docker container, signed in as arda/admin)
+Screenshotted the key surfaces to confirm the API-level results actually render — the pass-8
+changes are all wired, no mocks on any inspected surface:
+- **Home** — "**35 decisions** waiting on you" = the member-scoped per-project badges 1 (Deploy) + 33
+  (Viberr Core) + 1 (Billing). W1 renders. Honest "GitHub/Google — not configured" on login.
+- **Board** — header "42 tasks · **37 waiting on a human decision**" (project-wide) vs the "**Waiting
+  on me · 33**" filter chip (member-scoped); finding-C labels distinct per card ("waiting on you"
+  vs "waiting on a human" vs "agent working"); Codex/Claude backend glyphs per specialist.
+- **Task VIB-169 [T02]** — the operator's **decision packet** ("Work stalled — pick a recovery
+  path") with the honest Codex-unavailable signal and a recommended **"Retry on Claude Code
+  (operator pick)"**; Current-state Owner = **Murat** (from the T02 owner-assign test); Permissions
+  panel shows W2 honesty "**Comments: Every registered user**"; canonical `task.md` path surfaced.
+- **Policy** — the role-binding suite's changes are **live**: Elif=Maintainer, Murat=Contributor,
+  Selin=Viewer, Arda=Admin, "last change · Arda Kaya · Today"; capability table shows View/Comment
+  as "**Any signed-in user · membership not required**" (FR4); human-vs-agent two-surface split;
+  **ALWAYS RESERVED FOR HUMANS** = merge PR / transition to Done / change policy (all profiles).
+- **Review queue** — "7 at the review boundary · **6 waiting on your acceptance**" (member-scoped);
+  "Review → Done · human only"; per-task validation states; Claude reviewer runs produced real
+  "Accept completion" recommendations on VIB-175/176.
+- **Agents** — Operator described "never writes code and never closes a task itself" (matches the
+  tool-isolation fix); 3-mode capability policy (acts-directly / recommends-only / reserved-for-
+  humans); operator spans all stages.
+
+**Minor copy nuance noted (not a bug):** VIB-181 (T14) review row reads "Reviewer found nothing to
+review — no specialist was ever assigned." A specialist *was* assigned (Codex `developer`) but the
+backend was down so it produced no diff. Wording conflates "assigned but never ran" with "never
+assigned." Low priority; arose from an artificial test sequence (reviewer engaged before the
+specialist ever ran, Codex-down). Open product question: should the copy distinguish the two?
+
 ## The one credential-gated dimension not re-run in docker
 Real **PR lifecycle (push→PR→merge/reject→W4 divergence)** needs a GitHub repo credential in the
 container (fresh seed has 0 connections/PATs — observed via Codex's honest clone-blocked report). It
