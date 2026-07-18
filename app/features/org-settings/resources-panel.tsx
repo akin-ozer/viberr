@@ -31,6 +31,14 @@ function rel(iso: string | null): string {
   return iso ? formatRelative(iso) : "never";
 }
 
+/** A health check older than this reads as STALE — a green "up" dot for an
+ * hours-old check over-implies "healthy now" (stdio MCPs are only re-checked on
+ * save/test, never on page load). Amber + a "stale" hint keeps it honest. */
+const MCP_HEALTH_STALE_MS = 60 * 60 * 1000;
+function isStaleCheck(iso: string | null): boolean {
+  return !!iso && Date.now() - new Date(iso).getTime() > MCP_HEALTH_STALE_MS;
+}
+
 /** Shared modal-close-with-inline-error fetcher wiring. */
 function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {
   const [err, setErr] = useState<string | null>(null);
@@ -714,10 +722,26 @@ function McpPanel({
       <div className="rsrc-list">
         {mcps.map((m) => (
           <div className="rsrc-row" key={m.id}>
-            <span
-              className={"stat-dot" + (m.up === true ? " up" : m.up === false ? " down" : "")}
-              title={m.up === true ? "connected" : m.up === false ? "unreachable" : "not health-checked"}
-            ></span>
+            {(() => {
+              const stale = m.up === true && isStaleCheck(m.lastCheckedAt);
+              return (
+                <span
+                  className={
+                    "stat-dot" +
+                    (stale ? " stale" : m.up === true ? " up" : m.up === false ? " down" : "")
+                  }
+                  title={
+                    stale
+                      ? "last check passed but is stale — retest to confirm"
+                      : m.up === true
+                        ? "connected"
+                        : m.up === false
+                          ? "unreachable"
+                          : "not health-checked"
+                  }
+                ></span>
+              );
+            })()}
             <span className="rsrc-main">
               <b className="mono-b">{m.name}</b>
               <span className="sub mono">
@@ -726,7 +750,8 @@ function McpPanel({
               <span className="sub">
                 {m.up === true
                   ? (m.tools !== null ? m.tools + " tools · " : "reachable · ") +
-                    "checked " + rel(m.lastCheckedAt)
+                    "checked " + rel(m.lastCheckedAt) +
+                    (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
                     : "not health-checked yet"}

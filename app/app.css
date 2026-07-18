@@ -3001,6 +3001,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .modal-wide .modal-foot .foot-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .stat-dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--placeholder); flex: none; }
 .stat-dot.up { background: var(--success); }
+/* Last health check passed but is old — amber, so a stale check never reads as
+   "healthy now" (a stdio MCP is only re-checked on save/test). */
+.stat-dot.stale { background: var(--yellow-dark); }
 
 .chip-x { border: 0; background: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; color: var(--placeholder); border-radius: 4px; }
 .chip-x:hover { color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), transparent 50%); }

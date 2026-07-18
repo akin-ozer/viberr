@@ -320,6 +320,24 @@ describe("ResourcesPanel", () => {
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
 
+  it("renders a stale health check as amber (not a fresh-green 'up') with a retest hint", () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const staleMcps: McpView[] = [
+      { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo },
+    ];
+    const { container } = renderPanel(
+      <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,
+    );
+    // The dot is amber (stale), NOT the fresh-green `up`.
+    const dot = container.querySelector(".stat-dot")!;
+    expect(dot.classList.contains("stale")).toBe(true);
+    expect(dot.classList.contains("up")).toBe(false);
+    // And the line flags it as stale + prompts a retest.
+    expect(container.textContent).toContain("· stale, retest");
+    expect(container.textContent).toContain("1 tools · checked");
+  });
+
   it("kb delete confirms with the spec copy; deployed profile delete is guarded", async () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Delete Architecture notes"));
