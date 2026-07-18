@@ -8,18 +8,22 @@ export type BoardFilterId = "all" | "human" | "agent" | "risk";
 
 export interface FilterableTask {
   waiting: string;
+  /** R8-3: loader-annotated "an open decision here needs THIS viewer's action". */
+  waitingOnMe?: boolean;
   readiness: string;
   validation: string;
   urgent: boolean;
 }
 
 /** Verbatim mock semantics with canonical enum values ("Needs attention" =
- * readiness risk/blocked || validation failing || urgent). */
+ * readiness risk/blocked || validation failing || urgent). The "Waiting on me"
+ * filter is member-scoped (R8-3): a decision the viewer can actually act on,
+ * not the project-wide `waiting === "human"` enum. */
 export function matchesBoardFilter(
   task: FilterableTask,
   filter: BoardFilterId,
 ): boolean {
-  if (filter === "human") return task.waiting === "human";
+  if (filter === "human") return task.waitingOnMe === true;
   if (filter === "agent") return task.waiting === "agent";
   if (filter === "risk") {
     return (

@@ -7,9 +7,9 @@ import type {
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
 import {
+  canRunAgents,
   requireProjectAuthority,
   requireProjectMutable,
-  resolveProjectAuthority,
 } from "~/server/auth/project-authority.server";
 import type { OperatorAutonomy } from "./operator-actions.server";
 import {
@@ -478,6 +478,7 @@ export async function createTask(
     specialist: null,
     reviewers: [],
     recommendations: [],
+    schedules: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
     operator:
       stageId === project.stages[0]?.id
@@ -1107,7 +1108,8 @@ function hasRuntimeRole(
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
   if (!file) return false;
-  return resolveProjectAuthority(
+  // Delegate the run-agents tier + audit to the ONE shared helper (§4g dedup).
+  return canRunAgents(
     db,
     {
       slug: projectSlug,
@@ -1116,9 +1118,8 @@ function hasRuntimeRole(
       ),
     },
     actor,
-    rolesForAction("run-agents"),
-    { action: "run-agents", what: "trigger an agent run by @mention" },
-  ).allowed;
+    "trigger an agent run by @mention",
+  );
 }
 
 function projectRepoFor(
@@ -1529,6 +1530,17 @@ export async function recordReviewerVerdict(
         summary = "Reviewer approved the work.";
       }
       parsed.frontmatter.validation = validation;
+      // A failing verdict makes a pending accept-completion recommendation stale
+      // (the acceptance gate would 409 on a failing task — F7-VAL1), so drop it:
+      // the UI must not show a misleading "Accept completion" card next to a
+      // failing validation. The operator re-recommends the right next step
+      // (rework / re-review) on its next turn. (pass-8 review-reject finding.)
+      if (validation === "failing") {
+        parsed.frontmatter.recommendations =
+          parsed.frontmatter.recommendations.filter(
+            (r) => r.kind !== "accept_completion",
+          );
+      }
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "quality",

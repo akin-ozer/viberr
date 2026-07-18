@@ -58,11 +58,19 @@ describe("HumanAccess", () => {
     // Header counts derive live from the same member array.
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
-    // Grant rows (derived from PROJECT_CAP_MATRIX).
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(13);
+    // Grant rows (derived from PROJECT_CAP_MATRIX) — total table, every enforced action.
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(17);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
     expect(getByText("Re-scan project files & projections")).toBeTruthy();
+    // Newly-surfaced enforced actions (were hidden before the total-table fix).
+    expect(getByText("Reconcile GitHub state")).toBeTruthy();
+    expect(getByText("Manage agent profiles")).toBeTruthy();
+    // App-wide rows (view/comment) render as "any signed-in user", not role cells.
+    expect(container.querySelectorAll(".rbac-table tr.rbac-appwide")).toHaveLength(2);
+    expect(
+      container.querySelectorAll(".rbac-table td.rbac-appwide-cell"),
+    ).toHaveLength(2);
 
     // Selecting a new role dispatches; re-selecting the current one no-ops.
     const selinSeg = container.querySelectorAll(".mini-seg")[3]!;

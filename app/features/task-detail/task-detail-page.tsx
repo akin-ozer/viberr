@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import type { DiagnosticRecord, TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -478,6 +479,135 @@ function RecommendationsSection({
   );
 }
 
+/** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
+ *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
+ *  entirely for viewers/contributors with nothing scheduled. */
+function ScheduledActions({
+  schedules,
+  canRunAgents,
+  taskClosed,
+}: {
+  schedules: TaskSchedule[];
+  canRunAgents: boolean;
+  taskClosed: boolean;
+}) {
+  const csrf = useCsrfToken();
+  const fetcher = useFetcher<ActionResult>();
+  useActionFeedback(fetcher);
+  const busy = fetcher.state !== "idle";
+  const canSchedule = canRunAgents && !taskClosed;
+
+  // Nothing to show: no pending schedules AND the viewer can't create one.
+  if (schedules.length === 0 && !canSchedule) return null;
+
+  const submit = (fields: Record<string, string>) => {
+    if (busy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    fetcher.submit(fd, { method: "post" });
+  };
+
+  return (
+    <section className="panel" data-testid="scheduled-actions">
+      <div className="panel-head">
+        <h2>
+          <Icon name="clock" /> Scheduled re-runs
+        </h2>
+        {schedules.length > 0 ? (
+          <span className="right muted">{schedules.length} pending</span>
+        ) : null}
+      </div>
+
+      {schedules.length === 0 ? (
+        <p className="empty" style={{ padding: ".4rem 0" }}>
+          No scheduled operator re-runs.
+        </p>
+      ) : (
+        <ul className="sched-list">
+          {schedules.map((s) => (
+            <li key={s.id} className="sched-row">
+              <div className="sched-when">
+                <Icon name="clock" />
+                <span>{new Date(s.dueAt).toLocaleString()}</span>
+              </div>
+              <div className="sched-meta">
+                operator · {s.autonomy} · {s.backend === "claude" ? "Claude Code" : "Codex"}
+                {s.note ? ` — ${s.note}` : ""}
+                {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
+              </div>
+              {canRunAgents ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost sched-cancel"
+                  disabled={busy}
+                  onClick={() => submit({ intent: "cancel-schedule", scheduleId: s.id })}
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canSchedule ? (
+        <fetcher.Form
+          method="post"
+          className="sched-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            submit({
+              intent: "schedule-action",
+              delayMinutes: String(f.get("delayMinutes") ?? "60"),
+              backend: String(f.get("backend") ?? "claude"),
+              autonomy: String(f.get("autonomy") ?? "supervised"),
+              note: String(f.get("note") ?? ""),
+            });
+          }}
+        >
+          <div className="sched-controls">
+            <label className="flabel">
+              In
+              <select name="delayMinutes" defaultValue="60">
+                <option value="5">5 min</option>
+                <option value="60">1 hour</option>
+                <option value="360">6 hours</option>
+                <option value="1440">24 hours</option>
+              </select>
+            </label>
+            <label className="flabel">
+              Backend
+              <select name="backend" defaultValue="claude">
+                <option value="claude">Claude Code</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+            <label className="flabel">
+              Autonomy
+              <select name="autonomy" defaultValue="supervised">
+                <option value="supervised">Supervised</option>
+                <option value="full">Full</option>
+              </select>
+            </label>
+          </div>
+          <input
+            className="sched-note"
+            name="note"
+            type="text"
+            placeholder="Why re-run later? (optional)"
+            maxLength={140}
+          />
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            <Icon name="clock" /> Schedule operator re-run
+          </button>
+        </fetcher.Form>
+      ) : null}
+    </section>
+  );
+}
+
 /** Execution profile plus the specialist / reviewer / operator mutations it drives. */
 function ExecutionSection({
   task,
@@ -758,6 +888,7 @@ export function TaskDetailPage({
   myRole,
   mentionables,
   recommendations,
+  schedules,
   githubHost,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
@@ -779,6 +910,8 @@ export function TaskDetailPage({
   mentionables: Mentionables;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
+  /** Pending scheduled operator re-runs (O-3, loader — from the task file). */
+  schedules: TaskSchedule[];
   /** GitHub web host for browse links (loader-derived; GHE-safe). */
   githubHost?: string;
 }) {
@@ -1017,6 +1150,12 @@ export function TaskDetailPage({
         <RecommendationsSection
           recommendations={recommendations}
           canApply={canRunAgents}
+        />
+
+        <ScheduledActions
+          schedules={schedules}
+          canRunAgents={canRunAgents}
+          taskClosed={taskClosed}
         />
 
         <ExecutionSection

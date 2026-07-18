@@ -137,19 +137,17 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "grant-scope": {
         // The single guard path consulting the ACTION_ROLES source:
         // `grant-github-scope` (maintainer+), same as the GitHub view's action
-        // (pass-4 XS-10); org admins pass as the audited D2 override. Archived
-        // gate skipped, unchanged from the pre-consolidation check.
-        assertProjectAction(db, "grant-github-scope", slug, actor, "re-check the credential", {
-          allowArchived: true,
-        });
+        // (pass-4 XS-10); org admins pass as the audited D2 override. The archived
+        // read-only gate IS enforced (R8-5): no credential hygiene on a frozen
+        // project — restore it first.
+        assertProjectAction(db, "grant-github-scope", slug, actor, "re-check the credential");
         return await runGrantScope(db, slug, actor);
       }
       case "set-credential":
       case "clear-credential": {
         // Attach/rotate + remove the credential — `grant-github-scope` tier.
-        assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential", {
-          allowArchived: true,
-        });
+        // Archived read-only gate enforced (R8-5).
+        assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential");
         return intent === "set-credential"
           ? runSetCredential(db, slug, actor)
           : runClearCredential(db, slug, actor);

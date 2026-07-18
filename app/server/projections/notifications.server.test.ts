@@ -253,13 +253,16 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
 
   it("packet notification: waiting while the packet is open, drops out once resolved", () => {
     const store = setupTestStore(ctx);
+    // R8-3: waitingOnYou is member-scoped — the recipient must be able to act on
+    // the decision. murat is a maintainer, so the packet is in his `mine` set.
+    const uid = store.users.murat.id;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
       packet: PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    createNotification(store.db, { id: "p", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-101" });
-    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(true);
+    createNotification(store.db, { id: "p", userId: uid, kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-101" });
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
 
     // Packet resolved (cleared from the file) — the notification leaves the
     // waiting bucket WITHOUT being deleted or auto-read.
@@ -267,26 +270,58 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
       frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const after = listNotifications(store.db, "u_1");
+    const after = listNotifications(store.db, uid);
     expect(after).toHaveLength(1);
     expect(after[0]).toMatchObject({ id: "p", waitingOnYou: false, unread: true });
   });
 
   it("approval notification: waiting while a recommendation is pending, drops out once applied", () => {
     const store = setupTestStore(ctx);
+    const uid = store.users.murat.id; // maintainer — can act on the decision
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-102", { stage: "impl", recommendations: [REC] }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    createNotification(store.db, { id: "a", userId: "u_1", kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-102" });
-    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(true);
+    createNotification(store.db, { id: "a", userId: uid, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-102" });
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(true);
 
     // Recommendation applied/dismissed (cleared from the file).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-102", { stage: "review" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect(listNotifications(store.db, "u_1")[0]?.waitingOnYou).toBe(false);
+    expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(false);
+  });
+
+  it("R8-3: waitingOnYou is member-scoped — a viewer (and a non-member) never wait on a live packet", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review" }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // Same live open packet, three recipients.
+    createNotification(store.db, { id: "pm", userId: store.users.murat.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
+    createNotification(store.db, { id: "pv", userId: store.users.elif.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
+    createNotification(store.db, { id: "pn", userId: store.users.deniz.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
+    // maintainer → waits; viewer (elif) + non-member (deniz) → never.
+    expect(listNotifications(store.db, store.users.murat.id)[0]?.waitingOnYou).toBe(true);
+    expect(listNotifications(store.db, store.users.elif.id)[0]?.waitingOnYou).toBe(false);
+    expect(listNotifications(store.db, store.users.deniz.id)[0]?.waitingOnYou).toBe(false);
+  });
+
+  it("R8-3: a contributor who OWNS the task waits on its packet (owner allowance)", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-105", {
+        stage: "review",
+        ownerUserId: store.users.selin.id, // selin = contributor
+      }),
+      packet: PACKET,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    createNotification(store.db, { id: "po", userId: store.users.selin.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-105" });
+    expect(listNotifications(store.db, store.users.selin.id)[0]?.waitingOnYou).toBe(true);
   });
 
   it("a task in the terminal stage is never waiting — leftover packet/rec notwithstanding", () => {
@@ -300,9 +335,12 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
       packet: PACKET,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    createNotification(store.db, { id: "p", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
-    createNotification(store.db, { id: "a", userId: "u_1", kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
-    expect(listNotifications(store.db, "u_1").map((n) => n.waitingOnYou)).toEqual([
+    // Use a maintainer so the drop is caused by the TERMINAL stage, not by lack
+    // of authority (member-scoping is exercised separately above).
+    const uid = store.users.murat.id;
+    createNotification(store.db, { id: "p", userId: uid, kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
+    createNotification(store.db, { id: "a", userId: uid, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
+    expect(listNotifications(store.db, uid).map((n) => n.waitingOnYou)).toEqual([
       false,
       false,
     ]);

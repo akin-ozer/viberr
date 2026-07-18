@@ -224,7 +224,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       recommend: ["Move the task to Review", "Report a validation verdict"],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
-    "Implements stage work on the task-key branch: writes code, runs local validation, and opens the review PR. Hands back to the operator at the review boundary.",
+    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
   ),
   profile(
     {
@@ -419,6 +419,7 @@ function fm(input: {
     reviewers: input.reviewers,
     operator: input.operator,
     recommendations: input.recommendations ?? [],
+    schedules: [],
     urgent: input.urgent,
     validation: input.validation,
     branch: input.branch,

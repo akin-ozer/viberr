@@ -129,6 +129,41 @@ export const recommendationSchema = z
   .loose();
 export type Recommendation = z.infer<typeof recommendationSchema>;
 
+/**
+ * A governed SCHEDULED action on a task (O-3): a human schedules a future
+ * operator re-run — e.g. "re-check this not-yet-Done task in 24h". Canonical in
+ * the task file so it survives a projection rebuild; a server-side runner fires
+ * due entries (server-side → backend-agnostic, works for Claude AND Codex, no
+ * per-backend agent tool). Never fires on a terminal (Done) task.
+ */
+export const SCHEDULE_ACTION_TYPES = ["run-operator"] as const;
+export type ScheduleActionType = (typeof SCHEDULE_ACTION_TYPES)[number];
+
+export const SCHEDULE_STATUS_VALUES = ["pending", "fired", "cancelled"] as const;
+export type ScheduleStatus = (typeof SCHEDULE_STATUS_VALUES)[number];
+
+export const scheduleSchema = z
+  .object({
+    id: z.string().min(1),
+    action: z.enum(SCHEDULE_ACTION_TYPES),
+    /** ISO timestamp; the runner fires the entry once now >= dueAt. */
+    dueAt: z.string().min(1),
+    /** The backend + autonomy the scheduled operator run uses. */
+    backend: z.enum(["claude", "codex"]).default("claude"),
+    autonomy: z.enum(["supervised", "full"]).default("supervised"),
+    /** Human note shown on the scheduled-actions card. */
+    note: z.string().default(""),
+    /** Who scheduled it (userId) + a display label. */
+    createdBy: z.string().min(1),
+    createdByLabel: z.string().default(""),
+    createdAt: z.string().min(1),
+    status: z.enum(SCHEDULE_STATUS_VALUES).default("pending"),
+    /** Set when the runner fires (or skips) the entry. */
+    firedAt: z.string().nullable().default(null),
+  })
+  .loose();
+export type TaskSchedule = z.infer<typeof scheduleSchema>;
+
 /** The canonical `pr.state` cache vocabulary (ruling 12 + D3): "review" =
  * open (incl. draft), "merged", "closed" = closed without merging, and
  * "accepted" = a human accepted the completion but the real merge is still
@@ -231,6 +266,8 @@ export const taskFrontmatterSchema = z.object({
   operator: operatorRefSchema.nullable(),
   /** Pending operator recommendations rendered as one-click action cards. */
   recommendations: z.array(recommendationSchema),
+  /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
+  schedules: z.array(scheduleSchema),
   urgent: z.boolean(),
   validation: z.enum(VALIDATION_VALUES),
   branch: z.string().nullable(),
@@ -257,6 +294,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "reviewers",
   "operator",
   "recommendations",
+  "schedules",
   "urgent",
   "validation",
   "branch",
@@ -462,6 +500,15 @@ export function parseTaskFrontmatter(
       "recommendations",
       data.recommendations,
       taskFrontmatterSchema.shape.recommendations,
+      [],
+    ),
+    // schedules — absent on tasks that predate O-3 → empty, silently (mirrors
+    // recommendations: a missing optional array is not a diagnostic).
+    schedules: tolerant(
+      diagnostics,
+      "schedules",
+      data.schedules,
+      taskFrontmatterSchema.shape.schedules,
       [],
     ),
     // urgent is an optional boolean by contract — absent means false, silently.

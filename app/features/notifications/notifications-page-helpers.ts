@@ -21,10 +21,26 @@ export function splitNotifications(
   const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
   const needsYou = (n: NotificationPageItem) =>
     (n.kind === "packet" || n.kind === "approval") && n.waitingOnYou;
-  return {
-    needs: items.filter((n) => needsYou(n) && match(n)),
-    rest: items.filter((n) => !needsYou(n) && match(n)),
-  };
+  // R8-3: exactly one "Waiting on you" card per task — a task needs one human
+  // action, so a superseded packet's leftover notification (or a stale approval
+  // beside a newer packet) must NOT show as a second pending decision. Items are
+  // newest-first, so the first waiting row per task wins; the rest fall to the
+  // ordinary stream (never deleted, never auto-read).
+  const seenTasks = new Set<string>();
+  const needs: NotificationPageItem[] = [];
+  const rest: NotificationPageItem[] = [];
+  for (const n of items) {
+    if (!match(n)) continue;
+    const taskKey =
+      n.projectSlug && n.taskKey ? `${n.projectSlug}::${n.taskKey}` : null;
+    if (needsYou(n) && (!taskKey || !seenTasks.has(taskKey))) {
+      if (taskKey) seenTasks.add(taskKey);
+      needs.push(n);
+    } else {
+      rest.push(n);
+    }
+  }
+  return { needs, rest };
 }
 
 /** Needs-you card time: today → "10:31", else lowercased day + time

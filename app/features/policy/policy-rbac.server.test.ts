@@ -3,10 +3,12 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   createTask,
   setOwner,
@@ -239,6 +241,41 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
     await assertMatchesMatrix("rescan-project", async (actor) =>
       assertProjectAction(store.db, "rescan-project", store.slug, actor, "re-scan the project", { dataRoot: store.dataRoot }),
     );
+  });
+
+  it("reconcile-github → maintainer+ (R8-4: aligned with rescan-project, was contributor+)", async () => {
+    await assertMatchesMatrix("reconcile-github", async (actor) =>
+      assertProjectAction(store.db, "reconcile-github", store.slug, actor, "reconcile with GitHub", { dataRoot: store.dataRoot }),
+    );
+  });
+
+  it("archived project FREEZES github/credential mutation (R8-5): even an admin is denied (409)", () => {
+    // Archive the project (read-only per R6-3). Credential mutation no longer
+    // passes allowArchived, so the mutable gate fires BEFORE the role check.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const admin = actorOf(store.users.arda);
+    // grant-github-scope (change the credential) is admin-held, yet the archived
+    // gate rejects it with a 409 (not a 403) — restore first.
+    expect(() =>
+      assertProjectAction(store.db, "grant-github-scope", store.slug, admin, "change the credential", {
+        dataRoot: store.dataRoot,
+      }),
+    ).toThrow(/archived/i);
+    // reconcile likewise frozen on an archived project.
+    expect(() =>
+      assertProjectAction(store.db, "reconcile-github", store.slug, admin, "reconcile with GitHub", {
+        dataRoot: store.dataRoot,
+      }),
+    ).toThrow(/archived/i);
+    // But a plain task READ gate still admits (allowArchived at the read path is unchanged).
+    expect(() =>
+      assertProjectAction(store.db, "grant-github-scope", store.slug, admin, "change the credential", {
+        dataRoot: store.dataRoot,
+        allowArchived: true,
+      }),
+    ).not.toThrow();
   });
 
   it("ownership hand-off REQUIRES the target can own (contributor+) — a viewer target is rejected", async () => {

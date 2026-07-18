@@ -99,6 +99,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.ownership.handed_off": "task",
   "task.ownership.released": "task",
   "task.ownership.admin_released": "task",
+  "task.schedule.created": "task",
+  "task.schedule.cancelled": "task",
+  "task.schedule.fired": "task",
   "task.specialist.assigned": "task",
   "task.specialist.run_started": "task",
   "task.reviewer.assigned": "task",
@@ -145,6 +148,9 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   // Boot recovery re-invoked the operator for an orphaned run (F7-BOOT1); the
   // count of these in a rolling window is the crash-loop backstop.
   "run.recovery.reinvoked": "task",
+  // Boot recovery replayed a dropped agent-reply reaction (NFR17/B9); the count
+  // per run in a rolling window is that path's crash-loop backstop.
+  "run.recovery.reply_replayed": "task",
 
   // -- store / projections & maintenance (phases 3 + 10) --------------------
   "projection.rescan": "system",

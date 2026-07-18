@@ -110,12 +110,70 @@ export function resolveClaudeModel(model?: string): string | undefined {
  * from the model's context, so this holds even under bypassPermissions.
  */
 const OPERATOR_DENIED_BUILTINS = [
+  // Repo-mutation built-ins — the operator coordinates, it never writes code.
+  // (`Task` moved to BASE_DENIED_BUILTINS: no run may spawn ungoverned subagents.)
   "Bash",
   "Edit",
   "MultiEdit",
   "Write",
   "NotebookEdit",
+] as const;
+
+/**
+ * Denied for EVERY Viberr run (operator + specialist + reviewer).
+ *
+ * These are Claude Agent SDK built-ins COMPILED INTO the
+ * `@anthropic-ai/claude-agent-sdk` binary. `skills: []`/`settingSources: []`
+ * don't strip them — verified 2026-07-18 by running a standalone Docker
+ * deployment (pristine CLAUDE_CONFIG_DIR, no host ~/.claude, non-root): the run
+ * init still listed and EXPOSED all of them, so the leak is production, not the
+ * once-assumed "dev-nested in a Claude Code session" artifact.
+ *
+ * We deny the ones that either (a) have NO Codex analog — allowing them breaks
+ * the "Codex and Claude work the same from viberr's eye" parity, since a Codex
+ * specialist on the same task literally cannot do it — or (b) bypass a concern
+ * viberr already OWNS (orchestration = the operator; notifications =
+ * `notifyTaskWatchers`; the workspace clone = the runtime; skills = injected as
+ * prompt TEXT). All are empirically UNUSED (0 invocations across every real run).
+ *
+ * DELIBERATELY NOT DENIED: `ToolSearch` (the operator loads its deferred
+ * `mcp__viberr__*` governance tools through it — 137 real calls; denying it
+ * breaks the operator), the coding toolset (Bash/Read/Write/Edit/Grep/Glob/
+ * Notebook — specialists do real work), web tools (WebFetch/WebSearch), and the
+ * `mcp__*` channel (the backend-agnostic way viberr grants real capabilities to
+ * BOTH backends). If viberr ever wants a scheduled/recurring-task capability
+ * (the "Cron on a not-yet-Done task" idea), the parity-correct form is a governed
+ * `mcp__viberr__schedule_*` tool + capability toggle, NOT the Claude Cron tool.
+ * See planning/discovery-2026-07-17/plan-bundled-tool-isolation.md.
+ */
+const BASE_DENIED_BUILTINS = [
+  "Skill", // viberr injects each agent's declared skill as system-prompt text
+  // The subagent-spawning family — a denied-tools run must not be able to spawn
+  // an SDK subagent (`claude`/`general-purpose`/…) that would inherit an
+  // UNRESTRICTED toolset (Bash/Write/Edit) and bypass this very denylist. Under
+  // `bypassPermissions` the denylist is the only gate, so all spawn entrypoints
+  // are closed: the synchronous `Task` AND the async task family (verified
+  // present in the production docker init — `TaskCreate`/`TaskGet`/… leaked past
+  // the singular `Task` deny). Orchestration is the operator's job.
   "Task",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskOutput",
+  "TaskStop",
+  "TaskUpdate",
+  "Workflow", // self-orchestration bypasses the operator
+  "CronCreate", // scheduling is viberr's job (a future mcp__viberr__schedule_* cap)
+  "CronDelete",
+  "CronList",
+  "ScheduleWakeup",
+  "RemoteTrigger",
+  "Monitor",
+  "PushNotification", // notifications are notifyTaskWatchers' job
+  "SendMessage",
+  "DesignSync", // unrelated first-party plugin
+  "EnterWorktree", // the runtime manages the task's workspace clone
+  "ExitWorktree",
 ] as const;
 
 /** One streaming-input user message (enables Query.interrupt()). */
@@ -294,25 +352,22 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
           maxTurns: resolveMaxTurns(),
           // SDK isolation: never load the host machine's ~/.claude settings
-          // tiers into a Viberr run, and enable ZERO skills — Viberr injects
-          // its own skill/KB as system-prompt text, so a run must see exactly
-          // the agent's declared resources, not the operator-user's personal
-          // Claude Code skills/plugins (`settingSources` alone does NOT filter
-          // plugin skills — `skills: []` does).
+          // tiers into a Viberr run — Viberr injects each agent's declared
+          // skill/KB as system-prompt text, so a run must see exactly the
+          // agent's declared resources, not the operator-user's personal Claude
+          // Code settings/plugins. `settingSources: []` drops the host settings
+          // tiers; `plugins: []` names ZERO local plugins (defense-in-depth for
+          // the plugin channel, F13).
           //
-          // `plugins: []` names ZERO local plugins for the run — defense-in-depth
-          // for the plugin channel (F13) on top of settingSources/skills.
-          //
-          // Isolation boundary (verified, honest): in a STANDARD deployment (a
-          // standalone node process with a pristine CLAUDE_CONFIG_DIR under the
-          // data root) these three empty levers mean a run sees ONLY the agent's
-          // declared skills/KB (injected as prompt text) — no host resources.
-          // The ONE case they can't cover is running the server from INSIDE an
-          // active Claude Code/Desktop session: the spawned `claude` subprocess
-          // inherits that parent session's managed toolset/marketplace at the
-          // PROCESS level (above any SDK option), so a dev sees the parent's
-          // slash-commands/tools in the run. That's a dev-only condition — a real
-          // deployment has no such parent — and it can't be closed from here.
+          // HONEST LIMIT (docker-verified 2026-07-18): `skills: []` does NOT give
+          // an empty skill set. The SDK compiles ~16 first-party skills into its
+          // binary, and a standalone deployment (pristine CLAUDE_CONFIG_DIR, no
+          // host ~/.claude) STILL lists all 16 in the run's init and exposes the
+          // `Skill` tool. It is NOT the once-assumed "server nested in a Claude
+          // Code session" dev artifact — it is present in production. We cannot
+          // strip them from the init list here, so isolation is enforced the only
+          // way we can: `BASE_DENIED_BUILTINS` denies the `Skill` TOOL for every
+          // run, making those bundled skills UNINVOKABLE (see that constant).
           settingSources: [],
           skills: [],
           plugins: [],
@@ -358,6 +413,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //   - specialist: deny the git/gh commands for capabilities the profile
         //     withholds (push / PR / merge), computed upstream.
         const denied = [
+          ...BASE_DENIED_BUILTINS,
           ...(spec.kind === "operator" ? OPERATOR_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),
         ];

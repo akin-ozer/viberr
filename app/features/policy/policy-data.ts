@@ -23,6 +23,9 @@ export const ROLE_LABEL: Record<RoleId, string> = RBAC_ROLE_LABEL;
 export interface RbacRow {
   action: string;
   grant: Record<RoleId, 0 | 1>;
+  /** App-wide (any signed-in user, member or not) — the role columns are
+   * informational; the UI renders these as app-wide, not role-gated. */
+  appWide?: boolean;
 }
 
 /**
@@ -33,6 +36,7 @@ export interface RbacRow {
 export const PROJECT_CAP_MATRIX: readonly {
   action: string;
   roles: readonly RoleId[];
+  appWide?: boolean;
 }[] = RBAC_TABLE;
 
 /** RBAC grant table — derived from the canonical table (never hand-maintained). */
@@ -41,6 +45,7 @@ export const RBAC_ROWS: readonly RbacRow[] = PROJECT_CAP_MATRIX.map((cap) => ({
   grant: Object.fromEntries(
     ROLE_IDS.map((r) => [r, cap.roles.includes(r) ? 1 : 0]),
   ) as Record<RoleId, 0 | 1>,
+  ...(cap.appWide ? { appWide: true } : {}),
 }));
 
 export type BoundaryId = "auto" | "approval" | "human";

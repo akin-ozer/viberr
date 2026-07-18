@@ -8,9 +8,12 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
  * (review-queue.md, ported 1:1 from design/html-app/app/review.jsx).
  *
  * Zero mutations here: rows navigate to task detail (where packet
- * resolution lives, Phase 5), the policy chip navigates to Policy. The
- * split is project-wide per ruling 10 — labels unchanged. Rows leave the
- * queue live via the shell's SSE revalidation (Phase 6).
+ * resolution lives, Phase 5), the policy chip navigates to Policy. The split is
+ * member-scoped by acceptance authority (R8-3): "your acceptance" lists only the
+ * human-waiting tasks THIS viewer can accept; a human-waiting task someone else
+ * must accept lands in "Still in review" labeled "waiting on a human" (never the
+ * false "agent working"). Rows leave the queue live via the shell's SSE
+ * revalidation (Phase 6).
  *
  * The wait-tag copy is deliberately different from the board ("your
  * acceptance" vs "waiting on you") — do not unify. The subline builder
@@ -45,6 +48,13 @@ function RQRow({
           <span className="wait-tag human">
             <Icon name="hand" />
             your acceptance
+          </span>
+        ) : t.waiting === "human" ? (
+          // Human-waiting, but not THIS viewer's to accept (R8-3) — a human still
+          // needs to act, so never the false "agent working".
+          <span className="wait-tag human">
+            <Icon name="hand" />
+            waiting on a human
           </span>
         ) : (
           <span className="wait-tag agent">
@@ -137,7 +147,7 @@ export function ReviewQueuePage({
         <div className="panel">
           <div className="panel-head">
             <Icon name="activity" />
-            <h2>Still with agents</h2>
+            <h2>Still in review</h2>
             <span
               className="right sub"
               style={{ fontSize: ".76rem", color: "var(--faint)" }}

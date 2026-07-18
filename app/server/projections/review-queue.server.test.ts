@@ -191,3 +191,72 @@ describe("getReviewQueue", () => {
     expect(queue.ready.map((t) => t.key)).toEqual(["LP-1"]);
   });
 });
+
+describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
+  // A review-stage task waiting on a human with NO packet/recommendation (the
+  // operator couldn't open a completion packet). It still needs a human to
+  // accept it, so the scoping must key on acceptance AUTHORITY (maintainer+ /
+  // owner), not on the presence of a decision object.
+  function seedBareHumanReview(
+    store: ReturnType<typeof setupTestStore>,
+    owner: string | null,
+  ) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Bare human-waiting review",
+        stage: "review",
+        waiting: "human",
+        ownerUserId: owner,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("a maintainer sees a bare human-waiting review task in `ready`", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, null);
+    const q = getReviewQueue(store.db, store.slug, {
+      viewerUserId: store.users.murat.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+  });
+
+  it("a viewer sees it in `working` but STILL flagged human-waiting (never 'agent working')", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, null);
+    const q = getReviewQueue(store.db, store.slug, {
+      viewerUserId: store.users.elif.id,
+    });
+    expect(q.ready).toHaveLength(0);
+    const row = q.working.find((t) => t.key === "VIB-201")!;
+    // waiting stays "human" → the page renders "waiting on a human", not the
+    // false "agent working" (the pre-fix regression).
+    expect(row.waiting).toBe("human");
+  });
+
+  it("a contributor OWNER sees their bare human-waiting review task in `ready` (owner exception)", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, store.users.selin.id);
+    const q = getReviewQueue(store.db, store.slug, {
+      viewerUserId: store.users.selin.id,
+    });
+    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+  });
+
+  it("a contributor NON-owner does not get it in `ready`", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, store.users.elif.id); // owned by someone else
+    const q = getReviewQueue(store.db, store.slug, {
+      viewerUserId: store.users.selin.id,
+    });
+    expect(q.ready).toHaveLength(0);
+    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
+  });
+
+  it("unscoped (no viewer) keeps the state-based split — any human-waiting task is ready", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, null);
+    const q = getReviewQueue(store.db, store.slug);
+    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+  });
+});

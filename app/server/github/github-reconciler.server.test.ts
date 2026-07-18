@@ -13,6 +13,7 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { listNotifications } from "~/server/projections/notifications.server";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
@@ -295,6 +296,98 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("merged"); // real terminal state overrides "accepted"
+  });
+
+  it("R8-6: a PR merged out-of-band while the task isn't Done surfaces a divergence event + notifies supervisors, WITHOUT auto-advancing", async () => {
+    const { store, actor } = setup(); // VIB-301 at "review", owner arda (admin)
+    const routes = happyRoutes();
+    // GitHub reports the PR merged directly (not through Viberr's accept flow).
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1,
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    // Stage is UNCHANGED — files stay canonical, no auto-advance.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.stage).toBe("review");
+    // A typed divergence event landed on the timeline (projected to task_events).
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events.some((e) => /\*\*Divergence:\*\* PR #318 was merged on GitHub/.test(e.text))).toBe(true);
+    // The supervisor (arda: admin + owner) got a policy notification.
+    const notifs = listNotifications(store.db, store.users.arda.id);
+    expect(notifs.some((n) => n.kind === "policy" && /merged on GitHub/.test(n.text))).toBe(true);
+    // Idempotent: a second reconcile (PR still merged in the cache) does NOT
+    // re-announce the divergence.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    const events2 = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    expect(events2.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
+  });
+
+  function seedWithRecs(store: TestStore) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        recommendations: [
+          { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+          { id: "r-assign", kind: "assign_specialist", profileId: "developer", label: "Assign Developer", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("R8-6: a CLOSED-out-of-band divergence withdraws the moot transition + accept_completion recs (assign survives)", async () => {
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // transition + accept_completion withdrawn (PR is gone); assign_specialist survives.
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-assign"]);
+    const events = store.db.prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`).all() as { text: string }[];
+    expect(events.some((e) => /closed on GitHub without merging/.test(e.text) && /withdrawn/.test(e.text))).toBe(true);
+  });
+
+  it("R8-6: a MERGED-out-of-band divergence withdraws transition but KEEPS accept_completion (accepting reflects the merge)", async () => {
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "closed",
+        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
+        additions: 1, deletions: 0, changed_files: 1 },
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // transition withdrawn; accept_completion SURVIVES (the divergence tells the human to accept).
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign"]);
   });
 
   it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {

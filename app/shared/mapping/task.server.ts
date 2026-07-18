@@ -95,6 +95,11 @@ export interface TaskSummary {
   readiness: Readiness;
   displayReadiness: Readiness | "accepted" | "merged";
   waiting: Waiting;
+  /** R8-3: does an open decision on this task require THE VIEWING USER's action?
+   * Loader-annotated (the projection has no viewer context) — the board's
+   * "Waiting on me" chip + per-card badge read this, member-scoped, instead of
+   * the project-wide `waiting === "human"` enum. */
+  waitingOnMe?: boolean;
   urgent: boolean;
   validation: Validation;
   owner: ActorRender | null;

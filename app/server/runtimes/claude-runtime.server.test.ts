@@ -225,7 +225,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured?.skills).toEqual([]);
   });
 
-  it("denies the repo-mutation built-ins for an operator run, leaving specialists unconfined", async () => {
+  it("denies the SDK bundled parity/governance tools on every run (keeps ToolSearch + coding tools), plus repo-mutation for operators", async () => {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
     // Capture each run's options by index (no reassignment → clean typing).
     const seen: ({ disallowedTools?: string[] } | undefined)[] = [];
@@ -240,20 +240,52 @@ describe("claude adapter (SDK, injected fake query)", () => {
       return seen[seen.length - 1];
     };
 
-    // Operator: Bash/Edit/Write/NotebookEdit/Task are removed from context so it
-    // genuinely cannot write code — its job is the mcp__viberr__* tools.
-    expect((await run({ ...SPEC, kind: "operator" }))?.disallowedTools).toEqual(
-      expect.arrayContaining(["Bash", "Edit", "Write", "NotebookEdit"]),
+    // EVERY run denies the SDK-bundled tools that break Codex/Claude parity or
+    // bypass viberr governance (docker-verified they load despite skills:[]):
+    // Skill, Task (subagents), Workflow, Cron*, ScheduleWakeup, RemoteTrigger,
+    // Monitor, Push/SendMessage, DesignSync, Enter/ExitWorktree.
+    const primaryDenied = (await run({ ...SPEC, kind: "primary" }))?.disallowedTools ?? [];
+    expect(primaryDenied).toEqual(
+      expect.arrayContaining([
+        "Skill",
+        // The whole subagent-spawn family — sync `Task` AND the async
+        // `TaskCreate`/`TaskGet`/… variants (both leak past the SDK in the
+        // production docker init; either can spawn an unrestricted subagent).
+        "Task",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
+        "Workflow",
+        "CronCreate",
+        "ScheduleWakeup",
+        "Monitor",
+        "PushNotification",
+        "EnterWorktree",
+      ]),
     );
+    // But NOT ToolSearch (the operator loads its deferred mcp__viberr__* tools
+    // through it), and NOT the coding/web toolset — specialists do real work.
+    expect(primaryDenied).not.toContain("ToolSearch");
+    expect(primaryDenied).not.toContain("Bash");
+    expect(primaryDenied).not.toContain("WebFetch");
 
-    // A specialist with no withheld caps keeps the full toolset (it does the
-    // dev work) — no denylist is imposed.
-    expect((await run({ ...SPEC, kind: "primary" }))?.disallowedTools).toBeUndefined();
+    // Operator ADDS the repo-mutation built-ins on top of the base list, but must
+    // keep ToolSearch (it can't reach its mcp__viberr__* governance tools without it).
+    const opDenied = (await run({ ...SPEC, kind: "operator" }))?.disallowedTools ?? [];
+    expect(opDenied).toEqual(
+      expect.arrayContaining(["Skill", "Task", "Bash", "Edit", "Write", "NotebookEdit"]),
+    );
+    expect(opDenied).not.toContain("ToolSearch");
 
-    // A specialist WITH withheld caps has exactly those denied (nothing extra).
-    expect(
-      (await run({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] }))?.disallowedTools,
-    ).toEqual(["Bash(git push:*)"]);
+    // A specialist WITH withheld caps gets the base list PLUS those.
+    const withheld =
+      (await run({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] }))
+        ?.disallowedTools ?? [];
+    expect(withheld).toContain("Bash(git push:*)");
+    expect(withheld).toContain("Skill");
   });
 
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {

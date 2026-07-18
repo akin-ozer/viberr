@@ -18,8 +18,12 @@ describe("matchesBoardFilter", () => {
   it('"all" matches everything', () => {
     expect(matchesBoardFilter(base, "all")).toBe(true);
   });
-  it('"human"/"agent" filter on waiting', () => {
-    expect(matchesBoardFilter({ ...base, waiting: "human" }, "human")).toBe(true);
+  it('"human" filter is member-scoped (R8-3: waitingOnMe, not the waiting enum)', () => {
+    // A human-waiting task the viewer CAN'T act on is not "waiting on me".
+    expect(matchesBoardFilter({ ...base, waiting: "human", waitingOnMe: false }, "human")).toBe(false);
+    // Only when the loader marks it as the viewer's decision.
+    expect(matchesBoardFilter({ ...base, waiting: "human", waitingOnMe: true }, "human")).toBe(true);
+    // The "agent" filter still keys off the waiting enum.
     expect(matchesBoardFilter({ ...base, waiting: "agent" }, "human")).toBe(false);
     expect(matchesBoardFilter({ ...base, waiting: "agent" }, "agent")).toBe(true);
   });
