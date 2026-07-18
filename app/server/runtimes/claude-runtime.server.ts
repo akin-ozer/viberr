@@ -110,32 +110,58 @@ export function resolveClaudeModel(model?: string): string | undefined {
  * from the model's context, so this holds even under bypassPermissions.
  */
 const OPERATOR_DENIED_BUILTINS = [
+  // Repo-mutation built-ins — the operator coordinates, it never writes code.
+  // (`Task` moved to BASE_DENIED_BUILTINS: no run may spawn ungoverned subagents.)
   "Bash",
   "Edit",
   "MultiEdit",
   "Write",
   "NotebookEdit",
-  "Task",
 ] as const;
 
 /**
  * Denied for EVERY Viberr run (operator + specialist + reviewer).
  *
- * `Skill`: the SDK ships ~16 first-party skills (deep-research, code-review,
- * dataviz, doctor, run-skill-generator, …) COMPILED INTO the
- * `@anthropic-ai/claude-agent-sdk` binary. `skills: []` does NOT strip them —
- * verified 2026-07-18 by running a standalone Docker deployment (pristine
- * CLAUDE_CONFIG_DIR, no host ~/.claude, non-root): the run's init still listed
- * all 16 and exposed the `Skill` tool. So the skill leak is NOT the "dev-nested
- * in a Claude Code session" artifact it was once thought to be — it is present
- * in production. Viberr never uses SDK skills (it injects each agent's declared
- * skill as system-prompt TEXT), so denying the `Skill` tool removes the model's
- * ability to invoke any of those unrelated skills — the isolation the empty
- * `skills: []` lever only *claims*. (The 16 stay listed in the init `skills`
- * field, which is SDK discovery we can't suppress from here; denying the tool is
- * what makes them uninvokable.)
+ * These are Claude Agent SDK built-ins COMPILED INTO the
+ * `@anthropic-ai/claude-agent-sdk` binary. `skills: []`/`settingSources: []`
+ * don't strip them — verified 2026-07-18 by running a standalone Docker
+ * deployment (pristine CLAUDE_CONFIG_DIR, no host ~/.claude, non-root): the run
+ * init still listed and EXPOSED all of them, so the leak is production, not the
+ * once-assumed "dev-nested in a Claude Code session" artifact.
+ *
+ * We deny the ones that either (a) have NO Codex analog — allowing them breaks
+ * the "Codex and Claude work the same from viberr's eye" parity, since a Codex
+ * specialist on the same task literally cannot do it — or (b) bypass a concern
+ * viberr already OWNS (orchestration = the operator; notifications =
+ * `notifyTaskWatchers`; the workspace clone = the runtime; skills = injected as
+ * prompt TEXT). All are empirically UNUSED (0 invocations across every real run).
+ *
+ * DELIBERATELY NOT DENIED: `ToolSearch` (the operator loads its deferred
+ * `mcp__viberr__*` governance tools through it — 137 real calls; denying it
+ * breaks the operator), the coding toolset (Bash/Read/Write/Edit/Grep/Glob/
+ * Notebook — specialists do real work), web tools (WebFetch/WebSearch), and the
+ * `mcp__*` channel (the backend-agnostic way viberr grants real capabilities to
+ * BOTH backends). If viberr ever wants a scheduled/recurring-task capability
+ * (the "Cron on a not-yet-Done task" idea), the parity-correct form is a governed
+ * `mcp__viberr__schedule_*` tool + capability toggle, NOT the Claude Cron tool.
+ * See planning/discovery-2026-07-17/plan-bundled-tool-isolation.md.
  */
-const BASE_DENIED_BUILTINS = ["Skill"] as const;
+const BASE_DENIED_BUILTINS = [
+  "Skill", // viberr injects each agent's declared skill as system-prompt text
+  "Task", // spawns UNGOVERNED subagents — orchestration is the operator's job
+  "Workflow", // self-orchestration bypasses the operator
+  "CronCreate", // scheduling is viberr's job (a future mcp__viberr__schedule_* cap)
+  "CronDelete",
+  "CronList",
+  "ScheduleWakeup",
+  "RemoteTrigger",
+  "Monitor",
+  "PushNotification", // notifications are notifyTaskWatchers' job
+  "SendMessage",
+  "DesignSync", // unrelated first-party plugin
+  "EnterWorktree", // the runtime manages the task's workspace clone
+  "ExitWorktree",
+] as const;
 
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
