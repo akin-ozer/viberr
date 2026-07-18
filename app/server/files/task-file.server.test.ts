@@ -117,6 +117,37 @@ describe("task.md round-trip", () => {
     const { parsed } = parseTaskFileContent(text, { fallbackKey: "VIB-142" });
     expect(parsed.timeline).toEqual([]);
   });
+
+  it("an agent comment whose role has punctuation survives serialize→parse (VIB-12)", () => {
+    // The shipped `reviewer` profile's role is "Review & validation"; the `&`
+    // must NOT make decodeActorRef fail and drop the reviewer's reply comment.
+    const reviewerReply = {
+      ...FULL,
+      packet: null,
+      extraSections: [],
+      timeline: [
+        {
+          occurredAt: "2026-07-04T06:10:00.000Z",
+          type: "comment" as const,
+          actor: { kind: "agent" as const, backend: "claude" as const, role: "Review & validation" },
+          title: null,
+          toAgent: false,
+          evidence: null,
+          text: "@operator the inventory is complete and accurate.",
+        },
+      ],
+    };
+    const { parsed, diagnostics } = parseTaskFileContent(serializeTaskFile(reviewerReply), {
+      fallbackKey: "VIB-142",
+    });
+    expect(diagnostics.some((d) => d.code === "timeline.unknown_actor")).toBe(false);
+    expect(parsed.timeline).toHaveLength(1);
+    expect(parsed.timeline[0]!.actor).toEqual({
+      kind: "agent",
+      backend: "claude",
+      role: "Review & validation",
+    });
+  });
 });
 
 describe("task.md event-body escaping (structure-like text)", () => {

@@ -13,11 +13,23 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
  */
 
 const HUMAN_RE = /^user:(\S+)(?:\s+\((.+)\))?$/;
-const AGENT_RE = /^agent:(codex|claude)\/([A-Za-z][\w-]*)$/;
+// The role slug is whatever roleToSlug emits: a whitespace-collapsed lowercase
+// string that CAN legitimately contain punctuation (the `reviewer` profile's
+// role is "Review & validation" → "review-&-validation"). Decode must accept
+// the whole slug up to end-of-ref — a strict `[A-Za-z][\w-]*` rejected the `&`,
+// so decodeActorRef returned null and the timeline parser SKIPPED (dropped) the
+// event. A reviewer's reply comment vanished on every re-parse (VIB-12): its
+// serialized `agent:claude/review-&-validation` header failed to decode, so the
+// next read-modify-write's base — and the projected timeline — lost it. The
+// slug never contains the ` · ` field separator (whitespace is collapsed to
+// `-`), so matching to `$` is unambiguous.
+const AGENT_RE = /^agent:(codex|claude)\/(.+)$/;
 const SYSTEM_RE = /^system:([A-Za-z][\w-]*)$/;
 
 export function roleToSlug(role: string): string {
-  return role.trim().toLowerCase().replace(/\s+/g, "-");
+  // Never empty — an empty slug would serialize to `agent:codex/` and fail to
+  // decode (the event would then be dropped as an unrecognized actor).
+  return role.trim().toLowerCase().replace(/\s+/g, "-") || "agent";
 }
 
 export function slugToRole(slug: string): string {
