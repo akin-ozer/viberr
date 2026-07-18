@@ -89,9 +89,15 @@ Creation flow, `viberr-sandbox`:
   excluded from the create-modal because zero runtime references, but retained in the full catalog so
   seeded profiles can describe their role). They gate no tool (absent from `specialist-tool-policy`).
   Removing them would STRIP intentional descriptive richness — a regression, not a fix. Leave as-is.
-- **O-3 (product Q, open)** should a scheduled/recurring capability exist for not-yet-Done tasks? The
-  parity-correct form is a governed `mcp__viberr__schedule_*` tool (works for both backends), not the
-  Claude Cron tool. Noted in `plan-bundled-tool-isolation.md`, not built.
+- **O-3 → IMPLEMENTED + live-verified (commits 2eac909, 825e131).** Governed scheduled operator
+  re-runs: a maintainer schedules a future `run-operator` on a not-yet-Done task; a server-side runner
+  (`schedule.server.ts`, boot + unref'd interval) fires due entries by calling `runOperator` —
+  backend-agnostic, so Claude & Codex behave identically (the parity-correct form, NOT the Claude Cron
+  tool, and NOT a per-backend agent tool). Canonical `schedules` frontmatter + `schedules_json`
+  projection column; crash-safe (flips pending→fired in the FILE before invoking); RBAC `run-agents`;
+  UI panel (schedule/cancel) on the task detail; +6 unit tests. Live in docker: scheduled VIB-208,
+  the runner fired it at the due time and the operator ran (opened a scoping packet that even cites
+  its schedule source). See §4c (superseded — the subsystem was built).
 
 ## 4. Product decisions taken this pass (owner-ruled)
 - Divergence dismisses the now-moot pending recommendation (R8-6 refinement) — IMPLEMENTED.
@@ -108,14 +114,17 @@ hardcoded mock RES_CATALOG"; `templates.ts:11` defines stages the original mock 
 `Math.random`/faker fake-data generators in loaders. Substantiates the fresh-discovery "no mocks"
 verdict with an actual sweep.
 
-## 4c. O-3 feasibility (why it needs an owner greenlight, not an autonomous build)
-The app has **no periodic-scheduler infrastructure**: `boot.server.ts` runs `recoverUnreactedAgentRuns`
-ONCE at startup; there is no interval/tick/cron loop anywhere. A governed `schedule_*` capability
-therefore requires a NET-NEW subsystem: (1) a durable schedule store, (2) a periodic executor that is
-single-flight across restarts + idempotent (the hard part — no existing tick to extend), (3) the
-capability + MCP tool threaded to both backends, (4) UI, (5) tests. This is large new architecture
-with real design trade-offs (durability model, execution/failure semantics) — and the code itself
-files it as "a future capability" (`claude-runtime.server.ts:145`). Per the owner's standing
+## 4c. O-3 — BUILT (the scheduler subsystem)
+The app had no periodic-scheduler infra (`boot.server.ts` recovery ran once); this pass added the
+net-new subsystem, chosen in its **parity-safe form**: a governed HUMAN action + a **server-side
+executor calling `runOperator`** (already backend-agnostic) rather than a per-backend agent tool. The
+in-process `mcp__viberr__*` toolkit is Claude-only (Codex uses structured output), so a schedule MCP
+tool would have forked by backend; the human-action + server-side-runner form works identically for
+both and matches the governed-delivery model. Shipped: canonical `schedules` frontmatter,
+`schedules_json` projection, `schedule.server.ts` (create/cancel/`fireDueSchedules`/
+`startScheduleRunner`, crash-safe file-first flip), boot wiring, `run-agents`-gated route intents, a
+task-detail UI panel, audit actions, +6 tests. Live-verified in docker (VIB-208 fired on time → real
+operator run). Tick is `VIBERR_SCHEDULE_TICK_MS` (default 60s). Per the owner's standing
 instruction to be consulted on product-design decisions, this is greenlit-then-built, not built blind.
 
 ## 5. Verdict
