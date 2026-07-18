@@ -53,6 +53,8 @@ export function useDialog(
     const finish = () => {
       if (done) return;
       done = true;
+      dialog.removeEventListener("transitionend", onTransitionEnd);
+      clearTimeout(fallback);
       onCloseRef.current();
     };
     // Only the dialog's own transition counts — transitionend BUBBLES, and a
@@ -63,7 +65,7 @@ export function useDialog(
     };
     dialog.addEventListener("transitionend", onTransitionEnd);
     // Fallback in case transitionend never fires (display:none ancestor …).
-    setTimeout(finish, seconds * 1000 + 50);
+    const fallback = setTimeout(finish, seconds * 1000 + 50);
   }, []);
 
   useEffect(() => {
@@ -73,14 +75,18 @@ export function useDialog(
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    // React's autoFocus has already focused a field inside the dialog at
-    // commit time; showModal() would move focus off it, so put it back.
+    // Initial focus, two paths: React's autoFocus has already focused a field
+    // inside the dialog at commit time (showModal() would move focus off it,
+    // so put it back), or a field opts in via [data-autofocus] and is focused
+    // after showModal() — same first-field UX without an autoFocus prop.
     const preFocused =
       previouslyFocused && dialog.contains(previouslyFocused)
         ? previouslyFocused
         : null;
+    const initial =
+      preFocused ?? dialog.querySelector<HTMLElement>("[data-autofocus]");
     if (!dialog.open) dialog.showModal();
-    preFocused?.focus();
+    initial?.focus();
 
     // Escape fires `cancel`; suppress the native close so React state stays
     // the source of truth (the caller unmounts the dialog after the exit

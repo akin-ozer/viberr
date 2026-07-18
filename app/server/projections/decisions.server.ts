@@ -146,14 +146,3 @@ export function decisionsRequiring(
 
   return { mine, overrideEligible };
 }
-
-/** Convenience: per-project `mine` decision counts (Home cards + headline). */
-export function myDecisionCountsBySlug(
-  db: Database.Database,
-  userId: string,
-): Map<string, number> {
-  const { mine } = decisionsRequiring(db, userId);
-  const counts = new Map<string, number>();
-  for (const d of mine) counts.set(d.projectSlug, (counts.get(d.projectSlug) ?? 0) + 1);
-  return counts;
-}

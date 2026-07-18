@@ -97,7 +97,7 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
             setName(e.target.value);
             setErr(null);
           }}
-          autoFocus
+          data-autofocus=""
         />
       </div>
       <div className="field">
@@ -183,7 +183,7 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
               setName(e.target.value);
               setErr(null);
             }}
-            autoFocus
+            data-autofocus=""
           />
         </div>
         <div className="field">
@@ -299,7 +299,7 @@ function SkillModal({
             setName(e.target.value);
             setErr(null);
           }}
-          autoFocus
+          data-autofocus=""
         />
       </div>
       <div className="field">
@@ -443,7 +443,7 @@ function AgentModal({
             setName(e.target.value);
             setErr(null);
           }}
-          autoFocus
+          data-autofocus=""
         />
       </div>
       <div className="field">

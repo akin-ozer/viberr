@@ -160,7 +160,7 @@ function IdentityFields({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Migrations"
-          autoFocus
+          data-autofocus=""
         />
       </div>
       <div className="field">
@@ -186,12 +186,15 @@ function BackendField({
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
 }) {
+  // Chip groups have no labelable control — a `<label>` here names nothing.
+  // role="group" + aria-labelledby gives screen readers the same caption.
+  const capId = useId();
   return (
-    <div className="field">
-      <label className="flabel">
+    <div className="field" role="group" aria-labelledby={capId}>
+      <span className="flabel" id={capId}>
         Execution backend<span className="req">*</span>
         <span className="fhint">pick exactly one</span>
-      </label>
+      </span>
       <div className="pick-chips">
         {BACKENDS.map((b) => (
           <button
@@ -216,15 +219,16 @@ function AutonomyField({
   autonomy: "supervised" | "full";
   setAutonomy: (v: "supervised" | "full") => void;
 }) {
+  const capId = useId();
   return (
-    <div className="field">
-      <label className="flabel">
+    <div className="field" role="group" aria-labelledby={capId}>
+      <span className="flabel" id={capId}>
         Default autonomy
         <span className="fhint">
           supervised recommends at approval boundaries · full performs
           them and may accept completion to Done
         </span>
-      </label>
+      </span>
       <div className="pick-chips">
         {(
           [
@@ -350,12 +354,13 @@ function StagesField({
   stg: string[];
   toggleStage: (id: string) => void;
 }) {
+  const capId = useId();
   return (
-    <div className="field">
-      <label className="flabel">
+    <div className="field" role="group" aria-labelledby={capId}>
+      <span className="flabel" id={capId}>
         Eligible stages<span className="req">*</span>
         <span className="fhint">stages this profile may work in</span>
-      </label>
+      </span>
       <div className="pick-chips">
         {stages.map((s) => (
           <button
@@ -421,14 +426,15 @@ function CapabilityGrants({
   openGroups: Record<string, boolean>;
   setOpenGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
 }) {
+  const capId = useId();
   return (
-    <div className="field">
-      <label className="flabel">
+    <div className="field" role="group" aria-labelledby={capId}>
+      <span className="flabel" id={capId}>
         Capability policy
         <span className="fhint">
           how each action is enforced — adjust the defaults
         </span>
-      </label>
+      </span>
       <div className="cap-matrix">
         {capCatalog.map((g) => {
           const open = !!openGroups[g.group];
@@ -520,14 +526,15 @@ function ResourcePicker({
   openRes: Record<string, boolean>;
   setOpenRes: Dispatch<SetStateAction<Record<string, boolean>>>;
 }) {
+  const capId = useId();
   return (
-    <div className="field">
-      <label className="flabel">
+    <div className="field" role="group" aria-labelledby={capId}>
+      <span className="flabel" id={capId}>
         Context resources
         <span className="fhint">
           skills, MCP servers, knowledge bases this profile may load
         </span>
-      </label>
+      </span>
       <div className="cap-matrix">
         {resCatalog.map((g) => {
           const open = !!openRes[g.group];
