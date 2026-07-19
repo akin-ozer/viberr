@@ -76,8 +76,14 @@ F22, F4, F12**, plus **F8/F9 verified** (tool-enforcement asymmetry is already h
   code (github-reconciler.server.ts:255+) and in VIB-4's data. My live obs missed it (timing/grep).
 - F8/F9: honest "claude-only" tool-enforcement labels already in place (owner Q2). Verified.
 
-**Remaining (genuinely minor, documented not rushed — all LOW severity):**
-- F13 swallowed errors + agent audit attribution under the operator system actor. Robustness.
-- F19 operator legacy dead code (`operatorSchedulesOnOwner`) + stale "Phase-8" comments. Cleanup.
-- F20 board rescan reprojects instance-wide under a project-scoped gate (idempotent; intentional-ish)
-  + `applyRecommendation` pre-authz reads (info already view-accessible). Left as-is.
+**F13 (done):** post-run delivery-reconcile failures are logged, not silently swallowed. The
+audit-attribution sub-point is left as-is (operator-AUTHORIZED runtime actions audited under the
+operator is by-design, not a mismatch).
+
+**Remaining (genuinely minor, documented not rushed — all LOW severity, no correctness impact):**
+- F19 operator legacy dead code (`operatorSchedulesOnOwner`, fires only on seed `**Quality gate:**`
+  events) + stale "Phase-8" comments. Pure cleanup — left to avoid removing not-provably-dead code
+  without a dedicated pass.
+- F20 board rescan reprojects instance-wide under a project-scoped gate (idempotent; the code comment
+  documents it as deliberate) + `applyRecommendation` pre-authz reads (info already view-accessible,
+  delegated mutations enforce RBAC). Defensible as-is.
