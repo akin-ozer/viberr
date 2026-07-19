@@ -49,3 +49,14 @@ Legend: ✅ pass · ❌ fail (→ finding) · ⚠️ partial/notable.
 | T17 | Reject PR via `gh` (out-of-band close) → reconcile → divergence | GitHub reject path, reconcile, no false auto-advance | ✅ **strong** | Closed PR #72 unmerged via `gh`. Viberr initially showed it "in review" (no scheduled reconcile). After manual Reconcile: `pr.state: closed` reflected; task **stayed at Review** (validation healthy) — did NOT auto-advance to Done. Divergence detection works. (⚠️ see F25 re: whether the close is surfaced loudly enough + stale accept rec.) |
 | — | Reviewer is a genuine reviewer, not a rubber-stamp | reviewer quality | ✅ | On PR #72 the reviewer approved but flagged 3 real non-blocking test-coverage nits (whitespace branch, error-path non-disclosure, main() stream routing verified via CLI but not unit-asserted). Thorough diff review. |
 | **F25** | Out-of-band PR close is under-surfaced on the task page | divergence surfacing (delivery/github) | ❌ **BUG(minor)** | After reconcile detected PR #72 closed: `pr.state:closed` updated + stale accept rec cleared (good), BUT **no timeline event and no notification** were emitted about the rejection, and the task-page PR pill shows "PR #72" with **no closed/rejected badge**. A human sees "Review · validation healthy · PR #72" with no cue the PR was rejected. delivery-github.md claims divergence is "surfaced via typed timeline event + notification" — not observed on this reconcile path. Surface it loudly (event + notification + PR-closed badge) + ideally an operator decision packet. |
+
+## Phase 3 — Implementation live validations (dev server, current branch)
+| # | Fix | Live evidence | Result |
+|---|-----|---------------|--------|
+| V1 | **F24** unified commit identity | VIB-5 Codex developer committed `c5f26c1` as **`developer <developer@viberr.local>`** (was host identity `akin-ozer <ozer_akin@outlook.com>` pre-fix on VIB-4). Codex now matches Claude's `<profileId>@viberr.local`. | ✅ **strong** |
+| V2 | **F14** deliverer delivers | VIB-5 codex developer committed on branch vib-5 (delivery works with the granted headline). | ✅ |
+| V3 | **F4** engagement labels | Task page execution profile renders "Operator / Delivering agent / Reviewing agents / Engage reviewer". | ✅ |
+| V4 | **F5** home skill count | Home Agent-resources tile shows "3 skills" (was "0 skills"). | ✅ |
+| — | Suite + typecheck | `tsc` 0 errors; vitest 137 files / 1389 tests green. | ✅ |
+
+Implementation branch: `fix/pass9-delivery-capability-parity` → PR #73 on akin-ozer/viberr.
