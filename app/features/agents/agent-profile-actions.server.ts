@@ -67,6 +67,8 @@ const profileFormSchema = z.object({
   backend: z.enum(["codex", "claude"]),
   stages: z.array(z.string().min(1)).min(1, "At least one stage is required."),
   definition: z.string().default(""),
+  /** The long persona/instructions (D6) — system-prompt material; "" = keep. */
+  persona: z.string().default(""),
   /** Picked model id/alias (from the model catalog) + reasoning effort.
    * Defaulted so older clients that omit them still parse; the actions apply
    * a per-backend fallback when the string is empty. */
@@ -252,6 +254,8 @@ export async function createAgentProfile(
       desc:
         form.definition.trim() ||
         `${form.name} — a ${form.role.toLowerCase()} specialist.`,
+      // The long persona (D6) — the run's system-prompt material.
+      ...(form.persona.trim() ? { persona: form.persona.trim() } : {}),
       stages: form.stages,
       resources: form.resources,
     };
@@ -337,6 +341,13 @@ export async function updateAgentProfile(
       // org template's real description (and its ungrammatical "a implementation
       // specialist" wording). Same for operator and specialist.
       desc: form.definition.trim() || current.desc,
+      // Empty persona → keep the existing persona (deployment override or the
+      // template body), mirroring the desc rule above.
+      ...(form.persona.trim()
+        ? { persona: form.persona.trim() }
+        : current.definition
+          ? { persona: current.definition }
+          : {}),
       stages: form.stages,
       spanAll: current.spanAll,
       ...(isOperator ? { autonomy: form.autonomy ?? current.autonomy ?? "supervised" } : {}),

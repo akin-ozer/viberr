@@ -36,6 +36,8 @@ export interface ProfileFormPayload {
   backend: "codex" | "claude";
   stages: string[];
   definition: string;
+  /** The long persona/instructions (system-prompt material, D6); "" = keep. */
+  persona: string;
   /** Picked model id/alias + reasoning effort (from the model catalog). */
   model: string;
   effort: string;
@@ -385,27 +387,50 @@ function DefinitionField({
   uid,
   definition,
   setDefinition,
+  persona,
+  setPersona,
 }: {
   uid: string;
   definition: string;
   setDefinition: (v: string) => void;
+  persona: string;
+  setPersona: (v: string) => void;
 }) {
   return (
-    <div className="field">
-      <label className="flabel" htmlFor={`${uid}-definition`}>
-        Definition
-        <span className="fhint">
-          what this agent is for, in your words — markdown ok
-        </span>
-      </label>
-      <textarea
-        id={`${uid}-definition`}
-        value={definition}
-        onChange={(e) => setDefinition(e.target.value)}
-        style={{ minHeight: "96px" }}
-        placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
-      />
-    </div>
+    <>
+      <div className="field">
+        <label className="flabel" htmlFor={`${uid}-definition`}>
+          Description
+          <span className="fhint">
+            one short paragraph — the OPERATOR reads this to pick the right
+            agent for a task
+          </span>
+        </label>
+        <textarea
+          id={`${uid}-definition`}
+          value={definition}
+          onChange={(e) => setDefinition(e.target.value)}
+          style={{ minHeight: "72px" }}
+          placeholder="e.g. Owns database schema changes. Writes and verifies migrations against a shadow DB, and never touches application code without operator sign-off."
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor={`${uid}-persona`}>
+          Persona / instructions
+          <span className="fhint">
+            the agent's working instructions — injected as its system prompt on
+            every run; markdown ok
+          </span>
+        </label>
+        <textarea
+          id={`${uid}-persona`}
+          value={persona}
+          onChange={(e) => setPersona(e.target.value)}
+          style={{ minHeight: "120px" }}
+          placeholder="How this agent works: its responsibilities, standards, review checklist, reporting format…"
+        />
+      </div>
+    </>
   );
 }
 
@@ -692,6 +717,7 @@ export function CreateProfileModal({
     initial?.autonomy ?? "supervised",
   );
   const [definition, setDefinition] = useState(initial ? initial.desc : "");
+  const [persona, setPersona] = useState(initial ? initial.definition : "");
   // Model + effort picks (seeded from the profile in edit mode). The catalog
   // (fetched below) supplies the option lists + defaults; a seeded value that
   // is not in the catalog is still preserved and rendered.
@@ -780,6 +806,7 @@ export function CreateProfileModal({
       backend: backend as "codex" | "claude",
       stages: [...stg],
       definition,
+      persona,
       model: model.trim(),
       effort: showEffort ? effort.trim() : "",
       caps,
@@ -841,6 +868,8 @@ export function CreateProfileModal({
           uid={uid}
           definition={definition}
           setDefinition={setDefinition}
+          persona={persona}
+          setPersona={setPersona}
         />
 
         <CapabilityGrants

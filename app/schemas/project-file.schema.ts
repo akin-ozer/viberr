@@ -101,6 +101,11 @@ export const agentDeploymentDefinitionSchema = z
     effort: z.string().optional(),
     scope: z.string().optional(),
     desc: z.string().optional(),
+    /** The profile's long persona/instructions (D6) — the run's system-prompt
+     *  material. Distinct from `desc` (the short copy the operator selects
+     *  by). Project-created/edited profiles carry it here; org templates carry
+     *  it as their markdown body. */
+    persona: z.string().optional(),
     stages: z.array(z.string()).optional(),
     spanAll: z.boolean().optional(),
     /** Operator only: default autonomy level (supervised recommends at governed

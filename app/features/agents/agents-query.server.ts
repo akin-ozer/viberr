@@ -68,6 +68,7 @@ export function parseDeploymentDefinition(
   if (typeof raw.effort === "string" && raw.effort) def.effort = raw.effort;
   if (typeof raw.scope === "string") def.scope = raw.scope;
   if (typeof raw.desc === "string") def.desc = raw.desc;
+  if (typeof raw.persona === "string") def.persona = raw.persona;
   const stages = stringArray(raw.stages);
   if (stages) def.stages = stages;
   if (typeof raw.spanAll === "boolean") def.spanAll = raw.spanAll;
@@ -213,10 +214,11 @@ export function effectiveProfileView(
     // else the template's dedicated `desc` field, else the body (legacy
     // templates whose body IS the short description).
     desc: def?.desc ?? (template?.desc || template?.description) ?? "",
-    // The template BODY is the profile's long persona/instructions (D6) —
+    // The profile's long persona/instructions (D6): deployment override
+    // first (project-created/edited profiles), else the template BODY —
     // startAgentRun feeds it to the run when no agents/definitions/<id>.md
-    // override ships. Empty for definition-less project-created profiles.
-    definition: template?.description ?? "",
+    // override ships.
+    definition: def?.persona ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
     // Operator only: default autonomy (supervised unless the deployment sets it).
