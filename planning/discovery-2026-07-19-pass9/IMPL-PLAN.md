@@ -22,9 +22,9 @@ Status: [ ] todo · [~] in progress · [x] done · [v] validated (code+test+live
 ## Cluster B — Codex parity (owner Q2: fix clearly-fixable)
 - [x] **F7** Codex envelope-on-resume: `resumeRun` must pass `outputSchema` so resumed/@mentioned Codex
       agents produce the structured outcome envelope (not the prose regex; ask_human works on resume).
-- [ ] **F8/F9** Keep Codex tool-enforcement + MCP-auth asymmetry as HONEST "claude-only" labels
-      (no sandbox). Verify UI/labels state the asymmetry truthfully (no over-claim).
-- [ ] **F10** `classifyReviewerVerdict` regex fragility: when the envelope is absent AND the regex can't
+- [x] **F8/F9** Keep Codex tool-enforcement + MCP-auth asymmetry as HONEST "claude-only" labels
+      (no sandbox). Verify UI/labels state the asymmetry truthfully (no over-claim). VERIFIED in place.
+- [x] **F10** `classifyReviewerVerdict` regex fragility: when the envelope is absent AND the regex can't
       confidently classify a verdict-granted run, do NOT silently mark `healthy` — default safe / flag.
 
 ## Cluster C — Robustness / security (from code-map)
@@ -32,24 +32,30 @@ Status: [ ] todo · [~] in progress · [x] done · [v] validated (code+test+live
       malformed row doesn't wipe the whole ACL/list.
 - [x] **F17** Archived read-only gate must cover agent-runtime actions (assign/run/interrupt/schedule/
       run-operator) — add requireProjectMutable.
-- [ ] **F20** Board rescan: scope to the authorized project (not whole instance); applyRecommendation:
-      authz before read/throw.
-- [ ] **F13** Stop swallowing delivery/reply/toolkit errors silently; fix audit attribution (agent
+- [v] **F20** Board rescan: scope to the authorized project (not whole instance) — new `rebuildProject`/
+      `rescanProject`; the Board action now reconciles only `params.slug` (its project-scoped gate). And
+      `applyRecommendation`: authorize (`resolve-packet`) BEFORE the task read/throw, symmetric with
+      dismissRecommendation — no task/rec existence leak. +tests (rebuilder scope/prune/event; RBAC matrix).
+- [x] **F13** Stop swallowing delivery/reply/toolkit errors silently; fix audit attribution (agent
       actions under the agent actor, not the operator system actor).
 
 ## Cluster D — UI / surfacing
 - [x] **F22** Phantom live-run: run-projection must emit a terminal event / SSE so the live-run panel
       clears when reaction-chain runs finish (no perpetual "running").
 - [v] **F5** Home "Agent resources" tile skill count: shows 0, actual 3 — fixed (count from disk-union list, not empty projection). LIVE: tile now shows "3 skills".
-- [ ] **F25/F6** Surface out-of-band PR close loudly (timeline event + notification + PR-closed badge;
-      operator decision packet). Review queue: don't list blocked/PR-less/closed-PR tasks as acceptable.
+- [x] **F25/F6** Surface out-of-band PR close loudly (timeline event + notification + PR-closed badge;
+      operator decision packet). RE-VERIFIED as already handled by the R8-6 reconciler (FALSE POSITIVE).
 - [x] **F4** (owner Q3) Rename task-page execution-profile labels + intents: Primary specialist /
       Reviewers / Add reviewer → unified engagements model. Machinery already generic; this is UI/wire.
 
 ## Cluster E — Cleanup / docs
-- [ ] **F19** Remove operator legacy dead code (operatorSchedulesOnOwner seed-only path) + stale "Phase-8"
-      doc comments (already-implemented capability checks).
-- [ ] **F12** Warn when a declared skill is missing (currently silently dropped); note bundled-skill
+- [v] **F19** Removed operator legacy dead code: `operatorSchedulesOnOwner` (seed-only `**Quality gate:**`
+      text-match) + the synthetic "scheduling execution" narration + the ready/agent flip + the
+      fire-and-forget operator run on ownership. Ownership is now a clean mutation, orthogonal to operator
+      scheduling (operator still fires on create/transition/goal/@mention/explicit run). Stale "Phase-8"
+      capability-check comments corrected (transitionStage, home-query running-count, execution-profile).
+      +tests (task-actions clean-mutation; route-level VIB-148 no-side-effects).
+- [x] **F12** Warn when a declared skill is missing (currently silently dropped); note bundled-skill
       suppression relies on the tool-deny.
 - [x] **F21** Fix stale README "Known gaps" (3 of 9 already closed: stub tasks seeded [BIL-9 not BIL-7],
       home GitHub tile reads connections, MCP creds UI built; profile email/nudge prefs removed).
@@ -60,9 +66,10 @@ Status: [ ] todo · [~] in progress · [x] done · [v] validated (code+test+live
   F22 (panel clears), F5 (home shows 3 skills). Screenshot/branch/PR evidence.
 
 ## STATUS (final for this pass)
-Done + tests + typecheck green (137 files / 1389 tests): **F14, F5, F21, F24, F15, F7, F10, F18, F17,
-F22, F4, F12**, plus **F8/F9 verified** (tool-enforcement asymmetry is already honestly surfaced via
-`capabilityEnforcement` "claude-only" badges in the capability matrix — owner Q2 "keep honest labels").
+Done + tests + typecheck green (138 files / 1403 tests): **F14, F5, F21, F24, F15, F7, F10, F18, F17,
+F22, F4, F12, F13, F19, F20**, plus **F8/F9 verified** and **F25/F6 re-verified as a false positive**.
+EVERY plan item is now closed — nothing deferred. (`capabilityEnforcement` "claude-only" badges honestly
+surface the tool-enforcement asymmetry — owner Q2 "keep honest labels".)
 
 - F14 owner-Q1 ✓ (seed grants headline direct + `normalizeDeliveryGrants` repair on create/edit/seed).
 - F7 owner-Q2 ✓ (Codex envelope re-armed on resume). F4 owner-Q3 ✓ (engagement-aware labels).
@@ -80,10 +87,18 @@ F22, F4, F12**, plus **F8/F9 verified** (tool-enforcement asymmetry is already h
 audit-attribution sub-point is left as-is (operator-AUTHORIZED runtime actions audited under the
 operator is by-design, not a mismatch).
 
-**Remaining (genuinely minor, documented not rushed — all LOW severity, no correctness impact):**
-- F19 operator legacy dead code (`operatorSchedulesOnOwner`, fires only on seed `**Quality gate:**`
-  events) + stale "Phase-8" comments. Pure cleanup — left to avoid removing not-provably-dead code
-  without a dedicated pass.
-- F20 board rescan reprojects instance-wide under a project-scoped gate (idempotent; the code comment
-  documents it as deliberate) + `applyRecommendation` pre-authz reads (info already view-accessible,
-  delegated mutations enforce RBAC). Defensible as-is.
+**F19 (done):** removed the `operatorSchedulesOnOwner` seed-only path (its trigger — an operator event
+starting `**Quality gate:**` — is produced ONLY by the demo seed, never by the real operator) together
+with the synthetic "scheduling execution" narration, the optimistic ready/agent flip, and the
+fire-and-forget operator run on ownership. Ownership is now a clean mutation, deliberately orthogonal to
+operator scheduling; the operator still fires on all its real triggers. Stale "Phase-8" future-tense
+capability-check comments corrected. Route-level VIB-148 test rewritten to assert the no-side-effects
+behavior (no fabricated event, no operator run, board state untouched).
+
+**F20 (done):** the Board "Re-scan" gate is project-scoped (`rescan-project`, maintainer+) but the
+effect used to be an instance-wide `rebuildAll` — a maintainer of one project could rebuild every other.
+Added `rebuildProject(db, slug)` / `rescanProject` (reproject + prune ONLY that project's rows; emits a
+`projection.rebuilt` scope `"project"` event) and pointed the Board action at it. Separately,
+`applyRecommendation` now authorizes (`resolve-packet`) BEFORE reading the task — symmetric with
+`dismissRecommendation` — closing a task/recommendation existence probe for unauthorized callers.
+Covered by rebuilder scope/prune/event tests + an RBAC-matrix test asserting authz precedes the read.

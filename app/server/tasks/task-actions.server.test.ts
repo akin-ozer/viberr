@@ -621,15 +621,19 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
   });
 });
 
-describe("owner-assign scheduling routes through the real operator (FIX #9)", () => {
-  it("a quality-gated unowned task flips ready/agent and schedules NO simulated run", async () => {
+describe("owner-assign is a clean ownership mutation — no operator side effects (F19)", () => {
+  it("records ownership without flipping board state, narrating, or firing an operator run", async () => {
     const store = prepared();
-    // operator attached + waiting on a human owner + a passed quality gate is
-    // the exact shape operatorSchedulesOnOwner reacts to (spec §5.2).
+    // operator attached + waiting on a human owner + unowned + a `**Quality
+    // gate:**` operator event: the EXACT shape that used to trip the inline
+    // text-pattern stand-in (synthetic narration + ready/agent flip + a
+    // fire-and-forget operator run). That whole reaction is gone (F19) —
+    // ownership is orthogonal to operator scheduling now.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
         operator: { assignedAtStageId: "impl" },
+        readiness: "input_required",
         waiting: "human",
         ownerUserId: null,
       }),
@@ -654,25 +658,24 @@ describe("owner-assign scheduling routes through the real operator (FIX #9)", ()
       { dataRoot: store.dataRoot },
     );
 
-    // The deterministic scheduling reaction still flips the board state.
     const fm = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
+    // Ownership is recorded…
     expect(fm.ownerUserId).toBe(store.users.selin.id);
-    expect(fm.readiness).toBe("ready");
-    expect(fm.waiting).toBe("agent");
+    // …board state is untouched (no fabricated ready/agent flip)…
+    expect(fm.readiness).toBe("input_required");
+    expect(fm.waiting).toBe("human");
+    // …no synthetic "scheduling execution" operator narration…
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(
       detail?.timeline.some(
         (e) => e.type === "agent" && e.text.includes("scheduling execution"),
       ),
-    ).toBe(true);
-
-    // The deleted stand-in used to insert a SIMULATED operator run here. With no
-    // operator deployed in the test project, the real autoInvokeOperator path is
-    // a clean no-op — and critically never fabricates a narration run.
+    ).toBe(false);
+    // …and NO operator run is fired on ownership.
     const opRuns = store.db
       .prepare(`SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`)
       .get() as { c: number };

@@ -16,6 +16,7 @@ import {
   updateTaskGoal,
   reorderTask,
   dismissRecommendation,
+  applyRecommendation,
 } from "~/server/tasks/task-actions.server";
 import {
   assignSpecialist,
@@ -228,6 +229,17 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
   it("resolve-packet (dismiss recommendation) → maintainer+", async () => {
     await assertMatchesMatrix("resolve-packet", (actor) =>
       dismissRecommendation(store.db, { projectSlug: store.slug, taskKey: "VIB-1", recId: "nope" }, actor, { dataRoot: store.dataRoot }),
+    );
+  });
+
+  it("resolve-packet (apply recommendation) → maintainer+, authorized BEFORE the task read (F20)", async () => {
+    // A bogus recId only reaches the notFound/conflict read AFTER the guard, so
+    // the matrix outcome is a clean read of the guard: viewers/non-members are
+    // denied with 403 up front (no task/recommendation existence leak), while
+    // maintainer+ pass the guard and fail downstream (non-403) — exactly the
+    // dismiss symmetry F20 restores.
+    await assertMatchesMatrix("resolve-packet", (actor) =>
+      applyRecommendation(store.db, { projectSlug: store.slug, taskKey: "VIB-1", recId: "nope" }, actor, { dataRoot: store.dataRoot }),
     );
   });
 

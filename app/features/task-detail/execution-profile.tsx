@@ -26,7 +26,7 @@ export interface DeployedSpecialistView {
  *     (project.md membership has no status field — every member is active);
  *   - the "operator active" head pill renders only when an operator is
  *     actually attached (mock showed it unconditionally; real runtime state
- *     arrives in Phase 8);
+ *     drives it now);
  *   - Manage menu closes on Escape too (spec §4.4 port note).
  */
 

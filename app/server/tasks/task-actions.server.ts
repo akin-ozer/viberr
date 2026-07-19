@@ -2427,32 +2427,6 @@ function withMention(handle: string, directive: string): string {
 // --------------------------------------------------------------- ownership
 
 /**
- * Operator scheduling rule (contracts §3.3, shell §5.2 — generalized from
- * the mock's VIB-148 demo script): when a quality-gated task that is
- * waiting only on a human owner gains one, the OPERATOR reacts — readiness
- * flips to ready, waiting flips to agent, and the operator writes its own
- * `agent` event. "Quality-gated" = the newest operator event on the
- * timeline announces a passed quality gate. This inline server rule is the
- * documented stand-in until the Phase-8 operator runtime owns the reaction.
- */
-function operatorSchedulesOnOwner(parsed: {
-  frontmatter: TaskFrontmatter;
-  packet: unknown;
-  timeline: TaskFileEvent[];
-}): boolean {
-  if (parsed.frontmatter.operator === null) return false;
-  if (parsed.frontmatter.waiting !== "human") return false;
-  if (parsed.packet) return false;
-  const newestOperatorEvent = parsed.timeline.find(
-    (e) => e.type === "agent" && e.actor.kind === "operator",
-  );
-  return (
-    newestOperatorEvent !== undefined &&
-    newestOperatorEvent.text.startsWith("**Quality gate:**")
-  );
-}
-
-/**
  * Take or hand off ownership. Exact typed `assign` event copy from
  * task-detail spec §5.2. RBAC: any project member may take (all four
  * roles hold the "Take / release task ownership" grant); handing off
@@ -2520,29 +2494,9 @@ export async function setOwner(
     evidence: null,
   };
 
-  // Operator scheduling stand-in: only an UNOWNED task gaining its owner
-  // triggers the reaction (spec §5.2 — VIB-148 generalization).
-  const scheduling = !currentOwnerId && operatorSchedulesOnOwner(existing.parsed);
-  const operatorEvent: TaskFileEvent | null = scheduling
-    ? {
-        occurredAt: event.occurredAt,
-        type: "agent",
-        actor: { kind: "operator" },
-        title: null,
-        text: `Acceptance boundary now owned by **${userName(db, input.targetUserId)}** — scheduling execution against the quality-gated scope.`,
-        toAgent: false,
-        evidence: null,
-      }
-    : null;
-
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.ownerUserId = input.targetUserId;
     parsed.timeline.unshift(event);
-    if (operatorEvent) {
-      parsed.frontmatter.readiness = "ready";
-      parsed.frontmatter.waiting = "agent";
-      parsed.timeline.unshift(operatorEvent);
-    }
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -2556,19 +2510,18 @@ export async function setOwner(
     details: {
       previousOwnerUserId: currentOwnerId,
       newOwnerUserId: input.targetUserId,
-      operatorScheduled: scheduling,
     },
   });
 
-  // When scheduling fires, the operator "schedules execution": hand off to the
-  // SAME operator runtime the rest of the lifecycle uses (trigger `transition`),
-  // not the deleted Phase-5 simulated-narration stand-in that always faked a run
-  // even with a real backend (finding #9). Fire-and-forget: it never blocks or
-  // fails the ownership mutation (file write + audit already committed), and it
-  // is a no-op when the project has no operator deployed.
-  if (scheduling) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
-  }
+  // Ownership is a human bookkeeping action (claiming the review/acceptance
+  // seat) — deliberately orthogonal to operator scheduling, so the operator is
+  // NOT auto-invoked here. It is driven by its real lifecycle triggers (task
+  // creation, stage transitions, goal updates, @mentions, and the explicit
+  // "Run operator" control). The former reaction (a ready/agent flip + a
+  // synthesized "scheduling execution" narration + a fire-and-forget run) only
+  // animated the seeded VIB-148 demo — its trigger was a hardcoded
+  // `**Quality gate:**` text match the real operator never emits — and was
+  // removed with that mock stand-in (F19).
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
@@ -2646,8 +2599,9 @@ export async function releaseOwner(
  *   auto      → any project member
  *   approval  → admin | maintainer ("Approve stage transitions")
  *   human     → admin | maintainer ("Accept completion → Done") — humans
- *               only by construction here; agent-triggered transitions get
- *               capability-checked in Phase 8.
+ *               only by construction here; agent-triggered transitions arrive
+ *               via the operator recommendation flow, which capability-checks
+ *               them (ALWAYS_HUMAN caps like `transition-to-done` stay human).
  * Side effects: entering the final stage sets waiting → none; leaving the
  * first stage assigns the operator when none is attached (ruling 16).
  */
@@ -3638,6 +3592,14 @@ export async function applyRecommendation(
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; label: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  // Applying an operator recommendation resolves a pending governance decision
+  // (symmetric with dismissRecommendation/resolvePacket) — authorize BEFORE any
+  // task read so an unauthorized caller can't probe task/recommendation
+  // existence through the notFound/conflict responses below. The inner governed
+  // mutations still enforce their own finer-grained caps.
+  requireAction(db, project, actor, "resolve-packet", "apply recommendations");
+
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const rec = existing.parsed.frontmatter.recommendations.find(

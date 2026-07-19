@@ -21,11 +21,11 @@ import { decisionsRequiring } from "~/server/projections/decisions.server";
 
 /**
  * Home (`/`) read models — the project directory + org tile summaries
- * (home spec §3). All aggregates derive from the Phase-3 projections:
+ * (home spec §3). Aggregates derive from the store projections, except the
+ * live-run count which reads the runtime registry:
  *
- * - `running`: tasks with waiting === "agent" ("agents working") — the
- *   honest Phase-4 stand-in for active runtime runs; Phase 8's run registry
- *   replaces the derivation, not the field.
+ * - `running`: distinct tasks with a REAL (non-simulated) `agent_runs` row in
+ *   `state = 'running'` — the live run registry, not a `waiting`-field proxy.
  * - `waiting`: LIVE pending decisions, PROJECT-WIDE (ruling 10 — the
  *   "waiting on you" copy stays, scoping is V1-deliberate). Same rule as the
  *   notifications page's "Waiting on you" bucket (F7-NOTIF1): tasks with an
