@@ -41,6 +41,7 @@ import {
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
 import {
+  DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
   notifyTaskWatchers,
@@ -810,6 +811,89 @@ export async function operatorPostComment(
     "comment",
   );
   return { outcome: "done", message: "Comment posted to the timeline." };
+}
+
+/**
+ * Draft the task goal (governed by append-typed-events). This closes the
+ * triage-gate gap where the operator could OFFER "accept operator-drafted
+ * scope" but had no way to actually write the goal — the human accepted and
+ * the goal stayed the unspecified placeholder forever.
+ *
+ * SAFETY: only fills an UNSPECIFIED goal (empty or the DEFAULT_GOAL
+ * placeholder). It never overwrites an already-specified goal — changing a real
+ * goal stays a human/`edit_goal` decision, so a misfiring operator can't
+ * silently rewrite scope mid-flight. Operator-authorized (no human RBAC); a
+ * pending `awaiting: goal_edit` packet is fulfilled + cleared, mirroring
+ * updateTaskGoal.
+ */
+export async function operatorSetGoal(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; goal: string; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return { outcome: "denied", message: "The operator cannot draft the goal in this project." };
+  }
+  const goal = input.goal.trim();
+  if (goal.length < 3) {
+    return { outcome: "noop", message: "A goal of at least 3 characters is required." };
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) {
+    return { outcome: "denied", message: `Task ${input.taskKey} not found.` };
+  }
+  const current = existing.parsed.goal.trim();
+  if (current !== "" && current !== DEFAULT_GOAL) {
+    return {
+      outcome: "denied",
+      message:
+        "The goal is already specified — open an edit_goal packet to propose a change instead of overwriting it.",
+    };
+  }
+  if (current === goal) {
+    return { outcome: "noop", message: "Goal unchanged." };
+  }
+  let clearedPacket = false;
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.goal = goal;
+    // Fulfil an awaiting goal-edit packet (the operator drafted the scope the
+    // human asked it to) — clear it + lift its readiness gate, exactly like
+    // updateTaskGoal does for a human edit.
+    if (parsed.packet?.awaiting === "goal_edit") {
+      const wasBlocked = parsed.packet.type === "blocked";
+      parsed.packet = null;
+      clearedPacket = true;
+      if (wasBlocked && parsed.frontmatter.readiness === "blocked") {
+        parsed.frontmatter.readiness = "ready";
+      }
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "policy",
+      actor: { kind: "operator" },
+      title: "Goal drafted",
+      text: input.reason?.trim()
+        ? `The operator drafted the task goal — ${input.reason.trim()}. Downstream agents re-anchor on the new goal.`
+        : "The operator drafted the task goal from the request. Downstream agents re-anchor on the new goal.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  if (clearedPacket) {
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  }
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.goal.updated",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { by: "operator" },
+  });
+  return { outcome: "done", message: "Task goal drafted." };
 }
 
 /** Assign the primary specialist (governed by assign-primary-specialist). */

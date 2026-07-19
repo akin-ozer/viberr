@@ -37,6 +37,7 @@ import {
   operatorAssignSpecialist,
   operatorOpenPacket,
   operatorPostComment,
+  operatorSetGoal,
   operatorResolvePacket,
   operatorPromptReviewer,
   operatorPromptSpecialist,
@@ -172,6 +173,74 @@ describe("gate", () => {
     expect(gate(supervised, "stage-transitions")).toBe("recommend");
     expect(gate(full, "stage-transitions")).toBe("direct"); // full promotes recommend
     expect(gate(supervised, "change-project-policy")).toBe("deny"); // absent → off → deny
+  });
+});
+
+describe("operatorSetGoal — draft the goal at the triage gate", () => {
+  const DEFAULT_GOAL = "Goal to be refined at the triage quality gate.";
+
+  /** Seed a task whose goal is still the unspecified triage placeholder. */
+  function seedUnspecified(): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "triage",
+        readiness: "input_required",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "list files in the project",
+      }),
+      goal: DEFAULT_GOAL,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("fills an UNSPECIFIED goal (the closed triage-gate gap) + records it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedUnspecified();
+    const r = await operatorSetGoal(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        goal: "Write a script that lists every file in the repo; a test asserts it prints the known files.",
+        reason: "drafted from the title",
+      },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().goal).toContain("lists every file");
+    // The draft is attributed to the operator on the timeline.
+    expect(task().timeline[0]!.actor).toEqual({ kind: "operator" });
+    expect(
+      listAuditEvents(store.db, { action: "task.goal.updated" })[0]?.taskKey,
+    ).toBe("VIB-1");
+  });
+
+  it("REFUSES to overwrite an already-specified goal (no scope clobber)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl"); // goal = "Prove the operator drives the task."
+    const r = await operatorSetGoal(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", goal: "something totally different" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(task().goal).toBe("Prove the operator drives the task."); // unchanged
+  });
+
+  it("is denied when append-typed-events is withheld", async () => {
+    deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
+    seedUnspecified();
+    const r = await operatorSetGoal(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", goal: "A concrete scope for the task." },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(task().goal).toBe(DEFAULT_GOAL);
   });
 });
 

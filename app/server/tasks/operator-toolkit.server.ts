@@ -15,6 +15,7 @@ import {
   operatorPostComment,
   operatorPromptAgentGeneric,
   operatorRunAgent,
+  operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
   type OperatorActionResult,
@@ -85,7 +86,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, and your own capability policy + autonomy. Call this FIRST and after each change. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — never by guessing from names.",
+      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, and your own capability policy + autonomy. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — never by guessing from names.",
       {},
       async () =>
         textResult(operatorSnapshot(db, ctx, projectSlug, taskKey, authority)),
@@ -105,6 +106,26 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "post_comment",
+    );
+    add(
+      tool(
+        "set_goal",
+        "Draft or refine the task GOAL when it is still unspecified (the triage-gate placeholder). Use it to write the scope/acceptance criteria you have determined — e.g. after a human accepts your offer to draft the scope, or when the task title gives enough signal to specify it yourself at triage. It fills only an UNSPECIFIED goal; it will refuse to overwrite an already-specified goal (open an edit_goal packet to propose a change to a real goal). Downstream agents re-anchor on the new goal.",
+        {
+          goal: z.string().describe("The full drafted goal / scope + acceptance criteria."),
+          reason: z.string().optional().describe("One line on why this scope — shown on the timeline."),
+        },
+        async (args) =>
+          resultText(
+            await operatorSetGoal(
+              db,
+              ctx,
+              { ...base, goal: prose(args.goal), ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              authority,
+            ),
+          ),
+      ),
+      "set_goal",
     );
   }
 

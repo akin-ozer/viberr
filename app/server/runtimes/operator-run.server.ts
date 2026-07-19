@@ -19,6 +19,7 @@ import {
   operatorEngageAgent,
   operatorOpenPacket,
   operatorPostComment,
+  operatorSetGoal,
   operatorPromptAgentGeneric,
   operatorRunAgent,
   operatorSnapshot,
@@ -34,7 +35,10 @@ import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
-import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import {
+  DEFAULT_GOAL,
+  type TaskMutationContext,
+} from "~/server/tasks/task-actions.server";
 import {
   isBackendAvailable,
   simulatedRuntimePermitted,
@@ -414,6 +418,9 @@ const OPERATOR_PLAN_TOOLS = [
   // Withdraw YOUR OWN open packet when it became moot (its asked-for input was
   // provided out-of-band, e.g. a human edited the goal). `reason` explains why.
   "resolve_packet",
+  // Draft the task GOAL when it is still the unspecified triage placeholder
+  // (`text` = the drafted goal). Fills only an unspecified goal.
+  "set_goal",
   // Generic engagement actions (generic-agents phase 3): `delivers` selects
   // the engagement shape (true = the delivering builder; false = supporting,
   // e.g. verdict-capable review).
@@ -770,6 +777,16 @@ async function executeCodexPlan(
             { ...base, ...(a.reason ? { reason: a.reason } : a.text ? { reason: a.text } : {}) },
             authority,
           );
+          break;
+        case "set_goal":
+          // `text` carries the drafted goal.
+          if (a.text)
+            await operatorSetGoal(
+              db,
+              ctx,
+              { ...base, goal: a.text, ...(a.reason ? { reason: a.reason } : {}) },
+              authority,
+            );
           break;
       }
     } catch (error) {
@@ -1272,6 +1289,13 @@ export function buildOperatorSystemPrompt(
  * decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we execute through
  * the same capability-gated actions.
  */
+/** The task goal is still the unspecified triage placeholder (or blank) — the
+ * operator must draft it (set_goal) before prompting any agent against it. */
+function goalIsUnspecified(goal: string): boolean {
+  const g = goal.trim();
+  return g === "" || g === DEFAULT_GOAL.trim();
+}
+
 export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
   trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
@@ -1299,7 +1323,13 @@ export function buildCodexOperatorPrompt(
         "review REQUESTED CHANGES, re-prompt the specialist and QUOTE the reviewer's specific findings in the " +
         "action's `text` (the specialist does not see this report otherwise). Only re-prompt the same agent " +
         "(prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not prompt just to repeat yourself."
-      : "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
+      : (goalIsUnspecified(snapshot.goal)
+          ? "THE GOAL IS UNSPECIFIED (still the triage placeholder). FIRST specify it: add a `set_goal` action whose " +
+            "`text` is a concrete scope + acceptance criteria drafted from the title/context (or open an `edit_goal` " +
+            "packet if you genuinely need the human to provide scope, and stop). Never prompt an agent against an " +
+            "unspecified goal. THEN "
+          : "") +
+        "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
         "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
         "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
         "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
@@ -1393,9 +1423,17 @@ export function buildOperatorTurnPrompt(
     );
   }
 
+  const goalUnspecified = goalIsUnspecified(snapshot.goal);
+  const goalStep = goalUnspecified
+    ? "0. THE GOAL IS UNSPECIFIED (it is still the triage placeholder). Specify it FIRST: call set_goal " +
+      "with a concrete scope + acceptance criteria drafted from the title and context — OR, if you genuinely " +
+      "need the human to provide scope, open an `edit_goal` decision packet and STOP. Never prompt an agent " +
+      "against an unspecified goal.\n"
+    : "";
   return (
     header +
     "Do this now:\n" +
+    goalStep +
     "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
     "2. Post a brief plan comment.\n" +
     "3. TRIGGER the right agent for THIS stage with a concrete, task-related directive, addressed to it by name (\"@dev implement …\"):\n" +
