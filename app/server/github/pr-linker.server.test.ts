@@ -132,6 +132,44 @@ describe("findPrForBranch", () => {
       expect(result.pr.state).toBe("merged");
       expect(result.pr.checks).toBeNull(); // check-runs route absent → 404 → null
     }
+    // F26 fail-safe: the branch-head lookup route is absent (→ 404), so a
+    // terminal PR still links (legitimate accepted/merged case is preserved).
+  });
+
+  it("F26: a stale terminal PR on a branch that MOVED ON is not linked (opens fresh)", async () => {
+    // A reused branch: its only PR (#35) merged long ago at `oldsha`, but the
+    // branch has since been force-pushed to `newsha` for a new delivery. The
+    // merged PR must NOT be linked — the caller opens a fresh PR instead.
+    const { client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          { number: 35, title: "[VIB-6] old merged work", state: "closed", merged_at: "2026-07-17T20:00:00Z", head: { sha: "oldsha" } },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/35`]: {
+        body: { number: 35, state: "closed", merged: true, merged_at: "2026-07-17T20:00:00Z", head: { sha: "oldsha" } },
+      },
+      [`GET ${REPO_PATH}/branches/vib-6`]: { body: { commit: { sha: "newsha" } } },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-6");
+    expect(result.status).toBe("none");
+  });
+
+  it("F26: a terminal PR whose head STILL matches the branch is linked (merged/divergence case)", async () => {
+    const { client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          { number: 40, title: "[VIB-7] merged out of band", state: "closed", merged_at: "2026-07-18T10:00:00Z", head: { sha: "samesha" } },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/40`]: {
+        body: { number: 40, state: "closed", merged: true, merged_at: "2026-07-18T10:00:00Z", head: { sha: "samesha" } },
+      },
+      [`GET ${REPO_PATH}/branches/vib-7`]: { body: { commit: { sha: "samesha" } } },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-7");
+    expect(result.status).toBe("found");
+    if (result.status === "found") expect(result.pr.number).toBe(40);
   });
 
   it("maps a closed-unmerged PR to 'closed' (risk pill)", async () => {

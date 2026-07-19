@@ -146,6 +146,22 @@ Legend: `[BUG]` broken/incorrect · `[MOCK]` unwired/placeholder · `[POOR]` wor
 - **F20 [POOR] board rescan authorizes 1 project but reprojects whole instance; applyRecommendation
   reads/throws before authz; lossy roleToSlug on encode; malformed-heading timeline drops.**
 
+### F26 [BUG-edge, found in Round-2 testing] Reused branch links a STALE merged/closed PR instead of opening a fresh one
+- Live: VIB-6 (a fresh test task) force-pushed branch `vib-6` with a NEW commit (281737d), but Viberr
+  LINKED the pass-8 **merged PR #35** ("Add pass-8 smoke-test note doc") — so the reviewer was pointed
+  at a wrong, already-merged PR instead of a fresh PR for the actual delivery.
+- Root cause: `findPrForBranch` (pr-linker.server.ts:108) queries `state:"all"` (:120) and takes the
+  NEWEST PR of ANY state (:144) — so a branch whose only PR is merged/closed links that stale PR.
+- Scope: only reachable when a task branch is REUSED (same `vib-N` as a prior task with a merged PR).
+  Normal monotonic `nextTaskNumber` prevents branch reuse; my test hit it because docker-data's
+  `nextTaskNumber` collided VIB-6 with pass-8's VIB-6.
+- **FIXED** (pr-linker.server.ts): when the newest PR for a branch is terminal (`state:"closed"` —
+  merged or closed), `findPrForBranch` now fetches the branch's current HEAD and links the PR ONLY if
+  its head SHA still matches (the legitimate accepted / merged-out-of-band divergence case); if the
+  branch has advanced past it, returns `none` so `openTaskPr` opens a fresh PR. Fail-safe: if the
+  branch head can't be read (head branch auto-deleted on merge), falls through to the old behavior.
+  +2 unit tests (stale→none, matching-head→found). Found live in Round-2 testing (VIB-6/PR#35).
+
 ### F21 [DOC] README "Known gaps" is stale — 3 of 9 already closed in code
 - #5 stub tasks (DEP-31/BIL-9, not BIL-7) ARE seeded; #6 home GitHub tile reads real connections store;
   #7 MCP-credentials UI IS built (sealed AES-256-GCM); #1 profile email/nudge prefs were removed (not
