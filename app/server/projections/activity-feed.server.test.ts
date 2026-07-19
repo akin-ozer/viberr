@@ -23,7 +23,7 @@ function seedStream(store: ReturnType<typeof setupTestStore>) {
       {
         occurredAt: "2026-07-02T09:41:00.000Z",
         type: "completion",
-        actor: { kind: "agent", backend: "codex", role: "Developer" },
+        actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" },
         title: "Completion report",
         text: "Implemented `attach` flow.",
         toAgent: false,

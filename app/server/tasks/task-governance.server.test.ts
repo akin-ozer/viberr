@@ -6,7 +6,10 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import type { TaskPacket } from "~/schemas/task-file.schema";
+import {
+  deliveringEngagement,
+  type TaskPacket,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -15,7 +18,7 @@ import { getBoard } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
-  recordReviewerVerdict,
+  recordAgentCompletion,
   reorderTask,
   resolvePacket,
   transitionStage,
@@ -722,7 +725,9 @@ describe("resolvePacket kind matrix", () => {
         stage: "impl",
         waiting: "human",
         readiness: "blocked",
-        specialist: { profileId: "dev", backend: "codex", role: "developer" },
+        engagements: [
+          { profileId: "dev", backend: "codex", role: "developer", delivers: true },
+        ],
       },
       RETRY_PACKET,
     );
@@ -757,7 +762,7 @@ describe("resolvePacket kind matrix", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("claude");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("claude");
     const texts = file.parsed.timeline.map((e) => e.text);
     expect(texts.some((t) => t.includes("switched from Codex"))).toBe(true);
     expect(
@@ -962,7 +967,31 @@ describe("classifyReviewerVerdict (F4 — reviewer verdict → quality signal)",
   });
 });
 
-describe("recordReviewerVerdict — failing verdict drops a stale accept-completion rec (pass-8)", () => {
+describe("recordAgentCompletion — failing verdict drops a stale accept-completion rec (pass-8)", () => {
+  /** The reviewer completion: verdict resolved BY THE CALLER (the classifier
+   *  over the same reply — the old recordReviewerVerdict intent), reply posted
+   *  atomically with it. */
+  async function recordReviewerReply(store: TestStore, replyText: string) {
+    await recordAgentCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      {
+        actorRef: {
+          kind: "agent",
+          backend: "claude",
+          profileId: "reviewer",
+          roleHint: "Review & validation",
+        },
+        runId: "run_rv1",
+        replyText,
+        verdict: classifyReviewerVerdict(replyText),
+        question: null,
+      },
+    );
+  }
+
   it("clears accept_completion recommendations when the reviewer requests changes", async () => {
     const store = prepared();
     // Review stage, previously clean (validation healthy) with a pending
@@ -975,11 +1004,8 @@ describe("recordReviewerVerdict — failing verdict drops a stale accept-complet
         { id: "rec-tr", kind: "transition", toStageId: "review", label: "Move to Review", detail: "" },
       ],
     });
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
+    await recordReviewerReply(
+      store,
       "Requesting changes: the heading is ALL CAPS and the Scope blockquote is missing.",
     );
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -997,13 +1023,7 @@ describe("recordReviewerVerdict — failing verdict drops a stale accept-complet
         { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
       ],
     });
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      "Approve — looks good, all four checks pass.",
-    );
+    await recordReviewerReply(store, "Approve — looks good, all four checks pass.");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.validation).toBe("healthy");
     expect(fm.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);

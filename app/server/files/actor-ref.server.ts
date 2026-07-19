@@ -3,32 +3,37 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
 /**
  * Actor-reference codec for the file store (contracts §3.1).
  *
- *   human    →  user:u_ab12cd34ef (Arda Kaya)     name snapshot optional
- *   agent    →  agent:codex/developer             backend "/" role-slug
+ *   human    →  user:u_ab12cd34ef (Arda Kaya)      name snapshot optional
+ *   agent    →  agent:codex/reviewer (Review & validation)
  *   operator →  operator
  *   system   →  system:policy-engine
  *
- * The userId is the identity (ruling 6); the parenthesized display name is a
- * human-readability snapshot used as fallback when the user row is gone.
+ * The userId / profileId is the identity (ruling 6 + generic-agents D7); the
+ * parenthesized display snapshot is a human-readability fallback used when
+ * the user row / profile is gone.
+ *
+ * AGENT REFS (D7): keyed by PROFILE ID, never by role string. The previous
+ * `agent:<backend>/<role-slug>` form derived identity from prose — VIB-12:
+ * the reviewer role "Review & validation" slugged to `review-&-validation`,
+ * a strict `[A-Za-z][\w-]*` decoder rejected the `&`, decode returned null,
+ * and the timeline parser silently DROPPED the reviewer's comment on every
+ * re-parse. Legacy refs still decode (the slug becomes the profileId, role
+ * hint null); `slugToRole` renders them exactly as before.
+ *
+ * DECODE NEVER RETURNS NULL: an unrecognized ref decodes to
+ * `{ kind: "unknown", raw }` which re-encodes verbatim — a malformed or
+ * future-format author can never cost an event again.
  */
 
 const HUMAN_RE = /^user:(\S+)(?:\s+\((.+)\))?$/;
-// The role slug is whatever roleToSlug emits: a whitespace-collapsed lowercase
-// string that CAN legitimately contain punctuation (the `reviewer` profile's
-// role is "Review & validation" → "review-&-validation"). Decode must accept
-// the whole slug up to end-of-ref — a strict `[A-Za-z][\w-]*` rejected the `&`,
-// so decodeActorRef returned null and the timeline parser SKIPPED (dropped) the
-// event. A reviewer's reply comment vanished on every re-parse (VIB-12): its
-// serialized `agent:claude/review-&-validation` header failed to decode, so the
-// next read-modify-write's base — and the projected timeline — lost it. The
-// slug never contains the ` · ` field separator (whitespace is collapsed to
-// `-`), so matching to `$` is unambiguous.
-const AGENT_RE = /^agent:(codex|claude)\/(.+)$/;
+// profileId = one non-whitespace token after the backend; the optional
+// parenthesized suffix is the role display snapshot. The token never contains
+// the ` · ` heading separator (encode sanitizes), so matching is unambiguous.
+const AGENT_RE = /^agent:(codex|claude)\/(\S+)(?:\s+\((.+)\))?$/;
 const SYSTEM_RE = /^system:([A-Za-z][\w-]*)$/;
 
+/** Slug-sanitize an id/role for the ref token: whitespace → `-`, never empty. */
 export function roleToSlug(role: string): string {
-  // Never empty — an empty slug would serialize to `agent:codex/` and fail to
-  // decode (the event would then be dropped as an unrecognized actor).
   return role.trim().toLowerCase().replace(/\s+/g, "-") || "agent";
 }
 
@@ -46,23 +51,47 @@ export function systemIdToName(systemId: string): string {
   return words ? words[0]!.toUpperCase() + words.slice(1) : "System";
 }
 
+/** Display role for an agent ref: the stored snapshot, else the un-slugged
+ * profileId (which renders LEGACY role-slug refs exactly as they always did:
+ * `review-&-validation` → "Review & validation"). */
+export function agentRoleDisplay(ref: {
+  profileId: string;
+  roleHint: string | null;
+}): string {
+  return ref.roleHint ?? slugToRole(ref.profileId);
+}
+
+/** A display hint must never contain a newline or the ` · ` heading separator
+ * (either would corrupt the event heading it is embedded in). */
+function sanitizeHint(hint: string): string {
+  return hint.replace(/\s*·\s*/g, " - ").replace(/\s*\n\s*/g, " ").trim();
+}
+
 export function encodeActorRef(ref: FileActorRef): string {
   switch (ref.kind) {
     case "human":
       return ref.nameHint
-        ? `user:${ref.userId} (${ref.nameHint})`
+        ? `user:${ref.userId} (${sanitizeHint(ref.nameHint)})`
         : `user:${ref.userId}`;
-    case "agent":
-      return `agent:${ref.backend}/${roleToSlug(ref.role)}`;
+    case "agent": {
+      const id = roleToSlug(ref.profileId);
+      return ref.roleHint
+        ? `agent:${ref.backend}/${id} (${sanitizeHint(ref.roleHint)})`
+        : `agent:${ref.backend}/${id}`;
+    }
     case "operator":
       return "operator";
     case "system":
       return `system:${ref.systemId}`;
+    case "unknown":
+      return ref.raw;
   }
 }
 
-/** Returns null for unrecognized refs (caller records a diagnostic). */
-export function decodeActorRef(raw: string): FileActorRef | null {
+/** Total: every input decodes; unrecognized refs become `unknown` (verbatim
+ * round-trip) rather than null — the parser never drops an event over its
+ * author again. */
+export function decodeActorRef(raw: string): FileActorRef {
   const text = raw.trim();
   if (text === "operator") return { kind: "operator" };
 
@@ -76,14 +105,15 @@ export function decodeActorRef(raw: string): FileActorRef | null {
     return {
       kind: "agent",
       backend: agent[1] as "codex" | "claude",
-      role: slugToRole(agent[2]!),
+      profileId: agent[2]!,
+      roleHint: agent[3] ?? null,
     };
   }
 
   const system = SYSTEM_RE.exec(text);
   if (system) return { kind: "system", systemId: system[1]! };
 
-  return null;
+  return { kind: "unknown", raw: text };
 }
 
 /** Backend → display name (mock contract: Codex / Claude Code). */

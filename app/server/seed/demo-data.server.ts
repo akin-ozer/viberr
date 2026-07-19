@@ -84,10 +84,29 @@ export type SeedUserIds = Record<SeedPerson["handle"], string>;
 
 // ------------------------------------------------------------- actor refs
 
-const codexRef = (role: string) =>
-  ({ kind: "agent", backend: "codex", role }) as const;
-const claudeRef = (role: string) =>
-  ({ kind: "agent", backend: "claude", role }) as const;
+// Seed profile roles — the ONE place a seeded ref's role snapshot comes from
+// (mismatched hand-written snapshots shielded the VIB-12 codec bug).
+const SEED_PROFILE_ROLES: Record<string, string> = {
+  operator: "Task coordinator",
+  developer: "Implementation",
+  reviewer: "Review & validation",
+};
+const seedRole = (profileId: string) =>
+  SEED_PROFILE_ROLES[profileId] ?? profileId;
+const codexRef = (profileId: string) =>
+  ({
+    kind: "agent",
+    backend: "codex",
+    profileId,
+    roleHint: seedRole(profileId),
+  }) as const;
+const claudeRef = (profileId: string) =>
+  ({
+    kind: "agent",
+    backend: "claude",
+    profileId,
+    roleHint: seedRole(profileId),
+  }) as const;
 const OP = { kind: "operator" } as const;
 const POLICY_ENGINE = { kind: "system", systemId: "policy-engine" } as const;
 
@@ -113,7 +132,7 @@ const CLAUDE_REVIEWER_RENDER: ActorRender = {
   kind: "agent",
   backend: "claude",
   name: "Claude Code",
-  role: "Reviewer",
+  role: "Review & validation",
 };
 
 // ------------------------------------------------------- agent profiles
@@ -173,6 +192,7 @@ function profile(
   return {
     frontmatter: {
       ...base,
+      desc: description,
       spanAll: base.spanAll ?? false,
       capabilities,
       extras,
@@ -220,8 +240,8 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request"],
-      recommend: ["Move the task to Review", "Report a validation verdict"],
+      direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Comment on the task", "Ask the human a question"],
+      recommend: ["Move the task to Review"],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
     "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
@@ -241,7 +261,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // The single quality specialist: reviews the diff AND authors/runs the
       // validation suite (the former Tester role is folded in here).
-      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task"],
+      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task", "Ask the human a question", "Report a validation verdict"],
       recommend: ["Approve the review", "Request changes"],
       // The reviewer must NOT push/commit — use the exact catalog label so this
       // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
@@ -394,8 +414,8 @@ function fm(input: {
   readiness: TaskFrontmatter["readiness"];
   waiting: TaskFrontmatter["waiting"];
   owner: string | null;
-  specialist: TaskFrontmatter["specialist"];
-  reviewers: TaskFrontmatter["reviewers"];
+  specialist: { profileId: string; backend: "codex" | "claude"; role: string } | null;
+  reviewers: { profileId: string; backend: "codex" | "claude"; role: string }[];
   operator: TaskFrontmatter["operator"];
   urgent: boolean;
   validation: TaskFrontmatter["validation"];
@@ -415,8 +435,12 @@ function fm(input: {
     readiness: input.readiness,
     waiting: input.waiting,
     ownerUserId: input.owner,
-    specialist: input.specialist,
-    reviewers: input.reviewers,
+    // G1: the seed keeps the specialist/reviewers authoring shape; canonical
+    // frontmatter is the uniform engagements list (delivers = the specialist).
+    engagements: [
+      ...(input.specialist ? [{ ...input.specialist, delivers: true }] : []),
+      ...input.reviewers.map((r) => ({ ...r, delivers: false })),
+    ],
     operator: input.operator,
     recommendations: input.recommendations ?? [],
     schedules: [],
@@ -433,9 +457,9 @@ function fm(input: {
 }
 
 const dev = (backend: "codex" | "claude") =>
-  ({ profileId: "developer", backend, role: "Developer" }) as const;
+  ({ profileId: "developer", backend, role: seedRole("developer") }) as const;
 const reviewer = (backend: "codex" | "claude") =>
-  ({ profileId: "reviewer", backend, role: "Reviewer" }) as const;
+  ({ profileId: "reviewer", backend, role: seedRole("reviewer") }) as const;
 
 export function seedTasks(ids: SeedUserIds): SeedTask[] {
   return [
@@ -488,23 +512,23 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(9, 58), type: "comment", actor: humanRef(ids, "arda"), title: null, toAgent: true, evidence: null,
           text: "@operator if the PAT scope is the only blocker, let's widen it rather than block the whole task." },
-        { occurredAt: todayAt(9, 41), type: "completion", actor: codexRef("Developer"), title: "Completion report", toAgent: false,
+        { occurredAt: todayAt(9, 41), type: "completion", actor: codexRef("developer"), title: "Completion report", toAgent: false,
           text: "Implemented repo attach, branch creation, and PR-sync projection. Validation green except one snapshot intentionally updated.",
           evidence: [
             { label: "unit/policy_gate_test", add: "+14", del: "0" },
             { label: "integration/pr_sync_test", add: "+38", del: "−4" },
           ] },
-        { occurredAt: todayAt(9, 39), type: "github", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(9, 39), type: "github", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`." },
         { occurredAt: todayAt(9, 38), type: "policy", actor: POLICY_ENGINE, title: null, toAgent: false, evidence: null,
           text: "**Policy violation:** active PAT is missing `pull_request:write`. Auto-sync after merge will fail." },
-        { occurredAt: todayAt(9, 20), type: "quality", actor: claudeRef("Reviewer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(9, 20), type: "quality", actor: claudeRef("reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag:** snapshot `task_projection.json` changed — confirm the new compact shape is intended before review." },
         { occurredAt: todayAt(9, 2), type: "transition", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Transition request:** move VIB-142 from In Progress to Review. Branch healthy, evidence attached." },
         { occurredAt: todayAt(8, 30), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "Re-engaged **Claude Code (Reviewer)** as reviewer; re-anchored on `task.md` before review." },
-        { occurredAt: todayAt(8, 12), type: "comment", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(8, 12), type: "comment", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Branch work complete. Handing back to operator for the review boundary." },
         { occurredAt: yesterdayAt(15, 12), type: "assign", actor: humanRef(ids, "arda"), title: null, toAgent: false, evidence: null,
           text: "Took task ownership — owner is the human reviewer and acceptance authority for this task." },
@@ -560,11 +584,11 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       goal: "Apply the compression threshold so long task histories stay readable: collapse routine chatter, keep typed important events, preserve continuity for re-anchoring.",
       packet: null,
       timeline: [
-        { occurredAt: todayAt(10, 24), type: "comment", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(10, 24), type: "comment", actor: claudeRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Threshold sweep running against the 40-event fixture. Typed events survive every compression pass so far." },
         { occurredAt: todayAt(9, 47), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "Re-anchored **Codex (Reviewer)** on `task.md` for a second opinion on threshold defaults." },
-        { occurredAt: todayAt(9, 31), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(9, 31), type: "github", actor: claudeRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed 2 commits to `vib-151-timeline-compression` — compaction map and threshold config." },
         { occurredAt: yesterdayAt(14, 20), type: "assign", actor: humanRef(ids, "selin"), title: null, toAgent: false, evidence: null,
           text: "Took task ownership ahead of the review boundary." },
@@ -596,7 +620,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(10, 12), type: "comment", actor: humanRef(ids, "deniz"), title: null, toAgent: false, evidence: null,
           text: "Following from the platform team — this packet budget will matter for our ops rollout too." },
-        { occurredAt: todayAt(10, 2), type: "comment", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(10, 2), type: "comment", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Brevity linter drafted — packets past the length budget bounce back to the operator with a diff of what to cut." },
         { occurredAt: todayAt(8, 58), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "Assigned **Codex (Developer)** as primary specialist — branch `vib-153-operator-brevity` created." },
@@ -643,13 +667,13 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(10, 31), type: "blocked", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Blocked decision:** provider history unavailable and two rehydrate checks failing — recovery packet raised for human review." },
-        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("Reviewer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(10, 18), type: "quality", actor: codexRef("reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag:** the rehydrate path drops evidence references recorded before the continuity break." },
         { occurredAt: todayAt(10, 5), type: "agent", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Continuity warning:** runtime history unavailable — re-anchored **Claude Code (Developer)** on the canonical task file." },
-        { occurredAt: todayAt(9, 52), type: "github", actor: claudeRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(9, 52), type: "github", actor: claudeRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Pushed `vib-160-rehydrate` — recovery shim and continuity marker." },
-        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("Reviewer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: yesterdayAt(12, 10), type: "quality", actor: codexRef("reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Validation failing** on the rehydrate path — evidence attached, re-run requested." },
         { occurredAt: yesterdayAt(11, 20), type: "comment", actor: humanRef(ids, "murat"), title: null, toAgent: false, evidence: null,
           text: "Opened the Developer runtime session to debug continuity — session recorded per audit policy." },
@@ -679,9 +703,9 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: todayAt(9, 12), type: "transition", actor: OP, title: null, toAgent: false, evidence: null,
           text: "**Transition request:** move VIB-145 from In Progress to Review — SSE fan-out demo recorded, evidence attached." },
-        { occurredAt: todayAt(8, 51), type: "comment", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: todayAt(8, 51), type: "comment", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Review build is green across the three desktop browser targets. Reviewer thread can start on the diff." },
-        { occurredAt: yesterdayAt(16, 40), type: "github", actor: codexRef("Developer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: yesterdayAt(16, 40), type: "github", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Opened **PR #311** from `vib-145-sse-revalidate` into `main`." },
       ],
     },
@@ -737,7 +761,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
       timeline: [
         { occurredAt: mar30At(15, 2), type: "github", actor: humanRef(ids, "murat"), title: null, toAgent: false, evidence: null,
           text: "Merged **PR #287** — the typed important-event schema is live." },
-        { occurredAt: mar30At(14, 31), type: "quality", actor: claudeRef("Reviewer"), title: null, toAgent: false, evidence: null,
+        { occurredAt: mar30At(14, 31), type: "quality", actor: claudeRef("reviewer"), title: null, toAgent: false, evidence: null,
           text: "**Quality flag resolved:** typed payloads carry actor identity and task references." },
       ],
     },
@@ -812,8 +836,8 @@ export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
         readiness: "ready",
         waiting: "human",
         owner: ids.arda,
-        specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-        reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+        specialist: { profileId: "developer", backend: "codex", role: seedRole("developer") },
+        reviewers: [{ profileId: "reviewer", backend: "claude", role: seedRole("reviewer") }],
         operator: { assignedAtStageId: "impl" },
         urgent: false,
         validation: "healthy",
@@ -854,7 +878,7 @@ export function seedStubTasks(ids: SeedUserIds): SeedStubTask[] {
         readiness: "ready",
         waiting: "human",
         owner: null,
-        specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+        specialist: { profileId: "developer", backend: "codex", role: seedRole("developer") },
         reviewers: [],
         operator: { assignedAtStageId: "todo" },
         urgent: false,

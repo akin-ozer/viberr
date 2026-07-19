@@ -1,18 +1,22 @@
-import { capabilityById } from "~/shared/capabilities";
+import {
+  UNIFIED_CAP_CATALOG,
+  type CapabilityKind,
+} from "~/shared/capabilities";
 
 /**
- * The MODAL capability catalog (design/html-app/app/agents.jsx CAP_CATALOG,
- * ported verbatim) re-keyed onto the shared id-based CAP_CATALOG
- * (app/shared/capabilities.ts — orchestrator ruling 7). The mock's short ids
- * (`read`, `merge`, …) are replaced by the canonical catalog ids; labels are
- * rendered FROM the shared catalog so the two can never drift (asserted in
- * capability-catalog.test.ts).
+ * Per-kind editor views DERIVED from the unified capability catalog
+ * (app/shared/capabilities.ts UNIFIED_CAP_CATALOG — generic-agents plan,
+ * 2026-07-19). The former hand-maintained CAP_MODAL_CATALOG /
+ * OPERATOR_CAP_CATALOG pair is now a projection: `kinds` + `group` on the
+ * unified entry decide which editor shows which toggle, so the two views can
+ * never drift from the catalog (asserted in capability-catalog.test.ts).
  *
  * Grouping + per-capability default modes drive the create/edit-profile
  * modal accordion and the CapabilityMatrixModal row groups. Capabilities a
- * profile holds that are OUTSIDE this curated set (e.g. the operator's
- * coordination actions) surface in the matrix's "Other actions" group and
- * are preserved untouched by the edit modal.
+ * profile holds that are OUTSIDE its kind's toggle set surface in the
+ * matrix's "Other actions" group and are preserved untouched by the editor
+ * (pass-4 ruling 7 — advisory ids with no runtime consumer get no toggle;
+ * `group: null` in the unified catalog).
  */
 
 export type CapMode = "direct" | "recommend" | "human" | "off";
@@ -29,88 +33,46 @@ export interface ModalCapGroup {
   caps: ModalCap[];
 }
 
-function cap(id: string, def: Exclude<CapMode, "off">): ModalCap {
-  const found = capabilityById(id);
-  return { id, label: found ? found.label : id, def };
+/** Editor view for one profile kind: the unified entries applicable to that
+ * kind that carry a toggle group, in catalog order, grouped. */
+function editorCatalog(kind: CapabilityKind): readonly ModalCapGroup[] {
+  const groups: ModalCapGroup[] = [];
+  for (const entry of UNIFIED_CAP_CATALOG) {
+    if (!entry.kinds.includes(kind) || entry.group === null) continue;
+    // `off` defaults still render a toggle; the editor seeds them unchecked.
+    const def = (entry.defaultMode === "off" ? "direct" : entry.defaultMode) as
+      Exclude<CapMode, "off">;
+    let group = groups.find((g) => g.group === entry.group);
+    if (!group) {
+      group = { group: entry.group, caps: [] };
+      groups.push(group);
+    }
+    group.caps.push({ id: entry.id, label: entry.label, def });
+  }
+  return groups;
 }
 
-// The toggleable specialist catalog holds ONLY capabilities whose mode is
-// actually CONSULTED at runtime (pass-4 ruling 7 — "prune the fake toggles").
-// Every id here binds via the specialist tool denylist
-// (specialist-tool-policy.ts) or is a structural always-human lock. The former
-// advisory rows (read-task-repo, run-validation-suites, author-test-cases,
-// attach-evidence-references, post-quality-flags, comment-on-task,
-// report-validation-verdict, approve-review, request-changes,
-// flag-underspecified-tasks, move-task-to-review) had ZERO runtime references —
-// setting them to human/off did nothing — so they are no longer presented as
-// toggles. A profile that still carries them shows them read-only + advisory in
-// the capability matrix's "Other actions" group.
-export const CAP_MODAL_CATALOG: readonly ModalCapGroup[] = [
-  {
-    group: "Repository & execution",
-    caps: [
-      cap("create-task-branch", "direct"),
-      cap("commit-push-branch", "direct"),
-      // XS-8: `execute-code-or-write-repo` IS enforced (its withhold removes
-      // Edit/Write/MultiEdit/NotebookEdit + denies git commit) but was
-      // previously inexpressible in the modal.
-      cap("execute-code-or-write-repo", "direct"),
-      // R7-5: `open-review-pr` defaults to `direct` ("Allowed"), not `recommend`
-      // — the specialist picker no longer offers `recommend` (it is meaningless
-      // for a specialist; a specialist just opens the PR directly). The former
-      // `recommend` default coerces to `direct` on read anyway.
-      cap("open-review-pr", "direct"),
-    ],
-  },
-  {
-    group: "Reserved for humans",
-    caps: [
-      cap("merge-pull-request", "human"),
-      cap("transition-to-done", "human"),
-      cap("change-project-policy", "human"),
-    ],
-  },
-];
+/** The generic-AGENT editor catalog (every non-operator profile). */
+export const CAP_MODAL_CATALOG: readonly ModalCapGroup[] = editorCatalog("agent");
 
-/** Every capability id the modal governs (others are preserved untouched). */
+/** Every capability id the agent editor governs (others preserved untouched). */
 export const MODAL_CAP_IDS: ReadonlySet<string> = new Set(
   CAP_MODAL_CATALOG.flatMap((g) => g.caps.map((c) => c.id)),
 );
 
-/** Default mode per modal capability (create-mode seeding). */
+/** Default mode per agent capability (create-mode seeding) — honors the
+ * unified catalog's real default (e.g. report-validation-verdict seeds `off`
+ * so a new profile never silently acquires acceptance-veto power — G2/R2). */
 export const CAP_MODAL_DEFAULTS: Readonly<Record<string, CapMode>> =
   Object.fromEntries(
-    CAP_MODAL_CATALOG.flatMap((g) => g.caps.map((c) => [c.id, c.def])),
+    UNIFIED_CAP_CATALOG.filter(
+      (e) => e.kinds.includes("agent") && e.group !== null,
+    ).map((e) => [e.id, e.defaultMode]),
   );
 
-/**
- * The OPERATOR's coordination capabilities — what the operator RBAC editor
- * shows when editing the operator profile (assignment recommend/assign/off,
- * governance modes). Distinct from the specialist catalog above.
- */
-export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] = [
-  {
-    group: "Assignment",
-    caps: [
-      cap("assign-primary-specialist", "direct"),
-      cap("summon-reviewers", "direct"),
-    ],
-  },
-  {
-    group: "Coordination",
-    caps: [
-      cap("generate-packets", "direct"),
-      cap("append-typed-events", "direct"),
-    ],
-  },
-  {
-    group: "Permissions",
-    caps: [
-      cap("stage-transitions", "recommend"),
-      cap("completion-for-acceptance", "recommend"),
-    ],
-  },
-];
+/** The OPERATOR editor catalog — derived from the same unified source. */
+export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] =
+  editorCatalog("operator");
 
 /** Every operator capability id the operator editor governs. */
 export const OPERATOR_CAP_IDS: ReadonlySet<string> = new Set(
@@ -120,7 +82,9 @@ export const OPERATOR_CAP_IDS: ReadonlySet<string> = new Set(
 /** Default mode per operator capability. */
 export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
   Object.fromEntries(
-    OPERATOR_CAP_CATALOG.flatMap((g) => g.caps.map((c) => [c.id, c.def])),
+    UNIFIED_CAP_CATALOG.filter(
+      (e) => e.kinds.includes("operator") && e.group !== null,
+    ).map((e) => [e.id, e.defaultMode]),
   );
 
 /** The OPERATOR capability picker's modes — all 4, because `recommend`

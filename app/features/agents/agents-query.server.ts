@@ -68,6 +68,7 @@ export function parseDeploymentDefinition(
   if (typeof raw.effort === "string" && raw.effort) def.effort = raw.effort;
   if (typeof raw.scope === "string") def.scope = raw.scope;
   if (typeof raw.desc === "string") def.desc = raw.desc;
+  if (typeof raw.persona === "string") def.persona = raw.persona;
   const stages = stringArray(raw.stages);
   if (stages) def.stages = stages;
   if (typeof raw.spanAll === "boolean") def.spanAll = raw.spanAll;
@@ -116,6 +117,8 @@ interface TemplateProfile {
   stages: string[];
   spanAll: boolean;
   resources: { skills: string[]; mcps: string[]; kb: string[] };
+  /** Short scannable frontmatter `desc` (empty on older templates). */
+  desc: string;
   description: string;
 }
 
@@ -145,6 +148,8 @@ function readTemplate(
       mcps: fm.resources.mcps,
       kb: fm.resources.kb,
     },
+    /** Short scannable frontmatter desc (may be empty on older templates). */
+    desc: fm.desc,
     description: parsed.description,
   };
 }
@@ -205,7 +210,15 @@ export function effectiveProfileView(
     modelKnown,
     effort: def?.effort ?? "",
     scope: def?.scope ?? template?.scope ?? "",
-    desc: def?.desc ?? template?.description ?? "",
+    // Short scannable copy (operator selection + cards): deployment override,
+    // else the template's dedicated `desc` field, else the body (legacy
+    // templates whose body IS the short description).
+    desc: def?.desc ?? (template?.desc || template?.description) ?? "",
+    // The profile's long persona/instructions (D6): deployment override
+    // first (project-created/edited profiles), else the template BODY —
+    // startAgentRun feeds it to the run when no agents/definitions/<id>.md
+    // override ships.
+    definition: def?.persona ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],
     spanAll: def?.spanAll ?? template?.spanAll ?? false,
     // Operator only: default autonomy (supervised unless the deployment sets it).

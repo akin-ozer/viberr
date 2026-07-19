@@ -23,29 +23,33 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     }
   });
 
-  it("carries only runtime-consulted specialist toggles (pass-4 ruling 7 prune)", () => {
+  it("carries only runtime-consulted agent toggles (ruling 7 prune + generic-agents Collaboration)", () => {
     // The toggleable catalog holds ONLY ids whose mode is consulted at runtime:
-    // 4 enforced (create-task-branch, commit-push-branch,
-    // execute-code-or-write-repo, open-review-pr) + 3 always-human. The former
-    // advisory "fake toggles" (read-task-repo, run-validation-suites,
-    // report-validation-verdict, approve-review, request-changes, …) — none of
-    // which had any runtime effect — were removed.
-    expect(MODAL_CAP_IDS.size).toBe(7);
+    // 4 repo-enforced (create-task-branch, commit-push-branch,
+    // execute-code-or-write-repo, open-review-pr) + 3 Collaboration gates
+    // (comment-on-task, ask-human, report-validation-verdict — promoted from
+    // decorative to real agent-toolkit gates by the generic-agents plan, D10)
+    // + 3 always-human. The remaining advisory ids (read-task-repo,
+    // run-validation-suites, approve-review, request-changes, …) still have no
+    // runtime effect and stay matrix-only.
+    expect(MODAL_CAP_IDS.size).toBe(10);
     expect([...MODAL_CAP_IDS].sort()).toEqual(
       [
+        "ask-human",
         "change-project-policy",
+        "comment-on-task",
         "commit-push-branch",
         "create-task-branch",
         "execute-code-or-write-repo",
         "merge-pull-request",
         "open-review-pr",
+        "report-validation-verdict",
         "transition-to-done",
       ].sort(),
     );
-    // The pruned fake toggles are gone.
+    // The pruned fake toggles are still gone.
     for (const gone of [
       "read-task-repo",
-      "report-validation-verdict",
       "approve-review",
       "request-changes",
       "move-task-to-review",
@@ -54,8 +58,14 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     }
     expect(CAP_MODAL_CATALOG.map((g) => g.group)).toEqual([
       "Repository & execution",
+      "Collaboration",
       "Reserved for humans",
     ]);
+    // G2/R2: verdict power is never seeded onto a casually-created profile —
+    // the grant defaults OFF (the seed grants it to the reviewer explicitly).
+    expect(CAP_MODAL_DEFAULTS["report-validation-verdict"]).toBe("off");
+    expect(CAP_MODAL_DEFAULTS["comment-on-task"]).toBe("direct");
+    expect(CAP_MODAL_DEFAULTS["ask-human"]).toBe("direct");
     // XS-8: the enforced "write to the repo" capability is now expressible.
     expect(CAP_MODAL_DEFAULTS["execute-code-or-write-repo"]).toBe("direct");
     // R7-5: `open-review-pr` now defaults to `direct` ("Allowed") — the

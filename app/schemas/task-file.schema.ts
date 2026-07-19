@@ -72,8 +72,9 @@ export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
 
 // ------------------------------------------------------------ sub-shapes
 
-/** Agent reference (specialist/reviewers): profile id is the join key
- * (ruling: never join by role string). backend+role are display data. */
+/** Agent reference: profile id is the join key (ruling: never join by role
+ * string). backend+role are display data. Still the projection JSON shape for
+ * the derived specialist/reviewers columns. */
 export const agentRefSchema = z
   .object({
     profileId: z.string().min(1),
@@ -82,6 +83,39 @@ export const agentRefSchema = z
   })
   .loose();
 export type AgentRef = z.infer<typeof agentRefSchema>;
+
+/**
+ * One agent ENGAGED on a task (generic-agents plan G1, 2026-07-19): the
+ * uniform replacement for the former `specialist` + `reviewers[]` slots. At
+ * most ONE engagement carries `delivers: true` — the workspace/branch/PR
+ * owner (single-writer invariant; the parser coerces extras). Every other
+ * behavior difference comes from the profile's capability grants, never from
+ * which list an agent sits in.
+ */
+export const engagementSchema = z
+  .object({
+    profileId: z.string().min(1),
+    backend: z.enum(["codex", "claude"]),
+    /** Role display snapshot taken from the live profile at engage time. */
+    role: z.string().min(1),
+    delivers: z.boolean().default(false),
+  })
+  .loose();
+export type Engagement = z.infer<typeof engagementSchema>;
+
+/** The single delivering engagement (workspace/branch/PR owner), if any. */
+export function deliveringEngagement(fm: {
+  engagements: Engagement[];
+}): Engagement | null {
+  return fm.engagements.find((e) => e.delivers) ?? null;
+}
+
+/** Every non-delivering engagement (the former "reviewers" position). */
+export function supportingEngagements(fm: {
+  engagements: Engagement[];
+}): Engagement[] {
+  return fm.engagements.filter((e) => !e.delivers);
+}
 
 /** Operator assignment — stage id captured when the operator attached
  * (ruling 16: store the stage id; UI renders "stage <1-based index>"). */
@@ -261,8 +295,8 @@ export const taskFrontmatterSchema = z.object({
   readiness: z.enum(READINESS_VALUES),
   waiting: z.enum(WAITING_VALUES),
   ownerUserId: z.string().nullable(),
-  specialist: agentRefSchema.nullable(),
-  reviewers: z.array(agentRefSchema),
+  /** Engaged agents (G1): one uniform list; ≤1 entry has delivers: true. */
+  engagements: z.array(engagementSchema),
   operator: operatorRefSchema.nullable(),
   /** Pending operator recommendations rendered as one-click action cards. */
   recommendations: z.array(recommendationSchema),
@@ -290,8 +324,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "readiness",
   "waiting",
   "ownerUserId",
-  "specialist",
-  "reviewers",
+  "engagements",
   "operator",
   "recommendations",
   "schedules",
@@ -351,6 +384,90 @@ function tolerant<T>(
     ),
   );
   return fallback;
+}
+
+/**
+ * Engagements parse (G1) with legacy absorption: a pre-engagements task.md
+ * carries `specialist` (→ the delivering engagement) and `reviewers[]` /
+ * `consultants[]` (→ supporting engagements). Legacy keys are absorbed here
+ * and NOT preserved as unknown — the next write emits `engagements` only.
+ * Invariant: at most one `delivers: true` (first wins; extras are demoted
+ * with a diagnostic — never two workspace owners).
+ */
+function parseEngagements(
+  diagnostics: FileDiagnostic[],
+  data: Record<string, unknown>,
+): Engagement[] {
+  let engagements: Engagement[];
+  if (data.engagements !== undefined) {
+    engagements = tolerant(
+      diagnostics,
+      "engagements",
+      data.engagements,
+      taskFrontmatterSchema.shape.engagements,
+      [],
+    );
+  } else {
+    // Legacy slots → engagements. Each ref is validated independently so one
+    // bad reviewer never drops the specialist (or vice versa).
+    engagements = [];
+    const specialist = tolerant(
+      diagnostics,
+      "specialist",
+      data.specialist,
+      agentRefSchema.nullable(),
+      null,
+    );
+    if (specialist) engagements.push({ ...specialist, delivers: true });
+    const reviewers = tolerant(
+      diagnostics,
+      "reviewers",
+      data.reviewers ?? data.consultants,
+      z.array(agentRefSchema),
+      [],
+    );
+    for (const reviewer of reviewers) {
+      engagements.push({ ...reviewer, delivers: false });
+    }
+  }
+  // profileId-uniqueness invariant (defense-in-depth): a profile has at most
+  // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
+  // resolves by the FIRST match), so keep the first occurrence and drop the
+  // rest — with a diagnostic — whatever produced the duplicate (a hand edit or
+  // a missed write path).
+  const seenProfiles = new Set<string>();
+  const deduped: Engagement[] = [];
+  for (const engagement of engagements) {
+    if (seenProfiles.has(engagement.profileId)) {
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.duplicate_engagement",
+          `Profile \`${engagement.profileId}\` is engaged more than once — only the first engagement is kept.`,
+          "engagements",
+        ),
+      );
+      continue;
+    }
+    seenProfiles.add(engagement.profileId);
+    deduped.push(engagement);
+  }
+  let sawDeliverer = false;
+  for (const engagement of deduped) {
+    if (!engagement.delivers) continue;
+    if (!sawDeliverer) {
+      sawDeliverer = true;
+      continue;
+    }
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.multiple_deliverers",
+        `Engagement \`${engagement.profileId}\` also claims delivers — only the first delivering engagement owns the workspace; this one was demoted.`,
+        "engagements",
+      ),
+    );
+    engagement.delivers = false;
+  }
+  return deduped;
 }
 
 /**
@@ -472,22 +589,7 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.ownerUserId,
       null,
     ),
-    specialist: tolerant(
-      diagnostics,
-      "specialist",
-      data.specialist,
-      taskFrontmatterSchema.shape.specialist,
-      null,
-    ),
-    // `reviewers` was formerly `consultants`; read the old key when a
-    // pre-rename task.md hasn't been rewritten yet (back-compat migration).
-    reviewers: tolerant(
-      diagnostics,
-      "reviewers",
-      data.reviewers ?? data.consultants,
-      taskFrontmatterSchema.shape.reviewers,
-      [],
-    ),
+    engagements: parseEngagements(diagnostics, data),
     operator: tolerant(
       diagnostics,
       "operator",
@@ -574,9 +676,10 @@ export function parseTaskFrontmatter(
 
   const unknown: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
-    // `consultants` is the pre-rename alias of `reviewers` — already absorbed
-    // above; don't preserve it as "unknown" or a rewrite would emit both keys.
-    if (k === "consultants") continue;
+    // Legacy engagement slots (`specialist`/`reviewers` and the older
+    // `consultants` alias) are absorbed into `engagements` above; don't
+    // preserve them as "unknown" or a rewrite would emit both forms.
+    if (k === "consultants" || k === "specialist" || k === "reviewers") continue;
     if (!(TASK_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
       unknown[k] = v;
     }
@@ -625,15 +728,35 @@ export function parseTaskPacket(raw: unknown): {
 /**
  * Actor reference variants as encoded in files (contracts §3.1):
  *   humans   →  user:<userId> (Optional Display Name)
- *   agents   →  agent:<backend>/<role-slug>
+ *   agents   →  agent:<backend>/<profileId> (Optional Role Snapshot)
  *   operator →  operator
  *   system   →  system:<id>            (only "system:policy-engine" observed)
+ *
+ * AGENT IDENTITY (generic-agents plan D7, 2026-07-19): the profile id is the
+ * identity — never the role string. VIB-12 proved role-slug identity is a
+ * fragility class: prose-derived slugs drift, punctuation broke decoding, and
+ * a failed decode silently DROPPED the event. The parenthesized role snapshot
+ * mirrors the human nameHint: display fallback when the profile is gone.
+ * Legacy `agent:<backend>/<role-slug>` refs (no parens) decode with the slug
+ * as `profileId` and a null roleHint — display falls back to un-slugging,
+ * which renders legacy refs exactly as before.
+ *
+ * `unknown` (tolerance): an unrecognized actor ref no longer drops its event
+ * (the VIB-12 failure shape) — it parses to `{ kind: "unknown", raw }` and
+ * re-serializes VERBATIM, so unrecognized authors round-trip losslessly.
  */
 export type FileActorRef =
   | { kind: "human"; userId: string; nameHint: string | null }
-  | { kind: "agent"; backend: "codex" | "claude"; role: string }
+  | {
+      kind: "agent";
+      backend: "codex" | "claude";
+      profileId: string;
+      /** Role display snapshot at write time; null on legacy refs. */
+      roleHint: string | null;
+    }
   | { kind: "operator" }
-  | { kind: "system"; systemId: string };
+  | { kind: "system"; systemId: string }
+  | { kind: "unknown"; raw: string };
 
 // -------------------------------------------------- timeline events
 

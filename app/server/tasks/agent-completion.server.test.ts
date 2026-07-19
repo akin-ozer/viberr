@@ -26,8 +26,7 @@ import {
 } from "./task-actions.server";
 import {
   assignReviewer,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
   assignSpecialist,
 } from "./specialist-run.server";
 
@@ -121,7 +120,7 @@ describe("waiting-state bookkeeping (A2)", () => {
       { dataRoot: store.dataRoot },
     );
     expect(taskFile().parsed.frontmatter.waiting).not.toBe("agent");
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -197,8 +196,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: "reviewer",
         role: "Reviewer",
-        kind: "reviewer",
+        delivers: false,
         workdir: null,
         agentHandle: "reviewer",
       },
@@ -229,12 +229,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await applyAgentCompletionEffects(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
         { id: runId, state: "finished", simulated: false },
       );
       const tl = taskFile().parsed.timeline;
       const reviewerComment = tl.find(
-        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+        (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
       );
       const quality = tl.find((e) => e.type === "quality");
       expect(reviewerComment, `reviewer reply must be posted (${wantValidation})`).toBeTruthy();
@@ -268,7 +268,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", role: "Reviewer", kind: "reviewer", workdir: null, agentHandle: "reviewer" },
+      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
       { id: runId, state: "finished", simulated: false },
     );
 
@@ -292,7 +292,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
     const tl = taskFile().parsed.timeline;
     const reviewerComment = tl.find(
-      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.role === "Reviewer",
+      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
     );
     expect(reviewerComment, "reviewer reply must survive the stale-read write").toBeTruthy();
     expect(reviewerComment!.text).toContain("@operator the inventory is verified");
@@ -316,8 +316,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: "developer",
         role: "developer",
-        kind: "primary",
+        delivers: true,
         workdir: null,
         agentHandle: "dev",
       },
@@ -403,8 +404,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "codex",
+        profileId: "developer",
         role: "Developer",
-        kind: "primary",
+        delivers: true,
         workdir: null,
         agentHandle: "dev",
       },
@@ -474,7 +476,7 @@ describe("R7-2 fail-fast through the specialist start path (no fake runs)", () =
     );
     setSimulatedRuntimePermittedForTests(false);
     try {
-      const result = await startSpecialistRun(
+      const result = await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -524,7 +526,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
     // With a directive the simulated reviewer report closes with an explicit
     // "Verdict: **approve**" — the completion hook must classify it and flip
     // validation to healthy without any operator/@mention involvement.
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       {
         projectSlug: store.slug,
@@ -619,7 +621,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
 
   async function runEffects(
     runId: string,
-    kind: "primary" | "reviewer",
+    engagement: { delivers: boolean; profileId?: string },
     state = "finished",
   ): Promise<void> {
     await applyAgentCompletionEffects(
@@ -629,8 +631,9 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
+        profileId: engagement.profileId ?? "developer",
         role: "developer",
-        kind,
+        delivers: engagement.delivers,
         workdir: null,
         agentHandle: "dev",
       },
@@ -641,7 +644,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   it("a successful PRIMARY run withdraws a primary-subject packet, lifts readiness, and audits", async () => {
     await openBlockedPacket([retryPrimary, redirect]);
     const runId = await finishedRunWith("Recovered — the work is delivered.");
-    await runEffects(runId, "primary");
+    await runEffects(runId, { delivers: true });
     const parsed = taskFile().parsed;
     expect(parsed.packet).toBeNull();
     expect(parsed.frontmatter.readiness).toBe("ready");
@@ -661,7 +664,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   it("a FAILED run does not withdraw — the packet stays for the human", async () => {
     await openBlockedPacket([retryPrimary, redirect]);
     const runId = await finishedRunWith("It broke again.");
-    await runEffects(runId, "primary", "error");
+    await runEffects(runId, { delivers: true }, "error");
     expect(taskFile().parsed.packet).not.toBeNull();
   });
 
@@ -671,7 +674,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       redirect,
     ]);
     const runId = await finishedRunWith("More work landed.");
-    await runEffects(runId, "primary");
+    await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).not.toBeNull();
   });
 
@@ -679,21 +682,22 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     await openBlockedPacket([retryReviewer, redirect]);
     // Primary success — different subject, packet must stay.
     const primaryRun = await finishedRunWith("Primary delivered.");
-    await runEffects(primaryRun, "primary");
+    await runEffects(primaryRun, { delivers: true });
     expect(taskFile().parsed.packet).not.toBeNull();
-    // The named reviewer profile succeeds — withdrawn.
+    // The named reviewer profile succeeds — withdrawn (profileId is the join
+    // key against the retry option's stamped profileId, never the role).
     const reviewerRun = await finishedRunWith("Review passed cleanly.");
     store.db
       .prepare(`UPDATE agent_runs SET agent_profile_id = ? WHERE id = ?`)
       .run("style", reviewerRun);
-    await runEffects(reviewerRun, "reviewer");
+    await runEffects(reviewerRun, { delivers: false, profileId: "style" });
     expect(taskFile().parsed.packet).toBeNull();
   });
 
   it("an agent-agnostic packet (no retry option) withdraws on any successful run", async () => {
     await openBlockedPacket([redirect]);
     const runId = await finishedRunWith("Unblocked and finished.");
-    await runEffects(runId, "primary");
+    await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).toBeNull();
   });
 });

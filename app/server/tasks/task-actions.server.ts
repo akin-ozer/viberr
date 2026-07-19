@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
-import type {
-  PacketOption,
-  TaskFileEvent,
-  TaskFrontmatter,
+import {
+  deliveringEngagement,
+  type PacketOption,
+  type TaskFileEvent,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
@@ -22,6 +23,15 @@ import {
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  agentRoleDisplay,
+  encodeActorRef,
+  roleToSlug,
+} from "~/server/files/actor-ref.server";
+import {
+  buildAgentQuestionPacket,
+  type AgentOutcomeQuestion,
+} from "./agent-outcome.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
@@ -385,7 +395,7 @@ function humanActorRef(db: Database.Database, actor: TaskActor) {
   };
 }
 
-function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
+export function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
   return {
     projectSlug,
     taskKey,
@@ -394,7 +404,7 @@ function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string)
 }
 
 /** file write already happened — reproject the task file incrementally. */
-function reprojectTask(
+export function reprojectTask(
   db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -475,8 +485,7 @@ export async function createTask(
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,
-    specialist: null,
-    reviewers: [],
+    engagements: [],
     recommendations: [],
     schedules: [],
     // Operator assigned unless the task starts in triage (contracts §1.1).
@@ -931,6 +940,7 @@ export async function commentToAgent(
 
   let runId: string;
   let triggered: "resumed" | "started";
+  let resumeOutcomeKey: string | undefined;
 
   if (target.session) {
     // 4a. Resume the agent's existing provider session, reusing the clone
@@ -960,6 +970,9 @@ export async function commentToAgent(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: target.profileId,
+      backend: target.session.backend === "codex" ? "codex" : "claude",
+      role: target.role,
+      delivers: target.isPrimary,
     });
     const resumed = await resumeRun(db, {
       runId: target.session.id,
@@ -985,6 +998,7 @@ export async function commentToAgent(
       actor: { userId: actor.userId, label: actor.label },
     });
     runId = resumed.runId;
+    resumeOutcomeKey = confinement.outcomeKey;
     triggered = "resumed";
   } else {
     // 4b. No prior session for THIS agent — start a FRESH run, routed by how
@@ -995,9 +1009,10 @@ export async function commentToAgent(
     //         is assigned as the primary specialist and run as primary;
     //       · anyone else is engaged as a reviewer (idempotent) and run as a
     //         reviewer on its own thread.
-    const hasPrimary = !!existing?.parsed.frontmatter.specialist;
+    const hasPrimary =
+      !!existing && !!deliveringEngagement(existing.parsed.frontmatter);
     if (target.isPrimary || !hasPrimary) {
-      const { assignSpecialist, startSpecialistRun } = await import(
+      const { assignSpecialist, startAgentRun } = await import(
         "./specialist-run.server"
       );
       if (!hasPrimary) {
@@ -1008,7 +1023,7 @@ export async function commentToAgent(
           ctx,
         );
       }
-      const started = await startSpecialistRun(
+      const started = await startAgentRun(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
         actor,
@@ -1016,7 +1031,7 @@ export async function commentToAgent(
       );
       runId = started.runId;
     } else {
-      const { assignReviewer, startReviewerRun } = await import(
+      const { assignReviewer, startAgentRun } = await import(
         "./specialist-run.server"
       );
       // Engage as a reviewer if not already (idempotent), then run as reviewer.
@@ -1026,7 +1041,7 @@ export async function commentToAgent(
         actor,
         ctx,
       );
-      const started = await startReviewerRun(
+      const started = await startAgentRun(
         db,
         { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
         actor,
@@ -1052,8 +1067,10 @@ export async function commentToAgent(
       taskKey: input.taskKey,
       runId,
       backend: target.session?.backend === "codex" ? "codex" : "claude",
+      profileId: target.profileId,
       role: target.role,
-      kind: target.isPrimary ? "primary" : "reviewer",
+      delivers: target.isPrimary,
+      ...(resumeOutcomeKey ? { outcomeKey: resumeOutcomeKey } : {}),
       workdir: null,
       agentHandle: target.name.toLowerCase(),
       ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
@@ -1299,26 +1316,42 @@ export async function postAgentReplyComment(
  * operator-actions before they reach this direct-execution path.
  */
 /**
- * The agent's most-recent reply comment text on a task (matched by backend +
- * role), or null when it has never replied. Used to detect a no-progress repeat
- * before re-inviting the operator to react.
+ * The agent's most-recent reply comment text on a task, or null when it has
+ * never replied. Identity match: profileId (D7) with a legacy fallback on the
+ * displayed role (pre-profileId events encoded a role slug — their displayed
+ * role still equals the live role snapshot). Used to detect a no-progress
+ * repeat before re-inviting the operator to react.
+ *
+ * `before` (the CURRENT run's start time) excludes THIS run's own mid-run
+ * `post_comment` toolkit events — those live on the timeline before completion,
+ * and counting one as the "previous reply" corrupts the no-progress comparison
+ * (the guard would compare the final report against a comment this same run
+ * just posted). Only comments that predate this run count as the prior reply.
  */
 function latestAgentReplyText(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   backend: RealBackend,
+  profileId: string | null,
   role: string,
+  before?: string | null,
 ): string | null {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) return null;
+  const beforeMs = before ? Date.parse(before) : NaN;
   for (const e of file.parsed.timeline) {
     if (
       e.type === "comment" &&
       e.actor.kind === "agent" &&
       e.actor.backend === backend &&
-      e.actor.role === role
+      ((profileId !== null && e.actor.profileId === profileId) ||
+        agentRoleDisplay(e.actor) === role)
     ) {
+      // Skip comments from the current run (occurredAt >= run start).
+      if (!Number.isNaN(beforeMs) && Date.parse(e.occurredAt) >= beforeMs) {
+        continue;
+      }
       return e.text;
     }
   }
@@ -1429,7 +1462,7 @@ async function withdrawSupersededStuckPacket(
   input: {
     projectSlug: string;
     taskKey: string;
-    kind: "primary" | "reviewer";
+    delivers: boolean;
     role: string;
     runProfileId: string | null;
   },
@@ -1445,12 +1478,15 @@ async function withdrawSupersededStuckPacket(
     if (retryOptions.length > 0) {
       const subjectProfileId =
         retryOptions.find((o) => o.profileId)?.profileId ?? null;
+      // profileId is the join key when the packet names one (R3 — every new
+      // retry option is stamped); a legacy unstamped packet is about the
+      // delivering agent.
       const matches = subjectProfileId
-        ? input.kind === "reviewer" && input.runProfileId === subjectProfileId
-        : input.kind === "primary";
+        ? input.runProfileId === subjectProfileId
+        : input.delivers;
       if (!matches) return;
     }
-    const roleLabel = input.kind === "reviewer" ? "reviewer" : "specialist";
+    const roleLabel = "agent";
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
@@ -1484,7 +1520,7 @@ async function withdrawSupersededStuckPacket(
       subjectId: input.taskKey,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { kind: input.kind, role: input.role },
+      details: { delivers: input.delivers, role: input.role },
     });
   } catch (error) {
     logger.warn("superseded-packet withdrawal failed", {
@@ -1586,7 +1622,7 @@ export function classifyReviewerVerdict(
  */
 export function hasReworkSinceLastRejection(
   timeline: readonly TaskFileEvent[],
-  primary?: { backend: string; role: string } | null,
+  primary?: { profileId: string; backend: string; role: string } | null,
 ): boolean {
   for (const e of timeline) {
     // Newest-first walk: everything seen BEFORE the failing quality event is
@@ -1596,9 +1632,14 @@ export function hasReworkSinceLastRejection(
     }
     if (e.type === "transition") return true;
     if (e.type === "comment" && e.actor.kind === "agent") {
+      // Identity: profileId (D7); legacy events (role-slug refs) fall back to
+      // the displayed role + backend. No delivering engagement at all -> the
+      // historical role-heuristic fallback (Phase-4 cleanup, R4).
       const isPrimary = primary
-        ? e.actor.backend === primary.backend && e.actor.role === primary.role
-        : !/review|valid|qa|test/i.test(e.actor.role);
+        ? e.actor.profileId === primary.profileId ||
+          (e.actor.backend === primary.backend &&
+            agentRoleDisplay(e.actor) === primary.role)
+        : !/review|valid|qa|test/i.test(agentRoleDisplay(e.actor));
       if (isPrimary) return true; // a primary-specialist reply landed after the rejection
     }
   }
@@ -1606,38 +1647,52 @@ export function hasReworkSinceLastRejection(
   return true;
 }
 
-export async function recordReviewerVerdict(
+/**
+ * THE universal finished-run record (generic-agents G2/G4/D8): ONE atomic
+ * task-file write containing the agent's reply comment, its verdict effects
+ * (typed quality event ATTRIBUTED TO THE AGENT + validation frontmatter), and
+ * an ask-human question packet — whichever of them this completion carries.
+ * One write can't split (the docker bind-mount lesson, VIB-1..12): nothing a
+ * later read-modify-write can race away.
+ *
+ * The verdict/question have already been RESOLVED by the caller (envelope →
+ * fallback, capability-gated) — this function only records.
+ */
+export async function recordAgentCompletion(
   db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  replyText: string | null,
-  // The reviewer's own run: when present, its reply comment is posted in the
-  // SAME write as the verdict event (atomic — see prepareAgentReplyEvent). The
-  // reviewer must show its voice on the timeline whether it approves or requests
-  // changes; the two-write split silently lost that comment on the docker mount.
-  reply?: { actorRef: FileActorRef; runId: string },
+  input: {
+    actorRef: FileActorRef;
+    runId: string;
+    /** The prose reply (Claude full text · Codex envelope summary). */
+    replyText: string | null;
+    verdict: "approve" | "request_changes" | null;
+    question: AgentOutcomeQuestion | null;
+  },
 ): Promise<void> {
-  const verdict = classifyReviewerVerdict(replyText);
-  const prepared = reply
-    ? await prepareAgentReplyEvent(
-        db,
-        ctx,
-        projectSlug,
-        reply.runId,
-        reply.actorRef,
-        replyText,
-      )
-    : ({ status: "empty" } as const);
-  // Nothing to record: no classifiable verdict AND no postable reply comment.
-  if (!verdict && prepared.status !== "event") {
+  const { actorRef, runId, replyText, verdict, question } = input;
+  const prepared = await prepareAgentReplyEvent(
+    db,
+    ctx,
+    projectSlug,
+    runId,
+    actorRef,
+    replyText,
+  );
+  // Nothing to record at all.
+  if (!verdict && !question && prepared.status !== "event") {
     // Still stamp the recovery-idempotency audit for a guardrail-dropped reply,
     // so boot recovery doesn't reprocess it forever.
-    if (reply && prepared.status === "dropped") {
-      recordAgentRepliedAudit(db, projectSlug, taskKey, reply.runId, true);
+    if (prepared.status === "dropped") {
+      recordAgentRepliedAudit(db, projectSlug, taskKey, runId, true);
     }
     return;
   }
+  const roleDisplay =
+    actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
+  let questionOpened = false;
   let validation: "failing" | "healthy" = "healthy";
   // The title/summary are computed from the RESOLVED validation, not the raw
   // verdict, so the event can never read "Review passed / Validation: failing"
@@ -1664,23 +1719,22 @@ export async function recordReviewerVerdict(
           parsed.frontmatter.validation === "failing" &&
           !hasReworkSinceLastRejection(
             parsed.timeline,
-            parsed.frontmatter.specialist,
+            deliveringEngagement(parsed.frontmatter),
           );
         validation =
           verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
         if (verdict === "request_changes") {
           title = "Changes requested";
-          summary = "Reviewer requested changes.";
+          summary = `${roleDisplay} requested changes.`;
         } else if (approveDidNotClear) {
-          // Honest: the reviewer approved, but a standing rejection with no
+          // Honest: the agent approved, but a standing rejection with no
           // rework since still governs — validation stays failing until the
           // work moves.
           title = "Approval noted — rework still needed";
-          summary =
-            "Reviewer approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.";
+          summary = `${roleDisplay} approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.`;
         } else {
           title = "Review passed";
-          summary = "Reviewer approved the work.";
+          summary = `${roleDisplay} approved the work.`;
         }
         parsed.frontmatter.validation = validation;
         // A failing verdict makes a pending accept-completion recommendation
@@ -1695,31 +1749,71 @@ export async function recordReviewerVerdict(
             );
         }
       }
-      // ATOMIC: the reviewer's reply comment and its verdict land in this ONE
-      // write. Unshift the reply first, then the verdict, so the verdict reads
-      // newest and the reviewer's reply sits just below it.
+      // ATOMIC: the agent's reply comment, its verdict, and its question land
+      // in this ONE write. Unshift the reply first, then the verdict, so the
+      // verdict reads newest and the agent's reply sits just below it.
       if (prepared.status === "event") parsed.timeline.unshift(prepared.event);
       if (verdict) {
         parsed.timeline.unshift({
           occurredAt: new Date().toISOString(),
           type: "quality",
-          actor: { kind: "operator" },
+          // D8: the outcome is the AGENT'S judgment — attribute it honestly.
+          actor: actorRef,
           title,
           text: `**Validation:** ${validation}. ${summary}`,
           toAgent: false,
           evidence: null,
         });
       }
+      // Ask-human question from the outcome envelope (Codex transport; the
+      // Claude toolkit opens its packet live mid-run). One packet slot per
+      // task — never clobber an open decision.
+      if (question && !parsed.packet) {
+        parsed.packet = buildAgentQuestionPacket(actorRef, question);
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: actorRef,
+          title: null,
+          text: `**Question for a human:** ${question.title.trim()}`,
+          toAgent: false,
+          evidence: null,
+        });
+        questionOpened = true;
+      }
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
     // Recovery-idempotency audit for the reply (posted or guardrail-dropped).
-    if (reply && prepared.status !== "empty") {
+    if (prepared.status !== "empty") {
       recordAgentRepliedAudit(
         db,
         projectSlug,
         taskKey,
-        reply.runId,
+        runId,
         prepared.status === "dropped",
+      );
+    }
+    if (questionOpened) {
+      recordAudit(db, {
+        action: "task.agent.packet_opened",
+        actor: OPERATOR_AUDIT_ACTOR,
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: { runId, title: question!.title.trim() },
+      });
+      notifyTaskWatchers(
+        db,
+        {
+          projectSlug,
+          taskKey,
+          kind: "approval",
+          title: `${roleDisplay} asks: ${question!.title.trim()}`,
+          text: question!.body ?? "An engaged agent needs a human decision.",
+        },
+        ctx,
       );
     }
     if (verdict) {
@@ -1730,7 +1824,7 @@ export async function recordReviewerVerdict(
         subjectId: taskKey,
         projectSlug,
         taskKey,
-        details: { verdict, validation },
+        details: { verdict, validation, actorRef: encodeActorRef(actorRef) },
       });
       // Ping the owner + supervisors so the quality inbox card appears on real
       // runs (not just seed). Each recipient's `quality` routing pref is honored
@@ -1742,7 +1836,7 @@ export async function recordReviewerVerdict(
       );
     }
   } catch (error) {
-    logger.warn("reviewer verdict recording failed", {
+    logger.warn("agent completion recording failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
@@ -1781,8 +1875,16 @@ export async function registerAgentCompletion(
     taskKey: string;
     runId: string;
     backend: RealBackend;
+    /** The engaged profile's id (identity for actor refs, D7); null only for
+     *  legacy recovered runs that predate identity columns. */
+    profileId: string | null;
     role: string;
-    kind: "primary" | "reviewer";
+    /** The engagement owns the workspace/branch/PR (G1) — gates delivery
+     *  reconcile + the single-flight semantics; NEVER a behavior kind. */
+    delivers: boolean;
+    /** Staging key for a Claude toolkit report_outcome envelope (absent for
+     *  Codex/recovered runs — their envelope re-parses from the stored reply). */
+    outcomeKey?: string;
     workdir: string | null;
     /** The agent's @mention handle, for the stuck-loop packet copy. */
     agentHandle: string;
@@ -1821,8 +1923,10 @@ export async function applyAgentCompletionEffects(
     projectSlug: string;
     taskKey: string;
     backend: RealBackend;
+    profileId: string | null;
     role: string;
-    kind: "primary" | "reviewer";
+    delivers: boolean;
+    outcomeKey?: string;
     workdir: string | null;
     agentHandle: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
@@ -1835,7 +1939,10 @@ export async function applyAgentCompletionEffects(
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
-    role: input.role,
+    // Legacy recovered runs may lack an identity - fall back to the role slug
+    // (exactly the pre-D7 ref), so their events keep their historical shape.
+    profileId: input.profileId ?? roleToSlug(input.role),
+    roleHint: input.role,
   };
   // The timeline comment stores the FULL reply (2026-07-17 ruling — the old
   // 1,200-char cap made "(truncated — full report in the agent logs)" the only
@@ -1843,28 +1950,89 @@ export async function applyAgentCompletionEffects(
   // operator snapshot caps per-comment text on ITS side, so prompts stay
   // bounded.
   const fullText = fullReplyTextForRun(db, finished.id);
+  // The prior reply must predate THIS run so a mid-run post_comment from this
+  // same run can't be mistaken for it (corrupting no-progress detection).
+  const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
   const prevReply = latestAgentReplyText(
     ctx,
     input.projectSlug,
     input.taskKey,
     input.backend,
+    input.profileId,
     input.role,
+    thisRunStartedAt,
   );
-  // 1. Land the reply first so a reacting operator reads it in its snapshot.
-  //    A FINISHED reviewer run is the exception: its reply comment is posted
-  //    ATOMICALLY with the verdict event in step 3 (recordReviewerVerdict).
-  //    Posting it here too was a separate earlier write that the verdict's
-  //    read-modify-write erased on the docker bind mount (read-your-own-writes
-  //    gap) — the reviewer's comment vanished while only the verdict survived.
-  //    A non-finished reviewer (interrupted) has no step-3 verdict, so it still
-  //    reports its partial reply here.
-  if (input.kind !== "reviewer" || finished.state !== "finished") {
+  // 1. Resolve this run's OUTCOME ENVELOPE (G4) + collaboration gates, then
+  //    land the reply + verdict + question in ONE atomic write for EVERY
+  //    finished run (the reviewer's atomic path is now the universal path —
+  //    the two-write split silently lost comments on the docker bind mount).
+  //    A non-finished run (interrupt) has no outcome; it still reports its
+  //    partial reply below.
+  const {
+    parseAgentOutcomeJson,
+    resolveAgentCollab,
+    takeStagedOutcome,
+  } = await import("./agent-outcome.server");
+  // Gates resolve at COMPLETION time from the live deployment (recovery gets
+  // identical behavior); an undeployed profile falls back to the transition
+  // defaults (supporting → verdict on, delivering → verdict off).
+  let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] = [];
+  if (input.profileId) {
+    try {
+      const { resolveDeployedSpecialist } = await import("./specialist-run.server");
+      grants = resolveDeployedSpecialist(
+        ctx,
+        input.projectSlug,
+        input.profileId,
+      ).capabilities;
+    } catch {
+      // undeployed — defaults apply
+    }
+  }
+  const collab = resolveAgentCollab(grants, input.delivers);
+  // Envelope: a Claude toolkit-staged outcome first; else a Codex
+  // outputSchema reply (JSON) parsed from the stored full text.
+  let outcome = input.outcomeKey ? takeStagedOutcome(input.outcomeKey) : null;
+  let replyText = fullText;
+  if (!outcome && input.backend === "codex" && fullText) {
+    const parsedEnvelope = parseAgentOutcomeJson(fullText);
+    if (parsedEnvelope) {
+      outcome = parsedEnvelope;
+      // The raw JSON must never become the timeline comment.
+      replyText = parsedEnvelope.summary ?? null;
+    }
+  }
+  if (!replyText && outcome?.summary) replyText = outcome.summary;
+  if (finished.state === "finished") {
+    // Verdict: envelope first; a verdict-GRANTED agent with no envelope falls
+    // back to the prose classifier (G4). The regex NEVER runs without the
+    // grant (R1 — a developer's "tests pass" can't flip validation).
+    let verdict = collab.verdict ? (outcome?.verdict ?? null) : null;
+    if (!verdict && collab.verdict) {
+      verdict = classifyReviewerVerdict(replyText);
+      if (verdict) {
+        logger.info("agent verdict resolved by prose fallback (no envelope)", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          verdict,
+        });
+      }
+    }
+    const question = collab.ask ? (outcome?.question ?? null) : null;
+    await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
+      actorRef,
+      runId: finished.id,
+      replyText,
+      verdict,
+      question,
+    });
+  } else {
     await postAgentReplyComment(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       runId: finished.id,
       actorRef,
-      replyText: fullText,
+      replyText,
     });
   }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
@@ -1877,7 +2045,7 @@ export async function applyAgentCompletionEffects(
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
     const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
-    const roleLabel = input.kind === "reviewer" ? "reviewer" : "specialist";
+    const roleLabel = "agent";
     const failText = failure?.text
       ? failure.text.length > 180
         ? failure.text.slice(0, 177) + "…"
@@ -1926,13 +2094,13 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "unavailable";
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
     const altLabel = altBackend === "claude" ? "Claude Code" : "Codex";
-    // A reviewer retry must name its profile; the run row carries it.
+    // R3 normalization: EVERY retry option names its profile when known
+    // (startAgentRun resolves profileId → the right engagement either way);
+    // a legacy identity-less run only retries when it was the deliverer.
     const failedProfileId =
-      input.kind === "reviewer"
-        ? (getRun(db, finished.id)?.agent_profile_id ?? null)
-        : null;
+      input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null;
     const retryOption =
-      backendFailure && (input.kind === "primary" || failedProfileId)
+      backendFailure && (input.delivers || failedProfileId)
         ? [
             {
               kind: "retry_other_backend" as const,
@@ -1972,9 +2140,10 @@ export async function applyAgentCompletionEffects(
     await withdrawSupersededStuckPacket(db, ctx, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      kind: input.kind,
+      delivers: input.delivers,
       role: input.role,
-      runProfileId: getRun(db, finished.id)?.agent_profile_id ?? null,
+      runProfileId:
+        input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null,
     });
   }
   // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
@@ -1984,11 +2153,7 @@ export async function applyAgentCompletionEffects(
   //    read-modify-write of task.md could drop it) and could stamp task.md's
   //    branch/pr from the reviewer's checkout. Only the specialist that produced
   //    the change reconciles delivery.
-  if (
-    input.kind === "primary" &&
-    finished.state === "finished" &&
-    !finished.simulated
-  ) {
+  if (input.delivers && finished.state === "finished" && !finished.simulated) {
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
@@ -1997,24 +2162,15 @@ export async function applyAgentCompletionEffects(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       backend: input.backend,
+      profileId: input.profileId,
       role: input.role,
       simulated: false,
       ...(input.workdir ? { workdir: input.workdir } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     }).catch(() => {});
   }
-  // 3. Reviewer verdict — classify on the FULL (untruncated) reply so a verdict
-  //    past the 1200-char comment cap is never dropped.
-  if (input.kind === "reviewer" && finished.state === "finished") {
-    await recordReviewerVerdict(
-      db,
-      ctx,
-      input.projectSlug,
-      input.taskKey,
-      fullText,
-      { actorRef, runId: finished.id },
-    );
-  }
+  // 3. (The verdict/question are recorded ATOMICALLY with the reply in step 1
+  //    — there is no separate verdict write to race anything.)
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
   const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -2037,17 +2193,20 @@ export async function applyAgentCompletionEffects(
   // `prevReply` (the prior stored comment — also full for new comments; a
   // legacy truncated prevReply simply won't match, which errs toward reacting
   // and is bounded by the depth cap).
+  // Compare + hand off the RESOLVED prose reply (a Codex envelope run's
+  // fullText is raw JSON — the stored comment and the operator both see the
+  // summary, so both sides of the comparison must too).
   const shouldReact = operatorShouldReactToReply(
     finished.state,
-    fullText,
+    replyText,
     prevReply,
     currentDepth,
   );
   if (!shouldReact) {
     const noProgress =
-      !!fullText && prevReply !== null && prevReply.trim() === fullText.trim();
+      !!replyText && prevReply !== null && prevReply.trim() === replyText.trim();
     const depthCapped =
-      !!fullText &&
+      !!replyText &&
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
@@ -2098,7 +2257,7 @@ export async function applyAgentCompletionEffects(
     // missing (stale bind-mount read, guardrail drop), the operator re-prompted
     // the next agent with no findings ("pull up the reviewer's comments…").
     // The run store is the source of truth for the reply; the prompt carries it.
-    ...(fullText ? { agentReply: fullText } : {}),
+    ...(replyText ? { agentReply: replyText } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 }
@@ -2189,15 +2348,13 @@ export async function operatorPromptAgent(
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
-  const { startSpecialistRun, startReviewerRun } = await import(
-    "./specialist-run.server"
-  );
+  const { startAgentRun } = await import("./specialist-run.server");
   let runId: string;
   if (input.kind === "reviewer") {
     if (!input.profileId) {
       throw AppError.validation("A reviewer profile id is required to run a reviewer.");
     }
-    const started = await startReviewerRun(
+    const started = await startAgentRun(
       db,
       {
         projectSlug: input.projectSlug,
@@ -2210,7 +2367,7 @@ export async function operatorPromptAgent(
     );
     runId = started.runId;
   } else {
-    const started = await startSpecialistRun(
+    const started = await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
       OPERATOR_TASK_ACTOR,
@@ -2220,7 +2377,7 @@ export async function operatorPromptAgent(
   }
 
   // 3. The completion handler (reply → reconcile → verdict → react) is already
-  //    installed by startSpecialistRun/startReviewerRun above, which read
+  //    installed by startAgentRun above, which read
   //    `ctx.operatorRun` from opCtx (preserved from this operator run) and pass
   //    the real workspace clone dir. So the chain continues at depth+1 with the
   //    correct workdir — no separate registration here.
@@ -2635,7 +2792,7 @@ export async function transitionStage(
         stale !== "failing" ||
         hasReworkSinceLastRejection(
           parsed.timeline,
-          parsed.frontmatter.specialist,
+          deliveringEngagement(parsed.frontmatter),
         )
       ) {
         parsed.frontmatter.validation = "changed";
@@ -3203,33 +3360,20 @@ export async function resolvePacket(
     const target: RealBackend = option.backend === "codex" ? "codex" : "claude";
     const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
     try {
-      const { startSpecialistRun, startReviewerRun } = await import(
-        "./specialist-run.server"
+      const { startAgentRun } = await import("./specialist-run.server");
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          ...(typeof option.profileId === "string" && option.profileId
+            ? { profileId: option.profileId }
+            : {}),
+          backendOverride: target,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
       );
-      if (typeof option.profileId === "string" && option.profileId) {
-        await startReviewerRun(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            profileId: option.profileId,
-            backendOverride: target,
-          },
-          OPERATOR_TASK_ACTOR,
-          opCtx,
-        );
-      } else {
-        await startSpecialistRun(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            backendOverride: target,
-          },
-          OPERATOR_TASK_ACTOR,
-          opCtx,
-        );
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("retry_other_backend start failed", {
@@ -3490,19 +3634,19 @@ export async function applyRecommendation(
       ctx,
     );
   } else if (rec.kind === "run_specialist") {
-    // The operator recommended starting the primary specialist's run (it can't
-    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked in
-    // startSpecialistRun) starts the run.
-    const { startSpecialistRun } = await import("./specialist-run.server");
-    await startSpecialistRun(
+    // The operator recommended starting the delivering agent's run (it can't
+    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked
+    // in startAgentRun) starts the run.
+    const { startAgentRun } = await import("./specialist-run.server");
+    await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
       actor,
       ctx,
     );
   } else if (rec.kind === "run_reviewer" && rec.profileId) {
-    const { startReviewerRun } = await import("./specialist-run.server");
-    await startReviewerRun(
+    const { startAgentRun } = await import("./specialist-run.server");
+    await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
       actor,

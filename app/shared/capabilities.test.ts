@@ -57,6 +57,14 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
   });
 
+  it("classifies generic-agent collaboration gates by their real transport", () => {
+    // verdict + ask-human gate server-side at completion → both backends;
+    // the mid-run comment tool is Claude-only (Codex has no comment channel).
+    expect(capabilityEnforcement("report-validation-verdict")).toBe("both");
+    expect(capabilityEnforcement("ask-human")).toBe("both");
+    expect(capabilityEnforcement("comment-on-task")).toBe("claude-only");
+  });
+
   it("capabilityIsEnforced matches the enforced set", () => {
     expect(capabilityIsEnforced("merge-pull-request")).toBe(true);
     expect(capabilityIsEnforced("post-quality-flags")).toBe(false);

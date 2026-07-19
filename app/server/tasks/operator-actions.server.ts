@@ -1,12 +1,14 @@
 import type Database from "better-sqlite3";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import type {
-  PacketOption,
-  PacketOptionKind,
-  Recommendation,
-  RecommendationKind,
-  TaskFileEvent,
-  TaskPacket,
+import {
+  deliveringEngagement,
+  supportingEngagements,
+  type PacketOption,
+  type PacketOptionKind,
+  type Recommendation,
+  type RecommendationKind,
+  type TaskFileEvent,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import {
@@ -39,6 +41,7 @@ import {
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
 import {
+  DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
   notifyTaskWatchers,
@@ -51,8 +54,7 @@ import {
   assignSpecialist,
   listDeployedSpecialists,
   specialistEligibleForStage,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
@@ -737,14 +739,17 @@ export function operatorSnapshot(
     readiness: fm.readiness,
     waiting: fm.waiting,
     owner: ownerName,
-    specialist: fm.specialist
-      ? {
-          profileId: fm.specialist.profileId,
-          role: fm.specialist.role,
-          backend: fm.specialist.backend,
-        }
-      : null,
-    reviewers: fm.reviewers.map((r) => ({
+    specialist: (() => {
+      const delivering = deliveringEngagement(fm);
+      return delivering
+        ? {
+            profileId: delivering.profileId,
+            role: delivering.role,
+            backend: delivering.backend,
+          }
+        : null;
+    })(),
+    reviewers: supportingEngagements(fm).map((r) => ({
       profileId: r.profileId,
       role: r.role,
       backend: r.backend,
@@ -808,6 +813,89 @@ export async function operatorPostComment(
   return { outcome: "done", message: "Comment posted to the timeline." };
 }
 
+/**
+ * Draft the task goal (governed by append-typed-events). This closes the
+ * triage-gate gap where the operator could OFFER "accept operator-drafted
+ * scope" but had no way to actually write the goal — the human accepted and
+ * the goal stayed the unspecified placeholder forever.
+ *
+ * SAFETY: only fills an UNSPECIFIED goal (empty or the DEFAULT_GOAL
+ * placeholder). It never overwrites an already-specified goal — changing a real
+ * goal stays a human/`edit_goal` decision, so a misfiring operator can't
+ * silently rewrite scope mid-flight. Operator-authorized (no human RBAC); a
+ * pending `awaiting: goal_edit` packet is fulfilled + cleared, mirroring
+ * updateTaskGoal.
+ */
+export async function operatorSetGoal(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; goal: string; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return { outcome: "denied", message: "The operator cannot draft the goal in this project." };
+  }
+  const goal = input.goal.trim();
+  if (goal.length < 3) {
+    return { outcome: "noop", message: "A goal of at least 3 characters is required." };
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) {
+    return { outcome: "denied", message: `Task ${input.taskKey} not found.` };
+  }
+  const current = existing.parsed.goal.trim();
+  if (current !== "" && current !== DEFAULT_GOAL) {
+    return {
+      outcome: "denied",
+      message:
+        "The goal is already specified — open an edit_goal packet to propose a change instead of overwriting it.",
+    };
+  }
+  if (current === goal) {
+    return { outcome: "noop", message: "Goal unchanged." };
+  }
+  let clearedPacket = false;
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.goal = goal;
+    // Fulfil an awaiting goal-edit packet (the operator drafted the scope the
+    // human asked it to) — clear it + lift its readiness gate, exactly like
+    // updateTaskGoal does for a human edit.
+    if (parsed.packet?.awaiting === "goal_edit") {
+      const wasBlocked = parsed.packet.type === "blocked";
+      parsed.packet = null;
+      clearedPacket = true;
+      if (wasBlocked && parsed.frontmatter.readiness === "blocked") {
+        parsed.frontmatter.readiness = "ready";
+      }
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "policy",
+      actor: { kind: "operator" },
+      title: "Goal drafted",
+      text: input.reason?.trim()
+        ? `The operator drafted the task goal — ${input.reason.trim()}. Downstream agents re-anchor on the new goal.`
+        : "The operator drafted the task goal from the request. Downstream agents re-anchor on the new goal.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  if (clearedPacket) {
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  }
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.goal.updated",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { by: "operator" },
+  });
+  return { outcome: "done", message: "Task goal drafted." };
+}
+
 /** Assign the primary specialist (governed by assign-primary-specialist). */
 export async function operatorAssignSpecialist(
   db: Database.Database,
@@ -869,7 +957,7 @@ export async function operatorRunSpecialist(
     );
     return { outcome: "recommended", message: "Recommended starting the primary specialist's run." };
   }
-  const result = await startSpecialistRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} specialist.`,
@@ -935,7 +1023,7 @@ export async function operatorRunReviewer(
     );
     return { outcome: "recommended", message: `Recommended starting ${name}'s review run.` };
   }
-  const result = await startReviewerRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
+  const result = await startAgentRun(db, input, OPERATOR_TASK_ACTOR, opCtx(ctx));
   return {
     outcome: "done",
     message: `Started a ${result.backend === "claude" ? "Claude Code" : "Codex"} run for the ${result.role} reviewer.`,
@@ -1056,7 +1144,9 @@ export async function operatorPromptSpecialist(
 
   // direct: assign as primary if it isn't already, then prompt + run.
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  const currentPrimary = file?.parsed.frontmatter.specialist?.profileId ?? null;
+  const currentPrimary = file
+    ? (deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null)
+    : null;
   if (currentPrimary !== input.profileId) {
     await assignSpecialist(
       db,
@@ -1168,6 +1258,136 @@ export async function operatorPromptReviewer(
 }
 
 /** Move the task to an allowed next stage (governed by stage-transitions). */
+
+// ------------------------------------------------- generic agent dispatch
+
+/**
+ * Generic engagement dispatch (generic-agents phase 3): ONE tool surface —
+ * engage_agent / run_agent / prompt_agent — replacing the six kind-tools.
+ * `delivers` selects the engagement shape; the capability GATES keep their
+ * existing ids (assign-primary-specialist governs delivering engagements,
+ * summon-reviewers the supporting ones), so no deployment grant migrates.
+ */
+export async function operatorEngageAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    delivers: boolean;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const { profileId, projectSlug, taskKey } = input;
+  const base = { projectSlug, taskKey, profileId };
+  return input.delivers
+    ? operatorAssignSpecialist(
+        db,
+        ctx,
+        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
+        authority,
+      )
+    : operatorAssignReviewer(
+        db,
+        ctx,
+        { ...base, ...(input.reason ? { reason: input.reason } : {}) },
+        authority,
+      );
+}
+
+/** Resolve whether `profileId` names the task's delivering engagement (or the
+ * intended one): explicit hint wins; an engaged profile keeps its shape; an
+ * unengaged profile delivers iff the task has no deliverer yet. */
+function resolveDeliversIntent(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  profileId: string | undefined,
+  hint: boolean | undefined,
+): boolean {
+  if (hint !== undefined) return hint;
+  const file = readTaskFile({
+    projectSlug,
+    taskKey,
+    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+  });
+  const fm = file?.parsed.frontmatter;
+  if (!fm) return !profileId;
+  const delivering = deliveringEngagement(fm);
+  if (!profileId) return true;
+  if (delivering?.profileId === profileId) return true;
+  if (fm.engagements.some((e) => e.profileId === profileId)) return false;
+  return delivering === null;
+}
+
+export async function operatorRunAgent(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId?: string;
+    delivers?: boolean;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const delivers = resolveDeliversIntent(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.profileId,
+    input.delivers,
+  );
+  const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  if (delivers) return operatorRunSpecialist(db, ctx, base, authority);
+  if (!input.profileId) {
+    return {
+      outcome: "denied",
+      message: "A profileId is required to run a supporting agent.",
+    };
+  }
+  return operatorRunReviewer(
+    db,
+    ctx,
+    { ...base, profileId: input.profileId },
+    authority,
+  );
+}
+
+export async function operatorPromptAgentGeneric(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    directive?: string;
+    delivers?: boolean;
+    reason?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const delivers = resolveDeliversIntent(
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    input.profileId,
+    input.delivers,
+  );
+  const base = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    profileId: input.profileId,
+    ...(input.directive ? { directive: input.directive } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+  };
+  return delivers
+    ? operatorPromptSpecialist(db, ctx, base, authority)
+    : operatorPromptReviewer(db, ctx, base, authority);
+}
+
 export async function operatorTransitionStage(
   db: Database.Database,
   ctx: TaskMutationContext,

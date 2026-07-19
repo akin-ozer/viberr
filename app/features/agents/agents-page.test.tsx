@@ -99,6 +99,7 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     effort: "",
     scope: "Global base · customized for Viberr Core",
     desc: "Implements stage work on the task-key branch.",
+    definition: "",
     stages: ["ready", "impl"],
     spanAll: false,
     actions: {

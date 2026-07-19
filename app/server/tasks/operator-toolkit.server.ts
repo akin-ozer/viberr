@@ -9,15 +9,13 @@ import type { TaskMutationContext } from "./task-actions.server";
 import {
   gate,
   operatorAcceptCompletion,
-  operatorAssignReviewer,
-  operatorAssignSpecialist,
+  operatorEngageAgent,
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
-  operatorPromptReviewer,
-  operatorPromptSpecialist,
-  operatorRunReviewer,
-  operatorRunSpecialist,
+  operatorPromptAgentGeneric,
+  operatorRunAgent,
+  operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
   type OperatorActionResult,
@@ -88,7 +86,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage, readiness, waiting, owner, primary specialist, reviewers, goal, the deployed specialists you can assign, the allowed next stage transitions, any open decision packet, and your own capability policy + autonomy. Call this FIRST and after each change.",
+      "Read the current task snapshot: stage, readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can engage, the allowed next stage transitions, any open decision packet, and your own capability policy + autonomy. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — never by guessing from names.",
       {},
       async () =>
         textResult(operatorSnapshot(db, ctx, projectSlug, taskKey, authority)),
@@ -108,6 +106,26 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "post_comment",
+    );
+    add(
+      tool(
+        "set_goal",
+        "Draft or refine the task GOAL when it is still unspecified (the triage-gate placeholder). Use it to write the scope/acceptance criteria you have determined — e.g. after a human accepts your offer to draft the scope, or when the task title gives enough signal to specify it yourself at triage. It fills only an UNSPECIFIED goal; it will refuse to overwrite an already-specified goal (open an edit_goal packet to propose a change to a real goal). Downstream agents re-anchor on the new goal.",
+        {
+          goal: z.string().describe("The full drafted goal / scope + acceptance criteria."),
+          reason: z.string().optional().describe("One line on why this scope — shown on the timeline."),
+        },
+        async (args) =>
+          resultText(
+            await operatorSetGoal(
+              db,
+              ctx,
+              { ...base, goal: prose(args.goal), ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              authority,
+            ),
+          ),
+      ),
+      "set_goal",
     );
   }
 
@@ -202,115 +220,94 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  if (gate(authority, "assign-primary-specialist") !== "deny") {
+  // ONE generic engagement surface (generic-agents phase 3) — the former six
+  // kind-tools (assign/run/prompt_specialist + _reviewer) collapse into three;
+  // `delivers` selects the engagement shape and the existing capability gates
+  // still govern per shape (assign-primary-specialist / summon-reviewers)
+  // inside the dispatch, so a partially-granted operator is refused per call.
+  const canDeliverers = gate(authority, "assign-primary-specialist") !== "deny";
+  const canSupporting = gate(authority, "summon-reviewers") !== "deny";
+  if (canDeliverers || canSupporting) {
     add(
       tool(
-        "assign_specialist",
-        "Assign a deployed specialist as the task's PRIMARY specialist. Pass the specialist's profileId (from get_task's deployedSpecialists) and a short reason. Under supervised autonomy this posts a recommendation card; under full autonomy it assigns directly.",
+        "engage_agent",
+        "Engage a deployed agent profile on the task. `delivers: true` makes it THE delivering agent (owns the workspace/branch/PR — exactly one per task); `delivers: false` engages it as a supporting agent (e.g. a verdict-capable profile for review). Pick the profile by its `desc` and `capabilities` from get_task. Supervised → recommendation card; full autonomy → engages directly.",
         {
-          profileId: z.string().describe("The specialist profile id to assign."),
-          reason: z.string().optional().describe("Why this specialist fits — shown on the recommendation card."),
+          profileId: z.string().describe("The agent profile id to engage (from get_task's deployedSpecialists)."),
+          delivers: z
+            .boolean()
+            .describe("true = the delivering agent (builds + owns the branch/PR); false = supporting (review/advice)."),
+          reason: z.string().optional().describe("Why this profile fits — shown on the recommendation card."),
         },
         async (args) =>
           resultText(
-            await operatorAssignSpecialist(
+            await operatorEngageAgent(
               db,
               ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
+              {
+                ...base,
+                profileId: args.profileId,
+                delivers: args.delivers,
+                ...(args.reason ? { reason: prose(args.reason) } : {}),
+              },
               authority,
             ),
           ),
       ),
-      "assign_specialist",
+      "engage_agent",
     );
     add(
       tool(
-        "run_specialist",
-        "Start an agent run for the assigned primary specialist so it does the stage work.",
-        {},
-        async () =>
-          resultText(await operatorRunSpecialist(db, ctx, base, authority)),
-      ),
-      "run_specialist",
-    );
-    add(
-      tool(
-        "prompt_specialist",
-        "Hand the task to the primary specialist for the CURRENT stage: assign it (if needed), post a task-related prompt comment addressed to it, and start its run with that prompt as its directive. Use this when a task enters a new working stage — it triggers the agent WITH a prompt, not silently. Pass the specialist's profileId and a concrete `prompt` telling it what to do for this task at this stage.",
+        "run_agent",
+        "Start a run for an ENGAGED agent. Omit profileId to run the delivering agent; pass a supporting agent's profileId to run it.",
         {
-          profileId: z.string().describe("The primary specialist profile id to prompt."),
+          profileId: z
+            .string()
+            .optional()
+            .describe("The engaged agent to run; omit for the delivering agent."),
+        },
+        async (args) =>
+          resultText(
+            await operatorRunAgent(
+              db,
+              ctx,
+              { ...base, ...(args.profileId ? { profileId: args.profileId } : {}) },
+              authority,
+            ),
+          ),
+      ),
+      "run_agent",
+    );
+    add(
+      tool(
+        "prompt_agent",
+        "Hand the task to an agent for the CURRENT stage: engage it (if needed), post a task-related prompt comment addressed to it, and start its run with that prompt as its directive. Use this when a task enters a working stage — it triggers the agent WITH a prompt, not silently. Pass the profileId, a concrete `prompt`, and `delivers` (true = as the delivering builder; false = as a supporting agent, e.g. for review).",
+        {
+          profileId: z.string().describe("The agent profile id to prompt."),
           prompt: z
             .string()
-            .describe("The task-related directive to give the specialist (what to do now at this stage)."),
+            .describe("The task-related directive (what to do for this task at this stage)."),
+          delivers: z
+            .boolean()
+            .optional()
+            .describe("true = delivering builder · false = supporting (review). Omit to follow how it is already engaged."),
         },
         async (args) =>
           resultText(
-            await operatorPromptSpecialist(
+            await operatorPromptAgentGeneric(
               db,
               ctx,
-              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
+              {
+                ...base,
+                profileId: args.profileId,
+                directive: prose(args.prompt),
+                ...(args.delivers !== undefined ? { delivers: args.delivers } : {}),
+              },
               authority,
             ),
           ),
       ),
-      "prompt_specialist",
-    );
-  }
-
-  if (gate(authority, "summon-reviewers") !== "deny") {
-    add(
-      tool(
-        "assign_reviewer",
-        "Engage a deployed specialist as a REVIEWER (advisory, non-primary). Pass its profileId and a short reason. Supervised → recommendation card; full autonomy → engages directly.",
-        {
-          profileId: z.string().describe("The specialist profile id to engage as reviewer."),
-          reason: z.string().optional().describe("Why engage this reviewer — shown on the recommendation card."),
-        },
-        async (args) =>
-          resultText(
-            await operatorAssignReviewer(
-              db,
-              ctx,
-              { ...base, profileId: args.profileId, ...(args.reason ? { reason: prose(args.reason) } : {}) },
-              authority,
-            ),
-          ),
-      ),
-      "assign_reviewer",
-    );
-    add(
-      tool(
-        "run_reviewer",
-        "Start an agent run for an engaged reviewer. Pass its profileId.",
-        { profileId: z.string().describe("The engaged reviewer's profile id.") },
-        async (args) =>
-          resultText(
-            await operatorRunReviewer(db, ctx, { ...base, profileId: args.profileId }, authority),
-          ),
-      ),
-      "run_reviewer",
-    );
-    add(
-      tool(
-        "prompt_reviewer",
-        "Hand the task to a reviewer for the REVIEW stage: engage it (if needed), post a task-related prompt comment addressed to it, and start its reviewer run with that prompt as its directive. Use this when a task enters the review stage. Pass the reviewer's profileId and a concrete `prompt` telling it what to review for this task.",
-        {
-          profileId: z.string().describe("The reviewer profile id to prompt."),
-          prompt: z
-            .string()
-            .describe("The task-related directive to give the reviewer (what to review now)."),
-        },
-        async (args) =>
-          resultText(
-            await operatorPromptReviewer(
-              db,
-              ctx,
-              { ...base, profileId: args.profileId, directive: prose(args.prompt) },
-              authority,
-            ),
-          ),
-      ),
-      "prompt_reviewer",
+      "prompt_agent",
     );
   }
 

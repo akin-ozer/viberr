@@ -10,6 +10,10 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  deliveringEngagement,
+  supportingEngagements,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -34,7 +38,7 @@ import {
 import {
   assignSpecialist,
   resolveResumeConfinement,
-  startSpecialistRun,
+  startAgentRun,
 } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -102,7 +106,9 @@ beforeEach(() => {
       stage: "impl",
       ownerUserId: store.users.arda.id,
       title: "Attach execution workspace",
-      specialist: { profileId: "dev", backend: "claude", role: "developer" },
+      engagements: [
+        { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+      ],
     }),
     goal: "Let the operator attach a repo and run the specialist.",
   });
@@ -145,7 +151,7 @@ describe("resolveMentionedAgent", () => {
     const target = call("hey @dev can you re-check this?");
     expect(target).not.toBeNull();
     expect(target).toMatchObject({ profileId: "dev", name: "dev", role: "developer", backend: "claude" });
-    expect(target!.actorRef).toMatchObject({ kind: "agent", backend: "claude", role: "developer" });
+    expect(target!.actorRef).toMatchObject({ kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" });
   });
 
   it("resolves by backend (@claude)", () => {
@@ -191,7 +197,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("returns the most-recent run WITH a session_id once one exists", async () => {
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -470,9 +476,10 @@ describe("commentToAgent", () => {
     const agentComment = file.parsed.timeline.find(
       (e) => e.type === "comment" && e.actor.kind === "agent",
     )!;
-    // The role round-trips through the file actor-ref codec: written as the
-    // slug `claude/developer`, re-parsed as the title-cased display "Developer".
-    expect(agentComment.actor).toMatchObject({ kind: "agent", backend: "claude", role: "Developer" });
+    // The identity round-trips through the file actor-ref codec: written as
+    // `agent:claude/dev (developer)` (profile id is the identity, D7), re-parsed
+    // with the role snapshot preserved verbatim as the display hint.
+    expect(agentComment.actor).toMatchObject({ kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" });
     expect(agentComment.toAgent).toBe(false);
     expect(agentComment.text.length).toBeGreaterThan(0);
 
@@ -482,7 +489,7 @@ describe("commentToAgent", () => {
 
   it("RESUMES the agent's existing session (reusing its session_id) on a later comment", async () => {
     // First run establishes a session.
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -597,7 +604,7 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
   it("@analyst does NOT inherit the primary dev's claude session (matched by identity, not backend)", async () => {
     deployTwoSpecialists();
     // The PRIMARY dev gets a real session on the SAME backend (claude) as analyst.
-    await startSpecialistRun(
+    await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -643,7 +650,9 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
 
     // The primary specialist is still dev; analyst is engaged as a reviewer.
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    expect(file.parsed.frontmatter.specialist!.profileId).toBe("dev");
-    expect(file.parsed.frontmatter.reviewers.map((r) => r.profileId)).toContain("analyst");
+    expect(deliveringEngagement(file.parsed.frontmatter)!.profileId).toBe("dev");
+    expect(
+      supportingEngagements(file.parsed.frontmatter).map((r) => r.profileId),
+    ).toContain("analyst");
   });
 });

@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
-import type { FileActorRef } from "~/schemas/task-file.schema";
+import {
+  deliveringEngagement,
+  type FileActorRef,
+} from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
@@ -76,9 +79,14 @@ export interface MentionedAgent {
   session: AgentRunRow | null;
 }
 
-/** The agent's file actor ref — an `agent:<backend>/<role>` ref. */
-function agentActorRef(backend: RealBackend, role: string): FileActorRef {
-  return { kind: "agent", backend, role };
+/** The agent's file actor ref — `agent:<backend>/<profileId> (role)` (D7:
+ * the profile id is the identity; the role is a display snapshot). */
+function agentActorRef(
+  backend: RealBackend,
+  profileId: string,
+  role: string,
+): FileActorRef {
+  return { kind: "agent", backend, profileId, roleHint: role };
 }
 
 /**
@@ -169,7 +177,9 @@ export function resolveMentionedAgent(
     taskKey,
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
-  const primaryRef = existing?.parsed.frontmatter.specialist ?? null;
+  const primaryRef = existing
+    ? deliveringEngagement(existing.parsed.frontmatter)
+    : null;
 
   // 1. `@operator` → the OPERATOR itself (never the primary specialist). Only
   //    resolves when an operator is actually deployed on the project; the caller
@@ -211,7 +221,7 @@ export function resolveMentionedAgent(
       backend,
       model: sp?.model ?? (defaultModelFor(backend)),
       effort: sp?.effort ?? "",
-      actorRef: agentActorRef(backend, role),
+      actorRef: agentActorRef(backend, primaryRef.profileId, role),
       isPrimary: true,
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
@@ -233,7 +243,7 @@ export function resolveMentionedAgent(
       backend: matched.backend,
       model: matched.model,
       effort: matched.effort,
-      actorRef: agentActorRef(matched.backend, matched.role),
+      actorRef: agentActorRef(matched.backend, matched.id, matched.role),
       isPrimary,
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
@@ -257,7 +267,7 @@ export function resolveMentionedAgent(
         backend,
         model: defaultModelFor(backend),
         effort: "",
-        actorRef: agentActorRef(backend, primaryRef.role),
+        actorRef: agentActorRef(backend, primaryRef.profileId, primaryRef.role),
         isPrimary: true,
         isOperator: false,
         session: latestSessionRun(db, projectSlug, taskKey, {

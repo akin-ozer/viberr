@@ -62,7 +62,9 @@ beforeEach(() => {
   deploySpecialists();
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
-      specialist: { profileId: "dev", backend: "claude", role: "developer" },
+      engagements: [
+        { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+      ],
     }),
   });
 });

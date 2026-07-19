@@ -8,6 +8,10 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  deliveringEngagement,
+  supportingEngagements,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -21,8 +25,7 @@ import {
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
-  startReviewerRun,
-  startSpecialistRun,
+  startAgentRun,
 } from "./specialist-run.server";
 
 /**
@@ -155,10 +158,11 @@ describe("assignSpecialist", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist).toMatchObject({
+    expect(deliveringEngagement(file.parsed.frontmatter)).toMatchObject({
       profileId: "dev",
       backend: "claude",
       role: "developer",
+      delivers: true,
     });
     const event = file.parsed.timeline[0]!;
     expect(event.type).toBe("agent");
@@ -204,6 +208,53 @@ describe("assignSpecialist", () => {
   });
 });
 
+describe("engagement uniqueness (adversarial-review)", () => {
+  /** Deploy a SECOND profile alongside `dev` so a profile can be moved between
+   *  the delivering and supporting positions. */
+  function deploySecond(id: string): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const fm = file.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        ...fm.agents,
+        {
+          profileId: id,
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: id, role: id, backends: ["claude"], model: "sonnet" },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("promoting a SUPPORTING profile to deliverer never duplicates its profileId", async () => {
+    deploySecond("style");
+    // dev delivers; style is a supporting reviewer.
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    // Promote style to be THE deliverer.
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // style appears exactly once (as deliverer); dev is dropped; no duplicate.
+    expect(fm.engagements.filter((e) => e.profileId === "style")).toHaveLength(1);
+    expect(deliveringEngagement(fm)?.profileId).toBe("style");
+    expect(supportingEngagements(fm).some((e) => e.profileId === "style")).toBe(false);
+  });
+
+  it("engaging the current deliverer as a reviewer is a no-op (no duplicate)", async () => {
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    const res = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    expect(res.alreadyEngaged).toBe(true);
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.engagements.filter((e) => e.profileId === "dev")).toHaveLength(1);
+    expect(deliveringEngagement(fm)?.profileId).toBe("dev");
+  });
+});
+
 describe("startSpecialistRun", () => {
   async function assign(): Promise<void> {
     await assignSpecialist(
@@ -216,7 +267,7 @@ describe("startSpecialistRun", () => {
 
   it("errors when no specialist is assigned", async () => {
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -246,7 +297,7 @@ describe("startSpecialistRun", () => {
       startedAt: "2026-07-16T00:00:00.000Z",
     } as Parameters<typeof upsertRun>[1]);
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -286,14 +337,16 @@ describe("startSpecialistRun", () => {
         stage: "impl",
         ownerUserId: store.users.arda.id,
         title: "Attach execution workspace",
-        specialist: { profileId: "dev", backend: "claude", role: "developer" },
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+        ],
       }),
       goal: "Let the operator attach a repo and run the specialist.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await expect(
-      startSpecialistRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
         actor(store.users.arda),
@@ -304,7 +357,7 @@ describe("startSpecialistRun", () => {
 
   it("creates a run row with the specialist backend + a simulated stream (>0 lines)", async () => {
     await assign();
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -316,7 +369,8 @@ describe("startSpecialistRun", () => {
     const run = getRun(store.db, result.runId)!;
     expect(run.backend).toBe("claude"); // requested backend kept for glyph fidelity
     expect(run.kind).toBe("primary");
-    expect(run.role).toBe("Primary specialist");
+    // Run rows carry the engagement's live role snapshot, not a kind literal.
+    expect(run.role).toBe("developer");
     expect(run.simulated).toBe(1);
     // The simulated fallback streams a realistic analyze transcript (>0 lines).
     const lineCount = await waitForLines(result.runId, 1);
@@ -337,7 +391,7 @@ describe("startSpecialistRun", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(file.parsed.timeline[0]!.text).toContain("Started a Claude Code run");
-    const audit = listAuditEvents(store.db, { action: "task.specialist.run_started" });
+    const audit = listAuditEvents(store.db, { action: "task.agent.run_started" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
     const startAudit = listAuditEvents(store.db, { action: "runtime.run.started" });
     expect(startAudit.length).toBe(1); // not double-counted
@@ -347,7 +401,7 @@ describe("startSpecialistRun", () => {
     await assign(); // snapshot captured with backend: claude
     deployDevSpecialist(["codex"]); // profile later edited to the other backend
 
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actor(store.users.arda),
@@ -370,13 +424,13 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
     expect(file.parsed.timeline[0]!.text).toContain("switched from Claude Code");
   });
 
   it("persists a D4 backendOverride to the snapshot so later prompts follow it", async () => {
     await assign(); // snapshot: claude
-    const result = await startSpecialistRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "codex" },
       actor(store.users.arda),
@@ -396,7 +450,7 @@ describe("startSpecialistRun", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.specialist?.backend).toBe("codex");
+    expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
   });
 
   it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
@@ -434,7 +488,7 @@ describe("startSpecialistRun", () => {
     await assign();
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
-        startSpecialistRun(
+        startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1" },
           actor(user),
@@ -460,8 +514,8 @@ describe("assignReviewer / removeReviewer", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!;
-    expect(file.parsed.frontmatter.reviewers).toEqual([
-      { profileId: "dev", backend: "claude", role: "developer" },
+    expect(supportingEngagements(file.parsed.frontmatter)).toEqual([
+      { profileId: "dev", backend: "claude", role: "developer", delivers: false },
     ]);
     expect(file.parsed.timeline[0]!.text).toContain("Engaged **dev**");
     expect(file.parsed.timeline[0]!.text).toContain("as a reviewer");
@@ -476,7 +530,7 @@ describe("assignReviewer / removeReviewer", () => {
     const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     expect(again.alreadyEngaged).toBe(true);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    expect(file.parsed.frontmatter.reviewers).toHaveLength(1);
+    expect(supportingEngagements(file.parsed.frontmatter)).toHaveLength(1);
   });
 
   it("removeReviewer drops the ref (+ event/audit); missing id is a no-op", async () => {
@@ -485,7 +539,7 @@ describe("assignReviewer / removeReviewer", () => {
     const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
     expect(removed.removed).toBe(true);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    expect(file.parsed.frontmatter.reviewers).toEqual([]);
+    expect(supportingEngagements(file.parsed.frontmatter)).toEqual([]);
     expect(file.parsed.timeline[0]!.text).toContain("Released reviewer **dev**");
     expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]?.taskKey).toBe("VIB-1");
 
@@ -539,7 +593,7 @@ describe("startReviewerRun", () => {
 
   it("errors when the profile is not an engaged reviewer", async () => {
     await expect(
-      startReviewerRun(
+      startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
         actor(store.users.arda),
@@ -550,7 +604,7 @@ describe("startReviewerRun", () => {
 
   it("creates a kind='reviewer' run on its own thread with a simulated stream", async () => {
     await engage();
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda),
@@ -558,7 +612,7 @@ describe("startReviewerRun", () => {
     );
     const run = getRun(store.db, result.runId)!;
     expect(run.kind).toBe("reviewer");
-    expect(run.role).toBe("Reviewer");
+    expect(run.role).toBe("developer");
     expect(run.thread_id.startsWith("r0-")).toBe(true);
     expect(run.agent_profile_id).toBe("dev");
     const lineCount = await waitForLines(result.runId, 1);
@@ -571,13 +625,13 @@ describe("startReviewerRun", () => {
       actor(store.users.arda),
     );
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.run_started" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.agent.run_started" })[0]?.taskKey,
     ).toBe("VIB-1");
   });
 
   it("posts the reviewer's reply as a comment when the run finishes (Run-button path)", async () => {
     await engage();
-    const result = await startReviewerRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actor(store.users.arda),

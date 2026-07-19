@@ -142,16 +142,18 @@ function parseEventBlock(
     );
   }
 
+  // Total decode: an unrecognized author becomes `{kind:"unknown", raw}` and
+  // round-trips verbatim — the event is KEPT (VIB-12 class: a dropped decode
+  // used to silently erase the event on the next read-modify-write).
   const actor = decodeActorRef(actorRaw);
-  if (!actor) {
+  if (actor.kind === "unknown") {
     diagnostics.push(
       diagWarning(
         "timeline.unknown_actor",
-        `Timeline entry has an unrecognized actor ref "${actorRaw}" and was skipped.`,
+        `Timeline entry has an unrecognized actor ref "${actorRaw}" — kept verbatim.`,
         "timeline",
       ),
     );
-    return null;
   }
 
   // Metadata lines: consecutive `title:` / `to:` lines directly after heading.

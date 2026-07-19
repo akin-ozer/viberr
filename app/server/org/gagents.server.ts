@@ -217,6 +217,9 @@ export function saveGlobalAgentProfile(
       kind: "specialist",
       name,
       role: name,
+      // Short scannable description for operator selection; the body carries
+      // the same summary until a dedicated persona is written.
+      desc: input.summary.trim(),
       icon: "cpu",
       backends: [backend],
       model: "",

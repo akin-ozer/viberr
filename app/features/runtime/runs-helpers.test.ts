@@ -37,7 +37,10 @@ describe("runLabel / roleShort", () => {
   it("roleShort maps op/primary/reviewer", () => {
     expect(roleShort({ ...base, op: true })).toBe("operator");
     expect(roleShort(base)).toBe("primary");
-    expect(roleShort({ ...base, role: "Reviewer" })).toBe("reviewer");
+    // Kind is data on the run row — the role label is free-form (live
+    // engagement role), so roleShort keys on kind, never the label.
+    expect(roleShort({ ...base, kind: "reviewer" })).toBe("reviewer");
+    expect(roleShort({ ...base, kind: "reviewer", role: "Anything" })).toBe("reviewer");
   });
 });
 

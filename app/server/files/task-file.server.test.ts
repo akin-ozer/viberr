@@ -18,8 +18,10 @@ const FULL: ParsedTaskFile = {
     readiness: "input_required",
     waiting: "human",
     ownerUserId: "u_arda01",
-    specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-    reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    engagements: [
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+    ],
     operator: { assignedAtStageId: "triage" },
     recommendations: [],
     schedules: [],
@@ -57,17 +59,17 @@ const FULL: ParsedTaskFile = {
   timeline: [
     { occurredAt: "2026-07-04T06:58:00.000Z", type: "comment", actor: { kind: "human", userId: "u_arda01", nameHint: "Arda Kaya" }, title: null, toAgent: true, evidence: null,
       text: "@operator if the PAT scope is the only blocker, let's widen it rather than block the whole task." },
-    { occurredAt: "2026-07-04T06:41:00.000Z", type: "completion", actor: { kind: "agent", backend: "codex", role: "Developer" }, title: "Completion report", toAgent: false,
+    { occurredAt: "2026-07-04T06:41:00.000Z", type: "completion", actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" }, title: "Completion report", toAgent: false,
       text: "Implemented repo attach, branch creation, and PR-sync projection.",
       evidence: [
         { label: "unit/policy_gate_test", add: "+14", del: "0" },
         { label: "integration/pr_sync_test", add: "+38", del: "−4" },
       ] },
-    { occurredAt: "2026-07-04T06:39:00.000Z", type: "github", actor: { kind: "agent", backend: "codex", role: "Developer" }, title: null, toAgent: false, evidence: null,
+    { occurredAt: "2026-07-04T06:39:00.000Z", type: "github", actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" }, title: null, toAgent: false, evidence: null,
       text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`." },
     { occurredAt: "2026-07-04T06:38:00.000Z", type: "policy", actor: { kind: "system", systemId: "policy-engine" }, title: null, toAgent: false, evidence: null,
       text: "**Policy violation:** active PAT is missing `pull_request:write`." },
-    { occurredAt: "2026-07-04T06:20:00.000Z", type: "quality", actor: { kind: "agent", backend: "claude", role: "Reviewer" }, title: null, toAgent: false, evidence: null,
+    { occurredAt: "2026-07-04T06:20:00.000Z", type: "quality", actor: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Reviewer" }, title: null, toAgent: false, evidence: null,
       text: "**Quality flag:** snapshot `task_projection.json` changed — confirm the new compact shape." },
     { occurredAt: "2026-07-04T06:02:00.000Z", type: "transition", actor: { kind: "operator" }, title: null, toAgent: false, evidence: null,
       text: "**Transition request:** move VIB-142 from In Progress to Review." },
@@ -129,7 +131,12 @@ describe("task.md round-trip", () => {
         {
           occurredAt: "2026-07-04T06:10:00.000Z",
           type: "comment" as const,
-          actor: { kind: "agent" as const, backend: "claude" as const, role: "Review & validation" },
+          actor: {
+            kind: "agent" as const,
+            backend: "claude" as const,
+            profileId: "reviewer",
+            roleHint: "Review & validation",
+          },
           title: null,
           toAgent: false,
           evidence: null,
@@ -145,7 +152,8 @@ describe("task.md round-trip", () => {
     expect(parsed.timeline[0]!.actor).toEqual({
       kind: "agent",
       backend: "claude",
-      role: "Review & validation",
+      profileId: "reviewer",
+      roleHint: "Review & validation",
     });
   });
 });
@@ -342,7 +350,7 @@ describe("task.md duplicate sections (first-wins + diagnostic)", () => {
 describe("task.md tolerant parsing", () => {
   it("malformed timeline entry is skipped with a diagnostic — task survives", () => {
     const text = serializeTaskFile(FULL).replace(
-      "### 2026-07-04T06:39:00.000Z · github · agent:codex/developer",
+      "### 2026-07-04T06:39:00.000Z · github · agent:codex/developer (Developer)",
       "### not-a-timestamp %% garbage",
     );
     const { parsed, diagnostics } = parseTaskFileContent(text, {

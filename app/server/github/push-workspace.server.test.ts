@@ -42,13 +42,36 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
-/** A fake git that answers the helper's probes and records the push. */
-function fakeGit(opts: { branch: string; ahead: number; pushOk?: boolean }) {
+/** A fake git that answers the helper's probes and records the push. `dirty`
+ * simulates uncommitted working-tree changes the agent left behind; once the
+ * helper commits them, the ahead-count reflects the new commit. */
+function fakeGit(opts: {
+  branch: string;
+  ahead: number;
+  pushOk?: boolean;
+  dirty?: boolean;
+  aheadAfterCommit?: number;
+}) {
   const calls: string[][] = [];
+  let committed = false;
   const exec = vi.fn(async (_file: string, args: string[]) => {
     calls.push(args);
     if (args.includes("--abbrev-ref")) return { ok: true, stdout: opts.branch, stderr: "" };
-    if (args.includes("--count")) return { ok: true, stdout: String(opts.ahead), stderr: "" };
+    if (args.includes("status") && args.includes("--porcelain")) {
+      return {
+        ok: true,
+        stdout: opts.dirty && !committed ? " M README.md\n?? scripts/list-files.ts\n" : "",
+        stderr: "",
+      };
+    }
+    if (args.includes("commit")) {
+      committed = true;
+      return { ok: true, stdout: "", stderr: "" };
+    }
+    if (args.includes("--count")) {
+      const ahead = committed ? (opts.aheadAfterCommit ?? opts.ahead + 1) : opts.ahead;
+      return { ok: true, stdout: String(ahead), stderr: "" };
+    }
     if (args.includes("push")) return { ok: opts.pushOk !== false, stdout: "", stderr: "" };
     return { ok: true, stdout: "", stderr: "" };
   });
@@ -68,7 +91,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(pushCall).toEqual(["-C", expect.any(String), "push", "origin", "HEAD:refs/heads/vib-1-work"]);
   });
 
-  it("no-ops when there are no local commits ahead", async () => {
+  it("no-ops when there are no local commits ahead AND a clean tree", async () => {
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 0 });
     const res = await pushWorkspaceBranch({
@@ -77,6 +100,38 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     });
     expect(res.status).toBe("no_commits");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    // A clean tree → no auto-commit.
+    expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+  });
+
+  it("COMMITS the agent's uncommitted changes, then pushes (delivery finalization)", async () => {
+    bindPat();
+    // The agent wrote files but never committed (e.g. execute-code-or-write-repo
+    // withheld, or it read its workspace contract as prohibiting commit).
+    const git = fakeGit({ branch: "vib-1-work", ahead: 0, dirty: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1 });
+    // Staged everything, then committed with an inline identity + task-key message.
+    expect(git.calls.some((c) => c.includes("add") && c.includes("-A"))).toBe(true);
+    const commitCall = git.calls.find((c) => c.includes("commit"));
+    expect(commitCall).toBeDefined();
+    expect(commitCall!.join(" ")).toContain("[VIB-1] deliver working-tree changes");
+    expect(commitCall!.join(" ")).toContain("user.email=delivery@viberr.local");
+    // And it never commits onto the default branch.
+  });
+
+  it("never auto-commits onto the default branch (HEAD on main)", async () => {
+    bindPat();
+    const git = fakeGit({ branch: "main", ahead: 0, dirty: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("no_branch");
+    expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
   });
 
   it("degrades to no_pat when the project has no credential", async () => {

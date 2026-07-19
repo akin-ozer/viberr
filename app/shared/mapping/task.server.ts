@@ -11,6 +11,11 @@ import type {
   Waiting,
 } from "~/schemas/task-file.schema";
 import type { ActorRender } from "./actor.server";
+import {
+  agentRoleDisplay,
+  decodeActorRef,
+  systemIdToName,
+} from "~/server/files/actor-ref.server";
 
 /**
  * Centralized snake_case → camelCase mapping for `task_projections` and the
@@ -161,8 +166,29 @@ export function mapPacket(packet: TaskPacket | null): PacketRender | null {
   const { from, ...rest } = packet;
   return {
     ...rest,
-    from: from === "operator" ? "Operator" : from,
+    from: packetFromDisplay(from),
   } as PacketRender;
+}
+
+/** Human-readable packet author from the stored actor-ref codec string. Most
+ * packets are operator-authored ("operator"); an agent-raised ask-human packet
+ * (G3) carries the agent's own ref — decode it to a role/backend name rather
+ * than leaking `agent:codex/reviewer (…)` to the task page. */
+function packetFromDisplay(from: string): string {
+  if (from === "operator") return "Operator";
+  const ref = decodeActorRef(from);
+  switch (ref.kind) {
+    case "operator":
+      return "Operator";
+    case "agent":
+      return agentRoleDisplay(ref);
+    case "system":
+      return systemIdToName(ref.systemId);
+    case "human":
+      return ref.nameHint ?? ref.userId;
+    default:
+      return from; // unknown ref — leave the raw string rather than blanking it
+  }
 }
 
 export function mapTaskProjectionRow(

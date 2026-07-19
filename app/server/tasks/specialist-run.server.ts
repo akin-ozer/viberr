@@ -3,11 +3,20 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type Database from "better-sqlite3";
-import type {
-  AgentRef,
-  FileActorRef,
-  TaskFileEvent,
+import {
+  deliveringEngagement,
+  supportingEngagements,
+  type AgentRef,
+  type FileActorRef,
+  type TaskFileEvent,
 } from "~/schemas/task-file.schema";
+import {
+  AGENT_OUTCOME_JSON_SCHEMA,
+  effectiveCollabMode,
+  resolveAgentCollab,
+} from "./agent-outcome.server";
+import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
+import { buildAgentToolkit } from "./agent-toolkit.server";
 import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -116,6 +125,9 @@ export interface ResolvedSpecialist {
   kb: string[];
   /** The agent's declared MCP servers — wired into the selected SDK. */
   mcps: string[];
+  /** The profile's long persona/instructions (template body, D6). A shipped
+   *  agents/definitions/<id>.md still overrides it (built-in transition aid). */
+  definition: string;
   /** The deployment's stored capability grants — drive run-time tool
    *  confinement (specialist-tool-policy). Empty for the list/display path. */
   capabilities: CapabilityGrant[];
@@ -148,6 +160,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
     mcps: view.resources.mcps ?? [],
+    definition: view.definition,
     capabilities: [],
     stages: view.stages ?? [],
     spanAll: view.spanAll ?? false,
@@ -264,7 +277,17 @@ export async function assignSpecialist(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.specialist = ref;
+      // The new deliverer replaces the old one; if it was previously a
+      // SUPPORTING engagement, drop that entry too so its profileId never
+      // appears twice (a duplicate profileId corrupts run routing — the
+      // engagements.find in startAgentRun returns the first match, so a later
+      // review run would resolve to the delivers:true entry and run as primary).
+      parsed.frontmatter.engagements = [
+        { ...ref, delivers: true },
+        ...supportingEngagements(parsed.frontmatter).filter(
+          (e) => e.profileId !== ref.profileId,
+        ),
+      ];
       // Clear any pending "assign specialist" recommendation — it's now done.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => r.kind !== "assign_specialist",
@@ -337,7 +360,10 @@ export async function assignReviewer(
   );
   assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
 
-  const alreadyEngaged = existing.parsed.frontmatter.reviewers.some(
+  // Already engaged in ANY capacity (delivering OR supporting): no-op. Scanning
+  // only the supporting list let the CURRENT deliverer be re-added as a
+  // supporting reviewer, duplicating its profileId in engagements[].
+  const alreadyEngaged = existing.parsed.frontmatter.engagements.some(
     (r) => r.profileId === reviewer.profileId,
   );
   if (alreadyEngaged) {
@@ -363,7 +389,7 @@ export async function assignReviewer(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.reviewers.push(ref);
+      parsed.frontmatter.engagements.push({ ...ref, delivers: false });
       // Clear a matching pending "engage reviewer" recommendation.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
         (r) => !(r.kind === "assign_reviewer" && r.profileId === reviewer.profileId),
@@ -420,7 +446,7 @@ export async function removeReviewer(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const target = existing.parsed.frontmatter.reviewers.find(
+  const target = supportingEngagements(existing.parsed.frontmatter).find(
     (r) => r.profileId === input.profileId,
   );
   if (!target) return { profileId: input.profileId, removed: false };
@@ -437,8 +463,8 @@ export async function removeReviewer(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      parsed.frontmatter.reviewers = parsed.frontmatter.reviewers.filter(
-        (r) => r.profileId !== input.profileId,
+      parsed.frontmatter.engagements = parsed.frontmatter.engagements.filter(
+        (r) => r.delivers || r.profileId !== input.profileId,
       );
       parsed.timeline.unshift(event);
     },
@@ -458,9 +484,9 @@ export async function removeReviewer(
   return { profileId: input.profileId, removed: true };
 }
 
-// --------------------------------------------------------- startSpecialistRun
+// -------------------------------------------------------------- startAgentRun
 
-export interface StartSpecialistRunResult {
+export interface StartAgentRunResult {
   runId: string;
   backend: RealBackend;
   simulated: boolean;
@@ -468,85 +494,113 @@ export interface StartSpecialistRunResult {
 }
 
 /**
- * Starts a PRIMARY specialist run for a task with an assigned specialist.
- * Builds an "analyze the repo" prompt from the task title + goal, best-effort
- * clones the project repo into `<taskDir>/workspace/<repo>` (ephemeral
- * askpass authentication when bound, plain clone for public repos) and points
- * the run there. Hands off to
- * the run service with a realistic simulated fallback script so the console
- * streams meaningfully when no real credential is present; a real SDK run is
- * used when the backend's credential IS available.
+ * Starts a run for an ENGAGED agent — the ONE dispatch path for every agent on
+ * a task (generic-agents G1: the former startSpecialistRun / startReviewerRun
+ * twins differed only in slot lookup, thread prefix, role label and audit
+ * copy — all of which are now data on the engagement).
  *
- * RBAC: admin|maintainer. `runtime.run.started` is audited by startRun — we
- * add a task-level `task.specialist.run_started` audit row + a typed `agent`
- * timeline event.
+ * `profileId` selects the engagement; omitted → the delivering engagement
+ * (the former "primary specialist" path). Behavior differences come from the
+ * engagement, never from a kind:
+ *   - single-flight guard iff `delivers` (one live run per task workspace —
+ *     F7-OP1; supporting agents run concurrently on their own threads);
+ *   - thread prefix `primary-` / `r<index>-` (the agents projection groups on
+ *     it) is derived from `delivers`;
+ *   - the run row records the engagement's live role snapshot.
+ *
+ * Builds the analyze prompt from the task title + goal, best-effort clones the
+ * project repo into `<taskDir>/workspace/<repo>`, resolves model/effort/
+ * skills/KB/MCPs/tool-denies from the CURRENT deployment (live profile wins
+ * over the engage-time snapshot), and hands off to the run service. RBAC:
+ * admin|maintainer (runtimeAuditActor).
  */
-export async function startSpecialistRun(
+export async function startAgentRun(
   db: Database.Database,
   input: {
     projectSlug: string;
     taskKey: string;
+    /** The engaged profile to run; omitted → the delivering engagement. */
+    profileId?: string;
     directive?: string;
     /** Force this run onto a specific backend regardless of the profile's
-     *  default — used by "retry on the other backend" after an availability /
+     *  default — "retry on the other backend" after an availability /
      *  quota failure (D4). */
     backendOverride?: RealBackend;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<StartSpecialistRunResult> {
+): Promise<StartAgentRunResult> {
   const auditActor = runtimeAuditActor(
     db,
     ctx,
     input.projectSlug,
     actor,
-    "start a specialist run",
+    "start an agent run",
   );
 
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  const sp = existing.parsed.frontmatter.specialist;
-  if (!sp) {
+  const engagement = input.profileId
+    ? (existing.parsed.frontmatter.engagements.find(
+        (e) => e.profileId === input.profileId,
+      ) ?? null)
+    : deliveringEngagement(existing.parsed.frontmatter);
+  if (!engagement) {
     throw AppError.validation(
-      "Assign a specialist before starting a run.",
+      input.profileId
+        ? "That agent is not engaged on this task. Engage it first."
+        : "Engage a delivering agent before starting a run.",
     );
   }
-  // Server-side single-flight for the PRIMARY specialist (F7-OP1). Two operator
-  // turns racing (e.g. a packet resolve + a manual backward transition in quick
-  // succession) each used to start a codex/claude run in the SAME
-  // tasks/<KEY>/workspace clone — two agent processes fighting over one git
-  // index/branch, risking a double push. The operator lease guards operator
-  // runs only; the specialist dispatch had no in-flight guard. One live primary
-  // run per task: refuse a second until the first finishes or is interrupted.
-  const livePrimary = listRunsForTaskRows(db, input.projectSlug, input.taskKey).find(
-    (r) => r.kind === "primary" && (r.state === "running" || r.state === "queued"),
-  );
-  if (livePrimary) {
-    throw new AppError({
-      code: ERROR_CODES.CONFLICT,
-      status: 409,
-      userMessage:
-        "A specialist run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-      kind: "user",
-    });
+  const delivers = engagement.delivers;
+
+  // Server-side single-flight for the DELIVERING agent (F7-OP1). Two racing
+  // dispatches used to start two runs in the SAME tasks/<KEY>/workspace clone —
+  // two agent processes fighting over one git index/branch, risking a double
+  // push. One live delivering run per task: refuse a second until the first
+  // finishes or is interrupted. Supporting agents have their own read-only
+  // relationship to the workspace and run concurrently.
+  if (delivers) {
+    const liveDelivering = listRunsForTaskRows(
+      db,
+      input.projectSlug,
+      input.taskKey,
+    ).find(
+      (r) =>
+        r.kind === "primary" && (r.state === "running" || r.state === "queued"),
+    );
+    if (liveDelivering) {
+      throw new AppError({
+        code: ERROR_CODES.CONFLICT,
+        status: 409,
+        userMessage:
+          "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
+        kind: "user",
+      });
+    }
   }
+
   // Resolve the CURRENT deployment before picking the backend: the run follows
-  // the live profile, not the assign-time snapshot in task.md, so switching a
+  // the live profile, not the engage-time snapshot in task.md, so switching a
   // profile to the other backend takes effect on the very next run (manual,
   // operator prompt or @mention) instead of pinning the task forever.
-  let resolvedSpec: ResolvedSpecialist | null = null;
+  let resolved: ResolvedSpecialist | null = null;
   try {
-    resolvedSpec = resolveDeployedSpecialist(ctx, input.projectSlug, sp.profileId);
+    resolved = resolveDeployedSpecialist(
+      ctx,
+      input.projectSlug,
+      engagement.profileId,
+    );
   } catch {
-    // Profile may have been undeployed since assignment — snapshot fallback.
+    // Profile may have been undeployed since engagement — snapshot fallback.
   }
   // Backend: an explicit D4 retry override wins; then the live deployment;
   // then the snapshot (undeployed profile).
   const backend: RealBackend =
     input.backendOverride ??
-    resolvedSpec?.backend ??
-    (sp.backend === "codex" ? "codex" : "claude");
+    resolved?.backend ??
+    (engagement.backend === "codex" ? "codex" : "claude");
   // Resolve the model + effort from the deployment (falls back to a sane
   // default). Effort is threaded into the run so the SDK gets the profile's
   // chosen reasoning level (claude options.effort · codex modelReasoningEffort).
@@ -554,62 +608,71 @@ export async function startSpecialistRun(
   let effort = "";
   // The agent's display name for the Agent-logs picker (grouped one-per-agent).
   // Falls back to the profile id when the deployment can't be resolved.
-  let agentName = sp.profileId;
+  let agentName = engagement.profileId;
   let skills: string[] = [];
   let kb: string[] = [];
   let mcpNames: string[] = [];
-  // Run-time tool confinement from the deployment's capability grants (a
-  // specialist without push/PR/merge rights literally cannot run those
-  // commands). Empty when nothing is withheld.
+  // Run-time tool confinement from the deployment's capability grants (an
+  // agent without push/PR/merge rights literally cannot run those commands).
   let disallowedTools: string[] = [];
-  if (resolvedSpec) {
-    agentName = resolvedSpec.name;
-    skills = resolvedSpec.skills;
-    kb = resolvedSpec.kb;
-    mcpNames = resolvedSpec.mcps;
-    disallowedTools = resolveSpecialistDisallowedTools(resolvedSpec.capabilities);
+  if (resolved) {
+    agentName = resolved.name;
+    skills = resolved.skills;
+    kb = resolved.kb;
+    mcpNames = resolved.mcps;
+    disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     // The profile's model/effort are specific to ITS native backend. When this
     // run overrides to a DIFFERENT backend (D4 retry-on-other-backend), the
-    // native model id is invalid there (e.g. Claude's "opus" sent to Codex) —
-    // re-resolve model + effort for the actual run backend so the retry works
-    // instead of hard-failing. Same-backend runs keep the profile's exact values.
-    if (backend === resolvedSpec.backend) {
-      model = resolvedSpec.model;
-      effort = resolvedSpec.effort;
+    // native model id is invalid there — re-resolve for the actual run backend
+    // so the retry works. Same-backend runs keep the profile's exact values.
+    if (backend === resolved.backend) {
+      model = resolved.model;
+      effort = resolved.effort;
     } else {
       model = resolveRunModel(backend, undefined); // backend default
-      effort = resolveRunEffort(backend, resolvedSpec.effort);
+      effort = resolveRunEffort(backend, resolved.effort);
     }
   }
-  // Stage eligibility holds at the RUN boundary too (F1): an already-assigned
-  // specialist must not be re-run after the task moved to a stage it isn't
-  // eligible for (assign-time checks alone would let a re-prompt bypass F1).
-  // Outside the try so the graceful undeployed-profile fallback can't swallow it.
-  if (resolvedSpec) {
-    assertStageEligible(resolvedSpec, existing.parsed.frontmatter.stage);
+  // Stage eligibility holds at the RUN boundary too (F1): an already-engaged
+  // agent must not be re-run after the task moved to a stage it isn't eligible
+  // for. Outside the try so the undeployed-profile fallback can't swallow it.
+  if (resolved) {
+    assertStageEligible(resolved, existing.parsed.frontmatter.stage);
   }
 
-  // The agent's run persona: its detailed definition + declared skills + KB docs.
-  // This is what makes the specialist behave as itself (the Developer implements
-  // + tests + reports back) rather than a generic analyzer. Claude takes it as a
-  // system prompt; Codex receives the same persona through the supported
-  // `developer_instructions` configuration channel.
+  // The agent's run persona: its detailed definition + declared skills + KB
+  // docs. Claude takes it as a system prompt; Codex receives the same persona
+  // through the supported `developer_instructions` configuration channel.
   const persona = buildSpecialistPersona({
-    profileId: sp.profileId,
+    profileId: engagement.profileId,
     skills,
     kb,
+    ...(resolved?.definition ? { definition: resolved.definition } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
+  // Collaboration gates (G3/G4) from the deployment's grants — the SAME
+  // resolution the completion pipeline re-derives (agent-outcome.server.ts).
+  const collab = resolveAgentCollab(resolved?.capabilities ?? [], delivers);
+  // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
+  const agentActorRef: FileActorRef = {
+    kind: "agent",
+    backend,
+    profileId: engagement.profileId,
+    roleHint: engagement.role,
+  };
+  // Staging key linking a Claude report_outcome tool call to THIS dispatch's
+  // completion (the runId doesn't exist until startRun returns).
+  const outcomeKey = newId("oc");
+
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
-  const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+  const repo =
+    existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
 
   // Best-effort clone — only when a REAL backend will actually consume a
-  // working tree. With no credential the run either fails fast in startRun
-  // (R7-2) or the gated test engine carries it — neither needs a checkout, so
-  // we skip the network clone entirely (keeps the test suite fast + offline).
-  // Still best-effort even when real.
+  // working tree (R7-2: no credential → fail fast or gated test engine, neither
+  // needs a checkout).
   const realBackend = isBackendAvailable(backend);
   const clone =
     repo && realBackend
@@ -621,9 +684,7 @@ export async function startSpecialistRun(
         })
       : null;
   // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
-  // the clone when it succeeded, else an empty workspace root the agent clones
-  // into. NEVER the task dir (which sits inside the data root, which may live
-  // inside a host git repo). Confine git with GIT_CEILING (workspaceRunEnv).
+  // NEVER the task dir. Confine git with GIT_CEILING (workspaceRunEnv).
   const workspaceRoot = taskWorkspaceRoot(
     input.projectSlug,
     input.taskKey,
@@ -634,19 +695,17 @@ export async function startSpecialistRun(
     mkdirSync(runWorkdir, { recursive: true });
   }
 
-  const delivery = resolveDeliveryPermissions(resolvedSpec?.capabilities ?? []);
-  // The run env: git confinement only. Delivery is SERVER-SIDE for BOTH backends
-  // (F-GH3): the agent commits locally with its own `[TASK]` message but NEVER
-  // pushes — viberr pushes the workspace branch + opens the PR on the Review
-  // transition (`pushWorkspaceBranch`). This is the sole token-safe, backend-
-  // agnostic path: handing the agent a push credential works on Claude (child
-  // env) but is impossible on Codex without leaking the token into `--config`
-  // argv (Codex's `shell_environment_policy: inherit "core"` strips GIT_ASKPASS
-  // from tool shells — parity gap found live 2026-07-18). So no run gets push
-  // credentials; the platform delivers.
-  const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
-  const analyzePrompt = buildAnalyzePrompt({
-    role: sp.role,
+  const delivery = resolveDeliveryPermissions(resolved?.capabilities ?? []);
+  // The run env: git confinement only. Delivery is SERVER-SIDE for BOTH
+  // backends (F-GH3): the agent commits locally but NEVER pushes — viberr
+  // pushes the workspace branch + opens the PR on the Review transition.
+  const baseRunEnv = workspaceRunEnv(
+    input.projectSlug,
+    input.taskKey,
+    ctx.dataRoot,
+  );
+  const basePrompt = buildAnalyzePrompt({
+    role: engagement.role,
     taskKey: input.taskKey,
     title,
     goal,
@@ -656,11 +715,40 @@ export async function startSpecialistRun(
     delivery,
     ...(input.directive ? { directive: input.directive } : {}),
   });
-  const prompt = analyzePrompt;
+  // Collaboration guidance (G3/G4): tell the agent about its channel so the
+  // capabilities are actually exercised, per-transport.
+  const collabNotes: string[] = [];
+  if (backend === "claude" && realBackend) {
+    if (collab.comment) {
+      collabNotes.push(
+        "- `post_comment` — post a material mid-run progress note or finding to the task timeline.",
+      );
+    }
+    if (collab.ask) {
+      collabNotes.push(
+        "- `ask_human` — raise a question you are blocked on as a decision card for the humans (you will not get the answer in this run; note it in your report).",
+      );
+    }
+    if (collab.verdict) {
+      collabNotes.push(
+        "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification, then finish with your full findings.",
+      );
+    }
+  } else if (backend === "codex" && realBackend && (collab.verdict || collab.ask)) {
+    collabNotes.push(
+      '- Your FINAL message must be the structured outcome JSON: {"summary": "<your full report, markdown>"' +
+        (collab.verdict ? ', "verdict": "approve" | "request_changes" (required when you judged the work)' : "") +
+        (collab.ask ? ', "question": {"title", "body", "options"} (only when blocked on a human decision)' : "") +
+        "}.",
+    );
+  }
+  const prompt = collabNotes.length
+    ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
+    : basePrompt;
 
   // R7-2: the canned analyze stream feeds ONLY the gated deterministic test
-  // engine — a real run never receives one, and an unavailable backend now
-  // fails fast in startRun instead of falling back to this fabrication.
+  // engine — a real run never receives one, and an unavailable backend fails
+  // fast in startRun instead of falling back to this fabrication.
   const script =
     !realBackend && simulatedRuntimePermitted()
       ? buildAnalyzeScript({
@@ -668,60 +756,100 @@ export async function startSpecialistRun(
           model,
           repo,
           cloned: !!clone,
-          role: sp.role,
+          role: engagement.role,
           ...(input.directive ? { directive: input.directive } : {}),
         })
       : undefined;
 
+  // Thread prefix: the delivering agent streams on `primary-…`; each
+  // supporting agent groups on its `r<index>-…` prefix (the agents deployment
+  // projection groups on it). Unique suffix so re-runs never collide on
+  // agent_runs' unique(project, task, thread).
+  const supportingIndex = delivers
+    ? -1
+    : supportingEngagements(existing.parsed.frontmatter).findIndex(
+        (r) => r.profileId === engagement.profileId,
+      );
+  const threadId =
+    (delivers ? "primary-" : `r${supportingIndex}-`) +
+    newId("t").replace("t_", "").slice(0, 8);
+
+  // Collaboration transports (G3/G4):
+  //   Claude → in-process toolkit tools (post_comment / ask_human /
+  //            report_outcome), merged with the profile's declared MCPs;
+  //   Codex  → the outcome-envelope outputSchema on the final reply (the codex
+  //            SDK can't mount our in-process tools) — only when a structured
+  //            field (verdict/question) is actually usable, so a plain
+  //            developer's report stays natural prose.
+  const declaredMcps = mcpServersFor(db, mcpNames);
+  const toolkit =
+    backend === "claude" && realBackend
+      ? buildAgentToolkit({
+          db,
+          ctx,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          actorRef: agentActorRef,
+          outcomeKey,
+          collab,
+        })
+      : null;
+  const mergedMcpServers = {
+    ...(declaredMcps.mcpServers ?? {}),
+    ...(toolkit?.mcpServers ?? {}),
+  };
+  const useEnvelopeSchema =
+    backend === "codex" && realBackend && (collab.verdict || collab.ask);
+
   const { runId, simulated } = await startRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    // Unique thread per specialist run so re-running a task starts a fresh
-    // stream instead of colliding with a prior run on the "primary" thread
-    // (agent_runs is unique on project+task+thread). Each run shows in the
-    // Agent-logs picker; the label comes from the role, not the thread id.
-    threadId: "primary-" + newId("t").replace("t_", "").slice(0, 8),
-    role: "Primary specialist",
-    kind: "primary",
+    threadId,
+    // The engagement's live role snapshot — run rows no longer carry the
+    // "Primary specialist"/"Reviewer" kind literals (shadow-kind cleanup).
+    role: engagement.role,
+    kind: delivers ? "primary" : "reviewer",
     backend,
     model,
     ...(effort ? { effort } : {}),
     ...(persona ? { systemPrompt: persona } : {}),
     // Persist the agent identity so the Agent-logs picker groups this run's
-    // resumes into one entry labeled by the specialist's name (e.g. "dev").
+    // resumes into one entry labeled by the agent's name.
     agentName,
-    agentProfileId: sp.profileId,
+    agentProfileId: engagement.profileId,
     prompt,
     ...(script ? { script } : {}),
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
-    // Wire the profile's declared MCP servers into the run (item-1/FR9): a
-    // profile that declares an org MCP gets it on both supported SDKs.
-    ...mcpServersFor(db, mcpNames),
+    // Profile MCPs (item-1/FR9) + the collaboration toolkit (Claude).
+    ...(Object.keys(mergedMcpServers).length
+      ? { mcpServers: mergedMcpServers }
+      : {}),
+    ...(useEnvelopeSchema ? { outputSchema: AGENT_OUTCOME_JSON_SCHEMA } : {}),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend ? { env: baseRunEnv } : {}),
     ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
   });
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
-  const switched = sp.backend !== backend;
+  const switched = engagement.backend !== backend;
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
-      // Keep the assignment snapshot in step with the backend that actually
+      // Keep the engage-time snapshot in step with the backend that actually
       // ran (deployment edit or D4 retry): the exec-profile label stays honest
       // and every later resolution (operator prompt, @mention) follows it.
-      if (
-        parsed.frontmatter.specialist &&
-        parsed.frontmatter.specialist.backend !== backend
-      ) {
-        parsed.frontmatter.specialist.backend = backend;
+      const engaged = parsed.frontmatter.engagements.find(
+        (r) => r.profileId === engagement.profileId,
+      );
+      if (engaged && engaged.backend !== backend) {
+        engaged.backend = backend;
       }
       parsed.timeline.unshift(
         agentEvent(
           switched
-            ? `Started a ${backendLabel} run for the ${sp.role} specialist (switched from ${sp.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
-            : `Started a ${backendLabel} run for the ${sp.role} specialist — streaming to the agent logs.`,
+            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
+            : `Started a ${backendLabel} run for the ${engagement.role} agent — streaming to the agent logs.`,
         ),
       );
     },
@@ -729,7 +857,10 @@ export async function startSpecialistRun(
   reproject(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
-    action: "task.specialist.run_started",
+    // ONE action id for every engaged agent (the former
+    // task.specialist.run_started / task.reviewer.run_started split);
+    // `delivers` in the details carries the distinction as data.
+    action: "task.agent.run_started",
     actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
@@ -737,8 +868,9 @@ export async function startSpecialistRun(
     taskKey: input.taskKey,
     details: {
       runId,
-      profileId: sp.profileId,
+      profileId: engagement.profileId,
       backend,
+      delivers,
       simulated,
       cloned: !!clone,
     },
@@ -751,254 +883,24 @@ export async function startSpecialistRun(
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
   // ONE canonical completion handler for EVERY start path (UI "Run", @mention,
-  // operator prompt): reply → reconcile agent-side delivery → (reviewer) verdict
-  // → re-invoke the operator to react. `ctx.operatorRun` (set when this run is
-  // inside an operator react loop) continues the chain at depth+1; otherwise a
-  // fresh chain starts against the deployed operator.
+  // operator prompt): reply → reconcile delivery (delivers only) → outcome/
+  // verdict → re-invoke the operator to react. `ctx.operatorRun` (set when
+  // this run is inside an operator react loop) continues the chain at depth+1.
   await registerAgentCompletion(db, ctx, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     runId,
     backend,
-    role: sp.role,
-    kind: "primary",
+    profileId: engagement.profileId,
+    role: engagement.role,
+    delivers,
+    outcomeKey,
     workdir: runWorkdir,
-    agentHandle: agentHandleFor(sp.role),
+    agentHandle: agentHandleFor(engagement.role),
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
-  return { runId, backend, simulated, role: sp.role };
-}
-
-// ------------------------------------------------------------ startReviewerRun
-
-/**
- * Starts a REVIEWER run for a specific engaged reviewer (by profile id) —
- * the reviewer counterpart of {@link startSpecialistRun}. Same analyze prompt +
- * best-effort clone + gated test-engine script, but the run is `kind:
- * "reviewer"` on its own `r<index>-…` thread so it groups under the reviewer's
- * own Agent-logs entry. RBAC: admin|maintainer.
- */
-export async function startReviewerRun(
-  db: Database.Database,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    profileId: string;
-    directive?: string;
-    /** Force this run onto a specific backend (D4 retry-on-other-backend). */
-    backendOverride?: RealBackend;
-  },
-  actor: TaskActor,
-  ctx: TaskMutationContext = {},
-): Promise<StartSpecialistRunResult> {
-  const auditActor = runtimeAuditActor(
-    db,
-    ctx,
-    input.projectSlug,
-    actor,
-    "start a reviewer run",
-  );
-
-  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
-
-  const reviewers = existing.parsed.frontmatter.reviewers;
-  const index = reviewers.findIndex((r) => r.profileId === input.profileId);
-  if (index < 0) {
-    throw AppError.validation(
-      "That reviewer is not engaged on this task. Assign it first.",
-    );
-  }
-  const rev = reviewers[index]!;
-  // Same deployment-first resolution as startSpecialistRun: the live profile's
-  // backend wins over the engage-time snapshot so a backend edit applies to
-  // the next reviewer run too.
-  let resolvedRev: ResolvedSpecialist | null = null;
-  try {
-    resolvedRev = resolveDeployedSpecialist(ctx, input.projectSlug, rev.profileId);
-  } catch {
-    // Profile may have been undeployed since engagement — snapshot fallback.
-  }
-  const backend: RealBackend =
-    input.backendOverride ??
-    resolvedRev?.backend ??
-    (rev.backend === "codex" ? "codex" : "claude");
-
-  let model = defaultModelFor(backend);
-  let effort = "";
-  let agentName = rev.profileId;
-  let skills: string[] = [];
-  let kb: string[] = [];
-  let mcpNames: string[] = [];
-  let disallowedTools: string[] = [];
-  if (resolvedRev) {
-    agentName = resolvedRev.name;
-    skills = resolvedRev.skills;
-    kb = resolvedRev.kb;
-    mcpNames = resolvedRev.mcps;
-    disallowedTools = resolveSpecialistDisallowedTools(resolvedRev.capabilities);
-    // Cross-backend retry (D4): re-resolve model + effort for the run backend.
-    if (backend === resolvedRev.backend) {
-      model = resolvedRev.model;
-      effort = resolvedRev.effort;
-    } else {
-      model = resolveRunModel(backend, undefined);
-      effort = resolveRunEffort(backend, resolvedRev.effort);
-    }
-  }
-  // Stage eligibility at the RUN boundary (F1) — same rationale as
-  // startSpecialistRun: an engaged reviewer must not be re-run at a stage its
-  // profile isn't eligible for. Outside the try so the fallback can't swallow it.
-  if (resolvedRev) {
-    assertStageEligible(resolvedRev, existing.parsed.frontmatter.stage);
-  }
-
-  const persona = buildSpecialistPersona({
-    profileId: rev.profileId,
-    skills,
-    kb,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
-
-  const title = existing.parsed.frontmatter.title;
-  const goal = existing.parsed.goal;
-  const repo = existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
-
-  const realBackend = isBackendAvailable(backend);
-  const clone =
-    repo && realBackend
-      ? await cloneRepo(db, {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          repo,
-          dataRoot: ctx.dataRoot,
-        })
-      : null;
-  const workspaceRoot = taskWorkspaceRoot(
-    input.projectSlug,
-    input.taskKey,
-    ctx.dataRoot,
-  );
-  const runWorkdir = clone ?? (realBackend ? workspaceRoot : null);
-  if (runWorkdir && !existsSync(runWorkdir)) {
-    mkdirSync(runWorkdir, { recursive: true });
-  }
-
-  const delivery = resolveDeliveryPermissions(resolvedRev?.capabilities ?? []);
-  // Confinement only — same server-side delivery model as the primary run: the
-  // agent commits locally but never pushes; viberr delivers on Review.
-  const baseRunEnv = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
-  const analyzePrompt = buildAnalyzePrompt({
-    role: rev.role,
-    taskKey: input.taskKey,
-    title,
-    goal,
-    repo,
-    branch: existing.parsed.frontmatter.branch ?? taskBranchName(input.taskKey),
-    cloned: !!clone,
-    delivery,
-    ...(input.directive ? { directive: input.directive } : {}),
-  });
-  const prompt = analyzePrompt;
-
-  // R7-2: canned stream for the gated deterministic test engine only (see
-  // startSpecialistRun — same rationale).
-  const script =
-    !realBackend && simulatedRuntimePermitted()
-      ? buildAnalyzeScript({
-          backend,
-          model,
-          repo,
-          cloned: !!clone,
-          role: rev.role,
-          ...(input.directive ? { directive: input.directive } : {}),
-        })
-      : undefined;
-
-  const { runId, simulated } = await startRun(db, {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    // `r<index>-<uid>`: the index groups this reviewer's runs in the agents
-    // deployment projection; the uid keeps re-runs from colliding on the thread.
-    threadId: `r${index}-` + newId("t").replace("t_", "").slice(0, 8),
-    role: "Reviewer",
-    kind: "reviewer",
-    backend,
-    model,
-    ...(effort ? { effort } : {}),
-    ...(persona ? { systemPrompt: persona } : {}),
-    agentName,
-    agentProfileId: rev.profileId,
-    prompt,
-    ...(script ? { script } : {}),
-    actor: auditActor,
-    ...(disallowedTools.length ? { disallowedTools } : {}),
-    ...mcpServersFor(db, mcpNames),
-    ...(runWorkdir ? { workdir: runWorkdir } : {}),
-    ...(realBackend ? { env: baseRunEnv } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-  });
-
-  const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
-  const switched = rev.backend !== backend;
-  await updateTaskFile(
-    taskRef(ctx, input.projectSlug, input.taskKey),
-    (parsed) => {
-      // Keep this reviewer's engage-time snapshot in step with the backend
-      // that actually ran (deployment edit or D4 retry).
-      const engaged = parsed.frontmatter.reviewers.find(
-        (r) => r.profileId === rev.profileId,
-      );
-      if (engaged && engaged.backend !== backend) {
-        engaged.backend = backend;
-      }
-      parsed.timeline.unshift(
-        agentEvent(
-          switched
-            ? `Started a ${backendLabel} run for the ${rev.role} reviewer (switched from ${rev.backend === "claude" ? "Claude Code" : "Codex"}) — streaming to the agent logs.`
-            : `Started a ${backendLabel} run for the ${rev.role} reviewer — streaming to the agent logs.`,
-        ),
-      );
-    },
-  );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
-
-  recordAudit(db, {
-    action: "task.reviewer.run_started",
-    actor: auditActor,
-    subjectKind: "task",
-    subjectId: input.taskKey,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: {
-      runId,
-      profileId: rev.profileId,
-      backend,
-      simulated,
-      cloned: !!clone,
-    },
-  });
-
-  const { registerAgentCompletion, markWaitingAgent } = await import(
-    "./task-actions.server"
-  );
-  await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
-
-  // Same canonical handler — a reviewer additionally records its verdict.
-  await registerAgentCompletion(db, ctx, {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    runId,
-    backend,
-    role: rev.role,
-    kind: "reviewer",
-    workdir: runWorkdir,
-    agentHandle: agentHandleFor(rev.role),
-    ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
-  });
-
-  return { runId, backend, simulated, role: rev.role };
+  return { runId, backend, simulated, role: engagement.role };
 }
 
 // ----------------------------------------------------------------- persona
@@ -1052,10 +954,16 @@ export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
   kb?: string[];
+  /** The profile's own persona body (D6) — used when the store ships no
+   *  agents/definitions/<id>.md override. Custom profiles finally run AS
+   *  themselves instead of persona-less on the generic analyze prompt. */
+  definition?: string;
   dataRoot?: string;
 }): string {
   const parts: string[] = [];
-  const definition = readAgentDefinition(input.profileId, input.dataRoot);
+  const definition =
+    readAgentDefinition(input.profileId, input.dataRoot) ||
+    (input.definition ?? "").trim();
   if (definition) parts.push(definition);
   // Collect the actually-resolvable resource bodies first, so the trusted-
   // provenance banner (F7-RES4) is emitted ONLY when there is real attached
@@ -1357,12 +1265,24 @@ function taskWorkspaceRoot(
 export function resolveResumeConfinement(
   db: Database.Database,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; profileId: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    /** The resumed run's backend + engagement shape — rebuilds the same
+     *  collaboration transport the fresh-run path mounts (toolkit on Claude;
+     *  the Codex envelope re-parses from the reply, no resume config needed). */
+    backend?: RealBackend;
+    role?: string;
+    delivers?: boolean;
+  },
 ): {
   disallowedTools: string[];
   env: Record<string, string>;
   mcpServers?: Record<string, unknown>;
   systemPrompt?: string;
+  /** Staging key for a Claude report_outcome on this resumed turn. */
+  outcomeKey?: string;
 } {
   const env = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
   try {
@@ -1375,16 +1295,40 @@ export function resolveResumeConfinement(
       profileId: input.profileId,
       skills: resolved.skills,
       kb: resolved.kb,
+      ...(resolved.definition ? { definition: resolved.definition } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
+    // Same collaboration toolkit the fresh-run path mounts (XS-1 parity).
+    let outcomeKey: string | undefined;
+    let toolkitServers: Record<string, unknown> = {};
+    if (input.backend === "claude") {
+      const delivers = input.delivers ?? false;
+      const collab = resolveAgentCollab(resolved.capabilities, delivers);
+      outcomeKey = newId("oc");
+      const toolkit = buildAgentToolkit({
+        db,
+        ctx,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        actorRef: {
+          kind: "agent",
+          backend: "claude",
+          profileId: input.profileId,
+          roleHint: input.role ?? resolved.role,
+        },
+        outcomeKey,
+        collab,
+      });
+      if (toolkit) toolkitServers = toolkit.mcpServers;
+    }
+    const merged = { ...mcpServers, ...toolkitServers };
     return {
       disallowedTools: resolveSpecialistDisallowedTools(resolved.capabilities),
       env,
-      ...(mcpServers && Object.keys(mcpServers).length
-        ? { mcpServers }
-        : {}),
+      ...(Object.keys(merged).length ? { mcpServers: merged } : {}),
       ...(persona ? { systemPrompt: persona } : {}),
+      ...(outcomeKey ? { outcomeKey } : {}),
     };
   } catch {
     // Profile not a current deployment — still apply the conservative settings.
@@ -1551,6 +1495,22 @@ export interface DeployedSpecialistView {
   /** Reasoning effort (empty when unset) — carried so a comment-resume can
    *  apply the agent's current effort, not the prior run's. */
   effort: string;
+  /** Short scannable profile description — WHAT THE OPERATOR SELECTS BY
+   *  (generic-agents D11): purpose/strengths, one paragraph. */
+  desc: string;
+  /** Granted collaboration/delivery capabilities, as display labels — the
+   *  operator's second selection input (e.g. "reports validation verdicts"
+   *  identifies a review-capable profile without a hardcoded id). */
+  capabilities: {
+    /** May own the workspace/branch/PR when engaged as the deliverer. */
+    delivery: boolean;
+    /** Holds report-validation-verdict → its verdicts gate acceptance. */
+    verdict: boolean;
+    /** May raise ask-human question packets. */
+    askHuman: boolean;
+  };
+  /** Declared resources (skills/MCPs/KBs) — selection context. */
+  resources: { skills: string[]; mcps: string[]; kb: string[] };
   /** Stage ids this profile is eligible to work (F1 — now enforced, not just
    *  displayed). Empty when spanAll. */
   stages: string[];
@@ -1611,6 +1571,15 @@ export function listDeployedSpecialists(
     const view = effectiveProfileView(deployment, ctx.dataRoot);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
+    const grants = deployment.capabilities;
+    // Delivery capability: any repo-write grant in direct mode (the same set
+    // the tool denylist binds on).
+    const granted = (id: string) =>
+      grants.some(
+        (g) =>
+          g.capabilityId === id &&
+          coerceSpecialistCapabilityMode(g.mode) === "direct",
+      );
     out.push({
       id: resolved.profileId,
       name: resolved.name,
@@ -1618,6 +1587,24 @@ export function listDeployedSpecialists(
       backend: resolved.backend,
       model: resolved.model,
       effort: resolved.effort,
+      desc: view.desc,
+      capabilities: {
+        delivery:
+          granted("execute-code-or-write-repo") ||
+          granted("commit-push-branch") ||
+          granted("create-task-branch"),
+        // EXPLICIT grant only — the completion-time transition default
+        // (absent grant → verdict-on for supporting engagements) is a
+        // RECORDING rule, not a selection signal; applying it here made every
+        // profile look review-capable and mis-picked the reviewer.
+        verdict: granted("report-validation-verdict"),
+        askHuman: effectiveCollabMode(grants, "ask-human", false) === "direct",
+      },
+      resources: {
+        skills: resolved.skills,
+        mcps: resolved.mcps,
+        kb: resolved.kb,
+      },
       stages: resolved.stages,
       spanAll: resolved.spanAll,
     });

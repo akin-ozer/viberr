@@ -26,40 +26,87 @@ export interface CapabilityDef {
   label: string;
 }
 
-export const CAP_CATALOG: readonly CapabilityDef[] = [
-  // Operator coordination
-  { id: "assign-primary-specialist", label: "Assign the primary specialist" },
-  { id: "summon-reviewers", label: "Summon reviewer specialists" },
-  { id: "generate-packets", label: "Generate decision & blocking packets" },
-  { id: "append-typed-events", label: "Append typed important events" },
-  { id: "stage-transitions", label: "Stage transitions" },
-  { id: "completion-for-acceptance", label: "Completion for human acceptance" },
-  { id: "execute-code-or-write-repo", label: "Execute code or write to the repo" },
-  // Delivery
-  { id: "create-task-branch", label: "Create the task-key branch" },
-  { id: "commit-push-branch", label: "Commit & push to the branch" },
-  { id: "run-unit-integration-validation", label: "Run unit & integration validation" },
-  { id: "open-review-pr", label: "Open the review pull request" },
-  { id: "move-task-to-review", label: "Move the task to Review" },
-  { id: "report-validation-verdict", label: "Report a validation verdict" },
-  // Review
-  { id: "read-repo-diff", label: "Read the repository & diff" },
-  { id: "run-validation-suites", label: "Run validation suites" },
-  { id: "post-quality-flags", label: "Post quality-flag events" },
-  { id: "comment-on-task", label: "Comment on the task" },
-  { id: "approve-review", label: "Approve the review" },
-  { id: "request-changes", label: "Request changes" },
-  // Validation
-  { id: "author-test-cases", label: "Author test cases" },
-  { id: "attach-evidence-references", label: "Attach evidence references" },
-  // Shared specialist actions
-  { id: "read-task-repo", label: "Read the task & repository" },
-  { id: "flag-underspecified-tasks", label: "Flag underspecified tasks" },
-  // Always-human governed actions
-  { id: "merge-pull-request", label: "Merge a pull request" },
-  { id: "transition-to-done", label: "Transition a task to Done" },
-  { id: "change-project-policy", label: "Change project policy" },
+/** Which profile kinds a capability applies to. "agent" = every non-operator
+ * profile (generic-agents plan G1: reviewer is no longer a kind). */
+export type CapabilityKind = "operator" | "agent";
+
+/**
+ * Unified catalog entry (generic-agents plan, 2026-07-19): ONE catalog drives
+ * the profile editors for BOTH kinds — the former CAP_MODAL_CATALOG /
+ * OPERATOR_CAP_CATALOG split is now derived per-kind from `kinds` + `group`.
+ *
+ * `group: null` → not a toggle in any editor; the capability only surfaces
+ * read-only in the capability matrix's "Other actions" group (the pass-4
+ * ruling-7 "no fake toggles" stance for ids with no runtime consumer).
+ *
+ * `promotable: false` → autonomy promotion may NEVER escalate this capability
+ * to `direct` (absorbs the former `completion-for-acceptance` string
+ * special-case in operator gate()).
+ */
+export interface UnifiedCapabilityDef {
+  id: string;
+  label: string;
+  kinds: readonly CapabilityKind[];
+  /** Editor accordion group for the kinds above; null → matrix-only. */
+  group: string | null;
+  /** Mode seeded when a profile of an applicable kind is created. */
+  defaultMode: "direct" | "recommend" | "human" | "off";
+  promotable: boolean;
+}
+
+const cap = (
+  id: string,
+  label: string,
+  kinds: readonly CapabilityKind[],
+  group: string | null,
+  defaultMode: UnifiedCapabilityDef["defaultMode"] = "direct",
+  promotable = true,
+): UnifiedCapabilityDef => ({ id, label, kinds, group, defaultMode, promotable });
+
+export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
+  // Operator coordination (operator editor toggles)
+  cap("assign-primary-specialist", "Assign the primary specialist", ["operator"], "Assignment"),
+  cap("summon-reviewers", "Summon reviewer specialists", ["operator"], "Assignment"),
+  cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
+  cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),
+  cap("stage-transitions", "Stage transitions", ["operator"], "Permissions", "recommend"),
+  // Never autonomy-promoted to direct: acceptance stays human even under
+  // `full` autonomy (formerly a string special-case in operator gate()).
+  cap("completion-for-acceptance", "Completion for human acceptance", ["operator"], "Permissions", "recommend", false),
+  // Agent repository/execution toggles (bind via the Claude tool denylist)
+  cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
+  cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
+  cap("commit-push-branch", "Commit & push to the branch", ["agent"], "Repository & execution"),
+  cap("open-review-pr", "Open the review pull request", ["agent"], "Repository & execution"),
+  // Agent collaboration toggles (generic-agents G3/G4: gate the agent toolkit —
+  // post_comment / ask_human / report_outcome — wired in the pipeline phase).
+  cap("comment-on-task", "Comment on the task", ["agent"], "Collaboration"),
+  cap("ask-human", "Ask the human a question", ["agent"], "Collaboration"),
+  // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
+  // never acquires acceptance-veto power; the seed grants it to the reviewer.
+  cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
+  // Advisory persona guidance (no runtime consumer — matrix-only, no toggle)
+  cap("run-unit-integration-validation", "Run unit & integration validation", ["agent"], null),
+  cap("move-task-to-review", "Move the task to Review", ["agent"], null),
+  cap("read-repo-diff", "Read the repository & diff", ["agent"], null),
+  cap("run-validation-suites", "Run validation suites", ["agent"], null),
+  cap("post-quality-flags", "Post quality-flag events", ["agent"], null),
+  cap("approve-review", "Approve the review", ["agent"], null),
+  cap("request-changes", "Request changes", ["agent"], null),
+  cap("author-test-cases", "Author test cases", ["agent"], null),
+  cap("attach-evidence-references", "Attach evidence references", ["agent"], null),
+  cap("read-task-repo", "Read the task & repository", ["agent"], null),
+  cap("flag-underspecified-tasks", "Flag underspecified tasks", ["agent"], null),
+  // Always-human governed actions (structural locks, shown to agents)
+  cap("merge-pull-request", "Merge a pull request", ["agent"], "Reserved for humans", "human", false),
+  cap("transition-to-done", "Transition a task to Done", ["agent"], "Reserved for humans", "human", false),
+  cap("change-project-policy", "Change project policy", ["agent"], "Reserved for humans", "human", false),
 ] as const;
+
+/** Flat id+label view — the shape most consumers key on. */
+export const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
+  ({ id, label }) => ({ id, label }),
+);
 // Removed 2026-07-12 (role-bindings prune): `edit-other-task-branch` (its broad
 // `git checkout:*` deny defeated the granted create-task-branch and is moot under
 // per-task workspace isolation — F11), `open-or-merge-pr` (dead deny rule, never
@@ -107,6 +154,11 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "completion-for-acceptance",
   "transition-to-done",
   "change-project-policy",
+  // Generic-agent collaboration gates (real, both-backend enforcement): the
+  // completion pipeline gates verdict-recording + the ask-human question packet
+  // on these grants server-side, so withholding binds on Claude AND Codex.
+  "report-validation-verdict",
+  "ask-human",
 ]);
 
 /**
@@ -130,6 +182,10 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   "commit-push-branch",
   "open-review-pr",
   "execute-code-or-write-repo",
+  // The mid-run post_comment tool is mounted only on Claude (Codex has no
+  // in-process comment channel at all — its final reply always posts), so
+  // withholding comment-on-task binds on Claude and is advisory on Codex.
+  "comment-on-task",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

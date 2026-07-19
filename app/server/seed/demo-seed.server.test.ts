@@ -117,8 +117,8 @@ describe("demo seed", () => {
     expect(task.commits).toHaveLength(3);
     expect(task.changed).toEqual({ files: 9, add: 412, del: 87 });
     expect(task.owner).toMatchObject({ name: "Arda Kaya" });
-    expect(task.specialist).toMatchObject({ profileId: "developer", backend: "codex", role: "Developer" });
-    expect(task.reviewers[0]).toMatchObject({ backend: "claude", role: "Reviewer" });
+    expect(task.specialist).toMatchObject({ profileId: "developer", backend: "codex", role: "Implementation" });
+    expect(task.reviewers[0]).toMatchObject({ backend: "claude", role: "Review & validation" });
     expect(task.operator).toMatchObject({ assignedAtStageId: "triage", sinceLabel: "since Triage" });
     expect(task.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
 
@@ -159,7 +159,7 @@ describe("demo seed", () => {
       { label: "unit/policy_gate_test", add: "+14", del: "0" },
       { label: "integration/pr_sync_test", add: "+38", del: "−4" },
     ]);
-    expect(completion?.actor).toMatchObject({ kind: "agent", backend: "codex", name: "Codex", role: "Developer" });
+    expect(completion?.actor).toMatchObject({ kind: "agent", backend: "codex", name: "Codex", role: "Implementation" });
     expect(policy?.actor).toEqual({ kind: "system", name: "Policy engine" });
     expect(quality?.text).toBe(
       "**Quality flag:** snapshot `task_projection.json` changed — confirm the new compact shape is intended before review.",

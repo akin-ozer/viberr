@@ -7,6 +7,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import type { FileActorRef } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -15,11 +16,12 @@ import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
   appendComment,
+  classifyReviewerVerdict,
   createTask,
   DEFAULT_GOAL,
   notifyTaskWatchers,
   postAgentReplyComment,
-  recordReviewerVerdict,
+  recordAgentCompletion,
   releaseOwner,
   setOwner,
   transitionStage,
@@ -36,6 +38,39 @@ function prepared(): TestStore {
   const store = setupTestStore(ctx);
   rebuildAll(store.db, { dataRoot: store.dataRoot });
   return store;
+}
+
+/** The reviewer agent's own ref (generic-agents D8): the quality event is now
+ *  attributed to the agent that judged, not the operator. */
+const REVIEWER_REF: FileActorRef = {
+  kind: "agent",
+  backend: "claude",
+  profileId: "reviewer",
+  roleHint: "Review & validation",
+};
+
+/** recordReviewerVerdict's replacement: the verdict is RESOLVED BY THE CALLER
+ *  now — classifyReviewerVerdict over the same reply preserves each test's
+ *  intent — and the reply comment always posts atomically with it. Run ids are
+ *  unique per call (no agent_runs row needed). */
+let reviewerRunSeq = 0;
+async function recordReviewerReply(
+  store: TestStore,
+  replyText: string,
+): Promise<void> {
+  await recordAgentCompletion(
+    store.db,
+    { dataRoot: store.dataRoot },
+    store.slug,
+    "VIB-1",
+    {
+      actorRef: REVIEWER_REF,
+      runId: `run_rv${++reviewerRunSeq}`,
+      replyText,
+      verdict: classifyReviewerVerdict(replyText),
+      question: null,
+    },
+  );
 }
 
 describe("createTask", () => {
@@ -427,27 +462,30 @@ describe("reviewer quality notification (FIX #6)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      "Requesting changes — the tests fail.",
-    );
+    await recordReviewerReply(store, "Requesting changes — the tests fail.");
 
     // Validation health flipped on the canonical file.
-    const fm = readTaskFile({
+    const file = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
-    expect(fm.validation).toBe("failing");
+    })!;
+    expect(file.parsed.frontmatter.validation).toBe("failing");
 
-    // Typed quality event on the timeline.
+    // Typed quality event on the timeline — newest, with the agent's reply
+    // comment atomically just below it; attributed to the AGENT's own ref and
+    // phrased with its displayed role (generic-agents D8).
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "quality",
       title: "Changes requested",
+    });
+    const quality = file.parsed.timeline.find((e) => e.type === "quality")!;
+    expect(quality.actor).toMatchObject({ kind: "agent", profileId: "reviewer" });
+    expect(quality.text).toContain("Review & validation requested changes.");
+    expect(file.parsed.timeline[1]).toMatchObject({
+      type: "comment",
+      text: "Requesting changes — the tests fail.",
     });
 
     // A `quality` notification reached the owner + supervisors (real run, not seed).
@@ -459,20 +497,27 @@ describe("reviewer quality notification (FIX #6)", () => {
     );
   });
 
-  it("an unclear reviewer reply emits neither event nor notification", async () => {
+  it("an unclear reviewer reply emits neither quality event nor notification", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.selin.id }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      "Here are some thoughts on the structure.",
-    );
+    await recordReviewerReply(store, "Here are some thoughts on the structure.");
+    // The reply comment still posts (the completion always records the agent's
+    // report), but with a null verdict there is no quality event…
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    expect(timeline.some((e) => e.type === "quality")).toBe(false);
+    expect(timeline[0]).toMatchObject({
+      type: "comment",
+      text: "Here are some thoughts on the structure.",
+    });
+    // …and no quality notification.
     const quality = store.db
       .prepare(`SELECT count(*) AS c FROM notifications WHERE kind = 'quality'`)
       .get() as { c: number };
@@ -493,11 +538,8 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     // 1. Reviewer rejects → failing.
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
+    await recordReviewerReply(
+      store,
       "Verdict: request changes — the diff violates the spec.",
     );
     let fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
@@ -509,16 +551,18 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_rework",
-      actorRef: { kind: "agent", backend: "claude", role: "developer" },
+      actorRef: {
+        kind: "agent",
+        backend: "claude",
+        profileId: "developer",
+        roleHint: "developer",
+      },
       replyText: "Fixed the violation and pushed a new commit.",
     });
 
     // 3. Re-review approves → the rework evidence lets the approve clear failing.
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
+    await recordReviewerReply(
+      store,
       "Verdict: approve — the fix restores spec compliance.",
     );
     fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
@@ -537,21 +581,12 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
+    await recordReviewerReply(
+      store,
       "Verdict: request changes — missing error handling.",
     );
     // A second reviewer approves with NO rework in between → failing sticks.
-    await recordReviewerVerdict(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      "Verdict: approve — looks fine to me.",
-    );
+    await recordReviewerReply(store, "Verdict: approve — looks fine to me.");
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.frontmatter.validation).toBe("failing");
     // F7-REV3: the approve-that-didn't-clear quality event must NOT read the

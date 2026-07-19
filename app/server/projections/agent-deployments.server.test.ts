@@ -27,8 +27,10 @@ function seedTasks(dataRoot: string, slug: string) {
       stage: "review",
       waiting: "human",
       operator: { assignedAtStageId: "triage" },
-      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      engagements: [
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+        { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+      ],
     }),
   });
   // impl + waiting agent → operator "coordinating", primary "working".
@@ -37,8 +39,10 @@ function seedTasks(dataRoot: string, slug: string) {
       stage: "impl",
       waiting: "agent",
       operator: { assignedAtStageId: "ready" },
-      specialist: { profileId: "developer", backend: "claude", role: "Developer" },
-      reviewers: [{ profileId: "reviewer", backend: "codex", role: "Reviewer" }],
+      engagements: [
+        { profileId: "developer", backend: "claude", role: "Developer", delivers: true },
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false },
+      ],
     }),
   });
   // ready + waiting none → primary "on call".
@@ -47,7 +51,9 @@ function seedTasks(dataRoot: string, slug: string) {
       stage: "ready",
       waiting: "none",
       operator: { assignedAtStageId: "ready" },
-      specialist: { profileId: "reviewer", backend: "codex", role: "Reviewer" },
+      engagements: [
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: true },
+      ],
     }),
   });
   // done → contributes NOTHING even with a full crew.
@@ -56,10 +62,12 @@ function seedTasks(dataRoot: string, slug: string) {
       stage: "done",
       waiting: "none",
       operator: { assignedAtStageId: "triage" },
-      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+      engagements: [
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+      ],
     }),
   });
-  // triage, no operator/specialist → contributes nothing.
+  // triage, no operator/engagements → contributes nothing.
   writeTask(dataRoot, slug, {
     frontmatter: baseTaskFrontmatter("VIB-5", { stage: "triage" }),
   });

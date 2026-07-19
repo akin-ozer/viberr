@@ -41,7 +41,9 @@ export function runLabel(run: RunView): string {
 }
 
 export function roleShort(run: RunView): string {
-  return run.op ? "operator" : run.role === "Primary specialist" ? "primary" : "reviewer";
+  // Kind is data on the run row — never string-match the role label (run rows
+  // now carry the engagement's live role snapshot, not a kind literal).
+  return run.op ? "operator" : run.kind === "primary" ? "primary" : "reviewer";
 }
 
 export function fmtClock(s: number): string {
