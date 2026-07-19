@@ -99,6 +99,12 @@ export const engagementSchema = z
     /** Role display snapshot taken from the live profile at engage time. */
     role: z.string().min(1),
     delivers: z.boolean().default(false),
+    /** F10-15: snapshot at engage time — does this engagement hold an EXPLICIT
+     *  `report-validation-verdict: direct` grant? A supporting engagement that
+     *  does is a REQUIRED reviewer: acceptance waits for its approval of the
+     *  current work revision. A pure, file-local flag so the required-reviewer
+     *  set needs no live profile lookup (mirrors role/backend/delivers). */
+    verdictCapable: z.boolean().default(false),
   })
   .loose();
 export type Engagement = z.infer<typeof engagementSchema>;
@@ -173,7 +179,18 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
 export const SCHEDULE_ACTION_TYPES = ["run-operator"] as const;
 export type ScheduleActionType = (typeof SCHEDULE_ACTION_TYPES)[number];
 
-export const SCHEDULE_STATUS_VALUES = ["pending", "fired", "cancelled"] as const;
+// F10-16 lifecycle: pending → claimed → fired (success) | failed (terminal).
+// `claimed` reserves an occurrence before the detached operator enqueue so a
+// crash/enqueue failure between the claim and completion is RECOVERABLE (a
+// stale claim past its lease is re-driven) rather than silently lost, which the
+// old pending→fired-before-enqueue flow did. `cancelled` is a human withdrawal.
+export const SCHEDULE_STATUS_VALUES = [
+  "pending",
+  "claimed",
+  "fired",
+  "failed",
+  "cancelled",
+] as const;
 export type ScheduleStatus = (typeof SCHEDULE_STATUS_VALUES)[number];
 
 export const scheduleSchema = z
@@ -194,6 +211,12 @@ export const scheduleSchema = z
     status: z.enum(SCHEDULE_STATUS_VALUES).default("pending"),
     /** Set when the runner fires (or skips) the entry. */
     firedAt: z.string().nullable().default(null),
+    /** F10-16: set when the runner CLAIMS the occurrence (before enqueue). A
+     *  claim older than the lease is treated as crashed and re-driven. */
+    claimedAt: z.string().nullable().default(null),
+    /** F10-16: bounded retry counter — a failed enqueue/run retries up to a cap,
+     *  then becomes terminal `failed` (visible), never silently lost. */
+    retries: z.number().int().default(0),
   })
   .loose();
 export type TaskSchedule = z.infer<typeof scheduleSchema>;
@@ -269,6 +292,11 @@ export type PacketOption = z.infer<typeof packetOptionSchema>;
 
 export const taskPacketSchema = z
   .object({
+    /** F10-09: a stable per-packet id, stamped when a NEW packet is opened. A
+     *  resolution captures this (or a content fingerprint when absent) before
+     *  its lock and re-checks it inside the lock, so a REPLACEMENT packet opened
+     *  in the read→await→lock window can't be resolved by the stale action. */
+    id: z.string().optional(),
     type: z.enum(["input", "blocked"]),
     /** Pill label, e.g. "Completion report" | "Blocked decision". */
     kind: z.string().min(1),
@@ -284,6 +312,50 @@ export const taskPacketSchema = z
   })
   .loose();
 export type TaskPacket = z.infer<typeof taskPacketSchema>;
+
+// -------------------------------------------- work revision + verdicts (F10-15)
+
+/**
+ * The immutable identity of the delivered work currently up for review (F10-15).
+ * Minted server-side when a delivering run produces a new head (commit SHA), so
+ * a verdict binds to EXACTLY what the reviewer saw. A new head (different tree)
+ * mints a new revision id, which automatically makes every prior verdict stale —
+ * that is the whole of new-commit invalidation and the fix for the F10-32
+ * "rework = a comment or stage bounce" heuristic.
+ */
+export const workRevisionSchema = z
+  .object({
+    id: z.string().min(1),
+    /** Full commit SHA the reviewers judge (not the abbreviated `git log` form). */
+    headSha: z.string().min(1),
+    /** Tree SHA — the actual content identity; null when git couldn't resolve it. */
+    treeSha: z.string().nullable().default(null),
+    branch: z.string().nullable().default(null),
+    createdAt: z.string().min(1),
+    /** The delivering engagement's profileId that produced this revision. */
+    sourceProfileId: z.string().nullable().default(null),
+  })
+  .loose();
+export type WorkRevision = z.infer<typeof workRevisionSchema>;
+
+export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
+export type ReviewVerdictResult = (typeof REVIEW_VERDICT_RESULTS)[number];
+
+/** One reviewing engagement's verdict, bound to the revision it judged (F10-15). */
+export const reviewVerdictSchema = z
+  .object({
+    profileId: z.string().min(1),
+    /** The workRevision.id this verdict judged — a verdict on an OLD revision is
+     *  automatically stale once a new revision is minted. */
+    revisionId: z.string().min(1),
+    /** Denormalized head SHA for display/traceability. */
+    headSha: z.string().min(1),
+    result: z.enum(REVIEW_VERDICT_RESULTS),
+    reason: z.string().default(""),
+    at: z.string().min(1),
+  })
+  .loose();
+export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
 // -------------------------------------------------------- frontmatter
 
@@ -303,7 +375,14 @@ export const taskFrontmatterSchema = z.object({
   /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
   schedules: z.array(scheduleSchema),
   urgent: z.boolean(),
+  /** DERIVED cache of the review state for the board/pills (F10-15). No longer
+   *  written as a source of truth — `deriveValidation` recomputes it from
+   *  `workRevision` + `verdicts` + the required-reviewer set on every write. */
   validation: z.enum(VALIDATION_VALUES),
+  /** F10-15: the immutable work revision currently under review (or null). */
+  workRevision: workRevisionSchema.nullable(),
+  /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
+  verdicts: z.array(reviewVerdictSchema),
   branch: z.string().nullable(),
   /** Task-level repo override; null → project default repo. */
   repo: z.string().nullable(),
@@ -316,6 +395,115 @@ export const taskFrontmatterSchema = z.object({
   boardRank: z.number().nullable(),
 });
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
+
+// ------------------------------------------- review-state derivation (F10-15)
+
+/** The minimal review-relevant slice of the frontmatter (so the helpers are
+ *  pure and testable without a full task file). */
+type ReviewState = {
+  engagements: Engagement[];
+  workRevision: WorkRevision | null;
+  verdicts: ReviewVerdict[];
+};
+
+/** Supporting engagements that are REQUIRED reviewers (verdict-capable). Their
+ *  approval of the current revision gates acceptance (F10-15). */
+export function requiredReviewers(fm: { engagements: Engagement[] }): Engagement[] {
+  return fm.engagements.filter((e) => !e.delivers && e.verdictCapable);
+}
+
+/** Verdicts bound to the CURRENT work revision — older ones are stale (F10-32). */
+export function currentVerdicts(fm: {
+  workRevision: WorkRevision | null;
+  verdicts: ReviewVerdict[];
+}): ReviewVerdict[] {
+  const rev = fm.workRevision;
+  if (!rev) return [];
+  return fm.verdicts.filter((v) => v.revisionId === rev.id);
+}
+
+/** The DERIVED review-state cache written into `validation` (F10-15): failing if
+ *  any required reviewer requests changes on the current revision; healthy when
+ *  every required reviewer approved it; changed while a revision is under review
+ *  with verdicts pending (or no required reviewer); none before delivery. */
+export function deriveValidation(
+  fm: ReviewState,
+): (typeof VALIDATION_VALUES)[number] {
+  if (!fm.workRevision) return "none";
+  const required = requiredReviewers(fm);
+  const cur = currentVerdicts(fm);
+  const verdictOf = (profileId: string) =>
+    cur.find((v) => v.profileId === profileId)?.result;
+  if (required.some((r) => verdictOf(r.profileId) === "request_changes")) {
+    return "failing";
+  }
+  if (
+    required.length > 0 &&
+    required.every((r) => verdictOf(r.profileId) === "approve")
+  ) {
+    return "healthy";
+  }
+  return "changed";
+}
+
+/** Why acceptance is blocked on the current revision, or null when allowed. A
+ *  task with NO required reviewers and NO revision stays acceptable (planning /
+ *  non-repo work); once a revision exists, all required reviewers must approve
+ *  it and none may request changes (F10-15). */
+export function acceptanceBlockedReason(fm: ReviewState): string | null {
+  const required = requiredReviewers(fm);
+  if (!fm.workRevision) {
+    return required.length > 0
+      ? "No reviewed revision yet — nothing for the required reviewers to approve."
+      : null;
+  }
+  const cur = currentVerdicts(fm);
+  const verdictOf = (profileId: string) =>
+    cur.find((v) => v.profileId === profileId)?.result;
+  if (required.some((r) => verdictOf(r.profileId) === "request_changes")) {
+    return "This task's latest review requests changes on the current revision — rework and re-review before accepting.";
+  }
+  const missing = required.filter((r) => verdictOf(r.profileId) !== "approve");
+  if (missing.length > 0) {
+    return `Waiting on ${missing.length} required reviewer approval${missing.length === 1 ? "" : "s"} of the current revision.`;
+  }
+  return null;
+}
+
+/** Compute the next work revision for a freshly delivered head. A head with the
+ *  SAME tree (or same head when the tree is unavailable) as the current revision
+ *  is the SAME review subject — no new revision, so prior verdicts are NOT
+ *  invalidated (F10-32). Otherwise a NEW revision id is minted, which makes
+ *  every prior verdict stale automatically (F10-15 new-commit invalidation). */
+export function nextWorkRevision(
+  current: WorkRevision | null,
+  input: {
+    id: string;
+    headSha: string;
+    treeSha: string | null;
+    branch: string | null;
+    sourceProfileId: string | null;
+    createdAt: string;
+  },
+): { revision: WorkRevision; changed: boolean } {
+  const sameSubject =
+    current != null &&
+    (input.treeSha != null && current.treeSha != null
+      ? current.treeSha === input.treeSha
+      : current.headSha === input.headSha);
+  if (sameSubject) return { revision: current, changed: false };
+  return {
+    revision: {
+      id: input.id,
+      headSha: input.headSha,
+      treeSha: input.treeSha,
+      branch: input.branch,
+      createdAt: input.createdAt,
+      sourceProfileId: input.sourceProfileId,
+    },
+    changed: true,
+  };
+}
 
 export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "key",
@@ -330,6 +518,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "schedules",
   "urgent",
   "validation",
+  "workRevision",
+  "verdicts",
   "branch",
   "repo",
   "pr",
@@ -418,7 +608,8 @@ function parseEngagements(
       agentRefSchema.nullable(),
       null,
     );
-    if (specialist) engagements.push({ ...specialist, delivers: true });
+    if (specialist)
+      engagements.push({ ...specialist, delivers: true, verdictCapable: false });
     const reviewers = tolerant(
       diagnostics,
       "reviewers",
@@ -427,7 +618,9 @@ function parseEngagements(
       [],
     );
     for (const reviewer of reviewers) {
-      engagements.push({ ...reviewer, delivers: false });
+      // A migrated legacy reviewer is not verdict-capable until it carries an
+      // explicit report-validation-verdict:direct grant (F10-14).
+      engagements.push({ ...reviewer, delivers: false, verdictCapable: false });
     }
   }
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
@@ -628,6 +821,20 @@ export function parseTaskFrontmatter(
       z.enum(VALIDATION_VALUES),
       "none",
       { required: true, severity: "info" },
+    ),
+    workRevision: tolerant(
+      diagnostics,
+      "workRevision",
+      data.workRevision,
+      taskFrontmatterSchema.shape.workRevision,
+      null,
+    ),
+    verdicts: tolerant(
+      diagnostics,
+      "verdicts",
+      data.verdicts,
+      taskFrontmatterSchema.shape.verdicts,
+      [],
     ),
     branch: tolerant(
       diagnostics,

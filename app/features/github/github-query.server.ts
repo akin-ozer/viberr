@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { formatRelative } from "~/shared/dates/format";
 import { deriveSyncState } from "~/server/github/branch-sync.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import {
@@ -63,6 +64,15 @@ export interface GithubViewData {
   credential: ProjectCredentialHealth;
   prs: PrRowView[];
   branches: BranchRowView[];
+  /** F10-28: freshness of the cached GitHub state (last manual reconcile). */
+  reconcile: {
+    /** ISO of the newest reconcile across the project's tasks, or null. */
+    at: string | null;
+    /** Relative label ("3m ago"), computed server-side; null when never. */
+    label: string | null;
+    /** Never reconciled or older than an hour → the state may be out of date. */
+    stale: boolean;
+  };
 }
 
 /**
@@ -172,6 +182,29 @@ export async function getGithubViewData(
     }))
     .sort((a, b) => b.number - a.number);
 
+  // F10-28: GitHub state is served from cached projections + the LAST manual
+  // reconcile — there is no scheduled sync. Surface the freshest reconcile time
+  // so stale cached PR/branch state can't silently look current. `null` = never
+  // reconciled. Newest `github.reconcile` provenance across the project's tasks.
+  const lastReconcileRow = db
+    .prepare(
+      `SELECT MAX(observed_at) AS latest FROM provenance
+        WHERE action = 'github.reconcile' AND source_path LIKE ?`,
+    )
+    .get(`projects/${projectSlug}/%`) as { latest: string | null } | undefined;
+  const lastReconciledAt = lastReconcileRow?.latest ?? null;
+  // Computed server-side (SSR-stable, no client clock): the label is as-of page
+  // load and refreshes when the loader revalidates on the next GitHub SSE event.
+  const reconciledMs = lastReconciledAt ? Date.parse(lastReconciledAt) : NaN;
+  const reconcile = {
+    at: lastReconciledAt,
+    label: Number.isFinite(reconciledMs) ? formatRelative(lastReconciledAt!) : null,
+    // Stale = never reconciled, or older than an hour (manual-only sync).
+    stale:
+      !Number.isFinite(reconciledMs) ||
+      Date.now() - reconciledMs > 60 * 60_000,
+  };
+
   return {
     project: {
       slug: project.slug,
@@ -185,5 +218,6 @@ export async function getGithubViewData(
     credential,
     prs,
     branches,
+    reconcile,
   };
 }

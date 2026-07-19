@@ -9,6 +9,11 @@ import type {
   TaskFileEvent,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import {
+  deriveValidation,
+  nextWorkRevision,
+} from "~/schemas/task-file.schema";
+import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { roleToSlug } from "~/server/files/actor-ref.server";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -325,6 +330,38 @@ export async function reconcileWorkspaceDelivery(
       }
     }
 
+    // 2b. F10-15: mint/refresh the immutable WORK REVISION the reviewers judge.
+    //     `git log --oneline` yields abbreviated shas (display cache only); the
+    //     revision needs the FULL head + tree sha so a verdict binds to exactly
+    //     this content. A head with the SAME tree as the current revision is the
+    //     SAME subject → no new revision (verdicts survive, F10-32); a different
+    //     tree mints a new revision id that makes every prior verdict stale.
+    let workRevisionPatch: TaskFrontmatter["workRevision"] | undefined;
+    if (validBranch) {
+      const headRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+        cwd: repoDir,
+        timeoutMs: 5_000,
+      });
+      const treeRes = await exec(
+        "git",
+        ["-C", repoDir, "rev-parse", "HEAD^{tree}"],
+        { cwd: repoDir, timeoutMs: 5_000 },
+      );
+      const headSha = headRes.ok ? headRes.stdout.trim() : "";
+      const treeSha = treeRes.ok ? treeRes.stdout.trim() || null : null;
+      if (headSha) {
+        const { revision, changed } = nextWorkRevision(fm.workRevision, {
+          id: newId("rev"),
+          headSha,
+          treeSha,
+          branch: validBranch,
+          sourceProfileId: input.profileId ?? null,
+          createdAt: new Date().toISOString(),
+        });
+        if (changed) workRevisionPatch = revision;
+      }
+    }
+
     // 3. Branch + commit-cache write (idempotent: only when something changed).
     const branchPatch: Partial<TaskFrontmatter> = {};
     let branchLinked = false;
@@ -332,6 +369,17 @@ export async function reconcileWorkspaceDelivery(
       branchPatch.branch = validBranch;
       branchLinked = true;
     }
+    if (workRevisionPatch) {
+      branchPatch.workRevision = workRevisionPatch;
+      // A new revision invalidates prior verdicts (they target the old id), so
+      // recompute the derived validation cache from the new subject.
+      branchPatch.validation = deriveValidation({
+        engagements: fm.engagements,
+        workRevision: workRevisionPatch,
+        verdicts: fm.verdicts,
+      });
+    }
+    let commitsChanged = false;
     if (
       commits &&
       JSON.stringify(commits) !== JSON.stringify(fm.github?.commits ?? [])
@@ -340,6 +388,7 @@ export async function reconcileWorkspaceDelivery(
         commits,
         changed: fm.github?.changed ?? null,
       };
+      commitsChanged = true;
     }
     if (Object.keys(branchPatch).length > 0) {
       if (branchLinked) {
@@ -357,6 +406,11 @@ export async function reconcileWorkspaceDelivery(
       rebuildPath(db, resolveTaskFilePath(ref), {
         ...(dataRoot !== undefined ? { dataRoot } : {}),
       });
+    }
+    // The branch-reconciled audit fires only for a real BRANCH or COMMIT change,
+    // not for a workRevision-only stamp (F10-15): re-reconciling an unchanged
+    // branch stays audit-silent even though the first delivery mints a revision.
+    if (branchLinked || commitsChanged) {
       recordAudit(db, {
         action: "github.workspace.branch_reconciled",
         actor: { userId: null, label: "system:workspace-reconcile" },

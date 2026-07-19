@@ -45,6 +45,7 @@ export type PushWorkspaceResult =
         | "no_branch"
         | "no_commits"
         | "push_failed"
+        | "grant_withheld"
         | "task_not_found";
       reason: string;
     };
@@ -100,6 +101,16 @@ export interface PushWorkspaceBranchInput {
   taskKey: string;
   dataRoot?: string;
   workdir?: string | null;
+  /**
+   * Whether the DELIVERING profile is authorized to write/commit/push the repo
+   * (its `execute-code-or-write-repo` / `commit-push-branch` grant, resolved by
+   * the caller). Defaults to `true` for callers/tests that don't gate. When
+   * `false`, the server refuses to stage/commit/push the workspace — capability
+   * grants shown as enforced must actually constrain server-owned delivery
+   * (F10-03). This is the real enforcement for Codex, which ignores the tool
+   * denylist and could otherwise write + have its dirty tree auto-committed.
+   */
+  canCommitPush?: boolean;
   /** Injected runner (tests). */
   exec?: Exec;
 }
@@ -155,6 +166,22 @@ export async function pushWorkspaceBranch(
     const branch = headRes.ok ? headRes.stdout.trim() : "";
     if (!branch || branch === "HEAD" || branch === defaultBranch) {
       return { status: "no_branch", reason: `HEAD not on a task branch (${branch || "detached"})` };
+    }
+
+    // F10-03: server-owned delivery honors the delivering profile's repo-write
+    // grant. If that capability is withheld, the server must NOT stage, commit,
+    // or push the workspace — otherwise a "read-only" or grant-withheld profile
+    // (notably a Codex run, which ignores the tool denylist) could still have
+    // its dirty tree delivered. Refuse before touching the index or the remote.
+    if (input.canCommitPush === false) {
+      logger.info("skipping workspace delivery — repo-write grant withheld", {
+        taskKey,
+        branch,
+      });
+      return {
+        status: "grant_withheld",
+        reason: "delivering profile's repository-write capability is withheld",
+      };
     }
 
     // Server-side DELIVERY FINALIZATION: if the agent WROTE changes but never

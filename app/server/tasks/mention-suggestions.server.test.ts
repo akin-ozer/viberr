@@ -63,7 +63,7 @@ beforeEach(() => {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       engagements: [
-        { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+        { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
       ],
     }),
   });

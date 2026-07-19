@@ -251,10 +251,15 @@ describe("LiveRoster", () => {
     const { container } = render(<LiveRoster deployments={rows} onOpen={onOpen} />);
     const rendered = Array.from(container.querySelectorAll(".live-row"));
     expect(rendered).toHaveLength(3);
-    expect(rendered[0]!.querySelector(".live-role")!.textContent).toBe("Operator");
+    // F10-20: the "Profile" column shows the profile IDENTITY (operator → "Operator").
+    expect(rendered[0]!.querySelector(".live-name")!.textContent).toBe("Operator");
     expect(rendered[0]!.querySelector(".live-be")!.textContent).toBe("orchestration");
     expect(rendered[1]!.querySelector(".live-be")!.textContent).toBe("Codex");
     expect(rendered[2]!.querySelector(".live-be")!.textContent).toBe("Claude Code");
+    // Engagement is human-facing, not the internal primary/reviewer literals.
+    expect(rendered[1]!.textContent).toContain("delivering");
+    expect(rendered[2]!.textContent).toContain("supporting");
+    expect(rendered[1]!.textContent).not.toContain("primary");
     fireEvent.click(rendered[2]!);
     expect(onOpen).toHaveBeenCalledWith("VIB-2");
   });
@@ -290,8 +295,10 @@ describe("CapabilityMatrixModal", () => {
       />,
     );
     expect(getByText("Capability matrix")).toBeTruthy();
+    // Substring match: the subheader now also carries the honest-enforcement
+    // note (F10-01/03) so the text node is no longer exactly this sentence.
     expect(
-      getByText("Every profile's permissions for each action in Viberr Core."),
+      getByText(/Every profile's permissions for each action in Viberr Core\./),
     ).toBeTruthy();
     expect(getByText("Repository & execution")).toBeTruthy();
     // "Reserved for humans" appears both as a group header and as the mode

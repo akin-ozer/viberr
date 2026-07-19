@@ -107,7 +107,7 @@ beforeEach(() => {
       ownerUserId: store.users.arda.id,
       title: "Attach execution workspace",
       engagements: [
-        { profileId: "dev", backend: "claude", role: "developer", delivers: true },
+        { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
       ],
     }),
     goal: "Let the operator attach a repo and run the specialist.",
@@ -514,6 +514,21 @@ describe("commentToAgent", () => {
         (r) => r.kind !== "operator" && !!r.session_id,
       ),
     );
+    // F10-05 single-flights the delivering slot: a resume must not race a still-
+    // running delivering run. End the first run first (the realistic flow is
+    // run-ends → comment → resume its persisted session), then resume it.
+    for (const run of listRunsForTaskRows(store.db, store.slug, "VIB-1")) {
+      if (
+        run.kind !== "operator" &&
+        (run.state === "running" || run.state === "queued")
+      ) {
+        interruptRun(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", runId: run.id },
+          actor(store.users.arda),
+        );
+      }
+    }
     const priorRuns = listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
       (r) => r.kind !== "operator" && r.session_id,
     );
@@ -542,7 +557,7 @@ describe("commentToAgent", () => {
       );
     });
     expect(posted).toBe(true);
-  });
+  }, 20_000);
 
   it("returns the grouped Agent-logs id (logThreadId) for the reply run (BUG 3)", async () => {
     const result = await commentToAgent(

@@ -372,8 +372,16 @@ export function createCodexAdapter(
         // Operators are coordinators rather than coding agents, so enforce the
         // closest direct-SDK equivalent to Claude's denied mutation tools:
         // read-only files, no network, and no web search.
+        //
+        // Supporting/reviewing runs (`kind: "reviewer"`) are read-only too
+        // (F10-12 / F10-04, owner ruling "supporting agents read-only by
+        // default"): only the single delivering engagement mutates the
+        // workspace. A read-only Codex sandbox PHYSICALLY blocks writes — this
+        // is stronger than Claude's tool denylist and closes the VIB-30 class
+        // where a reviewer committed + pushed. Network stays enabled so declared
+        // MCP resources still work (only the operator disables egress).
         const sandboxMode: SandboxMode =
-          spec.kind === "operator"
+          spec.kind === "operator" || spec.kind === "reviewer"
             ? "read-only"
             : spec.autonomous
               ? "danger-full-access"

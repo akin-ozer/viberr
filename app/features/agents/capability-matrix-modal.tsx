@@ -81,6 +81,13 @@ export function CapabilityMatrixModal({
           <h2>Capability matrix</h2>
           <div className="mh-sub">
             Every profile's permissions for each action in {projectName}.
+            Delivery (push · open/merge PR) is <b>server-owned</b> and gated
+            server-side on the delivering profile's grant — enforced on both
+            backends. Supporting (reviewing) agents run <b>read-only</b>. In-run
+            tool limits bind on Claude; on Codex they are advisory, so a Codex
+            run's own commands aren't blocked mid-run — the read-only sandbox and
+            server-side delivery gate are what actually constrain it. Specialist
+            processes share the host, not an OS sandbox.
           </div>
         </div>
         <button

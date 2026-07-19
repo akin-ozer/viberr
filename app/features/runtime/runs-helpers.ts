@@ -62,10 +62,17 @@ export function fmtTok(n: number): string {
  * Elapsed seconds since `startedAt` (UTC ISO), recomputed every second on the
  * client clock (runs.md §7 replacement for `elapsed + tick`). Returns 0 when
  * no start time. Never trusts a shipped seconds count.
+ *
+ * SSR-stable (F10-37): `now` seeds to `null`, so the server render and the first
+ * client (hydration) render both compute elapsed from a stable placeholder —
+ * identical markup, no hydration mismatch. Wall-clock ticking begins only after
+ * mount, when the effect installs the real client `Date.now()`. Never call
+ * `Date.now()` during render.
  */
 export function useElapsed(startedAt: string | null, active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    setNow(Date.now());
     if (!active) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
@@ -73,5 +80,8 @@ export function useElapsed(startedAt: string | null, active: boolean): number {
   if (!startedAt) return 0;
   const started = new Date(startedAt).getTime();
   if (!Number.isFinite(started)) return 0;
+  // Before hydration `now` is null → elapsed 0 on both SSR and first client
+  // render; the post-mount effect supplies the real clock.
+  if (now === null) return 0;
   return Math.max(0, Math.floor((now - started) / 1000));
 }

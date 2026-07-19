@@ -7,7 +7,12 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { FileActorRef } from "~/schemas/task-file.schema";
+import { deriveValidation } from "~/schemas/task-file.schema";
+import type {
+  Engagement,
+  FileActorRef,
+  WorkRevision,
+} from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -20,12 +25,14 @@ import {
   createTask,
   DEFAULT_GOAL,
   notifyTaskWatchers,
+  packetIdentity,
   postAgentReplyComment,
   recordAgentCompletion,
   releaseOwner,
   setOwner,
   transitionStage,
 } from "./task-actions.server";
+import type { TaskPacket } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -33,6 +40,42 @@ afterEach(ctx.cleanup);
 function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
 }
+
+describe("packetIdentity (F10-09 — replacement detection)", () => {
+  const base: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Pick one",
+    body: "",
+    observations: [],
+    options: [{ kind: "custom", t: "A", d: "", rec: true }],
+  };
+
+  it("an explicit id is authoritative — two ids differ, same id matches regardless of content", () => {
+    expect(packetIdentity({ ...base, id: "pkt_1" })).not.toBe(
+      packetIdentity({ ...base, id: "pkt_2" }),
+    );
+    expect(packetIdentity({ ...base, id: "pkt_1", title: "x" })).toBe(
+      packetIdentity({ ...base, id: "pkt_1", title: "y" }),
+    );
+  });
+
+  it("without an id, the content fingerprint separates different packets", () => {
+    // Same content → same identity (resolving the same choice is harmless).
+    expect(packetIdentity(base)).toBe(packetIdentity({ ...base }));
+    // A REPLACEMENT with different options → different identity → the stale
+    // resolution is rejected under the lock.
+    expect(packetIdentity(base)).not.toBe(
+      packetIdentity({
+        ...base,
+        options: [{ kind: "accept_completion", t: "Accept", d: "", rec: true }],
+      }),
+    );
+    // A packet that gained an id is no longer the same identity as the id-less one.
+    expect(packetIdentity(base)).not.toBe(packetIdentity({ ...base, id: "pkt_9" }));
+  });
+});
 
 function prepared(): TestStore {
   const store = setupTestStore(ctx);
@@ -49,14 +92,90 @@ const REVIEWER_REF: FileActorRef = {
   roleHint: "Review & validation",
 };
 
+/** A SECOND verdict-capable reviewer with a distinct profileId. Needed to prove
+ *  one reviewer's approve cannot overwrite another's request_changes — verdicts
+ *  key on (profileId, revisionId), so two distinct profiles never collide. */
+const QA_REVIEWER_REF: FileActorRef = {
+  kind: "agent",
+  backend: "claude",
+  profileId: "qa-reviewer",
+  roleHint: "QA review",
+};
+
+/** The delivering developer engagement (workspace/branch owner) — a deliverer
+ *  is never a required reviewer regardless of its verdict flag. */
+const DEV_ENGAGEMENT: Engagement = {
+  profileId: "developer",
+  backend: "claude",
+  role: "developer",
+  delivers: true,
+  verdictCapable: false,
+};
+/** A verdict-capable reviewer engagement whose profileId matches REVIEWER_REF,
+ *  so recordReviewerReply's verdict binds AND gates acceptance (F10-15). */
+const REVIEWER_ENGAGEMENT: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+/** A second verdict-capable reviewer engagement (pairs with QA_REVIEWER_REF). */
+const QA_REVIEWER_ENGAGEMENT: Engagement = {
+  profileId: "qa-reviewer",
+  backend: "claude",
+  role: "QA review",
+  delivers: false,
+  verdictCapable: true,
+};
+
+/** An immutable work revision under review. A new `id` + different `treeSha`
+ *  models developer rework, which makes every prior verdict stale (F10-32). */
+function workRev(id = "rev_1", treeSha = "t".repeat(40)): WorkRevision {
+  return {
+    id,
+    headSha: "a".repeat(40),
+    treeSha,
+    branch: "vib-1-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+}
+
+/** Deliver a NEW work revision onto VIB-1 (developer rework): swap the
+ *  workRevision, recompute the derived validation (verdicts on the OLD revision
+ *  are now stale), reproject — the file-level equivalent of a delivering run
+ *  minting a new head. */
+function deliverRevision(store: TestStore, revision: WorkRevision): void {
+  const parsed = readTaskFile({
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    dataRoot: store.dataRoot,
+  })!.parsed;
+  const frontmatter = { ...parsed.frontmatter, workRevision: revision };
+  frontmatter.validation = deriveValidation(frontmatter);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter,
+    goal: parsed.goal,
+    packet: parsed.packet,
+    timeline: parsed.timeline,
+    unknownFrontmatter: parsed.unknownFrontmatter,
+    extraSections: parsed.extraSections,
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
 /** recordReviewerVerdict's replacement: the verdict is RESOLVED BY THE CALLER
  *  now — classifyReviewerVerdict over the same reply preserves each test's
  *  intent — and the reply comment always posts atomically with it. Run ids are
- *  unique per call (no agent_runs row needed). */
+ *  unique per call (no agent_runs row needed). `ref` names WHICH reviewer
+ *  judged (defaults to the primary reviewer; a multi-reviewer scenario passes a
+ *  distinct one so the verdicts don't collide). */
 let reviewerRunSeq = 0;
 async function recordReviewerReply(
   store: TestStore,
   replyText: string,
+  ref: FileActorRef = REVIEWER_REF,
 ): Promise<void> {
   await recordAgentCompletion(
     store.db,
@@ -64,7 +183,7 @@ async function recordReviewerReply(
     store.slug,
     "VIB-1",
     {
-      actorRef: REVIEWER_REF,
+      actorRef: ref,
       runId: `run_rv${++reviewerRunSeq}`,
       replyText,
       verdict: classifyReviewerVerdict(replyText),
@@ -457,6 +576,12 @@ describe("reviewer quality notification (FIX #6)", () => {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         ownerUserId: store.users.selin.id,
+        branch: "vib-1-work",
+        // A delivered revision under review + a verdict-capable reviewer whose
+        // profileId matches REVIEWER_REF — so the reviewer's request_changes
+        // binds to the current revision and derives validation → failing.
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev(),
         validation: "changed",
       }),
     });
@@ -526,18 +651,21 @@ describe("reviewer quality notification (FIX #6)", () => {
 });
 
 describe("validation state machine (A3 — a rejection is not a life sentence)", () => {
-  it("an approve AFTER developer rework clears a standing failing", async () => {
+  it("an approve on a NEW revision clears a standing failing", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         ownerUserId: store.users.selin.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
         validation: "changed",
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    // 1. Reviewer rejects → failing.
+    // 1. Reviewer rejects revision 1 → failing.
     await recordReviewerReply(
       store,
       "Verdict: request changes — the diff violates the spec.",
@@ -546,7 +674,8 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       .parsed.frontmatter;
     expect(fm.validation).toBe("failing");
 
-    // 2. The developer reworks (a primary-specialist reply lands on the timeline).
+    // 2. The developer reworks and delivers a NEW revision (different tree). The
+    //    rev-1 rejection is now STALE, so validation derives back to "changed".
     await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -559,8 +688,13 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       },
       replyText: "Fixed the violation and pushed a new commit.",
     });
+    deliverRevision(store, workRev("rev_2", "u".repeat(40)));
+    fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("changed");
 
-    // 3. Re-review approves → the rework evidence lets the approve clear failing.
+    // 3. Re-review approves the NEW revision → healthy (the stale rejection is
+    //    gone because the review subject changed, not because of a bare bounce).
     await recordReviewerReply(
       store,
       "Verdict: approve — the fix restores spec compliance.",
@@ -572,10 +706,16 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
 
   it("a same-round approve does NOT mask another reviewer's rejection", async () => {
     const store = prepared();
+    // TWO required reviewers on the SAME revision: an approve from one cannot
+    // overwrite the other's request_changes (verdicts key on the (profileId,
+    // revisionId) pair — an approve only replaces THAT reviewer's own verdict).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         ownerUserId: store.users.selin.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT, QA_REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
         validation: "changed",
       }),
     });
@@ -585,8 +725,9 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       store,
       "Verdict: request changes — missing error handling.",
     );
-    // A second reviewer approves with NO rework in between → failing sticks.
-    await recordReviewerReply(store, "Verdict: approve — looks fine to me.");
+    // A DIFFERENT required reviewer approves the same revision (no rework in
+    // between) → the first reviewer's rejection still stands → failing sticks.
+    await recordReviewerReply(store, "Verdict: approve — looks fine to me.", QA_REVIEWER_REF);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.frontmatter.validation).toBe("failing");
     // F7-REV3: the approve-that-didn't-clear quality event must NOT read the
@@ -598,13 +739,16 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     expect(quality?.text).not.toContain("approved the work");
   });
 
-  it("re-entering review resets ANY stale validation to 'changed'", async () => {
+  it("re-entering review recomputes validation — a workRevision with no verdicts derives 'changed'", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
         ownerUserId: store.users.arda.id,
-        validation: "failing",
+        branch: "vib-1-work",
+        // Delivered work under review, no verdicts yet → derives "changed".
+        workRevision: workRev("rev_1"),
+        validation: "none",
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -618,6 +762,45 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     expect(fm.validation).toBe("changed");
+  });
+
+  it("a bare re-entry does NOT launder a standing failing (no new revision)", async () => {
+    const store = prepared();
+    // A live request_changes verdict on the CURRENT revision — the standing
+    // failing. No new revision has been delivered.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "a".repeat(40),
+            result: "request_changes",
+            reason: "the diff violates the spec",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+        validation: "failing",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Review entry recomputes the derived cache, but with no new revision the
+    // rev-1 rejection is still current — the failing survives (not laundered).
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
   });
 });
 

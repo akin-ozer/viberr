@@ -1,9 +1,12 @@
 import type Database from "better-sqlite3";
 import {
+  acceptanceBlockedReason,
   deliveringEngagement,
+  deriveValidation,
   type PacketOption,
   type TaskFileEvent,
   type TaskFrontmatter,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { type RbacAction, roleCan, rolesForAction } from "~/shared/rbac";
@@ -495,6 +498,8 @@ export async function createTask(
         : { assignedAtStageId: stageId },
     urgent: input.urgent ?? false,
     validation: "none",
+    workRevision: null,
+    verdicts: [],
     branch: null,
     repo: null,
     pr: null,
@@ -1609,47 +1614,14 @@ export function classifyReviewerVerdict(
  * updated the timeline + board but never pinged the human who owns acceptance.
  * Exported for tests.
  */
-/**
- * Rework evidence since the last rejection: scanning the newest-first timeline,
- * is there a primary-specialist agent reply or a stage `transition` NEWER than
- * the most recent failing `quality` event? (Reviewer-authored comments don't
- * count — a reviewer talking is not the developer fixing.) Used to decide
- * whether an approve may clear a standing `failing` validation. Pure — exported
- * for tests.
- *
- * `primary` (the task's assigned specialist {backend, role}) lets us match the
- * developer's reply by IDENTITY rather than a role-name regex (adversarial-
- * review #6/#14): a reviewer whose role string dodges the review/qa/test regex
- * would otherwise have its own reply counted as developer rework. When `primary`
- * is absent (or a reply's actor doesn't carry a backend to compare) we fall
- * back to the regex heuristic.
+/*
+ * F10-32: `hasReworkSinceLastRejection` was DELETED. It treated any newer stage
+ * transition or delivering-agent comment as "rework", so an approve could clear
+ * a standing `failing` on an UNCHANGED commit. Rework is now defined by the
+ * immutable review SUBJECT: a rejection only clears when a NEW work revision
+ * (delivered head/tree change) is minted, which makes prior verdicts stale (see
+ * `deriveValidation` / `nextWorkRevision` in task-file.schema.ts).
  */
-export function hasReworkSinceLastRejection(
-  timeline: readonly TaskFileEvent[],
-  primary?: { profileId: string; backend: string; role: string } | null,
-): boolean {
-  for (const e of timeline) {
-    // Newest-first walk: everything seen BEFORE the failing quality event is
-    // newer than it.
-    if (e.type === "quality" && /\*\*Validation:\*\* failing/.test(e.text)) {
-      return false; // reached the rejection without seeing rework first
-    }
-    if (e.type === "transition") return true;
-    if (e.type === "comment" && e.actor.kind === "agent") {
-      // Identity: profileId (D7); legacy events (role-slug refs) fall back to
-      // the displayed role + backend. No delivering engagement at all -> the
-      // historical role-heuristic fallback (Phase-4 cleanup, R4).
-      const isPrimary = primary
-        ? e.actor.profileId === primary.profileId ||
-          (e.actor.backend === primary.backend &&
-            agentRoleDisplay(e.actor) === primary.role)
-        : !/review|valid|qa|test/i.test(agentRoleDisplay(e.actor));
-      if (isPrimary) return true; // a primary-specialist reply landed after the rejection
-    }
-  }
-  // No failing quality event found at all — nothing to hold against the approve.
-  return true;
-}
 
 /**
  * THE universal finished-run record (generic-agents G2/G4/D8): ONE atomic
@@ -1697,56 +1669,65 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
-  let validation: "failing" | "healthy" = "healthy";
-  // The title/summary are computed from the RESOLVED validation, not the raw
-  // verdict, so the event can never read "Review passed / Validation: failing"
-  // (F7-REV3): an approve that lands on a still-failing task (a prior rejection
-  // with no rework since — see below) is an "Approval noted, rework still
-  // needed", NOT a pass.
+  let validation: TaskFrontmatter["validation"] = "healthy";
+  // The title/summary are computed from the RESOLVED (derived) validation, not
+  // the raw verdict, so the event can never read "Review passed / Validation:
+  // failing" (F7-REV3): an approve that lands while another required reviewer is
+  // outstanding (or requesting changes) on the current revision is an "Approval
+  // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       if (verdict) {
-        // A request_changes always fails. An APPROVE clears a standing `failing`
-        // ONLY when the work has demonstrably moved since the rejection — a
-        // primary-specialist reply or a stage transition after the failing
-        // quality event (rework evidence). That keeps both properties:
-        //   · same-round masking is impossible (reviewer B's simultaneous
-        //     approve can't silently bury reviewer A's rejection — nothing
-        //     changed in between), and
-        //   · a rejection is NOT a life sentence (the old bug: re-review after a
-        //     real fix could never restore health, so the operator refused
-        //     acceptance forever and stalled the task).
-        const approveDidNotClear =
-          verdict === "approve" &&
-          parsed.frontmatter.validation === "failing" &&
-          !hasReworkSinceLastRejection(
-            parsed.timeline,
-            deliveringEngagement(parsed.frontmatter),
-          );
-        validation =
-          verdict === "request_changes" || approveDidNotClear ? "failing" : "healthy";
+        // F10-15: bind the verdict to the CURRENT work revision, last-write-wins
+        // per (profileId, revisionId). A NEW revision (delivered head/tree
+        // change) makes it stale automatically — no comment/stage-bounce
+        // heuristic (F10-32). The derived `validation` cache is then recomputed
+        // from the required reviewers' verdicts on the current revision.
+        const rev = parsed.frontmatter.workRevision;
+        const reviewerProfileId =
+          actorRef.kind === "agent" ? actorRef.profileId : null;
+        if (rev && reviewerProfileId) {
+          parsed.frontmatter.verdicts = [
+            ...parsed.frontmatter.verdicts.filter(
+              (v) =>
+                !(v.profileId === reviewerProfileId && v.revisionId === rev.id),
+            ),
+            {
+              profileId: reviewerProfileId,
+              revisionId: rev.id,
+              headSha: rev.headSha,
+              result: verdict,
+              reason: (replyText ?? "").trim().slice(0, 2000),
+              at: new Date().toISOString(),
+            },
+          ];
+        }
+        validation = deriveValidation(parsed.frontmatter);
+        parsed.frontmatter.validation = validation;
         if (verdict === "request_changes") {
           title = "Changes requested";
           summary = `${roleDisplay} requested changes.`;
-        } else if (approveDidNotClear) {
-          // Honest: the agent approved, but a standing rejection with no
-          // rework since still governs — validation stays failing until the
-          // work moves.
-          title = "Approval noted — rework still needed";
-          summary = `${roleDisplay} approved, but an earlier rejection still stands until the changes are reworked and re-reviewed.`;
-        } else {
+        } else if (!rev || !reviewerProfileId) {
+          // Approve with nothing to bind to — no delivered revision yet. Record
+          // the prose but never claim a pass.
+          title = "Approval noted";
+          summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
+        } else if (validation === "healthy") {
           title = "Review passed";
           summary = `${roleDisplay} approved the work.`;
+        } else {
+          // Approved, but not yet cleared: another required reviewer is
+          // outstanding or has requested changes on the current revision.
+          title = "Approval noted — rework still needed";
+          summary = `${roleDisplay} approved, but the current revision is not yet cleared by all required reviewers.`;
         }
-        parsed.frontmatter.validation = validation;
-        // A failing verdict makes a pending accept-completion recommendation
-        // stale (the acceptance gate would 409 on a failing task — F7-VAL1), so
-        // drop it: the UI must not show a misleading "Accept completion" card
-        // next to a failing validation. The operator re-recommends the right
-        // next step on its next turn. (pass-8 review-reject finding.)
-        if (validation === "failing") {
+        // A not-yet-acceptable state makes a pending accept-completion
+        // recommendation stale (the acceptance gate would 409), so drop it: the
+        // UI must not show a misleading "Accept completion" card. The operator
+        // re-recommends the right next step on its next turn.
+        if (validation !== "healthy") {
           parsed.frontmatter.recommendations =
             parsed.frontmatter.recommendations.filter(
               (r) => r.kind !== "accept_completion",
@@ -1994,6 +1975,23 @@ export async function applyAgentCompletionEffects(
     }
   }
   const collab = resolveAgentCollab(grants, input.delivers);
+  // F10-15 consistency: the REQUIRED-reviewer set (acceptanceBlockedReason /
+  // requiredReviewers) is computed from the engagement's engage-time
+  // `verdictCapable` snapshot. Verdict RECORDING must use the SAME source, or a
+  // required reviewer whose live grant was later removed/undeployed can approve
+  // but never record — leaving the task un-acceptable forever (neither accept
+  // path has a force bypass). Prefer the engagement snapshot; fall back to the
+  // live grant only when there is no engagement row (legacy/ad-hoc runs).
+  const verdictEngagement = input.profileId
+    ? readTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+      )?.parsed.frontmatter.engagements.find(
+        (e) => e.profileId === input.profileId,
+      )
+    : null;
+  const verdictAuthorized = verdictEngagement
+    ? verdictEngagement.verdictCapable === true
+    : collab.verdict;
   // Envelope: a Claude toolkit-staged outcome first; else a Codex
   // outputSchema reply (JSON) parsed from the stored full text.
   let outcome = input.outcomeKey ? takeStagedOutcome(input.outcomeKey) : null;
@@ -2008,11 +2006,11 @@ export async function applyAgentCompletionEffects(
   }
   if (!replyText && outcome?.summary) replyText = outcome.summary;
   if (finished.state === "finished") {
-    // Verdict: envelope first; a verdict-GRANTED agent with no envelope falls
-    // back to the prose classifier (G4). The regex NEVER runs without the
-    // grant (R1 — a developer's "tests pass" can't flip validation).
-    let verdict = collab.verdict ? (outcome?.verdict ?? null) : null;
-    if (!verdict && collab.verdict) {
+    // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
+    // back to the prose classifier (G4). The regex NEVER runs without authority
+    // (R1 — a developer's "tests pass" can't flip validation).
+    let verdict = verdictAuthorized ? (outcome?.verdict ?? null) : null;
+    if (!verdict && verdictAuthorized) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
         logger.info("agent verdict resolved by prose fallback (no envelope)", {
@@ -2757,29 +2755,13 @@ export async function transitionStage(
     ) {
       parsed.frontmatter.readiness = "ready";
     }
-    // Live validation-health (FR24, B7): the board's validation signal was
-    // seed-only, so a real task always read "none". Derive it from governance
-    // state — entering review means the work is up for review ("changed").
-    // ANY stale verdict is reset: a `healthy` from a prior round no longer
-    // describes the new evidence, and a `failing` from a prior round starts a
-    // NEW review cycle (the fix that ends "failing forever" — the reviewer
-    // re-verdicts the fresh evidence). BUT a bare re-entry must NOT launder a
-    // standing `failing` (adversarial-review #9): only reset failing→changed
-    // when there is genuine rework since the rejection — otherwise a maintainer
-    // could bounce a rejected task out of and back into review to clear the
-    // flag and accept without a re-review. A non-failing validation always
-    // resets to `changed` on review entry.
+    // F10-15/F10-32: validation is now DERIVED from the current work revision +
+    // per-reviewer verdicts, so review entry no longer laundates it. A bare
+    // re-entry can NOT clear a standing `failing` — that only happens when a NEW
+    // work revision is delivered (which makes prior verdicts stale). Just
+    // recompute the derived cache so the board pill is fresh on entry.
     if (input.toStageId === reviewStageIdOf(project)) {
-      const stale = parsed.frontmatter.validation;
-      if (
-        stale !== "failing" ||
-        hasReworkSinceLastRejection(
-          parsed.timeline,
-          deliveringEngagement(parsed.frontmatter),
-        )
-      ) {
-        parsed.frontmatter.validation = "changed";
-      }
+      parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     }
     // A stage move makes any pending transition recommendation stale — drop it
     // so a Done task never shows a "move to <stage>" card.
@@ -2856,11 +2838,48 @@ async function openReviewPrBestEffort(
 ): Promise<void> {
   const dataCtx = { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) };
   try {
+    // F10-03: resolve the DELIVERING profile's repo-write authorization so the
+    // server-owned push honors it. A profile whose `execute-code-or-write-repo`
+    // grant is withheld must not have its workspace staged/committed/pushed.
+    let canCommitPush = true;
+    try {
+      const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      const deliverer = file
+        ? deliveringEngagement(file.parsed.frontmatter)
+        : null;
+      if (deliverer) {
+        const { resolveDeployedSpecialist } = await import(
+          "~/server/tasks/specialist-run.server"
+        );
+        const { resolveDeliveryPermissions } = await import(
+          "~/server/tasks/specialist-tool-policy"
+        );
+        const resolved = resolveDeployedSpecialist(
+          ctx,
+          projectSlug,
+          deliverer.profileId,
+        );
+        canCommitPush = resolveDeliveryPermissions(
+          resolved.capabilities,
+        ).canCommitPush;
+      }
+    } catch {
+      // Undeployed profile / resolution failure: fall back to permissive — the
+      // deliverer already ran and the common case is a granted profile.
+      canCommitPush = true;
+    }
+
     // 1. Push the workspace commits to the remote task branch (best-effort).
     const { pushWorkspaceBranch } = await import(
       "~/server/github/push-workspace.server"
     );
-    const push = await pushWorkspaceBranch({ db, projectSlug, taskKey, ...dataCtx });
+    const push = await pushWorkspaceBranch({
+      db,
+      projectSlug,
+      taskKey,
+      canCommitPush,
+      ...dataCtx,
+    });
     if (push.status !== "pushed" && push.status !== "up_to_date") {
       logger.info("workspace push before review PR did not push", {
         taskKey,
@@ -3080,6 +3099,31 @@ export async function reorderTask(
  * resolved elsewhere), never a crash. Every resolve marks the task's
  * packet + approval notifications read (server-side).
  */
+/**
+ * A stable identity for a decision packet (F10-09). Prefers the explicit `id`
+ * stamped when a NEW packet is opened; falls back to a content fingerprint for
+ * packets that predate the id. Captured before the resolution lock and
+ * re-checked inside it so a REPLACEMENT packet opened during the
+ * read→(await merge)→lock window is never resolved/cleared by the stale action
+ * (which reads the option by array index and would otherwise apply an old
+ * choice to whatever packet happens to occupy that slot).
+ */
+export function packetIdentity(p: TaskPacket): string {
+  if (p.id) return `id:${p.id}`;
+  return `fp:${JSON.stringify({
+    kind: p.kind,
+    title: p.title,
+    from: p.from,
+    awaiting: p.awaiting ?? null,
+    options: p.options.map((o) => ({
+      kind: o.kind,
+      t: o.t,
+      profileId: o.profileId ?? null,
+      backend: o.backend ?? null,
+    })),
+  })}`;
+}
+
 export async function resolvePacket(
   db: Database.Database,
   input: { projectSlug: string; taskKey: string; optionIndex: number },
@@ -3097,6 +3141,11 @@ export async function resolvePacket(
   if (!option) {
     throw AppError.validation("Unknown packet option.");
   }
+  // F10-09: snapshot the packet's identity BEFORE any await/lock. The
+  // accept_completion path awaits a remote merge, widening the window in which a
+  // replacement packet could be opened; the locked update below re-checks this
+  // identity so a stale resolution can't stamp/clear a different packet.
+  const resolvedPacketIdentity = packetIdentity(packet);
 
   // Packet-resolution authority (owner ruling Q2, 2026-07-11): a decision packet
   // is addressed to the task OWNER, so the owner (whatever their project role)
@@ -3141,13 +3190,13 @@ export async function resolvePacket(
         existing.parsed.frontmatter.ownerUserId,
         "accept completion into Done",
       );
-      // Refuse a standing `failing` validation (C2) — same stance as the human
-      // acceptCompletion + operator (H3): a stale acceptance packet must not
-      // merge work the last review rejected.
-      if (existing.parsed.frontmatter.validation === "failing") {
-        throw conflict(
-          "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
-        );
+      // F10-15: acceptance requires every required reviewer to have approved the
+      // CURRENT work revision (and none to have requested changes on it). A
+      // stale acceptance packet can't merge work the current review hasn't
+      // cleared.
+      {
+        const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
+        if (blockReason) throw conflict(blockReason);
       }
       const doneStageId =
         terminalStageIdOf(project) ??
@@ -3295,6 +3344,14 @@ export async function resolvePacket(
       // Raced with a concurrent resolve inside the lock window.
       throw conflict("This packet was already resolved.");
     }
+    // F10-09: the packet in the file must be the SAME one we read and validated
+    // the option against. A replacement (opened during our await) has a
+    // different identity — reject rather than apply the stale choice to it.
+    if (packetIdentity(parsed.packet) !== resolvedPacketIdentity) {
+      throw conflict(
+        "This decision was replaced by a newer one — refresh the task and choose again.",
+      );
+    }
     mutate(parsed.frontmatter);
     if (clearPacket) parsed.packet = null;
     // edit_goal keeps the packet but marks the decision made — updateTaskGoal
@@ -3419,14 +3476,14 @@ async function acceptCompletion(
     "accept completion into Done",
   );
 
-  // Refuse to accept a task with a standing `failing` validation (C2) — a stale
-  // "accept completion" recommendation created before a reviewer rejected must
-  // not merge broken work. Same stance as the operator's H3 refusal. The
-  // developer reworks + a reviewer re-approves (which clears failing, A3) first.
-  if (!input.force && existing.parsed.frontmatter.validation === "failing") {
-    throw conflict(
-      "This task's latest review is failing — it can't be accepted until the changes are reworked and re-reviewed.",
-    );
+  // F10-15: acceptance requires every required reviewer to have approved the
+  // CURRENT work revision (none requesting changes on it). `force` is the
+  // explicit human override. Replaces the old scalar-`failing` gate, which a
+  // maintainer could clear by bouncing a rejected task out of and back into
+  // review without any re-review.
+  if (!input.force) {
+    const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
+    if (blockReason) throw conflict(blockReason);
   }
 
   // Refuse to accept while an operator-raised BLOCKED decision is still open

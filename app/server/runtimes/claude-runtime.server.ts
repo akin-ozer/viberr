@@ -120,6 +120,34 @@ const OPERATOR_DENIED_BUILTINS = [
 ] as const;
 
 /**
+ * Denied for SUPPORTING (non-delivering, `kind: "reviewer"`) specialist runs
+ * (F10-12 / F10-04, owner ruling "supporting agents read-only by default"). A
+ * supporting engagement researches, reviews, tests, or advises — it is NOT the
+ * delivering agent and must be physically unable to mutate the shared workspace
+ * or reach the remote. Only the single `delivers: true` engagement writes and
+ * delivers. Deny wins under bypassPermissions, so this removes the file-write
+ * built-ins and every git/gh mutation command while keeping Read/Grep/Glob and
+ * Bash-for-read-only-validation. (`sed -i`/shell redirection stay reachable —
+ * the same honest Bash limitation the deliverer has; the Codex side gets a true
+ * read-only sandbox, which is strictly stronger.) Closes the VIB-30 class where
+ * a review agent committed, pushed, and opened a PR with no delivery linkage.
+ */
+const SUPPORTING_DENIED_BUILTINS = [
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "NotebookEdit",
+  "Bash(git commit:*)",
+  "Bash(git push:*)",
+  "Bash(git checkout -b:*)",
+  "Bash(git checkout -B:*)",
+  "Bash(git switch -c:*)",
+  "Bash(git switch -C:*)",
+  "Bash(gh pr create:*)",
+  "Bash(gh pr merge:*)",
+] as const;
+
+/**
  * Denied for EVERY Viberr run (operator + specialist + reviewer).
  *
  * These are Claude Agent SDK built-ins COMPILED INTO the
@@ -415,6 +443,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const denied = [
           ...BASE_DENIED_BUILTINS,
           ...(spec.kind === "operator" ? OPERATOR_DENIED_BUILTINS : []),
+          // Supporting/reviewing runs are read-only for the repo (F10-12).
+          ...(spec.kind === "reviewer" ? SUPPORTING_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),
         ];
         if (denied.length) options.disallowedTools = denied;

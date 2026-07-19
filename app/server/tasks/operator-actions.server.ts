@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
+  acceptanceBlockedReason,
   deliveringEngagement,
   supportingEngagements,
   type PacketOption,
@@ -504,6 +505,7 @@ export async function operatorOpenPacket(
   if (!recSeen && options[0]) options[0].rec = true;
 
   const packet: TaskPacket = {
+    id: newId("pkt"), // F10-09: stable identity for concurrent-resolution safety
     type: input.packetType,
     kind: input.packetType === "blocked" ? "Blocked decision" : "Decision required",
     from: "operator",
@@ -1268,6 +1270,58 @@ export async function operatorPromptReviewer(
  * existing ids (assign-primary-specialist governs delivering engagements,
  * summon-reviewers the supporting ones), so no deployment grant migrates.
  */
+/**
+ * F10-35: persist a DETERMINISTIC, server-computed routing trace whenever the
+ * operator selects a profile — every deployed specialist it could have chosen,
+ * with its stage-eligibility and already-engaged status, the one chosen, and the
+ * operator's stated reason. This turns opaque "the operator picked X" into an
+ * auditable record an owner can inspect to tell a deliberate semantic match from
+ * an availability/first-match fallback. Best-effort — never blocks the engage.
+ */
+function recordAgentSelectionTrace(
+  db: Database.Database,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    delivers: boolean;
+    reason?: string;
+  },
+): void {
+  try {
+    const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    const stage = file?.parsed.frontmatter.stage;
+    const engaged = new Set(
+      (file?.parsed.frontmatter.engagements ?? []).map((e) => e.profileId),
+    );
+    const candidates = listDeployedSpecialists(db, input.projectSlug, ctx).map(
+      (s) => ({
+        profileId: s.id,
+        eligibleForStage: stage ? specialistEligibleForStage(s, stage) : false,
+        alreadyEngaged: engaged.has(s.id),
+        chosen: s.id === input.profileId,
+      }),
+    );
+    recordAudit(db, {
+      action: "task.operator.agent_selected",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        chosen: input.profileId,
+        delivers: input.delivers,
+        reason: input.reason ?? null,
+        candidates,
+      },
+    });
+  } catch {
+    // Tracing must never block a routing decision.
+  }
+}
+
 export async function operatorEngageAgent(
   db: Database.Database,
   ctx: TaskMutationContext,
@@ -1282,6 +1336,7 @@ export async function operatorEngageAgent(
 ): Promise<OperatorActionResult> {
   const { profileId, projectSlug, taskKey } = input;
   const base = { projectSlug, taskKey, profileId };
+  recordAgentSelectionTrace(db, ctx, input);
   return input.delivers
     ? operatorAssignSpecialist(
         db,
@@ -1376,6 +1431,14 @@ export async function operatorPromptAgentGeneric(
     input.profileId,
     input.delivers,
   );
+  // F10-35: prompt_agent is also a routing decision — record its selection trace.
+  recordAgentSelectionTrace(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    profileId: input.profileId,
+    delivers,
+    ...(input.reason ? { reason: input.reason } : {}),
+  });
   const base = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1521,16 +1584,15 @@ export async function operatorAcceptCompletion(
     return { outcome: "noop", message: `${input.taskKey} is already Done.` };
   }
 
-  // Never accept a task a reviewer FLAGGED (validation "failing"): a
-  // request-changes verdict blocks acceptance until the developer reworks it
-  // (which resets validation off "failing"). This stops the operator from
-  // auto-accepting flagged work — e.g. when one of several reviewers rejected
-  // it — under full autonomy.
-  if (file.parsed.frontmatter.validation === "failing") {
-    return {
-      outcome: "noop",
-      message: `${input.taskKey} has an open "changes requested" verdict — not accepting until it's resolved.`,
-    };
+  // F10-15: the operator may accept only when every required reviewer approved
+  // the CURRENT work revision (and none requested changes on it). This stops the
+  // operator from auto-accepting work that a reviewer rejected, or that a
+  // required reviewer hasn't approved yet, under full autonomy.
+  {
+    const blockReason = acceptanceBlockedReason(file.parsed.frontmatter);
+    if (blockReason) {
+      return { outcome: "noop", message: `${input.taskKey}: ${blockReason}` };
+    }
   }
 
   // Never accept a task with an open BLOCKED decision (mirrors the human

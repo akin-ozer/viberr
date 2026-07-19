@@ -457,6 +457,11 @@ h1, h2, h3, h4 {
 .board-head .sub { color: var(--faint); font-size: .86rem; margin-top: .15rem; }
 .board-tools { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
 
+/* F10-28: GitHub state freshness chip next to Reconcile. */
+.gh-freshness { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.gh-freshness svg { width: 14px; height: 14px; }
+.gh-freshness.stale { color: var(--coral-dark); }
+
 .seg {
   display: inline-flex;
   padding: .2rem;
@@ -570,6 +575,12 @@ h1, h2, h3, h4 {
 
 /* ---- drag-and-drop stage moves on the board ---- */
 .card-wrap { position: relative; }
+/* F10-25: keyboard/pointer stage-move control on each card. Revealed on hover
+   or keyboard focus so it stays discoverable without cluttering every card. */
+.card-move { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity .12s var(--ease-out); z-index: 2; }
+.card-wrap:hover .card-move, .card-move:focus-within { opacity: 1; }
+.card-move .stage-menu-btn { font-size: .68rem; padding: .12rem .35rem; }
+.card-move .sm-name { display: none; }
 .card-wrap.draggable { cursor: grab; }
 .card-wrap.draggable:active { cursor: grabbing; }
 /* The card being dragged stays in the source column as a faded ghost. */
@@ -1296,6 +1307,10 @@ h1, h2, h3, h4 {
 .live-row:hover { background: color-mix(in srgb, var(--fg), transparent 97%); }
 .live-agent { display: flex; align-items: center; gap: .55rem; min-width: 0; }
 .live-role { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
+/* F10-20: profile identity (name) over the task role sub-label. */
+.live-ident { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.live-name { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
+.live-role-sub { font-size: .72rem; color: var(--muted); }
 .live-be { font-size: .82rem; color: var(--muted); }
 .live-task { min-width: 0; overflow: hidden; }
 .live-task .key { color: var(--faint); margin-right: .4rem; }
@@ -1787,6 +1802,10 @@ dialog[data-closing]::backdrop {
 .pev-ico.audit { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
 .pev-main { flex: 1; min-width: 0; font-size: .85rem; color: var(--muted); line-height: 1.5; padding-top: .15rem; }
 .pev-main strong { color: var(--fg); }
+/* F10-19: collapsed long activity report — one-line preview + Show more. */
+.act-collapsible { display: inline; }
+.act-preview { color: var(--muted); }
+.act-toggle { font-size: .78rem; font-weight: 600; color: var(--link, var(--teal-dark)); }
 .pev-t { font-family: var(--font-mono); font-size: .7rem; color: var(--placeholder); flex: none; padding-top: .3rem; white-space: nowrap; }
 
 @media (max-width: 1100px) {
@@ -2526,6 +2545,38 @@ dialog[data-closing]::backdrop {
 body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+
+/* F10-27: desktop two-column composition (brand aside + sign-in card). The
+   aside is hidden on narrow viewports, preserving the simple centered card on
+   mobile. */
+.login-aside { display: none; }
+@media (min-width: 900px) {
+  .login-wrap-2col {
+    grid-auto-flow: column;
+    grid-template-columns: minmax(0, 380px) auto;
+    gap: 4.5rem;
+    justify-content: center;
+    align-items: center;
+  }
+  .login-aside {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    max-width: 380px;
+    animation: rise .3s var(--ease-out);
+  }
+  .login-aside-mark {
+    display: inline-grid; place-items: center;
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--accent, var(--teal-dark)); color: #fff;
+    font-weight: 800; font-size: 1.3rem; font-family: var(--font-mono);
+  }
+  .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--fg); margin: 0; }
+  .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--muted); margin: 0; }
+  .login-aside-points { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .login-aside-points li { position: relative; padding-left: 1.4rem; font-size: .86rem; color: var(--muted); line-height: 1.4; }
+  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--accent, var(--teal-dark)); font-weight: 700; }
+}
 .login-card {
   width: min(430px, 100%);
   background: var(--surface);

@@ -493,9 +493,11 @@ function NewProjectPolicyField({
       <div className="def-note">
         <Icon name="shield" />
         <span>
-          Completion stays human-authorized in every preset. Stages, RBAC
-          and the agent capability matrix can be refined in project
-          settings.
+          Completion stays human-authorized — except an{" "}
+          <b>Autonomous within policy</b> operator granted <b>direct</b>{" "}
+          completion authority, which may accept work itself (disclosed on the
+          Policy page). Stages, RBAC and the agent capability matrix can be
+          refined in project settings.
         </span>
       </div>
     </div>
@@ -1108,7 +1110,10 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
               <AgentGlyph backend="claude" />
             </span>
             <span>
-              <span className="nm">{org.globalAgents} global agents</span>
+              <span className="nm">
+                {org.globalAgents} agent {org.globalAgents === 1 ? "profile" : "profiles"}
+                <span className="muted"> · + operator</span>
+              </span>
               <div className="sub">
                 {org.knowledgeBases} knowledge bases · {org.mcpServers} MCP ·{" "}
                 {org.skills} skills

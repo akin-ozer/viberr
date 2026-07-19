@@ -287,7 +287,8 @@ export async function startRun(
       : selectAdapter(input.backend, state.adapters);
   const simulated = selection.kind === "simulated";
 
-  upsertRun(db, {
+  try {
+    upsertRun(db, {
     id: runId,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -302,7 +303,30 @@ export async function startRun(
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId ?? null,
     state: "queued",
-  });
+    });
+  } catch (err) {
+    // F10-05: the partial unique index idx_agent_runs__one_delivering rejects a
+    // SECOND active delivering ("primary") run for the task. The service
+    // preflights, but two racing dispatches can both pass that check during
+    // their awaits; this is the authoritative atomic guard. Translate the
+    // constraint violation into a clean 409 (nothing was audited or launched
+    // yet). Any other DB error is a real fault — rethrow it.
+    const code = (err as { code?: string } | null)?.code;
+    if (
+      input.kind === "primary" &&
+      typeof code === "string" &&
+      code.startsWith("SQLITE_CONSTRAINT")
+    ) {
+      throw new AppError({
+        code: ERROR_CODES.CONFLICT,
+        status: 409,
+        userMessage:
+          "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
+        kind: "user",
+      });
+    }
+    throw err;
+  }
 
   // Governed action: opening a runtime session is audited (BUILD-PLAN
   // Phase 10 / contracts — run start + interrupt both leave audit rows).

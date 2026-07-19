@@ -15,6 +15,55 @@ import {
 } from "./feed-helpers";
 
 /**
+ * F10-19: agent reports render into the activity stream at full length, so a
+ * few long completion reports drown the scannable transitions/decisions. Short
+ * events render inline as before; a long one shows a one-line preview with a
+ * deliberate "Show more" toggle (the full markdown renders on expand), keeping
+ * the stream scannable while preserving access to the whole report. The
+ * per-row task-key deep link (kept by the callers) is the stable pointer to the
+ * run/task itself.
+ */
+const ACTIVITY_TEXT_PREVIEW_LIMIT = 240;
+function ActivityText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (text.length <= ACTIVITY_TEXT_PREVIEW_LIMIT) {
+    return <RichText text={text} mentions={false} />;
+  }
+  if (!expanded) {
+    const preview = text
+      .slice(0, ACTIVITY_TEXT_PREVIEW_LIMIT)
+      .replace(/\s+\S*$/, "")
+      .trim();
+    return (
+      <span className="act-collapsible">
+        <span className="act-preview">{preview}… </span>
+        <button
+          type="button"
+          className="keybtn act-toggle"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+        >
+          Show more
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="act-collapsible">
+      <RichText text={text} mentions={false} />{" "}
+      <button
+        type="button"
+        className="keybtn act-toggle"
+        aria-expanded={true}
+        onClick={() => setExpanded(false)}
+      >
+        Show less
+      </button>
+    </span>
+  );
+}
+
+/**
  * Activity view — project-wide cross-task stream + audit logs
  * (activity.md, ported from design/html-app/app/activity.jsx).
  *
@@ -81,7 +130,7 @@ function AuditLogs({
                 <Icon name={m.icon} />
               </span>
               <span className="pev-main">
-                <RichText text={e.text} mentions={false} />
+                <ActivityText text={e.text} />
                 {e.taskKey && (
                   <>
                     {" "}
@@ -245,7 +294,7 @@ export function ActivityPage({
                         {r.actor ? r.actor.name : "—"}
                       </strong>
                       <span className="act-sep">·</span>
-                      <RichText text={r.text} mentions={false} />{" "}
+                      <ActivityText text={r.text} />{" "}
                       <button
                         type="button"
                         className="keybtn"

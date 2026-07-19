@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
+import { applyRetention } from "./db/retention.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import {
   DATA_ROOT_SUBDIRS,
@@ -135,6 +136,17 @@ export function bootServer(): void {
     finalizeOrphanedRuns(db);
   } catch (error) {
     logger.error("orphaned-run finalize failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  // F10-29: bounded retention/compaction of the high-volume log/audit/
+  // notification tables so a long-lived deployment doesn't grow the SQLite file
+  // without limit. Best-effort; canonical task files (source of truth) untouched.
+  try {
+    applyRetention(db);
+  } catch (error) {
+    logger.error("retention pass failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }

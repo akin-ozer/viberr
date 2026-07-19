@@ -130,6 +130,28 @@ describe("StagesPanel", () => {
     expect(getByText("Policy → Workflow rules")).toBeTruthy();
   });
 
+  // F10-22: `.off` is only paint. A model-locked stage can NEVER be removed, so
+  // the control must carry the `disabled` property too — a button that looks
+  // clickable and silently no-ops lies to the user about what the model allows.
+  it("entry/terminal remove buttons are truly disabled, middle stages are not", () => {
+    const { container, getByLabelText } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+    );
+    const entry = getByLabelText("Remove Triage") as HTMLButtonElement;
+    const terminal = getByLabelText("Remove Done") as HTMLButtonElement;
+    expect(entry.disabled).toBe(true);
+    expect(terminal.disabled).toBe(true);
+    // The lock is explained, not just implied by the dimming.
+    expect(entry.title).toContain("can't be removed");
+    expect(terminal.title).toContain("can't be removed");
+
+    // A middle stage stays actionable for a manager (the client-side non-empty
+    // guard lives in the handler, not in `disabled`).
+    const middle = getByLabelText("Remove Ready") as HTMLButtonElement;
+    expect(middle.disabled).toBe(false);
+    expect(container.querySelectorAll(".stg-x:disabled")).toHaveLength(2);
+  });
+
   it("locked/non-empty removals stop client-side; empty unlocked ones dispatch", () => {
     const onRemove = vi.fn();
     const { container } = render(
@@ -420,5 +442,42 @@ describe("DangerZone", () => {
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger")!);
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  // F10-34: destructive project actions are admin-only. Greying the buttons is
+  // not enough — a viewer who can still press them gets a control that looks
+  // actionable and then silently does nothing (or leans on the server to say
+  // no). Both Archive and Delete must be genuinely `disabled`.
+  it("a viewer gets both danger-zone controls truly disabled; an admin gets them enabled", () => {
+    const dz = (myRole: string) =>
+      render(
+        <DangerZone
+          projectName="Viberr Core"
+          myRole={myRole}
+          archived={false}
+          busy={false}
+          onArchive={() => {}}
+          onDelete={() => {}}
+        />,
+      ).container;
+
+    const viewer = dz("viewer");
+    const viewerArchive = viewer.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
+    const viewerDelete = viewer.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+    expect(viewerArchive.disabled).toBe(true);
+    expect(viewerDelete.disabled).toBe(true);
+    // The denial is explained rather than left as unexplained dimming.
+    expect(viewerArchive.title).toContain("project admin");
+    expect(viewerDelete.title).toContain("project admin");
+
+    cleanup();
+
+    const admin = dz("admin");
+    expect((admin.querySelector(".dz-row .btn.ghost") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect((admin.querySelector(".dz-row .btn.danger") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

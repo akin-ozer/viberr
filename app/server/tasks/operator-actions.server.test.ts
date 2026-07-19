@@ -35,6 +35,7 @@ import {
   operatorAcceptCompletion,
   operatorAssignReviewer,
   operatorAssignSpecialist,
+  operatorEngageAgent,
   operatorOpenPacket,
   operatorPostComment,
   operatorSetGoal,
@@ -277,6 +278,45 @@ describe("operatorAssignSpecialist", () => {
     expect(recs[0]!.detail).toBe("Dev fits impl.");
     // …and the operator's reasoning is also commented to the timeline.
     expect(task().timeline.some((e) => e.actor.kind === "operator" && e.type === "comment")).toBe(true);
+  });
+
+  it("F10-35: records a routing trace — candidates considered, chosen, reason", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorEngageAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "developer",
+        delivers: true,
+        reason: "Dev fits the impl stage.",
+      },
+      authority("full"),
+    );
+    const trace = listAuditEvents(store.db, {
+      action: "task.operator.agent_selected",
+    })[0];
+    expect(trace).toBeTruthy();
+    const d = trace!.details as {
+      chosen: string;
+      delivers: boolean;
+      reason: string | null;
+      candidates: { profileId: string; chosen: boolean; eligibleForStage: boolean }[];
+    };
+    expect(d.chosen).toBe("developer");
+    expect(d.delivers).toBe(true);
+    expect(d.reason).toBe("Dev fits the impl stage.");
+    // Every deployed specialist is recorded as a considered candidate, exactly
+    // one marked chosen — a deterministic, auditable trace (not a free-text blob).
+    expect(d.candidates.length).toBeGreaterThan(0);
+    expect(d.candidates.filter((c) => c.chosen).map((c) => c.profileId)).toEqual([
+      "developer",
+    ]);
+    expect(
+      d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
+    ).toBe(true);
   });
 
   it("off mode (don't recommend) is denied", async () => {
@@ -606,7 +646,7 @@ describe("operator react to an agent report (trigger=agent-reply)", () => {
         operator: { assignedAtStageId: "triage" },
         title: "Ineligible engaged reviewer",
         engagements: [
-          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false },
+          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: false },
         ],
       }),
       goal: "Prove the operator skips an ineligible engaged reviewer.",

@@ -77,6 +77,33 @@ describe("home org tile counts (Phase 10)", () => {
     expect(data.org.skills).toBe(4);
     expect(data.org.globalAgents).toBeGreaterThan(0);
   });
+
+  // F10-21: the tile reads "<n> agent profiles" — reusable templates the user
+  // configured. The operator is a SYSTEM profile that ships with every store and
+  // is not listed in the Org Resources catalog, so folding it in overstates what
+  // was configured and makes the tile disagree with the catalog for no reason.
+  it("counts SPECIALIST profiles only — the seeded operator is excluded", async () => {
+    const { listGlobalAgentProfiles } = await import(
+      "~/server/org/gagents.server"
+    );
+    const { cookie } = await app.cookieFor(ardaId);
+    const data = await runHomeLoader(cookie);
+
+    // runDemoSeed writes 3 profile templates: operator + developer + reviewer.
+    const profiles = listGlobalAgentProfiles(app.db, { dataRoot: app.dataRoot });
+    expect(profiles.map((p) => p.id)).toEqual(["developer", "reviewer"]);
+    // The operator template IS on disk — the count excludes it by kind, not by
+    // it being absent.
+    const { existsSync } = await import("node:fs");
+    const { default: path } = await import("node:path");
+    expect(
+      existsSync(path.join(app.dataRoot, "agents", "profiles", "operator.md")),
+    ).toBe(true);
+
+    // Exact count, same population the catalog lists — 2, not 3.
+    expect(data.org.globalAgents).toBe(2);
+    expect(data.org.globalAgents).toBe(profiles.length);
+  });
 });
 
 describe("rebuild-projections intent (Phase 10 recovery)", () => {

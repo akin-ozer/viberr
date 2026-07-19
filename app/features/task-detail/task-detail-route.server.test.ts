@@ -555,7 +555,9 @@ describe("loader — deployed specialists", () => {
     const dev = result.deployedSpecialists.find((s) => s.id === "developer")!;
     expect(dev).toMatchObject({ role: "Implementation" });
     expect(dev.backend === "codex" || dev.backend === "claude").toBe(true);
-    expect(result.runActive).toBe(false); // no running run on VIB-166 (triage)
+    // F10-04: per-engagement run gating replaced the single `runActive` boolean.
+    expect(result.deliveringActive).toBe(false); // no delivering run on VIB-166
+    expect(result.activeReviewerIds).toEqual([]); // no reviewer run either
   });
 });
 

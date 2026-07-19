@@ -104,9 +104,17 @@ function OwnerControl({
   // Hand-off requires owner-or-admin (owner-assign); only the owner or an admin
   // sees the candidate list.
   const canHandOff = mine || admin;
-  // Hand-off candidates: active members minus the current owner and me.
+  // Hand-off candidates: active members minus the current owner and me, and —
+  // F10-13 — only members who can actually OWN a task (contributor or above).
+  // The server rejects a hand-off to a viewer ("own-task"), so the picker must
+  // not offer one.
   const candidates = canHandOff
-    ? members.filter((m) => m.userId !== o.userId && m.userId !== meId)
+    ? members.filter(
+        (m) =>
+          m.userId !== o.userId &&
+          m.userId !== meId &&
+          roleCan(m.role as ProjectRole, "own-task"),
+      )
     : [];
 
   // Nothing this user can do to ownership → no Manage control (Q5, XS-12): a
@@ -452,7 +460,8 @@ export function ExecutionProfile({
   onRelease,
   deployedSpecialists,
   canRunAgents,
-  runActive,
+  deliveringActive,
+  activeReviewerIds,
   runBusy,
   onAssignSpecialist,
   onRunSpecialist,
@@ -475,8 +484,12 @@ export function ExecutionProfile({
   deployedSpecialists: DeployedSpecialistView[];
   /** admin|maintainer — gates the assign/run affordances (server re-checks). */
   canRunAgents: boolean;
-  /** A run for this task is currently running — disables Run. */
-  runActive: boolean;
+  /** A DELIVERING run is active (queued/running) — disables the delivering Run
+   *  button (server single-flights delivering). F10-04. */
+  deliveringActive: boolean;
+  /** Profile ids of reviewing engagements with an active run — disables only
+   *  that reviewer's Run button; supporting runs are read-only and concurrent. */
+  activeReviewerIds: string[];
   /** A LIVE operator run (queued/running) exists — the only state honest
    * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
   operatorRunActive: boolean;
@@ -494,9 +507,14 @@ export function ExecutionProfile({
   /** Run the operator agent with a chosen backend + autonomy. */
   onRunOperator: (backend: string, autonomy: string) => void;
 }) {
-  // Deployed specialists not already engaged as reviewers — what "Add reviewer" offers.
+  // Deployed specialists not already engaged as reviewers — what "Add reviewer"
+  // offers. F10-13: also exclude the current DELIVERING profile. Engaging it as
+  // a reviewer is a server no-op that returned a misleading "is already a
+  // reviewer" toast; the deliverer is already engaged (as the deliverer).
   const availableReviewers = deployedSpecialists.filter(
-    (s) => !task.reviewers.some((r) => r.profileId === s.id),
+    (s) =>
+      !task.reviewers.some((r) => r.profileId === s.id) &&
+      s.id !== task.specialist?.profileId,
   );
   // Resolve an agent's display NAME by profile id. The AgentRef stored on the
   // task carries only profileId/backend/role (its `name` is the backend label),
@@ -575,18 +593,18 @@ export function ExecutionProfile({
                     <button
                       type="button"
                       className="btn primary sm"
-                      disabled={runBusy || runActive || closed}
+                      disabled={runBusy || deliveringActive || closed}
                       onClick={onRunSpecialist}
                       title={
                         closed
                           ? "Task is closed (terminal stage) — no runs needed"
-                          : runActive
-                            ? "A run is already streaming for this task"
+                          : deliveringActive
+                            ? "A delivering run is already streaming for this task"
                             : "Start an agent run for the delivering agent"
                       }
                     >
                       <Icon name="bolt" />
-                      {runActive ? "Running…" : "Run"}
+                      {deliveringActive ? "Running…" : "Run"}
                     </button>
                   </span>
                 )}
@@ -630,18 +648,22 @@ export function ExecutionProfile({
                       <button
                         type="button"
                         className="btn primary sm"
-                        disabled={reviewerBusy || runActive || closed}
+                        disabled={
+                          reviewerBusy ||
+                          activeReviewerIds.includes(c.profileId) ||
+                          closed
+                        }
                         onClick={() => onRunReviewer(c.profileId)}
                         title={
                           closed
                             ? "Task is closed (terminal stage) — no runs needed"
-                            : runActive
-                              ? "A run is already streaming for this task"
+                            : activeReviewerIds.includes(c.profileId)
+                              ? "A run for this reviewer is already streaming"
                               : "Start a run for this reviewer"
                         }
                       >
                         <Icon name="bolt" />
-                        {runActive ? "Running…" : "Run"}
+                        {activeReviewerIds.includes(c.profileId) ? "Running…" : "Run"}
                       </button>
                       <button
                         type="button"

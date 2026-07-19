@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -166,5 +166,33 @@ describe("watcher liveness (E8)", () => {
 
     watcher.emit("error", new Error("EMFILE: too many open files"));
     expect(isFileWatcherAlive()).toBe(false);
+  }, 15000);
+});
+
+describe("watcher re-arm lifecycle (F10-08)", () => {
+  it("teardown cancels a pending transient re-arm — it cannot resurrect the watcher", async () => {
+    const store = setupTestStore(ctx);
+    const watcher = await startWatcherReady(store);
+    expect(isFileWatcherAlive()).toBe(true);
+
+    // Only fake the timer functions so chokidar's fs mechanics stay real.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // A transient error WITH a code schedules the 2s self-heal re-arm.
+      watcher.emit(
+        "error",
+        Object.assign(new Error("EMFILE"), { code: "EMFILE" }),
+      );
+      expect(isFileWatcherAlive()).toBe(false);
+      // Teardown must cancel that pending re-arm and bump the generation, so
+      // advancing well past the backoff never brings a watcher back (the old
+      // untracked timer re-fired on `cache === undefined` — exactly what
+      // teardown creates — resurrecting a watcher against a deleted root).
+      stopFileWatcherForTests();
+      vi.advanceTimersByTime(10_000);
+      expect(isFileWatcherAlive()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   }, 15000);
 });

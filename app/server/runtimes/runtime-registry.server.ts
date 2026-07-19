@@ -257,6 +257,45 @@ export function codexSpawnEnv(
   return out;
 }
 
+/**
+ * A complete but secret-filtered spawn env for the Claude Agent SDK (F10-02).
+ *
+ * The SDK REPLACES the child `claude` process env with the `env` we pass —
+ * verified in the bundled sdk.mjs (`env = options.env` when provided; only a
+ * default `{...process.env}` when omitted). So filtering here is REAL: the
+ * spawned agent never sees a variable we drop. This mirrors `codexSpawnEnv` and
+ * fixes the asymmetry where Claude previously received the FULL server
+ * environment (session-signing + encryption secrets, DATABASE_URL, the GitHub
+ * PAT, provider keys, unrelated deploy secrets) while Codex was already
+ * filtered. Keep ordinary runtime settings (PATH/HOME/locale/proxy) so stdio
+ * MCP servers (`npx …`) and the CLI's own session lookup keep working; strip
+ * every credential-shaped variable; then re-add only the selected Claude
+ * credential and the deterministic config dir.
+ */
+export function claudeSpawnEnv(
+  configDir: string,
+  apiKey?: string,
+  oauthToken?: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value !== "string") continue;
+    if (
+      /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i.test(
+        key,
+      ) ||
+      /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i.test(key)
+    ) {
+      continue;
+    }
+    out[key] = value;
+  }
+  out.CLAUDE_CONFIG_DIR = configDir;
+  if (apiKey) out.ANTHROPIC_API_KEY = apiKey;
+  if (oauthToken) out.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+  return out;
+}
+
 /** Constructs the three adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const env = safeEnv();
@@ -272,20 +311,18 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
     env.CODEX_ACCESS_TOKEN,
     preferCachedCodexLogin,
   );
-  // The SDK's `env` REPLACES the child environment (it is not merged), so we
-  // MUST start from process.env — otherwise the spawned runtime loses PATH and
-  // HOME, which silently breaks stdio MCP servers (`npx …` can't be found) and
-  // the CLI's own auth/session lookup. Then overlay the credential vars and a
-  // deterministic config dir so session transcripts land where session-export
-  // reads them (resolveClaudeConfigDir is the single source both agree on).
-  const claudeEnv: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
-    ...(env.CLAUDE_CODE_OAUTH_TOKEN
-      ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
-      : {}),
-    CLAUDE_CONFIG_DIR: resolveClaudeConfigDir(),
-  };
+  // The SDK's `env` REPLACES the child environment (it is not merged). We build
+  // it from `claudeSpawnEnv`, which starts from process.env — so the spawned
+  // runtime keeps PATH/HOME (stdio MCP `npx …` and CLI auth/session lookup
+  // work) — but FILTERS OUT every server credential and adds only the selected
+  // Claude credential + a deterministic CLAUDE_CONFIG_DIR (so session
+  // transcripts land where session-export reads them). Previously this spread
+  // the raw process.env and leaked all server secrets to the agent (F10-02).
+  const claudeEnv = claudeSpawnEnv(
+    resolveClaudeConfigDir(),
+    env.ANTHROPIC_API_KEY,
+    env.CLAUDE_CODE_OAUTH_TOKEN,
+  );
   return {
     claude: createClaudeAdapter({
       ...(deps.claudeQueryFn ? { queryFn: deps.claudeQueryFn } : {}),
@@ -296,11 +333,11 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
       // API key when present; otherwise NO key so the Codex SDK uses either
       // CODEX_ACCESS_TOKEN or the ChatGPT login in $CODEX_HOME/auth.json.
       ...(codexApiKey ? { apiKey: codexApiKey } : {}),
-      // Point the SDK's spawned `codex` at the subscription login dir. NOTE:
-      // the Codex SDK REPLACES the child env with this object (unlike the
-      // Claude SDK, which merges into process.env), so we must hand it a FULL
-      // env — otherwise `codex` spawns with only CODEX_HOME and loses PATH/HOME
-      // (git/auth break). Merge process.env, then force CODEX_HOME.
+      // Point the SDK's spawned `codex` at the subscription login dir. Both
+      // SDKs REPLACE the child env with this object, so we hand it a FULL
+      // (secret-filtered) env — otherwise `codex` spawns with only CODEX_HOME
+      // and loses PATH/HOME (git/auth break). `codexSpawnEnv` starts from
+      // process.env, strips credentials, then forces CODEX_HOME.
       env: codexEnv,
     }),
     simulated: createSimulatedAdapter(),

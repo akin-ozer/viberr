@@ -286,6 +286,27 @@ describe("claude adapter (SDK, injected fake query)", () => {
         ?.disallowedTools ?? [];
     expect(withheld).toContain("Bash(git push:*)");
     expect(withheld).toContain("Skill");
+
+    // F10-12/F10-04: a SUPPORTING/reviewing run (kind: "reviewer") is read-only
+    // for the repo — the file-write built-ins and every git/gh mutation command
+    // are denied, so a reviewer physically cannot commit, push, or open a PR
+    // (the VIB-30 class). Read/Grep/Bash-for-validation stay available.
+    const reviewerDenied = (await run({ ...SPEC, kind: "reviewer" }))?.disallowedTools ?? [];
+    expect(reviewerDenied).toEqual(
+      expect.arrayContaining([
+        "Edit",
+        "MultiEdit",
+        "Write",
+        "NotebookEdit",
+        "Bash(git commit:*)",
+        "Bash(git push:*)",
+        "Bash(gh pr create:*)",
+        "Bash(gh pr merge:*)",
+      ]),
+    );
+    // A delivering (primary) run is NOT read-only — it must be able to write.
+    expect(primaryDenied).not.toContain("Write");
+    expect(primaryDenied).not.toContain("Bash(git commit:*)");
   });
 
   it("interrupt() calls the SDK interrupt and ends interrupted (no result line)", async () => {

@@ -60,33 +60,66 @@ function toSessionUser(user: UserRecord): SessionUser {
 }
 
 /**
- * Authenticates a request from its better-auth session. The identity invariant
- * (better-auth `user.id` === `users.id`) lets us load the canonical `users` row
- * for the profile/role. A disabled or vanished user has their better-auth
- * session deleted and is treated as signed out. `sessionId` is better-auth's
- * session id — it keys the double-submit CSRF token. Null when signed out.
+ * Authenticates a request from its better-auth session AND captures the renewal
+ * headers better-auth emits (F10-17).
+ *
+ * Better Auth is configured for rolling sessions (auth.server.ts: 30-day expiry,
+ * 1-day updateAge). When a session is touched past its updateAge, better-auth
+ * slides the DB expiry AND emits a fresh session cookie via `Set-Cookie`. The
+ * old code called `getSession({ headers })` and read only the session object,
+ * DISCARDING that renewal cookie — so the browser cookie could expire at the
+ * original login+30d mark regardless of activity, diverging from the DB. Passing
+ * `returnHeaders: true` captures the `Set-Cookie` so a caller (the root loader)
+ * can forward it to the browser and the roll actually reaches the client.
+ *
+ * `renewalHeaders` is a Headers object that carries any `Set-Cookie` the refresh
+ * produced (usually empty — most requests are within the updateAge window).
  */
-export async function authenticate(
+export async function authenticateWithHeaders(
   request: Request,
-): Promise<AuthContext | null> {
-  const result = await getAuth().api.getSession({ headers: request.headers });
-  if (!result) return null;
+): Promise<{ ctx: AuthContext | null; renewalHeaders: Headers }> {
+  const { response: result, headers: renewalHeaders } =
+    await getAuth().api.getSession({
+      headers: request.headers,
+      returnHeaders: true,
+    });
+  if (!result) return { ctx: null, renewalHeaders };
   const db = getDb();
   const user = findUserById(db, result.user.id);
   if (!user || user.disabled) {
     db.prepare(`DELETE FROM session WHERE id = ?`).run(result.session.id);
-    return null;
+    return { ctx: null, renewalHeaders };
   }
   // Option-B cutover (pass-4 ruling 5): the org role is authoritatively the
   // better-auth membership, not the legacy `users.role` column (which is now a
   // derived cache kept in sync on every role write).
   const orgRole = resolveOrgRole(db, user.id, user.role);
   return {
-    user: toSessionUser({ ...user, role: orgRole }),
-    pwresetRequired: user.pwresetRequired,
-    sessionId: result.session.id,
-    sessionToken: result.session.token,
+    ctx: {
+      user: toSessionUser({ ...user, role: orgRole }),
+      pwresetRequired: user.pwresetRequired,
+      sessionId: result.session.id,
+      sessionToken: result.session.token,
+    },
+    renewalHeaders,
   };
+}
+
+/**
+ * Authenticates a request from its better-auth session. The identity invariant
+ * (better-auth `user.id` === `users.id`) lets us load the canonical `users` row
+ * for the profile/role. A disabled or vanished user has their better-auth
+ * session deleted and is treated as signed out. `sessionId` is better-auth's
+ * session id — it keys the double-submit CSRF token. Null when signed out.
+ *
+ * This drops the renewal headers; the root document loader uses
+ * {@link authenticateWithHeaders} so the rolling-session cookie reaches the
+ * browser (F10-17). Guards that only need the identity use this.
+ */
+export async function authenticate(
+  request: Request,
+): Promise<AuthContext | null> {
+  return (await authenticateWithHeaders(request)).ctx;
 }
 
 /** Sanitizes a post-login redirect target: same-app absolute paths only. */

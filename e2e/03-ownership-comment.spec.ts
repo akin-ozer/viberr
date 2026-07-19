@@ -2,11 +2,13 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Golden path (c): take ownership of VIB-148 (quality-gated, unowned) →
- * the operator reaction event appears on the timeline; then comment with
- * @operator → the comment is routed (toagent tint + mention chip + toast).
+ * ownership is recorded with NO operator side effect (F19: taking ownership is a
+ * clean ownership mutation — it does not schedule or invoke the operator); then
+ * comment with @operator → the comment is routed (toagent tint + mention chip +
+ * toast).
  */
 
-test("taking ownership of VIB-148 triggers the operator reaction", async ({
+test("taking ownership of VIB-148 records ownership with no operator reaction", async ({
   page,
 }) => {
   await page.goto("/projects/viberr-core/tasks/VIB-148");
@@ -18,14 +20,16 @@ test("taking ownership of VIB-148 triggers the operator reaction", async ({
     page.locator(".toast", { hasText: "You own VIB-148" }),
   ).toBeVisible();
 
-  // Operator scheduling stand-in: the operator agent reaction lands on the
-  // timeline and flips waiting → agent. Assert the reaction is PRESENT (not
-  // strictly newest — the operator may post further reactions on top).
-  const reaction = page
+  // F19: ownership is recorded as a plain timeline event; the task stays
+  // human-waiting and NO operator reaction ("Acceptance boundary now owned by")
+  // is scheduled — that side effect was intentionally removed.
+  const ownershipEvent = page
     .locator(".tl-item")
-    .filter({ hasText: "Acceptance boundary now owned by" });
-  await expect(reaction.first()).toBeVisible();
-  await expect(reaction.first().getByText("agent", { exact: true })).toBeVisible();
+    .filter({ hasText: "Took task ownership" });
+  await expect(ownershipEvent.first()).toBeVisible();
+  await expect(
+    page.locator(".tl-item").filter({ hasText: "Acceptance boundary now owned by" }),
+  ).toHaveCount(0);
 });
 
 test("commenting with @operator routes the comment", async ({ page }) => {

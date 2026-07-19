@@ -211,4 +211,36 @@ describe("ActivityPage", () => {
     const full = renderActivity();
     expect(full.queryByText(/Show older/)).toBeNull();
   });
+  // F10-19: long agent reports used to dump hundreds of lines into the feed,
+  // burying every other event. They collapse to a preview with a Show more /
+  // Show less toggle; short text is never wrapped in a toggle at all.
+  it("F10-19: collapses long activity text behind Show more and expands in place", () => {
+    const long = "x".repeat(400);
+    const view = renderActivity([
+      { ...STREAM[0]!, text: long },
+    ]);
+
+    // Collapsed: a truncated preview plus an unexpanded toggle — never the full text.
+    const toggle = view.getByText("Show more");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(view.queryByText(long)).toBeNull();
+    const preview = view.container.querySelector(".act-preview")!.textContent!;
+    expect(preview.length).toBeLessThan(long.length);
+
+    // Expanded: full text, and the toggle flips to Show less.
+    fireEvent.click(toggle);
+    expect(view.getByText("Show less").getAttribute("aria-expanded")).toBe("true");
+    expect(view.container.textContent).toContain(long);
+    expect(view.queryByText("Show more")).toBeNull();
+
+    // Collapsing again restores the preview.
+    fireEvent.click(view.getByText("Show less"));
+    expect(view.getByText("Show more")).toBeTruthy();
+  });
+
+  it("F10-19: short activity text is rendered plainly, with no toggle", () => {
+    const view = renderActivity([{ ...STREAM[0]!, text: "short enough" }]);
+    expect(view.queryByText(/Show more|Show less/)).toBeNull();
+    expect(view.container.querySelector(".act-collapsible")).toBeNull();
+  });
 });

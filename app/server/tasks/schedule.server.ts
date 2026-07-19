@@ -131,6 +131,8 @@ export async function scheduleTaskAction(
     createdAt: new Date().toISOString(),
     status: "pending",
     firedAt: null,
+    claimedAt: null,
+    retries: 0,
   };
 
   await updateTaskFile(ref, (parsed) => {
@@ -200,6 +202,13 @@ interface DueRow {
   schedules_json: string;
 }
 
+/** F10-16: a claim older than this is treated as crashed and re-driven. Longer
+ *  than any real operator run start; shorter than "lost forever". */
+const CLAIM_LEASE_MS = 5 * 60_000;
+/** F10-16: bounded retry — after this many failed enqueue/run attempts the
+ *  occurrence becomes terminal `failed` (visible) instead of retrying forever. */
+const MAX_SCHEDULE_RETRIES = 3;
+
 /**
  * Fire every pending schedule whose `dueAt` has passed. A schedule on a task
  * that reached its terminal stage is retired (`fired`, outcome `skipped-done`)
@@ -215,7 +224,8 @@ export async function fireDueSchedules(
     .prepare(
       `SELECT project_slug, task_key, stage, schedules_json
          FROM task_projections
-        WHERE schedules_json LIKE '%"status":"pending"%'`,
+        WHERE schedules_json LIKE '%"status":"pending"%'
+           OR schedules_json LIKE '%"status":"claimed"%'`,
     )
     .all() as DueRow[];
   if (rows.length === 0) return { fired: 0, skipped: 0 };
@@ -226,9 +236,23 @@ export async function fireDueSchedules(
     return terminalCache.get(slug) ?? null;
   };
 
+  /** A stale claim = claimed but its lease expired (the enqueuing tick crashed
+   *  before finalizing). Re-driven so the action is never lost (F10-16). */
+  const isStaleClaim = (s: TaskSchedule): boolean => {
+    if (s.status !== "claimed") return false;
+    const claimedMs = s.claimedAt ? Date.parse(s.claimedAt) : NaN;
+    return !Number.isFinite(claimedMs) || nowMs - claimedMs >= CLAIM_LEASE_MS;
+  };
+
   let fired = 0;
   let skipped = 0;
-  const toRun: { projectSlug: string; taskKey: string; backend: "claude" | "codex"; autonomy: "supervised" | "full" }[] = [];
+  const toRun: {
+    projectSlug: string;
+    taskKey: string;
+    backend: "claude" | "codex";
+    autonomy: "supervised" | "full";
+    scheduleId: string;
+  }[] = [];
 
   for (const row of rows) {
     let scheds: TaskSchedule[];
@@ -237,33 +261,50 @@ export async function fireDueSchedules(
     } catch {
       continue;
     }
-    const due = scheds.filter(
-      (s) => s.status === "pending" && Number.isFinite(Date.parse(s.dueAt)) && Date.parse(s.dueAt) <= nowMs,
-    );
+    const due = scheds.filter((s) => {
+      const dueMs = Date.parse(s.dueAt);
+      if (!Number.isFinite(dueMs) || dueMs > nowMs) return false;
+      return s.status === "pending" || isStaleClaim(s);
+    });
     if (due.length === 0) continue;
     const isDone = terminalFor(row.project_slug) !== null && row.stage === terminalFor(row.project_slug);
 
     for (const s of due) {
       try {
-        // Flip pending → fired in the FILE first (crash-safe idempotency): a
-        // restart mid-run finds it already fired and never re-runs it.
-        let flipped = false;
+        // CLAIM the occurrence in the FILE first (crash-safe). A moot Done task
+        // is retired straight to `fired`; otherwise we reserve it as `claimed`
+        // and only after the detached operator enqueue COMPLETES do we finalize
+        // it to `fired`. A crash between claim and finalize leaves a `claimed`
+        // row that a later tick re-drives once its lease expires — the action is
+        // never lost (the old pending→fired-before-enqueue flow lost it).
+        let claimed = false;
+        const staleClaim = isStaleClaim(s);
         await updateTaskFile(taskFileRef(ctx, row.project_slug, row.task_key), (parsed) => {
           const target = parsed.frontmatter.schedules.find((x) => x.id === s.id);
-          if (!target || target.status !== "pending") return;
-          target.status = "fired";
-          target.firedAt = new Date().toISOString();
-          flipped = true;
-          parsed.timeline.unshift(
-            scheduleEvent(
-              { kind: "system", systemId: "schedule-runner" },
-              isDone
-                ? `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled operator re-run is moot.`
-                : `**Scheduled action fired:** starting the scheduled operator re-run for ${row.task_key}${s.note ? ` — ${s.note}` : ""}.`,
-            ),
-          );
+          if (!target) return;
+          if (target.status !== "pending" && !isStaleClaim(target)) return;
+          if (isDone) {
+            target.status = "fired";
+            target.firedAt = new Date().toISOString();
+            parsed.timeline.unshift(
+              scheduleEvent(
+                { kind: "system", systemId: "schedule-runner" },
+                `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled operator re-run is moot.`,
+              ),
+            );
+          } else {
+            target.status = "claimed";
+            target.claimedAt = new Date().toISOString();
+            parsed.timeline.unshift(
+              scheduleEvent(
+                { kind: "system", systemId: "schedule-runner" },
+                `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled operator re-run for ${row.task_key}${s.note ? ` — ${s.note}` : ""}.`,
+              ),
+            );
+          }
+          claimed = true;
         });
-        if (!flipped) continue; // another tick/restart already handled it
+        if (!claimed) continue; // another tick/restart already handled it
         reproject(db, ctx, row.project_slug, row.task_key);
         recordAudit(db, {
           action: "task.schedule.fired",
@@ -272,16 +313,22 @@ export async function fireDueSchedules(
           subjectId: row.task_key,
           projectSlug: row.project_slug,
           taskKey: row.task_key,
-          details: { scheduleId: s.id, outcome: isDone ? "skipped-done" : "fired" },
+          details: { scheduleId: s.id, outcome: isDone ? "skipped-done" : "claimed" },
         });
         if (isDone) {
           skipped += 1;
         } else {
-          toRun.push({ projectSlug: row.project_slug, taskKey: row.task_key, backend: s.backend, autonomy: s.autonomy });
+          toRun.push({
+            projectSlug: row.project_slug,
+            taskKey: row.task_key,
+            backend: s.backend,
+            autonomy: s.autonomy,
+            scheduleId: s.id,
+          });
           fired += 1;
         }
       } catch (error) {
-        logger.warn("scheduled action fire failed", {
+        logger.warn("scheduled action claim failed", {
           taskKey: row.task_key,
           projectSlug: row.project_slug,
           err: error instanceof Error ? error : new Error(String(error)),
@@ -294,6 +341,7 @@ export async function fireDueSchedules(
     void (async () => {
       const { runOperator } = await import("~/server/runtimes/operator-run.server");
       for (const t of toRun) {
+        let ok = false;
         try {
           await runOperator(db, {
             projectSlug: t.projectSlug,
@@ -303,8 +351,50 @@ export async function fireDueSchedules(
             trigger: "manual",
             ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
           });
+          ok = true;
         } catch (error) {
           logger.warn("scheduled operator re-run failed", {
+            taskKey: t.taskKey,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+        // Finalize the claimed occurrence — never leave it stuck in `claimed`.
+        // Success → fired. Failure → bounded retry (back to pending) or terminal
+        // `failed` once the retry cap is hit (F10-16).
+        try {
+          await updateTaskFile(
+            taskFileRef(ctx, t.projectSlug, t.taskKey),
+            (parsed) => {
+              const target = parsed.frontmatter.schedules.find(
+                (x) => x.id === t.scheduleId,
+              );
+              if (!target || target.status !== "claimed") return;
+              if (ok) {
+                target.status = "fired";
+                target.firedAt = new Date().toISOString();
+                target.claimedAt = null;
+                return;
+              }
+              const retries = (target.retries ?? 0) + 1;
+              target.retries = retries;
+              target.claimedAt = null;
+              if (retries >= MAX_SCHEDULE_RETRIES) {
+                target.status = "failed";
+                target.firedAt = new Date().toISOString();
+                parsed.timeline.unshift(
+                  scheduleEvent(
+                    { kind: "system", systemId: "schedule-runner" },
+                    `**Scheduled action failed:** the scheduled operator re-run for ${t.taskKey} did not complete after ${retries} attempts.`,
+                  ),
+                );
+              } else {
+                target.status = "pending"; // retry on a later tick
+              }
+            },
+          );
+          reproject(db, ctx, t.projectSlug, t.taskKey);
+        } catch (error) {
+          logger.warn("schedule finalize failed", {
             taskKey: t.taskKey,
             err: error instanceof Error ? error : new Error(String(error)),
           });

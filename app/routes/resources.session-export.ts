@@ -1,5 +1,6 @@
 import type { Route } from "./+types/resources.session-export";
 import { requireUser } from "~/server/auth/require-user.server";
+import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
@@ -21,6 +22,13 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  *
  * 404 when the run has no resumable on-disk session (simulated runs, or a
  * provider that wrote no transcript).
+ *
+ * F10-06/F10-33: a provider session transcript is the MOST sensitive run
+ * artifact (full conversation, tool outputs, repository content, prompts, and
+ * potentially secrets) AND it is a downloadable installer. So — unlike the old
+ * "any signed-in user" behavior — this requires PROJECT MEMBERSHIP (org admins
+ * pass via the D2 override). The app-wide task view never implied transcript
+ * export.
  */
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
@@ -33,6 +41,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!run) {
     return new Response("Run not found.", { status: 404 });
   }
+  // Membership gate for the run's project (throws a 403 Response for non-members).
+  await requireProjectMember(request, run.project_slug, "export the provider session");
   if (run.simulated || !run.session_id) {
     return new Response(
       "This run has no exportable provider session (it was simulated or never opened a real session).",

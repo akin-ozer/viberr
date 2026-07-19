@@ -630,7 +630,8 @@ function ExecutionSection({
   onRelease,
   deployedSpecialists,
   canRunAgents,
-  runActive,
+  deliveringActive,
+  activeReviewerIds,
   operatorRunActive,
 }: {
   task: TaskDetail;
@@ -642,7 +643,10 @@ function ExecutionSection({
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
   canRunAgents: boolean;
-  runActive: boolean;
+  /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
+  deliveringActive: boolean;
+  /** Reviewer profile ids with an active run — disables only that reviewer. */
+  activeReviewerIds: string[];
   /** A live (queued/running) OPERATOR run exists (F7-UI1 pill honesty). */
   operatorRunActive: boolean;
 }) {
@@ -669,7 +673,7 @@ function ExecutionSection({
     specialistFetcher.submit(fd, { method: "post" });
   };
   const onRunSpecialist = () => {
-    if (specialistBusy || runActive) return;
+    if (specialistBusy || deliveringActive) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "run-specialist");
@@ -677,8 +681,9 @@ function ExecutionSection({
   };
 
   // Reviewer engagement (admin|maintainer; server re-checks). Assign a deployed
-  // specialist as a reviewer, run a specific reviewer (gated on runActive so
-  // one run streams at a time, same as the primary), or release one.
+  // specialist as a reviewer, run a specific reviewer (gated on THAT reviewer's
+  // own active run — supporting runs are read-only and concurrent, F10-04), or
+  // release one.
   const onAssignReviewer = (profileId: string) => {
     if (reviewerBusy) return;
     const fd = new FormData();
@@ -688,7 +693,7 @@ function ExecutionSection({
     reviewerFetcher.submit(fd, { method: "post" });
   };
   const onRunReviewer = (profileId: string) => {
-    if (reviewerBusy || runActive) return;
+    if (reviewerBusy || activeReviewerIds.includes(profileId)) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "run-reviewer");
@@ -728,7 +733,8 @@ function ExecutionSection({
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
       canRunAgents={canRunAgents}
-      runActive={runActive}
+      deliveringActive={deliveringActive}
+      activeReviewerIds={activeReviewerIds}
       operatorRunActive={operatorRunActive}
       runBusy={specialistBusy}
       onAssignSpecialist={onAssignSpecialist}
@@ -895,17 +901,21 @@ function useRunControls({
   runtime,
   myRole,
   canRunAgents,
-  runActive,
 }: {
   csrf: string;
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
-  runActive: boolean;
 }) {
   const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(runFetcher);
   const runBusy = runFetcher.state !== "idle";
+  // Any live (queued/running) run — the D4 backend-retry affordance stays gated
+  // on "nothing currently in flight" (F10-04 keeps this coarse gate; per-
+  // engagement gating applies to the primary/reviewer Run buttons only).
+  const anyRunActive = runtime.some(
+    (r) => r.lifecycle === "running" || r.lifecycle === "queued",
+  );
   // Interrupt is admin|maintainer (contracts §3.2); the button hides for
   // everyone else. Server re-checks RBAC regardless.
   const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
@@ -926,7 +936,7 @@ function useRunControls({
   // next prompt follows the switched backend. admin|maintainer; server
   // re-checks.
   const onRetryBackend =
-    canRunAgents && !runActive
+    canRunAgents && !anyRunActive
       ? (backend: "claude" | "codex", run: RunView) => {
           if (runBusy) return;
           const fd = new FormData();
@@ -1004,7 +1014,8 @@ export function TaskDetailPage({
   task,
   runtime,
   deployedSpecialists,
-  runActive,
+  deliveringActive,
+  activeReviewerIds,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -1023,8 +1034,10 @@ export function TaskDetailPage({
   runtime: RunView[];
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
-  /** A run for this task is currently running — disables the Run button. */
-  runActive: boolean;
+  /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
+  deliveringActive: boolean;
+  /** Reviewer profile ids with an active run — disables only that reviewer. */
+  activeReviewerIds: string[];
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -1126,7 +1139,7 @@ export function TaskDetailPage({
   });
 
   const { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge } =
-    useRunControls({ csrf, runtime, myRole, canRunAgents, runActive });
+    useRunControls({ csrf, runtime, myRole, canRunAgents });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
     useLogSelection(runtime);
 
@@ -1212,7 +1225,8 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           canRunAgents={canRunAgents}
-          runActive={runActive}
+          deliveringActive={deliveringActive}
+          activeReviewerIds={activeReviewerIds}
           operatorRunActive={operatorRunActive}
         />
 

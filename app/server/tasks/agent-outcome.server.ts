@@ -6,6 +6,7 @@ import type {
   TaskPacket,
 } from "~/schemas/task-file.schema";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
+import { newId } from "~/shared/ids/new-id.server";
 
 /**
  * The uniform agent OUTCOME ENVELOPE (generic-agents G4): one structured shape
@@ -197,17 +198,21 @@ export interface AgentCollab {
  * Effective mode for a collaboration capability on one engagement.
  *
  * Explicit grant → its mode (specialist `recommend` coerces to `direct`,
- * R7-5). ABSENT grant → the catalog default, with ONE transition rule:
- * `report-validation-verdict` on a NON-delivering engagement defaults to
- * `direct` — that is exactly today's reviewer behavior (every engaged
- * reviewer's verdict is recorded), so pre-grant deployments keep working. A
- * DELIVERING engagement without the grant stays `off` (a developer's "tests
- * pass" prose must never flip validation — R1/R2).
+ * R7-5). ABSENT grant → the catalog default.
+ *
+ * F10-14: verdict authority is EXPLICIT-ONLY. There is NO implicit rule that
+ * gives a supporting engagement `report-validation-verdict: direct` by default
+ * — a supporting agent gains acceptance-gating veto only when its profile
+ * carries an explicit `direct` grant. Previously a non-delivering engagement
+ * with no grant defaulted to `direct`, so any generic "supporting" assignment
+ * silently held a gating verdict the profile/picker never disclosed. Now the
+ * catalog default (`off`) applies, and the required-reviewer set is exactly the
+ * engagements whose profile explicitly grants the verdict.
  */
 export function effectiveCollabMode(
   grants: readonly CapabilityGrant[],
   capabilityId: string,
-  delivers: boolean,
+  _delivers: boolean,
 ): "direct" | "human" | "off" {
   const grant = grants.find((g) => g.capabilityId === capabilityId);
   // An EXPLICIT direct/human/off grant is authoritative. `recommend` is NOT:
@@ -223,9 +228,6 @@ export function effectiveCollabMode(
       : grant.mode === "human"
         ? "human"
         : "off";
-  }
-  if (capabilityId === "report-validation-verdict") {
-    return delivers ? "off" : "direct";
   }
   const def = CATALOG_DEFAULTS.get(capabilityId) ?? "off";
   return def === "direct" ? "direct" : "off";
@@ -271,6 +273,7 @@ export function buildAgentQuestionPacket(
         },
       ];
   return {
+    id: newId("pkt"), // F10-09: stable identity for concurrent-resolution safety
     type: "input",
     kind: "Agent question",
     from: encodeActorRef(actorRef),

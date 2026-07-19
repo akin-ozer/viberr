@@ -435,7 +435,8 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         canRunAgents
-        runActive={false}
+        deliveringActive={false}
+        activeReviewerIds={[]}
         operatorRunActive={false}
         runBusy={false}
         onAssignSpecialist={onAssign}
@@ -503,7 +504,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
     expect(onRun).toHaveBeenCalled();
   });
 
-  it("Run button is disabled while a run is active", () => {
+  it("delivering Run button is disabled while a delivering run is active", () => {
     const task = execTask({
       specialist: {
         kind: "agent",
@@ -513,7 +514,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
         role: "Implementation",
       },
     } as unknown as Partial<TaskSummary>);
-    const { container } = renderExec(task, { runActive: true });
+    const { container } = renderExec(task, { deliveringActive: true });
     const runBtn = Array.from(container.querySelectorAll("button.btn.primary")).find(
       (b) => b.textContent?.includes("Running"),
     ) as HTMLButtonElement;
@@ -610,11 +611,54 @@ describe("ExecutionProfile — reviewers", () => {
     expect(onAssignReviewer).toHaveBeenCalledWith("developer");
   });
 
-  it("reviewer Run buttons are disabled while a run is active", () => {
-    const { container } = renderExec(reviewerTask(), { runActive: true });
+  it("'Engage reviewer' menu excludes the DELIVERING agent (F10-13)", () => {
+    // F10-13: a reviewer must not review its own delivery — engaging the
+    // delivering profile as a reviewer was a server no-op that answered with a
+    // misleading "is already a reviewer" toast. The picker must not offer it.
+    const task = execTask({
+      specialist: {
+        kind: "agent",
+        profileId: "developer",
+        backend: "codex",
+        name: "Codex",
+        role: "Implementation",
+      },
+      reviewers: [],
+    } as unknown as Partial<TaskSummary>);
+    const { container } = renderExec(task);
+    const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
+      b.textContent?.includes("Engage reviewer"),
+    ) as HTMLButtonElement;
+    fireEvent.click(addBtn);
+    const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
+    const items = [...menu.querySelectorAll(".menu-item")].map((i) => i.textContent);
+    // 'developer' is delivering → only the other deployed agent is offered.
+    expect(items).toHaveLength(1);
+    expect(items[0]).toContain("Reviewer");
+    expect(items.join(" ")).not.toContain("Developer");
+  });
+
+  it("a reviewer Run button is disabled only while THAT reviewer's run is active", () => {
+    // F10-04: per-engagement gating — this reviewer ("reviewer") has an active
+    // run, so its button reads Running/disabled.
+    const { container } = renderExec(reviewerTask(), {
+      activeReviewerIds: ["reviewer"],
+    });
     const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
     expect(runBtn.disabled).toBe(true);
     expect(runBtn.textContent).toContain("Running");
+  });
+
+  it("a reviewer Run button stays enabled when a DIFFERENT run is active", () => {
+    // A delivering run (or another reviewer) being active must NOT disable this
+    // read-only reviewer's Run button (F10-04).
+    const { container } = renderExec(reviewerTask(), {
+      deliveringActive: true,
+      activeReviewerIds: ["some-other-reviewer"],
+    });
+    const runBtn = container.querySelector(".rev-agent .btn.primary") as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.textContent).toContain("Run");
   });
 
   it("non-privileged role: chips render read-only (no Run/remove/Add)", () => {
@@ -630,5 +674,28 @@ describe("ExecutionProfile — reviewers", () => {
         b.textContent?.includes("Engage reviewer"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("ExecutionProfile — owner hand-off candidates", () => {
+  it("hand-off list offers only members who can own a task (F10-13)", () => {
+    // F10-13: viewers are read + comment only — the server rejects a hand-off to
+    // one ("own-task"), so the picker must not offer a candidate that 403s.
+    const withViewer: TaskMemberView[] = [
+      ...membersFixture,
+      { userId: "u-baris", role: "viewer", user: { name: "Barış Koç", initials: "BK", tone: "amber" } },
+    ];
+    // Owner is me (u-arda) → candidates are every OTHER member who can own.
+    const { container } = renderExec(execTask(), { members: withViewer });
+    const manageBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
+      b.textContent?.includes("Manage"),
+    ) as HTMLButtonElement;
+    expect(manageBtn).toBeDefined();
+    fireEvent.click(manageBtn);
+    const menu = container.querySelector('[aria-label="Manage task ownership"]')!;
+    const names = [...menu.querySelectorAll(".menu-item")].map((i) => i.textContent);
+    expect(names.join(" ")).not.toContain("Barış Koç"); // viewer — cannot own
+    expect(names.join(" ")).toContain("Murat Yıldız"); // maintainer — can own
+    expect(names.join(" ")).toContain("Selin Aksoy"); // contributor — can own
   });
 });

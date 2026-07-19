@@ -74,6 +74,13 @@ export function StageMenu({
     setOpen((o) => !o);
   };
 
+  // F10-25: close the menu AND return focus to the trigger (keyboard users must
+  // not be dumped at the top of the document after Escape / selection).
+  const closeAndReturnFocus = () => {
+    setOpen(false);
+    btnRef.current?.focus();
+  };
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -85,7 +92,7 @@ export function StageMenu({
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeAndReturnFocus();
     };
     const onReflow = () => setOpen(false);
     document.addEventListener("mousedown", onDoc);
@@ -101,10 +108,56 @@ export function StageMenu({
     };
   }, [open]);
 
+  // F10-25: move keyboard focus into the menu when it opens (the first
+  // selectable stage), so Arrow/Home/End navigation has an anchor.
+  useEffect(() => {
+    if (!open || !pos) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>(
+      "button.sm-item:not([disabled])",
+    );
+    first?.focus();
+  }, [open, pos]);
+
+  // F10-25: the ARIA menu keyboard contract — roving focus with Arrow Up/Down
+  // (wrapping), Home/End, and Escape. Enter/Space activate natively (real
+  // <button>s). Operates on the enabled items only (the current stage is
+  // disabled and skipped).
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button.sm-item:not([disabled])",
+      ) ?? [],
+    );
+    if (items.length === 0) return;
+    const idx = items.findIndex((el) => el === document.activeElement);
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        items[(idx + 1 + items.length) % items.length]?.focus();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        items[(idx - 1 + items.length) % items.length]?.focus();
+        break;
+      case "Home":
+        e.preventDefault();
+        items[0]?.focus();
+        break;
+      case "End":
+        e.preventDefault();
+        items[items.length - 1]?.focus();
+        break;
+      case "Escape":
+        e.preventDefault();
+        closeAndReturnFocus();
+        break;
+    }
+  };
+
   const pick = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setOpen(false);
+    closeAndReturnFocus();
     if (id !== currentStageId) onSelect(id);
   };
 
@@ -142,6 +195,7 @@ export function StageMenu({
               minWidth: pos.width,
             }}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={onMenuKeyDown}
           >
             <div className="sm-head">Move to stage</div>
             {stages.map((s) => {

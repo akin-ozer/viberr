@@ -446,6 +446,22 @@ export function GithubViewPage({
           </div>
         </div>
         <div className="board-tools">
+          {/* F10-28: GitHub state is served from cache + the last MANUAL
+              reconcile (no scheduled sync). Show how fresh it is so stale state
+              can't look current. */}
+          <span
+            className={"gh-freshness" + (data.reconcile.stale ? " stale" : "")}
+            title={
+              data.reconcile.at
+                ? "Branch/PR state reflects the last manual reconcile — click Reconcile to refresh."
+                : "Branch/PR state has never been reconciled with GitHub."
+            }
+          >
+            <Icon name={data.reconcile.stale ? "alert" : "clock"} />
+            {data.reconcile.at
+              ? `Reconciled ${data.reconcile.label}`
+              : "Never reconciled"}
+          </span>
           <button
             type="button"
             className="btn ghost sm"

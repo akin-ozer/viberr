@@ -467,7 +467,10 @@ export function LiveRoster({
     <div className="live-wrap">
       <div className="live-table">
         <div className="live-head">
-          <span>Agent</span>
+          {/* F10-20: profile IDENTITY (not the task role) heads this column, with
+              the task role as a sub-label — four distinct axes: identity, task
+              role, engagement, backend. */}
+          <span>Profile</span>
           <span>Backend</span>
           <span>Task</span>
           <span>Engagement</span>
@@ -499,7 +502,12 @@ export function LiveRoster({
                     name={isOp ? "shield" : d.backend === "claude" ? "sparkle" : "cpu"}
                   />
                 </span>
-                <span className="live-role">{d.role}</span>
+                <span className="live-ident">
+                  <span className="live-name">
+                    {isOp ? "Operator" : d.profileId}
+                  </span>
+                  {!isOp && <span className="live-role-sub">{d.role}</span>}
+                </span>
               </span>
               <span className="live-be">
                 {isOp
@@ -523,7 +531,13 @@ export function LiveRoster({
                   }
                   sm
                 >
-                  {d.engagement}
+                  {/* F10-20: human-facing engagement, not the internal
+                      primary/reviewer literals. */}
+                  {d.engagement === "operator"
+                    ? "operator"
+                    : d.engagement === "primary"
+                      ? "delivering"
+                      : "supporting"}
                 </Pill>
               </span>
               <span>

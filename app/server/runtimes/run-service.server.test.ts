@@ -93,6 +93,44 @@ describe("run-service lifecycle (simulated)", () => {
     expect(run.output_tokens).toBe(3);
   });
 
+  it("F10-05: a second concurrent delivering run is rejected atomically (409)", async () => {
+    const script = instantScript([
+      { t: "1", ev: "init", tag: "system·init", text: "session" },
+    ]);
+    const primary = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary" as const,
+      backend: "claude" as const,
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      script,
+      dataRoot: store.dataRoot,
+    };
+    // First delivering run — left in flight (NOT settled), so its row is still
+    // queued/running when the second dispatch races in.
+    const first = await startRun(store.db, primary);
+    expect(first.runId).toBeTruthy();
+
+    // A second delivering start for the SAME task must 409 (partial unique index
+    // idx_agent_runs__one_delivering) — this is the atomic guard behind the
+    // service's preflight check.
+    await expect(startRun(store.db, { ...primary, prompt: "go2" })).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // A reviewer (supporting) run for the same task is NOT constrained.
+    const reviewer = await startRun(store.db, {
+      ...primary,
+      role: "Reviewer",
+      kind: "reviewer",
+      prompt: "review",
+    });
+    expect(reviewer.runId).toBeTruthy();
+    await settle();
+  });
+
   it("a run settling after the DB closed logs instead of throwing (teardown race)", async () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "session x" },
