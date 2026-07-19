@@ -2187,7 +2187,16 @@ export async function applyAgentCompletionEffects(
       simulated: false,
       ...(input.workdir ? { workdir: input.workdir } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
-    }).catch(() => {});
+    }).catch((error) => {
+      // F13: best-effort (must not break completion) but no longer SILENT — a
+      // delivery-reconcile failure (git/network) was invisible, so a broken
+      // branch/PR link went undiagnosed. Surface it for operators.
+      logger.warn("post-run delivery reconcile failed (best-effort)", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
   }
   // 3. (The verdict/question are recorded ATOMICALLY with the reply in step 1
   //    — there is no separate verdict write to race anything.)
