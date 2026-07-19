@@ -7,6 +7,7 @@ import {
   capabilityByLabel,
   capabilityEnforcement,
   capabilityIsEnforced,
+  normalizeDeliveryGrants,
 } from "./capabilities";
 
 describe("capability catalog", () => {
@@ -80,5 +81,56 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     }
     // Merge a pull request must NOT get the claude-only badge.
     expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
+  });
+});
+
+describe("normalizeDeliveryGrants (F14 — headline is the master delivery gate)", () => {
+  const mode = (capabilityId: string, m: string) => ({ capabilityId, mode: m });
+
+  it("repairs a deliverer whose scoped delivery is granted but the headline is explicit off", () => {
+    const grants = [
+      mode("execute-code-or-write-repo", "off"),
+      mode("create-task-branch", "direct"),
+      mode("commit-push-branch", "direct"),
+      mode("open-review-pr", "direct"),
+    ];
+    const out = normalizeDeliveryGrants(grants);
+    expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("direct");
+    // Idempotent.
+    expect(normalizeDeliveryGrants(out)).toEqual(out);
+  });
+
+  it("adds the headline grant when it is absent but scoped delivery is actionable", () => {
+    const grants = [mode("commit-push-branch", "direct")];
+    const out = normalizeDeliveryGrants(grants);
+    expect(out.some((g) => g.capabilityId === "execute-code-or-write-repo" && g.mode === "direct")).toBe(true);
+  });
+
+  it("treats a specialist `recommend` scoped grant as actionable (repairs the headline)", () => {
+    const grants = [
+      mode("open-review-pr", "recommend"),
+      mode("execute-code-or-write-repo", "off"),
+    ];
+    const out = normalizeDeliveryGrants(grants);
+    expect(out.find((g) => g.capabilityId === "execute-code-or-write-repo")?.mode).toBe("direct");
+  });
+
+  it("leaves a non-deliverer (reviewer: scoped delivery off/human) untouched", () => {
+    const grants = [
+      mode("execute-code-or-write-repo", "off"),
+      mode("create-task-branch", "off"),
+      mode("commit-push-branch", "human"),
+      mode("open-review-pr", "off"),
+      mode("report-validation-verdict", "direct"),
+    ];
+    expect(normalizeDeliveryGrants(grants)).toEqual(grants);
+  });
+
+  it("leaves an already-correct deliverer (headline direct) untouched", () => {
+    const grants = [
+      mode("execute-code-or-write-repo", "direct"),
+      mode("create-task-branch", "direct"),
+    ];
+    expect(normalizeDeliveryGrants(grants)).toEqual(grants);
   });
 });

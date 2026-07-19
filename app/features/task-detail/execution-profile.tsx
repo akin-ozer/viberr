@@ -26,7 +26,7 @@ export interface DeployedSpecialistView {
  *     (project.md membership has no status field — every member is active);
  *   - the "operator active" head pill renders only when an operator is
  *     actually attached (mock showed it unconditionally; real runtime state
- *     arrives in Phase 8);
+ *     drives it now);
  *   - Manage menu closes on Escape too (spec §4.4 port note).
  */
 
@@ -240,7 +240,7 @@ function SpecialistControl({
   if (specialists.length === 0) {
     return (
       <span className="sub">
-        No specialists deployed —{" "}
+        No agents deployed —{" "}
         <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
         .
       </span>
@@ -257,12 +257,12 @@ function SpecialistControl({
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        Assign specialist
+        Assign delivering agent
         <Icon name="chevron" />
       </button>
       {open && (
-        <div className="own-menu" role="menu" aria-label="Assign a specialist">
-          <div className="own-lbl">Deployed specialists</div>
+        <div className="own-menu" role="menu" aria-label="Assign a delivering agent">
+          <div className="own-lbl">Deployed agents</div>
           {specialists.map((s) => (
             <button
               type="button"
@@ -329,7 +329,7 @@ function ReviewerControl({
   if (!hasAnyDeployed) {
     return (
       <span className="sub">
-        No specialists deployed —{" "}
+        No agents deployed —{" "}
         <Link to={`/projects/${projectSlug}/agents`}>deploy one on the Agents page</Link>
         .
       </span>
@@ -347,14 +347,14 @@ function ReviewerControl({
         aria-expanded={open}
       >
         <Icon name="plus" />
-        Add reviewer
+        Engage reviewer
       </button>
       {open && (
-        <div className="own-menu" role="menu" aria-label="Add a reviewer">
-          <div className="own-lbl">Deployed specialists</div>
+        <div className="own-menu" role="menu" aria-label="Engage a reviewer">
+          <div className="own-lbl">Deployed agents</div>
           {specialists.length === 0 ? (
             <div className="menu-item" aria-disabled>
-              <span className="sub">All deployed specialists are already reviewers.</span>
+              <span className="sub">All deployed agents are already reviewing.</span>
             </div>
           ) : (
             specialists.map((s) => (
@@ -559,7 +559,7 @@ export function ExecutionProfile({
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">Primary specialist</div>
+          <div className="lbl">Delivering agent</div>
           <div className="val">
             {sp ? (
               <>
@@ -582,7 +582,7 @@ export function ExecutionProfile({
                           ? "Task is closed (terminal stage) — no runs needed"
                           : runActive
                             ? "A run is already streaming for this task"
-                            : "Start an agent run for the assigned specialist"
+                            : "Start an agent run for the delivering agent"
                       }
                     >
                       <Icon name="bolt" />
@@ -594,7 +594,7 @@ export function ExecutionProfile({
             ) : canRunAgents ? (
               <div className="rev-row">
                 <span className="sub">
-                  None yet — assign a deployed specialist to run it
+                  None yet — assign a deployed agent to deliver it
                 </span>
                 <SpecialistControl
                   projectSlug={task.projectSlug}
@@ -611,8 +611,8 @@ export function ExecutionProfile({
           </div>
         </div>
         <div className="profile-cell">
-          <div className="lbl">Reviewers</div>
-          {/* Each reviewer renders as a row identical to the Primary specialist
+          <div className="lbl">Reviewing agents</div>
+          {/* Each reviewer renders as a row identical to the delivering agent
               above (glyph · name / role·backend · Run), with a release (×). */}
           <div className="val revs">
             {task.reviewers.length ? (

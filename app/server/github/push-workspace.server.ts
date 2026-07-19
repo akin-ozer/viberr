@@ -174,23 +174,46 @@ export async function pushWorkspaceBranch(
       { cwd: repoDir, timeoutMs: 5_000 },
     );
     if (statusRes.ok && statusRes.stdout.trim() !== "") {
+      // F15: `git add -A` intentionally delivers the agent's whole working tree
+      // (the uncommitted changes ARE the deliverable) and already honors
+      // `.gitignore`, so build artifacts / deps stay out. Capture the file list
+      // so unexpected/stray files in a REUSED workspace are visible for review
+      // rather than silently shipped into the PR.
+      const changedFiles = statusRes.stdout
+        .trim()
+        .split("\n")
+        .map((l) => l.slice(3).trim())
+        .filter(Boolean);
       const addRes = await exec(
         "git",
         ["-C", repoDir, "add", "-A"],
         { cwd: repoDir, timeoutMs: 15_000 },
       );
       if (addRes.ok) {
+        // F24: prefer the workspace's configured identity (cloneRepo stamps it to
+        // the delivering profile, matching the agent's own commits). Fall back to
+        // a stable Viberr identity only when no user is configured, so a fresh
+        // clone with no identity never dead-ends the commit.
+        const emailRes = await exec(
+          "git",
+          ["-C", repoDir, "config", "user.email"],
+          { cwd: repoDir, timeoutMs: 5_000 },
+        );
+        const identityArgs =
+          emailRes.ok && emailRes.stdout.trim() !== ""
+            ? []
+            : [
+                "-c",
+                "user.name=Viberr Delivery",
+                "-c",
+                "user.email=delivery@viberr.local",
+              ];
         const commitRes = await exec(
           "git",
           [
             "-C",
             repoDir,
-            // Inline identity so the commit works even in a fresh clone with no
-            // configured user; the AGENT already wrote the content.
-            "-c",
-            "user.name=Viberr Delivery",
-            "-c",
-            "user.email=delivery@viberr.local",
+            ...identityArgs,
             "commit",
             "-m",
             `[${taskKey}] deliver working-tree changes from the agent run`,
@@ -201,6 +224,7 @@ export async function pushWorkspaceBranch(
           logger.info("committed uncommitted workspace changes for delivery", {
             taskKey,
             branch,
+            files: changedFiles,
           });
         } else {
           logger.info("delivery auto-commit failed — pushing existing commits only", {

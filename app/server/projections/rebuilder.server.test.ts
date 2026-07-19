@@ -13,9 +13,27 @@ import {
 } from "~/server/files/file-store-root.server";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
-import { rebuildAll, rebuildPath } from "./rebuilder.server";
+import { rebuildAll, rebuildPath, rebuildProject } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
 import { getTaskDetail } from "./task-query.server";
+
+/** A second project alongside the store's default, for scope tests. */
+function writeSecondProject(store: ReturnType<typeof setupTestStore>, slug: string) {
+  writeProject(store.dataRoot, {
+    name: "Other Project",
+    slug,
+    repo: "acme/other",
+    defaultBranch: "main",
+    taskPrefix: "OTH",
+    nextTaskNumber: 2,
+    stages: GOVERNED_TEMPLATE.stages,
+    workflow: GOVERNED_TEMPLATE.workflow,
+    members: [],
+    agents: [],
+    credentialPolicy: null,
+    guardrails: [],
+  });
+}
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -330,5 +348,81 @@ describe("rebuilder", () => {
     });
 
     expect(repoOf()).toBe("acme/fresh");
+  });
+});
+
+describe("scoped project rescan (F20)", () => {
+  it("reprojects ONLY the target project, leaving other projects' rows untouched", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { title: "A original" }),
+    });
+    writeSecondProject(store, "other-proj");
+    writeTask(store.dataRoot, "other-proj", {
+      frontmatter: baseTaskFrontmatter("OTH-1", { title: "B original" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // Edit a task in BOTH projects directly on disk.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { title: "A edited" }),
+    });
+    writeTask(store.dataRoot, "other-proj", {
+      frontmatter: baseTaskFrontmatter("OTH-1", { title: "B edited" }),
+    });
+
+    // Scoped rescan of project A only.
+    const summary = rebuildProject(store.db, store.slug, { dataRoot: store.dataRoot });
+    expect(summary.projects).toBe(1);
+    expect(summary.tasks).toBe(1); // only A's task is walked
+    expect(summary.changed).toBe(1); // A's edited task
+
+    // A picked up its edit; B's stale projection is deliberately NOT touched —
+    // proving the effect is confined to the authorized project.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.title).toBe("A edited");
+    expect(getTaskDetail(store.db, "other-proj", "OTH-1")?.title).toBe("B original");
+  });
+
+  it("prunes only the target project's vanished task rows, never another project's", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    writeSecondProject(store, "other-proj");
+    writeTask(store.dataRoot, "other-proj", {
+      frontmatter: baseTaskFrontmatter("OTH-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // Delete a task file in the OTHER project, then rescan only project A.
+    rmSync(taskFilePath("other-proj", "OTH-1", store.dataRoot));
+    rebuildProject(store.db, store.slug, { dataRoot: store.dataRoot });
+
+    // A's task survives; B's deleted task is NOT pruned by A's scoped rescan.
+    expect(listProjectTasks(store.db, store.slug).map((t) => t.key)).toEqual(["VIB-1"]);
+    expect(getTaskDetail(store.db, "other-proj", "OTH-1")).not.toBeNull();
+
+    // A scoped rescan of B DOES prune it.
+    const summary = rebuildProject(store.db, "other-proj", { dataRoot: store.dataRoot });
+    expect(summary.removed).toBe(1);
+    expect(getTaskDetail(store.db, "other-proj", "OTH-1")).toBeNull();
+  });
+
+  it("emits a project-scoped projection.rebuilt event", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const scopes: string[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type === "projection.rebuilt") scopes.push(e.scope);
+    });
+    rebuildProject(store.db, store.slug, { dataRoot: store.dataRoot });
+    off();
+
+    expect(scopes).toContain("project");
+    expect(scopes).not.toContain("full");
   });
 });

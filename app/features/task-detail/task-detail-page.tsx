@@ -1121,6 +1121,8 @@ export function TaskDetailPage({
       runId: r.serverRunId,
       lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
     })),
+    // F22: bounds a stale "running" strip if a finalize event is missed.
+    hasActiveRun: runtime.some((r) => r.state === "running"),
   });
 
   const { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge } =

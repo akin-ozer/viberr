@@ -416,6 +416,20 @@ describe("resumeWorkdir", () => {
     expect(path.relative(ceiling, fallback)).toBe("workspace");
     expect(existsSync(fallback)).toBe(true);
   });
+
+  it("stamps the unified delivery git identity into the resume env (F24)", () => {
+    const confinement = resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+    );
+    // Every commit a resumed agent makes must use <profileId>@viberr.local, the
+    // same author as its fresh-run commits — never the host's git identity.
+    expect(confinement.env.GIT_AUTHOR_NAME).toBe("dev");
+    expect(confinement.env.GIT_AUTHOR_EMAIL).toBe("dev@viberr.local");
+    expect(confinement.env.GIT_COMMITTER_NAME).toBe("dev");
+    expect(confinement.env.GIT_COMMITTER_EMAIL).toBe("dev@viberr.local");
+  });
 });
 
 /* ------------------------------------------------------------ commentToAgent */

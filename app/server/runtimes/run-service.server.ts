@@ -448,6 +448,12 @@ export async function resumeRun(
     mcpServers?: Record<string, unknown>;
     /** Re-apply the persona/system prompt on resume (Claude). */
     systemPrompt?: string;
+    /** Re-apply the outcome-envelope schema on resume so a resumed (e.g.
+     *  @mention) Codex agent still emits the structured outcome (verdict /
+     *  questions) instead of falling back to the fragile prose regex — and so
+     *  ask_human can fire. Without it a resumed Codex reviewer silently lost
+     *  its envelope, a fresh-vs-resume parity break (F7). */
+    outputSchema?: unknown;
   },
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
@@ -491,6 +497,8 @@ export async function resumeRun(
     ...(input.env ? { env: input.env } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    // F7: re-arm the outcome envelope on resume (Codex parity with fresh runs).
+    ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
   });
 }
 
@@ -599,6 +607,10 @@ export function interruptRun(
     {
       slug: input.projectSlug,
       memberRoles: new Map(members.map((m) => [m.userId, m.role])),
+      // Interrupt is a de-escalation (STOP a run), not a new mutation — the F17
+      // archived gate blocks STARTING work; a run left in flight when a project
+      // is archived must still be stoppable, so this path never gates on archived.
+      archived: false,
     },
     actor,
     "interrupt this runtime session",

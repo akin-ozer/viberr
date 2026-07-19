@@ -8,7 +8,10 @@ import type {
   TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
-import { capabilityByLabel } from "~/shared/capabilities";
+import {
+  capabilityByLabel,
+  normalizeDeliveryGrants,
+} from "~/shared/capabilities";
 import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
@@ -240,7 +243,11 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      direct: ["Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Comment on the task", "Ask the human a question"],
+      // "Execute code or write to the repo" is the HEADLINE repo-write capability
+      // and the master gate for ALL delivery (specialist-tool-policy.ts): with it
+      // withheld, the fine-grained branch/commit/PR grants below are vetoed and the
+      // developer silently delivers nothing (VIB-1 class). A deliverer MUST hold it.
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Comment on the task", "Ask the human a question"],
       recommend: ["Move the task to Review"],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
@@ -307,11 +314,10 @@ export function baseAgentDeployments(): AgentDeployment[] {
 
 function deployments(): AgentDeployment[] {
   return SEED_AGENT_PROFILES.map((p) => {
-    const { capabilities, extras } = {
-      capabilities: p.frontmatter.capabilities,
-      extras: p.frontmatter.extras,
-    };
-    return { profileId: p.frontmatter.id, capabilities, extras };
+    // F14: a deliverer must hold the headline repo-write capability (master gate);
+    // repair any seed deliverer that grants scoped delivery without it.
+    const capabilities = normalizeDeliveryGrants(p.frontmatter.capabilities);
+    return { profileId: p.frontmatter.id, capabilities, extras: p.frontmatter.extras };
   });
 }
 

@@ -153,6 +153,27 @@ export async function findPrForBranch(
   const state = mapPrToCacheState(pr);
   const headSha = pr.head?.sha ?? head.head?.sha ?? null;
 
+  // F26: a reused branch whose newest PR is TERMINAL (merged/closed) must NOT
+  // link that stale PR when the branch has advanced past it — e.g. a task key /
+  // branch reused across sessions where the prior PR merged and a new delivery
+  // force-pushed the branch. Link a terminal PR only when it still represents
+  // the branch's CURRENT head (the legitimate accepted / merged-out-of-band
+  // divergence case); if the branch moved on, return `none` so `openTaskPr`
+  // opens a fresh PR. Fail-safe: if the branch head can't be read (e.g. the head
+  // branch was auto-deleted on merge), fall through and link the PR as before.
+  if (pr.state === "closed" && headSha) {
+    const branchRes = await client.request<{ commit?: { sha?: string } }>(
+      "GET",
+      `/repos/${repo}/branches/${encodeURIComponent(branch)}`,
+    );
+    if (branchRes.ok) {
+      const branchHead = branchRes.data.commit?.sha ?? null;
+      if (branchHead && branchHead !== headSha) {
+        return { status: "none" };
+      }
+    }
+  }
+
   let checks: PrChecksSummary | null = null;
   if (headSha) {
     const checkRuns = await client.request<GhCheckRuns>(

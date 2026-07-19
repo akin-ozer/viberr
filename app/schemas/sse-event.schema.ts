@@ -83,7 +83,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     entityId,
     occurredAt,
     data: z.object({
-      scope: z.enum(["full", "file"]),
+      scope: z.enum(["full", "file", "project"]),
       changed: z.number().int().nonnegative(),
     }),
   }),

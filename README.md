@@ -201,21 +201,15 @@ task workspace with decision packets, live agent runs, review queue, org setting
 
 Deliberate scope boundaries, documented rather than half-built:
 
-- **No mailer.** Notifications are in-app only; email/nudge preferences on the profile
-  are schema-only. Invited users don't get an email — admins hand over the one-time
-  password shown at creation.
+- **No mailer.** Notifications are in-app only (the profile has a real in-app opt-out
+  toggle, not email/nudge preferences). Whitelisted users don't get an email — admins
+  hand over the one-time password shown at creation.
 - **Org-level audit console.** Org-scoped audit rows (user admin, connections, auth)
   are recorded but only project-scoped audit has a UI (Activity → Audit logs). The mock
   defines no org audit tab.
 - **Provenance/audit tables grow unboundedly** — no retention policy yet; see the
   runbook for the manual cleanup story.
 - **Notifications page caps at the newest 200 rows** (no pagination).
-- **Stub-project task links** (DEP-31, BIL-7) land on an in-shell 404 — the two stub
-  projects exist for cross-project navigation, their tasks are not seeded.
-- **Home "GitHub connections" tile** derives from project repos, not from org
-  connections.
-- **MCP server credentials UI** is not built (org settings lists servers and probes
-  reachability; secrets would be a follow-up).
 - **Fine-grained PAT validation is partly probe-based** — GitHub doesn't expose
   fine-grained permissions in headers, so some scope checks report "assumed" until
   first use (documented in the credential card).

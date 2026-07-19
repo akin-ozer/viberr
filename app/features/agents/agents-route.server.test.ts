@@ -344,7 +344,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     await postAction(ids.arda, { intent: "delete-profile", profileId: "locked-dev" });
   });
 
-  it("persists EXACTLY the submitted governed caps — no permissive defaults merged (#37)", async () => {
+  it("persists the submitted governed caps — no permissive defaults merged, but the F14 headline repair applies (#37)", async () => {
     const result = (await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -353,8 +353,8 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
         backend: "claude",
         stages: ["impl"],
         definition: "Only two caps submitted; nothing else should be granted.",
-        // Only two governed (modal) caps submitted, as a partial/older client
-        // would — the rest of the catalog must NOT be merged in.
+        // Two scoped-delivery caps submitted, as a partial/older client would —
+        // the rest of the catalog must NOT be merged in.
         caps: { "create-task-branch": "direct", "open-review-pr": "direct" },
         resources: { skills: [], mcps: [], kb: [] },
       }),
@@ -364,20 +364,25 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const created = (await runLoader(ids.arda)).profiles.find(
       (p) => p.id === "minimal-dev",
     )!;
-    // The persisted cap set equals exactly what the form submitted. Previously
-    // the create path merged the permissive catalog defaults, so 2 submitted
-    // caps persisted as ~12.
     const persisted = created.capabilities
       .map((c) => [c.capabilityId, c.mode])
       .sort();
+    // F14: granting scoped delivery (create-task-branch/open-review-pr) is a
+    // deliverer, so the headline `execute-code-or-write-repo` (the master gate)
+    // is repaired to `direct` — otherwise the chosen delivery caps would be
+    // silently vetoed by the tool policy (the VIB-1 "no commits" class). The
+    // repair adds ONLY the headline; the rest of the catalog is still NOT merged.
     expect(persisted).toEqual([
       ["create-task-branch", "direct"],
+      ["execute-code-or-write-repo", "direct"],
       ["open-review-pr", "direct"],
     ]);
-    // Powers the creator never chose are ABSENT (not defaulted).
+    // Powers the creator never chose (and that the repair doesn't need) stay
+    // ABSENT — no blanket default merge (the original #37 regression).
     const capIds = created.capabilities.map((c) => c.capabilityId);
     expect(capIds).not.toContain("commit-push-branch");
-    expect(capIds).not.toContain("execute-code-or-write-repo");
+    expect(capIds).not.toContain("merge-pull-request");
+    expect(capIds).not.toContain("comment-on-task");
 
     await postAction(ids.arda, {
       intent: "delete-profile",

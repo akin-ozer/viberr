@@ -546,6 +546,95 @@ export function rebuildPath(
   }
 }
 
+// --------------------------------------------------------- scoped rescan
+
+/**
+ * Scoped rescan: reproject a SINGLE project's files (project.md + its task
+ * files) and prune only THAT project's vanished rows. Same reconciliation as
+ * `rebuildAll`, confined to `slug`, so the project-scoped Board "Re-scan"
+ * action can't trigger an instance-wide rebuild of projects the caller has no
+ * authority over (F20 — the gate is project-scoped, so the effect must be too).
+ */
+export function rebuildProject(
+  db: Database.Database,
+  slug: string,
+  options: RebuildOptions = {},
+): RescanSummary {
+  const startedAt = Date.now();
+  const summary: RescanSummary = {
+    projects: 0,
+    tasks: 0,
+    changed: 0,
+    unchanged: 0,
+    removed: 0,
+    errors: 0,
+    durationMs: 0,
+  };
+  const track = (result: RebuildFileResult) => {
+    if (result.action === "projected") summary.changed += 1;
+    else if (result.action === "unchanged") summary.unchanged += 1;
+    else if (result.action === "removed") summary.removed += 1;
+    else if (result.action === "error") summary.errors += 1;
+  };
+
+  const seenTasks = new Set<string>();
+  const projectExists = existsSync(projectFilePath(slug, options.dataRoot));
+  let projectChanged = false;
+  if (projectExists) {
+    summary.projects += 1;
+    // Suppress the in-file cascade — this walk re-projects every task itself
+    // (with force when the project row changed), matching rebuildAll's pattern.
+    const result = rebuildPath(db, projectFilePath(slug, options.dataRoot), {
+      ...options,
+      skipTaskCascade: true,
+    });
+    track(result);
+    projectChanged = result.action === "projected";
+  }
+
+  const taskOptions = projectChanged ? { ...options, force: true } : options;
+  for (const key of listTaskDirs(slug, options.dataRoot)) {
+    if (!existsSync(taskFilePath(slug, key, options.dataRoot))) continue;
+    summary.tasks += 1;
+    seenTasks.add(key);
+    track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions));
+  }
+
+  // Prune ONLY this project's task rows whose backing files are gone.
+  const taskRows = db
+    .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
+    .all(slug) as { task_key: string }[];
+  for (const row of taskRows) {
+    if (!seenTasks.has(row.task_key)) {
+      track(rebuildTaskFile(db, slug, row.task_key, options));
+    }
+  }
+  // If the project.md itself vanished, prune the project row too.
+  if (!projectExists) {
+    const existed = db.prepare(`SELECT slug FROM projects WHERE slug = ?`).get(slug);
+    if (existed) track(rebuildProjectFile(db, slug, options));
+  }
+
+  summary.durationMs = Date.now() - startedAt;
+  recordProvenance(db, {
+    sourcePath: storeRelativePath(
+      path.join(projectsDir(options.dataRoot), slug),
+      options.dataRoot,
+    ),
+    contentHash: null,
+    action: "rescan",
+    details: { ...summary, slug, scope: "project" },
+  });
+  emitProjectionEvent({
+    type: "projection.rebuilt",
+    scope: "project",
+    occurredAt: nowIso(),
+    changed: summary.changed,
+  });
+  logger.info("project projection rescan complete", { slug, ...summary });
+  return summary;
+}
+
 // ------------------------------------------------------------ full rescan
 
 /** Full rescan: project every store file, prune vanished rows. */

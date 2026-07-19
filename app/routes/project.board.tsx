@@ -5,7 +5,7 @@ import { requireAuth } from "~/server/auth/require-user.server";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
-import { rescanProjections } from "~/server/projections/rescan.server";
+import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
 import { BoardPage } from "~/features/board/board-page";
@@ -73,12 +73,14 @@ export async function action({ request, params }: Route.ActionArgs) {
       };
     }
     if (intent === "rescan") {
-      // Re-scan rebuilds projections instance-wide — a maintenance action, not
-      // a read. Gated by the canonical `rescan-project` action (maintainer+,
-      // single-sourced in ACTION_ROLES + rendered on the Policy table) so a
-      // viewer or non-member can't trigger a full rebuild.
+      // Re-scan reconciles THIS project's files with its projections — a
+      // maintenance action, not a read. Gated by the canonical `rescan-project`
+      // action (maintainer+, single-sourced in ACTION_ROLES + rendered on the
+      // Policy table) so a viewer or non-member can't trigger it. The effect is
+      // scoped to `params.slug` to match that project-scoped gate (F20): a
+      // maintainer of one project can't rebuild every other project.
       assertProjectAction(db, "rescan-project", params.slug, actor, "re-scan the project");
-      const summary = rescanProjections(db, { actor });
+      const summary = rescanProject(db, params.slug, { actor });
       return { ok: true as const, ...summary };
     }
     return data(

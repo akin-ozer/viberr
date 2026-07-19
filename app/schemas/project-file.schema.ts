@@ -261,6 +261,62 @@ function tolerant<T>(
   return fallback;
 }
 
+/**
+ * Per-ENTRY tolerant parse for a list field (F18). The whole-array `tolerant`
+ * above dropped an ENTIRE list on one bad row — a single malformed `members[]`
+ * entry silently wiped every member's role (ACL integrity), and the same shape
+ * applied to stages / workflow / agents. Here we keep every valid entry and drop
+ * only the unparseable ones, each with its own indexed diagnostic. Mirrors the
+ * per-entry contract the task-file `parseEngagements` already used.
+ */
+function tolerantArray<T>(
+  diagnostics: FileDiagnostic[],
+  path: string,
+  value: unknown,
+  arraySchema: z.ZodArray<z.ZodType<T>>,
+  required = false,
+): T[] {
+  if (value === undefined) {
+    if (required) {
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.missing_field",
+          `Frontmatter field \`${path}\` is missing — using a default.`,
+          path,
+        ),
+      );
+    }
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    diagnostics.push(
+      diagWarning(
+        "frontmatter.invalid_field",
+        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
+        path,
+      ),
+    );
+    return [];
+  }
+  const element = arraySchema.element;
+  const out: T[] = [];
+  value.forEach((entry, i) => {
+    const r = element.safeParse(entry);
+    if (r.success) {
+      out.push(r.data);
+    } else {
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.invalid_field",
+          `Frontmatter \`${path}[${i}]\` is invalid (${r.error.issues[0]?.message ?? "unparseable"}) — dropping this entry, keeping the rest.`,
+          `${path}[${i}]`,
+        ),
+      );
+    }
+  });
+  return out;
+}
+
 function derivePrefix(slug: string): string {
   const letters = slug.replace(/[^a-z]/gi, "");
   return (letters.slice(0, 3) || "TSK").toUpperCase();
@@ -367,34 +423,31 @@ export function parseProjectFrontmatter(
       projectFrontmatterSchema.shape.nextTaskNumber,
       null,
     ),
-    stages: tolerant(
+    // F18: per-entry — one bad row drops only itself, never the whole list.
+    stages: tolerantArray(
       diagnostics,
       "stages",
       data.stages,
       projectFrontmatterSchema.shape.stages,
-      [],
       true,
     ),
-    workflow: tolerant(
+    workflow: tolerantArray(
       diagnostics,
       "workflow",
       data.workflow,
       projectFrontmatterSchema.shape.workflow,
-      [],
     ),
-    members: tolerant(
+    members: tolerantArray(
       diagnostics,
       "members",
       data.members,
       projectFrontmatterSchema.shape.members,
-      [],
     ),
-    agents: tolerant(
+    agents: tolerantArray(
       diagnostics,
       "agents",
       data.agents,
       projectFrontmatterSchema.shape.agents,
-      [],
     ),
     credentialPolicy: tolerant(
       diagnostics,

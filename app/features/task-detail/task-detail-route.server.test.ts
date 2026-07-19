@@ -11,7 +11,8 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  * 9-event timeline + truth strip), timeline slicing, comment routing
  * detection, resolvePacket dispatch incl. the human-only rejection, and the
  * ownership action matrix (take / hand-off / release / admin-release /
- * RBAC-denied) with the VIB-148 operator-scheduling reaction.
+ * RBAC-denied) — VIB-148 proves ownership is a clean mutation with no operator
+ * side effects (F19).
  *
  * ORDER MATTERS inside this file: read-only assertions run before the
  * mutating ones (one seed per file).
@@ -361,7 +362,17 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
 /* ---------------------------------------------------- ownership matrix */
 
 describe("ownership actions", () => {
-  it("take on VIB-148 fires the REAL operator reaction (no simulated stand-in)", async () => {
+  it("take on VIB-148 records ownership only — no operator scheduling side effects (F19)", async () => {
+    const opRuns = () =>
+      (
+        app.db
+          .prepare(
+            `SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator' AND task_key = 'VIB-148'`,
+          )
+          .get() as { c: number }
+      ).c;
+    const before = opRuns();
+
     const result = (await postIntent("VIB-148", ids.arda, {
       intent: "owner-take",
     })) as { ok: true; toast: string };
@@ -369,21 +380,24 @@ describe("ownership actions", () => {
 
     const after = await runLoader("VIB-148", ids.arda);
     expect(after.task.owner).toMatchObject({ kind: "human", name: "Arda Kaya" });
-    // Operator reaction: waiting flips to agent, readiness to ready…
-    expect(after.task.waiting).toBe("agent");
-    expect(after.task.readiness).toBe("ready");
-    // …and the operator genuinely coordinated (the same runOperator path every
-    // lifecycle trigger uses — the legacy scheduleOperatorRun narration is
-    // gone): its activity lands ABOVE the assign event.
-    const operatorActed = after.task.timeline.findIndex(
-      (e) => e.actor.kind === "agent" && e.actor.name === "Operator",
-    );
-    const assignAt = after.task.timeline.findIndex((e) => e.type === "assign");
-    expect(operatorActed).toBeGreaterThanOrEqual(0);
-    expect(assignAt).toBeGreaterThan(operatorActed);
-    expect(after.task.timeline[assignAt]!.text).toBe(
+    // The assign event sits at the top of the timeline…
+    expect(after.task.timeline[0]!.type).toBe("assign");
+    expect(after.task.timeline[0]!.text).toBe(
       "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
     );
+    // …board state is untouched: no fabricated ready/agent flip (VIB-148 stays
+    // input_required + waiting on a human — ownership is orthogonal to
+    // scheduling)…
+    expect(after.task.waiting).toBe("human");
+    expect(after.task.readiness).toBe("input_required");
+    // …no synthesized "scheduling execution against the quality-gated scope"
+    // narration (the removed mock stand-in)…
+    expect(
+      after.task.timeline.some((e) => e.text.includes("scheduling execution")),
+    ).toBe(false);
+    // …and NO operator run is fired on ownership: the operator is driven by its
+    // real lifecycle triggers, not by claiming the acceptance seat.
+    expect(opRuns()).toBe(before);
   });
 
   it("self release writes the exact assign copy (no re-scheduling on re-take)", async () => {
@@ -398,7 +412,8 @@ describe("ownership actions", () => {
     expect(after.task.timeline[0]!.text).toBe(
       "Released task ownership — review & acceptance stall until another member takes the seat.",
     );
-    // waiting is now "agent" → the quality-gate reaction must not re-fire.
+    // Re-taking is a clean ownership mutation: just the assign event on top,
+    // no operator scheduling reaction to re-fire (F19).
     const again = (await postIntent("VIB-148", ids.selin, {
       intent: "owner-take",
     })) as { ok: true };

@@ -681,6 +681,7 @@ export async function startAgentRun(
           taskKey: input.taskKey,
           repo,
           dataRoot: ctx.dataRoot,
+          identity: agentGitIdentity(engagement.profileId),
         })
       : null;
   // The run's cwd is ALWAYS an isolated workspace dir for a real backend —
@@ -699,11 +700,11 @@ export async function startAgentRun(
   // The run env: git confinement only. Delivery is SERVER-SIDE for BOTH
   // backends (F-GH3): the agent commits locally but NEVER pushes — viberr
   // pushes the workspace branch + opens the PR on the Review transition.
-  const baseRunEnv = workspaceRunEnv(
-    input.projectSlug,
-    input.taskKey,
-    ctx.dataRoot,
-  );
+  const baseRunEnv = {
+    ...workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot),
+    // F24: unify the delivery commit author across codex/claude.
+    ...agentGitIdentityEnv(engagement.profileId),
+  };
   const basePrompt = buildAnalyzePrompt({
     role: engagement.role,
     taskKey: input.taskKey,
@@ -933,8 +934,17 @@ function readSkillBody(name: string, dataRoot?: string): string {
       const { body } = splitFrontmatter(readFileSync(file, "utf8"));
       return body.trim();
     }
-  } catch {
-    // missing/unreadable skill — skip it
+    // F12: a declared skill that resolves to no file on disk (typo / deleted
+    // folder) was silently dropped, so the agent ran without craft it was
+    // configured to have and nobody noticed. Flag it — the run still proceeds.
+    logger.warn("declared agent skill not found on disk — run proceeds WITHOUT it", {
+      skill: name,
+    });
+  } catch (error) {
+    logger.warn("declared agent skill unreadable — run proceeds WITHOUT it", {
+      skill: name,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
   }
   return "";
 }
@@ -1270,8 +1280,9 @@ export function resolveResumeConfinement(
     taskKey: string;
     profileId: string;
     /** The resumed run's backend + engagement shape — rebuilds the same
-     *  collaboration transport the fresh-run path mounts (toolkit on Claude;
-     *  the Codex envelope re-parses from the reply, no resume config needed). */
+     *  collaboration transport the fresh-run path mounts: the toolkit on Claude,
+     *  and (F7) the outcome-envelope outputSchema on Codex so a resumed Codex
+     *  agent still emits a structured verdict/questions instead of prose. */
     backend?: RealBackend;
     role?: string;
     delivers?: boolean;
@@ -1283,8 +1294,14 @@ export function resolveResumeConfinement(
   systemPrompt?: string;
   /** Staging key for a Claude report_outcome on this resumed turn. */
   outcomeKey?: string;
+  /** F7: the Codex outcome-envelope schema to re-arm on resume. */
+  outputSchema?: unknown;
 } {
-  const env = workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot);
+  const env = {
+    ...workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot),
+    // F24: keep the unified delivery identity on resumed runs too.
+    ...agentGitIdentityEnv(input.profileId),
+  };
   try {
     const resolved = resolveDeployedSpecialist(
       ctx,
@@ -1299,12 +1316,15 @@ export function resolveResumeConfinement(
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
-    // Same collaboration toolkit the fresh-run path mounts (XS-1 parity).
+    // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
+    // the in-process toolkit on Claude, the outcome-envelope outputSchema on
+    // Codex. Both key off the SAME collaboration grants the fresh run resolves.
+    const delivers = input.delivers ?? false;
+    const collab = resolveAgentCollab(resolved.capabilities, delivers);
     let outcomeKey: string | undefined;
     let toolkitServers: Record<string, unknown> = {};
+    let outputSchema: unknown;
     if (input.backend === "claude") {
-      const delivers = input.delivers ?? false;
-      const collab = resolveAgentCollab(resolved.capabilities, delivers);
       outcomeKey = newId("oc");
       const toolkit = buildAgentToolkit({
         db,
@@ -1321,6 +1341,11 @@ export function resolveResumeConfinement(
         collab,
       });
       if (toolkit) toolkitServers = toolkit.mcpServers;
+    } else if (input.backend === "codex" && (collab.verdict || collab.ask)) {
+      // F7: re-arm the Codex outcome envelope on resume — a resumed reviewer
+      // used to lose it and fall back to the fragile prose regex (ask_human
+      // could not fire at all).
+      outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
     const merged = { ...mcpServers, ...toolkitServers };
     return {
@@ -1329,6 +1354,7 @@ export function resolveResumeConfinement(
       ...(Object.keys(merged).length ? { mcpServers: merged } : {}),
       ...(persona ? { systemPrompt: persona } : {}),
       ...(outcomeKey ? { outcomeKey } : {}),
+      ...(outputSchema ? { outputSchema } : {}),
     };
   } catch {
     // Profile not a current deployment — still apply the conservative settings.
@@ -1361,6 +1387,27 @@ function workspaceRunEnv(
   };
 }
 
+/** F24 — one delivery identity across BOTH backends. Codex commits with the
+ * host's git identity and Claude sets its own, so the same task's commits landed
+ * under three different authors. Force every commit the agent makes to the
+ * delivering profile identity via the GIT_AUTHOR / GIT_COMMITTER env vars (these
+ * override any `git config` the agent sets), matched by the repo config set at
+ * clone (for viberr's server-side auto-commit) — so from Viberr's eye codex and
+ * claude are indistinguishable in the git history. */
+export function agentGitIdentity(profileId: string): { name: string; email: string } {
+  return { name: profileId, email: `${profileId}@viberr.local` };
+}
+
+function agentGitIdentityEnv(profileId: string): Record<string, string> {
+  const { name, email } = agentGitIdentity(profileId);
+  return {
+    GIT_AUTHOR_NAME: name,
+    GIT_AUTHOR_EMAIL: email,
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: email,
+  };
+}
+
 async function cloneRepo(
   db: Database.Database,
   input: {
@@ -1368,8 +1415,22 @@ async function cloneRepo(
     taskKey: string;
     repo: string;
     dataRoot?: string;
+    /** F24: the delivering profile identity to stamp on the workspace's git
+     *  config, so viberr's server-side auto-commit (push-workspace) attributes
+     *  to the same author as the agent's own commits. */
+    identity?: { name: string; email: string };
   },
 ): Promise<string | null> {
+  const setIdentity = async (dir: string) => {
+    if (!input.identity) return;
+    try {
+      await execFileAsync("git", ["-C", dir, "config", "user.name", input.identity.name], { timeout: 5_000 });
+      await execFileAsync("git", ["-C", dir, "config", "user.email", input.identity.email], { timeout: 5_000 });
+    } catch {
+      // Non-fatal: the run env's GIT_AUTHOR_*/GIT_COMMITTER_* still stamps the
+      // agent's own commits; this only benefits the server-side auto-commit.
+    }
+  };
   try {
     const name = input.repo.split("/").pop() ?? input.repo;
     const dir = path.join(
@@ -1385,6 +1446,7 @@ async function cloneRepo(
         githubRemoteSanitizationArgs(input.repo, dir),
         { timeout: 10_000 },
       );
+      await setIdentity(dir);
       return dir;
     }
     mkdirSync(path.dirname(dir), { recursive: true });
@@ -1401,6 +1463,7 @@ async function cloneRepo(
         timeout: 60_000,
         env: clone.env,
       });
+      await setIdentity(dir);
       return dir;
     } finally {
       clone.dispose();
@@ -1479,6 +1542,7 @@ function requireRuntimeRole(
       memberRoles: new Map(
         file.parsed.frontmatter.members.map((m) => [m.userId, m.role]),
       ),
+      archived: file.parsed.frontmatter.archived === true,
     },
     actor,
     what,

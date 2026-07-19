@@ -439,6 +439,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             memberRoles: new Map(
               listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
             ),
+            archived: getProject(db, projectSlug)?.archived === true,
           },
           actor,
           "run the operator",
@@ -477,6 +478,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             memberRoles: new Map(
               listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
             ),
+            archived: getProject(db, projectSlug)?.archived === true,
           },
           actor,
           "schedule an operator re-run",
@@ -510,6 +512,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             memberRoles: new Map(
               listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
             ),
+            archived: getProject(db, projectSlug)?.archived === true,
           },
           actor,
           "cancel a scheduled operator re-run",
