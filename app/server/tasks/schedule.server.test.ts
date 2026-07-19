@@ -31,6 +31,23 @@ const schedules = (key: string): TaskSchedule[] =>
     .frontmatter.schedules;
 const dctx = () => ({ dataRoot: store.dataRoot });
 
+/** Poll until a schedule reaches an expected status (the F10-16 finalize is a
+ *  detached async step after the synchronous claim). */
+async function waitForSchedule(
+  key: string,
+  id: string,
+  status: string,
+  timeoutMs = 4000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (schedules(key).find((s) => s.id === id)?.status === status) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  const actual = schedules(key).find((s) => s.id === id)?.status;
+  throw new Error(`schedule ${id} never reached ${status} (last: ${actual})`);
+}
+
 /** A raw schedule object (bypasses the future-only guard) for fire tests. */
 function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
   return {
@@ -45,6 +62,8 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
     createdAt: new Date(Date.now() - 120_000).toISOString(),
     status: "pending",
     firedAt: null,
+    claimedAt: null,
+    retries: 0,
     ...over,
   };
 }
@@ -126,15 +145,60 @@ describe("fireDueSchedules", () => {
     const res = await fireDueSchedules(store.db, dctx());
     expect(res.fired).toBe(1);
     expect(res.skipped).toBe(0);
+    // F10-16 lifecycle: the occurrence is CLAIMED synchronously, then finalized
+    // to `fired` after the detached operator enqueue completes. Wait for it.
+    await waitForSchedule("VIB-1", "sch_due", "fired");
     const after = schedules("VIB-1");
     expect(after.find((s) => s.id === "sch_due")!.status).toBe("fired");
     expect(after.find((s) => s.id === "sch_due")!.firedAt).toBeTruthy();
+    expect(after.find((s) => s.id === "sch_due")!.claimedAt).toBeNull();
     expect(after.find((s) => s.id === "sch_future")!.status).toBe("pending");
     const fired = listAuditEvents(store.db).filter((e) => e.action === "task.schedule.fired");
     expect(fired).toHaveLength(1);
 
     // Idempotent — a second pass finds nothing due (already fired).
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
+  });
+
+  it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
+    // A claim whose lease expired = the enqueuing tick crashed before finalize.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({
+            id: "sch_stale",
+            status: "claimed",
+            claimedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+          }),
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(1); // the stalled claim was recovered and re-driven
+    await waitForSchedule("VIB-1", "sch_stale", "fired");
+  });
+
+  it("F10-16: does NOT re-drive a FRESH claim (still within its lease)", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        schedules: [
+          rawSchedule({
+            id: "sch_fresh",
+            status: "claimed",
+            claimedAt: new Date().toISOString(),
+          }),
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(0); // an in-flight claim is left alone
+    expect(schedules("VIB-1")[0]!.status).toBe("claimed");
   });
 
   it("retires a due schedule on a Done task WITHOUT running the operator (skipped-done)", async () => {

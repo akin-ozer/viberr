@@ -169,6 +169,23 @@ describe("loader", () => {
     expect(byKey["VIB-142"]!.pr).toEqual({ number: 318, state: "review" });
     expect(byKey["VIB-151"]!.pr).toBeNull();
   });
+
+  // F10-28: the branch/PR rows above are a CACHE — there is no scheduled sync,
+  // only the last manual reconcile. A surface that looks "live" while serving
+  // stale state misleads, so the loader must disclose its own freshness.
+  it("discloses freshness: never reconciled → no timestamp, no label, stale", async () => {
+    const { loader } = await import("~/routes/project.github");
+    const { cookie } = await app.cookieFor(ids.arda);
+    const { view } = (await loader(
+      (await loaderArgs("/projects/viberr-core/github", {
+        slug: "viberr-core",
+      }, cookie)) as never,
+    )) as { view: import("./github-query.server").GithubViewData };
+
+    // No `github.reconcile` provenance yet → null `at` (the view renders
+    // "Never reconciled"), no relative label, and honestly stale.
+    expect(view.reconcile).toEqual({ at: null, label: null, stale: true });
+  });
 });
 
 describe("action RBAC + degraded no-PAT results", () => {
@@ -447,6 +464,26 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(view.connection.status).toBe("connected");
   });
 
+  // F10-28 (second half): a reconcile that just ran must flip the disclosure
+  // from "never / stale" to a real timestamp, so the freshness badge is
+  // evidence of the last sync rather than decoration.
+  it("a successful reconcile stamps freshness: `at` set, label rendered, stale false", async () => {
+    const { getGithubViewData } = await import("./github-query.server");
+    const view = (await getGithubViewData(app.db, "viberr-core", {
+      fetchImpl: fakeGithubFetch({
+        [`GET /repos/${REPO}`]: {
+          status: 200,
+          body: { full_name: REPO, private: true, default_branch: "main" },
+        },
+      }).fetchImpl,
+    }))!;
+    expect(view.reconcile.at).not.toBeNull();
+    expect(Number.isFinite(Date.parse(view.reconcile.at!))).toBe(true);
+    // The label is computed server-side (SSR-stable) from that timestamp.
+    expect(view.reconcile.label).toBe("just now");
+    expect(view.reconcile.stale).toBe(false);
+  });
+
   it("reconcile while offline → stale-but-labeled toast, last-known rows kept", async () => {
     const { runReconcile } = await import("./github-actions.server");
     const { getGithubViewData } = await import("./github-query.server");
@@ -470,5 +507,45 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(view.branches.length).toBe(7);
     expect(view.prs.length).toBe(4);
     expect(view.connection.status).toBe("network_unavailable");
+  });
+
+  // F10-28 (threshold): staleness is time-based — anything older than one hour
+  // is stale, because the only sync is manual. Pinned here by backdating the
+  // reconcile provenance, so the badge can't quietly widen its "fresh" window.
+  // Runs last: it rewrites the project's `github.reconcile` observed_at rows.
+  it("a reconcile older than the one-hour threshold reads stale, timestamp still shown", async () => {
+    const { getGithubViewData } = await import("./github-query.server");
+    const offline: typeof fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const backdate = (msAgo: number) => {
+      const at = new Date(Date.now() - msAgo).toISOString();
+      app.db
+        .prepare(
+          `UPDATE provenance SET observed_at = ?
+            WHERE action = 'github.reconcile'
+              AND source_path LIKE 'projects/viberr-core/%'`,
+        )
+        .run(at);
+      return at;
+    };
+
+    // Just inside the hour → still fresh.
+    const fresh = backdate(59 * 60_000);
+    let view = (await getGithubViewData(app.db, "viberr-core", {
+      fetchImpl: offline,
+    }))!;
+    expect(view.reconcile.at).toBe(fresh);
+    expect(view.reconcile.stale).toBe(false);
+
+    // Past the hour → stale, but the `at`/label stay so the age is legible
+    // (the view keeps rendering "Reconciled <label>" with the stale styling).
+    const old = backdate(61 * 60_000);
+    view = (await getGithubViewData(app.db, "viberr-core", {
+      fetchImpl: offline,
+    }))!;
+    expect(view.reconcile.at).toBe(old);
+    expect(view.reconcile.stale).toBe(true);
+    expect(view.reconcile.label).not.toBeNull();
   });
 });

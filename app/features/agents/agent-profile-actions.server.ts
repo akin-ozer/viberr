@@ -159,7 +159,15 @@ function grantsFor(
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
   for (const [capabilityId, def] of Object.entries(defaults)) {
     let mode = caps[capabilityId] ?? def;
-    if (specialist) mode = coerceSpecialistCapabilityMode(mode);
+    if (capabilityId === "report-validation-verdict") {
+      // F10-07/F10-14: verdict authority is EXPLICIT-ONLY and must never be
+      // widened by a round-trip. Persist `direct` iff the toggle is direct;
+      // every other value (including a legacy `recommend`) persists `off`. Do
+      // NOT run the specialist recommend→direct coercion on this id.
+      mode = mode === "direct" ? "direct" : "off";
+    } else if (specialist) {
+      mode = coerceSpecialistCapabilityMode(mode);
+    }
     // Always-human caps are coerced to `human` whatever the form says.
     if (ALWAYS_HUMAN.has(capabilityId)) mode = "human";
     // Persist EVERY grant, including `off` (withheld). Dropping `off` here made
@@ -197,7 +205,12 @@ function createModalGrants(
     if (!MODAL_CAP_IDS.has(capabilityId)) continue;
     const mode = ALWAYS_HUMAN.has(capabilityId)
       ? "human"
-      : coerceSpecialistCapabilityMode(submitted);
+      : capabilityId === "report-validation-verdict"
+        ? // F10-07/F10-14: verdict is explicit-only — direct or nothing.
+          submitted === "direct"
+          ? "direct"
+          : "off"
+        : coerceSpecialistCapabilityMode(submitted);
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   // F14: a deliverer must hold the headline repo-write capability (master gate).

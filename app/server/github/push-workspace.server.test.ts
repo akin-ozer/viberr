@@ -123,6 +123,26 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // And it never commits onto the default branch.
   });
 
+  it("F10-03: refuses to stage/commit/push when the repo-write grant is withheld", async () => {
+    bindPat();
+    // Even with a dirty tree, a delivering profile whose execute-code-or-write-repo
+    // grant is withheld must NOT have its workspace delivered — the honest
+    // enforcement for Codex, which ignores the tool denylist.
+    const git = fakeGit({ branch: "vib-1-work", ahead: 3, dirty: true });
+    const res = await pushWorkspaceBranch({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+      exec: git.exec,
+      canCommitPush: false,
+    });
+    expect(res.status).toBe("grant_withheld");
+    expect(git.calls.some((c) => c.includes("add"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
   it("never auto-commits onto the default branch (HEAD on main)", async () => {
     bindPat();
     const git = fakeGit({ branch: "main", ahead: 0, dirty: true });

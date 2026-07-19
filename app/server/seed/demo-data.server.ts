@@ -434,6 +434,51 @@ function fm(input: {
    *  (F7-NOTIF1: an approval notification must match a LIVE decision). */
   recommendations?: TaskFrontmatter["recommendations"];
 }): TaskFrontmatter {
+  // G1: the seed keeps the specialist/reviewers authoring shape; canonical
+  // frontmatter is the uniform engagements list (delivers = the specialist).
+  const engagements = [
+    ...(input.specialist
+      ? [{ ...input.specialist, delivers: true, verdictCapable: false }]
+      : []),
+    // Seed reviewers are the verdict-capable Reviewer profile (F10-15).
+    ...input.reviewers.map((r) => ({ ...r, delivers: false, verdictCapable: true })),
+  ];
+  // F10-15: synthesize a CONSISTENT review subject so the acceptance gate
+  // (`acceptanceBlockedReason`) matches the illustrative `input.validation`.
+  // The seed has no run history, so a plausible revision + verdicts are
+  // fabricated: a review subject exists whenever the task has a branch and a
+  // non-"none" validation. `healthy` → every required reviewer approved the
+  // revision; `failing` → one requested changes; `changed` → verdicts pending.
+  let workRevision: TaskFrontmatter["workRevision"] = null;
+  let verdicts: TaskFrontmatter["verdicts"] = [];
+  const verdictReviewers = engagements.filter(
+    (e) => !e.delivers && e.verdictCapable,
+  );
+  if (input.branch && input.validation !== "none") {
+    const headSha = (input.github?.commits?.[0]?.sha ?? "0000000").padEnd(40, "0");
+    const rev = {
+      id: `rev-${input.key.toLowerCase()}`,
+      headSha,
+      treeSha: `tree-${input.key.toLowerCase()}`.padEnd(40, "0"),
+      branch: input.branch,
+      createdAt: input.updatedAt,
+      sourceProfileId: input.specialist?.profileId ?? null,
+    };
+    workRevision = rev;
+    const mk = (profileId: string, result: "approve" | "request_changes") => ({
+      profileId,
+      revisionId: rev.id,
+      headSha,
+      result,
+      reason: result === "approve" ? "Meets the spec." : "Needs changes.",
+      at: input.updatedAt,
+    });
+    if (input.validation === "healthy") {
+      verdicts = verdictReviewers.map((r) => mk(r.profileId, "approve"));
+    } else if (input.validation === "failing") {
+      verdicts = verdictReviewers.slice(0, 1).map((r) => mk(r.profileId, "request_changes"));
+    }
+  }
   return {
     key: input.key,
     title: input.title,
@@ -441,17 +486,14 @@ function fm(input: {
     readiness: input.readiness,
     waiting: input.waiting,
     ownerUserId: input.owner,
-    // G1: the seed keeps the specialist/reviewers authoring shape; canonical
-    // frontmatter is the uniform engagements list (delivers = the specialist).
-    engagements: [
-      ...(input.specialist ? [{ ...input.specialist, delivers: true }] : []),
-      ...input.reviewers.map((r) => ({ ...r, delivers: false })),
-    ],
+    engagements,
     operator: input.operator,
     recommendations: input.recommendations ?? [],
     schedules: [],
     urgent: input.urgent,
     validation: input.validation,
+    workRevision,
+    verdicts,
     branch: input.branch,
     repo: REPO,
     pr: input.pr,

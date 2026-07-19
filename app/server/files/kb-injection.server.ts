@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 import { kbDirPath } from "./file-store-root.server";
 
@@ -50,7 +56,30 @@ interface KbDoc {
  *  injection order is deterministic (and stable across runs). */
 function collectKbDocs(dir: string): KbDoc[] {
   const out: KbDoc[] = [];
-  const walk = (abs: string, relParts: string[]) => {
+  // F10-18: never follow a symlink out of the KB root, and never loop on a
+  // symlink cycle. `lstatSync` does not follow symlinks; symlinked entries are
+  // skipped entirely (KB content is real files under the store, not links); a
+  // realpath cycle guard + depth cap bound the walk; and every visited dir is
+  // re-checked to be beneath the (realpath'd) root.
+  let rootReal: string;
+  try {
+    rootReal = realpathSync(dir);
+  } catch {
+    return out;
+  }
+  const visited = new Set<string>();
+  const MAX_DEPTH = 32;
+  const walk = (abs: string, relParts: string[], depth: number) => {
+    if (depth > MAX_DEPTH) return;
+    let real: string;
+    try {
+      real = realpathSync(abs);
+    } catch {
+      return;
+    }
+    if (visited.has(real)) return; // cycle guard
+    visited.add(real);
+    if (real !== rootReal && !real.startsWith(rootReal + path.sep)) return; // containment
     let entries: string[];
     try {
       entries = readdirSync(abs).sort();
@@ -62,13 +91,17 @@ function collectKbDocs(dir: string): KbDoc[] {
       const childAbs = path.join(abs, entry);
       let st;
       try {
-        st = statSync(childAbs);
+        st = lstatSync(childAbs);
       } catch {
         continue;
       }
+      if (st.isSymbolicLink()) continue; // never follow symlinks out of the root
       if (st.isDirectory()) {
-        walk(childAbs, [...relParts, entry]);
-      } else if (KB_TEXT_EXTENSIONS.has(path.extname(entry).toLowerCase())) {
+        walk(childAbs, [...relParts, entry], depth + 1);
+      } else if (
+        st.isFile() &&
+        KB_TEXT_EXTENSIONS.has(path.extname(entry).toLowerCase())
+      ) {
         out.push({
           rel: [...relParts, entry].join("/"),
           abs: childAbs,
@@ -77,7 +110,7 @@ function collectKbDocs(dir: string): KbDoc[] {
       }
     }
   };
-  walk(dir, []);
+  walk(dir, [], 0);
   return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 

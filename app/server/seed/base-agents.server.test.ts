@@ -60,13 +60,15 @@ describe("seedDefaultAgentAssets", () => {
     const read = (...parts: string[]) =>
       readFileSync(path.join(dataRoot, ...parts), "utf8");
 
-    // Definitions (the run persona) for every built-in agent.
-    for (const id of ["operator", "developer", "reviewer"]) {
-      expect(existsSync(path.join(dataRoot, "agents", "definitions", `${id}.md`))).toBe(true);
-    }
-    expect(read("agents", "definitions", "developer.md")).toContain("You are the Developer");
-    expect(read("agents", "definitions", "reviewer.md")).toContain("You are the Reviewer");
-    // Tester was merged into the Reviewer — no separate Tester definition ships.
+    // F10-30: ONE persona source. Only the OPERATOR ships a dedicated
+    // definition file (system profile); the specialist persona is the profile
+    // TEMPLATE BODY, so no developer/reviewer definition files are seeded.
+    expect(existsSync(path.join(dataRoot, "agents", "definitions", "operator.md"))).toBe(true);
+    expect(existsSync(path.join(dataRoot, "agents", "definitions", "developer.md"))).toBe(false);
+    expect(existsSync(path.join(dataRoot, "agents", "definitions", "reviewer.md"))).toBe(false);
+    // The specialist persona now lives in the profile body.
+    expect(read("agents", "profiles", "developer.md")).toContain("You are the Developer");
+    expect(read("agents", "profiles", "reviewer.md")).toContain("You are the Reviewer");
     expect(existsSync(path.join(dataRoot, "agents", "definitions", "tester.md"))).toBe(false);
 
     // Real, loadable skills — one per specialist role.
@@ -107,7 +109,8 @@ describe("seedDefaultAgentAssets", () => {
 
   it("never clobbers an existing asset (idempotent)", () => {
     const dataRoot = ctx.makeTempDir();
-    const dest = path.join(dataRoot, "agents", "definitions", "developer.md");
+    // The developer PROFILE (its persona body) is the specialist source now.
+    const dest = path.join(dataRoot, "agents", "profiles", "developer.md");
     seedDefaultAgentAssets(dataRoot);
     writeFileAtomic(dest, "EDITED BY A HUMAN");
     seedDefaultAgentAssets(dataRoot);
@@ -119,12 +122,21 @@ describe("buildSpecialistPersona", () => {
   it("assembles the definition + declared skill body once the assets are shipped", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
+    // F10-30: the persona is the profile's own BODY, passed as `definition`
+    // (in a real run it is resolved from the deployed profile). Read the seeded
+    // developer profile body and feed it in.
+    const profileMd = readFileSync(
+      path.join(dataRoot, "agents", "profiles", "developer.md"),
+      "utf8",
+    );
+    const definition = profileMd.split(/\n---\n/).slice(1).join("\n---\n").trim();
     const persona = buildSpecialistPersona({
       profileId: "developer",
       skills: ["developer-expertise"],
+      definition,
       dataRoot,
     });
-    expect(persona).toContain("You are the Developer"); // the definition
+    expect(persona).toContain("You are the Developer"); // the persona body
     expect(persona).toContain("developer-expertise (skill)"); // the skill header
     expect(persona).toContain("Reporting rules"); // skill body content
     // F7-RES4: attached resources carry a trusted-provenance banner so the agent

@@ -31,7 +31,6 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   assignReviewer,
   assignSpecialist,
-  hasRunningRun,
   listDeployedSpecialists,
   removeReviewer,
   startAgentRun,
@@ -92,10 +91,22 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // was removed with the simulated-run seed data — R7-2 / F7-VEST1).
   const runtime = listRunsForTask(db, params.slug, params.key);
 
-  // Deployed specialists the "Assign specialist" menu offers; runActive
-  // disables the Run button while a run for this task is already running.
+  // Deployed specialists the "Assign specialist" menu offers.
   const deployedSpecialists = listDeployedSpecialists(db, params.slug);
-  const runActive = hasRunningRun(db, params.slug, params.key);
+  // F10-04: per-engagement run gating. The server single-flights only the
+  // DELIVERING run; supporting/reviewing runs are read-only and may run
+  // concurrently. So the delivering Run button disables only on an active
+  // delivering run, and each reviewer's Run button disables only on ITS OWN
+  // active run — not on any run anywhere (the old `runActive` boolean disabled
+  // every button whenever a single run was live, contradicting the server).
+  const activeRuns = runtime.filter(
+    (r) => r.lifecycle === "running" || r.lifecycle === "queued",
+  );
+  const deliveringActive = activeRuns.some((r) => r.kind === "primary" && !r.op);
+  const activeReviewerIds = activeRuns
+    .filter((r) => r.kind === "reviewer")
+    .map((r) => r.profileId)
+    .filter((id): id is string => !!id);
 
   // @-mention autocomplete directory for the comment composer: deployed
   // specialists, registered users, and the reserved backend/role handles —
@@ -123,7 +134,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     tlDefault,
     runtime,
     deployedSpecialists,
-    runActive,
+    deliveringActive,
+    activeReviewerIds,
     mentionables,
     // Host for GitHub browse links (PR/branch/repo) — derived server-side so
     // the client never hardcodes github.com (GHE deployments keep working).
@@ -577,7 +589,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       task={loaderData.task}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
-      runActive={loaderData.runActive}
+      deliveringActive={loaderData.deliveringActive}
+      activeReviewerIds={loaderData.activeReviewerIds}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}

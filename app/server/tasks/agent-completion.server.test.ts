@@ -8,7 +8,11 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import type {
+  Engagement,
+  TaskFileEvent,
+  WorkRevision,
+} from "~/schemas/task-file.schema";
 import {
   readTaskFile,
   resolveTaskFilePath,
@@ -44,6 +48,16 @@ function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
 }
 
+/** A verdict-capable specialist deployment: an EXPLICIT
+ *  `report-validation-verdict: direct` grant is what makes a supporting
+ *  engagement a required reviewer whose verdict is recorded + gates acceptance
+ *  (F10-14: verdict authority is explicit-only now, no implicit default). Both
+ *  `dev` (run as a reviewer on the UI-Run path) and the dedicated `reviewer`
+ *  profile (the direct-effects path) carry it. */
+const VERDICT_GRANT = [
+  { capabilityId: "report-validation-verdict", mode: "direct" },
+] as const;
+
 function deployDevSpecialist(): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
   const fm = file.parsed.frontmatter;
@@ -53,7 +67,7 @@ function deployDevSpecialist(): void {
     agents: [
       {
         profileId: "dev",
-        capabilities: [],
+        capabilities: VERDICT_GRANT,
         extras: [],
         definition: {
           kind: "specialist",
@@ -64,7 +78,72 @@ function deployDevSpecialist(): void {
           effort: "xhigh",
         },
       } as never,
+      {
+        profileId: "reviewer",
+        capabilities: VERDICT_GRANT,
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: "reviewer",
+          role: "Review & validation",
+          backends: ["claude"],
+          model: "sonnet",
+          effort: "xhigh",
+        },
+      } as never,
     ],
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** The delivering developer engagement (workspace owner; never a required
+ *  reviewer). */
+const DEV_DELIVERS_ENGAGEMENT: Engagement = {
+  profileId: "dev",
+  backend: "claude",
+  role: "Reviewer",
+  delivers: true,
+  verdictCapable: false,
+};
+/** The verdict-capable reviewer engagement whose profileId matches the effects'
+ *  `profileId: "reviewer"` — so the resolved verdict binds + derives validation. */
+const REVIEWER_ENGAGEMENT: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+/** An immutable delivered revision under review. */
+function workRev(id = "rev_1"): WorkRevision {
+  return {
+    id,
+    headSha: "a".repeat(40),
+    treeSha: "t".repeat(40),
+    branch: "vib-1-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "dev",
+  };
+}
+
+/** Write VIB-1 as a review-state task: a delivered revision under review + a
+ *  verdict-capable `reviewer` engagement, so a reviewer completion's verdict
+ *  binds to the current revision and gates/derives validation (F10-15). */
+function writeReviewTask(
+  patch: Parameters<typeof baseTaskFrontmatter>[1] = {},
+): void {
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage: "review",
+      ownerUserId: store.users.arda.id,
+      title: "Unified completion pipeline probe",
+      branch: "vib-1-work",
+      engagements: [DEV_DELIVERS_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      workRevision: workRev(),
+      validation: "changed",
+      ...patch,
+    }),
+    goal: "Exercise the reviewer reply + verdict.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -184,6 +263,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
 
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {
+    // A delivered revision under review + a verdict-capable reviewer, so the
+    // reviewer's verdict binds to the current revision and derives validation.
+    writeReviewTask();
     // 1500 chars of filler BEFORE the verdict line: the truncated comment
     // (1200 chars) never contains it — the old classifier missed it.
     const filler = "Detailed review notes follow. ".repeat(50);
@@ -210,6 +292,54 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(quality).toBeTruthy();
   });
 
+  it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {
+    // The required-reviewer set (acceptanceBlockedReason) uses the engage-time
+    // `verdictCapable` snapshot. If verdict RECORDING used the live grant
+    // instead, a reviewer whose grant was removed/undeployed after engagement
+    // could approve but never record — leaving the task un-acceptable forever
+    // (no force path). Recording must use the SAME snapshot the required set
+    // does, so the two never diverge.
+    writeReviewTask(); // reviewer engaged with verdictCapable: true (snapshot)
+    // Re-deploy `reviewer` WITHOUT the verdict grant — the live grant now says
+    // OFF while the engagement snapshot still says verdict-capable.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        (a as { profileId: string }).profileId === "reviewer"
+          ? ({ ...(a as object), capabilities: [] } as never)
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const runId = await finishedRunWith(
+      "Verdict: approve\n\n@operator the change meets the spec.",
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished", simulated: false },
+    );
+    // The verdict was recorded (snapshot is authoritative) → the only required
+    // reviewer approved the current revision → validation derives healthy →
+    // acceptance is unblocked.
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.verdicts).toHaveLength(1);
+    expect(fm.verdicts[0]).toMatchObject({ profileId: "reviewer", result: "approve" });
+    expect(fm.validation).toBe("healthy");
+  });
+
   it("posts the reviewer's OWN reply comment atomically with the verdict — pass AND fail", async () => {
     // Regression (VIB-1…4, docker): the reviewer's reply comment used to be a
     // separate earlier write that the verdict's read-modify-write erased on the
@@ -219,12 +349,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ["Verdict: approve\n\n@operator the inventory is complete and accurate.", "healthy"],
       ["Verdict: request changes\n\n@operator six symlinks are missing.", "failing"],
     ] as const) {
-      // fresh task each iteration
-      writeTask(store.dataRoot, store.slug, {
-        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id }),
-        goal: "Exercise the reviewer reply + verdict.",
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // fresh review-state task each iteration (delivered revision + reviewer)
+      writeReviewTask();
       const runId = await finishedRunWith(reply);
       await applyAgentCompletionEffects(
         store.db,
@@ -250,14 +376,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // seconds later while the bind mount still serves the PRE-completion file
     // content. Before the canonical cache, that second write's stale base
     // erased the reviewer's comment permanently.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        ownerUserId: store.users.arda.id,
-      }),
-      goal: "Exercise reviewer completion followed by a stale-read write.",
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    writeReviewTask({ title: "Reviewer completion then a stale-read write" });
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     const absPath = resolveTaskFilePath(ref);
     const preCompletion = readFileSync(absPath, "utf8");
@@ -517,6 +636,20 @@ describe("R7-2 fail-fast through the specialist start path (no fake runs)", () =
 
 describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => {
   it("startReviewerRun's own hook records the verdict when the run finishes", async () => {
+    // A delivered revision under review, but NO pre-set reviewer engagement:
+    // assignReviewer below makes `dev` the SOLE required reviewer (it carries an
+    // explicit verdict grant), so its approve derives validation → healthy.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "Unified completion pipeline probe",
+        branch: "vib-1-work",
+        workRevision: workRev(),
+      }),
+      goal: "Exercise the canonical completion handler.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },

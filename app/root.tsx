@@ -26,7 +26,7 @@ import {
 import type { Route } from "./+types/root";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
-import { authenticate } from "./server/auth/require-user.server";
+import { authenticateWithHeaders } from "./server/auth/require-user.server";
 import { getDb } from "./server/db/sqlite.server";
 import { getPref } from "./server/prefs/user-prefs.server";
 import {
@@ -41,8 +41,9 @@ export const links: Route.LinksFunction = () => [
 export async function loader({ request }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
   // Runs on every document request: identifies the signed-in user (for the
-  // shell + <CsrfInput />). better-auth owns session cookie sliding.
-  const auth = await authenticate(request);
+  // shell + <CsrfInput />) AND captures better-auth's rolling-session renewal
+  // cookie so the slide reaches the browser (F10-17).
+  const { ctx: auth, renewalHeaders } = await authenticateWithHeaders(request);
   // Reduce-motion preference (Phase 9C, ruling 13): user_prefs is the
   // truth; SSR renders <html data-motion> directly so the [data-motion]
   // CSS hook applies without a flash. Signed-out pages default to "full".
@@ -50,16 +51,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     auth && getPref<string>(getDb(), auth.user.id, "motion") === "reduce"
       ? "reduce"
       : "full";
-  return {
+  const payload = {
     theme,
     motion,
     user: auth?.user ?? null,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
+  // Forward ONLY the renewal Set-Cookie(s) — never clobber other headers. Most
+  // requests are within the updateAge window and produce none, in which case
+  // the response carries no extra header.
+  const setCookies = renewalHeaders.getSetCookie();
+  if (setCookies.length === 0) return payload;
+  const headers = new Headers();
+  for (const cookie of setCookies) headers.append("Set-Cookie", cookie);
+  return data(payload, { headers });
 }
 
-// Surface loader headers (Set-Cookie renewal) on routes without their own
-// headers export — React Router uses the deepest headers export available.
+// Surface loader headers (Set-Cookie renewal, F10-17) on routes without their
+// own headers export — React Router uses the deepest headers export available.
 export function headers({ loaderHeaders }: Route.HeadersArgs) {
   return loaderHeaders;
 }

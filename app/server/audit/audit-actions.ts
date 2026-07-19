@@ -120,6 +120,8 @@ export const AUDIT_ACTIONS: Record<string, AuditScope> = {
   "task.goal.updated": "task",
   // Operator-authored governance actions (operator-actions.server).
   "task.operator.commented": "task",
+  // F10-35: deterministic agent-routing trace (candidates considered + chosen).
+  "task.operator.agent_selected": "task",
   "task.operator.recommended": "task",
   "task.operator.recommended_completion": "task",
   "task.operator.accepted_completion": "task",

@@ -98,12 +98,6 @@ const selectStyle: CSSProperties = {
 // Repo-write grants that mark a profile as a DELIVERING builder (mirrors
 // listDeployedSpecialists' delivery heuristic) — used to seed the verdict
 // toggle from its RUNTIME-effective mode below.
-const DELIVERY_CAP_IDS = [
-  "execute-code-or-write-repo",
-  "commit-push-branch",
-  "create-task-branch",
-];
-
 function seedCaps(
   initial: AgentProfileView | null,
   defaults: Readonly<Record<string, CapMode>>,
@@ -111,21 +105,21 @@ function seedCaps(
   if (!initial) return { ...defaults };
   const caps: Record<string, CapMode> = {};
   for (const id of Object.keys(defaults)) caps[id] = "off";
-  const stored = new Set(initial.capabilities.map((g) => g.capabilityId));
-  // report-validation-verdict has a delivers-dependent runtime default (absent
-  // → OFF for a builder, ON for a reviewer — see effectiveCollabMode). Seed the
-  // toggle from that EFFECTIVE value when the grant is absent, so opening +
-  // saving a pre-branch profile can't silently revoke a reviewer's verdict (or
-  // arm a builder's) — the display matches runtime, and save normalizes the
-  // implicit default into explicit data.
-  if ("report-validation-verdict" in caps && !stored.has("report-validation-verdict")) {
-    const delivers = initial.capabilities.some(
-      (g) => DELIVERY_CAP_IDS.includes(g.capabilityId) && g.mode === "direct",
-    );
-    caps["report-validation-verdict"] = delivers ? "off" : "direct";
-  }
+  // F10-07: seed EVERY toggle from the STORED grant only — never synthesize an
+  // implicit default. Verdict authority is explicit-only (F10-14), so an absent
+  // `report-validation-verdict` grant stays OFF; the old code fabricated a
+  // `direct` verdict for a non-delivering profile from the delivers-dependent
+  // runtime default, and saving any unrelated field then PERSISTED that `direct`
+  // — silently arming verdict veto. A legacy `recommend` (runtime-treats-as-off)
+  // also seeds OFF so a lossless round-trip can only preserve or narrow
+  // authority, never widen it.
   for (const grant of initial.capabilities) {
-    if (grant.capabilityId in caps) caps[grant.capabilityId] = grant.mode;
+    if (grant.capabilityId in caps) {
+      caps[grant.capabilityId] =
+        grant.mode === "recommend" && grant.capabilityId === "report-validation-verdict"
+          ? "off"
+          : grant.mode;
+    }
   }
   return caps;
 }

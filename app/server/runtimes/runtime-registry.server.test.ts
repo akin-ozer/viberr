@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  claudeSpawnEnv,
   codexSpawnEnv,
   createAdapters,
   isBackendAvailable,
@@ -206,6 +207,35 @@ describe("runtime-registry — detection & fallback", () => {
       delete process.env.VIBERR_CODEX_TEST_MARKER;
       delete process.env.VIBERR_SESSION_SECRET;
       delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("claudeSpawnEnv preserves runtime essentials but filters server secrets (F10-02)", () => {
+    // The Claude Agent SDK REPLACES the child env with what we pass (verified in
+    // sdk.mjs). Previously the adapter spread the raw process.env, leaking every
+    // server secret to the spawned `claude`. claudeSpawnEnv mirrors codexSpawnEnv.
+    process.env.PATH = process.env.PATH || "/usr/bin:/bin";
+    process.env.VIBERR_CLAUDE_TEST_MARKER = "present";
+    process.env.MY_DEPLOY_SECRET = "server-deploy-secret";
+    process.env.DATABASE_URL = "postgres://secret";
+    process.env.GITHUB_TOKEN = "ghp_should_not_leak";
+    try {
+      const env = claudeSpawnEnv("/claude-cfg", "anthropic-key", "oauth-tok");
+      expect(env.CLAUDE_CONFIG_DIR).toBe("/claude-cfg"); // forced
+      expect(env.PATH).toBeTruthy(); // preserved
+      expect(env.VIBERR_CLAUDE_TEST_MARKER).toBe("present"); // ordinary var carried
+      // The selected Claude credential is re-added explicitly...
+      expect(env.ANTHROPIC_API_KEY).toBe("anthropic-key");
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-tok");
+      // ...but NO server secret survives the filter.
+      expect(env.MY_DEPLOY_SECRET).toBeUndefined();
+      expect(env.DATABASE_URL).toBeUndefined();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+    } finally {
+      delete process.env.VIBERR_CLAUDE_TEST_MARKER;
+      delete process.env.MY_DEPLOY_SECRET;
+      delete process.env.DATABASE_URL;
+      delete process.env.GITHUB_TOKEN;
     }
   });
 

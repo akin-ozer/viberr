@@ -89,14 +89,47 @@ export function agentProfileFilePath(
   return path.join(agentProfilesDir(dataRoot), `${profileId}.md`);
 }
 
+/**
+ * Resolve a single store-directory segment beneath `root`, rejecting any
+ * traversal (F10-18). A skill/KB name comes from a profile's resource array,
+ * which a hand-edited canonical file or crafted admin action could set to
+ * `../../projects/x/secret`; `path.join` would happily normalize the `..` and
+ * escape the store root, and the resolved content is injected as TRUSTED
+ * persona material — crossing a prompt trust boundary. So the segment must be a
+ * plain directory name: no separators, no dot-segments, no absolute path, no
+ * NUL. Mirrors `diskNameFromId` (org/resources.server.ts). Throws on violation;
+ * the injection readers catch it and degrade to "inject nothing" while logging
+ * the denial, so a bad reference is explicitly DENIED, never silently escaped.
+ */
+export function resolveStoreSegment(root: string, name: string): string {
+  if (
+    !name ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("\0") ||
+    path.isAbsolute(name)
+  ) {
+    throw new Error(`Unsafe store resource name: ${JSON.stringify(name)}`);
+  }
+  const rootAbs = path.resolve(root);
+  const resolved = path.resolve(rootAbs, name);
+  // Defense in depth: the resolved child must stay beneath the root.
+  if (resolved !== rootAbs && !resolved.startsWith(rootAbs + path.sep)) {
+    throw new Error(`Store resource escapes its root: ${JSON.stringify(name)}`);
+  }
+  return resolved;
+}
+
 /** Knowledge-base store root: ${DATA_ROOT}/kb (store://kb/…). Phase 9B. */
 export function kbRootDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "kb");
 }
 
-/** One knowledge base's folder: ${DATA_ROOT}/kb/<dir>. */
+/** One knowledge base's folder: ${DATA_ROOT}/kb/<dir> (traversal-contained). */
 export function kbDirPath(dir: string, dataRoot?: string): string {
-  return path.join(kbRootDir(dataRoot), dir);
+  return resolveStoreSegment(kbRootDir(dataRoot), dir);
 }
 
 /** Skill store root: ${DATA_ROOT}/skills (store://skills/…). Phase 9B. */
@@ -104,9 +137,9 @@ export function skillsRootDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "skills");
 }
 
-/** One skill's folder: ${DATA_ROOT}/skills/<name>. */
+/** One skill's folder: ${DATA_ROOT}/skills/<name> (traversal-contained). */
 export function skillDirPath(name: string, dataRoot?: string): string {
-  return path.join(skillsRootDir(dataRoot), name);
+  return resolveStoreSegment(skillsRootDir(dataRoot), name);
 }
 
 /**

@@ -18,6 +18,7 @@ const rowHuman: ReviewRowView = {
   latestEventText: null,
   pr: { number: 318, state: "review" },
   validation: "changed",
+  blockReason: null,
 };
 
 const rowAgent: ReviewRowView = {
@@ -29,6 +30,7 @@ const rowAgent: ReviewRowView = {
     "**Transition request:** move VIB-145 from In Progress to Review — evidence attached.",
   pr: { number: 311, state: "merged" },
   validation: "healthy",
+  blockReason: null,
 };
 
 function renderQueue(

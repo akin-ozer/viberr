@@ -28,8 +28,8 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "human",
       operator: { assignedAtStageId: "triage" },
       engagements: [
-        { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
-        { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
       ],
     }),
   });
@@ -40,8 +40,8 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "agent",
       operator: { assignedAtStageId: "ready" },
       engagements: [
-        { profileId: "developer", backend: "claude", role: "Developer", delivers: true },
-        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false },
+        { profileId: "developer", backend: "claude", role: "Developer", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false, verdictCapable: false },
       ],
     }),
   });
@@ -52,7 +52,7 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "none",
       operator: { assignedAtStageId: "ready" },
       engagements: [
-        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: true },
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: true, verdictCapable: false },
       ],
     }),
   });
@@ -63,7 +63,7 @@ function seedTasks(dataRoot: string, slug: string) {
       waiting: "none",
       operator: { assignedAtStageId: "triage" },
       engagements: [
-        { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
       ],
     }),
   });

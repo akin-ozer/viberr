@@ -311,8 +311,14 @@ export function StagesPanel({
                 type="button"
                 className={"stg-x" + (locked ? " off" : "")}
                 aria-label={"Remove " + s.name}
-                title={locked ? `${s.name} can't be removed` : "Remove stage"}
-                disabled={!canManage}
+                title={
+                  locked
+                    ? `${s.name} is a required ${s.id === stages[0]?.id ? "entry" : "terminal"} stage and can't be removed`
+                    : "Remove stage"
+                }
+                // F10-22: entry/terminal stages are model-locked; the control is
+                // truly disabled (not just greyed) so it never looks actionable.
+                disabled={!canManage || Boolean(locked)}
                 onClick={() => remove(s)}
               >
                 <Icon name="x" />
@@ -665,11 +671,8 @@ export function DangerZone({
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
 }) {
-  const push = useToast();
   const [confirming, setConfirming] = useState(false);
   const isAdmin = myRole === "admin";
-  const deny = (what: string) =>
-    push(`${what} is admin-only — you're signed in as a ${myRole ?? "guest"}`);
 
   return (
     <div className="panel danger-panel">
@@ -691,10 +694,12 @@ export function DangerZone({
         <button
           type="button"
           className="btn ghost sm"
-          disabled={busy}
-          onClick={() =>
-            isAdmin ? onArchive(!archived) : deny("Archiving")
-          }
+          // F10-34: destructive project actions are project-admin only. A
+          // viewer/maintainer must not see an actionable control; the server
+          // still enforces edit-policy.
+          disabled={busy || !isAdmin}
+          title={isAdmin ? undefined : "Only a project admin can archive this project"}
+          onClick={() => onArchive(!archived)}
         >
           {archived ? "Restore" : "Archive"}
         </button>
@@ -709,7 +714,11 @@ export function DangerZone({
         <button
           type="button"
           className="btn danger sm"
-          onClick={() => (isAdmin ? setConfirming(true) : deny("Deletion"))}
+          // F10-34: project-admin only; disabled for everyone else so the
+          // typed-confirm dialog can never be opened without authority.
+          disabled={busy || !isAdmin}
+          title={isAdmin ? undefined : "Only a project admin can delete this project"}
+          onClick={() => setConfirming(true)}
         >
           Delete project
         </button>

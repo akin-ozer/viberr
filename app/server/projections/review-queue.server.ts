@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 import type { Validation, Waiting } from "~/schemas/task-file.schema";
+import { acceptanceBlockedReason } from "~/schemas/task-file.schema";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
@@ -40,6 +42,11 @@ export interface ReviewQueueRow {
   latestEventText: string | null;
   pr: { number: number; state: "review" | "merged" } | null;
   validation: Validation;
+  /** F10-11/F10-15: null = the current revision is acceptance-ready (all
+   *  required reviewers approved it, none requesting changes). A non-null reason
+   *  means the task is NOT ready for acceptance (failing / awaiting a reviewer /
+   *  no delivered revision) — it must NOT sit under "Waiting on your acceptance".*/
+  blockReason: string | null;
 }
 
 export interface ReviewQueueData {
@@ -54,7 +61,7 @@ export interface ReviewQueueData {
 export function getReviewQueue(
   db: Database.Database,
   slug: string,
-  opts: { viewerUserId?: string } = {},
+  opts: { viewerUserId?: string; dataRoot?: string } = {},
 ): ReviewQueueData {
   const project = getProject(db, slug);
   const reviewId = project
@@ -63,6 +70,24 @@ export function getReviewQueue(
   const inReview = reviewId
     ? listProjectTasks(db, slug).filter((t) => t.stage === reviewId)
     : [];
+
+  // F10-11/F10-15: acceptance readiness comes from the revision-bound review
+  // model, not just `waiting`. Read each in-review task's frontmatter (a small
+  // set) and compute `acceptanceBlockedReason` — a failing verdict, an
+  // outstanding required reviewer, or no delivered revision all keep a task OUT
+  // of the "Waiting on your acceptance" panel it used to falsely populate.
+  const blockReasonByKey = new Map<string, string | null>();
+  for (const t of inReview) {
+    const file = readTaskFile({
+      projectSlug: slug,
+      taskKey: t.key,
+      ...(opts.dataRoot !== undefined ? { dataRoot: opts.dataRoot } : {}),
+    });
+    blockReasonByKey.set(
+      t.key,
+      file ? acceptanceBlockedReason(file.parsed.frontmatter) : null,
+    );
+  }
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();
@@ -87,6 +112,7 @@ export function getReviewQueue(
         }
       : null,
     validation: t.validation,
+    blockReason: blockReasonByKey.get(t.key) ?? null,
   }));
 
   // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,
@@ -120,9 +146,15 @@ export function getReviewQueue(
     const owner = ownerByKey.get(key) ?? null;
     return owner !== null && owner === opts.viewerUserId && viewerCanOwn;
   };
+  // Ready-for-acceptance requires BOTH acceptance authority AND that the current
+  // revision is actually acceptable (F10-11): a failing/awaiting/no-revision task
+  // is still human-waiting but belongs in "Still in review", not the acceptance
+  // panel that promises a valid, actionable decision.
+  const isReady = (r: ReviewQueueRow): boolean =>
+    r.waiting === "human" && canAccept(r.key) && r.blockReason === null;
   return {
-    ready: rows.filter((r) => r.waiting === "human" && canAccept(r.key)),
-    working: rows.filter((r) => !(r.waiting === "human" && canAccept(r.key))),
+    ready: rows.filter(isReady),
+    working: rows.filter((r) => !isReady(r)),
     total: rows.length,
   };
 }

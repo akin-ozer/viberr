@@ -112,7 +112,7 @@ function setup() {
 describe("getReviewQueue", () => {
   it("splits review-stage tasks on waiting — review+none lands with agents", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug);
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
 
     expect(queue.total).toBe(3);
     expect(queue.ready.map((t) => t.key)).toEqual(["VIB-101"]);
@@ -125,7 +125,7 @@ describe("getReviewQueue", () => {
 
   it("carries the subline sources: packet header, newest event text, or nothing", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug);
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
 
     const withPacket = queue.ready[0]!;
     expect(withPacket.packet).toEqual({
@@ -145,7 +145,7 @@ describe("getReviewQueue", () => {
 
   it("keeps pr + validation for the meta cluster", () => {
     const store = setup();
-    const queue = getReviewQueue(store.db, store.slug);
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
     expect(queue.ready[0]!.pr).toEqual({ number: 318, state: "review" });
     expect(queue.ready[0]!.validation).toBe("changed");
     expect(queue.working[0]!.validation).toBe("healthy");
@@ -154,7 +154,7 @@ describe("getReviewQueue", () => {
   it("returns empty panels for a project with no review-stage tasks", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const queue = getReviewQueue(store.db, store.slug);
+    const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
     expect(queue).toEqual({ ready: [], working: [], total: 0 });
   });
 
@@ -186,7 +186,7 @@ describe("getReviewQueue", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    const queue = getReviewQueue(store.db, "lite");
+    const queue = getReviewQueue(store.db, "lite", { dataRoot: store.dataRoot });
     expect(queue.total).toBe(1);
     expect(queue.ready.map((t) => t.key)).toEqual(["LP-1"]);
   });
@@ -216,6 +216,7 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
     const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
       viewerUserId: store.users.murat.id,
     });
     expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
@@ -225,6 +226,7 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
     const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
       viewerUserId: store.users.elif.id,
     });
     expect(q.ready).toHaveLength(0);
@@ -238,6 +240,7 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, store.users.selin.id);
     const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
       viewerUserId: store.users.selin.id,
     });
     expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
@@ -247,6 +250,7 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, store.users.elif.id); // owned by someone else
     const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
       viewerUserId: store.users.selin.id,
     });
     expect(q.ready).toHaveLength(0);
@@ -256,7 +260,91 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
   it("unscoped (no viewer) keeps the state-based split — any human-waiting task is ready", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
-    const q = getReviewQueue(store.db, store.slug);
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
     expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+  });
+});
+
+describe("F10-11: acceptance readiness is revision-bound, not just human-waiting", () => {
+  it("a failing task (request_changes on the current revision) is NOT in `ready`", () => {
+    const store = setupTestStore(ctx);
+    const rev = {
+      id: "rev_1",
+      headSha: "a".repeat(40),
+      treeSha: "t".repeat(40),
+      branch: "vib-9-work",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        title: "Rejected work",
+        stage: "review",
+        waiting: "human",
+        branch: "vib-9-work",
+        pr: { number: 99, state: "review", title: "Rejected work" },
+        workRevision: rev,
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "a".repeat(40),
+            result: "request_changes",
+            reason: "spec violation",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    // Human-waiting, but a required reviewer requested changes → NOT acceptable.
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-9");
+    const row = q.working.find((t) => t.key === "VIB-9")!;
+    expect(row.blockReason).toMatch(/requests changes/i);
+  });
+
+  it("a task whose required reviewer approved the current revision IS in `ready`", () => {
+    const store = setupTestStore(ctx);
+    const rev = {
+      id: "rev_1",
+      headSha: "b".repeat(40),
+      treeSha: "u".repeat(40),
+      branch: "vib-8-work",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-8", {
+        title: "Approved work",
+        stage: "review",
+        waiting: "human",
+        branch: "vib-8-work",
+        pr: { number: 88, state: "review", title: "Approved work" },
+        workRevision: rev,
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "b".repeat(40),
+            result: "approve",
+            reason: "looks good",
+            at: "2026-07-04T01:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    expect(q.ready.map((t) => t.key)).toContain("VIB-8");
+    expect(q.ready.find((t) => t.key === "VIB-8")!.blockReason).toBeNull();
   });
 });

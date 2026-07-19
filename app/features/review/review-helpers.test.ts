@@ -9,6 +9,7 @@ const base: ReviewRowView = {
   latestEventText: null,
   pr: null,
   validation: "none",
+  blockReason: null,
 };
 
 describe("reviewRowSub", () => {

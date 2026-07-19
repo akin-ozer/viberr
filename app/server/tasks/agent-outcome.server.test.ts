@@ -46,9 +46,18 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     expect(resolveAgentCollab(grants, true).verdict).toBe(false);
   });
 
-  it("a SUPPORTING agent with no verdict grant defaults ON (pre-branch reviewer)", () => {
-    expect(effectiveCollabMode([], "report-validation-verdict", false)).toBe("direct");
-    expect(resolveAgentCollab([], false).verdict).toBe(true);
+  it("F10-14: a SUPPORTING agent with NO verdict grant is OFF (explicit-only)", () => {
+    // Verdict authority is explicit-only now — there is no implicit `direct`
+    // default for a non-delivering engagement. A reviewer gains gating verdict
+    // power ONLY via an explicit report-validation-verdict:direct grant.
+    expect(effectiveCollabMode([], "report-validation-verdict", false)).toBe("off");
+    expect(resolveAgentCollab([], false).verdict).toBe(false);
+  });
+
+  it("F10-14: a SUPPORTING agent WITH an explicit direct grant is ON", () => {
+    const grants = [grant("report-validation-verdict", "direct")];
+    expect(effectiveCollabMode(grants, "report-validation-verdict", false)).toBe("direct");
+    expect(resolveAgentCollab(grants, false).verdict).toBe(true);
   });
 
   it("a DELIVERING agent with no verdict grant stays OFF", () => {

@@ -8,7 +8,9 @@ import {
 } from "../../../test-support/test-store";
 import {
   deliveringEngagement,
+  type Engagement,
   type TaskPacket,
+  type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
@@ -47,6 +49,49 @@ const PACKET: TaskPacket = {
     { kind: "redirect", t: "Start a fresh specialist", d: "", rec: false },
   ],
 };
+
+/** The delivering developer engagement (workspace owner; never a required
+ *  reviewer). */
+const DEV_ENGAGEMENT: Engagement = {
+  profileId: "dev",
+  backend: "codex",
+  role: "developer",
+  delivers: true,
+  verdictCapable: false,
+};
+/** A verdict-capable reviewer whose profileId matches recordReviewerReply's
+ *  actorRef ("reviewer") — so its verdict binds to the current revision AND
+ *  gates acceptance (F10-15). */
+const REVIEWER_ENGAGEMENT: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+/** An immutable delivered revision under review. */
+function workRev(id = "rev_1"): WorkRevision {
+  return {
+    id,
+    headSha: "a".repeat(40),
+    treeSha: "t".repeat(40),
+    branch: "vib-1-work",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "dev",
+  };
+}
+/** A standing request_changes verdict bound to `revisionId` (a live rejection
+ *  on the current revision). */
+function rejectionVerdict(revisionId = "rev_1") {
+  return {
+    profileId: "reviewer",
+    revisionId,
+    headSha: "a".repeat(40),
+    result: "request_changes" as const,
+    reason: "standing rejection",
+    at: "2026-07-04T01:00:00.000Z",
+  };
+}
 
 function withTask(
   store: TestStore,
@@ -164,11 +209,16 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
   it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
     const store = prepared();
-    // failing, at impl, with NO rework since the rejection.
+    // failing, at impl, with NO new revision since the rejection: a live
+    // request_changes verdict bound to the current work revision.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
         ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")],
         validation: "failing",
       }),
       timeline: [
@@ -198,9 +248,19 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
   it("acceptCompletion (via packet) refuses a failing-validation task (C2)", async () => {
     const store = prepared();
+    // A required reviewer requested changes on the current revision — acceptance
+    // is blocked by acceptanceBlockedReason (F10-15), which the packet honors.
     withTask(
       store,
-      { stage: "review", ownerUserId: store.users.arda.id, validation: "failing" },
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")],
+        validation: "failing",
+      },
       PACKET,
     );
     await expect(
@@ -358,7 +418,14 @@ describe("transitionStage boundary enforcement", () => {
 
   it("entering the review stage sets validation to 'changed' (FR24 live signal)", async () => {
     const store = prepared();
-    withTask(store, { stage: "impl", validation: "none" });
+    // Delivered work under review with no verdicts yet → review entry derives
+    // the live "changed" signal (a revision is up but unjudged).
+    withTask(store, {
+      stage: "impl",
+      validation: "none",
+      branch: "vib-1-work",
+      workRevision: workRev("rev_1"),
+    });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
@@ -726,7 +793,7 @@ describe("resolvePacket kind matrix", () => {
         waiting: "human",
         readiness: "blocked",
         engagements: [
-          { profileId: "dev", backend: "codex", role: "developer", delivers: true },
+          { profileId: "dev", backend: "codex", role: "developer", delivers: true, verdictCapable: false },
         ],
       },
       RETRY_PACKET,
@@ -999,6 +1066,9 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
     withTask(store, {
       stage: "review",
       validation: "healthy",
+      branch: "vib-1-work",
+      engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      workRevision: workRev("rev_1"),
       recommendations: [
         { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "Clean review." },
         { id: "rec-tr", kind: "transition", toStageId: "review", label: "Move to Review", detail: "" },
@@ -1019,6 +1089,10 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
     withTask(store, {
       stage: "review",
       validation: "healthy",
+      branch: "vib-1-work",
+      // The single required reviewer — its approve derives validation → healthy.
+      engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      workRevision: workRev("rev_1"),
       recommendations: [
         { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
       ],

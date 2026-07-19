@@ -129,6 +129,8 @@ export function baseTaskFrontmatter(
     recommendations: [],
     urgent: false,
     validation: "none",
+    workRevision: null,
+    verdicts: [],
     branch: null,
     repo: null,
     pr: null,

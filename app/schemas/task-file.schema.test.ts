@@ -1,8 +1,184 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceptanceBlockedReason,
+  deriveValidation,
+  nextWorkRevision,
   parseTaskFrontmatter,
   parseTaskPacket,
+  requiredReviewers,
+  type Engagement,
+  type ReviewVerdict,
+  type WorkRevision,
 } from "./task-file.schema";
+
+describe("revision-bound review helpers (F10-15/F10-32)", () => {
+  const rev1: WorkRevision = {
+    id: "rev_1",
+    headSha: "a".repeat(40),
+    treeSha: "t1".padEnd(40, "0"),
+    branch: "vib-1",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    sourceProfileId: "developer",
+  };
+  const deliverer: Engagement = {
+    profileId: "developer",
+    backend: "claude",
+    role: "developer",
+    delivers: true,
+    verdictCapable: false,
+  };
+  const reviewerA: Engagement = {
+    profileId: "reviewer",
+    backend: "claude",
+    role: "Review",
+    delivers: false,
+    verdictCapable: true,
+  };
+  const reviewerB: Engagement = {
+    profileId: "qa",
+    backend: "codex",
+    role: "QA",
+    delivers: false,
+    verdictCapable: true,
+  };
+  const nonVerdictReviewer: Engagement = {
+    profileId: "docs",
+    backend: "claude",
+    role: "Docs",
+    delivers: false,
+    verdictCapable: false,
+  };
+  const verdict = (
+    profileId: string,
+    result: ReviewVerdict["result"],
+    revisionId = "rev_1",
+  ): ReviewVerdict => ({
+    profileId,
+    revisionId,
+    headSha: "a".repeat(40),
+    result,
+    reason: "",
+    at: "2026-07-04T01:00:00.000Z",
+  });
+
+  it("requiredReviewers = supporting AND verdict-capable only", () => {
+    const fm = { engagements: [deliverer, reviewerA, nonVerdictReviewer] };
+    expect(requiredReviewers(fm).map((r) => r.profileId)).toEqual(["reviewer"]);
+  });
+
+  it("deriveValidation: none without a revision", () => {
+    expect(
+      deriveValidation({ engagements: [reviewerA], workRevision: null, verdicts: [] }),
+    ).toBe("none");
+  });
+
+  it("deriveValidation: request_changes on the current revision → failing", () => {
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "request_changes")],
+      }),
+    ).toBe("failing");
+  });
+
+  it("deriveValidation: a same-revision approve does NOT mask another reviewer's rejection", () => {
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA, reviewerB],
+        workRevision: rev1,
+        verdicts: [
+          verdict("reviewer", "request_changes"),
+          verdict("qa", "approve"),
+        ],
+      }),
+    ).toBe("failing");
+  });
+
+  it("deriveValidation: healthy only when EVERY required reviewer approves the current revision", () => {
+    const base = { engagements: [deliverer, reviewerA, reviewerB], workRevision: rev1 };
+    // Only one of two approved → still changed (pending).
+    expect(deriveValidation({ ...base, verdicts: [verdict("reviewer", "approve")] })).toBe("changed");
+    // Both approved → healthy.
+    expect(
+      deriveValidation({
+        ...base,
+        verdicts: [verdict("reviewer", "approve"), verdict("qa", "approve")],
+      }),
+    ).toBe("healthy");
+  });
+
+  it("deriveValidation: a NEW revision makes prior verdicts stale (F10-32)", () => {
+    const rev2: WorkRevision = { ...rev1, id: "rev_2", treeSha: "t2".padEnd(40, "0") };
+    // The approve targeted rev_1; against rev_2 it's stale → changed, not healthy.
+    expect(
+      deriveValidation({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev2,
+        verdicts: [verdict("reviewer", "approve", "rev_1")],
+      }),
+    ).toBe("changed");
+  });
+
+  it("acceptanceBlockedReason: blocks on request_changes, missing approvals, and no revision", () => {
+    // No revision + a required reviewer → blocked.
+    expect(
+      acceptanceBlockedReason({ engagements: [reviewerA], workRevision: null, verdicts: [] }),
+    ).toMatch(/no reviewed revision/i);
+    // request_changes on current revision → blocked.
+    expect(
+      acceptanceBlockedReason({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "request_changes")],
+      }),
+    ).toMatch(/requests changes/i);
+    // A required reviewer hasn't approved → blocked.
+    expect(
+      acceptanceBlockedReason({
+        engagements: [deliverer, reviewerA, reviewerB],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "approve")],
+      }),
+    ).toMatch(/waiting on 1 required reviewer/i);
+    // All required reviewers approved current revision → null (allowed).
+    expect(
+      acceptanceBlockedReason({
+        engagements: [deliverer, reviewerA],
+        workRevision: rev1,
+        verdicts: [verdict("reviewer", "approve")],
+      }),
+    ).toBeNull();
+    // No revision AND no required reviewers → allowed (planning / non-repo work).
+    expect(
+      acceptanceBlockedReason({ engagements: [], workRevision: null, verdicts: [] }),
+    ).toBeNull();
+  });
+
+  it("nextWorkRevision: same tree = same subject (no invalidation); different tree = new revision", () => {
+    const same = nextWorkRevision(rev1, {
+      id: "rev_x",
+      headSha: "b".repeat(40), // different head, SAME tree
+      treeSha: rev1.treeSha,
+      branch: "vib-1",
+      sourceProfileId: "developer",
+      createdAt: "2026-07-05T00:00:00.000Z",
+    });
+    expect(same.changed).toBe(false);
+    expect(same.revision.id).toBe("rev_1");
+
+    const diff = nextWorkRevision(rev1, {
+      id: "rev_2",
+      headSha: "c".repeat(40),
+      treeSha: "t2".padEnd(40, "0"),
+      branch: "vib-1",
+      sourceProfileId: "developer",
+      createdAt: "2026-07-05T00:00:00.000Z",
+    });
+    expect(diff.changed).toBe(true);
+    expect(diff.revision.id).toBe("rev_2");
+  });
+});
 
 describe("parseTaskFrontmatter (tolerant)", () => {
   const valid = {
@@ -33,7 +209,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect(result.frontmatter.readiness).toBe("input_required");
     expect(result.frontmatter.urgent).toBe(true);
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
     ]);
     expect(result.unknown).toEqual({});
   });
@@ -78,8 +254,8 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
     expect(result.diagnostics).toEqual([]);
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
     ]);
     // Legacy slots are absorbed, NOT preserved as unknown fields (so a
     // rewrite emits only `engagements:`, never both forms).
@@ -95,7 +271,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
     expect(result.diagnostics).toEqual([]);
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
     ]);
     // The legacy alias is absorbed, NOT preserved as an unknown field (so a
     // rewrite emits only `engagements:`, never both keys).
@@ -111,7 +287,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     delete both.engagements;
     const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
     ]);
     expect(result.unknown).toEqual({});
   });
@@ -128,8 +304,8 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       { fallbackKey: "VIB-142" },
     );
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true },
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
     ]);
     const demotion = result.diagnostics.find(
       (d) => d.code === "frontmatter.multiple_deliverers",
@@ -151,7 +327,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     // The same profileId corrupts run routing (startAgentRun resolves by the
     // first match) — keep only the first engagement.
     expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: true },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: true, verdictCapable: false },
     ]);
     expect(
       result.diagnostics.find((d) => d.code === "frontmatter.duplicate_engagement")?.severity,

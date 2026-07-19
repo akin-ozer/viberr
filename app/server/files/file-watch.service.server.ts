@@ -37,6 +37,39 @@ interface WatcherHandle {
   root: string;
 }
 
+/**
+ * Watcher lifecycle state, separate from the (nullable) handle (F10-08).
+ *
+ * The old transient-error self-heal scheduled a `setTimeout` re-arm and NEVER
+ * stored its handle, so teardown could not cancel it — and it re-fired on the
+ * exact condition teardown creates (`cache[WATCHER_KEY] === undefined`),
+ * resurrecting a watcher after stop against a deleted/temp root and producing an
+ * unbounded re-arm/log loop. This owns the pending re-arm timer (so teardown can
+ * cancel it) and a monotonic `generation` (bumped on every intentional
+ * start/stop/retire) so a fired timer can detect it is stale and abort.
+ */
+const WATCHER_LIFECYCLE_KEY = Symbol.for("viberr.fileWatcherLifecycle");
+interface WatcherLifecycle {
+  generation: number;
+  reArmTimer: ReturnType<typeof setTimeout> | null;
+}
+function watcherLifecycle(
+  cache: Record<symbol, unknown>,
+): WatcherLifecycle {
+  let lc = cache[WATCHER_LIFECYCLE_KEY] as WatcherLifecycle | undefined;
+  if (!lc) {
+    lc = { generation: 0, reArmTimer: null };
+    cache[WATCHER_LIFECYCLE_KEY] = lc;
+  }
+  return lc;
+}
+function cancelPendingReArm(lc: WatcherLifecycle): void {
+  if (lc.reArmTimer) {
+    clearTimeout(lc.reArmTimer);
+    lc.reArmTimer = null;
+  }
+}
+
 function shouldIgnore(candidate: string): boolean {
   const base = path.basename(candidate);
   return base.startsWith(".") || base.endsWith(".tmp");
@@ -83,8 +116,12 @@ export function startFileWatcher(
   const root = getDataRoot(options.dataRoot);
   const existing = cache[WATCHER_KEY];
   if (existing && existing.root === root) return existing.watcher;
+  const lc = watcherLifecycle(cache);
   if (existing) {
-    // Data root changed (tests) — retire the old watcher first.
+    // Data root changed (tests) — retire the old watcher first, and invalidate
+    // any pending re-arm so it can't resurrect the retired root (F10-08).
+    cancelPendingReArm(lc);
+    lc.generation += 1;
     existing.debouncer.cancelAll();
     existing.dirDebouncer.cancelAll();
     void existing.watcher.close();
@@ -208,24 +245,36 @@ export function startFileWatcher(
     // Self-heal (adversarial-review #16): transient FS-pressure errors
     // (EMFILE / ENFILE / ENOSPC / EPERM / EACCES) should not permanently kill
     // watching — re-arm after a short backoff instead of requiring a full
-    // server restart. Only re-arm when no other watcher has taken over.
+    // server restart. F10-08: the re-arm timer is now OWNED (cancellable by
+    // teardown) and generation-guarded (a stale timer aborts) so it cannot
+    // resurrect a watcher after stop or loop unboundedly on a deleted root.
     const TRANSIENT = new Set(["EMFILE", "ENFILE", "ENOSPC", "EPERM", "EACCES"]);
     if (code && TRANSIENT.has(code)) {
-      setTimeout(() => {
-        if (cache[WATCHER_KEY] === undefined) {
-          logger.info("file watcher re-arming after a transient error", { code });
-          try {
-            startFileWatcher(options);
-          } catch (reErr) {
-            logger.error("file watcher re-arm failed", {
-              err: reErr instanceof Error ? reErr : new Error(String(reErr)),
-            });
-          }
+      const lc = watcherLifecycle(cache);
+      cancelPendingReArm(lc); // at most one pending re-arm
+      const scheduledGen = lc.generation;
+      lc.reArmTimer = setTimeout(() => {
+        lc.reArmTimer = null;
+        // Stale if an intentional start/stop/retire happened since scheduling,
+        // or if another watcher already took over.
+        if (lc.generation !== scheduledGen) return;
+        if (cache[WATCHER_KEY] !== undefined) return;
+        logger.info("file watcher re-arming after a transient error", { code });
+        try {
+          startFileWatcher(options);
+        } catch (reErr) {
+          logger.error("file watcher re-arm failed", {
+            err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+          });
         }
-      }, 2_000).unref?.();
+      }, 2_000);
+      lc.reArmTimer.unref?.();
     }
   });
 
+  // A successful (re)start supersedes any pending re-arm and is a new generation.
+  cancelPendingReArm(lc);
+  lc.generation += 1;
   cache[WATCHER_KEY] = { watcher, debouncer, dirDebouncer, root };
   logger.info("file watcher started", { dir: watchedDir, debounceMs: WATCH_DEBOUNCE_MS });
   return watcher;
@@ -238,10 +287,15 @@ export function isFileWatcherAlive(): boolean {
   return cache[WATCHER_KEY] !== undefined;
 }
 
-/** Test-only: stop and forget the running watcher. */
+/** Test-only: stop and forget the running watcher. Also cancels any pending
+ *  re-arm timer and bumps the generation so a scheduled re-arm cannot resurrect
+ *  the watcher after teardown (F10-08). */
 export function stopFileWatcherForTests(): void {
-  const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
-  const existing = cache[WATCHER_KEY];
+  const cache = globalThis as unknown as Record<symbol, unknown>;
+  const lc = watcherLifecycle(cache);
+  cancelPendingReArm(lc);
+  lc.generation += 1;
+  const existing = cache[WATCHER_KEY] as WatcherHandle | undefined;
   if (!existing) return;
   existing.debouncer.cancelAll();
   existing.dirDebouncer.cancelAll();

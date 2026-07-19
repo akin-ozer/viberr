@@ -198,6 +198,22 @@ describe("codex adapter (SDK, injected fake client)", () => {
       networkAccessEnabled: false,
       webSearchMode: "disabled",
     });
+
+    // F10-12/F10-04: a supporting/reviewing run is read-only for the workspace
+    // (only the delivering engagement mutates), but — unlike the operator — it
+    // keeps network access for declared MCP resources.
+    const reviewer = fakeCodex(events);
+    createCodexAdapter({ codexFactory: reviewer.factory }).start(
+      { ...SPEC, kind: "reviewer" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const revOpts = reviewer.startOptions() as {
+      sandboxMode?: string;
+      networkAccessEnabled?: boolean;
+    };
+    expect(revOpts.sandboxMode).toBe("read-only");
+    expect(revOpts.networkAccessEnabled).toBeUndefined();
   });
 
   it("keeps subscription auth in the CLI env but out of generated shells", async () => {

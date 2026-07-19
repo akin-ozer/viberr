@@ -15,8 +15,22 @@ import reviewerDefinitionMd from "./assets/reviewer.definition.md?raw";
 import operatorProfileMd from "./assets/operator.profile.md?raw";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
+import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { SEED_AGENT_PROFILES } from "./demo-data.server";
+
+// F10-30: the built-in specialist PERSONA is the profile's own markdown body —
+// ONE authoring source. Previously the rich persona shipped as a SEPARATE
+// `agents/definitions/<id>.md` that overrode the profile body at run time, so a
+// built-in profile behaved differently from an equivalent custom one and editing
+// the profile body had no effect. We now fold each specialist's persona into its
+// profile-template body; the definition-file precedence is removed
+// (specialist-run.server.ts). Only the operator keeps a dedicated definition
+// (it is a system profile with its own persona path).
+const SPECIALIST_PERSONA_BY_ID: Record<string, string> = {
+  developer: splitFrontmatter(developerDefinitionMd).body.trim(),
+  reviewer: splitFrontmatter(reviewerDefinitionMd).body.trim(),
+};
 
 /**
  * Ships Viberr's DEFAULT agent assets — the operator PLUS the base specialists
@@ -41,10 +55,10 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   { rel: path.join("skills", "viberr-app-expertise", "SKILL.md"), content: viberrSkillMd },
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
-  // Definitions — the detailed persona + personality each run loads.
+  // Definitions — only the OPERATOR keeps a dedicated definition file (system
+  // profile). Specialist personas now live in their profile-template BODY
+  // (F10-30), so developer/reviewer definition files are no longer seeded.
   { rel: path.join("agents", "definitions", "operator.md"), content: operatorDefinitionMd },
-  { rel: path.join("agents", "definitions", "developer.md"), content: developerDefinitionMd },
-  { rel: path.join("agents", "definitions", "reviewer.md"), content: reviewerDefinitionMd },
   // The operator PROFILE template — so an operator deployment resolves (kind,
   // backends, capabilities) in a store that was never demo-seeded, which is what
   // makes the operator preinstalled everywhere.
@@ -67,12 +81,14 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
       // shared SEED_AGENT_PROFILES is also the DEMO seed's source, which DOES
       // create the backing KBs). The base install seeds on-disk skills but no
       // knowledge bases, so a KB grant here would dangle in every non-demo
-      // store as the "N of 0" ghost (2026-07-18 owner fix).
+      // store as the "N of 0" ghost (2026-07-18 owner fix). The short scannable
+      // `desc` is kept in frontmatter; the BODY is the full persona (F10-30).
       frontmatter: {
         ...p.frontmatter,
+        desc: p.frontmatter.desc || p.description,
         resources: { ...p.frontmatter.resources, kb: [] },
       },
-      description: p.description,
+      description: SPECIALIST_PERSONA_BY_ID[p.frontmatter.id] ?? p.description,
     }),
   }));
 }

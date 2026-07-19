@@ -1,10 +1,9 @@
-import { existsSync, readdirSync } from "node:fs";
 import type Database from "better-sqlite3";
 import {
   listProjectMembers,
   listProjects,
 } from "~/server/projections/board-query.server";
-import { agentProfilesDir } from "~/server/files/file-store-root.server";
+import { listGlobalAgentProfiles } from "~/server/org/gagents.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { listConnections } from "~/server/org/connections.server";
 import {
@@ -283,13 +282,13 @@ export function getHomeOrgSummary(
   const users = listUsers(db).filter((u) => !u.disabled);
   const admins = users.filter((u) => u.role === "admin").length;
 
-  let globalAgents = 0;
-  const profilesDir = agentProfilesDir(options.dataRoot);
-  if (existsSync(profilesDir)) {
-    globalAgents = readdirSync(profilesDir).filter((f) =>
-      f.endsWith(".md"),
-    ).length;
-  }
+  // F10-21: count SPECIALIST profiles only — the same population the Org
+  // Resources catalog lists (`listGlobalAgentProfiles` filters kind, excluding
+  // the system operator). Counting every `.md` here (incl. operator.md) made the
+  // Home tile say 4 while the catalog showed 3 for no disclosed reason.
+  const globalAgents = listGlobalAgentProfiles(db, {
+    dataRoot: options.dataRoot,
+  }).length;
 
   // F5: KB & skills are DISK-backed ("disk is truth" — resources.server.ts) and
   // the `org_*` projection rows can lag the folders, so count from the SAME

@@ -56,23 +56,26 @@ describe("/projects/:slug/review", () => {
     };
 
     expect(result.total).toBe(2);
-    expect(result.ready.map((t) => t.key)).toEqual(["VIB-142"]);
-    expect(result.working.map((t) => t.key)).toEqual(["VIB-145"]);
+    // F10-11/F10-15: acceptance readiness is revision-bound now. VIB-142 has a
+    // verdict-capable reviewer engaged but no approving verdict on its current
+    // revision (validation "changed"), so it is NOT acceptance-ready — it sits
+    // in "Still in review" with an honest block reason, not the acceptance
+    // panel. VIB-145 waits on agents.
+    expect(result.ready.map((t) => t.key)).toEqual([]);
+    expect(result.working.map((t) => t.key)).toEqual(["VIB-142", "VIB-145"]);
 
-    // Panel-1 row: packet header wins the subline.
-    const vib142 = result.ready[0]!;
+    const vib142 = result.working.find((t) => t.key === "VIB-142")!;
     expect(vib142.packet?.kind).toBe("Completion report");
-    expect(reviewRowSub(vib142)).toBe(
-      "Completion report — Accept completion, or send back for one fix?",
-    );
     expect(vib142.pr).toEqual({ number: 318, state: "review" });
     expect(vib142.validation).toBe("changed");
+    // The subline states WHY it isn't ready (a required reviewer is outstanding).
+    expect(vib142.blockReason).toMatch(/waiting on 1 required reviewer/i);
+    expect(reviewRowSub(vib142)).toBe(vib142.blockReason);
 
-    // Panel-2 row: no packet → newest timeline event, markers stripped.
-    const vib145 = result.working[0]!;
+    const vib145 = result.working.find((t) => t.key === "VIB-145")!;
     expect(vib145.packet).toBeNull();
+    // No revision / no required reviewer verdict yet → also not acceptance-ready.
     const sub = reviewRowSub(vib145);
-    expect(sub).toContain("Transition request");
     expect(sub).not.toContain("**");
     expect(sub).not.toContain("`");
   });
@@ -86,6 +89,7 @@ describe("/projects/:slug/review", () => {
       latestEventText: null,
       pr: null,
       validation: "none",
+      blockReason: null,
     };
     expect(reviewRowSub(bare)).toBe(
       "Agent working — the packet arrives at the boundary.",

@@ -22,8 +22,9 @@ audit — never canonical business truth.
 
 Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · better-sqlite3 (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
-(no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK, with a built-in simulated
-backend so the full product works with zero external credentials.
+(no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK — configure a credential for
+at least one to run real agents. A backend with no credential is reported unavailable and
+runs on it fail fast with an honest error (there is no simulated fallback).
 
 ## Quickstart (local dev)
 
@@ -59,9 +60,9 @@ Sign in with the seeded demo accounts:
 | Murat Yıldız / Selin Aksoy / Deniz Şahin | `…@viberr.dev` | `viberr-dev-2828` | member |
 
 The seed materializes the full demo dataset: the **viberr-core** project with tasks
-VIB-139…VIB-168 (packets, timelines, agent runs with live-dripping logs), two stub
-projects, notifications, agent profiles, knowledge bases. `npm run seed -- --reset`
-restores it to pristine at any time.
+VIB-139…VIB-168 (packets, timelines), two stub projects, notifications, agent profiles,
+knowledge bases. It ships no run history — agent runs only ever come from real runs you
+start. `npm run seed -- --reset` restores it to pristine at any time.
 
 Without `npm run seed`, an empty instance boots too: when the users table is empty the
 server creates a bootstrap admin at startup — set `VIBERR_SEED_ADMIN_EMAIL` /
@@ -84,8 +85,9 @@ first sign-in).
 
 ## Enabling real agent backends
 
-Out of the box every agent run uses the built-in **simulated** engine (clearly labeled,
-streams the seeded demo scripts live over SSE). To run real agents you can use a
+Out of the box no agent backend is configured, so runs fail fast with an honest
+"backend unavailable" error — there is no simulated fallback in dev or production (the
+simulated engine is a test-only adapter). To run real agents you can use a
 **subscription (no per-token API key)** or an API key; set it in `.env` and restart —
 detection is presence-only, no paid call:
 
@@ -110,7 +112,9 @@ For untrusted tasks, run Codex under a separate OS user/container with only the
 task workspace mounted and keep delivery credentials in the server process.
 
 Confirm what's live: `GET /resources/health` → `backends: { claude, codex }` reports
-`real` vs `simulated`. New runs then stream real SDK output; raw NDJSON of every run is
+`real` vs `unavailable` — `real` means a credential is configured/detected (presence
+only; an expired token still reads `real`), `unavailable` means runs on that backend fail
+fast. New runs then stream real SDK output; raw NDJSON of every run is
 persisted under `<data root>/runtimes/`. Container specifics: `docs/operations/deployment.md`.
 
 ## Enabling GitHub integration
@@ -139,9 +143,9 @@ whitelist-based: it succeeds only for emails that already have a (non-disabled) 
 user row — plus, for Google, domains added to the org allowlist (those provision on
 first login).
 
-- **GitHub**: OAuth app with callback `https://<host>/auth/github/callback` →
+- **GitHub**: OAuth app with callback `https://<host>/api/auth/callback/github` →
   `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` (scopes `read:user user:email`).
-- **Google**: OAuth web client with redirect `https://<host>/auth/google/callback` →
+- **Google**: OAuth web client with redirect `https://<host>/api/auth/callback/google` →
   `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (scopes `openid email profile`, PKCE).
 
 ## Docker

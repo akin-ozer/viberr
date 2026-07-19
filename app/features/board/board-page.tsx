@@ -17,6 +17,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill } from "~/ui/pill";
+import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import {
@@ -126,6 +127,8 @@ function TaskCard({
   onDragStart,
   onDragEnd,
   onDragOver,
+  allStages,
+  onMoveTask,
 }: {
   task: TaskSummary;
   /** The key of the card immediately below this one (null when last) — used to
@@ -140,6 +143,9 @@ function TaskCard({
   onDragStart: (task: TaskSummary, e: DragEvent) => void;
   onDragEnd: () => void;
   onDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
+  /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
+  allStages: BoardStage[];
+  onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   const cls = ["card"];
   if (task.waiting === "human") cls.push("wait-human");
@@ -202,6 +208,18 @@ function TaskCard({
           <WaitTag task={task} />
         </div>
       </Link>
+      {/* F10-25: keyboard-accessible stage move (drag is pointer-only). Sibling
+          of the Link so it never triggers navigation; opens the same
+          keyboard-navigable StageMenu the task-detail panel uses. */}
+      {canTransition && (
+        <div className="card-move">
+          <StageMenu
+            stages={allStages}
+            currentStageId={task.stage}
+            onSelect={(stageId) => onMoveTask(task.key, stageId)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -238,6 +256,8 @@ function Column({
   onCardDragOver,
   onColumnDragOver,
   onColumnDrop,
+  allStages,
+  onMoveTask,
 }: {
   stage: BoardStage;
   tasks: TaskSummary[];
@@ -259,6 +279,8 @@ function Column({
   onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
   onColumnDragOver: (stageId: string, e: DragEvent) => void;
   onColumnDrop: (stageId: string, e: DragEvent) => void;
+  allStages: BoardStage[];
+  onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
@@ -301,6 +323,8 @@ function Column({
                   onDragStart={onCardDragStart}
                   onDragEnd={onCardDragEnd}
                   onDragOver={onCardDragOver}
+                  allStages={allStages}
+                  onMoveTask={onMoveTask}
                 />
               </Fragment>
             ))}
@@ -693,6 +717,7 @@ function StageBoard({
   onCardDragOver,
   onColumnDragOver,
   onColumnDrop,
+  onMoveTask,
 }: {
   columns: BoardColumnData[];
   visible: (tasks: TaskSummary[]) => TaskSummary[];
@@ -710,7 +735,11 @@ function StageBoard({
   onCardDragOver: (task: TaskSummary, nextKey: string | null, e: DragEvent) => void;
   onColumnDragOver: (stageId: string, e: DragEvent) => void;
   onColumnDrop: (stageId: string, e: DragEvent) => void;
+  /** F10-25: keyboard-accessible stage move (drag is pointer-only). */
+  onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
+  // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
+  const allStages = columns.map((c) => c.stage);
   return (
     <div className="board">
       {columns.map((c) => {
@@ -743,6 +772,8 @@ function StageBoard({
             onCardDragOver={onCardDragOver}
             onColumnDragOver={onColumnDragOver}
             onColumnDrop={onColumnDrop}
+            allStages={allStages}
+            onMoveTask={onMoveTask}
           />
         );
       })}
@@ -866,6 +897,23 @@ export function BoardPage({
     transitionFetcher.submit(fd, { method: "post" });
   };
 
+  // F10-25: keyboard-accessible move — the SAME governed transition the drop
+  // uses, appending to the end of the target stage. A no-op when unchanged.
+  const onMoveTask = (taskKey: string, toStageId: string) => {
+    const fromStage = columns.find((c) =>
+      c.tasks.some((t) => t.key === taskKey),
+    )?.stage.id;
+    if (fromStage === toStageId) return;
+    setArrivedKey(taskKey);
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "reorder");
+    fd.set("taskKey", taskKey);
+    fd.set("to", toStageId);
+    fd.set("beforeKey", "");
+    transitionFetcher.submit(fd, { method: "post" });
+  };
+
   // Toast on completion (and drop the pulse if the move was rejected).
   useEffect(() => {
     if (transitionFetcher.state !== "idle" || !transitionFetcher.data) return;
@@ -980,6 +1028,7 @@ export function BoardPage({
           onCardDragOver={onCardDragOver}
           onColumnDragOver={onColumnDragOver}
           onColumnDrop={onColumnDrop}
+          onMoveTask={onMoveTask}
         />
       ) : (
         <ListView tasks={visible(allTasks)} stages={stages} />

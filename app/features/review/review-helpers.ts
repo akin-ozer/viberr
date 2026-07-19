@@ -9,11 +9,18 @@ export interface ReviewRowView {
   latestEventText: string | null;
   pr: { number: number; state: "review" | "merged" } | null;
   validation: ValidationValue;
+  /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
+   *  Only ever populated on "Still in review" rows — the acceptance panel holds
+   *  only rows with a null block reason. */
+  blockReason: string | null;
 }
 
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 14, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
+  // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
+  // no delivered revision) instead of a generic "needs a human decision".
+  if (t.blockReason) return t.blockReason;
   if (t.packet) return t.packet.kind + " — " + t.packet.title;
   if (t.latestEventText) return plainText(t.latestEventText);
   // No packet, no timeline event yet. Don't claim "agent working" on a task
