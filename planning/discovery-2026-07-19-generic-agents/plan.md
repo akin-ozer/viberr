@@ -188,6 +188,35 @@ Full inventory in the workflow synthesis; anchors:
    findings; docker bind-mount live verification (engage generic agent + reviewer
    verdict + ask-human packet end-to-end).
 
+## Implementation status (2026-07-19)
+
+Phases 1, 2a, 2b, 2c, 3, 5 landed (commits on `generic-agents`); phase 4 (route
+wire-name renames) + the UI rework deferred to a design pass — the machinery is
+already generic. Full suite green (1370); typecheck clean.
+
+**Adversarial review (2-round, 6 dimensions, adversarial-verify per finding).**
+8 confirmed findings, all fixed:
+- R2 HIGH — legacy `report-validation-verdict: recommend` on the DELIVERING
+  developer coerced to `direct`, arming verdict-veto on live pre-branch data.
+  Fix: `recommend` is treated as non-explicit (falls through to the
+  delivers-based default → OFF for a builder).
+- MEDIUM — editor round-tripped an absent verdict grant into an explicit `off`,
+  revoking a pre-branch reviewer's verdict on cosmetic save. Fix: seed the
+  toggle from the effective mode via a delivery heuristic.
+- MEDIUM ×3 (one root) — assign paths could duplicate a profileId in
+  engagements[], corrupting run routing. Fix: dedup on promote, no-op on
+  re-engage, + parser profileId-uniqueness backstop.
+- MEDIUM — mid-run post_comment corrupted the no-progress guard. Fix: the prior
+  reply must predate this run's start.
+- LOW ×2 — enforcement labeling for the 3 collaboration ids; packet `from`
+  leaked the raw actor-ref codec string. Both fixed.
+
+**Docker live-data verification** (bind mount seeded pre-branch, deterministic
+tsx check against branch source): all 14 legacy-format task files absorb into
+engagements with ZERO dropped timeline events and zero corruption diagnostics;
+the developer's legacy `recommend` verdict grant resolves to verdict OFF (R2
+disarmed) while the reviewer resolves to verdict ON (behavior preserved).
+
 ## Risk register (from investigation; mitigation owner = this pass)
 
 - R1 regex-on-everyone: fallback ONLY for verdict-granted profiles.
