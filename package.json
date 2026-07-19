@@ -11,6 +11,7 @@
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "test": "vitest run",
+    "check:env": "tsx scripts/env-check.ts",
     "migrate": "tsx scripts/run-migrations.ts",
     "seed": "tsx scripts/seed.ts",
     "rescan": "tsx scripts/rescan.ts",
