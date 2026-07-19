@@ -208,6 +208,53 @@ describe("assignSpecialist", () => {
   });
 });
 
+describe("engagement uniqueness (adversarial-review)", () => {
+  /** Deploy a SECOND profile alongside `dev` so a profile can be moved between
+   *  the delivering and supporting positions. */
+  function deploySecond(id: string): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const fm = file.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        ...fm.agents,
+        {
+          profileId: id,
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: id, role: id, backends: ["claude"], model: "sonnet" },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("promoting a SUPPORTING profile to deliverer never duplicates its profileId", async () => {
+    deploySecond("style");
+    // dev delivers; style is a supporting reviewer.
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    // Promote style to be THE deliverer.
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    // style appears exactly once (as deliverer); dev is dropped; no duplicate.
+    expect(fm.engagements.filter((e) => e.profileId === "style")).toHaveLength(1);
+    expect(deliveringEngagement(fm)?.profileId).toBe("style");
+    expect(supportingEngagements(fm).some((e) => e.profileId === "style")).toBe(false);
+  });
+
+  it("engaging the current deliverer as a reviewer is a no-op (no duplicate)", async () => {
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    const res = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    expect(res.alreadyEngaged).toBe(true);
+
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.engagements.filter((e) => e.profileId === "dev")).toHaveLength(1);
+    expect(deliveringEngagement(fm)?.profileId).toBe("dev");
+  });
+});
+
 describe("startSpecialistRun", () => {
   async function assign(): Promise<void> {
     await assignSpecialist(

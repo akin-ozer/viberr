@@ -137,6 +137,27 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect(demotion?.severity).toBe("warning");
   });
 
+  it("dedupes a profile engaged more than once (profileId-uniqueness, keep first)", () => {
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: true },
+          { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false },
+        ],
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    // The same profileId corrupts run routing (startAgentRun resolves by the
+    // first match) — keep only the first engagement.
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: true },
+    ]);
+    expect(
+      result.diagnostics.find((d) => d.code === "frontmatter.duplicate_engagement")?.severity,
+    ).toBe("warning");
+  });
+
   it("missing required fields → warnings + safe fallbacks, never a throw", () => {
     const result = parseTaskFrontmatter({}, { fallbackKey: "VIB-9" });
     expect(result.frontmatter.key).toBe("VIB-9");

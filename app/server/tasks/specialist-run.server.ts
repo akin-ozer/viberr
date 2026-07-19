@@ -277,9 +277,16 @@ export async function assignSpecialist(
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
+      // The new deliverer replaces the old one; if it was previously a
+      // SUPPORTING engagement, drop that entry too so its profileId never
+      // appears twice (a duplicate profileId corrupts run routing — the
+      // engagements.find in startAgentRun returns the first match, so a later
+      // review run would resolve to the delivers:true entry and run as primary).
       parsed.frontmatter.engagements = [
         { ...ref, delivers: true },
-        ...supportingEngagements(parsed.frontmatter),
+        ...supportingEngagements(parsed.frontmatter).filter(
+          (e) => e.profileId !== ref.profileId,
+        ),
       ];
       // Clear any pending "assign specialist" recommendation — it's now done.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
@@ -353,9 +360,12 @@ export async function assignReviewer(
   );
   assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
 
-  const alreadyEngaged = supportingEngagements(
-    existing.parsed.frontmatter,
-  ).some((r) => r.profileId === reviewer.profileId);
+  // Already engaged in ANY capacity (delivering OR supporting): no-op. Scanning
+  // only the supporting list let the CURRENT deliverer be re-added as a
+  // supporting reviewer, duplicating its profileId in engagements[].
+  const alreadyEngaged = existing.parsed.frontmatter.engagements.some(
+    (r) => r.profileId === reviewer.profileId,
+  );
   if (alreadyEngaged) {
     return {
       profileId: reviewer.profileId,

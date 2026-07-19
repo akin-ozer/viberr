@@ -1321,6 +1321,12 @@ export async function postAgentReplyComment(
  * displayed role (pre-profileId events encoded a role slug — their displayed
  * role still equals the live role snapshot). Used to detect a no-progress
  * repeat before re-inviting the operator to react.
+ *
+ * `before` (the CURRENT run's start time) excludes THIS run's own mid-run
+ * `post_comment` toolkit events — those live on the timeline before completion,
+ * and counting one as the "previous reply" corrupts the no-progress comparison
+ * (the guard would compare the final report against a comment this same run
+ * just posted). Only comments that predate this run count as the prior reply.
  */
 function latestAgentReplyText(
   ctx: TaskMutationContext,
@@ -1329,9 +1335,11 @@ function latestAgentReplyText(
   backend: RealBackend,
   profileId: string | null,
   role: string,
+  before?: string | null,
 ): string | null {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) return null;
+  const beforeMs = before ? Date.parse(before) : NaN;
   for (const e of file.parsed.timeline) {
     if (
       e.type === "comment" &&
@@ -1340,6 +1348,10 @@ function latestAgentReplyText(
       ((profileId !== null && e.actor.profileId === profileId) ||
         agentRoleDisplay(e.actor) === role)
     ) {
+      // Skip comments from the current run (occurredAt >= run start).
+      if (!Number.isNaN(beforeMs) && Date.parse(e.occurredAt) >= beforeMs) {
+        continue;
+      }
       return e.text;
     }
   }
@@ -1938,6 +1950,9 @@ export async function applyAgentCompletionEffects(
   // operator snapshot caps per-comment text on ITS side, so prompts stay
   // bounded.
   const fullText = fullReplyTextForRun(db, finished.id);
+  // The prior reply must predate THIS run so a mid-run post_comment from this
+  // same run can't be mistaken for it (corrupting no-progress detection).
+  const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
   const prevReply = latestAgentReplyText(
     ctx,
     input.projectSlug,
@@ -1945,6 +1960,7 @@ export async function applyAgentCompletionEffects(
     input.backend,
     input.profileId,
     input.role,
+    thisRunStartedAt,
   );
   // 1. Resolve this run's OUTCOME ENVELOPE (G4) + collaboration gates, then
   //    land the reply + verdict + question in ONE atomic write for EVERY

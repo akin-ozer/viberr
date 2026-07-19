@@ -430,8 +430,29 @@ function parseEngagements(
       engagements.push({ ...reviewer, delivers: false });
     }
   }
-  let sawDeliverer = false;
+  // profileId-uniqueness invariant (defense-in-depth): a profile has at most
+  // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
+  // resolves by the FIRST match), so keep the first occurrence and drop the
+  // rest — with a diagnostic — whatever produced the duplicate (a hand edit or
+  // a missed write path).
+  const seenProfiles = new Set<string>();
+  const deduped: Engagement[] = [];
   for (const engagement of engagements) {
+    if (seenProfiles.has(engagement.profileId)) {
+      diagnostics.push(
+        diagWarning(
+          "frontmatter.duplicate_engagement",
+          `Profile \`${engagement.profileId}\` is engaged more than once — only the first engagement is kept.`,
+          "engagements",
+        ),
+      );
+      continue;
+    }
+    seenProfiles.add(engagement.profileId);
+    deduped.push(engagement);
+  }
+  let sawDeliverer = false;
+  for (const engagement of deduped) {
     if (!engagement.delivers) continue;
     if (!sawDeliverer) {
       sawDeliverer = true;
@@ -446,7 +467,7 @@ function parseEngagements(
     );
     engagement.delivers = false;
   }
-  return engagements;
+  return deduped;
 }
 
 /**
