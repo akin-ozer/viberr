@@ -157,6 +157,60 @@ export async function pushWorkspaceBranch(
       return { status: "no_branch", reason: `HEAD not on a task branch (${branch || "detached"})` };
     }
 
+    // Server-side DELIVERY FINALIZATION: if the agent WROTE changes but never
+    // committed them, commit the working tree now so delivery reaches the
+    // branch. The agent may not commit for legitimate reasons — its
+    // `execute-code-or-write-repo` grant is withheld (so its prompt is told NOT
+    // to commit), a Codex run wrote files but read its "workspace contract" as
+    // prohibiting commit, etc. At the Review boundary those changes ARE the
+    // deliverable (the human reviews the resulting PR), and delivery must not
+    // dead-end just because the agent left them uncommitted. A well-behaved
+    // agent that already committed leaves a clean tree here — this is a no-op
+    // for it. Only reachable once HEAD is confirmed on the task branch (never
+    // the default), so it can never auto-commit onto main.
+    const statusRes = await exec(
+      "git",
+      ["-C", repoDir, "status", "--porcelain"],
+      { cwd: repoDir, timeoutMs: 5_000 },
+    );
+    if (statusRes.ok && statusRes.stdout.trim() !== "") {
+      const addRes = await exec(
+        "git",
+        ["-C", repoDir, "add", "-A"],
+        { cwd: repoDir, timeoutMs: 15_000 },
+      );
+      if (addRes.ok) {
+        const commitRes = await exec(
+          "git",
+          [
+            "-C",
+            repoDir,
+            // Inline identity so the commit works even in a fresh clone with no
+            // configured user; the AGENT already wrote the content.
+            "-c",
+            "user.name=Viberr Delivery",
+            "-c",
+            "user.email=delivery@viberr.local",
+            "commit",
+            "-m",
+            `[${taskKey}] deliver working-tree changes from the agent run`,
+          ],
+          { cwd: repoDir, timeoutMs: 20_000 },
+        );
+        if (commitRes.ok) {
+          logger.info("committed uncommitted workspace changes for delivery", {
+            taskKey,
+            branch,
+          });
+        } else {
+          logger.info("delivery auto-commit failed — pushing existing commits only", {
+            taskKey,
+            branch,
+          });
+        }
+      }
+    }
+
     // Count local commits not on the default branch — nothing to push otherwise.
     const countRes = await exec(
       "git",
