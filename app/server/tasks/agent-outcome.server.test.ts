@@ -1,10 +1,35 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
+  AGENT_OUTCOME_JSON_SCHEMA,
   effectiveCollabMode,
   parseAgentOutcomeJson,
   resolveAgentCollab,
 } from "./agent-outcome.server";
+
+/** OpenAI strict structured-output invariant (the `codex_output_schema` rule
+ * that failed every Codex agent run): every object node sets
+ * additionalProperties:false AND lists EVERY property key in `required`. Walks
+ * recursively so a nested `question`/`options` violation is caught too. */
+function assertStrictSchema(node: unknown, path = "$"): string[] {
+  const errs: string[] = [];
+  if (!node || typeof node !== "object") return errs;
+  const n = node as Record<string, unknown>;
+  const types = Array.isArray(n.type) ? n.type : [n.type];
+  if (types.includes("object")) {
+    const props = (n.properties ?? {}) as Record<string, unknown>;
+    const required = new Set((n.required as string[]) ?? []);
+    if (n.additionalProperties !== false) errs.push(`${path}: additionalProperties must be false`);
+    for (const key of Object.keys(props)) {
+      if (!required.has(key)) errs.push(`${path}.${key}: not in required`);
+      errs.push(...assertStrictSchema(props[key], `${path}.${key}`));
+    }
+  }
+  if (types.includes("array") && n.items) {
+    errs.push(...assertStrictSchema(n.items, `${path}[]`));
+  }
+  return errs;
+}
 
 const grant = (capabilityId: string, mode: CapabilityGrant["mode"]): CapabilityGrant => ({
   capabilityId,
@@ -44,6 +69,24 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     expect(
       effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict", false),
     ).toBe("human");
+  });
+});
+
+describe("AGENT_OUTCOME_JSON_SCHEMA — Codex strict structured-output conformance", () => {
+  it("every property is required + additionalProperties:false (recursively)", () => {
+    // Regression: the envelope shipped with optional properties omitted from
+    // `required`, so OpenAI rejected it (invalid_json_schema) and EVERY
+    // verdict/ask-capable Codex agent run failed.
+    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
+  });
+
+  it("optional fields are nullable, and the parser treats null as absent", () => {
+    // A Codex reply that fills only summary (verdict/question null) parses to a
+    // plain report with no verdict/question.
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({ summary: "Done, no verdict needed.", verdict: null, question: null }),
+    );
+    expect(o).toEqual({ summary: "Done, no verdict needed." });
   });
 });
 

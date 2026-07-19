@@ -39,11 +39,20 @@ export interface AgentOutcome {
   question?: AgentOutcomeQuestion;
 }
 
-/** JSON schema for the Codex `outputSchema` transport. */
+/**
+ * JSON schema for the Codex `outputSchema` transport. MUST satisfy OpenAI's
+ * STRICT structured-output rules (the same ones OPERATOR_PLAN_SCHEMA follows,
+ * enforced by `codex_output_schema`): EVERY property appears in `required`, and
+ * optional fields are expressed as NULLABLE types (`["string","null"]`,
+ * `enum:[…, null]`) — never by omission. Getting this wrong makes the API
+ * reject the request with `invalid_json_schema`, which failed every Codex agent
+ * run that mounted the envelope (verdict/ask-capable). The tolerant parser
+ * (`parseAgentOutcomeJson`) already treats null/absent fields as "not present".
+ */
 export const AGENT_OUTCOME_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary"],
+  required: ["summary", "verdict", "question"],
   properties: {
     summary: {
       type: "string",
@@ -51,29 +60,29 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
         "Your report back to the task timeline: what you did/found, in markdown prose.",
     },
     verdict: {
-      type: "string",
-      enum: ["approve", "request_changes"],
+      type: ["string", "null"],
+      enum: ["approve", "request_changes", null],
       description:
-        "ONLY when your role is to judge the work: approve, or request_changes. Omit otherwise.",
+        "ONLY when your role is to judge the work: approve, or request_changes. null otherwise.",
     },
     question: {
-      type: "object",
+      type: ["object", "null"],
       additionalProperties: false,
-      required: ["title"],
+      required: ["title", "body", "options"],
       description:
-        "ONLY when you are blocked on a decision a human must make. Omit otherwise.",
+        "ONLY when you are blocked on a decision a human must make. null otherwise.",
       properties: {
         title: { type: "string" },
-        body: { type: "string" },
+        body: { type: ["string", "null"] },
         options: {
-          type: "array",
+          type: ["array", "null"],
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["title"],
+            required: ["title", "detail"],
             properties: {
               title: { type: "string" },
-              detail: { type: "string" },
+              detail: { type: ["string", "null"] },
             },
           },
         },
