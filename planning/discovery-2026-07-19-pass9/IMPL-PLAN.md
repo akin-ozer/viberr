@@ -70,10 +70,14 @@ F22, F4, F12**, plus **F8/F9 verified** (tool-enforcement asymmetry is already h
 - F17/F18 security (archived agent-runtime gate; per-entry tolerant parse — no ACL wipe).
 - F10 fail-safe verdict + anomaly flag; F12 warns on a missing declared skill; F5/F21 corrected.
 
-**Remaining (lower-severity, documented not rushed):**
-- F25/F6 divergence surfacing (out-of-band PR close detected + stale accept-rec cleared, but no loud
-  timeline event/notification/PR-closed badge). Medium UX; found live. Reconcile updates `pr.state`.
+**Re-verified as NON-issues (no fix needed):**
+- F25/F6: FALSE POSITIVE. The R8-6 reconciler already surfaces an out-of-band PR close (typed
+  divergence timeline event + withdraws the moot accept-rec + sends a notification). Confirmed in
+  code (github-reconciler.server.ts:255+) and in VIB-4's data. My live obs missed it (timing/grep).
+- F8/F9: honest "claude-only" tool-enforcement labels already in place (owner Q2). Verified.
+
+**Remaining (genuinely minor, documented not rushed — all LOW severity):**
 - F13 swallowed errors + agent audit attribution under the operator system actor. Robustness.
 - F19 operator legacy dead code (`operatorSchedulesOnOwner`) + stale "Phase-8" comments. Cleanup.
 - F20 board rescan reprojects instance-wide under a project-scoped gate (idempotent; intentional-ish)
-  + `applyRecommendation` pre-authz reads (info already view-accessible). Low value — left as-is.
+  + `applyRecommendation` pre-authz reads (info already view-accessible). Left as-is.
