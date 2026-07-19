@@ -154,6 +154,11 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "completion-for-acceptance",
   "transition-to-done",
   "change-project-policy",
+  // Generic-agent collaboration gates (real, both-backend enforcement): the
+  // completion pipeline gates verdict-recording + the ask-human question packet
+  // on these grants server-side, so withholding binds on Claude AND Codex.
+  "report-validation-verdict",
+  "ask-human",
 ]);
 
 /**
@@ -177,6 +182,10 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   "commit-push-branch",
   "open-review-pr",
   "execute-code-or-write-repo",
+  // The mid-run post_comment tool is mounted only on Claude (Codex has no
+  // in-process comment channel at all — its final reply always posts), so
+  // withholding comment-on-task binds on Claude and is advisory on Codex.
+  "comment-on-task",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

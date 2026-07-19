@@ -95,6 +95,15 @@ const selectStyle: CSSProperties = {
   outline: 0,
 };
 
+// Repo-write grants that mark a profile as a DELIVERING builder (mirrors
+// listDeployedSpecialists' delivery heuristic) — used to seed the verdict
+// toggle from its RUNTIME-effective mode below.
+const DELIVERY_CAP_IDS = [
+  "execute-code-or-write-repo",
+  "commit-push-branch",
+  "create-task-branch",
+];
+
 function seedCaps(
   initial: AgentProfileView | null,
   defaults: Readonly<Record<string, CapMode>>,
@@ -102,6 +111,19 @@ function seedCaps(
   if (!initial) return { ...defaults };
   const caps: Record<string, CapMode> = {};
   for (const id of Object.keys(defaults)) caps[id] = "off";
+  const stored = new Set(initial.capabilities.map((g) => g.capabilityId));
+  // report-validation-verdict has a delivers-dependent runtime default (absent
+  // → OFF for a builder, ON for a reviewer — see effectiveCollabMode). Seed the
+  // toggle from that EFFECTIVE value when the grant is absent, so opening +
+  // saving a pre-branch profile can't silently revoke a reviewer's verdict (or
+  // arm a builder's) — the display matches runtime, and save normalizes the
+  // implicit default into explicit data.
+  if ("report-validation-verdict" in caps && !stored.has("report-validation-verdict")) {
+    const delivers = initial.capabilities.some(
+      (g) => DELIVERY_CAP_IDS.includes(g.capabilityId) && g.mode === "direct",
+    );
+    caps["report-validation-verdict"] = delivers ? "off" : "direct";
+  }
   for (const grant of initial.capabilities) {
     if (grant.capabilityId in caps) caps[grant.capabilityId] = grant.mode;
   }

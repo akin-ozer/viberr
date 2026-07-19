@@ -1,7 +1,4 @@
-import {
-  UNIFIED_CAP_CATALOG,
-  coerceSpecialistCapabilityMode,
-} from "~/shared/capabilities";
+import { UNIFIED_CAP_CATALOG } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type {
   FileActorRef,
@@ -204,9 +201,19 @@ export function effectiveCollabMode(
   delivers: boolean,
 ): "direct" | "human" | "off" {
   const grant = grants.find((g) => g.capabilityId === capabilityId);
-  if (grant) {
-    const mode = coerceSpecialistCapabilityMode(grant.mode);
-    return mode === "direct" ? "direct" : mode === "human" ? "human" : "off";
+  // An EXPLICIT direct/human/off grant is authoritative. `recommend` is NOT:
+  // it is an operator-only mode with no agent runtime meaning, and on
+  // pre-generic-agents data it was a DECORATIVE grant that did nothing (main's
+  // seed gave the DELIVERING developer `report-validation-verdict: recommend`).
+  // The R7-5 coercion (recommend → direct) would silently ARM verdict-veto
+  // power on that delivering developer against live data — the exact R1/R2
+  // hazard. So a `recommend` grant falls through to the default, same as absent.
+  if (grant && grant.mode !== "recommend") {
+    return grant.mode === "direct"
+      ? "direct"
+      : grant.mode === "human"
+        ? "human"
+        : "off";
   }
   if (capabilityId === "report-validation-verdict") {
     return delivers ? "off" : "direct";

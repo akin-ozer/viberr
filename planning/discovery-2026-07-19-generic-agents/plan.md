@@ -145,11 +145,14 @@ Full inventory in the workflow synthesis; anchors:
   mention of a deployed-but-unengaged profile engages it (delivers only if none
   exists). Session resume keys (profileId, taskKey, thread); recovery filter moves
   in lockstep (R5).
-- UI: ExecutionProfile → operator cell + N-engagement list (delivers badge,
-  capability chips, per-engagement run/remove); runs panels/retry keyed on run kind
-  `agent`; event rendering resolves agent display names via profileId; agents page
-  keeps operator/generic split (operator IS special); create-profile-modal gains
-  `desc` + persona fields and the unified catalog. All on `--viberr-*` tokens.
+- UI — AMENDED scope: create-profile-modal gained the `desc` + persona split
+  (D6, implemented). DEFERRED to a future design-language pass: renaming the
+  task-page wire intents (assign/run-specialist, assign/run/remove-reviewer →
+  engage/run/disengage-agent) and the execution-profile grid labels, plus
+  profile-name resolution for agent chips — all purely presentational; the
+  machinery beneath (startAgentRun, engagements, generic operator tools) is
+  already generic. Rationale: wire-name churn buys no behavioral uniformity
+  and the canonical `design/` mock should drive the visual rework.
 
 ### Seed, tests, e2e (the R12 answer)
 
