@@ -42,6 +42,11 @@ export interface AuthorityActor {
 export interface AuthorityProject {
   slug: string;
   memberRoles: Map<string, ProjectRole>;
+  /** Whether the project is archived (read-only). Required so every authority
+   *  call carries it — the agent-runtime path (`requireRunAgents`) used to omit
+   *  the archived read-only gate that config surfaces enforce, letting agents run
+   *  on an archived project (F17). */
+  archived: boolean;
 }
 
 export interface ProjectAuthority {
@@ -189,6 +194,10 @@ export function requireRunAgents(
   actor: AuthorityActor,
   what: string,
 ): ProjectAuthority {
+  // F17: an archived project is read-only for EVERYONE — the agent runtime is a
+  // mutation surface (it writes branches, commits, timeline events), so gate it
+  // exactly like the config surfaces do, before the role tier check.
+  requireProjectMutable({ archived: project.archived }, what);
   return requireProjectAuthority(db, project, actor, rolesForAction("run-agents"), {
     action: "run-agents",
     what,
@@ -203,6 +212,8 @@ export function canRunAgents(
   actor: AuthorityActor,
   what: string,
 ): boolean {
+  // F17: no runtime sessions on an archived (read-only) project.
+  if (project.archived) return false;
   return resolveProjectAuthority(db, project, actor, rolesForAction("run-agents"), {
     action: "run-agents",
     what,
@@ -250,6 +261,7 @@ export function assertProjectAction(
     memberRoles: new Map(
       file.parsed.frontmatter.members.map((m) => [m.userId, m.role]),
     ),
+    archived: file.parsed.frontmatter.archived === true,
   };
   const allowed = action === "any-member" ? "any-member" : rolesForAction(action);
   const decision = resolveProjectAuthority(db, project, actor, allowed, {

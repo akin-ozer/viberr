@@ -8,6 +8,11 @@ import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { listConnections } from "~/server/org/connections.server";
 import {
+  listKnowledgeBases,
+  listMcpServers,
+  listSkills,
+} from "~/server/org/resources.server";
+import {
   createActorResolver,
   initialsOfName,
 } from "~/shared/mapping/actor.server";
@@ -286,8 +291,12 @@ export function getHomeOrgSummary(
     ).length;
   }
 
-  const countOf = (table: string): number =>
-    (db.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }).c;
+  // F5: KB & skills are DISK-backed ("disk is truth" — resources.server.ts) and
+  // the `org_*` projection rows can lag the folders, so count from the SAME
+  // union-of-disk-and-rows listing the org resources page uses (a folder-only
+  // skill was counted as 0 on the home tile while it showed on the resources
+  // page). MCP servers are DB-only, so their table count is authoritative.
+  const resCtx = { dataRoot: options.dataRoot };
 
   return {
     connectionOwners: [...owners].sort(),
@@ -302,10 +311,8 @@ export function getHomeOrgSummary(
       })),
     },
     globalAgents,
-    // Real counts from the 9B org-resource tables (migration 0008); the
-    // phase-4 loader predated them (Phase 10 closed the honest-zeros gap).
-    knowledgeBases: countOf("org_knowledge_bases"),
-    mcpServers: countOf("org_mcp_servers"),
-    skills: countOf("org_skills"),
+    knowledgeBases: listKnowledgeBases(db, resCtx).length,
+    mcpServers: listMcpServers(db).length,
+    skills: listSkills(db, resCtx).length,
   };
 }

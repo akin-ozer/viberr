@@ -57,6 +57,11 @@ export function useRunLogStream(input: {
   taskKey: string;
   /** thread id → { runId, initial lines } from the loader. */
   threads: { threadId: string; runId: string | null; lines: StreamedLine[] }[];
+  /** True while the loader shows at least one running run. Drives a bounded
+   *  safety revalidation so a `run.state-changed` finalize event MISSED during
+   *  an SSE drop (rapid reaction chains) self-heals instead of leaving a
+   *  phantom "1 agent running" strip until a manual reload (F22). */
+  hasActiveRun?: boolean;
 }): RunLogState {
   const { projectSlug, taskKey } = input;
   const revalidator = useRevalidator();
@@ -64,6 +69,18 @@ export function useRunLogStream(input: {
   useEffect(() => {
     revalidateRef.current = revalidator.revalidate;
   });
+
+  // F22: while a run is shown as active, revalidate the loader on a slow safety
+  // interval. `run.state-changed` normally flips the strip instantly; this only
+  // covers the case where that terminal event never arrived (dropped stream /
+  // reconnect gap), bounding a stale "running" strip to one interval.
+  useEffect(() => {
+    if (!input.hasActiveRun || typeof window === "undefined") return;
+    const id = window.setInterval(() => {
+      void revalidateRef.current();
+    }, 20_000);
+    return () => window.clearInterval(id);
+  }, [input.hasActiveRun]);
 
   // Seed local lines from the loader on mount / thread-set change.
   const [linesByThread, setLinesByThread] = useState<Record<string, StreamedLine[]>>(() =>

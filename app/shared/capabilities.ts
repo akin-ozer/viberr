@@ -225,6 +225,62 @@ export function coerceSpecialistCapabilityMode<M extends string>(mode: M): M {
   return (mode === "recommend" ? "direct" : mode) as M;
 }
 
+/** The fine-grained delivery capabilities that the headline
+ * `execute-code-or-write-repo` gates in
+ * `specialist-tool-policy.resolveDeliveryPermissions`. */
+export const SCOPED_DELIVERY_CAPABILITY_IDS: readonly string[] = [
+  "create-task-branch",
+  "commit-push-branch",
+  "open-review-pr",
+];
+
+/**
+ * Repair a contradictory deliverer capability policy. `execute-code-or-write-repo`
+ * is the MASTER GATE for all delivery — with it withheld (off/human/absent) the
+ * fine-grained branch/commit/PR grants are vetoed and the profile silently
+ * delivers nothing (the VIB-1 "no commits, no PR" class). Owner ruling
+ * (2026-07-19): the headline stays the master switch, so whenever any scoped
+ * delivery capability is actionable (direct/recommend) we also grant the headline
+ * `direct`, so a deliverer actually delivers. Applied at grant-persist (create /
+ * edit) and by the seed. Idempotent, and a no-op for non-deliverers (e.g. the
+ * reviewer, whose scoped delivery caps are off/human). Generic over the
+ * mode-string type so both the modal's `CapMode` and the schema's
+ * `CapabilityMode` pass through unchanged. */
+export function normalizeDeliveryGrants<
+  G extends { capabilityId: string; mode: string },
+>(grants: readonly G[]): G[] {
+  const actionable = (m: string | undefined) =>
+    m === "direct" || m === "recommend";
+  const byCapId = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  const deliversScoped = SCOPED_DELIVERY_CAPABILITY_IDS.some((id) =>
+    actionable(byCapId.get(id)),
+  );
+  const headline = byCapId.get("execute-code-or-write-repo");
+  // Repair ONLY the accidental contradiction — headline ABSENT or `off` (the
+  // default an editor materialized, which produced VIB-1). An explicit `human`
+  // is a DELIBERATE human-gate ("repo writes are human-only") and is respected,
+  // not silently flipped to direct.
+  if (
+    !deliversScoped ||
+    actionable(headline) ||
+    headline === "human"
+  ) {
+    return grants.map((g) => ({ ...g }));
+  }
+  let found = false;
+  const out = grants.map((g) => {
+    if (g.capabilityId === "execute-code-or-write-repo") {
+      found = true;
+      return { ...g, mode: "direct" } as G;
+    }
+    return { ...g };
+  });
+  if (!found) {
+    out.push({ capabilityId: "execute-code-or-write-repo", mode: "direct" } as G);
+  }
+  return out;
+}
+
 export function capabilityById(id: string): CapabilityDef | null {
   return byId.get(id) ?? null;
 }

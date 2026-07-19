@@ -4,6 +4,7 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
+  normalizeDeliveryGrants,
 } from "~/shared/capabilities";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -168,7 +169,11 @@ function grantsFor(
     // withholding real (the operator gate already treats stored-off = deny).
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
-  return grants;
+  // F14: never persist a contradictory deliverer (scoped delivery actionable but
+  // the headline `execute-code-or-write-repo` withheld). The edit path used to
+  // materialize the absent headline to `off` from the defaults map, silently
+  // vetoing all delivery — this repairs it.
+  return normalizeDeliveryGrants(grants);
 }
 
 /** CREATE-path grants: persist EXACTLY the modal caps the form submitted, with
@@ -195,7 +200,8 @@ function createModalGrants(
       : coerceSpecialistCapabilityMode(submitted);
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
-  return grants;
+  // F14: a deliverer must hold the headline repo-write capability (master gate).
+  return normalizeDeliveryGrants(grants);
 }
 
 function slugifyProfileId(name: string): string {

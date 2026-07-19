@@ -982,6 +982,9 @@ export async function commentToAgent(
       env: confinement.env,
       ...(confinement.mcpServers ? { mcpServers: confinement.mcpServers } : {}),
       ...(confinement.systemPrompt ? { systemPrompt: confinement.systemPrompt } : {}),
+      // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
+      // structured verdict/questions instead of falling back to the prose regex.
+      ...(confinement.outputSchema ? { outputSchema: confinement.outputSchema } : {}),
       // Apply the agent's CURRENT profile model/effort on resume — not the
       // stale value on the prior run row (editing an agent to a new model
       // must take effect when its session is resumed via a comment).
@@ -1133,6 +1136,7 @@ function hasRuntimeRole(
       memberRoles: new Map(
         file.parsed.frontmatter.members.map((m) => [m.userId, m.role]),
       ),
+      archived: file.parsed.frontmatter.archived === true,
     },
     actor,
     "trigger an agent run by @mention",
@@ -2016,6 +2020,22 @@ export async function applyAgentCompletionEffects(
           runId: finished.id,
           verdict,
         });
+      } else {
+        // F10: a verdict-GRANTED agent finished but neither the structured
+        // envelope nor the prose classifier produced a verdict. Behaviour is
+        // fail-safe — validation is LEFT UNCHANGED (never silently flipped to
+        // `healthy`), so acceptance stays gated on whatever it was — but the
+        // reviewer's judgment was effectively lost, so flag the anomaly loudly
+        // for monitoring rather than dropping it in silence.
+        logger.warn(
+          "verdict-granted agent finished with NO determinable verdict — validation left unchanged (not marked healthy)",
+          {
+            taskKey: input.taskKey,
+            runId: finished.id,
+            backend: input.backend,
+            profileId: input.profileId,
+          },
+        );
       }
     }
     const question = collab.ask ? (outcome?.question ?? null) : null;

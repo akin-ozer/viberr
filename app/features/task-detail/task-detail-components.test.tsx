@@ -457,11 +457,11 @@ describe("ExecutionProfile — assign menu + run button", () => {
   it("no specialist + admin: assign menu lists deployed specialists; picking submits", () => {
     const { container, onAssign } = renderExec(execTask());
     const btn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign specialist"),
+      b.textContent?.includes("Assign delivering agent"),
     ) as HTMLButtonElement;
     expect(btn).toBeDefined();
     fireEvent.click(btn);
-    const menu = container.querySelector('[aria-label="Assign a specialist"]')!;
+    const menu = container.querySelector('[aria-label="Assign a delivering agent"]')!;
     const items = menu.querySelectorAll(".menu-item");
     expect(items).toHaveLength(2);
     expect(items[0]!.textContent).toContain("Developer");
@@ -474,10 +474,10 @@ describe("ExecutionProfile — assign menu + run button", () => {
     const { container } = renderExec(execTask(), { deployedSpecialists: [] });
     const link = container.querySelector('a[href="/projects/viberr-core/agents"]');
     expect(link).not.toBeNull();
-    // No "Assign specialist" trigger when there is nothing to assign (the
+    // No "Assign delivering agent" trigger when there is nothing to assign (the
     // owner "Manage" button is a separate .own-btn and may still be present).
     const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign specialist"),
+      b.textContent?.includes("Assign delivering agent"),
     );
     expect(assignBtn).toBeUndefined();
   });
@@ -526,7 +526,7 @@ describe("ExecutionProfile — assign menu + run button", () => {
       canRunAgents: false,
     });
     const assignBtn = Array.from(container.querySelectorAll(".own-btn")).find((b) =>
-      b.textContent?.includes("Assign specialist"),
+      b.textContent?.includes("Assign delivering agent"),
     );
     expect(assignBtn).toBeUndefined();
     expect(
@@ -579,11 +579,11 @@ describe("ExecutionProfile — reviewers", () => {
       ],
     } as unknown as Partial<TaskSummary>);
 
-  it("labels the cell 'Reviewers' and renders a row with Run + remove", () => {
+  it("labels the cell 'Reviewing agents' and renders a row with Run + remove", () => {
     const onRunReviewer = vi.fn();
     const onRemoveReviewer = vi.fn();
     const { container } = renderExec(reviewerTask(), { onRunReviewer, onRemoveReviewer });
-    expect(container.textContent).toContain("Reviewers");
+    expect(container.textContent).toContain("Reviewing agents");
     const chip = container.querySelector(".rev-agent")!;
     expect(chip).not.toBeNull();
     expect(chip.textContent).toContain("Code review");
@@ -593,16 +593,16 @@ describe("ExecutionProfile — reviewers", () => {
     expect(onRemoveReviewer).toHaveBeenCalledWith("reviewer");
   });
 
-  it("'Add reviewer' menu offers specialists not already engaged; picking submits", () => {
+  it("'Engage reviewer' menu offers specialists not already engaged; picking submits", () => {
     const onAssignReviewer = vi.fn();
     // 'reviewer' is already engaged → only 'developer' remains available.
     const { container } = renderExec(reviewerTask(), { onAssignReviewer });
     const addBtn = Array.from(container.querySelectorAll(".rev-add")).find((b) =>
-      b.textContent?.includes("Add reviewer"),
+      b.textContent?.includes("Engage reviewer"),
     ) as HTMLButtonElement;
     expect(addBtn).toBeDefined();
     fireEvent.click(addBtn);
-    const menu = container.querySelector('[aria-label="Add a reviewer"]')!;
+    const menu = container.querySelector('[aria-label="Engage a reviewer"]')!;
     const items = menu.querySelectorAll(".menu-item");
     expect(items).toHaveLength(1);
     expect(items[0]!.textContent).toContain("Developer");
@@ -627,7 +627,7 @@ describe("ExecutionProfile — reviewers", () => {
     expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
     expect(
       Array.from(container.querySelectorAll(".rev-add")).some((b) =>
-        b.textContent?.includes("Add reviewer"),
+        b.textContent?.includes("Engage reviewer"),
       ),
     ).toBe(false);
   });
