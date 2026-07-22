@@ -1,20 +1,20 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import { runMigrations } from "./migration-runner.server";
 
 /**
- * Opens (creating parent directories as needed) a better-sqlite3 database
+ * Opens (creating parent directories as needed) a SQLite database
  * with the app's standard pragmas. Used by getDb(), scripts and tests.
  */
-export function openDatabase(dbPath: string): Database.Database {
+export function openDatabase(dbPath: string): DatabaseSync {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;`);
   return db;
 }
 
@@ -32,13 +32,13 @@ const DB_CACHE_KEY = Symbol.for("viberr.db");
  * ${VIBERR_DATA_ROOT}/state/projection.sqlite and applies any pending
  * migrations from db/migrations/.
  */
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   const cache = globalThis as unknown as Record<
     symbol,
-    Database.Database | undefined
+    DatabaseSync | undefined
   >;
   let db = cache[DB_CACHE_KEY];
-  if (!db || !db.open) {
+  if (!db || !db.isOpen) {
     const dbPath = getProjectionDbPath();
     db = openDatabase(dbPath);
     const result = runMigrations(db);
@@ -56,9 +56,9 @@ export function getDb(): Database.Database {
 export function closeDb(): void {
   const cache = globalThis as unknown as Record<
     symbol,
-    Database.Database | undefined
+    DatabaseSync | undefined
   >;
   const db = cache[DB_CACHE_KEY];
-  if (db?.open) db.close();
+  if (db?.isOpen) db.close();
   cache[DB_CACHE_KEY] = undefined;
 }

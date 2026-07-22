@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   recordAudit,
   type AuditActor,
@@ -67,7 +67,7 @@ function readTemplateFile(
 }
 
 /** Distinct-project deployment counts per profileId (the `used` fact). */
-export function usedByProject(db: Database.Database): Record<string, number> {
+export function usedByProject(db: DatabaseSync): Record<string, number> {
   const rows = db
     .prepare(`SELECT slug, agent_policy_json FROM projects`)
     .all() as { slug: string; agent_policy_json: string }[];
@@ -115,7 +115,7 @@ function toView(
 
 /** Specialist templates only (the operator is a system profile). */
 export function listGlobalAgentProfiles(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: GagentContext = {},
 ): GagentView[] {
   const dir = agentProfilesDir(ctx.dataRoot);
@@ -144,7 +144,7 @@ export interface SaveGagentInput {
 }
 
 export function saveGlobalAgentProfile(
-  db: Database.Database,
+  db: DatabaseSync,
   input: SaveGagentInput,
   actor: AuditActor,
   ctx: GagentContext = {},
@@ -244,7 +244,7 @@ export type DeleteGagentResult =
   | { status: "in_use"; used: number; message: string };
 
 export function deleteGlobalAgentProfile(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: GagentContext = {},

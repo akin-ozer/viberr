@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Route-level test harness (phase 4): points the PROCESS env at a temp data
@@ -16,7 +16,7 @@ import type Database from "better-sqlite3";
  */
 
 export interface AppTestContext {
-  db: Database.Database;
+  db: DatabaseSync;
   dataRoot: string;
   sessionSecret: string;
   /** Cookie header value for a fresh session of the given user. */

@@ -29,6 +29,16 @@ export interface StageRoles {
   workId: string | null;
 }
 
+export function stageLockReason(
+  stageId: string,
+  stages: readonly { id: string }[],
+): string | null {
+  if (stageId === stages[0]?.id) return "it's the entry point";
+  if (stageId === stages.at(-1)?.id)
+    return "human acceptance stays terminal";
+  return null;
+}
+
 export function resolveStageRoles(
   stages: readonly Pick<StageDef, "id">[],
   workflow: readonly Pick<WorkflowBoundary, "from" | "to">[],
@@ -65,13 +75,4 @@ export function isTerminalStage(
 ): boolean {
   if (stageId == null) return false;
   return stageId === stages[stages.length - 1]?.id;
-}
-
-/** True when `stageId` is the project's entry (Triage-equivalent) stage. */
-export function isEntryStage(
-  stageId: string | null | undefined,
-  stages: readonly Pick<StageDef, "id">[],
-): boolean {
-  if (stageId == null) return false;
-  return stageId === stages[0]?.id;
 }

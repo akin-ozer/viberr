@@ -1,10 +1,9 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -35,24 +34,8 @@ export interface PolicyMutationContext {
   dataRoot?: string;
 }
 
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-  });
-}
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-  });
-}
-
 function requirePolicyAction(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: PolicyMutationContext,
   action: "manage-members" | "edit-policy",
   projectSlug: string,
@@ -64,21 +47,21 @@ function requirePolicyAction(
   // enforcement independently of the other (pass-4 XS-9). Both are admin-only
   // today, but this closes the single-source bypass.
   return assertProjectAction(db, action, projectSlug, actor, what, {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
 function reprojectProject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: PolicyMutationContext,
   projectSlug: string,
 ): void {
   rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
-function userName(db: Database.Database, userId: string): string {
+function userName(db: DatabaseSync, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
     | undefined;
@@ -93,7 +76,7 @@ function userName(db: Database.Database, userId: string): string {
  * with no session-cached role anywhere.
  */
 export async function setMemberRole(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; targetUserId: string; role: string },
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
@@ -113,7 +96,7 @@ export async function setMemberRole(
 
   const ref = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 
   let previousRole: ProjectRole | null = null;
@@ -133,7 +116,7 @@ export async function setMemberRole(
       ).length;
       if (admins <= 1) {
         // Last-admin guard — exact mock copy, project name parameterized.
-        throw conflict(
+        throw AppError.conflict(
           `${projectName} needs at least one admin — promote someone else first`,
         );
       }
@@ -178,7 +161,7 @@ const LOCKED_BOUNDARY_MESSAGE =
  * "Applies to future transitions" — in-flight requests are untouched.
  */
 export async function setTransitionBoundary(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; from: string; to: string; boundary: string },
   actor: PolicyActor,
   ctx: PolicyMutationContext = {},
@@ -191,7 +174,7 @@ export async function setTransitionBoundary(
 
   const ref = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 
   let changed = false;
@@ -209,7 +192,7 @@ export async function setTransitionBoundary(
     const stages = parsed.frontmatter.stages;
     const lastStageId = stages[stages.length - 1]?.id;
     if (rule.locked || (input.to === lastStageId && boundary !== "human")) {
-      throw forbidden(LOCKED_BOUNDARY_MESSAGE);
+      throw AppError.forbidden(LOCKED_BOUNDARY_MESSAGE);
     }
     fromName = stages.find((s) => s.id === input.from)?.name ?? input.from;
     toName = stages.find((s) => s.id === input.to)?.name ?? input.to;

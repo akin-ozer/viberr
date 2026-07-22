@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   getPatToken,
   getProjectCredential,
@@ -43,7 +43,7 @@ export interface GithubContextOptions {
 }
 
 export function getProjectGithubContext(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   options: GithubContextOptions = {},
 ): GithubContextResult {

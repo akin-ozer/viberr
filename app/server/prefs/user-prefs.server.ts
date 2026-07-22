@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Per-user UI preference store (`user_prefs`, migration 0004): JSON values
@@ -18,7 +18,7 @@ export interface HomePrefs {
 }
 
 export function getPref<T>(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   key: string,
 ): T | null {
@@ -34,7 +34,7 @@ export function getPref<T>(
 }
 
 export function setPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   key: string,
   value: unknown,
@@ -48,7 +48,7 @@ export function setPref(
 }
 
 /** Home prefs with tolerant fallback to defaults for missing/partial rows. */
-export function getHomePrefs(db: Database.Database, userId: string): HomePrefs {
+export function getHomePrefs(db: DatabaseSync, userId: string): HomePrefs {
   const raw = getPref<Partial<HomePrefs>>(db, userId, HOME_PREFS_KEY);
   return {
     view: raw?.view === "list" ? "list" : "grid",
@@ -58,7 +58,7 @@ export function getHomePrefs(db: Database.Database, userId: string): HomePrefs {
 }
 
 export function patchHomePrefs(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   patch: Partial<HomePrefs>,
 ): HomePrefs {

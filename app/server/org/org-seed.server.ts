@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   recordAudit,
   SYSTEM_ACTOR,
@@ -285,7 +285,7 @@ function writeSeedFile(absRoot: string, file: SeedFile, now: Date): void {
 }
 
 export function seedOrgResources(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { dataRoot: string; reset?: boolean },
 ): OrgSeedSummary {
   const now = new Date();

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type LogLine,
   type RunState,
@@ -89,7 +89,7 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
 }
 
 function projectRow(
-  db: Database.Database,
+  db: DatabaseSync,
   row: AgentRunRow,
   lines: LogLine[],
   raw: string[],
@@ -202,7 +202,7 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
  * (with many resume runs) + an optional reviewer shows 2–3 named entries.
  */
 export function projectRunsForTask(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): RunView[] {

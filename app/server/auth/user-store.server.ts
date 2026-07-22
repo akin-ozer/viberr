@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import {
   mapUserRow,
   type UserRecord,
@@ -26,7 +26,7 @@ const USER_SELECT = `SELECT users.*,
   FROM users`;
 
 export function findUserByEmail(
-  db: Database.Database,
+  db: DatabaseSync,
   email: string,
 ): UserRecord | null {
   const row = db
@@ -36,7 +36,7 @@ export function findUserByEmail(
 }
 
 export function findUserById(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
 ): UserRecord | null {
   const row = db.prepare(`${USER_SELECT} WHERE users.id = ?`).get(id) as
@@ -45,14 +45,14 @@ export function findUserById(
   return row ? mapUserRow(row) : null;
 }
 
-export function listUsers(db: Database.Database): UserRecord[] {
+export function listUsers(db: DatabaseSync): UserRecord[] {
   const rows = db
     .prepare(`${USER_SELECT} ORDER BY users.created_at ASC, users.id ASC`)
-    .all() as UserRow[];
+    .all() as unknown as UserRow[];
   return rows.map(mapUserRow);
 }
 
-export function countUsers(db: Database.Database): number {
+export function countUsers(db: DatabaseSync): number {
   const row = db.prepare(`SELECT count(*) AS c FROM users`).get() as {
     c: number;
   };
@@ -60,7 +60,7 @@ export function countUsers(db: Database.Database): number {
 }
 
 /** Active (non-disabled) admins — used by the last-admin lockout guard. */
-export function countActiveAdmins(db: Database.Database): number {
+export function countActiveAdmins(db: DatabaseSync): number {
   const row = db
     .prepare(`SELECT count(*) AS c FROM users WHERE role = 'admin' AND disabled = 0`)
     .get() as { c: number };
@@ -80,7 +80,7 @@ export interface InsertUserInput {
 }
 
 export function insertUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: InsertUserInput,
 ): UserRecord {
   const now = new Date().toISOString();
@@ -133,12 +133,12 @@ export interface UserFieldPatch {
 
 /** Generic column patch; bumps updated_at. Returns the fresh record. */
 export function updateUserFields(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   patch: UserFieldPatch,
 ): UserRecord | null {
   const sets: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLInputValue[] = [];
   for (const [key, column] of Object.entries(UPDATABLE_COLUMNS)) {
     if (!(key in patch)) continue;
     const value = patch[key as keyof UserFieldPatch];
@@ -157,7 +157,7 @@ export function updateUserFields(
 }
 
 /** Stamps last_login_at (successful credential or OAuth login). */
-export function recordUserLogin(db: Database.Database, id: string): void {
+export function recordUserLogin(db: DatabaseSync, id: string): void {
   db.prepare(`UPDATE users SET last_login_at = ? WHERE id = ?`).run(
     new Date().toISOString(),
     id,

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { listConnections, type ConnectionRecord } from "./connections.server";
@@ -37,7 +37,7 @@ export interface OrgSettingsView {
 }
 
 export function getOrgSettingsView(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: OrgSeedContext = {},
 ): OrgSettingsView {
   return {

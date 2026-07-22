@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { newId } from "~/shared/ids/new-id.server";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -21,7 +21,7 @@ afterEach(ctx.cleanup);
 const ACTOR = { userId: "u_admin", label: "admin@viberr.test" };
 
 /** Inserts a better-auth session row for a user (identity must exist). */
-function seedSession(db: Database.Database, userId: string): void {
+function seedSession(db: DatabaseSync, userId: string): void {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId)
@@ -36,7 +36,7 @@ function seedSession(db: Database.Database, userId: string): void {
   );
 }
 
-function sessionCount(db: Database.Database, userId: string): number {
+function sessionCount(db: DatabaseSync, userId: string): number {
   return (
     db.prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`).get(userId) as {
       c: number;

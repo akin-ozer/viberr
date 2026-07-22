@@ -6,7 +6,6 @@ import {
   ENFORCED_CAPABILITY_IDS,
   capabilityByLabel,
   capabilityEnforcement,
-  capabilityIsEnforced,
   normalizeDeliveryGrants,
 } from "./capabilities";
 
@@ -64,11 +63,6 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("report-validation-verdict")).toBe("both");
     expect(capabilityEnforcement("ask-human")).toBe("both");
     expect(capabilityEnforcement("comment-on-task")).toBe("claude-only");
-  });
-
-  it("capabilityIsEnforced matches the enforced set", () => {
-    expect(capabilityIsEnforced("merge-pull-request")).toBe(true);
-    expect(capabilityIsEnforced("post-quality-flags")).toBe(false);
   });
 
   it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 4 tool-denylist rows", () => {

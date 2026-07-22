@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
@@ -96,7 +96,7 @@ export interface RunOperatorResult {
 
 /** A queued/running operator run for the same task, if one is already in flight. */
 function inFlightOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): { id: string; backend: RealBackend } | null {
@@ -171,7 +171,7 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
  * no-op.
  */
 function releaseOperatorLease(
-  db: Database.Database,
+  db: DatabaseSync,
   key: string,
   token?: object,
 ): void {
@@ -213,7 +213,7 @@ function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } 
  *  a failed settle only leaves the board reading "working" until the next
  *  task mutation reprojects. */
 function settleWaitingAfterOperator(
-  db: Database.Database,
+  db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string },
 ): void {
   void (async () => {
@@ -224,7 +224,7 @@ function settleWaitingAfterOperator(
         "~/server/tasks/task-actions.server"
       );
       const ctx: TaskMutationContext =
-        ref.dataRoot !== undefined ? { dataRoot: ref.dataRoot } : {};
+        { dataRoot: ref.dataRoot };
       await clearWaitingToHuman(db, ctx, ref.projectSlug, ref.taskKey);
     } catch (error) {
       logger.warn("settleWaitingAfterOperator failed", {
@@ -237,7 +237,7 @@ function settleWaitingAfterOperator(
 
 /** Any queued/running run (operator, specialist or reviewer) on the task. */
 function inFlightAgentRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): boolean {
@@ -260,11 +260,11 @@ export function resetOperatorLeasesForTests(): void {
 }
 
 export async function runOperator(
-  db: Database.Database,
+  db: DatabaseSync,
   input: RunOperatorInput,
 ): Promise<RunOperatorResult> {
   const ctx: TaskMutationContext = {
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   };
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
     ...(input.backend ? { backend: input.backend } : {}),
@@ -322,7 +322,7 @@ export async function runOperator(
     autonomy: authority.autonomy,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -462,7 +462,7 @@ function defaultPacketOptions(
 }
 
 async function startCodexOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -494,7 +494,7 @@ async function startCodexOperatorRun(
     outputSchema: OPERATOR_PLAN_SCHEMA,
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   });
 
   // When the run finishes, parse its decision plan and execute it through the
@@ -546,7 +546,7 @@ function parseOperatorPlan(text: string): OperatorPlan | null {
 
 /** Execute a finished codex operator run's decision plan (capability-gated). */
 async function executeCodexPlan(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -726,7 +726,7 @@ async function executeCodexPlan(
 // ------------------------------------------------------- real (tool-driven)
 
 async function startRealOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -766,7 +766,7 @@ async function startRealOperatorRun(
     allowedTools: toolkit.allowedTools,
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   });
 
   // The real operator coordinates DURING its run (in-proc MCP tools), so the
@@ -802,7 +802,7 @@ async function startRealOperatorRun(
  * recovery packet through the operator's own gate, with quota/auth-aware copy.
  */
 async function escalateFailedOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,

@@ -245,7 +245,7 @@ export function claudeSpawnEnv(
 
 /** Constructs the two provider adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
-  const env = safeEnv();
+  const env = getEnv();
   // A Codex access token is a ChatGPT-workspace credential, not a Platform API
   // key. Prefer it when both are configured so subscription runs cannot
   // silently fall through to usage-based API billing.
@@ -288,40 +288,6 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
       env: codexEnv,
     }),
   };
-}
-
-function safeEnv(): {
-  ANTHROPIC_API_KEY?: string;
-  CLAUDE_CODE_OAUTH_TOKEN?: string;
-  CLAUDE_CONFIG_DIR?: string;
-  CODEX_ACCESS_TOKEN?: string;
-  CODEX_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  CODEX_HOME?: string;
-  VIBERR_CODEX_USE_CLI_AUTH?: string;
-} {
-  try {
-    const env = getEnv();
-    return {
-      ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
-      ...(env.CLAUDE_CODE_OAUTH_TOKEN
-        ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
-        : {}),
-      CLAUDE_CONFIG_DIR: resolveClaudeConfigDir(),
-      ...(env.CODEX_ACCESS_TOKEN
-        ? { CODEX_ACCESS_TOKEN: env.CODEX_ACCESS_TOKEN }
-        : {}),
-      ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
-      ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
-      ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}),
-      ...(env.VIBERR_CODEX_USE_CLI_AUTH
-        ? { VIBERR_CODEX_USE_CLI_AUTH: env.VIBERR_CODEX_USE_CLI_AUTH }
-        : {}),
-    };
-  } catch {
-    // Env not configured yet (for example in a focused unit test).
-    return {};
-  }
 }
 
 export type SelectResult =

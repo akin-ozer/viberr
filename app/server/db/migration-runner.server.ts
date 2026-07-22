@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
+import { withTransaction } from "./transaction.server";
 import { AppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
 
@@ -25,7 +26,7 @@ export interface MigrationResult {
  * inside migration files.
  */
 export function runMigrations(
-  db: Database.Database,
+  db: DatabaseSync,
   migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
 ): MigrationResult {
   db.exec(
@@ -58,7 +59,7 @@ export function runMigrations(
       continue;
     }
     const sql = readFileSync(path.join(migrationsDir, file), "utf8");
-    const applyOne = db.transaction(() => {
+    const applyOne = () => withTransaction(db, () => {
       db.exec(sql);
       recordStmt.run(file, new Date().toISOString());
     });

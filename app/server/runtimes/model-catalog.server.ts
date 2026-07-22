@@ -139,15 +139,7 @@ const CODEX_CURATED: ModelCatalog = {
 
 /** Deep clone so callers can't mutate the shared curated constants. */
 function cloneCatalog(cat: ModelCatalog): ModelCatalog {
-  return {
-    models: cat.models.map((m) => ({
-      ...m,
-      ...(m.efforts ? { efforts: [...m.efforts] } : {}),
-    })),
-    efforts: [...cat.efforts],
-    defaultModel: cat.defaultModel,
-    defaultEffort: cat.defaultEffort,
-  };
+  return structuredClone(cat);
 }
 
 /** The always-available curated fallback for a backend (fresh copy). */

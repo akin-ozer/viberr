@@ -16,10 +16,15 @@
  * Pure, client-safe (no .server suffix); pass `now` in tests.
  */
 
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-] as const;
+const shortDay = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+});
+const calendarDate = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
 
 function toDate(iso: string): Date {
   return new Date(iso);
@@ -48,7 +53,14 @@ export function formatDayBucket(iso: string, now: Date = new Date()): string {
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (sameLocalDay(d, yesterday)) return "Yesterday";
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return shortDay.format(d);
+}
+
+/** "Jul 3, 2027"; null for missing or invalid values. */
+export function formatCalendarDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = toDate(iso);
+  return Number.isNaN(d.getTime()) ? null : calendarDate.format(d);
 }
 
 /** Notification meta form: today → "9:41", else "{day} {t}" (trimmed). */

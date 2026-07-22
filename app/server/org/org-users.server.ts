@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   recordAudit,
@@ -98,7 +98,7 @@ export function toOrgUserView(user: UserRecord): OrgUserView {
   };
 }
 
-export function listOrgUsers(db: Database.Database): OrgUserView[] {
+export function listOrgUsers(db: DatabaseSync): OrgUserView[] {
   return listUsers(db).map(toOrgUserView);
 }
 
@@ -111,7 +111,7 @@ export function githubPlaceholderEmail(handle: string): string {
 }
 
 export function whitelistGithubUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { handle: string; role: UserRole },
   actor: AuditActor,
 ): { user: OrgUserView; toast: string } {
@@ -147,7 +147,7 @@ export function whitelistGithubUser(
 }
 
 export async function whitelistGoogleAccount(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { email: string; role: UserRole },
   actor: AuditActor,
 ): Promise<{ user: OrgUserView; toast: string }> {
@@ -174,7 +174,7 @@ export async function whitelistGoogleAccount(
 }
 
 export async function createLocalAccount(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { name: string; email: string; role: UserRole },
   actor: AuditActor,
 ): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
@@ -213,7 +213,7 @@ export interface UpdateOrgUserInput {
  * the phase-2 updateUser.
  */
 export function updateOrgUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: UpdateOrgUserInput,
   actor: AuditActor,
 ): OrgUserView {
@@ -262,7 +262,7 @@ export function updateOrgUser(
 }
 
 export function setOrgUserRole(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { userId: string; role: UserRole },
   actor: AuditActor,
 ): OrgUserView {
@@ -273,7 +273,7 @@ export function setOrgUserRole(
 /** Local password reset: temp password surfaced once; sessions killed;
  * the phase-2 forced-reset gate prompts at next sign-in. */
 export async function resetLocalPassword(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
 ): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
@@ -300,7 +300,7 @@ export async function resetLocalPassword(
  * removal), sessions/prefs/PATs cascade via FK.
  */
 export function deleteOrgUser(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
 ): { user: OrgUserView; toast: string } {
@@ -354,13 +354,13 @@ function mapDomain(row: DomainRow): DomainRecord {
   };
 }
 
-export function listDomains(db: Database.Database): DomainRecord[] {
+export function listDomains(db: DatabaseSync): DomainRecord[] {
   const rows = db
     .prepare(
       `SELECT id, domain, role, created_at FROM google_domain_allowlist
        ORDER BY created_at ASC, id ASC`,
     )
-    .all() as DomainRow[];
+    .all() as unknown as DomainRow[];
   return rows.map(mapDomain);
 }
 
@@ -383,7 +383,7 @@ export type AddDomainResult =
   | { status: "invalid"; message: string };
 
 export function addDomain(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { domain: string; role: UserRole },
   actor: AuditActor,
 ): AddDomainResult {
@@ -425,7 +425,7 @@ export function addDomain(
 }
 
 export function removeDomain(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
 ): { domain: DomainRecord; toast: string } {
@@ -458,7 +458,7 @@ export function removeDomain(
  * domain is not allowlisted.
  */
 export function findDomainAllowlistRole(
-  db: Database.Database,
+  db: DatabaseSync,
   email: string,
 ): UserRole | null {
   const at = email.lastIndexOf("@");

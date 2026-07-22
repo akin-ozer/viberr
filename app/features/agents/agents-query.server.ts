@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -240,7 +240,7 @@ export function effectiveProfileView(
  * operator first (mock list order), remaining entries in file order.
  */
 export function assembleAgentRoster(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): AgentProfileView[] {

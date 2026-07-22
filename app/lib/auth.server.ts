@@ -1,5 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import {
   applyOAuthUser,
@@ -30,8 +30,8 @@ export const AUTH_BASE_PATH = "/api/auth";
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
 export interface AuthDeps {
-  /** The app database handle (shared better-sqlite3 file). */
-  db: Database.Database;
+  /** The app database handle. */
+  db: DatabaseSync;
   /** Cookie-signing secret (>=32 chars) — reuse VIBERR_SESSION_SECRET. */
   secret: string;
   /**
@@ -168,7 +168,7 @@ export function createAuth(deps: AuthDeps): ReturnType<typeof betterAuth> {
 const AUTH_CACHE_KEY = Symbol.for("viberr.betterAuth");
 
 interface AuthCacheEntry {
-  db: Database.Database;
+  db: DatabaseSync;
   auth: ReturnType<typeof betterAuth>;
 }
 

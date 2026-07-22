@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, type AuditActor, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { rebuildAll, rebuildProject, type RescanSummary } from "./rebuilder.server";
 
@@ -8,11 +8,11 @@ import { rebuildAll, rebuildProject, type RescanSummary } from "./rebuilder.serv
  * rescan`. Governed action → audit event.
  */
 export function rescanProjections(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
 ): RescanSummary {
   const summary = rebuildAll(db, {
-    ...(options.dataRoot !== undefined ? { dataRoot: options.dataRoot } : {}),
+    dataRoot: options.dataRoot,
     ...(options.force !== undefined ? { force: options.force } : {}),
   });
   recordAudit(db, {
@@ -30,12 +30,12 @@ export function rescanProjections(
  * other project. Governed action → audit event carrying the project slug.
  */
 export function rescanProject(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
 ): RescanSummary {
   const summary = rebuildProject(db, slug, {
-    ...(options.dataRoot !== undefined ? { dataRoot: options.dataRoot } : {}),
+    dataRoot: options.dataRoot,
     ...(options.force !== undefined ? { force: options.force } : {}),
   });
   recordAudit(db, {

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import {
   agentBackendName,
@@ -62,7 +62,7 @@ interface UserDisplayRow {
  * and map many rows through it.
  */
 export function createActorRenderOverlay(
-  db: Database.Database,
+  db: DatabaseSync,
 ): (actor: ActorRender) => ActorRender {
   const stmt = db.prepare(`SELECT id, name, avatar_tone FROM users WHERE id = ?`);
   const cache = new Map<string, UserDisplayRow | null>();
@@ -86,7 +86,7 @@ export function createActorRenderOverlay(
 
 /** Cached per-call-site lookup helper for resolving many refs at once. */
 export function createActorResolver(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { projectMemberIds?: Set<string> } = {},
 ): (ref: FileActorRef) => ActorRender {
   const stmt = db.prepare(`SELECT id, name, avatar_tone FROM users WHERE id = ?`);

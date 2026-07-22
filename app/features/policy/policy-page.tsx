@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useRef, useState } from "react";
-import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
+import { Fragment, useState } from "react";
+import { useFetcher, useNavigate } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { useActionToast } from "~/ui/use-action-toast";
 import type { MatrixProfile } from "~/features/agents/agent-types";
 
 /** The Agent-capability rows need the matrix shape plus the role sub-line. */
@@ -33,22 +34,6 @@ import type { ProjectRole } from "~/shared/rbac";
  */
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
-
-function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
-  const push = useToast();
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
-    if (d.ok) {
-      if (d.toast) push(d.toast);
-    } else if (d.error) {
-      push(d.error);
-    }
-  }, [fetcher.state, fetcher.data, push]);
-}
 
 const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
 

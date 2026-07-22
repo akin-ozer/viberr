@@ -16,8 +16,7 @@ RUN npm run build \
     && npm prune --omit=dev
 
 # ============================================================================
-# Runtime stage — same base as the build stage so the better-sqlite3 binary
-# copied inside node_modules keeps working (same libc, same Node ABI).
+# Runtime stage.
 # ============================================================================
 FROM node:26-slim
 

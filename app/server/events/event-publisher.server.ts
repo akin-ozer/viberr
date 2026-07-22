@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { Readiness } from "~/schemas/task-file.schema";
 import { sseEventSchema, type SseEvent } from "~/schemas/sse-event.schema";
 import { getDb } from "~/server/db/sqlite.server";
@@ -143,7 +143,7 @@ export function translateProjectionEvent(
 }
 
 export function readTaskFacts(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): TaskFacts | null {

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { newId } from "~/shared/ids/new-id.server";
 import { USER_ROLES, type UserRecord, type UserRole } from "~/shared/mapping/user.server";
@@ -55,7 +55,7 @@ const createUserSchema = z.object({
 export type CreateUserInput = z.input<typeof createUserSchema>;
 
 export async function createUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: CreateUserInput,
   actor: AuditActor,
 ): Promise<UserRecord> {
@@ -117,7 +117,7 @@ export interface UpdateUserPatch {
 }
 
 export function updateUser(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   patch: UpdateUserPatch,
   actor: AuditActor,
@@ -193,7 +193,7 @@ export function updateUser(
  * and kills all existing sessions of that user.
  */
 export async function resetPassword(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   tempPassword: string,
   actor: AuditActor,
@@ -226,7 +226,7 @@ export async function resetPassword(
 }
 
 export function disableUser(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
 ): UserRecord {
@@ -234,7 +234,7 @@ export function disableUser(
 }
 
 export function enableUser(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
 ): UserRecord {

@@ -1,11 +1,10 @@
 import { existsSync, rmSync } from "node:fs";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { createUser } from "~/server/auth/user-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import type { RbacAction } from "~/shared/rbac";
 import {
   projectDir,
@@ -14,6 +13,7 @@ import {
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { stageLockReason } from "~/shared/workflow/stage-roles";
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -41,24 +41,6 @@ export interface SettingsMutationContext {
   dataRoot?: string;
 }
 
-/**
- * The entry (first) and terminal (last) stages are structural and cannot be
- * removed — regardless of their ids (a Lightweight board is `todo … done`, a
- * custom board is anything). Returns a lock reason if `stageId` is one of them,
- * else null. Replaces the old literal-id `STAGE_LOCK` map keyed on
- * "triage"/"done", which silently failed to protect non-default boards.
- */
-export function stageLockReason(
-  stageId: string,
-  stages: readonly { id: string }[],
-): string | null {
-  if (stages.length === 0) return null;
-  if (stageId === stages[0]!.id) return "it's the entry point";
-  if (stageId === stages[stages.length - 1]!.id)
-    return "human acceptance stays terminal";
-  return null;
-}
-
 export const NEW_STAGE_COLORS = [
   "var(--blue)",
   "var(--yellow-dark)",
@@ -66,16 +48,8 @@ export const NEW_STAGE_COLORS = [
   "var(--teal-dark)",
 ] as const;
 
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-  });
-}
-
 function requireProjectAction(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: SettingsMutationContext,
   action: RbacAction,
   projectSlug: string,
@@ -87,7 +61,7 @@ function requireProjectAction(
   // their honest action id — `edit-policy` for identity/stages/repo/archive/
   // delete, `manage-members` for membership CRUD (both admin tier today).
   return assertProjectAction(db, action, projectSlug, actor, what, {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
     ...(opts.allowArchived ? { allowArchived: true } : {}),
   });
 }
@@ -95,24 +69,24 @@ function requireProjectAction(
 function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
   return {
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
 function reprojectProject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: SettingsMutationContext,
   projectSlug: string,
 ): void {
   rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
 // ----------------------------------------------------------------- identity
 
 export async function updateProjectIdentity(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; name: string; prefix: string; description: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -163,7 +137,7 @@ export async function updateProjectIdentity(
 // ------------------------------------------------------------------- stages
 
 export async function renameStage(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; stageId: string; name: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -196,7 +170,7 @@ export async function renameStage(
 }
 
 export async function addStage(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -231,7 +205,7 @@ export async function addStage(
 }
 
 export async function removeStage(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; stageId: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -256,10 +230,10 @@ export async function removeStage(
     stageName = stage.name;
     const locked = stageLockReason(input.stageId, parsed.frontmatter.stages);
     if (locked) {
-      throw conflict(`${stage.name} can't be removed — ${locked}`);
+      throw AppError.conflict(`${stage.name} can't be removed — ${locked}`);
     }
     if (count > 0) {
-      throw conflict(
+      throw AppError.conflict(
         `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
       );
     }
@@ -286,7 +260,7 @@ export async function removeStage(
 }
 
 export async function reorderStages(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; orderedIds: string[] },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -342,7 +316,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * they sign in via OAuth — no mailer in V1, ruling 13), then the entry.
  */
 export async function inviteMember(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; name: string; email: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -370,7 +344,7 @@ export async function inviteMember(
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     if (parsed.frontmatter.members.some((m) => m.userId === userId)) {
-      throw conflict(`${email} is already a member`);
+      throw AppError.conflict(`${email} is already a member`);
     }
     // An invite IS the membership (X15): viberr uses a whitelist auth model with
     // no separate accept-invite step, so the member gets access immediately and
@@ -392,7 +366,7 @@ export async function inviteMember(
 }
 
 export async function removeMember(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; targetUserId: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -409,7 +383,7 @@ export async function removeMember(
   );
 
   if (input.targetUserId === actor.userId) {
-    throw conflict(`You can't remove yourself from ${projectName}`);
+    throw AppError.conflict(`You can't remove yourself from ${projectName}`);
   }
 
   const userRow = db
@@ -429,7 +403,7 @@ export async function removeMember(
         (m) => m.role === "admin",
       ).length;
       if (admins <= 1) {
-        throw conflict(
+        throw AppError.conflict(
           `${displayName} is the only admin — assign another admin in Policy first`,
         );
       }
@@ -456,7 +430,7 @@ export async function removeMember(
 // ----------------------------------------------------------------- override
 
 export async function setRepoOverride(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; enabled: boolean },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -492,7 +466,7 @@ export async function setRepoOverride(
  * the file, so the change persists via reproject like every other setting.
  */
 export async function setProjectArchived(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; archived: boolean },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -536,7 +510,7 @@ export async function setProjectArchived(
  * the trail (audit_events are app-owned, not store-derived).
  */
 export async function deleteProject(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; confirmName: string },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
@@ -558,7 +532,7 @@ export async function deleteProject(
   const dir = projectDir(input.projectSlug, ctx.dataRoot);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   rebuildAll(db, {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   // Notifications are app-owned (no FK cascade to projects), so a deleted
   // project used to leave orphaned "waiting on you" rows that dead-ended on a

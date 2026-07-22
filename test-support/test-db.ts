@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_MIGRATIONS_DIR,
   runMigrations,
@@ -16,14 +16,14 @@ import { openDatabase } from "~/server/db/sqlite.server";
  *   const db = ctx.makeDb(); // fresh migrated database
  */
 export interface TestDbContext {
-  makeDb(): Database.Database;
+  makeDb(): DatabaseSync;
   makeTempDir(): string;
   cleanup(): void;
 }
 
 export function createTestDbContext(): TestDbContext {
   let tempDirs: string[] = [];
-  let openDbs: Database.Database[] = [];
+  let openDbs: DatabaseSync[] = [];
 
   return {
     makeTempDir(): string {
@@ -31,7 +31,7 @@ export function createTestDbContext(): TestDbContext {
       tempDirs.push(dir);
       return dir;
     },
-    makeDb(): Database.Database {
+    makeDb(): DatabaseSync {
       const dir = mkdtempSync(path.join(tmpdir(), "viberr-test-"));
       tempDirs.push(dir);
       const db = openDatabase(path.join(dir, "state", "test.sqlite"));
@@ -40,7 +40,7 @@ export function createTestDbContext(): TestDbContext {
       return db;
     },
     cleanup(): void {
-      for (const db of openDbs) if (db.open) db.close();
+      for (const db of openDbs) if (db.isOpen) db.close();
       openDbs = [];
       for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
       tempDirs = [];

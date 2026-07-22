@@ -19,7 +19,7 @@ afterEach(() => {
 const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
 
 /** Seed a validated connection (owner → PAT) the way org settings would. */
-function seedConnection(db: import("better-sqlite3").Database, userId: string) {
+function seedConnection(db: import("node:sqlite").DatabaseSync, userId: string) {
   const pat = createPat(
     db,
     { userId, label: "connection · akin-ozer", token: "ghp_testtesttesttesttesttesttesttest0000" },

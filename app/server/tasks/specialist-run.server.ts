@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -87,7 +87,7 @@ function taskRef(
   return {
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
@@ -150,7 +150,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
 
 /** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
 function mcpServersFor(
-  db: Database.Database,
+  db: DatabaseSync,
   names: string[],
 ): { mcpServers?: Record<string, unknown> } {
   const servers = resolveSpecialistMcpServers(db, names);
@@ -171,7 +171,7 @@ export function resolveDeployedSpecialist(
 ): ResolvedSpecialist {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
@@ -222,7 +222,7 @@ export interface AssignSpecialistResult {
  * (SSE rides the reproject). RBAC: admin|maintainer.
  */
 export async function assignSpecialist(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -324,7 +324,7 @@ export interface AssignReviewerResult {
  * profile already in `reviewers` is a no-op. RBAC: admin|maintainer.
  */
 export async function assignReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -430,7 +430,7 @@ export interface RemoveReviewerResult {
  * profile that isn't currently a reviewer is a no-op. RBAC: admin|maintainer.
  */
 export async function removeReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -486,29 +486,9 @@ export interface StartAgentRunResult {
   role: string;
 }
 
-/**
- * Starts a run for an ENGAGED agent — the ONE dispatch path for every agent on
- * a task (generic-agents G1: the former startSpecialistRun / startReviewerRun
- * twins differed only in slot lookup, thread prefix, role label and audit
- * copy — all of which are now data on the engagement).
- *
- * `profileId` selects the engagement; omitted → the delivering engagement
- * (the former "primary specialist" path). Behavior differences come from the
- * engagement, never from a kind:
- *   - single-flight guard iff `delivers` (one live run per task workspace —
- *     F7-OP1; supporting agents run concurrently on their own threads);
- *   - thread prefix `primary-` / `r<index>-` (the agents projection groups on
- *     it) is derived from `delivers`;
- *   - the run row records the engagement's live role snapshot.
- *
- * Builds the analyze prompt from the task title + goal, best-effort clones the
- * project repo into `<taskDir>/workspace/<repo>`, resolves model/effort/
- * skills/KB/MCPs/tool-denies from the CURRENT deployment (live profile wins
- * over the engage-time snapshot), and hands off to the run service. RBAC:
- * admin|maintainer (runtimeAuditActor).
- */
+/** Start an engaged agent from its current deployment and task workspace. */
 export async function startAgentRun(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -640,7 +620,7 @@ export async function startAgentRun(
     skills,
     kb,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
@@ -806,7 +786,7 @@ export async function startAgentRun(
     ...(useEnvelopeSchema ? { outputSchema: AGENT_OUTCOME_JSON_SCHEMA } : {}),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend ? { env: baseRunEnv } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
@@ -929,17 +909,7 @@ function readSkillBody(name: string, dataRoot?: string): string {
   return "";
 }
 
-/**
- * Assemble a specialist's run PERSONA: its detailed definition (who it is + how
- * it works) followed by each of its declared skill bodies (its craft). This is
- * what makes a built-in agent behave as itself — the Developer implements and
- * reports back, the Reviewer critiques AND validates (tests) — rather than a
- * generic "analyze the repo" agent. Returns "" when the store ships neither a
- * definition nor any skill (the run still works on the analyze prompt alone).
- *
- * Threaded into the run as the system prompt for Claude, or folded into the turn
- * prompt for Codex (which has no system-prompt channel). Exported for tests.
- */
+/** Assemble the profile definition and attached skill/KB bodies into its persona. */
 export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
@@ -1099,14 +1069,7 @@ export function buildAnalyzePrompt(input: {
   return prompt;
 }
 
-/**
- * Does an operator directive try to make the specialist perform a delivery
- * action the SERVER owns (push / open-update-merge a PR)? Used to record the
- * contradiction in run evidence (F10-31) — the specialist prompt already gives
- * the typed contract precedence, and the workspace clone carries no push
- * credential, so a directive like this is inert; we surface it rather than let
- * it silently expand an agent's apparent authority.
- */
+/** Detect directives that contradict the server-owned delivery contract. */
 export function directiveRequestsDelivery(directive: string): boolean {
   return /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|open(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|create\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/i.test(
     directive,
@@ -1118,32 +1081,12 @@ export function directiveRequestsDelivery(directive: string): boolean {
 function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | null {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return file?.parsed.frontmatter.repo ?? null;
 }
 
-/**
- * Best-effort `git clone` of `<owner>/<name>` into
- * `<taskDir>/workspace/<name>`. Supplies a project-bound PAT through an
- * ephemeral Git askpass process when one exists (private repos), else uses a
- * plain credential-free clone (public repos).
- * Returns the clone dir on success, null on any failure (the caller then
- * points the run at its dedicated workspace root and tells the agent to clone
- * into that directory itself).
- *
- * Never throws — clone failure must not break starting the run.
- */
-/**
- * The dedicated per-task workspace directory (`<taskDir>/workspace`). A
- * specialist run's cwd is ALWAYS inside here — NEVER the task dir itself —
- * and `GIT_CEILING_DIRECTORIES` is pinned to it, so an agent's git can never
- * walk UP to a host checkout even when `VIBERR_DATA_ROOT` lives inside a git
- * repo (the dogfooding hazard: a run once switched the running app's own
- * source onto its task branch). This only constrains Git discovery; autonomous
- * Codex specialists still need a separate OS/container boundary before this can
- * be treated as filesystem isolation.
- */
+/** Keep every specialist cwd below the task workspace and Git discovery ceiling. */
 function taskWorkspaceRoot(
   projectSlug: string,
   taskKey: string,
@@ -1152,17 +1095,9 @@ function taskWorkspaceRoot(
   return path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
 }
 
-/** The per-run env that stops Git from discovering a parent checkout. */
-/**
- * Runtime settings a resumed specialist (@mention comment) must re-apply so it
- * gets the SAME denylist, git ceiling, MCP set, and persona as its fresh run.
- * The denylist is enforced by Claude only; Codex's direct SDK has no equivalent.
- * Best-effort: if the
- * profile is no longer a current deployment we still return the always-human
- * denylist and the workspace git ceiling.
- */
+/** Reapply the fresh-run confinement and resources when resuming a specialist. */
 export function resolveResumeConfinement(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1202,7 +1137,7 @@ export function resolveResumeConfinement(
       skills: resolved.skills,
       kb: resolved.kb,
       ...(resolved.definition ? { definition: resolved.definition } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
@@ -1298,7 +1233,7 @@ function agentGitIdentityEnv(profileId: string): Record<string, string> {
 }
 
 async function cloneRepo(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -1379,13 +1314,13 @@ function agentHandleFor(role: string): string {
 // --------------------------------------------------------------------- shared
 
 function reproject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
 ): void {
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -1394,7 +1329,7 @@ function reproject(
  *  human runtime RBAC. Operator authority is gated upstream by its capability
  *  policy (operator-actions.server), so operator callers skip the human check. */
 function runtimeAuditActor(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1412,7 +1347,7 @@ function runtimeAuditActor(
  * audited D2 override. Mirrors the check transition/interrupt use.
  */
 function requireRuntimeRole(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1420,7 +1355,7 @@ function requireRuntimeRole(
 ): ProjectRole {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
   // Shared run-agents helper — the tier + audit live in project-authority (§4g).
@@ -1515,7 +1450,7 @@ export function listDeployedSpecialists(
 ): DeployedSpecialistView[] {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) return [];
   const out: DeployedSpecialistView[] = [];

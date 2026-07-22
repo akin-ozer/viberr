@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { isAcceptedDisplayState } from "~/server/interpretation/readiness-policy.server";
 import { createActorResolver, type ActorRender } from "~/shared/mapping/actor.server";
 import {
@@ -68,7 +68,7 @@ export interface BoardData {
 }
 
 export function getProject(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
 ): ProjectRecord | null {
   const row = db.prepare(`SELECT * FROM projects WHERE slug = ?`).get(slug) as
@@ -77,26 +77,26 @@ export function getProject(
   return row ? mapProjectRow(row) : null;
 }
 
-export function listProjects(db: Database.Database): ProjectRecord[] {
+export function listProjects(db: DatabaseSync): ProjectRecord[] {
   const rows = db
     .prepare(`SELECT * FROM projects ORDER BY name ASC`)
-    .all() as ProjectRow[];
+    .all() as unknown as ProjectRow[];
   return rows.map(mapProjectRow);
 }
 
 export function listProjectMembers(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
 ): ProjectMemberRecord[] {
   const rows = db
     .prepare(`SELECT * FROM project_members WHERE project_slug = ?`)
-    .all(slug) as ProjectMemberRow[];
+    .all(slug) as unknown as ProjectMemberRow[];
   return rows.map(mapProjectMemberRow);
 }
 
 /** Owner render helper shared by board + task queries. */
 export function resolveTaskOwner(
-  db: Database.Database,
+  db: DatabaseSync,
   ownerUserId: string | null,
   memberIds: Set<string>,
 ): ActorRender | null {
@@ -106,7 +106,7 @@ export function resolveTaskOwner(
 }
 
 export function listProjectTasks(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
 ): TaskSummary[] {
   const project = getProject(db, slug);
@@ -127,7 +127,7 @@ export function listProjectTasks(
       `SELECT * FROM task_projections WHERE project_slug = ?
        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
-    .all(slug) as TaskProjectionRow[];
+    .all(slug) as unknown as TaskProjectionRow[];
   return rows.map((row) =>
     mapTaskProjectionRow(row, {
       stages,
@@ -144,7 +144,7 @@ export function listProjectTasks(
 }
 
 /** Full board read model: columns in project stage order. */
-export function getBoard(db: Database.Database, slug: string): BoardData | null {
+export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   const project = getProject(db, slug);
   if (!project) return null;
 

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { getMcpCredential, listMcpServers } from "~/server/org/resources.server";
 
 /**
@@ -30,7 +30,7 @@ import { getMcpCredential, listMcpServers } from "~/server/org/resources.server"
  * Claude-backed specialists only; on Codex it connects unauthenticated.
  */
 export function resolveSpecialistMcpServers(
-  db: Database.Database,
+  db: DatabaseSync,
   mcpNames: readonly string[],
 ): Record<string, unknown> {
   if (mcpNames.length === 0) return {};

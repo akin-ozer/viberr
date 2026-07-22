@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -85,7 +85,7 @@ export function requireProjectMutable(
 /** Whether this user holds the ORG admin role (better-auth membership is
  *  authoritative; `users.role` is the derived-cache fallback — identity.server).
  *  Disabled users never qualify. */
-export function isOrgAdmin(db: Database.Database, userId: string): boolean {
+export function isOrgAdmin(db: DatabaseSync, userId: string): boolean {
   const row = db
     .prepare(`SELECT role FROM users WHERE id = ? AND disabled = 0`)
     .get(userId) as { role: string } | undefined;
@@ -105,7 +105,7 @@ export function isOrgAdmin(db: Database.Database, userId: string): boolean {
  *   `memberRole` (null = not a member).
  */
 export function resolveProjectAuthority(
-  db: Database.Database,
+  db: DatabaseSync,
   project: AuthorityProject,
   actor: AuthorityActor,
   allowed: readonly ProjectRole[] | "any-member",
@@ -151,7 +151,7 @@ export function resolveProjectAuthority(
  * cannot …"). Used by the task-actions guards and every inline runtime check.
  */
 export function requireProjectAuthority(
-  db: Database.Database,
+  db: DatabaseSync,
   project: AuthorityProject,
   actor: AuthorityActor,
   allowed: readonly ProjectRole[] | "any-member",
@@ -179,7 +179,7 @@ export function requireProjectAuthority(
  * deny with the canonical 403 copy.
  */
 export function requireRunAgents(
-  db: Database.Database,
+  db: DatabaseSync,
   project: AuthorityProject,
   actor: AuthorityActor,
   what: string,
@@ -197,7 +197,7 @@ export function requireRunAgents(
 /** Non-throwing sibling of {@link requireRunAgents} for the @mention path: a
  *  lower-role commenter's mention is recorded, but the run is silently skipped. */
 export function canRunAgents(
-  db: Database.Database,
+  db: DatabaseSync,
   project: AuthorityProject,
   actor: AuthorityActor,
   what: string,
@@ -219,7 +219,7 @@ export function canRunAgents(
  * 403 copy keeps the config-surface shape ("Only project admins can …").
  */
 export function assertProjectAction(
-  db: Database.Database,
+  db: DatabaseSync,
   action: RbacAction | "any-member",
   projectSlug: string,
   actor: AuthorityActor,
@@ -228,7 +228,7 @@ export function assertProjectAction(
 ): { projectName: string; role: ProjectRole; isOrgAdminOverride: boolean } {
   const file = readProjectFile({
     projectSlug,
-    ...(opts.dataRoot !== undefined ? { dataRoot: opts.dataRoot } : {}),
+    dataRoot: opts.dataRoot,
   });
   if (!file) {
     throw new AppError({

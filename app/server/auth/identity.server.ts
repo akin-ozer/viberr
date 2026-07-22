@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
 import { normalizeEmail } from "./user-store.server";
 
@@ -35,7 +35,7 @@ export interface IdentityInput {
 
 /** Upserts the credential account carrying a user's scrypt hash. */
 function upsertCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   passwordHash: string,
 ): void {
@@ -64,7 +64,7 @@ function upsertCredential(
  * Provisions a better-auth identity for a legacy user (id-preserving): the
  * `user` row and a credential `account` when the user has a password. Idempotent.
  */
-export function provisionIdentity(db: Database.Database, u: IdentityInput): void {
+export function provisionIdentity(db: DatabaseSync, u: IdentityInput): void {
   const now = nowIso();
   const email = normalizeEmail(u.email);
 
@@ -88,7 +88,7 @@ export function provisionIdentity(db: Database.Database, u: IdentityInput): void
 
 /** Sets/replaces a user's credential password hash (password change/reset). */
 export function setCredentialPassword(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   passwordHash: string,
 ): void {
@@ -96,7 +96,7 @@ export function setCredentialPassword(
 }
 
 export function credentialPasswordHash(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): string | null {
   const row = db
@@ -110,7 +110,7 @@ export function credentialPasswordHash(
 
 /** Syncs a user's email onto their better-auth identity (admin email edit). */
 export function syncIdentityEmail(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   email: string,
 ): void {
@@ -123,13 +123,15 @@ export function syncIdentityEmail(
 
 /** Revokes every better-auth session of a user (disable / password change). */
 export function revokeUserSessions(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): number {
-  return db.prepare(`DELETE FROM session WHERE userId = ?`).run(userId).changes;
+  return Number(
+    db.prepare(`DELETE FROM session WHERE userId = ?`).run(userId).changes,
+  );
 }
 
 /** Removes a user's better-auth identity (cascades session/account). */
-export function deleteIdentity(db: Database.Database, userId: string): void {
+export function deleteIdentity(db: DatabaseSync, userId: string): void {
   db.prepare(`DELETE FROM "user" WHERE id = ?`).run(userId);
 }

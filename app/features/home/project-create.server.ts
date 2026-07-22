@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentDeployment,
   ProjectFrontmatter,
@@ -146,7 +146,7 @@ export interface CreateProjectResult {
 }
 
 export async function createProject(
-  db: Database.Database,
+  db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },
   ctx: { dataRoot?: string } = {},
@@ -245,11 +245,11 @@ export async function createProject(
   };
 
   await createProjectFile(
-    { projectSlug: slug, ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    { projectSlug: slug, dataRoot: ctx.dataRoot },
     { frontmatter, description: desc },
   );
   rebuildPath(db, projectFilePath(slug, ctx.dataRoot), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 
   // Bind the selected connection's PAT to the project so credential health,

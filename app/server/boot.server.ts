@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
@@ -30,7 +30,7 @@ const BOOT_KEY = Symbol.for("viberr.booted");
  * projection counts, logged once at startup. Basic runtime sanity — no
  * security posture implied.
  */
-function logBootIntegrity(db: Database.Database): void {
+function logBootIntegrity(db: DatabaseSync): void {
   const root = getDataRoot();
   const missingDirs = DATA_ROOT_SUBDIRS.filter(
     (dir) => !existsSync(path.join(root, dir)),

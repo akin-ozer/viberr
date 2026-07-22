@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -96,7 +96,7 @@ function findRepoDir(
 }
 
 export interface PushWorkspaceBranchInput {
-  db: Database.Database;
+  db: DatabaseSync;
   projectSlug: string;
   taskKey: string;
   dataRoot?: string;
@@ -130,7 +130,7 @@ export async function pushWorkspaceBranch(
     const ref = {
       projectSlug,
       taskKey,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     };
     const file = readTaskFile(ref);
     if (!file) return { status: "task_not_found", reason: "task file missing" };
@@ -138,7 +138,7 @@ export async function pushWorkspaceBranch(
 
     const projectFile = readProjectFile({
       projectSlug,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     });
     const repo = fm.repo ?? projectFile?.parsed.frontmatter.repo ?? null;
     if (!repo) return { status: "no_repo", reason: "project has no repo" };

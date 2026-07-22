@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   createActorRenderOverlay,
   type ActorRender,
@@ -42,7 +42,7 @@ export const ACTIVITY_STREAM_LIMIT = 200;
 
 /** Total stream rows for the project (drives the "show older" button). */
 export function countActivityStream(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
 ): number {
   return (
@@ -53,7 +53,7 @@ export function countActivityStream(
 }
 
 export function listActivityStream(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   options: { limit?: number } = {},
 ): ActivityStreamRow[] {
@@ -264,7 +264,7 @@ function finishText(text: string, taskKey: string | null): string {
 }
 
 /** Total audit-panel rows for the project (drives "show older"). */
-export function countAuditLog(db: Database.Database, slug: string): number {
+export function countAuditLog(db: DatabaseSync, slug: string): number {
   const violations = (
     db
       .prepare(
@@ -286,7 +286,7 @@ export function countAuditLog(db: Database.Database, slug: string): number {
 }
 
 export function listAuditLog(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   options: { limit?: number } = {},
 ): AuditLogEntry[] {
@@ -331,7 +331,7 @@ export function listAuditLog(
        WHERE a.project_slug = ? AND a.action IN (${placeholders})
        ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`,
     )
-    .all(slug, ...actions, limit) as AuditRow[];
+    .all(slug, ...actions, limit) as unknown as AuditRow[];
 
   const auditEntries: AuditLogEntry[] = rows.map((row) => ({
     id: row.id,

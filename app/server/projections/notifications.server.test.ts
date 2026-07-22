@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -29,7 +29,7 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 /** Real users row (user_prefs FKs to users), so a test can store a pref. */
-function mkUser(db: Database.Database, id: string): void {
+function mkUser(db: DatabaseSync, id: string): void {
   insertUser(db, {
     id,
     email: `${id}@viberr.test`,

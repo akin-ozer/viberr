@@ -2,13 +2,13 @@ import { data } from "react-router";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
 import { assertCsrf } from "~/server/auth/csrf.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import {
   requireRole,
   requireRoleAuth,
 } from "~/server/auth/require-user.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
 import {
   createConnection,
   removeConnection,
@@ -385,13 +385,7 @@ export async function action({ request }: Route.ActionArgs) {
         return fail("Unknown action.");
     }
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

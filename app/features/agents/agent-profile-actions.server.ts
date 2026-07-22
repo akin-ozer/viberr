@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
 import {
@@ -10,7 +10,6 @@ import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -90,16 +89,8 @@ const profileFormSchema = z.object({
 
 export type ProfileFormInput = z.infer<typeof profileFormSchema>;
 
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-  });
-}
-
 function requireProjectAction(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: ProfileMutationContext,
   projectSlug: string,
   actor: ProfileActor,
@@ -111,17 +102,17 @@ function requireProjectAction(
     projectSlug,
     actor,
     "change agent capability policy",
-    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    { dataRoot: ctx.dataRoot },
   );
 }
 
 function reprojectProject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: ProfileMutationContext,
   projectSlug: string,
 ): void {
   rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -220,7 +211,7 @@ function createModalGrants(
 // ------------------------------------------------------------------ create
 
 export async function createAgentProfile(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; form: unknown },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
@@ -230,7 +221,7 @@ export async function createAgentProfile(
 
   const ref = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 
   let profileId = "";
@@ -294,7 +285,7 @@ export async function createAgentProfile(
 // ------------------------------------------------------------------ update
 
 export async function updateAgentProfile(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; profileId: string; form: unknown },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
@@ -304,7 +295,7 @@ export async function updateAgentProfile(
 
   const ref = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 
   await updateProjectFile(ref, (parsed) => {
@@ -382,7 +373,7 @@ export async function updateAgentProfile(
 // ------------------------------------------------------------------ delete
 
 export async function deleteAgentProfile(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; profileId: string },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
@@ -391,7 +382,7 @@ export async function deleteAgentProfile(
 
   const ref = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 
   let name = input.profileId;
@@ -406,7 +397,9 @@ export async function deleteAgentProfile(
     if (current.kind === "operator") {
       // The operator is a system profile — never deletable (agents §4.3),
       // enforced server-side, not just by hiding the button.
-      throw forbidden("The Operator is a system profile and can't be deleted.");
+      throw AppError.forbidden(
+        "The Operator is a system profile and can't be deleted.",
+      );
     }
     name = current.name;
     parsed.frontmatter.agents = parsed.frontmatter.agents.filter(

@@ -49,7 +49,7 @@ describe("rebuildProjections (Phase 10 recovery hammer)", () => {
     const seenInTransaction: boolean[] = [];
     const types: string[] = [];
     const off = onProjectionEvent((e) => {
-      seenInTransaction.push(store.db.inTransaction);
+      seenInTransaction.push(store.db.isTransaction);
       types.push(e.type);
     });
     rebuildProjections(store.db, { dataRoot: store.dataRoot });

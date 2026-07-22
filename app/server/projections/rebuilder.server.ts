@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   deliveringEngagement,
@@ -86,7 +86,7 @@ function nowIso(): string {
 // ------------------------------------------------------------ provenance
 
 function recordProvenance(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     sourcePath: string;
     contentHash: string | null;
@@ -107,7 +107,7 @@ function recordProvenance(
 }
 
 function replaceDiagnostics(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     sourcePath: string;
     projectSlug: string | null;
@@ -147,7 +147,7 @@ interface ProjectContextRow {
   stages_json: string;
 }
 
-function getMemberIds(db: Database.Database, slug: string): Set<string> {
+function getMemberIds(db: DatabaseSync, slug: string): Set<string> {
   const rows = db
     .prepare(`SELECT user_id FROM project_members WHERE project_slug = ?`)
     .all(slug) as { user_id: string }[];
@@ -155,7 +155,7 @@ function getMemberIds(db: Database.Database, slug: string): Set<string> {
 }
 
 export function rebuildProjectFile(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   options: RebuildOptions = {},
 ): RebuildFileResult {
@@ -285,7 +285,7 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
 }
 
 export function rebuildTaskFile(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   key: string,
   options: RebuildOptions = {},
@@ -516,7 +516,7 @@ const PROJECT_PATH_RE = /^projects\/([^/]+)\/project\.md$/;
  * root. Non-store paths are ignored. Used by the watcher and mutations.
  */
 export function rebuildPath(
-  db: Database.Database,
+  db: DatabaseSync,
   absPath: string,
   options: RebuildOptions = {},
 ): RebuildFileResult {
@@ -556,7 +556,7 @@ export function rebuildPath(
  * authority over (F20 — the gate is project-scoped, so the effect must be too).
  */
 export function rebuildProject(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   options: RebuildOptions = {},
 ): RescanSummary {
@@ -639,7 +639,7 @@ export function rebuildProject(
 
 /** Full rescan: project every store file, prune vanished rows. */
 export function rebuildAll(
-  db: Database.Database,
+  db: DatabaseSync,
   options: RebuildOptions = {},
 ): RescanSummary {
   const startedAt = Date.now();

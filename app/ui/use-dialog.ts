@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 /**
  * Dialog behavior required on EVERY dialog by orchestrator ruling 16, now on
@@ -19,16 +19,10 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
  * without closing (no exit animation plays); explicit close() always closes.
  */
 
-export interface DialogHandle {
-  ref: RefObject<HTMLDialogElement | null>;
-  /** Plays the [data-closing] exit transition, then calls onClose. */
-  close: () => void;
-}
-
 export function useDialog(
   onClose: () => void,
   onDismissRequest?: () => boolean,
-): DialogHandle {
+) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
   const onDismissRef = useRef(onDismissRequest);

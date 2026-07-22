@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { listProjects } from "~/server/projections/board-query.server";
@@ -68,7 +68,7 @@ interface OpenDecisionRow {
 }
 
 export function decisionsRequiring(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   opts: { projectSlug?: string } = {},
 ): DecisionsForUser {
@@ -96,7 +96,7 @@ export function decisionsRequiring(
         WHERE ((packet_json IS NOT NULL AND packet_json <> '') OR recommendation_count > 0)
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
     )
-    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as OpenDecisionRow[];
+    .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as OpenDecisionRow[];
 
   const mine: DecisionRef[] = [];
   const overrideEligible: DecisionRef[] = [];

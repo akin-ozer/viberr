@@ -27,7 +27,6 @@ import {
   getPatToken,
   getProjectCredential,
   getProjectCredentialHealth,
-  listPats,
   recordPatValidation,
   setProjectCredential,
 } from "./pat-store.server";
@@ -86,25 +85,6 @@ describe("pat-store", () => {
         ACTOR,
       ),
     ).toThrowError();
-  });
-
-  it("lists metadata only (no token material), newest first", () => {
-    const store = setupTestStore(ctx);
-    createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "one", token: "ghp_aaaaaaaaaaaa1111" },
-      ACTOR,
-    );
-    createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "two", token: "ghp_bbbbbbbbbbbb2222" },
-      ACTOR,
-    );
-    const pats = listPats(store.db, store.users.arda.id);
-    expect(pats).toHaveLength(2);
-    expect(JSON.stringify(pats)).not.toContain("ghp_");
-    expect(pats.map((p) => p.tokenSuffix).sort()).toEqual(["1111", "2222"]);
-    expect(listPats(store.db, store.users.deniz.id)).toHaveLength(0);
   });
 
   it("caches validation results on the row", () => {

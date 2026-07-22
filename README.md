@@ -20,7 +20,7 @@ never a crash), derives readiness, and materializes projections into SQLite for 
 SQLite handles app management only — users, sessions, encrypted secrets, projections,
 audit — never canonical business truth.
 
-Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · better-sqlite3 (WAL)
+Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · `node:sqlite` (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
 (no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK — configure a credential for
 at least one to run real agents. A backend with no credential is reported unavailable and

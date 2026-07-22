@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Raw `audit_events` reader for tests. Production reads audit rows through
@@ -37,7 +37,7 @@ interface AuditEventRow {
 
 /** Newest-first, optionally filtered to one action. */
 export function listAuditEvents(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { limit?: number; action?: string } = {},
 ): AuditEventRecord[] {
   const limit = options.limit ?? 100;
@@ -54,7 +54,7 @@ export function listAuditEvents(
             `SELECT * FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ?`,
           )
           .all(limit)
-  ) as AuditEventRow[];
+  ) as unknown as AuditEventRow[];
   return rows.map((row) => ({
     id: row.id,
     occurredAt: row.occurred_at,

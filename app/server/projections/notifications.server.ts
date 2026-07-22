@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import { isNotifKindEnabled } from "~/features/profile/profile-query.server";
 import {
@@ -52,7 +52,7 @@ export interface CreateNotificationInput {
  * off and nothing was written.
  */
 export function createNotification(
-  db: Database.Database,
+  db: DatabaseSync,
   input: CreateNotificationInput,
 ): string | null {
   let deliver = true;
@@ -103,7 +103,7 @@ export function createNotification(
  * (home-query.server.ts) applies the same open-packet/pending-rec +
  * non-terminal-stage rule; keep them in step. */
 export function listNotifications(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   options: { limit?: number } = {},
 ): NotificationRecord[] {
@@ -121,7 +121,7 @@ export function listNotifications(
        ORDER BY n.occurred_at DESC, n.id DESC
        LIMIT ?`,
     )
-    .all(userId, options.limit ?? 100) as NotificationRow[];
+    .all(userId, options.limit ?? 100) as unknown as NotificationRow[];
   // E1: `from` actors are baked at creation — overlay the current
   // users-table identity so renames reflect in the inbox immediately.
   const overlay = createActorRenderOverlay(db);
@@ -149,7 +149,7 @@ export function listNotifications(
 }
 
 export function countUnreadNotifications(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): number {
   const row = db
@@ -172,7 +172,7 @@ function emitNotificationRead(userId: string): void {
 
 /** Idempotent read-marking (monotonic; re-marking is a no-op). */
 export function markNotificationsRead(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   ids: string[],
 ): number {
@@ -184,12 +184,13 @@ export function markNotificationsRead(
        WHERE user_id = ? AND read_at IS NULL AND id IN (${placeholders})`,
     )
     .run(new Date().toISOString(), userId, ...ids);
-  if (result.changes > 0) emitNotificationRead(userId);
-  return result.changes;
+  const changes = Number(result.changes);
+  if (changes > 0) emitNotificationRead(userId);
+  return changes;
 }
 
 export function markAllNotificationsRead(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): number {
   const result = db
@@ -197,8 +198,9 @@ export function markAllNotificationsRead(
       `UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL`,
     )
     .run(new Date().toISOString(), userId);
-  if (result.changes > 0) emitNotificationRead(userId);
-  return result.changes;
+  const changes = Number(result.changes);
+  if (changes > 0) emitNotificationRead(userId);
+  return changes;
 }
 
 /**
@@ -207,7 +209,7 @@ export function markAllNotificationsRead(
  * Emits `notification.read` per affected user (their badges drop live).
  */
 export function markTaskPacketApprovalRead(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   kinds: NotificationKind[] = ["packet", "approval"],
@@ -229,8 +231,9 @@ export function markTaskPacketApprovalRead(
          AND kind IN (${placeholders})`,
     )
     .run(new Date().toISOString(), projectSlug, taskKey, ...kinds);
-  if (result.changes > 0) {
+  const changes = Number(result.changes);
+  if (changes > 0) {
     for (const row of affected) emitNotificationRead(row.user_id);
   }
-  return result.changes;
+  return changes;
 }

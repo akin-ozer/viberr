@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   FileActorRef,
   PrRef,
@@ -98,7 +98,7 @@ const defaultExec: CommandExec = async (file, args, opts) => {
 // ------------------------------------------------------------------- input
 
 export interface ReconcileWorkspaceDeliveryInput {
-  db: Database.Database;
+  db: DatabaseSync;
   projectSlug: string;
   taskKey: string;
   /** The repo working dir the run used (the specialist clone dir), when known.
@@ -227,7 +227,7 @@ export async function reconcileWorkspaceDelivery(
     const ref = {
       projectSlug,
       taskKey,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     };
     const file = readTaskFile(ref);
     if (!file) return noop("task_not_found", "task file missing");
@@ -237,7 +237,7 @@ export async function reconcileWorkspaceDelivery(
     // its own git/gh creds, so we resolve config straight from the files.
     const projectFile = readProjectFile({
       projectSlug,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     });
     const repo = fm.repo ?? projectFile?.parsed.frontmatter.repo ?? null;
     if (!repo) return noop("no_repo", "project has no repo configured");
@@ -397,7 +397,7 @@ export async function reconcileWorkspaceDelivery(
         await patchTaskFrontmatter(ref, branchPatch);
       }
       rebuildPath(db, resolveTaskFilePath(ref), {
-        ...(dataRoot !== undefined ? { dataRoot } : {}),
+        dataRoot,
       });
     }
     // The branch-reconciled audit fires only for a real BRANCH or COMMIT change,
@@ -493,7 +493,7 @@ export async function reconcileWorkspaceDelivery(
               });
             }
             rebuildPath(db, resolveTaskFilePath(ref), {
-              ...(dataRoot !== undefined ? { dataRoot } : {}),
+              dataRoot,
             });
             recordAudit(db, {
               action: "github.workspace.pr_linked",

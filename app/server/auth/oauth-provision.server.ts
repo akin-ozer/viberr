@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { UserRole } from "~/shared/mapping/user.server";
 import { recordAudit } from "../audit/audit-recorder.server";
 import {
@@ -48,7 +48,7 @@ function normalizeHandle(handle: string | null | undefined): string | null {
 
 /** create.before gate: is this NEW better-auth OAuth user allowed at all? */
 export function isOAuthWhitelisted(
-  db: Database.Database,
+  db: DatabaseSync,
   user: OAuthUser,
 ): boolean {
   const email = normalizeEmail(user.email);
@@ -68,7 +68,7 @@ export function isOAuthWhitelisted(
  * membership for a freshly created OAuth user, resolving its role from the
  * domain allowlist or a claimed GitHub-handle placeholder.
  */
-export function applyOAuthUser(db: Database.Database, user: OAuthUser): void {
+export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
   const email = normalizeEmail(user.email);
   const handle = normalizeHandle(user.githubHandle);
   const provider = handle ? "github" : "google";
@@ -121,7 +121,7 @@ export function applyOAuthUser(db: Database.Database, user: OAuthUser): void {
 
 /** account.create.after: stamp the last provider used on the legacy row. */
 export function linkOAuth(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   providerId: string,
 ): void {

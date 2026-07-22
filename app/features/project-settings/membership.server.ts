@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
@@ -29,13 +29,13 @@ interface UserRow {
 }
 
 export function listMembershipViews(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): MembershipView[] {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) return [];
   const stmt = db.prepare(

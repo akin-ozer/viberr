@@ -1,13 +1,9 @@
-import { useEffect, useRef } from "react";
-import {
-  useFetcher,
-  useNavigate,
-  type FetcherWithComponents,
-} from "react-router";
+import { useFetcher, useNavigate } from "react-router";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { useActionToast } from "~/ui/use-action-toast";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import { connectionPill, prStatePill, syncPill } from "./github-pills";
@@ -29,23 +25,6 @@ import type {
  */
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
-
-/** Toast once per completed fetcher submission (phase-5 pattern). */
-function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
-  const push = useToast();
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
-    if (d.ok) {
-      if (d.toast) push(d.toast);
-    } else if (d.error) {
-      push(d.error);
-    }
-  }, [fetcher.state, fetcher.data, push]);
-}
 
 const PANEL_COUNT_STYLE = {
   fontSize: ".76rem",

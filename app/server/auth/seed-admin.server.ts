@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit, SYSTEM_ACTOR } from "../audit/audit-recorder.server";
 import { logger } from "../logging/logger.server";
@@ -35,7 +35,7 @@ function nameForEmail(email: string): string {
 }
 
 export async function seedInitialAdmin(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { email?: string; password?: string } = {},
 ): Promise<SeedAdminResult> {
   if (countUsers(db) > 0) return { created: false };

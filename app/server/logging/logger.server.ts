@@ -11,13 +11,6 @@ const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 type LogLevel = keyof typeof LEVELS;
 type LogFields = Record<string, unknown>;
 
-interface Logger {
-  debug(msg: string, fields?: LogFields): void;
-  info(msg: string, fields?: LogFields): void;
-  warn(msg: string, fields?: LogFields): void;
-  error(msg: string, fields?: LogFields): void;
-}
-
 function minLevel(): LogLevel {
   const raw = process.env.LOG_LEVEL;
   if (raw && raw in LEVELS) return raw as LogLevel;
@@ -57,9 +50,12 @@ function write(level: LogLevel, msg: string, fields?: LogFields): void {
   process.stdout.write(line + "\n");
 }
 
-export const logger: Logger = {
-  debug: (msg, fields) => write("debug", msg, fields),
-  info: (msg, fields) => write("info", msg, fields),
-  warn: (msg, fields) => write("warn", msg, fields),
-  error: (msg, fields) => write("error", msg, fields),
+const log = (level: LogLevel) => (msg: string, fields?: LogFields) =>
+  write(level, msg, fields);
+
+export const logger = {
+  debug: log("debug"),
+  info: log("info"),
+  warn: log("warn"),
+  error: log("error"),
 };

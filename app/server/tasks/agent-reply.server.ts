@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   deliveringEngagement,
@@ -115,7 +115,7 @@ function handleMatchesSpecialist(
  * enough to reuse another agent's session.
  */
 function latestSessionRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   target: { profileId: string; isPrimary: boolean },
@@ -143,7 +143,7 @@ function latestSessionRun(
  *   3. a deployed specialist by name / profile id / backend.
  */
 export function resolveMentionedAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -158,7 +158,7 @@ export function resolveMentionedAgent(
   const existing = readTaskFile({
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const primaryRef = existing
     ? deliveringEngagement(existing.parsed.frontmatter)
@@ -341,7 +341,7 @@ function truncate(text: string): string {
 
 /** Read a run's persisted display lines (helper for the completion callback). */
 export function replyTextForRun(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): string | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
@@ -350,7 +350,7 @@ export function replyTextForRun(
 
 /** The full untruncated reply text of a run (for verdict + no-progress checks). */
 export function fullReplyTextForRun(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): string | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
@@ -374,7 +374,7 @@ export type RunFailureKind =
  * credential, so no agent process ever started.
  */
 export function runFailureReason(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): { kind: RunFailureKind; text: string } | null {
   const lines = listRunLines(db, runId).map((l) => l.display);

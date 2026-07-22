@@ -1,4 +1,5 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
+import { withTransaction } from "~/server/db/transaction.server";
 import {
   recordAudit,
   type AuditActor,
@@ -32,18 +33,18 @@ import { rebuildAll, type RescanSummary } from "./rebuilder.server";
  * revalidation must never race a half-built (or rolled-back) projection.
  */
 export function rebuildProjections(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { dataRoot?: string; actor?: AuditActor } = {},
 ): RescanSummary {
   let summary: RescanSummary | null = null;
-  const run = db.transaction(() => {
+  const run = () => withTransaction(db, () => {
     db.prepare(`DELETE FROM task_events`).run();
     db.prepare(`DELETE FROM diagnostics`).run();
     db.prepare(`DELETE FROM task_projections`).run();
     db.prepare(`DELETE FROM projects`).run(); // project_members cascade
     summary = rebuildAll(db, {
       force: true,
-      ...(options.dataRoot !== undefined ? { dataRoot: options.dataRoot } : {}),
+      dataRoot: options.dataRoot,
     });
   });
   // Buffer every projection event raised inside the transaction; deliver

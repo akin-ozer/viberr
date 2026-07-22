@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  isEntryStage,
-  isTerminalStage,
-  resolveStageRoles,
-} from "./stage-roles";
+import { isTerminalStage, resolveStageRoles } from "./stage-roles";
 import { GOVERNED_TEMPLATE, LIGHTWEIGHT_TEMPLATE } from "./templates";
 
 describe("resolveStageRoles", () => {
@@ -79,11 +75,9 @@ describe("resolveStageRoles", () => {
     });
   });
 
-  it("isTerminalStage / isEntryStage key off position, not literal ids", () => {
+  it("isTerminalStage keys off position, not literal ids", () => {
     const stages = LIGHTWEIGHT_TEMPLATE.stages;
-    expect(isEntryStage("todo", stages)).toBe(true);
     expect(isTerminalStage("done", stages)).toBe(true);
     expect(isTerminalStage("doing", stages)).toBe(false);
-    expect(isEntryStage(null, stages)).toBe(false);
   });
 });

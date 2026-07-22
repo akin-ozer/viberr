@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   listProjectMembers,
   listProjects,
@@ -87,7 +87,7 @@ export interface HomeProjectCard {
  * longer leaks the existence + counts of projects a non-member can't open.
  */
 export function listHomeProjectsForUser(
-  db: Database.Database,
+  db: DatabaseSync,
   viewer: { id: string; role: "admin" | "member" },
 ): HomeProjectCard[] {
   const all = listHomeProjects(db);
@@ -129,7 +129,7 @@ interface HomeTaskAgg {
   updated_at: string | null;
 }
 
-export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
+export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
   const projects = listProjects(db);
 
   // Push the card counts into SQL (settings-query.server.ts pattern) instead of
@@ -266,7 +266,7 @@ export interface HomeOrgSummary {
 }
 
 export function getHomeOrgSummary(
-  db: Database.Database,
+  db: DatabaseSync,
   options: { dataRoot?: string } = {},
 ): HomeOrgSummary {
   // Real GitHub connections (Phase 7 store), newest-first via the query, so a

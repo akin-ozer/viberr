@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   acceptanceBlockedReason,
@@ -60,25 +60,7 @@ import {
 } from "./specialist-run.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 
-/**
- * Operator-authorized, capability-GATED task mutations — the layer the
- * operator runtime (its in-process governance tools, operator-toolkit.server)
- * calls to actually drive a task. Every action is governed by the operator
- * deployment's capability policy plus its autonomy level:
- *
- *   direct     → perform the action as the operator.
- *   recommend  → do NOT perform it; post a recommendation (and, for
- *                completion, open a decision packet) for a human to decide.
- *                Under FULL autonomy, recommend is promoted to direct.
- *   human/off  → refuse (human = reserved for a human; off = withheld / the
- *                "don't recommend" operator-RBAC mode → the tool isn't offered).
- *
- * The one deliberate exception to the human-only-Done invariant lives here:
- * under FULL autonomy the operator may accept completion and move a task to
- * Done ({@link operatorAcceptCompletion}). Supervised operators only ever
- * RECOMMEND acceptance (they open the same completion packet a human resolves).
- * Every other agent, and every supervised operator, still cannot reach Done.
- */
+/** Capability-gated task mutations used only by the in-process operator toolkit. */
 
 export type OperatorAutonomy = "supervised" | "full";
 
@@ -132,7 +114,7 @@ export function resolveOperatorAuthority(
 ): OperatorAuthority {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
@@ -212,18 +194,18 @@ function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string)
   return {
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
 function reproject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
 ): void {
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -241,7 +223,7 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
  * every call site).
  */
 async function writeOperatorComment(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -347,7 +329,7 @@ async function writeOperatorComment(
  * SUPERVISED operator does instead of performing a governed action itself.
  */
 async function addRecommendation(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -444,21 +426,9 @@ export interface OperatorOpenPacketInput {
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
 
-/**
- * Open a structured decision/blocking PACKET on the task (FR26, Journey 2) —
- * the artifact the whole product is built around. This is what an operator
- * produces at a genuine decision point or when it hits the limit of its
- * authority, instead of leaving a comment wall and a bare `waiting:human`.
- *
- * Governed by `generate-packets`. The packet carries typed observations and a
- * set of resolvable options (each a stable {@link PacketOptionKind}); exactly
- * one is marked recommended. Writing it sets `waiting=human` (and, for a
- * `blocked` packet, `readiness=blocked`), then fans a `packet` notification out
- * to the task's supervisors. The human resolves it through the existing
- * DecisionPacket UI → `resolvePacket`, so no new resolution path is needed.
- */
+/** Open a typed human-decision packet and notify the task's supervisors. */
 export async function operatorOpenPacket(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: OperatorOpenPacketInput,
   authority: OperatorAuthority,
@@ -585,7 +555,7 @@ export async function operatorOpenPacket(
  * log shows WHY the packet disappeared. No-op when no packet is open.
  */
 export async function operatorResolvePacket(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; reason?: string },
   authority: OperatorAuthority,
@@ -698,7 +668,7 @@ export interface OperatorTaskSnapshot {
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
 export function operatorSnapshot(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -708,7 +678,7 @@ export function operatorSnapshot(
   if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!project) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
@@ -793,7 +763,7 @@ export function operatorSnapshot(
 
 /** Post an operator comment (governed by append-typed-events). */
 export async function operatorPostComment(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; text: string },
   authority: OperatorAuthority,
@@ -814,21 +784,9 @@ export async function operatorPostComment(
   return { outcome: "done", message: "Comment posted to the timeline." };
 }
 
-/**
- * Draft the task goal (governed by append-typed-events). This closes the
- * triage-gate gap where the operator could OFFER "accept operator-drafted
- * scope" but had no way to actually write the goal — the human accepted and
- * the goal stayed the unspecified placeholder forever.
- *
- * SAFETY: only fills an UNSPECIFIED goal (empty or the DEFAULT_GOAL
- * placeholder). It never overwrites an already-specified goal — changing a real
- * goal stays a human/`edit_goal` decision, so a misfiring operator can't
- * silently rewrite scope mid-flight. Operator-authorized (no human RBAC); a
- * pending `awaiting: goal_edit` packet is fulfilled + cleared, mirroring
- * updateTaskGoal.
- */
+/** Fill only an unspecified goal; established scope remains human-controlled. */
 export async function operatorSetGoal(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; goal: string; reason?: string },
   authority: OperatorAuthority,
@@ -899,7 +857,7 @@ export async function operatorSetGoal(
 
 /** Assign the primary specialist (governed by assign-primary-specialist). */
 export async function operatorAssignSpecialist(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
   authority: OperatorAuthority,
@@ -938,7 +896,7 @@ export async function operatorAssignSpecialist(
 
 /** Start the primary specialist's run (governed by assign-primary-specialist). */
 export async function operatorRunSpecialist(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string },
   authority: OperatorAuthority,
@@ -967,7 +925,7 @@ export async function operatorRunSpecialist(
 
 /** Engage a reviewer (governed by summon-reviewers). */
 export async function operatorAssignReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; profileId: string; reason?: string },
   authority: OperatorAuthority,
@@ -1003,7 +961,7 @@ export async function operatorAssignReviewer(
 
 /** Start a reviewer's run (governed by summon-reviewers). */
 export async function operatorRunReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; profileId: string },
   authority: OperatorAuthority,
@@ -1052,7 +1010,7 @@ function deployedAgent(
  * typed results and writes the branch name into task.md on success.
  */
 async function ensureTaskBranchBestEffort(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -1063,7 +1021,7 @@ async function ensureTaskBranchBestEffort(
       db,
       { projectSlug, taskKey },
       OPERATOR_AUDIT_ACTOR,
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+      { dataRoot: ctx.dataRoot },
     );
   } catch {
     // Non-fatal: coordination proceeds without a branch when GitHub is absent.
@@ -1079,7 +1037,7 @@ function taskContext(
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const title = file?.parsed.frontmatter.title ?? taskKey;
   const goal = file?.parsed.goal ?? "";
@@ -1089,20 +1047,9 @@ function taskContext(
   return { title, goal, stageName };
 }
 
-/**
- * Engage + PROMPT the primary specialist for the current stage (governed by
- * `assign-primary-specialist`). Direct → assign it as primary (if it isn't
- * already), post an operator prompt comment related to the task, and start its
- * run with that prompt as the turn directive. Recommend (supervised with the
- * assign capability set to recommend) → post a recommendation card and stop.
- *
- * This is how the operator "hands a task to" its specialist when the task enters
- * a working stage: it triggers the agent with a task-related prompt, not a
- * silent run. Pass `directive` to control the prompt text; when omitted a
- * stage-aware default is generated from the task's goal.
- */
+/** Assign and prompt the stage's delivering specialist, or recommend the handoff. */
 export async function operatorPromptSpecialist(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1188,7 +1135,7 @@ export async function operatorPromptSpecialist(
  * stop. Used when a task reaches the review stage.
  */
 export async function operatorPromptReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1260,23 +1207,9 @@ export async function operatorPromptReviewer(
 
 // ------------------------------------------------- generic agent dispatch
 
-/**
- * Generic engagement dispatch (generic-agents phase 3): ONE tool surface —
- * engage_agent / run_agent / prompt_agent — replacing the six kind-tools.
- * `delivers` selects the engagement shape; the capability GATES keep their
- * existing ids (assign-primary-specialist governs delivering engagements,
- * summon-reviewers the supporting ones), so no deployment grant migrates.
- */
-/**
- * F10-35: persist a DETERMINISTIC, server-computed routing trace whenever the
- * operator selects a profile — every deployed specialist it could have chosen,
- * with its stage-eligibility and already-engaged status, the one chosen, and the
- * operator's stated reason. This turns opaque "the operator picked X" into an
- * auditable record an owner can inspect to tell a deliberate semantic match from
- * an availability/first-match fallback. Best-effort — never blocks the engage.
- */
+/** Best-effort audit trace for every operator profile selection. */
 function recordAgentSelectionTrace(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1320,7 +1253,7 @@ function recordAgentSelectionTrace(
 }
 
 export async function operatorEngageAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1363,7 +1296,7 @@ function resolveDeliversIntent(
   const file = readTaskFile({
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const fm = file?.parsed.frontmatter;
   if (!fm) return !profileId;
@@ -1375,7 +1308,7 @@ function resolveDeliversIntent(
 }
 
 export async function operatorRunAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1409,7 +1342,7 @@ export async function operatorRunAgent(
 }
 
 export async function operatorPromptAgentGeneric(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1449,7 +1382,7 @@ export async function operatorPromptAgentGeneric(
 }
 
 export async function operatorTransitionStage(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string; toStageId: string; reason?: string },
   authority: OperatorAuthority,
@@ -1505,7 +1438,7 @@ function stageNameOf(
 ): string {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return file?.parsed.frontmatter.stages.find((s) => s.id === stageId)?.name ?? stageId;
 }
@@ -1523,7 +1456,7 @@ function isReworkMove(
   const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!task || !project) return false;
   if (task.parsed.frontmatter.validation !== "failing") return false;
@@ -1544,7 +1477,7 @@ function operatorBoundaryFor(
   const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!task || !project) return null;
   const from = task.parsed.frontmatter.stage;
@@ -1560,7 +1493,7 @@ function operatorBoundaryFor(
  * human resolves (the existing acceptance UX).
  */
 export async function operatorAcceptCompletion(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: { projectSlug: string; taskKey: string },
   authority: OperatorAuthority,
@@ -1569,7 +1502,7 @@ export async function operatorAcceptCompletion(
   if (!file) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const project = readProjectFile({
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!project) throw AppError.notFound(`Project ${input.projectSlug} not found.`);
   const stages = project.parsed.frontmatter.stages;

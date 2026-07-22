@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { AUTH_BASE_PATH, type ViberrAuth } from "~/lib/auth.server";
 import type { UserRecord } from "~/shared/mapping/user.server";
 import { recordAudit } from "../audit/audit-recorder.server";
@@ -55,7 +55,7 @@ export interface LoginAttempt {
  * so no sync happens here.
  */
 export async function loginWithCredentials(
-  db: Database.Database,
+  db: DatabaseSync,
   auth: ViberrAuth,
   attempt: LoginAttempt,
   deps: { requestHeaders?: Headers; requestUrl?: string } = {},
@@ -129,7 +129,7 @@ export async function loginWithCredentials(
  * gate, not a credential-compromise recovery).
  */
 export async function completeForcedPasswordReset(
-  db: Database.Database,
+  db: DatabaseSync,
   args: {
     user: Pick<UserRecord, "id" | "email">;
     newPassword: string;

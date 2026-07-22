@@ -1,6 +1,6 @@
 import path from "node:path";
 import { watch, type FSWatcher } from "node:fs";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
@@ -93,7 +93,7 @@ function cancelAll(timers: Map<string, ReturnType<typeof setTimeout>>): void {
 
 /** Starts (or returns the already-running) projects-tree watcher. */
 export function startFileWatcher(
-  options: { dataRoot?: string; db?: Database.Database } = {},
+  options: { dataRoot?: string; db?: DatabaseSync } = {},
 ): FSWatcher {
   const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
   const root = getDataRoot(options.dataRoot);

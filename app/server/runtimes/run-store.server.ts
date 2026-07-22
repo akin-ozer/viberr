@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { LogLine, RunBackend, RunKind, RunState } from "~/features/runtime/runtime-types";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
@@ -72,7 +72,7 @@ export interface InsertRunInput {
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
-export function upsertRun(db: Database.Database, input: InsertRunInput): void {
+export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO agent_runs
@@ -145,9 +145,12 @@ export interface RunPatch {
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
-export function patchRun(db: Database.Database, runId: string, patch: RunPatch): void {
+export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void {
   const cols: string[] = [];
-  const params: Record<string, unknown> = { id: runId, updatedAt: new Date().toISOString() };
+  const params: Record<string, SQLInputValue> = {
+    id: runId,
+    updatedAt: new Date().toISOString(),
+  };
   const map: Record<keyof RunPatch, string> = {
     sessionId: "session_id",
     state: "state",
@@ -167,18 +170,18 @@ export function patchRun(db: Database.Database, runId: string, patch: RunPatch):
     const value = patch[key];
     if (value === undefined) continue;
     cols.push(`${map[key]} = @${key}`);
-    params[key] = value as unknown;
+    params[key] = value;
   }
   if (cols.length === 0) return;
   db.prepare(`UPDATE agent_runs SET ${cols.join(", ")}, updated_at = @updatedAt WHERE id = @id`).run(params);
 }
 
-export function getRun(db: Database.Database, runId: string): AgentRunRow | null {
+export function getRun(db: DatabaseSync, runId: string): AgentRunRow | null {
   return (db.prepare(`SELECT * FROM agent_runs WHERE id = ?`).get(runId) as AgentRunRow | undefined) ?? null;
 }
 
 export function listRunsForTaskRows(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): AgentRunRow[] {
@@ -187,11 +190,11 @@ export function listRunsForTaskRows(
       `SELECT * FROM agent_runs WHERE project_slug = ? AND task_key = ?
        ORDER BY created_at ASC, rowid ASC`,
     )
-    .all(projectSlug, taskKey) as AgentRunRow[];
+    .all(projectSlug, taskKey) as unknown as AgentRunRow[];
 }
 
 /** Next append sequence for a run (max seq + 1, or 0). */
-export function nextSeq(db: Database.Database, runId: string): number {
+export function nextSeq(db: DatabaseSync, runId: string): number {
   const row = db.prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`).get(runId) as
     | { m: number | null }
     | undefined;
@@ -199,7 +202,7 @@ export function nextSeq(db: Database.Database, runId: string): number {
 }
 
 export function listRunLines(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
   sinceSeq = -1,
 ): { seq: number; occurredAt: string; raw: string; display: LogLine }[] {
@@ -251,7 +254,7 @@ export function appendRawLine(
 
 /** Insert one projected log line row (raw + display). Returns the seq used. */
 export function insertRunLine(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { runId: string; seq: number; occurredAt: string; raw: string; display: LogLine },
 ): void {
   db.prepare(

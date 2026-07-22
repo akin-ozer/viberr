@@ -1,4 +1,5 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
+import { withTransaction } from "~/server/db/transaction.server";
 import {
   parsePatValidation,
   type PatValidation,
@@ -17,6 +18,7 @@ import {
 } from "~/server/secrets/pat-store.server";
 import { validatePatToken } from "~/server/secrets/pat-validator.server";
 import { slugify } from "~/shared/ids/slugify";
+import { formatCalendarDate } from "~/shared/dates/format";
 
 /**
  * Org-level GitHub OWNER connections (org-settings spec §3.1 / §4.1).
@@ -112,15 +114,15 @@ const LIST_SQL = `
   FROM github_connections c
   LEFT JOIN github_pats p ON p.id = c.pat_id`;
 
-export function listConnections(db: Database.Database): ConnectionRecord[] {
+export function listConnections(db: DatabaseSync): ConnectionRecord[] {
   const rows = db
     .prepare(`${LIST_SQL} ORDER BY c.created_at ASC, c.id ASC`)
-    .all() as ConnectionRow[];
+    .all() as unknown as ConnectionRow[];
   return rows.map((r) => mapRow(r));
 }
 
 export function getConnection(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
 ): ConnectionRecord | null {
   const row = db.prepare(`${LIST_SQL} WHERE c.id = ?`).get(id) as
@@ -131,7 +133,7 @@ export function getConnection(
 
 /** The default connection (at most one). */
 export function getDefaultConnection(
-  db: Database.Database,
+  db: DatabaseSync,
 ): ConnectionRecord | null {
   const row = db.prepare(`${LIST_SQL} WHERE c.is_default = 1`).get() as
     | ConnectionRow
@@ -144,7 +146,7 @@ export function getDefaultConnection(
  * passed — the StoreBrowser GitHub import uses this. SERVER-INTERNAL.
  */
 export function getDefaultConnectionToken(
-  db: Database.Database,
+  db: DatabaseSync,
 ): { connection: ConnectionRecord; token: string } | null {
   const connection = getDefaultConnection(db);
   if (!connection || connection.validationState !== "valid") return null;
@@ -163,19 +165,6 @@ export type SaveConnectionResult =
   | { status: "duplicate"; message: string }
   | { status: "validation_failed"; message: string }
   | { status: "not_found"; message: string };
-
-/** "Jul 3, 2027" display form for toast copy. */
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-] as const;
-
-export function formatExpiryDate(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
 
 function failureMessage(validation: PatValidation): string {
   if (validation.status === "insufficient_scope") {
@@ -255,7 +244,7 @@ async function validateConnectionToken(
 }
 
 export async function createConnection(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { owner: string; token: string; userId: string },
   actor: AuditActor,
   options: ConnectionOptions = {},
@@ -301,7 +290,7 @@ export async function createConnection(
   });
 
   const connection = getConnection(db, id)!;
-  const expiry = formatExpiryDate(connection.expiresAt);
+  const expiry = formatCalendarDate(connection.expiresAt);
   return {
     status: "saved",
     connection,
@@ -310,7 +299,7 @@ export async function createConnection(
 }
 
 export async function replaceConnectionToken(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { connectionId: string; token: string },
   actor: AuditActor,
   options: ConnectionOptions = {},
@@ -345,7 +334,7 @@ export async function replaceConnectionToken(
   });
 
   const connection = getConnection(db, existing.id)!;
-  const expiry = formatExpiryDate(connection.expiresAt);
+  const expiry = formatCalendarDate(connection.expiresAt);
   return {
     status: "saved",
     connection,
@@ -359,18 +348,18 @@ export type SetDefaultResult =
 
 /** Exactly one default, transactionally (spec §5 #3). */
 export function setDefaultConnection(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
 ): SetDefaultResult {
   const target = getConnection(db, id);
   if (!target) return { status: "not_found" };
-  db.transaction(() => {
+  withTransaction(db, () => {
     db.prepare(`UPDATE github_connections SET is_default = 0`).run();
     db.prepare(`UPDATE github_connections SET is_default = 1 WHERE id = ?`).run(
       id,
     );
-  })();
+  });
   recordAudit(db, {
     action: "org.connection.default_changed",
     actor,
@@ -391,7 +380,7 @@ export type RemoveConnectionResult =
 
 /** Refuses to remove the default ("Set another connection as default first"). */
 export function removeConnection(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
 ): RemoveConnectionResult {

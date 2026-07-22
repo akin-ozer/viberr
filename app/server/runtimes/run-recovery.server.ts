@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
@@ -35,7 +35,7 @@ const RECOVERY_REPLAY_ACTION = "run.recovery.reply_replayed";
  *
  * Idempotent: a second boot finds nothing non-terminal.
  */
-export function finalizeOrphanedRuns(db: Database.Database): {
+export function finalizeOrphanedRuns(db: DatabaseSync): {
   finalized: number;
   /** Orphaned tasks for which the operator was re-invoked this boot. */
   reinvoked: number;
@@ -179,7 +179,7 @@ export function finalizeOrphanedRuns(db: Database.Database): {
  *    of re-firing. A restart after the window elapses sees a clean count.
  */
 export async function recoverUnreactedAgentRuns(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<{ recovered: number; capped: number }> {
   const rows = db

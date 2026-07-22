@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -45,7 +45,7 @@ export interface OperatorToolkit {
 }
 
 interface ToolkitDeps {
-  db: Database.Database;
+  db: DatabaseSync;
   ctx: TaskMutationContext;
   projectSlug: string;
   taskKey: string;

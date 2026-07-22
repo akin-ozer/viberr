@@ -22,7 +22,6 @@
     "@openai/codex-sdk": "^0.144.1",
     "@react-router/serve": "^8.2.0",
     "better-auth": "1.6.23",
-    "better-sqlite3": "^12.11.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
@@ -35,7 +34,6 @@
   "devDependencies": {
     "@react-router/dev": "^8.2.0",
     "@testing-library/react": "^16.3.2",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

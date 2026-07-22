@@ -11,7 +11,7 @@ import { projectRunsForTask } from "./run-projection.server";
  */
 
 let ctx: TestDbContext;
-let db: import("better-sqlite3").Database;
+let db: import("node:sqlite").DatabaseSync;
 
 const SLUG = "viberr-core";
 const TASK = "VIB-1";

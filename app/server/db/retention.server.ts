@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 
 /**
@@ -35,31 +35,37 @@ function isoDaysAgo(now: Date, days: number): string {
 }
 
 export function applyRetention(
-  db: Database.Database,
+  db: DatabaseSync,
   now: Date = new Date(),
 ): RetentionResult {
-  const runLogLines = db
-    .prepare(`DELETE FROM run_log_lines WHERE occurred_at < ?`)
-    .run(isoDaysAgo(now, RUN_LOG_RETENTION_DAYS)).changes;
+  const runLogLines = Number(
+    db
+      .prepare(`DELETE FROM run_log_lines WHERE occurred_at < ?`)
+      .run(isoDaysAgo(now, RUN_LOG_RETENTION_DAYS)).changes,
+  );
 
-  const auditEvents = db
-    .prepare(`DELETE FROM audit_events WHERE occurred_at < ?`)
-    .run(isoDaysAgo(now, AUDIT_RETENTION_DAYS)).changes;
+  const auditEvents = Number(
+    db
+      .prepare(`DELETE FROM audit_events WHERE occurred_at < ?`)
+      .run(isoDaysAgo(now, AUDIT_RETENTION_DAYS)).changes,
+  );
 
   // Keep only the newest N notifications per user (window function — SQLite
-  // 3.25+, which better-sqlite3 bundles).
-  const notifications = db
-    .prepare(
-      `DELETE FROM notifications WHERE id IN (
-         SELECT id FROM (
-           SELECT id, ROW_NUMBER() OVER (
-             PARTITION BY user_id ORDER BY occurred_at DESC, id DESC
-           ) AS rn
-           FROM notifications
-         ) WHERE rn > ?
-       )`,
-    )
-    .run(NOTIFICATION_MAX_PER_USER).changes;
+  // 3.25+, which Node's SQLite build includes).
+  const notifications = Number(
+    db
+      .prepare(
+        `DELETE FROM notifications WHERE id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY user_id ORDER BY occurred_at DESC, id DESC
+             ) AS rn
+             FROM notifications
+           ) WHERE rn > ?
+         )`,
+      )
+      .run(NOTIFICATION_MAX_PER_USER).changes,
+  );
 
   const result = { runLogLines, auditEvents, notifications };
   if (runLogLines + auditEvents + notifications > 0) {

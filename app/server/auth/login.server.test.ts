@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
@@ -16,7 +16,7 @@ afterEach(ctx.cleanup);
 
 const PASSWORD = "correct-password";
 
-function makeAuth(db: Database.Database): ViberrAuth {
+function makeAuth(db: DatabaseSync): ViberrAuth {
   return createAuth({
     db,
     secret: "test-secret-at-least-32-characters-long-000",
@@ -26,7 +26,7 @@ function makeAuth(db: Database.Database): ViberrAuth {
 }
 
 async function seedUser(
-  db: Database.Database,
+  db: DatabaseSync,
   overrides: Partial<Parameters<typeof insertUser>[1]> = {},
   password: string | null = PASSWORD,
 ) {
@@ -54,7 +54,7 @@ function requestDeps(ip: string) {
 }
 
 /** Count better-auth session rows for a user. */
-function betterAuthSessions(db: Database.Database, userId: string): number {
+function betterAuthSessions(db: DatabaseSync, userId: string): number {
   return (
     db.prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`).get(userId) as {
       c: number;

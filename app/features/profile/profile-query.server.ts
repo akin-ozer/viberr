@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
@@ -68,7 +68,7 @@ export interface ProfileView {
  * Policy/Settings links, so it should be the project the user actually
  * works in, not an alphabetical accident. */
 export function listUserMemberships(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): ProfileMembership[] {
   const rows = db
@@ -92,7 +92,7 @@ export function listUserMemberships(
  *  `notifs` pref key — both the profile view and the notification-creation
  *  gate go through here. */
 export function getNotifPrefs(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): NotifPrefs {
   return mergeNotifPrefs(getPref(db, userId, NOTIFS_PREF_KEY));
@@ -102,7 +102,7 @@ export function getNotifPrefs(
  *  pref defaults to ON. Consulted before every notification insert so a
  *  silenced category never reaches the recipient's inbox (FR26 routing). */
 export function isNotifKindEnabled(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   kind: NotificationKind,
 ): boolean {
@@ -110,7 +110,7 @@ export function isNotifKindEnabled(
 }
 
 export function getMotionPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): MotionPreference {
   return getPref<string>(db, userId, MOTION_PREF_KEY) === "reduce"
@@ -119,7 +119,7 @@ export function getMotionPref(
 }
 
 export function getTimelineDefaultPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): TimelineDefault {
   const raw = getPref<string>(db, userId, TL_DEFAULT_PREF_KEY);
@@ -127,7 +127,7 @@ export function getTimelineDefaultPref(
 }
 
 export function getProfileView(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
 ): ProfileView | null {
   const user = findUserById(db, userId);

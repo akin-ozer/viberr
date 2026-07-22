@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { insertUser } from "~/server/auth/user-store.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
@@ -35,7 +35,7 @@ export interface TestStoreUser {
 }
 
 export interface TestStore {
-  db: Database.Database;
+  db: DatabaseSync;
   dataRoot: string;
   slug: string;
   users: {

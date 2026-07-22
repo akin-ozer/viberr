@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
@@ -20,7 +20,7 @@ import {
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-function auth(db: Database.Database): ViberrAuth {
+function auth(db: DatabaseSync): ViberrAuth {
   return createAuth({
     db,
     secret: "test-secret-at-least-32-characters-long-000",

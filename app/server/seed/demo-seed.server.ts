@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { provisionIdentity } from "~/server/auth/identity.server";
 import { hashPassword } from "~/server/auth/password.server";
@@ -83,7 +83,7 @@ const DERIVED_TABLES = [
 ];
 
 async function upsertUsers(
-  db: Database.Database,
+  db: DatabaseSync,
   options: DemoSeedOptions,
 ): Promise<SeedUserIds> {
   const ids = {} as SeedUserIds;
@@ -133,7 +133,7 @@ async function upsertUsers(
 }
 
 export async function runDemoSeed(
-  db: Database.Database,
+  db: DatabaseSync,
   options: DemoSeedOptions,
 ): Promise<DemoSeedSummary> {
   const dataRoot = options.dataRoot;

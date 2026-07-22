@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type AuditActor,
   SYSTEM_ACTOR,
@@ -65,12 +65,12 @@ function taskRef(input: {
   return {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   };
 }
 
 async function appendPolicyEvent(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; text: string },
   ctx: ScopeFlagContext,
 ): Promise<boolean> {
@@ -86,7 +86,7 @@ async function appendPolicyEvent(
     evidence: null,
   });
   rebuildPath(db, resolveTaskFilePath(ref), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return true;
 }
@@ -107,7 +107,7 @@ export interface FlagScopeViolationInput {
  * notification, no reprojection — fully idempotent).
  */
 export async function flagScopeViolation(
-  db: Database.Database,
+  db: DatabaseSync,
   input: FlagScopeViolationInput,
   ctx: ScopeFlagContext = {},
 ): Promise<{ violation: ScopeViolationRecord; created: boolean }> {
@@ -138,7 +138,7 @@ export async function flagScopeViolation(
         text: input.detail,
         from: { kind: "system", name: "Policy engine" },
       },
-      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      { dataRoot: ctx.dataRoot },
     );
   }
   return { violation, created };
@@ -149,7 +149,7 @@ export async function flagScopeViolation(
  * task. Idempotent (already-resolved → no event).
  */
 export async function resolveScopeViolationWithEvent(
-  db: Database.Database,
+  db: DatabaseSync,
   violationId: string,
   actor: AuditActor = SYSTEM_ACTOR,
   ctx: ScopeFlagContext = {},

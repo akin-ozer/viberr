@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
   credentialPasswordHash,
@@ -45,7 +45,7 @@ export interface ProfileActor {
 /** Name/Title blur-commit. Toast copy is the mock's, parameterized with
  * the first membership's project name (single-project mock literal). */
 export function updateProfileIdentity(
-  db: Database.Database,
+  db: DatabaseSync,
   actor: ProfileActor,
   input: { name: string; title: string },
 ): { toast: string } {
@@ -72,7 +72,7 @@ export function updateProfileIdentity(
 
 /** Notification-routing toggle (app channel only — ruling 13). */
 export function setNotifRoutingPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   category: string,
   on: boolean,
@@ -90,7 +90,7 @@ export function setNotifRoutingPref(
 }
 
 export function setMotionPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   motion: string,
 ): MotionPreference {
@@ -102,7 +102,7 @@ export function setMotionPref(
 }
 
 export function setTimelineDefaultPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   value: string,
 ): TimelineDefault {
@@ -119,7 +119,7 @@ export function setTimelineDefaultPref(
  * current session, signs out every other one.
  */
 export async function changeOwnPassword(
-  db: Database.Database,
+  db: DatabaseSync,
   actor: ProfileActor & { sessionId: string },
   input: { current: string; next: string; confirm: string },
 ): Promise<{ toast: string }> {
@@ -166,7 +166,7 @@ export async function changeOwnPassword(
  * lock itself out). Audit-relevant per profile.md §5.
  */
 export function disconnectGithubIdentity(
-  db: Database.Database,
+  db: DatabaseSync,
   actor: ProfileActor,
 ): { toast: string } {
   const user = findUserById(db, actor.userId);
