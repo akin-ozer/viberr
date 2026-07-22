@@ -35,14 +35,15 @@ afterEach(() => ctx.cleanup());
 function seedRun(id: string, over: Partial<Parameters<typeof upsertRun>[1]> = {}) {
   upsertRun(store.db, {
     id, taskKey: "VIB-1", projectSlug: store.slug, threadId: `op-${id}`,
-    role: "Operator", kind: "operator", backend: "claude", simulated: false,
+    role: "Operator", kind: "operator", backend: "claude",
+    agentProfileId: "operator",
     model: "sonnet", sdk: "Claude Agent SDK", state: "running",
     startedAt: new Date().toISOString(), ...over,
   } as Parameters<typeof upsertRun>[1]);
 }
 
 describe("finalizeOrphanedRuns (F-RUN1)", () => {
-  it("flips a real running run to error with interrupted_by=restart", () => {
+  it("flips a running run to error with interrupted_by=restart", () => {
     seedRun("run_orphan", { state: "running" });
     const { finalized } = finalizeOrphanedRuns(store.db);
     expect(finalized).toBe(1);
@@ -58,17 +59,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(getRun(store.db, "run_queued")!.state).toBe("error");
   });
 
-  it("retires simulated seed runs to finished (R6-5: no masquerading as live)", () => {
-    seedRun("run_sim", { state: "running", simulated: true });
-    const res = finalizeOrphanedRuns(store.db);
-    expect(res.simulated).toBe(1);
-    const row = getRun(store.db, "run_sim")!;
-    expect(row.state).toBe("finished");
-    // Not an error, not interrupted — a quiet demo completion.
-    expect(row.interrupted_by).toBeNull();
-  });
-
-  it("re-invokes the operator for a real orphan under the crash-loop cap", () => {
+  it("re-invokes the operator for an orphan under the crash-loop cap", () => {
     seedRun("run_orphan", { state: "running" });
     const res = finalizeOrphanedRuns(store.db);
     expect(res.finalized).toBe(1);
@@ -135,6 +126,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     seedRun(id, {
       kind: "primary",
       role: "Primary specialist",
+      agentProfileId: "developer",
       state: "finished",
       finishedAt: new Date().toISOString(),
     });
@@ -226,6 +218,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     seedRun("run_fresh", {
       kind: "primary",
       role: "Primary specialist",
+      agentProfileId: "developer",
       state: "finished",
       finishedAt: new Date().toISOString(),
     });

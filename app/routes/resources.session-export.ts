@@ -20,8 +20,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * inside Viberr can be continued locally on the same subscription. See
  * session-export.server.ts for the resume mechanics.
  *
- * 404 when the run has no resumable on-disk session (simulated runs, or a
- * provider that wrote no transcript).
+ * 404 when the run has no resumable on-disk provider session.
  *
  * F10-06/F10-33: a provider session transcript is the MOST sensitive run
  * artifact (full conversation, tool outputs, repository content, prompts, and
@@ -43,9 +42,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   // Membership gate for the run's project (throws a 403 Response for non-members).
   await requireProjectMember(request, run.project_slug, "export the provider session");
-  if (run.simulated || !run.session_id) {
+  if (!run.session_id) {
     return new Response(
-      "This run has no exportable provider session (it was simulated or never opened a real session).",
+      "This run never opened an exportable provider session.",
       { status: 404 },
     );
   }

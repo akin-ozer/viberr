@@ -111,38 +111,22 @@ function handleMatchesSpecialist(
  * backend alone let `@reviewer` resume the dev's most-recent claude session
  * (the dev then answered "as the dev"); this keeps each agent on its own thread.
  *
- * Pass 1 — the agent's own runs: `agent_profile_id === profileId` AND the run
- * kind matches how the agent is engaged (`primary` vs `reviewer`), so a run
- * stamped with an identity but the wrong kind (a legacy cross-agent resume) is
- * NOT reused. Pass 2 — a legacy fallback for the PRIMARY only: a pre-identity
- * (`agent_profile_id IS NULL`) primary run of the same backend, so primaries
- * that ran before the identity columns still resume.
+ * The profile id and engagement kind must both match; sharing a backend is not
+ * enough to reuse another agent's session.
  */
 function latestSessionRun(
   db: Database.Database,
   projectSlug: string,
   taskKey: string,
-  target: { profileId: string; backend: RealBackend; isPrimary: boolean },
+  target: { profileId: string; isPrimary: boolean },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
-  // Pass 1 — the agent's own session (identity + engagement kind).
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
     if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
       return row;
-    }
-  }
-  // Pass 2 — legacy null-identity primary session (pre-0010), same backend.
-  if (target.isPrimary) {
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i]!;
-      if (row.kind !== "primary") continue;
-      if (!row.session_id) continue;
-      if (row.agent_profile_id != null) continue;
-      const rowBackend: RealBackend = row.backend === "codex" ? "codex" : "claude";
-      if (rowBackend === target.backend) return row;
     }
   }
   return null;
@@ -169,7 +153,7 @@ export function resolveMentionedAgent(
   if (handles.length === 0) return null;
   const handleSet = new Set(handles);
 
-  const specialists = listDeployedSpecialists(db, projectSlug, ctx);
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
 
   const existing = readTaskFile({
     projectSlug,
@@ -225,7 +209,6 @@ export function resolveMentionedAgent(
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: primaryRef.profileId,
-        backend,
         isPrimary: true,
       }),
     };
@@ -247,7 +230,6 @@ export function resolveMentionedAgent(
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
-        backend: matched.backend,
         isPrimary,
       }),
     };
@@ -271,7 +253,6 @@ export function resolveMentionedAgent(
         isOperator: false,
         session: latestSessionRun(db, projectSlug, taskKey, {
           profileId: primaryRef.profileId,
-          backend,
           isPrimary: true,
         }),
       };

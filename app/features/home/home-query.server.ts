@@ -23,7 +23,7 @@ import { decisionsRequiring } from "~/server/projections/decisions.server";
  * (home spec §3). Aggregates derive from the store projections, except the
  * live-run count which reads the runtime registry:
  *
- * - `running`: distinct tasks with a REAL (non-simulated) `agent_runs` row in
+ * - `running`: distinct tasks with an `agent_runs` row in
  *   `state = 'running'` — the live run registry, not a `waiting`-field proxy.
  * - `waiting`: LIVE pending decisions, PROJECT-WIDE (ruling 10 — the
  *   "waiting on you" copy stays, scoping is V1-deliberate). Same rule as the
@@ -179,18 +179,14 @@ export function listHomeProjects(db: Database.Database): HomeProjectCard[] {
     )
     .all() as { project_slug: string; total: number; updated_at: string }[];
 
-  // `running` = "agents running" — count projects' tasks with a REAL (non-
-  // simulated) run actually in flight, NOT the task's waiting=agent governance
-  // state. The seed no longer fabricates runs (R7-2), so the simulated=0
-  // filter is mostly belt-and-braces now — it still excludes historical
-  // pre-R7-2 rows and gated test-engine runs (the column stays). This keeps
-  // home's "N runs active" honest: genuine live agent runs only.
+  // `running` = "agents running" — count projects' tasks with a run actually
+  // in flight, not the task's waiting=agent governance state.
   const runningBySlug = new Map<string, number>();
   const runningRows = db
     .prepare(
       `SELECT project_slug, COUNT(DISTINCT task_key) AS running
          FROM agent_runs
-        WHERE state = 'running' AND simulated = 0
+        WHERE state = 'running'
         GROUP BY project_slug`,
     )
     .all() as { project_slug: string; running: number }[];

@@ -179,7 +179,6 @@ export async function createProject(
       code: ERROR_CODES.CONFLICT,
       status: 409,
       userMessage: `A project at projects/${slug} already exists.`,
-      kind: "user",
     });
   }
   const template =

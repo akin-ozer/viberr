@@ -16,7 +16,7 @@ import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
  * reports whether a real credential is configured (env-presence only — NOT a
  * validity check; an expired token still reads "real"): "real" means runs
  * execute the SDK, "unavailable" means runs on that backend FAIL FAST with an
- * honest error (R7-2 — there is no simulated fallback). This is
+ * honest error rather than fabricating a run. This is
  * how you confirm, e.g. via `docker compose logs` / a curl, that a Claude
  * key/token reached the container.
  * 503 `{ ok: false }` when the database cannot be read.

@@ -51,7 +51,7 @@ import {
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
- * operator toolkit enforces. Simulated engine only (no real backend keys).
+ * operator toolkit enforces. Fake adapter only (no real backend keys).
  */
 
 let ctx: TestDbContext;

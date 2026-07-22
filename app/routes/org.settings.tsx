@@ -175,7 +175,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(isSelf ? "Profile updated" : `${user.name} updated`);
       }
       case "user-reset-password": {
-        const result = resetLocalPassword(db, field("userId"), actor);
+        const result = await resetLocalPassword(db, field("userId"), actor);
         return ok(result.toast, { tempPassword: result.tempPassword });
       }
       case "user-remove": {
@@ -207,7 +207,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "invite-google": {
-        const result = whitelistGoogleAccount(
+        const result = await whitelistGoogleAccount(
           db,
           { email: field("email"), role: parseRole(field("role")) },
           actor,
@@ -225,7 +225,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "invite-local": {
-        const result = createLocalAccount(
+        const result = await createLocalAccount(
           db,
           {
             name: field("name"),
@@ -276,7 +276,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "mcp-test":
-        return ok((await testMcpServer(db, field("mcpId"), actor)).toast);
+        return ok((await testMcpServer(db, field("mcpId"))).toast);
       case "mcp-delete":
         return ok(deleteMcpServer(db, field("mcpId"), actor).toast);
       case "skill-save": {

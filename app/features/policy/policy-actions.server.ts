@@ -40,7 +40,6 @@ function forbidden(userMessage: string): AppError {
     code: ERROR_CODES.FORBIDDEN,
     status: 403,
     userMessage,
-    kind: "user",
   });
 }
 
@@ -49,7 +48,6 @@ function conflict(userMessage: string): AppError {
     code: ERROR_CODES.CONFLICT,
     status: 409,
     userMessage,
-    kind: "user",
   });
 }
 

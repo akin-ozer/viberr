@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useRevalidator } from "react-router";
-import { buildEventsUrl, SSE_CONTROL_EVENTS } from "./event-types";
-import { createSseClient } from "./sse-client";
+import {
+  buildEventsUrl,
+  SSE_CONTROL_EVENTS,
+  SSE_EVENT_NAMES,
+} from "./event-types";
 
 /**
  * Live updates (Phase 6): subscribe the current surface to its SSE scopes
@@ -52,17 +55,16 @@ export function useLiveUpdates(scopes: readonly string[]): void {
       }, REVALIDATE_DEBOUNCE_MS);
     };
 
-    const client = createSseClient({
-      url: buildEventsUrl(scopeKey.split("\u0000")),
-      onEvent: (name) => {
-        if (SSE_CONTROL_EVENTS.includes(name)) return;
-        scheduleRevalidate();
-      },
-    });
+    const source = new EventSource(buildEventsUrl(scopeKey.split("\u0000")));
+    for (const name of SSE_EVENT_NAMES) {
+      if (!SSE_CONTROL_EVENTS.includes(name)) {
+        source.addEventListener(name, scheduleRevalidate);
+      }
+    }
 
     return () => {
       if (timer !== null) clearTimeout(timer);
-      client.close();
+      source.close();
     };
   }, [scopeKey]);
 }

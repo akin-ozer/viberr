@@ -226,7 +226,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     });
   });
 
-  it("pr.state is the 4-value enum; unknown strings coerce to \"review\" (never throw, never drop)", () => {
+  it("pr.state accepts only the canonical four values", () => {
     // Canonical values pass through untouched.
     for (const state of ["review", "merged", "closed", "accepted"]) {
       const result = parseTaskFrontmatter(
@@ -235,61 +235,12 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       );
       expect(result.frontmatter.pr?.state).toBe(state);
     }
-    // A legacy raw GitHub "open" (pre-B3 writes) coerces to "review" instead
-    // of dropping the whole PR ref.
-    const legacy = parseTaskFrontmatter(
+    const invalid = parseTaskFrontmatter(
       { ...valid, pr: { number: 318, state: "open", title: "x" } },
       { fallbackKey: "VIB-142" },
     );
-    expect(legacy.frontmatter.pr).toMatchObject({ number: 318, state: "review" });
-  });
-
-  it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
-    const legacy: Record<string, unknown> = {
-      ...valid,
-      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
-      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
-    };
-    delete legacy.engagements;
-    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
-    expect(result.diagnostics).toEqual([]);
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    // Legacy slots are absorbed, NOT preserved as unknown fields (so a
-    // rewrite emits only `engagements:`, never both forms).
-    expect(result.unknown).toEqual({});
-  });
-
-  it("reads the pre-rename `consultants` key as supporting engagements (back-compat)", () => {
-    const legacy: Record<string, unknown> = {
-      ...valid,
-      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
-    };
-    delete legacy.engagements;
-    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
-    expect(result.diagnostics).toEqual([]);
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    // The legacy alias is absorbed, NOT preserved as an unknown field (so a
-    // rewrite emits only `engagements:`, never both keys).
-    expect(result.unknown).toEqual({});
-  });
-
-  it("prefers `reviewers` over a stale `consultants` when both are present", () => {
-    const both: Record<string, unknown> = {
-      ...valid,
-      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
-      consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
-    };
-    delete both.engagements;
-    const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
-    expect(result.frontmatter.engagements).toEqual([
-      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
-    ]);
-    expect(result.unknown).toEqual({});
+    expect(invalid.frontmatter.pr).toBeNull();
+    expect(invalid.diagnostics.some((d) => d.path === "pr")).toBe(true);
   });
 
   it("demotes every delivering engagement after the first (single-writer invariant)", () => {

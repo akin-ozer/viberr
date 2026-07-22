@@ -133,8 +133,7 @@ function locateCodex(sessionId: string): string | null {
 
 /**
  * Locate the resumable transcript for a session id + backend, or null when the
- * provider kept no on-disk session (e.g. a simulated run, or Codex not logged
- * in so no rollout was written).
+ * provider kept no on-disk session.
  */
 export function locateTranscript(
   backend: RealBackend,

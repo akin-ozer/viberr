@@ -5,12 +5,9 @@ import { createAuth, type ViberrAuth } from "~/lib/auth.server";
 import { hashPassword } from "./password.server";
 import {
   CREDENTIAL_PROVIDER,
-  DEFAULT_ORG_ID,
   provisionIdentity,
-  resolveOrgRole,
   revokeUserSessions,
   setCredentialPassword,
-  setMemberRole,
   syncIdentityEmail,
 } from "./identity.server";
 
@@ -33,15 +30,14 @@ function auth(db: Database.Database): ViberrAuth {
 }
 
 describe("identity provisioning", () => {
-  it("provisions user + credential + membership; the credential signs in", async () => {
+  it("provisions user + credential; the credential signs in", async () => {
     const db = ctx.makeDb();
     const a = auth(db);
     provisionIdentity(db, {
       id: "u_arda",
       email: "Arda@Viberr.Dev",
       name: "Arda",
-      role: "admin",
-      passwordHash: hashPassword("viberr-dev-2828"),
+      passwordHash: await hashPassword("viberr-dev-2828"),
     });
 
     // Identity id-preserving, email lowercased, emailVerified set.
@@ -55,11 +51,6 @@ describe("identity provisioning", () => {
       .get() as { providerId: string; password: string };
     expect(acct.providerId).toBe(CREDENTIAL_PROVIDER);
 
-    const member = db
-      .prepare(`SELECT role, organizationId FROM member WHERE userId='u_arda'`)
-      .get() as { role: string; organizationId: string };
-    expect(member).toEqual({ role: "admin", organizationId: DEFAULT_ORG_ID });
-
     // The raw-provisioned credential verifies through better-auth sign-in.
     const res = await a.api.signInEmail({
       body: { email: "arda@viberr.dev", password: "viberr-dev-2828" },
@@ -68,33 +59,13 @@ describe("identity provisioning", () => {
     expect(res.status).toBe(200);
   });
 
-  it("resolveOrgRole reads the membership (Option-B source of truth), not users.role", () => {
-    const db = ctx.makeDb();
-    provisionIdentity(db, {
-      id: "u_r",
-      email: "r@viberr.dev",
-      name: "R",
-      role: "member",
-      passwordHash: null,
-    });
-    expect(resolveOrgRole(db, "u_r", "member")).toBe("member");
-
-    // Promote on the membership → resolveOrgRole reflects it immediately.
-    setMemberRole(db, "u_r", "admin");
-    expect(resolveOrgRole(db, "u_r", "member")).toBe("admin");
-
-    // No membership row → falls back to the provided legacy role (no demotion).
-    expect(resolveOrgRole(db, "u_missing", "admin")).toBe("admin");
-  });
-
-  it("syncIdentityEmail updates the better-auth user email (WI-2)", () => {
+  it("syncIdentityEmail updates the better-auth user email (WI-2)", async () => {
     const db = ctx.makeDb();
     provisionIdentity(db, {
       id: "u_e",
       email: "old@viberr.dev",
       name: "E",
-      role: "member",
-      passwordHash: hashPassword("secret-secret"),
+      passwordHash: await hashPassword("secret-secret"),
     });
     syncIdentityEmail(db, "u_e", "New@Viberr.Dev");
     const row = db
@@ -103,14 +74,13 @@ describe("identity provisioning", () => {
     expect(row.email).toBe("new@viberr.dev");
   });
 
-  it("is idempotent (no duplicate user/account/member on re-provision)", () => {
+  it("is idempotent (no duplicate user/account on re-provision)", async () => {
     const db = ctx.makeDb();
     const input = {
       id: "u_x",
       email: "x@viberr.dev",
       name: "X",
-      role: "member" as const,
-      passwordHash: hashPassword("secret-secret"),
+      passwordHash: await hashPassword("secret-secret"),
     };
     provisionIdentity(db, input);
     provisionIdentity(db, input);
@@ -118,11 +88,10 @@ describe("identity provisioning", () => {
       .prepare(
         `SELECT
            (SELECT count(*) FROM "user" WHERE id='u_x') AS users,
-           (SELECT count(*) FROM account WHERE userId='u_x') AS accts,
-           (SELECT count(*) FROM member WHERE userId='u_x') AS members`,
+           (SELECT count(*) FROM account WHERE userId='u_x') AS accts`,
       )
-      .get() as { users: number; accts: number; members: number };
-    expect(counts).toEqual({ users: 1, accts: 1, members: 1 });
+      .get() as { users: number; accts: number };
+    expect(counts).toEqual({ users: 1, accts: 1 });
   });
 
   it("setCredentialPassword swaps the sign-in password; revokeUserSessions clears sessions", async () => {
@@ -132,8 +101,7 @@ describe("identity provisioning", () => {
       id: "u_p",
       email: "p@viberr.dev",
       name: "P",
-      role: "member",
-      passwordHash: hashPassword("old-password-1"),
+      passwordHash: await hashPassword("old-password-1"),
     });
     // Establish a session, then revoke it.
     const signIn = await a.api.signInEmail({
@@ -150,7 +118,7 @@ describe("identity provisioning", () => {
     ).toBe(0);
 
     // New password verifies, old one no longer does.
-    setCredentialPassword(db, "u_p", hashPassword("new-password-2"));
+    setCredentialPassword(db, "u_p", await hashPassword("new-password-2"));
     const good = await a.api.signInEmail({
       body: { email: "p@viberr.dev", password: "new-password-2" },
       asResponse: true,

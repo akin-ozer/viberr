@@ -20,10 +20,10 @@ import {
   OperatorRecommendations,
   type RecommendationView,
 } from "./operator-recommendations";
-import { AgentLogsSlot, LiveRunSlot } from "./runtime-slots";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
+import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { formatDayDotTime } from "~/shared/dates/format";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
@@ -945,7 +945,7 @@ function useRunControls({
             "intent",
             run.kind === "reviewer" ? "run-reviewer" : "run-specialist",
           );
-          if (run.kind === "reviewer" && run.profileId) {
+          if (run.kind === "reviewer") {
             fd.set("profileId", run.profileId);
           }
           fd.set("backend", backend);
@@ -1182,13 +1182,15 @@ export function TaskDetailPage({
           editGoalSignal={editGoalSignal}
         />
 
-        <LiveRunSlot
-          runtime={runtime}
-          onViewLogs={onViewLogs}
-          onInterrupt={onInterrupt}
-          canInterrupt={canInterrupt}
-          interrupting={runBusy}
-        />
+        {runtime.length > 0 ? (
+          <LiveRunPanel
+            runtime={runtime}
+            onViewLogs={onViewLogs}
+            onInterrupt={onInterrupt}
+            canInterrupt={canInterrupt}
+            interrupting={runBusy}
+          />
+        ) : null}
 
         <DiagnosticsPanel diagnostics={task.diagnostics} />
 
@@ -1229,14 +1231,16 @@ export function TaskDetailPage({
           operatorRunActive={operatorRunActive}
         />
 
-        <AgentLogsSlot
-          runtime={runtime}
-          logSel={shownLogSel}
-          onLogSel={selectLog}
-          linesByThread={linesByThread}
-          {...(onRetryBackend ? { onRetryBackend } : {})}
-          retrying={runBusy}
-        />
+        {runtime.length > 0 ? (
+          <AgentLogsPanel
+            runtime={runtime}
+            sel={shownLogSel}
+            onSel={selectLog}
+            linesByThread={linesByThread}
+            {...(onRetryBackend ? { onRetryBackend } : {})}
+            retrying={runBusy}
+          />
+        ) : null}
 
         <Timeline
           events={task.timeline}

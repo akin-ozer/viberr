@@ -241,6 +241,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       taskKey: "VIB-1",
       kind: "reviewer",
       role: "Reviewer",
+      agentProfileId: "reviewer",
       backend: "claude",
       model: "sonnet",
       prompt: "review",
@@ -281,7 +282,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "reviewer",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
@@ -326,7 +327,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "reviewer",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     // The verdict was recorded (snapshot is authoritative) → the only required
     // reviewer approved the current revision → validation derives healthy →
@@ -353,7 +354,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         store.db,
         { dataRoot: store.dataRoot },
         { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-        { id: runId, state: "finished", simulated: false },
+        { id: runId, state: "finished" },
       );
       const tl = taskFile().parsed.timeline;
       const reviewerComment = tl.find(
@@ -385,7 +386,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
 
     // VirtioFS serves the PRE-completion content to the next reader: revert
@@ -438,7 +439,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     const parsed = taskFile().parsed;
     expect(
@@ -481,7 +482,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    // Build the errored run SYNCHRONOUSLY (no startRun/simulated-drip) so the
+    // Build the errored run synchronously so the
     // test is deterministic — a real async run's lifecycle raced CI's slower
     // SQLite (the "database connection is not open" flood) and intermittently
     // dropped the watcher notification. Here the run row + its error log line
@@ -494,8 +495,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       threadId: "t-f8",
       role: "Developer",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "codex",
-      simulated: false,
       model: "gpt-5.5",
       sdk: "codex",
       state: "error",
@@ -526,7 +527,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error", simulated: false },
+      { id: runId, state: "error" },
     );
     const parsed = taskFile().parsed;
     // The typed failure event naming the reason (distinct from the operator's
@@ -595,12 +596,10 @@ describe("unavailable backend through the specialist start path", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(result.simulated).toBe(false);
     const row = store.db
-      .prepare(`SELECT state, simulated FROM agent_runs WHERE id = ?`)
-      .get(result.runId) as { state: string; simulated: number };
+      .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+      .get(result.runId) as { state: string };
     expect(row.state).toBe("error");
-    expect(row.simulated).toBe(0);
 
     const surfaced = await waitFor(() => {
       const parsed = taskFile().parsed;
@@ -695,6 +694,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       taskKey: "VIB-1",
       kind: "reviewer",
       role: "Reviewer",
+      agentProfileId: "reviewer",
       backend: "claude",
       model: "sonnet",
       prompt: "review",
@@ -738,7 +738,14 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   const redirect = { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false };
-  const retryPrimary = { kind: "retry_other_backend", t: "Retry on Claude Code", d: "", rec: true, backend: "claude" };
+  const retryPrimary = {
+    kind: "retry_other_backend",
+    t: "Retry on Claude Code",
+    d: "",
+    rec: true,
+    backend: "claude",
+    profileId: "developer",
+  };
   const retryReviewer = { ...retryPrimary, profileId: "style" };
 
   async function runEffects(
@@ -759,7 +766,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state, simulated: false },
+      { id: runId, state },
     );
   }
 

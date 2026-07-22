@@ -21,7 +21,7 @@ let ids: { arda: string; murat: string; selin: string; deniz: string };
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,

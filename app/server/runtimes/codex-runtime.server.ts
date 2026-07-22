@@ -306,7 +306,6 @@ export function createCodexAdapter(
         cb.onExit({
           outcome,
           effectiveBackend: "codex",
-          simulated: false,
           sessionId,
         });
       };

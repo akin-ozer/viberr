@@ -24,7 +24,7 @@ Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (nativ
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
 (no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK — configure a credential for
 at least one to run real agents. A backend with no credential is reported unavailable and
-runs on it fail fast with an honest error (there is no simulated fallback).
+runs on it fail fast with an honest error.
 
 ## Quickstart (local dev)
 

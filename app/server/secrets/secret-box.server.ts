@@ -39,7 +39,6 @@ function invalidBox(message: string, cause?: unknown): AppError {
     status: 500,
     message: `secret box: ${message}`,
     userMessage: "A stored secret could not be read.",
-    kind: "infrastructure",
     cause,
   });
 }

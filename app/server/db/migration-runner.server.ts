@@ -70,7 +70,6 @@ export function runMigrations(
         status: 500,
         message: `migration ${file} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
         details: { migration: file },
-        kind: "infrastructure",
         cause,
       });
     }

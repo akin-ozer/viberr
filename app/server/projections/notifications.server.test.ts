@@ -8,7 +8,6 @@ import {
 } from "../../../test-support/test-store";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { insertUser } from "~/server/auth/user-store.server";
-import { hashPassword } from "~/server/auth/password.server";
 import { rebuildAll } from "./rebuilder.server";
 import {
   onProjectionEvent,
@@ -36,7 +35,6 @@ function mkUser(db: Database.Database, id: string): void {
     email: `${id}@viberr.test`,
     name: id,
     role: "member",
-    passwordHash: hashPassword("viberr-dev-2828"),
   });
 }
 

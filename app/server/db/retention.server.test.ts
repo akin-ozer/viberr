@@ -19,10 +19,10 @@ describe("applyRetention (F10-29)", () => {
     // A run row (run_log_lines FK references it).
     db.prepare(
       `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-         backend, simulated, model, sdk, state, turns, input_tokens,
-         cached_input_tokens, output_tokens, created_at, updated_at)
-       VALUES ('run_1','VIB-1','p','t','r','primary','claude',0,'m','s','finished',
-         0,0,0,0,?,?)`,
+         backend, model, sdk, state, turns, input_tokens,
+         cached_input_tokens, output_tokens, created_at, updated_at, agent_profile_id)
+       VALUES ('run_1','VIB-1','p','t','r','primary','claude','m','s','finished',
+         0,0,0,0,?,?,'developer')`,
     ).run(iso(400), iso(400));
 
     const line = (seq: number, at: string) =>

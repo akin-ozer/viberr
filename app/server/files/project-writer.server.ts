@@ -76,7 +76,6 @@ export async function createProjectFile(
         status: 409,
         message: `Project file already exists: ${absPath}`,
         userMessage: `Project ${ref.projectSlug} already exists.`,
-        kind: "user",
       });
     }
     const parsed: ParsedProjectFile = {

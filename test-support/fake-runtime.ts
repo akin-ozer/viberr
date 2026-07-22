@@ -63,7 +63,6 @@ function playFakeRun(
       callbacks.onExit({
         outcome: queuedRun?.outcome ?? inferOutcome(lines),
         effectiveBackend: spec.backend,
-        simulated: false,
         sessionId,
       });
     }
@@ -77,7 +76,6 @@ function playFakeRun(
       callbacks.onExit({
         outcome: "interrupted",
         effectiveBackend: spec.backend,
-        simulated: false,
         sessionId,
       });
     },

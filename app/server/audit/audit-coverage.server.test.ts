@@ -237,6 +237,7 @@ describe("governed actions record audit rows (table-driven)", () => {
             taskKey: "VIB-1",
             role: "Primary specialist",
             kind: "primary",
+            agentProfileId: "developer",
             backend: "claude",
             model: "m",
             prompt: "go",
@@ -260,6 +261,7 @@ describe("governed actions record audit rows (table-driven)", () => {
             taskKey: "VIB-1",
             role: "R",
             kind: "reviewer", // distinct thread — VIB-1 already has a primary
+            agentProfileId: "reviewer",
             backend: "claude",
             model: "m",
             prompt: "go",

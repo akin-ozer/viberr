@@ -59,6 +59,24 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
+type TestRunInput = Omit<Parameters<typeof startRun>[1], "agentProfileId"> & {
+  agentProfileId?: string;
+};
+
+function startTestRun(
+  db: Parameters<typeof startRun>[0],
+  input: TestRunInput,
+): ReturnType<typeof startRun> {
+  const agentProfileId =
+    input.agentProfileId ??
+    (input.kind === "operator"
+      ? "operator"
+      : input.kind === "reviewer"
+        ? "reviewer"
+        : "developer");
+  return startRun(db, { ...input, agentProfileId });
+}
+
 describe("run-service lifecycle", () => {
   it("startRun materializes a run + persists lines + reaches finished", async () => {
     const script = instantScript([
@@ -67,7 +85,7 @@ describe("run-service lifecycle", () => {
       { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 0.1, in: 5, cached: 2, out: 3 } },
     ]);
     queueFakeRun(script);
-    const { runId, simulated } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       role: "Primary specialist",
@@ -77,12 +95,10 @@ describe("run-service lifecycle", () => {
       prompt: "go",
       dataRoot: store.dataRoot,
     });
-    expect(simulated).toBe(false);
     await settle();
 
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("finished");
-    expect(run.simulated).toBe(0);
     expect(run.backend).toBe("claude");
     const lines = listRunLines(store.db, runId);
     expect(lines.length).toBe(3);
@@ -108,18 +124,18 @@ describe("run-service lifecycle", () => {
     };
     // First delivering run — left in flight (NOT settled), so its row is still
     // queued/running when the second dispatch races in.
-    const first = await startRun(store.db, primary);
+    const first = await startTestRun(store.db, primary);
     expect(first.runId).toBeTruthy();
 
     // A second delivering start for the SAME task must 409 (partial unique index
     // idx_agent_runs__one_delivering) — this is the atomic guard behind the
     // service's preflight check.
-    await expect(startRun(store.db, { ...primary, prompt: "go2" })).rejects.toMatchObject({
+    await expect(startTestRun(store.db, { ...primary, prompt: "go2" })).rejects.toMatchObject({
       status: 409,
     });
 
     // A reviewer (supporting) run for the same task is NOT constrained.
-    const reviewer = await startRun(store.db, {
+    const reviewer = await startTestRun(store.db, {
       ...primary,
       role: "Reviewer",
       kind: "reviewer",
@@ -136,7 +152,7 @@ describe("run-service lifecycle", () => {
       { t: "3", ev: "result", tag: "result", text: "done" },
     ]);
     queueFakeRun(script);
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       role: "Primary specialist",
@@ -163,7 +179,7 @@ describe("run-service lifecycle", () => {
       { t: "3", ev: "out", tag: "tool_result", text: "ok" },
     ]);
     queueFakeRun(script);
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
@@ -182,7 +198,7 @@ describe("run-service lifecycle", () => {
       ),
       "codex",
     );
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "codex", model: "gpt-5.4-codex", prompt: "go",
       dataRoot: store.dataRoot,
@@ -202,7 +218,7 @@ describe("run-service lifecycle", () => {
       { t: "2", ev: "text", tag: "assistant", text: "b" },
       { t: "3", ev: "text", tag: "assistant", text: "c" },
     ]));
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go",
       dataRoot: store.dataRoot,
@@ -219,14 +235,14 @@ describe("run-service lifecycle", () => {
       backend: "claude",
       start(spec, cb) {
         specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", simulated: false, sessionId: null });
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
         return { runId: spec.runId, interrupt() {} };
       },
     };
     const adapters: AdapterSet = { claude: capture, codex: capture };
     configureRunServiceForTests(adapters);
 
-    await startRun(store.db, {
+    await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", effort: "xhigh", prompt: "go",
       dataRoot: store.dataRoot,
@@ -236,7 +252,7 @@ describe("run-service lifecycle", () => {
     expect(specs[0]?.model).toBe("sonnet");
 
     // Omitting effort leaves spec.effort undefined (SDK default applies).
-    await startRun(store.db, {
+    await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", threadId: "t2", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
     });
@@ -248,7 +264,7 @@ describe("run-service lifecycle", () => {
 describe("unavailable backend", () => {
   async function startUnavailable() {
     setBackendAvailability("claude", false);
-    return startRun(store.db, {
+    return startTestRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       role: "Primary specialist",
@@ -260,12 +276,10 @@ describe("unavailable backend", () => {
     });
   }
 
-  it("startRun finalizes the run as `error` with a classified terminal err line (simulated=0)", async () => {
-    const { runId, simulated } = await startUnavailable();
-    expect(simulated).toBe(false); // NEVER a fake run
+  it("startRun finalizes an unavailable backend as a classified error", async () => {
+    const { runId } = await startUnavailable();
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("error"); // fail-fast: terminal synchronously
-    expect(run.simulated).toBe(0);
     expect(run.backend).toBe("claude");
     const lines = listRunLines(store.db, runId);
     expect(lines).toHaveLength(1);
@@ -290,7 +304,6 @@ describe("unavailable backend", () => {
     expect(audits.length).toBe(1);
     expect(audits[0]!.details).toMatchObject({
       backend: "claude",
-      simulated: false,
       failedUnavailable: true,
     });
   });
@@ -305,7 +318,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
     return {
       backend: "claude",
       start(spec, cb) {
-        cb.onExit({ outcome, effectiveBackend: "claude", simulated: false, sessionId: null });
+        cb.onExit({ outcome, effectiveBackend: "claude", sessionId: null });
         return { runId: spec.runId, interrupt() {} };
       },
     };
@@ -314,7 +327,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
   it("chainRunCompletion fires immediately when the run already finalized", async () => {
     const a = instantExitAdapter("error");
     configureRunServiceForTests({ claude: a, codex: a });
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
     });
@@ -328,7 +341,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
   it("registerRunCompletion fires immediately when the run already finalized", async () => {
     const a = instantExitAdapter("finished");
     configureRunServiceForTests({ claude: a, codex: a });
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
     });
@@ -345,7 +358,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
       occurredAt: [new Date().toISOString()],
       sessionId: "s",
     });
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", prompt: "go",
       dataRoot: store.dataRoot,
@@ -364,7 +377,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
       sessionId: "s",
       keepRunning: true,
     });
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
@@ -401,7 +414,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
   });
 
   it("interrupting a finished run is an idempotent no-op (not an error)", async () => {
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go",
       dataRoot: store.dataRoot,
@@ -416,7 +429,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
 
 describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () => {
   it("startRun persists agent_name + agent_profile_id on the run row", async () => {
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
       dataRoot: store.dataRoot,
@@ -428,7 +441,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   });
 
   it("resumeRun carries the prior run's agent identity onto the new row by default", async () => {
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
       dataRoot: store.dataRoot,
@@ -460,13 +473,13 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
       backend: "claude",
       start(spec, cb) {
         specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", simulated: false, sessionId: null });
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
         return { runId: spec.runId, interrupt() {} };
       },
     };
     configureRunServiceForTests({ claude: capture, codex: capture });
 
-    const { runId } = await startRun(store.db, {
+    const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });

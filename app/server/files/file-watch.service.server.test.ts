@@ -8,7 +8,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { projectDir, projectsDir, taskDir } from "./file-store-root.server";
+import { projectDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
   shouldIgnoreWatchPath,

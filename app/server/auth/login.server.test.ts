@@ -7,9 +7,8 @@ import {
   completeForcedPasswordReset,
   loginWithCredentials,
 } from "./login.server";
-import { provisionIdentity } from "./identity.server";
+import { credentialPasswordHash, provisionIdentity } from "./identity.server";
 import { hashPassword, verifyPassword } from "./password.server";
-import { TokenBucketLimiter } from "./rate-limit.server";
 import { findUserById, insertUser } from "./user-store.server";
 
 const ctx = createTestDbContext();
@@ -26,31 +25,32 @@ function makeAuth(db: Database.Database): ViberrAuth {
   });
 }
 
-function seedUser(
+async function seedUser(
   db: Database.Database,
   overrides: Partial<Parameters<typeof insertUser>[1]> = {},
+  password: string | null = PASSWORD,
 ) {
   const user = insertUser(db, {
     id: "u_login",
     email: "arda@viberr.test",
     name: "Arda",
     role: "admin",
-    passwordHash: hashPassword(PASSWORD),
     ...overrides,
   });
-  // Mirror the real creation path: users get a better-auth identity at birth.
   provisionIdentity(db, {
     id: user.id,
     email: user.email,
     name: user.name,
-    passwordHash: user.passwordHash,
-    role: user.role,
+    passwordHash: password === null ? null : await hashPassword(password),
   });
-  return user;
+  return findUserById(db, user.id)!;
 }
 
-function freshLimiter(capacity = 10) {
-  return new TokenBucketLimiter({ capacity, refillIntervalMs: 15 * 60 * 1000 });
+function requestDeps(ip: string) {
+  return {
+    requestHeaders: new Headers({ "X-Forwarded-For": ip }),
+    requestUrl: "http://localhost:5173/login",
+  };
 }
 
 /** Count better-auth session rows for a user. */
@@ -66,12 +66,12 @@ describe("loginWithCredentials", () => {
   it("succeeds with correct credentials and creates a better-auth session", async () => {
     const db = ctx.makeDb();
     const auth = makeAuth(db);
-    const user = seedUser(db);
+    const user = await seedUser(db);
     const result = await loginWithCredentials(
       db,
       auth,
-      { email: "Arda@viberr.test", password: PASSWORD, ip: "1.1.1.1" },
-      { limiter: freshLimiter() },
+      { email: "Arda@viberr.test", password: PASSWORD },
+      requestDeps("192.0.2.1"),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -89,12 +89,12 @@ describe("loginWithCredentials", () => {
 
   it("fails on wrong password (audits email only, no password)", async () => {
     const db = ctx.makeDb();
-    seedUser(db);
+    await seedUser(db);
     const result = await loginWithCredentials(
       db,
       makeAuth(db),
       { email: "arda@viberr.test", password: "wrong-password" },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.2"),
     );
     expect(result).toEqual({ ok: false, reason: "wrong_password" });
     const events = listAuditEvents(db, { action: "auth.login.failure" });
@@ -108,82 +108,81 @@ describe("loginWithCredentials", () => {
 
   it("fails on unknown email", async () => {
     const db = ctx.makeDb();
-    seedUser(db);
+    await seedUser(db);
     const result = await loginWithCredentials(
       db,
       makeAuth(db),
       { email: "nobody@viberr.test", password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.3"),
     );
     expect(result).toEqual({ ok: false, reason: "unknown_email" });
   });
 
   it("fails for a disabled user", async () => {
     const db = ctx.makeDb();
-    const user = seedUser(db);
+    const user = await seedUser(db);
     db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
     const result = await loginWithCredentials(
       db,
       makeAuth(db),
       { email: user.email, password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.4"),
     );
     expect(result).toEqual({ ok: false, reason: "disabled" });
   });
 
   it("fails for a passwordless (OAuth-only) account", async () => {
     const db = ctx.makeDb();
-    seedUser(db, { id: "u_oauth", email: "o@viberr.test", passwordHash: null });
+    await seedUser(db, { id: "u_oauth", email: "o@viberr.test" }, null);
     const result = await loginWithCredentials(
       db,
       makeAuth(db),
       { email: "o@viberr.test", password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.5"),
     );
     expect(result).toEqual({ ok: false, reason: "no_password" });
   });
 
-  it("rate limits after 10 attempts per email+ip and audits the trip", async () => {
+  it("uses Better Auth's per-IP rate limit and audits the trip", async () => {
     const db = ctx.makeDb();
     const auth = makeAuth(db);
-    seedUser(db);
-    const limiter = freshLimiter();
+    await seedUser(db);
     for (let i = 0; i < 10; i++) {
       await loginWithCredentials(
         db,
         auth,
-        { email: "arda@viberr.test", password: "nope", ip: "2.2.2.2" },
-        { limiter },
+        { email: "arda@viberr.test", password: "nope" },
+        requestDeps("192.0.2.6"),
       );
     }
     const blocked = await loginWithCredentials(
       db,
       auth,
-      { email: "arda@viberr.test", password: PASSWORD, ip: "2.2.2.2" },
-      { limiter },
+      { email: "arda@viberr.test", password: PASSWORD },
+      requestDeps("192.0.2.6"),
     );
     expect(blocked).toEqual({ ok: false, reason: "rate_limited" });
     expect(
       listAuditEvents(db, { action: "auth.login.rate_limited" }),
     ).toHaveLength(1);
-    // A different ip is not affected.
+    // A different IP is not affected.
     const otherIp = await loginWithCredentials(
       db,
       auth,
-      { email: "arda@viberr.test", password: PASSWORD, ip: "3.3.3.3" },
-      { limiter },
+      { email: "arda@viberr.test", password: PASSWORD },
+      requestDeps("192.0.2.7"),
     );
     expect(otherIp.ok).toBe(true);
   });
 
   it("signals the forced-reset gate when pwreset_required is set", async () => {
     const db = ctx.makeDb();
-    seedUser(db, { pwresetRequired: true });
+    await seedUser(db, { pwresetRequired: true });
     const result = await loginWithCredentials(
       db,
       makeAuth(db),
       { email: "arda@viberr.test", password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.8"),
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.mustResetPassword).toBe(true);
@@ -194,12 +193,12 @@ describe("completeForcedPasswordReset", () => {
   it("sets the new password on both stores and clears the flag", async () => {
     const db = ctx.makeDb();
     const auth = makeAuth(db);
-    const user = seedUser(db, { pwresetRequired: true });
+    const user = await seedUser(db, { pwresetRequired: true });
     const login = await loginWithCredentials(
       db,
       auth,
       { email: user.email, password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.9"),
     );
     expect(login.ok).toBe(true);
 
@@ -209,23 +208,26 @@ describe("completeForcedPasswordReset", () => {
     });
 
     const fresh = findUserById(db, user.id)!;
+    const passwordHash = credentialPasswordHash(db, user.id);
     expect(fresh.pwresetRequired).toBe(false);
-    expect(verifyPassword("brand-new-password", fresh.passwordHash)).toBe(true);
-    expect(verifyPassword(PASSWORD, fresh.passwordHash)).toBe(false);
+    await expect(verifyPassword("brand-new-password", passwordHash)).resolves.toBe(
+      true,
+    );
+    await expect(verifyPassword(PASSWORD, passwordHash)).resolves.toBe(false);
 
     // better-auth credential updated: new password signs in, old one doesn't.
     const good = await loginWithCredentials(
       db,
       auth,
       { email: user.email, password: "brand-new-password" },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.9"),
     );
     expect(good.ok).toBe(true);
     const bad = await loginWithCredentials(
       db,
       auth,
       { email: user.email, password: PASSWORD },
-      { limiter: freshLimiter() },
+      requestDeps("192.0.2.9"),
     );
     expect(bad).toEqual({ ok: false, reason: "wrong_password" });
 
@@ -234,11 +236,11 @@ describe("completeForcedPasswordReset", () => {
     ).toHaveLength(1);
   });
 
-  it("rejects a too-short password", () => {
+  it("rejects a too-short password", async () => {
     const db = ctx.makeDb();
-    const user = seedUser(db);
-    expect(() =>
+    const user = await seedUser(db);
+    await expect(
       completeForcedPasswordReset(db, { user, newPassword: "short" }),
-    ).toThrowError(/at least 8/);
+    ).rejects.toThrowError(/at least 8/);
   });
 });

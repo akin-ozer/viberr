@@ -355,7 +355,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
-        cb.onExit({ outcome, effectiveBackend: "claude", simulated: false, sessionId });
+        cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
       };
 
       const run = async () => {

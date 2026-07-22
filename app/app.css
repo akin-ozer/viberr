@@ -1011,14 +1011,6 @@ h1, h2, h3, h4 {
 .sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
 .sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .26rem; border-radius: 5px; }
-.addr {
-  display: inline-flex; align-items: center; gap: .35rem;
-  font-size: .74rem; font-weight: 700;
-  padding: .28rem .5rem; border-radius: var(--radius-chip);
-  border: 1px solid var(--hairline); background: var(--surface); color: var(--muted);
-}
-.addr.on { border-color: var(--agent); background: var(--agent-soft); color: var(--agent-dark); }
-.addr.on.human { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
 
 /* side panels */
 .kv { display: flex; flex-direction: column; gap: .15rem; }
@@ -1265,7 +1257,6 @@ h1, h2, h3, h4 {
 .live-row:last-child { border-bottom: 0; }
 .live-row:hover { background: color-mix(in srgb, var(--fg), transparent 97%); }
 .live-agent { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-.live-role { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
 /* F10-20: profile identity (name) over the task role sub-label. */
 .live-ident { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .live-name { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
@@ -2980,7 +2971,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .opt:active, .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active, .org-tile.go:active, .pj-card:active { transform: translateY(0) scale(.99); }
 .deploy-row:active, .pj-row:active { transform: translateX(0) scale(.99); }
-.seg button:active, .fchip:active, .pick-chip:active, .tl-filter button:active, .cap-seg button:active, .mini-seg button:active, .stage-menu-btn:active, .own-btn:active, .rev-add:active, .addr:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
+.seg button:active, .fchip:active, .pick-chip:active, .tl-filter button:active, .cap-seg button:active, .mini-seg button:active, .stage-menu-btn:active, .own-btn:active, .rev-add:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
 .nav-item:active { transform: scale(.985); }
 .rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .ag-add:active, .col-head .add:active, .session-id-copy:active { transform: scale(.9); }
 .fm-act:active { transform: translateY(0) scale(.94); }

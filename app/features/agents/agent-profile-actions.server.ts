@@ -95,7 +95,6 @@ function forbidden(userMessage: string): AppError {
     code: ERROR_CODES.FORBIDDEN,
     status: 403,
     userMessage,
-    kind: "user",
   });
 }
 

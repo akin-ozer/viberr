@@ -5,7 +5,6 @@ import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { type RbacAction, ROLE_LABEL, rolesForAction } from "~/shared/rbac";
-import { resolveOrgRole } from "./identity.server";
 
 /**
  * THE single project-authority resolution path (pass-7 R7-1 consolidation).
@@ -60,15 +59,6 @@ export type AuthorityDecision =
   | ({ allowed: true } & ProjectAuthority)
   | { allowed: false; memberRole: ProjectRole | null };
 
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-    kind: "user",
-  });
-}
-
 /**
  * Archived projects are read-only (owner ruling R6-3): a project moved to the
  * Home "Archived" section refuses every governed mutation (tasks, comments,
@@ -88,7 +78,6 @@ export function requireProjectMutable(
       code: ERROR_CODES.CONFLICT,
       status: 409,
       userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
-      kind: "user",
     });
   }
 }
@@ -101,8 +90,7 @@ export function isOrgAdmin(db: Database.Database, userId: string): boolean {
     .prepare(`SELECT role FROM users WHERE id = ? AND disabled = 0`)
     .get(userId) as { role: string } | undefined;
   if (!row) return false;
-  const fallback = row.role === "admin" ? "admin" : "member";
-  return resolveOrgRole(db, userId, fallback) === "admin";
+  return row.role === "admin";
 }
 
 /**
@@ -174,9 +162,11 @@ export function requireProjectAuthority(
     return { role: decision.role, isOrgAdminOverride: decision.isOrgAdminOverride };
   }
   if (!decision.memberRole) {
-    throw forbidden(`Only project members can ${audit.what}.`);
+    throw AppError.forbidden(`Only project members can ${audit.what}.`);
   }
-  throw forbidden(`Your project role (${decision.memberRole}) cannot ${audit.what}.`);
+  throw AppError.forbidden(
+    `Your project role (${decision.memberRole}) cannot ${audit.what}.`,
+  );
 }
 
 /**
@@ -245,7 +235,6 @@ export function assertProjectAction(
       code: ERROR_CODES.NOT_FOUND,
       status: 404,
       userMessage: `Project ${projectSlug} not found.`,
-      kind: "user",
     });
   }
   // Archived projects are read-only (R6-3): refuse config-surface mutations
@@ -281,5 +270,5 @@ export function assertProjectAction(
       : allowed.length === 1
         ? `${ROLE_LABEL[allowed[0]!].toLowerCase()}s`
         : "members with the right role";
-  throw forbidden(`Only project ${label} can ${what}.`);
+  throw AppError.forbidden(`Only project ${label} can ${what}.`);
 }

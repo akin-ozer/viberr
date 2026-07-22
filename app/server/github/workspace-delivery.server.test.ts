@@ -105,6 +105,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       backend: "codex",
@@ -142,6 +143,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
     });
@@ -162,6 +164,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
     });
@@ -182,6 +185,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
     });
@@ -204,6 +208,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: spyExec,
@@ -231,6 +236,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -258,6 +264,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: "abc1234 [ATL-3] Add feature" }),
@@ -281,6 +288,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       // On "main" (the default branch) — nothing to link.
@@ -306,6 +314,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: "main", commits: "" }),
@@ -324,6 +333,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -362,6 +372,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -386,6 +397,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true }),
@@ -396,45 +408,6 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).not.toContain(
       "github.workspace.pr_linked",
     );
-  });
-
-  it("a legacy non-canonical \"open\" cache reads as \"review\" (schema coercion) — no re-link, no ping-pong", async () => {
-    // The prRefSchema enum coerces the legacy raw "open" to "review" at parse
-    // time, so reconcile sees an already-linked canonical PR: nothing to heal,
-    // no duplicate event, ever.
-    const store = setupTask("ATL-3", {
-      branch: BRANCH,
-      // Legacy raw value written before the enum tightening — cast past the
-      // compile-time contract to prove the runtime coercion.
-      pr: {
-        number: 9,
-        state: "open" as unknown as "review",
-        title: "[ATL-3] Add feature",
-      },
-    });
-    const workdir = makeWorkspaceRepo();
-    const opts = {
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      workdir,
-      dataRoot: store.dataRoot,
-      exec: fakeExec({
-        branch: BRANCH,
-        commits: COMMITS,
-        pr: { number: 9, state: "OPEN", title: "[ATL-3] Add feature" },
-      }),
-    };
-
-    const first = await reconcileWorkspaceDelivery(opts);
-    expect(first.prLinked).toBe(false);
-    expect(readFm(store).frontmatter.pr).toMatchObject({ number: 9, state: "review" });
-
-    const second = await reconcileWorkspaceDelivery(opts);
-    expect(second.prLinked).toBe(false);
-    expect(
-      readFm(store).timeline.filter((e) => e.text.includes("PR #9")),
-    ).toHaveLength(0);
   });
 
   it("preserves a human-set \"accepted\" (merge pending) while gh reports the PR still OPEN (B1)", async () => {
@@ -451,6 +424,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -479,6 +453,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -507,6 +482,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({
@@ -524,24 +500,6 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
-  it("skips a simulated run entirely", async () => {
-    const store = setupTask();
-    const workdir = makeWorkspaceRepo();
-
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      workdir,
-      dataRoot: store.dataRoot,
-      simulated: true,
-      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
-    });
-
-    expect(res.status).toBe("skipped");
-    expect(readFm(store).frontmatter.branch).toBeNull();
-  });
-
   it("no-ops when there is no workspace git repo", async () => {
     const store = setupTask();
     const empty = ctx.makeTempDir(); // no .git marker
@@ -550,6 +508,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir: empty,
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH }),
@@ -580,6 +539,7 @@ describe("reconcileWorkspaceDelivery", () => {
       db: store.db,
       projectSlug: store.slug,
       taskKey: "ATL-3",
+      profileId: "developer",
       workdir,
       dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),

@@ -3,7 +3,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { hashPassword } from "~/server/auth/password.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
   kbDirPath,
@@ -204,7 +203,6 @@ describe("github import", () => {
       email: "admin@test.dev",
       name: "Admin Test",
       role: "admin",
-      passwordHash: hashPassword("viberr-dev-2828"),
     });
     const connectTransport = fakeGithubFetch({
       "GET /user": {
@@ -287,7 +285,6 @@ describe("github import", () => {
       email: "admin@test.dev",
       name: "Admin Test",
       role: "admin",
-      passwordHash: hashPassword("viberr-dev-2828"),
     });
     const connectTransport = fakeGithubFetch({
       "GET /user": {

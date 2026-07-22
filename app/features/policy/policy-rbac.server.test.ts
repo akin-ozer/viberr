@@ -80,7 +80,6 @@ beforeEach(() => {
     email: "orgadmin@viberr.test",
     name: "Org Admin",
     role: "admin",
-    passwordHash: null,
   });
   orgAdmin = { id: record.id, email: record.email };
   // A task at the work stage with an owner, so ownership/transition/packet paths

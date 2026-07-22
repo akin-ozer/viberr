@@ -1,8 +1,6 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { organization } from "better-auth/plugins";
 import type Database from "better-sqlite3";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
-import { hashPassword, verifyPassword } from "~/server/auth/password.server";
 import {
   applyOAuthUser,
   isOAuthWhitelisted,
@@ -14,21 +12,14 @@ import { getDb } from "~/server/db/sqlite.server";
 /**
  * better-auth instance (authN mechanics only).
  *
- * Scope decision (see design/better-auth-migration.md): better-auth owns
- * CREDENTIALS + SESSIONS + OAUTH + ORG MEMBERSHIP; the legacy `users` table
- * stays the app's canonical profile/role/disabled store. The two are bridged
- * by the invariant  better-auth `user.id` === legacy `users.id`, so every
- * profile/RBAC reader (findUserById, org-users, project_members, user_prefs,
- * audit) is untouched. `authenticate()` resolves a better-auth session, then
- * loads the legacy `users` row for the SessionUser it returns.
+ * Better Auth owns credentials, sessions, and OAuth. The `users` table owns
+ * application profile and authorization data. Both rows share the same id.
  *
  * - Cookie: `viberr.session_token` (cookiePrefix "viberr"), signed with the
  *   existing VIBERR_SESSION_SECRET — no new required env.
  * - Sessions: 30-day rolling (expiresIn) with a daily slide (updateAge), to
  *   match the retired hand-rolled session TTL.
- * - Passwords: our scrypt `hashPassword`/`verifyPassword` are plugged in as
- *   the hash/verify hooks, so better-auth reads the EXISTING 6-part
- *   `scrypt$N$r$p$salt$hash` strings verbatim — no forced reset.
+ * - Passwords: better-auth owns hashing and verification.
  * - Sign-up is disabled: identities are provisioned through the whitelist
  *   (seed admin, org-users invite, OAuth provisioning hooks), never open reg.
  */
@@ -95,11 +86,11 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // No open registration — the whitelist provisions identities.
       disableSignUp: true,
       minPasswordLength: MIN_PASSWORD_LENGTH,
-      // Plug Viberr's scrypt in so existing 6-part hashes verify unchanged.
-      password: {
-        hash: (password) => Promise.resolve(hashPassword(password)),
-        verify: ({ hash, password }) =>
-          Promise.resolve(verifyPassword(password, hash)),
+    },
+    rateLimit: {
+      enabled: true,
+      customRules: {
+        "/sign-in/email": { window: 15 * 60, max: 10 },
       },
     },
     session: {
@@ -162,13 +153,7 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         },
       },
     },
-    // Org/tenant membership + invitations (Option B). The org role continues
-    // to be enforced through Viberr's hierarchical check; the plugin supplies
-    // the membership tables and invitation flow.
-    plugins: [organization({ allowUserToCreateOrganization: false })],
-    advanced: {
-      cookiePrefix: "viberr",
-    },
+    advanced: { cookiePrefix: "viberr" },
   };
 }
 

@@ -98,12 +98,8 @@ describe("applyOAuthUser", () => {
       email: "new@viberr.dev",
       role: "admin",
       idp: "google",
-      passwordHash: null,
+      hasPassword: false,
     });
-    const member = db
-      .prepare(`SELECT role FROM member WHERE userId = 'ba_1'`)
-      .get() as { role: string };
-    expect(member.role).toBe("admin");
   });
 
   it("claims a GitHub-handle placeholder by replacement (role carries over)", () => {

@@ -5,8 +5,6 @@ export default [
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
   // OAuth is served by better-auth's own handler at /api/auth/callback/*.
-  // Legacy /org/users path — now a redirect into the real tabbed org settings.
-  route("org/users", "routes/org.users.tsx"),
   // The real tabbed org-settings surface (org profile, members, resources).
   route("org/settings", "routes/org.settings.tsx"),
 

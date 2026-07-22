@@ -1,9 +1,7 @@
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 
 import type { EntryContext, RouterContextProvider } from "react-router";
-import { createReadableStreamFromReadable } from "@react-router/node";
 import { ServerRouter } from "react-router";
-import { isbot } from "isbot";
 import type { RenderToPipeableStreamOptions } from "react-dom/server";
 import { renderToPipeableStream } from "react-dom/server";
 
@@ -11,7 +9,7 @@ import { bootServer } from "./server/boot.server";
 import { logger } from "./server/logging/logger.server";
 
 // One-time startup: validate env (fail fast) + open db and run migrations.
-bootServer();
+await bootServer();
 
 export const streamTimeout = 5_000;
 
@@ -32,14 +30,8 @@ export default function handleRequest(
 
   return new Promise((resolve, reject) => {
     let shellRendered = false;
-    let userAgent = request.headers.get("user-agent");
-
-    // Ensure requests from bots and SPA Mode renders wait for all content to load before responding
-    // https://react.dev/reference/react-dom/server/renderToPipeableStream#waiting-for-all-content-to-load-for-crawlers-and-static-generation
-    let readyOption: keyof RenderToPipeableStreamOptions =
-      (userAgent && isbot(userAgent)) || routerContext.isSpaMode
-        ? "onAllReady"
-        : "onShellReady";
+    const readyOption: keyof RenderToPipeableStreamOptions =
+      routerContext.isSpaMode ? "onAllReady" : "onShellReady";
 
     // Abort the rendering stream after the `streamTimeout` so it has time to
     // flush down the rejected boundaries
@@ -61,7 +53,9 @@ export default function handleRequest(
               callback();
             },
           });
-          const stream = createReadableStreamFromReadable(body);
+          const stream = Readable.toWeb(
+            body,
+          ) as unknown as ReadableStream<Uint8Array>;
 
           responseHeaders.set("Content-Type", "text/html");
 

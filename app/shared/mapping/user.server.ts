@@ -24,7 +24,7 @@ export interface UserRow {
   name: string;
   title: string | null;
   role: UserRole;
-  password_hash: string | null;
+  has_password: 0 | 1;
   idp: string;
   avatar_tone: string | null;
   pwreset_required: 0 | 1;
@@ -43,7 +43,7 @@ export interface UserRecord {
   name: string;
   title: string | null;
   role: UserRole;
-  passwordHash: string | null;
+  hasPassword: boolean;
   idp: string;
   avatarTone: string | null;
   pwresetRequired: boolean;
@@ -64,7 +64,7 @@ export function mapUserRow(row: UserRow): UserRecord {
     name: row.name,
     title: row.title,
     role: coerceUserRole(row.role),
-    passwordHash: row.password_hash,
+    hasPassword: row.has_password === 1,
     idp: row.idp,
     avatarTone: row.avatar_tone,
     pwresetRequired: row.pwreset_required === 1,

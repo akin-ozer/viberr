@@ -366,10 +366,10 @@ describe("mcp servers", () => {
     // Seeded rows carry demo tool counts — emulate one.
     db.prepare(`UPDATE org_mcp_servers SET tools_count = 14 WHERE id = ?`).run(mcp.id);
 
-    const healthy = await testMcpServer(db, mcp.id, ACTOR, { fetchImpl: respondingFetch });
+    const healthy = await testMcpServer(db, mcp.id, { fetchImpl: respondingFetch });
     expect(healthy.toast).toMatch(/^github-mcp healthy — 14 tools · \d+ms$/);
 
-    const dead = await testMcpServer(db, mcp.id, ACTOR, { fetchImpl: unreachableFetch() });
+    const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
     expect(dead.toast).toContain("github-mcp unreachable");
 
@@ -387,13 +387,13 @@ describe("mcp servers", () => {
     );
     expect(mcp.up).toBe(false);
 
-    const healthy = await testMcpServer(db, mcp.id, ACTOR, {
+    const healthy = await testMcpServer(db, mcp.id, {
       spawnImpl: fakeMcpSpawn(3),
     });
     expect(healthy.mcp).toMatchObject({ up: true, tools: 3 });
     expect(healthy.toast).toMatch(/^postgres-readonly healthy — 3 tools · \d+ms$/);
 
-    const dead = await testMcpServer(db, mcp.id, ACTOR, {
+    const dead = await testMcpServer(db, mcp.id, {
       spawnImpl: failingSpawn,
     });
     expect(dead.mcp).toMatchObject({ up: false, tools: null });

@@ -4,7 +4,6 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
-  getDataRoot,
   agentProfilesDir,
   skillDirPath,
 } from "~/server/files/file-store-root.server";
@@ -13,7 +12,6 @@ import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
-  gate,
   operatorAcceptCompletion,
   operatorEngageAgent,
   operatorOpenPacket,
@@ -380,14 +378,6 @@ const OPERATOR_PLAN_TOOLS = [
   "engage_agent",
   "run_agent",
   "prompt_agent",
-  // Legacy aliases (pre-generic plans / model drift) — dispatched to the same
-  // generic handlers with the delivers flag implied by the name.
-  "assign_specialist",
-  "run_specialist",
-  "prompt_specialist",
-  "assign_reviewer",
-  "run_reviewer",
-  "prompt_reviewer",
   "transition_stage",
   "accept_completion",
 ] as const;
@@ -436,8 +426,7 @@ const OPERATOR_PLAN_SCHEMA = {
 const operatorPlanActionSchema = z.strictObject({
   tool: z.enum(OPERATOR_PLAN_TOOLS),
   profileId: z.string().nullable(),
-  // Optional (not just nullable): legacy stored plans predate the field.
-  delivers: z.boolean().nullable().optional(),
+  delivers: z.boolean().nullable(),
   toStageId: z.string().nullable(),
   packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
   text: z.string().nullable(),
@@ -609,24 +598,17 @@ async function executeCodexPlan(
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
   }
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
-  // One operator turn → one comment. The plan's `reasoning` IS that comment;
-  // codex often ALSO emits redundant `post_comment` actions repeating it almost
-  // verbatim (observed live: three near-identical "Observed…/Recommended…"
-  // comments in one turn). Track what we've already said and drop duplicates so
-  // the timeline stays a decision log, not an echo chamber.
-  const postedComments = new Set<string>();
-  const commentKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
-  if (plan.reasoning) {
+  // Actions narrate themselves. Only a reply-only plan needs its reasoning
+  // copied to the timeline.
+  if (plan.actions.length === 0 && plan.reasoning) {
     await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
-    postedComments.add(commentKey(plan.reasoning));
   }
   for (const a of plan.actions) {
     try {
       switch (a.tool) {
         case "post_comment":
-          if (a.text && !postedComments.has(commentKey(a.text))) {
+          if (a.text) {
             await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
-            postedComments.add(commentKey(a.text));
           }
           break;
         case "open_packet": {
@@ -646,52 +628,33 @@ async function executeCodexPlan(
             );
           break;
         }
-        // Generic engagement actions + legacy aliases → ONE dispatch. The
-        // alias implies the delivers flag its name always meant.
         case "engage_agent":
-        case "assign_specialist":
-        case "assign_reviewer":
-          if (a.profileId)
+          if (a.profileId && a.delivers !== null)
             await operatorEngageAgent(
               db,
               ctx,
               {
                 ...base,
                 profileId: a.profileId,
-                delivers:
-                  a.tool === "assign_specialist"
-                    ? true
-                    : a.tool === "assign_reviewer"
-                      ? false
-                      : (a.delivers ?? true),
+                delivers: a.delivers,
                 ...(a.reason ? { reason: a.reason } : {}),
               },
               authority,
             );
           break;
         case "run_agent":
-        case "run_specialist":
-        case "run_reviewer":
           await operatorRunAgent(
             db,
             ctx,
             {
               ...base,
               ...(a.profileId ? { profileId: a.profileId } : {}),
-              ...(a.tool === "run_specialist"
-                ? { delivers: true }
-                : a.tool === "run_reviewer"
-                  ? { delivers: false }
-                  : a.delivers != null
-                    ? { delivers: a.delivers }
-                    : {}),
+              ...(a.delivers != null ? { delivers: a.delivers } : {}),
             },
             authority,
           );
           break;
         case "prompt_agent":
-        case "prompt_specialist":
-        case "prompt_reviewer":
           if (a.profileId)
             await operatorPromptAgentGeneric(
               db,
@@ -700,13 +663,7 @@ async function executeCodexPlan(
                 ...base,
                 profileId: a.profileId,
                 ...(a.text ? { directive: a.text } : {}),
-                ...(a.tool === "prompt_specialist"
-                  ? { delivers: true }
-                  : a.tool === "prompt_reviewer"
-                    ? { delivers: false }
-                    : a.delivers != null
-                      ? { delivers: a.delivers }
-                      : {}),
+                ...(a.delivers != null ? { delivers: a.delivers } : {}),
               },
               authority,
             );
@@ -941,8 +898,7 @@ export function buildOperatorSystemPrompt(
     .join("\n");
 
   const parts = [definition];
-  // Load EVERY declared skill that exists in the store (not just one), so the
-  // operator's profile-declared skills are actually in its context.
+  // Load every declared skill that exists in the store.
   const skills = authority.skills.length ? authority.skills : ["viberr-app-expertise"];
   for (const name of skills) {
     const body = readSkillBody(name, dataRoot);
@@ -963,29 +919,15 @@ export function buildOperatorSystemPrompt(
     }
   }
   parts.push(
-    "\n\n---\n# Your authority for this task\n\n" +
+    "\n\n---\n# Live authority\n\n" +
       `Autonomy: **${authority.autonomy}**.\n\n` +
       "Capability policy (capabilityId: mode):\n" +
       policyLines +
-      "\n\nRules:\n" +
-      "- `direct` capabilities: act via the matching tool.\n" +
-      "- `recommend` capabilities: under supervised autonomy the tool posts a recommendation and you must stop; under FULL autonomy it acts directly.\n" +
-      "- `human` / `off` / withheld: the tool is not offered — never attempt it.\n" +
-      "- When a task is at (or enters) a stage, TRIGGER its agent with a task-related prompt: prompt_specialist for a working stage, prompt_reviewer for the review stage. The prompt is the agent's directive — make it specific to this task and stage, never a bare 'proceed'.\n" +
-      "- Reach Done ONLY via accept_completion, and only under full autonomy; otherwise recommend acceptance.\n" +
-      "- Never write code, run shell commands, or touch the repository — those tools are withheld from you. Coordinate ONLY through the `mcp__viberr__*` governance tools (you may also read files and search to inform a decision).",
+      "\n\nUse only the governance tools offered for this run. Tool results enforce the policy; stop after a recommendation. Reach Done only through `accept_completion`.",
   );
   return parts.join("");
 }
 
-/**
- * The turn prompt for the CODEX structured-output operator. Persona + expertise
- * are supplied separately through Codex's supported `developer_instructions`
- * channel; this prompt contains only the live task snapshot and turn-specific
- * output instruction. Codex has no in-process SDK MCP channel, so it returns a
- * decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we execute through
- * the same capability-gated actions.
- */
 /** The task goal is still the unspecified triage placeholder (or blank) — the
  * operator must draft it (set_goal) before prompting any agent against it. */
 function goalIsUnspecified(goal: string): boolean {
@@ -993,154 +935,84 @@ function goalIsUnspecified(goal: string): boolean {
   return g === "" || g === DEFAULT_GOAL.trim();
 }
 
-export function buildCodexOperatorPrompt(
+type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
+
+function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
+  if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
+  const report = agentReply.slice(0, 4000);
+  const suffix = agentReply.length > report.length ? " (first 4,000 chars)" : "";
+  return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\``;
+}
+
+/** The turn-specific instruction shared by both operator backends. */
+function operatorTurnInstruction(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
+  trigger: OperatorTrigger,
   humanComment?: string,
-  agentReply?: string,
 ): string {
-  // Same rationale as the claude turn prompt: the react decision carries the
-  // agent's report verbatim so directives can quote concrete findings.
-  const reportBlock =
-    trigger === "agent-reply" && agentReply?.trim()
-      ? `\n\n# The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""})\n\n"""\n${agentReply.slice(0, 4000)}\n"""`
-      : "";
-  const decision = humanComment?.trim()
-    ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
-    : trigger === "goal-updated"
-      ? "A human just EDITED THE TASK GOAL (the snapshot's `goal` is the new one). If the open packet (snapshot `packet`) " +
-        "asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, include a " +
-        "`resolve_packet` action with a short `reason` — the packet is moot. Then continue coordination for the current " +
-        "stage (prompt the right agent anchored on the NEW goal, or advance a pre-work stage). If the goal is still not " +
-        "actionable, say what's missing in `reasoning` — do NOT open a duplicate packet."
-      : trigger === "agent-reply"
-      ? "An agent you prompted has just REPORTED BACK (its report is included above verbatim). React to it: " +
-        "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
-        "toward review if the implementation looks complete, or accept_completion if the review is clean. If the " +
-        "review REQUESTED CHANGES, re-prompt the specialist and QUOTE the reviewer's specific findings in the " +
-        "action's `text` (the specialist does not see this report otherwise). Only re-prompt the same agent " +
-        "(prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not prompt just to repeat yourself."
-      : (goalIsUnspecified(snapshot.goal)
-          ? "THE GOAL IS UNSPECIFIED (still the triage placeholder). FIRST specify it: add a `set_goal` action whose " +
-            "`text` is a concrete scope + acceptance criteria drafted from the title/context (or open an `edit_goal` " +
-            "packet if you genuinely need the human to provide scope, and stop). Never prompt an agent against an " +
-            "unspecified goal. THEN "
-          : "") +
-        "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
-        "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
-        "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
-        "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
+  if (humanComment?.trim()) {
+    return (
+      `A human addressed you directly: "${humanComment.trim()}" Respond from the live task state, ` +
+      "then take only the coordination action it warrants. If none is needed, leave one concise reply."
+    );
+  }
+  if (trigger === "goal-updated") {
+    return (
+      "The goal was edited. If it now supplies the input requested by the open packet, resolve that packet as moot. " +
+      "Continue the current stage using the new goal. If it is still not actionable, state the missing input once; do not open a duplicate packet."
+    );
+  }
+  if (trigger === "agent-reply") {
+    return (
+      "React to the report above. Move completed implementation toward review; accept a clean review through `accept_completion`. " +
+      "If review requests changes, move back to the work stage and `prompt_agent` the delivering profile with the concrete findings. " +
+      "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+
+  const scope = goalIsUnspecified(snapshot.goal)
+    ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. "
+    : "";
   return (
-    "# This task\n\n" +
-    "```json\n" +
-    JSON.stringify(snapshot, null, 2) +
-    "\n```" +
-    reportBlock +
-    "\n\n# Your decision\n\n" +
-    "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
-    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions. " +
-    "SELECT the right agent by reading each profile's `desc` (its purpose) and `capabilities` " +
-    "(delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — " +
-    "never by guessing from names.\n\n" +
-    decision +
-    "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
-    "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
-    "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_agent", "profileId": "…", "delivers": true, "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
-    "Include a short reason on each governed action (it is shown on the recommendation card)."
+    scope +
+    "Advance an eligible pre-work `auto` transition. At a work stage, choose the deployed profile by description and capabilities, " +
+    "then call `prompt_agent` with a concrete directive and `delivers: true` for implementation or `false` for supporting review. Stop after the handoff."
   );
 }
 
-/**
- * The operator's opening turn prompt. It differs by WHY the run fired:
- *   agent-reply → REACT: an agent the operator prompted just reported back; read
- *     its report and propose the next state change (do not re-prompt).
- *   otherwise  → COORDINATE: prompt the stage's agent with an "@handle …"
- *     directive and stop; the reaction comes when the agent reports.
- */
-export function buildOperatorTurnPrompt(
+/** Codex cannot call the in-process tools, so it returns a constrained plan. */
+
+export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
+  trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
 ): string {
-  const header =
-    `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
-    `Goal: ${snapshot.goal}\n\n` +
-    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
-
-  // A human is talking to you directly (@operator). Answer them first, then take
-  // any coordination action that their message warrants.
-  if (humanComment?.trim()) {
-    return (
-      header +
-      `A human just addressed YOU directly with: "${humanComment.trim()}"\n\n` +
-      "Do this now:\n" +
-      "1. Call get_task to read the live state, your policy, and the allowed next stages.\n" +
-      "2. Post a `post_comment` that RESPONDS to the human's message — answer their question or acknowledge their instruction, grounded in the task's real state.\n" +
-      "3. If their message calls for a coordination action you're allowed to take (prompt an agent, engage a reviewer, recommend/perform a transition), do it and say so. If it does not, just respond.\n" +
-      "Respect your capability policy. Keep it concise and directly responsive."
-    );
-  }
-
-  if (trigger === "goal-updated") {
-    return (
-      header +
-      "A human just EDITED THE TASK GOAL (the goal above is the new one).\n\n" +
-      "Do this now:\n" +
-      "1. Call get_task — read the new goal and the open decision packet (`packet`), if any.\n" +
-      "2. If your open packet asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, call resolve_decision_packet with a short reason — the packet is moot, do not leave it standing.\n" +
-      "3. Then continue coordination for the current stage: prompt the right agent with a directive anchored on the NEW goal, or advance a pre-work stage if nothing needs to run here.\n" +
-      "4. If the new goal is still not actionable, post ONE brief comment saying exactly what is missing — do NOT open a duplicate packet while one is already standing.\n\n" +
-      "Respect your capability policy at every step. Keep comments concise."
-    );
-  }
-
-  if (trigger === "agent-reply") {
-    // Embed the report verbatim (capped): the operator's next directive must
-    // carry the agent's actual findings even when the timeline comment was
-    // dropped or trimmed.
-    const reportBlock = agentReply?.trim()
-      ? `The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""}):\n"""\n${agentReply.slice(0, 4000)}\n"""\n\n`
-      : "";
-    return (
-      header +
-      "An agent you prompted has just REPORTED BACK.\n\n" +
-      reportBlock +
-      "Do this now:\n" +
-      "1. Call get_task and read the live state (the report above is the agent's reply).\n" +
-      "2. Post a brief comment summarizing what the agent reported.\n" +
-      "3. Based on that report, PROPOSE THE NEXT STATE CHANGE:\n" +
-      "   · if the implementation looks complete → transition_stage toward review (or recommend it under supervised);\n" +
-      "   · if the review looks clean → accept_completion (or recommend acceptance under supervised);\n" +
-      "   · if the review REQUESTED CHANGES → re-prompt the specialist and QUOTE the reviewer's specific findings in your directive (the specialist does not see this report otherwise — a directive that just says \"see the reviewer's comments\" hands it nothing);\n" +
-      "   · only if the work is clearly incomplete, re-prompt the SAME agent with prompt_specialist/prompt_reviewer, and say why.\n" +
-      "Do NOT prompt a fresh agent turn just to repeat yourself. React to the report, then act or recommend.\n\n" +
-      "Respect your capability policy at every step. Keep comments concise."
-    );
-  }
-
-  const goalUnspecified = goalIsUnspecified(snapshot.goal);
-  const goalStep = goalUnspecified
-    ? "0. THE GOAL IS UNSPECIFIED (it is still the triage placeholder). Specify it FIRST: call set_goal " +
-      "with a concrete scope + acceptance criteria drafted from the title and context — OR, if you genuinely " +
-      "need the human to provide scope, open an `edit_goal` decision packet and STOP. Never prompt an agent " +
-      "against an unspecified goal.\n"
-    : "";
   return (
-    header +
-    "Do this now:\n" +
-    goalStep +
-    "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
-    "2. Post a brief plan comment.\n" +
-    "3. TRIGGER the right agent for THIS stage with a concrete, task-related directive, addressed to it by name (\"@dev implement …\"):\n" +
-    "   · a working stage (before review) → prompt_specialist(profileId, prompt) — assigns the\n" +
-    "     specialist, posts your \"@name …\" prompt to it, and starts its run on your directive;\n" +
-    "   · the review stage → prompt_reviewer(profileId, prompt) — engages + prompts + runs a reviewer.\n" +
-    "   Write the prompt about THIS task (its goal and what to do at this stage), not a generic 'go'.\n" +
-    "4. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +
-    "   will be re-invoked to read its report and propose the next state change.\n" +
-    "   (Only advance a PRE-work stage, e.g. triage → ready, if no implementation is needed there yet.)\n\n" +
-    "Respect your capability policy at every step. Keep comments concise."
+    "# Task snapshot\n\n```json\n" +
+    JSON.stringify(snapshot, null, 2) +
+    "\n```" + agentReportBlock(trigger, agentReply) +
+    "\n\n# Your decision\n\n" +
+    "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
+    "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
+    operatorTurnInstruction(snapshot, trigger, humanComment) +
+    "\n\nUse `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
+    "Give governed actions a short `reason`. Return only the JSON plan."
+  );
+}
+
+/** Claude receives the same decision rule plus live tool access. */
+export function buildOperatorTurnPrompt(
+  snapshot: OperatorTaskSnapshot,
+  trigger: OperatorTrigger,
+  humanComment?: string,
+  agentReply?: string,
+): string {
+  return (
+    `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
+    `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
+    agentReportBlock(trigger, agentReply) +
+    "\n\n" +
+    operatorTurnInstruction(snapshot, trigger, humanComment)
   );
 }

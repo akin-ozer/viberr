@@ -19,7 +19,6 @@ CREATE TABLE users (
   name TEXT NOT NULL,
   title TEXT,
   role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
-  password_hash TEXT,
   idp TEXT NOT NULL DEFAULT 'local',
   avatar_tone TEXT,
   pwreset_required INTEGER NOT NULL DEFAULT 0,
@@ -250,8 +249,7 @@ CREATE TABLE "agent_runs" (
   thread_id TEXT NOT NULL,
   role TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer')),
-  backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex', 'simulated')),
-  simulated INTEGER NOT NULL DEFAULT 0,
+  backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   model TEXT NOT NULL,
   session_id TEXT,
   sdk TEXT NOT NULL DEFAULT '',
@@ -270,7 +268,7 @@ CREATE TABLE "agent_runs" (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   agent_name TEXT,
-  agent_profile_id TEXT
+  agent_profile_id TEXT NOT NULL
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -282,12 +280,9 @@ CREATE TABLE run_log_lines (
   created_at TEXT NOT NULL
 );
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
-CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade, "activeOrganizationId" text);
+CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
 CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
-CREATE TABLE "organization" ("id" text not null primary key, "name" text not null, "slug" text not null unique, "logo" text, "createdAt" date not null, "metadata" text);
-CREATE TABLE "member" ("id" text not null primary key, "organizationId" text not null references "organization" ("id") on delete cascade, "userId" text not null references "user" ("id") on delete cascade, "role" text not null, "createdAt" date not null);
-CREATE TABLE "invitation" ("id" text not null primary key, "organizationId" text not null references "organization" ("id") on delete cascade, "email" text not null, "role" text, "status" text not null, "expiresAt" date not null, "createdAt" date not null, "inviterId" text not null references "user" ("id") on delete cascade);
 
 -- ============================ indexes ===========================
 
@@ -323,8 +318,3 @@ CREATE UNIQUE INDEX idx_run_log_lines__run_seq ON run_log_lines (run_id, seq);
 CREATE INDEX "session_userId_idx" on "session" ("userId");
 CREATE INDEX "account_userId_idx" on "account" ("userId");
 CREATE INDEX "verification_identifier_idx" on "verification" ("identifier");
-CREATE UNIQUE INDEX "organization_slug_uidx" on "organization" ("slug");
-CREATE INDEX "member_organizationId_idx" on "member" ("organizationId");
-CREATE INDEX "member_userId_idx" on "member" ("userId");
-CREATE INDEX "invitation_organizationId_idx" on "invitation" ("organizationId");
-CREATE INDEX "invitation_email_idx" on "invitation" ("email");

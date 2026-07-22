@@ -86,7 +86,7 @@ export function getMentionables(
   // de-duped (two deployments could share a display name).
   const agentSeen = new Set<string>();
   const agents: MentionableAgent[] = [];
-  for (const sp of listDeployedSpecialists(db, projectSlug, ctx)) {
+  for (const sp of listDeployedSpecialists(projectSlug, ctx)) {
     const handle = sp.name.toLowerCase();
     if (agentSeen.has(handle)) continue;
     agentSeen.add(handle);

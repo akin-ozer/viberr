@@ -91,7 +91,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const runtime = listRunsForTask(db, params.slug, params.key);
 
   // Deployed specialists the "Assign specialist" menu offers.
-  const deployedSpecialists = listDeployedSpecialists(db, params.slug);
+  const deployedSpecialists = listDeployedSpecialists(params.slug);
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
   // concurrently. So the delivering Run button disables only on an active
@@ -461,7 +461,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           String(formData.get("autonomy") ?? "supervised") === "full"
             ? "full"
             : "supervised";
-        const result = await runOperator(db, {
+        await runOperator(db, {
           projectSlug,
           taskKey,
           backend,

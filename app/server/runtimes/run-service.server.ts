@@ -79,8 +79,6 @@ function getState(): ServiceState {
     state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
     cache[SERVICE_KEY] = state;
   }
-  // Older cached states (hot-reload / tests) may predate the completions map.
-  if (!state.completions) state.completions = new Map();
   return state;
 }
 
@@ -190,7 +188,7 @@ export interface StartRunInput {
    *  picker label). Null → the projection falls back to the backend name. */
   agentName?: string | null;
   /** The deployed profile id persisted on the run (per-agent grouping key). */
-  agentProfileId?: string | null;
+  agentProfileId: string;
   prompt: string;
   /** Resume an existing provider session. */
   resumeSessionId?: string | null;
@@ -242,7 +240,7 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
 export async function startRun(
   db: Database.Database,
   input: StartRunInput,
-): Promise<{ runId: string; simulated: boolean }> {
+): Promise<{ runId: string }> {
   const state = getState();
   const threadId = input.threadId ?? DEFAULT_THREAD[input.kind];
   const runId = newId("run");
@@ -250,8 +248,6 @@ export async function startRun(
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
   const selection = selectAdapter(input.backend, state.adapters);
-  const simulated = false;
-
   try {
     upsertRun(db, {
     id: runId,
@@ -261,12 +257,11 @@ export async function startRun(
     role: input.role,
     kind: input.kind,
     backend: input.backend,
-    simulated,
     model: input.model,
     sdk: SDK_LABEL[input.backend] ?? "",
     sessionId: input.resumeSessionId ?? null,
     agentName: input.agentName ?? null,
-    agentProfileId: input.agentProfileId ?? null,
+    agentProfileId: input.agentProfileId,
     state: "queued",
     });
   } catch (err) {
@@ -287,7 +282,6 @@ export async function startRun(
         status: 409,
         userMessage:
           "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-        kind: "user",
       });
     }
     throw err;
@@ -307,7 +301,6 @@ export async function startRun(
       backend: input.backend,
       role: input.role,
       kind: input.kind,
-      simulated,
       resumed: Boolean(input.resumeSessionId),
       // R7-2 fail-fast marker: the run never spawned a backend process.
       ...(selection.kind === "unavailable" ? { failedUnavailable: true } : {}),
@@ -340,11 +333,11 @@ export async function startRun(
 
   if (selection.kind === "unavailable") {
     failRunUnavailable(db, spec);
-    return { runId, simulated: false };
+    return { runId };
   }
 
   launch(db, spec, selection.adapter);
-  return { runId, simulated };
+  return { runId };
 }
 
 /**
@@ -370,7 +363,6 @@ function failRunUnavailable(db: Database.Database, spec: RunSpec): void {
   sink.finalize({
     outcome: "error",
     effectiveBackend: spec.backend,
-    simulated: false,
     sessionId: spec.resumeSessionId ?? null,
   });
 }
@@ -420,7 +412,7 @@ export async function resumeRun(
      *  with the prior run in the Agent-logs picker. Defaults to the prior
      *  row's agent_name/agent_profile_id. */
     agentName?: string | null;
-    agentProfileId?: string | null;
+    agentProfileId?: string;
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
@@ -442,12 +434,10 @@ export async function resumeRun(
      *  its envelope, a fresh-vs-resume parity break (F7). */
     outputSchema?: unknown;
   },
-): Promise<{ runId: string; simulated: boolean }> {
+): Promise<{ runId: string }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
-  // Historical simulated rows resume through Claude; new runs are never
-  // simulated.
-  const backend: RealBackend = prev.backend === "codex" ? "codex" : "claude";
+  const backend: RealBackend = prev.backend;
   // A resume creates a NEW run row (a fresh stream) that shares the PROVIDER
   // session id. It must NOT reuse the prior thread_id — agent_runs is unique
   // on (project, task, thread), and the prior row still exists. Derive a fresh

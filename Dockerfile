@@ -1,22 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================================
-# Build stage — install all deps (better-sqlite3 downloads a prebuilt binary
-# for this base; the toolchain below is the fallback if that ever fails),
-# compile the app, then prune node_modules down to production deps.
+# Build stage — install dependencies, compile the app, then prune node_modules
+# down to production dependencies.
 # ============================================================================
 FROM node:26-slim AS build
-
-# Native-module fallback toolchain (better-sqlite3 uses prebuild-install and
-# normally never compiles; python3/make/g++ keep `npm ci` working when a
-# prebuilt binary is unavailable for a future Node/platform combination).
-# Distro-current toolchain: pinning apt versions (DL3008) breaks the build on
-# every debian point release for zero reproducibility gain — the compiled
-# artifact is governed by package-lock.json.
-# hadolint ignore=DL3008
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

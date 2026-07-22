@@ -142,14 +142,10 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
           : exit.outcome === "error"
             ? "error"
             : "interrupted";
-      // Keep the requested backend on the row; `simulated` remains only for
-      // compatibility with historical rows. The effective backend selects the
-      // raw .jsonl directory.
-      effectiveBackend = exit.simulated ? "simulated" : exit.effectiveBackend;
+      effectiveBackend = exit.effectiveBackend;
       patchRun(db, spec.runId, {
         state,
         finishedAt: new Date().toISOString(),
-        simulated: exit.simulated,
         sessionId,
         phase: null,
         step: null,

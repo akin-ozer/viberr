@@ -5,6 +5,6 @@ export default {
     // scanning them double-counts every finding. *.server.test.ts files are
     // server-only test fixtures (react-router never bundles .server. modules
     // client-side) — their synthetic PATs aren't "client code" secrets.
-    files: ["**/design/**", "**/.claude/**", "**/*.server.test.ts"],
+    files: ["**/.claude/**", "**/*.server.test.ts"],
   },
 };

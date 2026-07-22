@@ -75,8 +75,6 @@ export interface RunExit {
   outcome: "finished" | "error" | "interrupted";
   /** The backend actually used. */
   effectiveBackend: RunBackend;
-  /** Legacy persistence flag; new runtime adapters always return false. */
-  simulated: boolean;
   /** Provider session id captured during the run, if any. */
   sessionId?: string | null;
 }

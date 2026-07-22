@@ -34,11 +34,12 @@ function insert(patch: Partial<InsertRunInput>): void {
     role: "Primary specialist",
     kind: "primary",
     backend: "claude",
-    simulated: true,
     model: "claude-sonnet-4-5",
     sdk: "Claude Agent SDK",
     state: "finished",
     ...patch,
+    agentProfileId:
+      patch.agentProfileId ?? (patch.kind === "operator" ? "operator" : "developer"),
   });
 }
 
@@ -85,14 +86,6 @@ describe("projectRunsForTask grouping", () => {
     // Newest by created_at / rowid is run_c.
     expect(views[0]!.serverRunId).toBe("run_c");
     expect(views[0]!.id).toBe("primary-r2");
-  });
-
-  it("who.name falls back to the backend name for null-identity (seed) rows", () => {
-    // No agent_name / agent_profile_id → seed/historical row shape.
-    insert({ id: "run_seed", threadId: "primary", state: "finished" });
-    const views = projectRunsForTask(db, SLUG, TASK);
-    expect(views.length).toBe(1);
-    expect(views[0]!.who.name).toBe("Claude Code"); // WHO_NAME[claude]
   });
 
   it("groups distinct agents separately and keeps three entries (op + primary + reviewer)", () => {

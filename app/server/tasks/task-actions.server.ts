@@ -29,14 +29,12 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
   encodeActorRef,
-  roleToSlug,
 } from "~/server/files/actor-ref.server";
 import {
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   resolveTaskFilePath,
   createTaskFile,
@@ -142,24 +140,6 @@ export const OPERATOR_TASK_ACTOR: TaskActor = {
 };
 
 // ---------------------------------------------------------------- helpers
-
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-    kind: "user",
-  });
-}
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
 
 interface ProjectContext {
   slug: string;
@@ -1161,7 +1141,7 @@ type PreparedReply =
 
 /**
  * Builds the agent-reply timeline comment (anti-noise guardrails + evidence
- * separation + simulated-run marking) WITHOUT writing it. Extracted so the
+ * separation) WITHOUT writing it. Extracted so the
  * REVIEWER path can unshift the reply comment ATOMICALLY with its verdict event
  * in a single updateTaskFile: they used to be two separate writes, and a
  * bind-mount read-your-own-writes gap (VirtioFS) let the verdict's
@@ -1169,10 +1149,8 @@ type PreparedReply =
  * (VIB-1/2/3/4, deterministic in docker). One write can't split them.
  */
 async function prepareAgentReplyEvent(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
-  runId: string,
   actorRef: FileActorRef,
   replyText: string | null,
 ): Promise<PreparedReply> {
@@ -1192,18 +1170,6 @@ async function prepareAgentReplyEvent(
   const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
     ? separateEvidence(replyText)
     : replyText;
-  // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
-  // fabricated (canned text with no real work). Mark it as such in the canonical
-  // timeline — the source of truth agents and humans re-anchor on.
-  const simulated =
-    (
-      db.prepare(`SELECT simulated FROM agent_runs WHERE id = ?`).get(runId) as
-        | { simulated: number }
-        | undefined
-    )?.simulated === 1;
-  const text = simulated
-    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
-    : separated;
   return {
     status: "event",
     event: {
@@ -1211,7 +1177,7 @@ async function prepareAgentReplyEvent(
       type: "comment",
       actor: actorRef,
       title: null,
-      text,
+      text: separated,
       toAgent: false,
       evidence: null,
     },
@@ -1253,10 +1219,8 @@ export async function postAgentReplyComment(
   },
 ): Promise<void> {
   const prepared = await prepareAgentReplyEvent(
-    db,
     ctx,
     input.projectSlug,
-    input.runId,
     input.actorRef,
     input.replyText,
   );
@@ -1312,9 +1276,7 @@ export async function postAgentReplyComment(
  */
 /**
  * The agent's most-recent reply comment text on a task, or null when it has
- * never replied. Identity match: profileId (D7) with a legacy fallback on the
- * displayed role (pre-profileId events encoded a role slug — their displayed
- * role still equals the live role snapshot). Used to detect a no-progress
+ * never replied. Identity matches by profile id. Used to detect a no-progress
  * repeat before re-inviting the operator to react.
  *
  * `before` (the CURRENT run's start time) excludes THIS run's own mid-run
@@ -1328,8 +1290,7 @@ function latestAgentReplyText(
   projectSlug: string,
   taskKey: string,
   backend: RealBackend,
-  profileId: string | null,
-  role: string,
+  profileId: string,
   before?: string | null,
 ): string | null {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -1340,8 +1301,7 @@ function latestAgentReplyText(
       e.type === "comment" &&
       e.actor.kind === "agent" &&
       e.actor.backend === backend &&
-      ((profileId !== null && e.actor.profileId === profileId) ||
-        agentRoleDisplay(e.actor) === role)
+      e.actor.profileId === profileId
     ) {
       // Skip comments from the current run (occurredAt >= run start).
       if (!Number.isNaN(beforeMs) && Date.parse(e.occurredAt) >= beforeMs) {
@@ -1441,12 +1401,9 @@ async function openStuckLoopPacket(
  * moot-recommendation ruling). Strictly scoped:
  *   - only `type: "blocked"` packets carrying NO `accept_completion` option —
  *     completion authorization (Review→Done) stays human, untouched;
- *   - subject match via the retry option's profileId (the join key — never the
- *     role string): a `retry_other_backend` option WITH profileId marks a
- *     reviewer-subject packet (withdrawn only when THAT reviewer profile
- *     succeeds); one WITHOUT marks the primary specialist. A packet with no
- *     retry option (redirect/hold-only) is agent-agnostic — any successful
- *     specialist/reviewer run falsifies "work stalled", so it withdraws.
+ *   - subject match via the retry option's required profileId (the join key,
+ *     never the role string). A packet with no retry option is agent-agnostic:
+ *     any successful agent run falsifies "work stalled", so it withdraws.
  * The withdrawal is announced on the timeline and audited; the pending
  * decision drops out of "Waiting on you" through decisionsRequiring on the
  * reproject (F7-NOTIF1), so no extra notification is needed.
@@ -1459,7 +1416,7 @@ async function withdrawSupersededStuckPacket(
     taskKey: string;
     delivers: boolean;
     role: string;
-    runProfileId: string | null;
+    runProfileId: string;
   },
 ): Promise<void> {
   try {
@@ -1473,15 +1430,8 @@ async function withdrawSupersededStuckPacket(
     if (retryOptions.length > 0) {
       const subjectProfileId =
         retryOptions.find((o) => o.profileId)?.profileId ?? null;
-      // profileId is the join key when the packet names one (R3 — every new
-      // retry option is stamped); a legacy unstamped packet is about the
-      // delivering agent.
-      const matches = subjectProfileId
-        ? input.runProfileId === subjectProfileId
-        : input.delivers;
-      if (!matches) return;
+      if (!subjectProfileId || input.runProfileId !== subjectProfileId) return;
     }
-    const roleLabel = "agent";
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
@@ -1499,7 +1449,7 @@ async function withdrawSupersededStuckPacket(
         type: "transition",
         actor: { kind: "operator" },
         title: null,
-        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} ${roleLabel} run completed successfully after it was opened.`,
+        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} agent run completed successfully after it was opened.`,
         toAgent: false,
         evidence: null,
       });
@@ -1636,10 +1586,8 @@ export async function recordAgentCompletion(
 ): Promise<void> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const prepared = await prepareAgentReplyEvent(
-    db,
     ctx,
     projectSlug,
-    runId,
     actorRef,
     replyText,
   );
@@ -1846,9 +1794,8 @@ export async function registerAgentCompletion(
     taskKey: string;
     runId: string;
     backend: RealBackend;
-    /** The engaged profile's id (identity for actor refs, D7); null only for
-     *  legacy recovered runs that predate identity columns. */
-    profileId: string | null;
+    /** The engaged profile's stable identity. */
+    profileId: string;
     role: string;
     /** The engagement owns the workspace/branch/PR (G1) — gates delivery
      *  reconcile + the single-flight semantics; NEVER a behavior kind. */
@@ -1870,7 +1817,6 @@ export async function registerAgentCompletion(
     void applyAgentCompletionEffects(db, ctx, input, {
       id: finished.id,
       state: finished.state,
-      simulated: finished.simulated === 1,
     }).catch((error: unknown) => {
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
@@ -1894,7 +1840,7 @@ export async function applyAgentCompletionEffects(
     projectSlug: string;
     taskKey: string;
     backend: RealBackend;
-    profileId: string | null;
+    profileId: string;
     role: string;
     delivers: boolean;
     outcomeKey?: string;
@@ -1902,17 +1848,13 @@ export async function applyAgentCompletionEffects(
     agentHandle: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
-  finished: { id: string; state: string; simulated: boolean },
+  finished: { id: string; state: string },
 ): Promise<void> {
-  const { replyTextForRun, fullReplyTextForRun } = await import(
-    "./agent-reply.server"
-  );
+  const { fullReplyTextForRun } = await import("./agent-reply.server");
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
-    // Legacy recovered runs may lack an identity - fall back to the role slug
-    // (exactly the pre-D7 ref), so their events keep their historical shape.
-    profileId: input.profileId ?? roleToSlug(input.role),
+    profileId: input.profileId,
     roleHint: input.role,
   };
   // The timeline comment stores the FULL reply (2026-07-17 ruling — the old
@@ -1930,7 +1872,6 @@ export async function applyAgentCompletionEffects(
     input.taskKey,
     input.backend,
     input.profileId,
-    input.role,
     thisRunStartedAt,
   );
   // 1. Resolve this run's OUTCOME ENVELOPE (G4) + collaboration gates, then
@@ -2045,7 +1986,7 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
-  if (finished.state === "error" && !finished.simulated) {
+  if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
     const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
@@ -2098,13 +2039,9 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "unavailable";
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
     const altLabel = altBackend === "claude" ? "Claude Code" : "Codex";
-    // R3 normalization: EVERY retry option names its profile when known
-    // (startAgentRun resolves profileId → the right engagement either way);
-    // a legacy identity-less run only retries when it was the deliverer.
-    const failedProfileId =
-      input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null;
+    const failedProfileId = input.profileId;
     const retryOption =
-      backendFailure && (input.delivers || failedProfileId)
+      backendFailure
         ? [
             {
               kind: "retry_other_backend" as const,
@@ -2112,7 +2049,7 @@ export async function applyAgentCompletionEffects(
               detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks — later prompts follow it.`,
               recommended: true,
               backend: altBackend,
-              ...(failedProfileId ? { profileId: failedProfileId } : {}),
+              profileId: failedProfileId,
             },
           ]
         : [];
@@ -2146,8 +2083,7 @@ export async function applyAgentCompletionEffects(
       taskKey: input.taskKey,
       delivers: input.delivers,
       role: input.role,
-      runProfileId:
-        input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null,
+      runProfileId: input.profileId,
     });
   }
   // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
@@ -2157,7 +2093,7 @@ export async function applyAgentCompletionEffects(
   //    read-modify-write of task.md could drop it) and could stamp task.md's
   //    branch/pr from the reviewer's checkout. Only the specialist that produced
   //    the change reconciles delivery.
-  if (input.delivers && finished.state === "finished" && !finished.simulated) {
+  if (input.delivers && finished.state === "finished") {
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
@@ -2168,7 +2104,6 @@ export async function applyAgentCompletionEffects(
       backend: input.backend,
       profileId: input.profileId,
       role: input.role,
-      simulated: false,
       ...(input.workdir ? { workdir: input.workdir } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
     }).catch((error) => {
@@ -2443,11 +2378,11 @@ export async function setOwner(
     // instead of a hardcoded role literal); target must be able to OWN
     // (contributor+ — a viewer is read+comment only and can't hold the owner seat).
     if (currentOwnerId !== actor.userId && !roleCan(actorRole, "release-any-ownership")) {
-      throw forbidden("Only the current owner or a project admin can hand off ownership.");
+      throw AppError.forbidden("Only the current owner or a project admin can hand off ownership.");
     }
     const targetRole = project.memberRoles.get(input.targetUserId);
     if (!targetRole || !roleCan(targetRole, "own-task")) {
-      throw forbidden(
+      throw AppError.forbidden(
         "Ownership can only be handed to a project member who can own tasks (contributor or above).",
       );
     }
@@ -2678,7 +2613,7 @@ export async function transitionStage(
     // Done only through the controlled accept-completion route (full autonomy),
     // never a bare stage move.
     if (input.toStageId === lastStageId) {
-      throw forbidden(
+      throw AppError.forbidden(
         "The operator reaches Done only by accepting completion, not a bare transition.",
       );
     }
@@ -3121,7 +3056,7 @@ export async function resolvePacket(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const packet = existing.parsed.packet;
   if (!packet) {
-    throw conflict("This packet was already resolved.");
+    throw AppError.conflict("This packet was already resolved.");
   }
   const option = packet.options[input.optionIndex];
   if (!option) {
@@ -3182,7 +3117,7 @@ export async function resolvePacket(
       // cleared.
       {
         const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-        if (blockReason) throw conflict(blockReason);
+        if (blockReason) throw AppError.conflict(blockReason);
       }
       const doneStageId =
         terminalStageIdOf(project) ??
@@ -3328,13 +3263,13 @@ export async function resolvePacket(
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     if (!parsed.packet) {
       // Raced with a concurrent resolve inside the lock window.
-      throw conflict("This packet was already resolved.");
+      throw AppError.conflict("This packet was already resolved.");
     }
     // F10-09: the packet in the file must be the SAME one we read and validated
     // the option against. A replacement (opened during our await) has a
     // different identity — reject rather than apply the stale choice to it.
     if (packetIdentity(parsed.packet) !== resolvedPacketIdentity) {
-      throw conflict(
+      throw AppError.conflict(
         "This decision was replaced by a newer one — refresh the task and choose again.",
       );
     }
@@ -3469,7 +3404,7 @@ async function acceptCompletion(
   // review without any re-review.
   if (!input.force) {
     const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-    if (blockReason) throw conflict(blockReason);
+    if (blockReason) throw AppError.conflict(blockReason);
   }
 
   // Refuse to accept while an operator-raised BLOCKED decision is still open
@@ -3483,7 +3418,7 @@ async function acceptCompletion(
     existing.parsed.frontmatter.readiness === "blocked" &&
     existing.parsed.packet?.type === "blocked"
   ) {
-    throw conflict(
+    throw AppError.conflict(
       "This task has an open blocked decision — resolve the operator's packet before accepting it.",
     );
   }
@@ -3589,7 +3524,7 @@ export async function completeTaskMerge(
     throw AppError.validation("This task has no linked pull request to merge.");
   }
   if (pr.state !== "accepted") {
-    throw conflict(
+    throw AppError.conflict(
       pr.state === "merged"
         ? "This PR is already merged."
         : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
@@ -3648,7 +3583,7 @@ export async function applyRecommendation(
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,
   );
-  if (!rec) throw conflict("That recommendation was already resolved.");
+  if (!rec) throw AppError.conflict("That recommendation was already resolved.");
 
   // Execute the recommended action through the governed mutation (RBAC inside).
   if (rec.kind === "assign_specialist" && rec.profileId) {

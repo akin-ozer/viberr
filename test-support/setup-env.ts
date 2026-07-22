@@ -24,8 +24,8 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
  * developer's `.env` or a CI host's environment — the risk is a paid provider
  * call from `npm test`. Delete every variable `hasCredential()` inspects
  * (runtime-registry.server.ts) plus the CLI-auth flags and `CODEX_HOME`, so
- * `isBackendAvailable` reports false and `selectAdapter` yields the simulated
- * adapter under NODE_ENV=test. A test that deliberately exercises real-backend
+ * `isBackendAvailable` reports false under NODE_ENV=test. A test that
+ * deliberately exercises real-backend
  * detection must set these explicitly within the test (and clean up), which
  * still works. `delete` (not `??=`) is required: nullish assignment preserves
  * an ambient value, which is exactly the leak.

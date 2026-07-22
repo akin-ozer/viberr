@@ -16,12 +16,21 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+const USER_SELECT = `SELECT users.*,
+  EXISTS (
+    SELECT 1 FROM account
+    WHERE account.userId = users.id
+      AND account.providerId = 'credential'
+      AND account.password IS NOT NULL
+  ) AS has_password
+  FROM users`;
+
 export function findUserByEmail(
   db: Database.Database,
   email: string,
 ): UserRecord | null {
   const row = db
-    .prepare(`SELECT * FROM users WHERE lower(email) = ?`)
+    .prepare(`${USER_SELECT} WHERE lower(users.email) = ?`)
     .get(normalizeEmail(email)) as UserRow | undefined;
   return row ? mapUserRow(row) : null;
 }
@@ -30,7 +39,7 @@ export function findUserById(
   db: Database.Database,
   id: string,
 ): UserRecord | null {
-  const row = db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as
+  const row = db.prepare(`${USER_SELECT} WHERE users.id = ?`).get(id) as
     | UserRow
     | undefined;
   return row ? mapUserRow(row) : null;
@@ -38,7 +47,7 @@ export function findUserById(
 
 export function listUsers(db: Database.Database): UserRecord[] {
   const rows = db
-    .prepare(`SELECT * FROM users ORDER BY created_at ASC, id ASC`)
+    .prepare(`${USER_SELECT} ORDER BY users.created_at ASC, users.id ASC`)
     .all() as UserRow[];
   return rows.map(mapUserRow);
 }
@@ -64,7 +73,6 @@ export interface InsertUserInput {
   name: string;
   title?: string | null;
   role: UserRole;
-  passwordHash?: string | null;
   idp?: string;
   avatarTone?: string | null;
   pwresetRequired?: boolean;
@@ -78,16 +86,15 @@ export function insertUser(
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO users
-       (id, email, name, title, role, password_hash, idp, avatar_tone,
+       (id, email, name, title, role, idp, avatar_tone,
         pwreset_required, theme, disabled, created_at, updated_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 0, ?, ?, ?)`,
   ).run(
     input.id,
     normalizeEmail(input.email),
     input.name,
     input.title ?? null,
     input.role,
-    input.passwordHash ?? null,
     input.idp ?? "local",
     input.avatarTone ?? null,
     input.pwresetRequired ? 1 : 0,
@@ -107,7 +114,6 @@ const UPDATABLE_COLUMNS = {
   disabled: "disabled",
   idp: "idp",
   theme: "theme",
-  passwordHash: "password_hash",
   pwresetRequired: "pwreset_required",
   avatarTone: "avatar_tone",
   githubHandle: "github_handle",
@@ -120,7 +126,6 @@ export interface UserFieldPatch {
   disabled?: boolean;
   idp?: string;
   theme?: UserRecord["theme"];
-  passwordHash?: string | null;
   pwresetRequired?: boolean;
   avatarTone?: string | null;
   githubHandle?: string | null;

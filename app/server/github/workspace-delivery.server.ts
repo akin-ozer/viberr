@@ -15,7 +15,6 @@ import {
 } from "~/schemas/task-file.schema";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
-import { roleToSlug } from "~/server/files/actor-ref.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -41,7 +40,7 @@ import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
  * The canonical task.md then keeps `branch: null` / `pr: null`, so
  * task↔branch↔PR traceability (NFR15) is broken for agent-delivered work.
  *
- * After a REAL (non-simulated) specialist run finishes we inspect the run's
+ * After a specialist run finishes we inspect the run's
  * workspace git repo and reconcile the task record from what the agent
  * ACTUALLY did: the real branch, the real commits, and (best-effort, via the
  * run's own `gh` auth) the real PR. Everything here is best-effort and never
@@ -111,10 +110,8 @@ export interface ReconcileWorkspaceDeliveryInput {
   /** The finished run's backend + identity — attribution for the typed
    *  events (D7: profileId is the identity; role is the display snapshot). */
   backend?: RealBackend;
-  profileId?: string | null;
+  profileId: string;
   role?: string;
-  /** Skip entirely for a simulated run (it did no real git work). */
-  simulated?: boolean;
   /** Injected command runner (tests). Defaults to a real `execFile` wrapper. */
   exec?: CommandExec;
 }
@@ -227,10 +224,6 @@ export async function reconcileWorkspaceDelivery(
   });
 
   try {
-    if (input.simulated) {
-      return noop("skipped", "simulated run — no real repository work");
-    }
-
     const ref = {
       projectSlug,
       taskKey,
@@ -273,7 +266,7 @@ export async function reconcileWorkspaceDelivery(
     const actor: FileActorRef = {
       kind: "agent",
       backend,
-      profileId: input.profileId ?? roleToSlug(role),
+      profileId: input.profileId,
       roleHint: role,
     };
 

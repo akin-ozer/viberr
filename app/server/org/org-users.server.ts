@@ -25,7 +25,6 @@ import {
   updateUserFields,
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -68,15 +67,6 @@ export interface OrgUserView {
   /** Password-reset pending (local; distinct from initial "invited"). */
   pwreset: boolean;
   disabled: boolean;
-}
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
 }
 
 function idpOf(user: UserRecord): "github" | "google" | "local" {
@@ -130,7 +120,7 @@ export function whitelistGithubUser(
     throw AppError.validation("Enter a GitHub username.");
   }
   if (findUserByEmail(db, githubPlaceholderEmail(handle))) {
-    throw conflict(`@${handle} is already whitelisted.`);
+    throw AppError.conflict(`@${handle} is already whitelisted.`);
   }
   // Placeholder identity until first sign-in; insertUser (not createUser)
   // because the placeholder "email" is deliberately not an email address.
@@ -139,7 +129,6 @@ export function whitelistGithubUser(
     email: githubPlaceholderEmail(handle),
     name: `@${handle}`,
     role: input.role,
-    passwordHash: null,
     idp: "github",
     avatarTone: "teal",
     createdBy: actor.userId,
@@ -157,15 +146,15 @@ export function whitelistGithubUser(
   };
 }
 
-export function whitelistGoogleAccount(
+export async function whitelistGoogleAccount(
   db: Database.Database,
   input: { email: string; role: UserRole },
   actor: AuditActor,
-): { user: OrgUserView; toast: string } {
+): Promise<{ user: OrgUserView; toast: string }> {
   const email = normalizeEmail(input.email);
   const name = email.split("@")[0] || email;
   // Phase-2 API: the row IS the whitelist; passwordless = OAuth-only.
-  const record = createUser(
+  const record = await createUser(
     db,
     { email, name, role: input.role, tempPassword: null },
     actor,
@@ -184,13 +173,13 @@ export function whitelistGoogleAccount(
   };
 }
 
-export function createLocalAccount(
+export async function createLocalAccount(
   db: Database.Database,
   input: { name: string; email: string; role: UserRole },
   actor: AuditActor,
-): { user: OrgUserView; tempPassword: string; toast: string } {
+): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
   const tempPassword = generateTempPassword();
-  const record = createUser(
+  const record = await createUser(
     db,
     {
       email: input.email,
@@ -239,7 +228,7 @@ export function updateOrgUser(
     }
     if (email !== existing.email) {
       if (findUserByEmail(db, email)) {
-        throw conflict(`A user with email ${email} already exists.`);
+        throw AppError.conflict(`A user with email ${email} already exists.`);
       }
       db.prepare(`UPDATE users SET email = ?, updated_at = ? WHERE id = ?`).run(
         email,
@@ -283,11 +272,11 @@ export function setOrgUserRole(
 
 /** Local password reset: temp password surfaced once; sessions killed;
  * the phase-2 forced-reset gate prompts at next sign-in. */
-export function resetLocalPassword(
+export async function resetLocalPassword(
   db: Database.Database,
   userId: string,
   actor: AuditActor,
-): { user: OrgUserView; tempPassword: string; toast: string } {
+): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.");
   if (idpOf(existing) !== "local") {
@@ -296,7 +285,7 @@ export function resetLocalPassword(
     );
   }
   const tempPassword = generateTempPassword();
-  const updated = resetPassword(db, userId, tempPassword, actor);
+  const updated = await resetPassword(db, userId, tempPassword, actor);
   return {
     user: toOrgUserView(updated),
     tempPassword,
@@ -322,9 +311,9 @@ export function deleteOrgUser(
     !existing.disabled &&
     countActiveAdmins(db) <= 1
   ) {
-    throw conflict("Cannot remove the last active admin.");
+    throw AppError.conflict("Cannot remove the last active admin.");
   }
-  // Remove the better-auth identity too (user/account/member/session cascade) —
+  // Remove the better-auth identity too (user/account/session cascade) —
   // otherwise the orphaned `user` row (email is UNIQUE NOT NULL) makes
   // re-creating the same email throw a raw constraint mid-flow (pass-4 WI-3).
   revokeUserSessions(db, userId);

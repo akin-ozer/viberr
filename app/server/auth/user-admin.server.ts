@@ -4,12 +4,10 @@ import { newId } from "~/shared/ids/new-id.server";
 import { USER_ROLES, type UserRecord, type UserRole } from "~/shared/mapping/user.server";
 import { recordAudit, type AuditActor } from "../audit/audit-recorder.server";
 import { AppError } from "../errors/app-error.server";
-import { ERROR_CODES } from "../errors/error-codes";
 import {
   provisionIdentity,
   revokeUserSessions,
   setCredentialPassword,
-  setMemberRole,
 } from "./identity.server";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "./password.server";
 import {
@@ -36,15 +34,6 @@ import {
 
 const AVATAR_TONES = ["", "rose", "teal", "violet"] as const;
 
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
-
 const createUserSchema = z.object({
   email: z.email("Enter a valid email address."),
   name: z.string().trim().min(1, "Name is required."),
@@ -65,11 +54,11 @@ const createUserSchema = z.object({
 
 export type CreateUserInput = z.input<typeof createUserSchema>;
 
-export function createUser(
+export async function createUser(
   db: Database.Database,
   input: CreateUserInput,
   actor: AuditActor,
-): UserRecord {
+): Promise<UserRecord> {
   const parsed = createUserSchema.safeParse(input);
   if (!parsed.success) {
     throw AppError.validation(
@@ -79,17 +68,18 @@ export function createUser(
   const { email, name, title, role, tempPassword } = parsed.data;
 
   if (findUserByEmail(db, email)) {
-    throw conflict(`A user with email ${normalizeEmail(email)} already exists.`);
+    throw AppError.conflict(
+      `A user with email ${normalizeEmail(email)} already exists.`,
+    );
   }
 
-  const passwordHash = tempPassword ? hashPassword(tempPassword) : null;
+  const passwordHash = tempPassword ? await hashPassword(tempPassword) : null;
   const user = insertUser(db, {
     id: newId("u"),
     email,
     name,
     title: title || null,
     role,
-    passwordHash,
     // A temp password must be replaced at first sign-in.
     pwresetRequired: Boolean(tempPassword),
     idp: "local",
@@ -103,7 +93,6 @@ export function createUser(
     email: user.email,
     name: user.name,
     passwordHash,
-    role: user.role,
   });
 
   recordAudit(db, {
@@ -117,7 +106,7 @@ export function createUser(
       passwordless: !tempPassword,
     },
   });
-  return user;
+  return findUserById(db, user.id)!;
 }
 
 export interface UpdateUserPatch {
@@ -150,7 +139,7 @@ export function updateUser(
     ((patch.role !== undefined && patch.role !== "admin") ||
       patch.disabled === true);
   if (losesAdmin && countActiveAdmins(db) <= 1) {
-    throw conflict("Cannot demote or disable the last active admin.");
+    throw AppError.conflict("Cannot demote or disable the last active admin.");
   }
 
   const updated = updateUserFields(db, userId, {
@@ -160,11 +149,6 @@ export function updateUser(
     ...(patch.disabled !== undefined ? { disabled: patch.disabled } : {}),
   });
   if (!updated) throw AppError.notFound("No such user.", { userId });
-
-  // Mirror an org-role change onto the better-auth membership.
-  if (patch.role !== undefined && patch.role !== existing.role) {
-    setMemberRole(db, userId, patch.role);
-  }
 
   if (patch.disabled === true && !existing.disabled) {
     revokeUserSessions(db, userId);
@@ -208,12 +192,12 @@ export function updateUser(
  * Admin password reset: sets a temp password, forces a reset at next login
  * and kills all existing sessions of that user.
  */
-export function resetPassword(
+export async function resetPassword(
   db: Database.Database,
   userId: string,
   tempPassword: string,
   actor: AuditActor,
-): UserRecord {
+): Promise<UserRecord> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.", { userId });
   if (tempPassword.length < MIN_PASSWORD_LENGTH) {
@@ -222,9 +206,8 @@ export function resetPassword(
     );
   }
 
-  const hash = hashPassword(tempPassword);
+  const hash = await hashPassword(tempPassword);
   const updated = updateUserFields(db, userId, {
-    passwordHash: hash,
     pwresetRequired: true,
   });
   if (!updated) throw AppError.notFound("No such user.", { userId });

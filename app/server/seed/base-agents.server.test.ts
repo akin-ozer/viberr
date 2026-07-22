@@ -180,10 +180,10 @@ describe("ensureBaseAgentsDeployed", () => {
       .parsed.frontmatter.agents.map((a) => a.profileId);
   }
 
-  it("backfills the base specialists into a project with NO specialists (first boot)", () => {
+  it("backfills the base specialists into a project with NO specialists (first boot)", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
 
     // Operator-only roster = no specialist deployments at all — this is the
     // one case the base specialists are still injected into.
@@ -197,10 +197,10 @@ describe("ensureBaseAgentsDeployed", () => {
     expect(ids).not.toContain("tester");
   });
 
-  it("respects a deliberate specialist removal — ≥1 specialist keeps the roster as-is (E10)", () => {
+  it("respects a deliberate specialist removal — ≥1 specialist keeps the roster as-is (E10)", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
 
     // The owner removed the Reviewer on purpose; the Developer remains. The
     // old boot backfill re-injected the Reviewer every restart.
@@ -213,10 +213,10 @@ describe("ensureBaseAgentsDeployed", () => {
     expect(ids).not.toContain("reviewer");
   });
 
-  it("the OPERATOR is always re-ensured — without dragging specialists along", () => {
+  it("the OPERATOR is always re-ensured — without dragging specialists along", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
 
     // No operator, but a deliberate developer-only roster.
     setRoster(db, dataRoot, (id) => id === "developer");
@@ -228,10 +228,10 @@ describe("ensureBaseAgentsDeployed", () => {
     expect(ids).not.toContain("reviewer"); // has ≥1 specialist → no backfill
   });
 
-  it("is idempotent — a fully-rostered project is left untouched", () => {
+  it("is idempotent — a fully-rostered project is left untouched", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
 
     const beforeIds = rosterIds(dataRoot);
     ensureBaseAgentsDeployed(db, dataRoot);

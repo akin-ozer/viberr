@@ -14,7 +14,7 @@ import {
 /**
  * Profile overlay read model (Phase 9C, profile.md). The session user is
  * the single source of `me` (ruling 6) — this module only widens the
- * session id into the display facts the panels need. `passwordHash` never
+ * session id into the display facts the panels need. Credential hashes never
  * leaves the server; only the derived `hasPassword` boolean ships.
  *
  * `githubConnected` is DERIVED from users.idp (ruling 13 dropped the
@@ -151,7 +151,7 @@ export function getProfileView(
       idp: user.idp,
       createdAt: user.createdAt,
       avatarTone: user.avatarTone ?? "",
-      hasPassword: user.passwordHash !== null,
+      hasPassword: user.hasPassword,
       githubConnected: user.idp === "github",
       githubHandle: user.githubHandle,
     },

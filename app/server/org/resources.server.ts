@@ -18,7 +18,6 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   isSecretBox,
   openSecret,
@@ -56,15 +55,6 @@ import { scanStoreTree, type StoreTarget } from "./store-files.server";
  * stdio, short timeout). Tool counts are never fabricated — discovery success
  * stores the real count + up=1, failure leaves up=0 / count null.
  */
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
 
 export interface OrgSeedContext {
   dataRoot?: string;
@@ -260,7 +250,7 @@ export function saveKnowledgeBase(
     const oldAbs = kbDirPath(oldDir, ctx.dataRoot);
     const newAbs = kbDirPath(dir, ctx.dataRoot);
     if (clash || existsSync(newAbs)) {
-      throw conflict(`A knowledge-base folder ${dir}/ already exists.`);
+      throw AppError.conflict(`A knowledge-base folder ${dir}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
     else mkdirSync(newAbs, { recursive: true });
@@ -290,7 +280,7 @@ export function saveKnowledgeBase(
   const clash = db
     .prepare(`SELECT id FROM org_knowledge_bases WHERE dir = ?`)
     .get(dir);
-  if (clash) throw conflict(`A knowledge-base folder ${dir}/ already exists.`);
+  if (clash) throw AppError.conflict(`A knowledge-base folder ${dir}/ already exists.`);
   const id = newId("kb");
   db.prepare(
     `INSERT INTO org_knowledge_bases
@@ -680,7 +670,7 @@ export async function saveMcpServer(
   const clash = db
     .prepare(`SELECT id FROM org_mcp_servers WHERE name = ? AND id != ?`)
     .get(name, input.id ?? "") as { id: string } | undefined;
-  if (clash) throw conflict(`An MCP server named ${name} already exists.`);
+  if (clash) throw AppError.conflict(`An MCP server named ${name} already exists.`);
 
   const now = new Date().toISOString();
 
@@ -765,7 +755,6 @@ export async function saveMcpServer(
 export async function testMcpServer(
   db: Database.Database,
   id: string,
-  actor: AuditActor,
   options: McpProbeOptions = {},
 ): Promise<{ mcp: McpView; toast: string }> {
   const existing = getMcpServer(db, id);
@@ -984,7 +973,7 @@ export function saveSkill(
   // A brand-new create must not clobber an existing on-disk folder (writing
   // SKILL.md would blank it) — editing a disk-only skill goes through oldName.
   if (!input.id && existsSync(skillDirPath(name, ctx.dataRoot))) {
-    throw conflict(`A skill folder ${name}/ already exists.`);
+    throw AppError.conflict(`A skill folder ${name}/ already exists.`);
   }
 
   // E4 write policy for EXISTING skills, decided BEFORE the folder moves:
@@ -1012,7 +1001,7 @@ export function saveSkill(
     const oldAbs = skillDirPath(oldName, ctx.dataRoot);
     const newAbs = skillDirPath(name, ctx.dataRoot);
     if (clash || existsSync(newAbs)) {
-      throw conflict(`A skill folder ${name}/ already exists.`);
+      throw AppError.conflict(`A skill folder ${name}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
   }
@@ -1046,7 +1035,7 @@ export function saveSkill(
 
   // Create, or adopt a disk-only folder into a fresh metadata row.
   const clash = db.prepare(`SELECT id FROM org_skills WHERE name = ?`).get(name);
-  if (clash) throw conflict(`A skill folder ${name}/ already exists.`);
+  if (clash) throw AppError.conflict(`A skill folder ${name}/ already exists.`);
   const id = newId("sk");
   db.prepare(
     `INSERT INTO org_skills (id, name, summary, created_at, updated_at)

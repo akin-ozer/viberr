@@ -18,7 +18,7 @@ let seedIds: { arda: string; deniz: string; selin: string };
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   const arda = findUserByEmail(app.db, "arda@viberr.dev")!;
   const deniz = findUserByEmail(app.db, "deniz@viberr.dev")!;
@@ -159,9 +159,8 @@ describe("home loader (seeded)", () => {
     ]);
     const core = result.projects.find((p) => p.slug === "viberr-core")!;
     expect(core.total).toBe(10);
-    // R6-5: "runs active" counts REAL (non-simulated) in-flight runs only. The
-    // seed's running runs are simulated demo dressing, so they must NOT show as
-    // live agents on Home — Viberr Core reads "quiet" until a real agent runs.
+    // The demo seed has no fabricated runs, so Viberr Core stays quiet until an
+    // agent actually runs.
     expect(core.running).toBe(0);
     expect(core.waiting).toBe(2); // open decision packets, project-wide
     expect(core.dist.review).toBe(2);

@@ -112,7 +112,7 @@ afterEach(() => {
 
 describe("listDeployedSpecialists", () => {
   it("returns the deployed dev specialist (claude backend)", () => {
-    const specialists = listDeployedSpecialists(store.db, store.slug, {
+    const specialists = listDeployedSpecialists(store.slug, {
       dataRoot: store.dataRoot,
     });
     expect(specialists).toHaveLength(1);
@@ -287,8 +287,8 @@ describe("startSpecialistRun", () => {
       threadId: "primary-inflight",
       role: "Primary specialist",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "claude",
-      simulated: false,
       model: "claude-sonnet-4-5",
       sdk: "Claude Agent SDK",
       state: "running",
@@ -362,14 +362,12 @@ describe("startSpecialistRun", () => {
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("claude");
-    expect(result.simulated).toBe(false);
 
     const run = getRun(store.db, result.runId)!;
     expect(run.backend).toBe("claude");
     expect(run.kind).toBe("primary");
     // Run rows carry the engagement's live role snapshot, not a kind literal.
     expect(run.role).toBe("developer");
-    expect(run.simulated).toBe(0);
     const lineCount = await waitForLines(result.runId, 1);
     expect(lineCount).toBeGreaterThan(0);
 

@@ -31,6 +31,8 @@ export interface AppTestContext {
   cleanup(): void;
 }
 
+export const APP_TEST_PASSWORD = "test-harness-password-000";
+
 export async function setupAppTest(): Promise<AppTestContext> {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-app-test-"));
   const sessionSecret = "test-session-secret-test-session-secret";
@@ -65,8 +67,6 @@ export async function setupAppTest(): Promise<AppTestContext> {
 
   // cookieFor signs the user in through better-auth, so it needs a known
   // credential — provisioning overwrites the user's credential with this.
-  const HARNESS_PASSWORD = "test-harness-password-000";
-
   return {
     db,
     dataRoot,
@@ -79,11 +79,10 @@ export async function setupAppTest(): Promise<AppTestContext> {
         id: user.id,
         email: user.email,
         name: user.name,
-        passwordHash: hashPassword(HARNESS_PASSWORD),
-        role: user.role,
+        passwordHash: await hashPassword(APP_TEST_PASSWORD),
       });
       const res = await getAuth().api.signInEmail({
-        body: { email: user.email, password: HARNESS_PASSWORD },
+        body: { email: user.email, password: APP_TEST_PASSWORD },
         asResponse: true,
       });
       const setCookie = res.headers

@@ -100,18 +100,15 @@ export function applyOAuthUser(db: Database.Database, user: OAuthUser): void {
     email,
     name: user.name?.trim() || email.split("@")[0] || email,
     role,
-    passwordHash: null, // OAuth-only account
     idp: provider,
   });
   if (handle) updateUserFields(db, user.id, { githubHandle: handle });
-  // Membership for the new better-auth user (idempotent; the user row itself
-  // was just created by better-auth).
+  // Ensure the better-auth identity is normalized after the app row is created.
   provisionIdentity(db, {
     id: user.id,
     email,
     name: user.name?.trim() || email,
     passwordHash: null,
-    role,
   });
   recordAudit(db, {
     action: "auth.oauth.user_provisioned",

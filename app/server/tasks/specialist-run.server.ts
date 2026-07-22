@@ -28,7 +28,6 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
-  agentProfilesDir,
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -484,7 +483,6 @@ export async function removeReviewer(
 export interface StartAgentRunResult {
   runId: string;
   backend: RealBackend;
-  simulated: boolean;
   role: string;
 }
 
@@ -571,7 +569,6 @@ export async function startAgentRun(
         status: 409,
         userMessage:
           "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-        kind: "user",
       });
     }
   }
@@ -783,7 +780,7 @@ export async function startAgentRun(
   const useEnvelopeSchema =
     backend === "codex" && realBackend && (collab.verdict || collab.ask);
 
-  const { runId, simulated } = await startRun(db, {
+  const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId,
@@ -875,7 +872,6 @@ export async function startAgentRun(
       profileId: engagement.profileId,
       backend,
       delivers,
-      simulated,
       cloned: !!clone,
       ...(directiveOverrode ? { directiveRequestedDelivery: true } : {}),
     },
@@ -905,7 +901,7 @@ export async function startAgentRun(
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
-  return { runId, backend, simulated, role: engagement.role };
+  return { runId, backend, role: engagement.role };
 }
 
 // ----------------------------------------------------------------- persona
@@ -1514,7 +1510,6 @@ function assertStageEligible(
  * the Agents surface does.
  */
 export function listDeployedSpecialists(
-  db: Database.Database,
   projectSlug: string,
   ctx: TaskMutationContext = {},
 ): DeployedSpecialistView[] {

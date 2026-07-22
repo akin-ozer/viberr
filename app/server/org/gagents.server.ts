@@ -5,7 +5,6 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   parseAgentProfileContent,
   serializeAgentProfile,
@@ -44,15 +43,6 @@ export interface GagentView {
   mcps: string[];
   kbs: string[];
   used: number;
-}
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
 }
 
 export interface GagentContext {
@@ -209,7 +199,7 @@ export function saveGlobalAgentProfile(
   const id = slugify(name);
   if (id.length < 2) throw AppError.validation("Give the profile a name.");
   if (existsSync(agentProfileFilePath(id, ctx.dataRoot))) {
-    throw conflict(`A profile named ${name} already exists.`);
+    throw AppError.conflict(`A profile named ${name} already exists.`);
   }
   const created: ParsedTemplate = {
     frontmatter: {

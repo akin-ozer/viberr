@@ -66,7 +66,6 @@ class ControlledAdapter implements RuntimeAdapter {
     pending.callbacks.onExit({
       outcome,
       effectiveBackend: "codex",
-      simulated: false,
       sessionId: "codex-operator-test",
     });
     this.pending = null;
@@ -83,6 +82,7 @@ function transitionAction(extra: Record<string, unknown> = {}) {
   return {
     tool: "transition_stage",
     profileId: null,
+    delivers: null,
     toStageId: "review",
     packetType: null,
     text: null,
@@ -219,6 +219,9 @@ describe("Codex structured operator completion", () => {
       expect(task().frontmatter.stage).toBe("review");
     });
     expect(task().packet).toBeNull();
+    expect(
+      task().timeline.some((event) => event.text.includes("implementation evidence")),
+    ).toBe(false);
   });
 
   it("rejects schema-invalid JSON before any governed action executes", async () => {

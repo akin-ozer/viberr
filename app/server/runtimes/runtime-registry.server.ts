@@ -61,7 +61,7 @@ function getState(): RegistryState {
  *   - codex: CODEX_ACCESS_TOKEN, CODEX_API_KEY / OPENAI_API_KEY, or
  *     VIBERR_CODEX_USE_CLI_AUTH=1.
  * When none is present the backend is UNAVAILABLE (R7-2: runs on it fail
- * fast with an honest error — no simulated fallback).
+ * fast with an honest error).
  */
 /**
  * When Codex CLI auth is the ONLY signal (no access token / API key), the
@@ -175,6 +175,22 @@ export interface AdapterDeps {
   codexFactory?: CodexFactory;
 }
 
+const CREDENTIAL_ENV_RE =
+  /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i;
+const PRIVATE_RUNTIME_ENV_RE =
+  /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
+
+function filteredSpawnEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" &&
+        !CREDENTIAL_ENV_RE.test(entry[0]) &&
+        !PRIVATE_RUNTIME_ENV_RE.test(entry[0]),
+    ),
+  );
+}
+
 /**
  * A complete but secret-filtered spawn env for the Codex SDK. Its `env` option
  * replaces the child process env wholesale, so PATH/HOME/locale/proxy settings
@@ -186,22 +202,7 @@ export function codexSpawnEnv(
   accessToken?: string,
   preferCachedLogin = false,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== "string") continue;
-    // Keep ordinary runtime settings while excluding credentials belonging to
-    // the app, Claude, GitHub, cloud providers, package registries, etc. The SDK
-    // adds `apiKey` itself; subscription auth is restored explicitly below.
-    if (
-      /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i.test(
-        key,
-      ) ||
-      /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i.test(key)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
+  const out = filteredSpawnEnv();
   if (codexHome) out.CODEX_HOME = codexHome;
   if (accessToken) {
     out.CODEX_ACCESS_TOKEN = accessToken;
@@ -235,19 +236,7 @@ export function claudeSpawnEnv(
   apiKey?: string,
   oauthToken?: string,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== "string") continue;
-    if (
-      /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i.test(
-        key,
-      ) ||
-      /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i.test(key)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
+  const out = filteredSpawnEnv();
   out.CLAUDE_CONFIG_DIR = configDir;
   if (apiKey) out.ANTHROPIC_API_KEY = apiKey;
   if (oauthToken) out.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;

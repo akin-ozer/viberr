@@ -229,9 +229,7 @@ export type PrState = (typeof PR_STATE_VALUES)[number];
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
-    // Tolerant: an unknown string (e.g. a legacy raw GitHub "open") coerces
-    // to "review" instead of dropping the whole PR ref — parsers never throw.
-    state: z.enum(PR_STATE_VALUES).catch("review"),
+    state: z.enum(PR_STATE_VALUES),
     title: z.string(),
   })
   .loose();
@@ -272,10 +270,8 @@ export const packetOptionSchema = z
     t: z.string().min(1),
     d: z.string().default(""),
     rec: z.boolean().default(false),
-    // (No `accept` flag — acceptance is gated solely on kind === "accept_completion"
-    // + the admin|maintainer re-check in resolvePacket. A separate `accept` field
-    // implied an authority that nothing consumed; removed. `.loose()` keeps any
-    // legacy `accept:` key in an existing task.md parseable, just ignored.)
+    // Acceptance is gated solely on kind === "accept_completion" plus the
+    // admin|maintainer re-check in resolvePacket.
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
     /** retry_other_backend — the backend to re-run the failed agent on. */
@@ -573,52 +569,20 @@ function tolerant<T>(
 }
 
 /**
- * Engagements parse (G1) with legacy absorption: a pre-engagements task.md
- * carries `specialist` (→ the delivering engagement) and `reviewers[]` /
- * `consultants[]` (→ supporting engagements). Legacy keys are absorbed here
- * and NOT preserved as unknown — the next write emits `engagements` only.
- * Invariant: at most one `delivers: true` (first wins; extras are demoted
- * with a diagnostic — never two workspace owners).
+ * Engagement parsing enforces one row per profile and at most one delivering
+ * workspace owner.
  */
 function parseEngagements(
   diagnostics: FileDiagnostic[],
   data: Record<string, unknown>,
 ): Engagement[] {
-  let engagements: Engagement[];
-  if (data.engagements !== undefined) {
-    engagements = tolerant(
-      diagnostics,
-      "engagements",
-      data.engagements,
-      taskFrontmatterSchema.shape.engagements,
-      [],
-    );
-  } else {
-    // Legacy slots → engagements. Each ref is validated independently so one
-    // bad reviewer never drops the specialist (or vice versa).
-    engagements = [];
-    const specialist = tolerant(
-      diagnostics,
-      "specialist",
-      data.specialist,
-      agentRefSchema.nullable(),
-      null,
-    );
-    if (specialist)
-      engagements.push({ ...specialist, delivers: true, verdictCapable: false });
-    const reviewers = tolerant(
-      diagnostics,
-      "reviewers",
-      data.reviewers ?? data.consultants,
-      z.array(agentRefSchema),
-      [],
-    );
-    for (const reviewer of reviewers) {
-      // A migrated legacy reviewer is not verdict-capable until it carries an
-      // explicit report-validation-verdict:direct grant (F10-14).
-      engagements.push({ ...reviewer, delivers: false, verdictCapable: false });
-    }
-  }
+  const engagements = tolerant(
+    diagnostics,
+    "engagements",
+    data.engagements,
+    taskFrontmatterSchema.shape.engagements,
+    [],
+  );
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
   // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
   // resolves by the FIRST match), so keep the first occurrence and drop the
@@ -879,10 +843,6 @@ export function parseTaskFrontmatter(
 
   const unknown: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
-    // Legacy engagement slots (`specialist`/`reviewers` and the older
-    // `consultants` alias) are absorbed into `engagements` above; don't
-    // preserve them as "unknown" or a rewrite would emit both forms.
-    if (k === "consultants" || k === "specialist" || k === "reviewers") continue;
     if (!(TASK_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
       unknown[k] = v;
     }

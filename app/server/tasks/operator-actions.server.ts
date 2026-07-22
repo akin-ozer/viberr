@@ -640,12 +640,11 @@ export async function operatorResolvePacket(
 
 /** Resolve a deployed specialist's display name for a recommendation label. */
 function specialistName(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   profileId: string,
 ): string {
-  const found = listDeployedSpecialists(db, projectSlug, ctx).find(
+  const found = listDeployedSpecialists(projectSlug, ctx).find(
     (s) => s.id === profileId,
   );
   return found?.name ?? profileId;
@@ -761,7 +760,7 @@ export function operatorSnapshot(
     doneStageId,
     reviewStageId: roles.reviewId,
     workStageId: roles.workId,
-    deployedSpecialists: listDeployedSpecialists(db, projectSlug, ctx).map((s) => ({
+    deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
       ...s,
       eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
     })),
@@ -913,7 +912,7 @@ export async function operatorAssignSpecialist(
     };
   }
   if (g === "recommend") {
-    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    const name = specialistName(ctx, input.projectSlug, input.profileId);
     await addRecommendation(
       db,
       ctx,
@@ -978,7 +977,7 @@ export async function operatorAssignReviewer(
     return { outcome: "denied", message: "Summoning reviewers is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    const name = specialistName(ctx, input.projectSlug, input.profileId);
     await addRecommendation(
       db,
       ctx,
@@ -1014,7 +1013,7 @@ export async function operatorRunReviewer(
     return { outcome: "denied", message: "Running a reviewer is not permitted for the operator here." };
   }
   if (g === "recommend") {
-    const name = specialistName(db, ctx, input.projectSlug, input.profileId);
+    const name = specialistName(ctx, input.projectSlug, input.profileId);
     await addRecommendation(
       db,
       ctx,
@@ -1036,13 +1035,12 @@ export async function operatorRunReviewer(
 
 /** Resolve a deployed specialist's role + backend for a prompt/run. */
 function deployedAgent(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   profileId: string,
 ): DeployedSpecialistView | null {
   return (
-    listDeployedSpecialists(db, projectSlug, ctx).find((s) => s.id === profileId) ??
+    listDeployedSpecialists(projectSlug, ctx).find((s) => s.id === profileId) ??
     null
   );
 }
@@ -1074,7 +1072,6 @@ async function ensureTaskBranchBestEffort(
 
 /** Title / goal / current stage name for building a default prompt directive. */
 function taskContext(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -1123,7 +1120,7 @@ export async function operatorPromptSpecialist(
       message: "Prompting the primary specialist is not permitted for the operator here.",
     };
   }
-  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
   if (!agent) {
     return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to prompt.` };
   }
@@ -1162,7 +1159,7 @@ export async function operatorPromptSpecialist(
   // when the repo/PAT isn't configured, and writes the branch name into task.md
   // so the PR/commit/branch chain stays traceable to this task.
   await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
-  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
+  const c = taskContext(ctx, input.projectSlug, input.taskKey);
   const directive =
     (input.directive ?? "").trim() ||
     `implement "${c.title}" (now in ${c.stageName}). ` +
@@ -1209,7 +1206,7 @@ export async function operatorPromptReviewer(
       message: "Prompting a reviewer is not permitted for the operator here.",
     };
   }
-  const agent = deployedAgent(db, ctx, input.projectSlug, input.profileId);
+  const agent = deployedAgent(ctx, input.projectSlug, input.profileId);
   if (!agent) {
     return { outcome: "denied", message: `No deployed specialist "${input.profileId}" to engage as a reviewer.` };
   }
@@ -1237,7 +1234,7 @@ export async function operatorPromptReviewer(
     OPERATOR_TASK_ACTOR,
     opCtx(ctx),
   );
-  const c = taskContext(db, ctx, input.projectSlug, input.taskKey);
+  const c = taskContext(ctx, input.projectSlug, input.taskKey);
   const directive =
     (input.directive ?? "").trim() ||
     `please review the work on "${c.title}" against the goal: ${c.goal} ` +
@@ -1295,7 +1292,7 @@ function recordAgentSelectionTrace(
     const engaged = new Set(
       (file?.parsed.frontmatter.engagements ?? []).map((e) => e.profileId),
     );
-    const candidates = listDeployedSpecialists(db, input.projectSlug, ctx).map(
+    const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
         eligibleForStage: stage ? specialistEligibleForStage(s, stage) : false,
@@ -1473,10 +1470,10 @@ export async function operatorTransitionStage(
   // The operator does this directly (no human, no recommendation) so a failed
   // review re-drives itself; transitionStage vets that it is genuinely backward
   // + failing before honoring the off-graph move.
-  const isRework = isReworkMove(db, ctx, input.projectSlug, input.taskKey, input.toStageId);
+  const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
   if (g === "recommend" && boundary !== "auto" && !isRework) {
-    const name = stageNameOf(db, ctx, input.projectSlug, input.toStageId);
+    const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
     await addRecommendation(
       db,
       ctx,
@@ -1502,7 +1499,6 @@ export async function operatorTransitionStage(
 
 /** Resolve a stage's display name for a recommendation label. */
 function stageNameOf(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   stageId: string,
@@ -1519,7 +1515,6 @@ function stageNameOf(
  *  `failing`. The operator performs these directly to route a rejected task
  *  back to the developer without a human. */
 function isReworkMove(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -1618,7 +1613,7 @@ export async function operatorAcceptCompletion(
   // one-click prompt as impl→review) — never move to Done ourselves. A
   // maintainer applies it to accept completion into Done.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
-    const doneName = stageNameOf(db, ctx, input.projectSlug, doneStageId);
+    const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
     await addRecommendation(
       db,
       ctx,

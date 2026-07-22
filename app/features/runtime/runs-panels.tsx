@@ -240,7 +240,7 @@ function SessionIdChip({
   sid: string | null;
   /** Server run id — the export download key. */
   runId?: string;
-  /** True for a real (non-simulated) run with a resumable on-disk session. */
+  /** True when this run has a resumable on-disk session. */
   exportable?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -373,8 +373,7 @@ export function AgentLogsPanel({
   // offer the retry inline instead of a dead "continuity error" (D4).
   const canRetryBackend =
     !!onRetryBackend &&
-    (cur!.kind === "primary" ||
-      (cur!.kind === "reviewer" && !!cur!.profileId)) &&
+    (cur!.kind === "primary" || cur!.kind === "reviewer") &&
     cur!.state === "error" &&
     !!cur!.failedBackendUnavailable &&
     !!cur!.altBackend;
@@ -411,7 +410,7 @@ export function AgentLogsPanel({
           <SessionIdChip
             sid={cur!.sid}
             runId={cur!.serverRunId}
-            exportable={!cur!.simulated && !!cur!.sid}
+            exportable={!!cur!.sid}
           />
         </span>
         <span className="spacer" />

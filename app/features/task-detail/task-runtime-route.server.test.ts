@@ -31,7 +31,7 @@ type ActionData = Awaited<ReturnType<typeof taskAction>>;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
@@ -69,6 +69,7 @@ beforeAll(async () => {
     threadId: "primary-test",
     role: "Primary specialist",
     kind: "primary",
+    agentProfileId: "developer",
     backend: "codex",
     model: "gpt-5.4-codex",
     prompt: "analyze",
@@ -88,6 +89,7 @@ beforeAll(async () => {
     threadId: "primary-live",
     role: "Primary specialist",
     kind: "primary",
+    agentProfileId: "developer",
     backend: "claude",
     model: "claude-sonnet-4-5",
     prompt: "work",

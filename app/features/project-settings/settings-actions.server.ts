@@ -71,7 +71,6 @@ function conflict(userMessage: string): AppError {
     code: ERROR_CODES.CONFLICT,
     status: 409,
     userMessage,
-    kind: "user",
   });
 }
 
@@ -361,7 +360,7 @@ export async function inviteMember(
   const auditActor = { userId: actor.userId, label: actor.label };
   let user = findUserByEmail(db, email);
   if (!user) {
-    user = createUser(
+    user = await createUser(
       db,
       { email, name, role: "member", tempPassword: null },
       auditActor,

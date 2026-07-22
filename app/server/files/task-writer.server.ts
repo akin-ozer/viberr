@@ -154,7 +154,6 @@ export async function createTaskFile(
         status: 409,
         message: `Task file already exists: ${absPath}`,
         userMessage: `Task ${ref.taskKey} already exists.`,
-        kind: "user",
       });
     }
     const parsed: ParsedTaskFile = {

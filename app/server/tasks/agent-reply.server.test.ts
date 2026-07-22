@@ -35,11 +35,7 @@ import {
   resolveMentionedAgent,
   runFailureReason,
 } from "./agent-reply.server";
-import {
-  assignSpecialist,
-  resolveResumeConfinement,
-  startAgentRun,
-} from "./specialist-run.server";
+import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 
@@ -308,8 +304,8 @@ describe("runFailureReason (F7-RUN1)", () => {
       threadId: "primary",
       role: "Primary specialist",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "codex",
-      simulated: false,
       model: "gpt-5.4-codex",
       sdk: "codex-sdk",
       state: "error",

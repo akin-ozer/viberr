@@ -13,18 +13,6 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
  * only rewritten when this actually reduced the event count.
  */
 
-/** Typed events that carry governance meaning and are NEVER compacted. */
-const PRESERVED_TYPES = new Set([
-  "transition",
-  "completion",
-  "github",
-  "policy",
-  "quality",
-  "blocked",
-  "agent",
-  "assign",
-]);
-
 /** A compaction marker is a plain comment whose title is exactly this. */
 export const COMPACTION_TITLE = "Compacted";
 

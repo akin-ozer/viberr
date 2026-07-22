@@ -174,7 +174,7 @@ describe("/resources/events", () => {
     expect(done.done).toBe(true);
   });
 
-  it("replays from ?lastEventId= (wrapper reconnect path)", async () => {
+  it("replays from the native Last-Event-ID header", async () => {
     const { publishSseEvent, getSseBrokerStats } = await import(
       "~/server/events/sse-broker.server"
     );
@@ -195,10 +195,10 @@ describe("/resources/events", () => {
     );
 
     const { cookie } = await app.cookieFor(userId);
-    const res = (await callLoader(
-      `/resources/events?scope=project:viberr-core&lastEventId=${head}`,
-      { cookie },
-    )) as Response;
+    const res = (await callLoader("/resources/events?scope=project:viberr-core", {
+      cookie,
+      headers: { "Last-Event-ID": String(head) },
+    })) as Response;
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let text = "";

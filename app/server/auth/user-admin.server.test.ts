@@ -4,6 +4,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { isAppError } from "../errors/app-error.server";
+import { credentialPasswordHash } from "./identity.server";
 import { verifyPassword } from "./password.server";
 import {
   createUser,
@@ -53,10 +54,10 @@ function seedAdmin(db: ReturnType<typeof ctx.makeDb>) {
 }
 
 describe("createUser", () => {
-  it("creates a user with a temp password (pwreset forced)", () => {
+  it("creates a user with a temp password (pwreset forced)", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    const user = createUser(
+    const user = await createUser(
       db,
       {
         email: "New.Person@Viberr.Test",
@@ -70,38 +71,49 @@ describe("createUser", () => {
     expect(user.role).toBe("member");
     expect(user.pwresetRequired).toBe(true);
     expect(user.createdBy).toBe("u_admin");
-    expect(verifyPassword("temp-pass-123", user.passwordHash)).toBe(true);
+    expect(user.hasPassword).toBe(true);
+    await expect(
+      verifyPassword("temp-pass-123", credentialPasswordHash(db, user.id)),
+    ).resolves.toBe(true);
     expect(listAuditEvents(db, { action: "org.user.created" })).toHaveLength(1);
   });
 
-  it("creates a passwordless OAuth-only user", () => {
+  it("creates a passwordless OAuth-only user", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    const user = createUser(
+    const user = await createUser(
       db,
       { email: "oauth@viberr.test", name: "O Auth", role: "member" },
       ACTOR,
     );
-    expect(user.passwordHash).toBeNull();
+    expect(user.hasPassword).toBe(false);
     expect(user.pwresetRequired).toBe(false);
   });
 
-  it("rejects invalid input and duplicates", () => {
+  it("rejects invalid input and duplicates", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    expect(() =>
+    await expect(
       createUser(db, { email: "not-an-email", name: "X", role: "member" }, ACTOR),
-    ).toThrowError(/valid email/i);
-    expect(() =>
+    ).rejects.toThrowError(/valid email/i);
+    await expect(
       createUser(
         db,
         { email: "a@viberr.test", name: "X", role: "member", tempPassword: "short" },
         ACTOR,
       ),
-    ).toThrowError(/at least 8/);
-    createUser(db, { email: "dup@viberr.test", name: "A", role: "member" }, ACTOR);
+    ).rejects.toThrowError(/at least 8/);
+    await createUser(
+      db,
+      { email: "dup@viberr.test", name: "A", role: "member" },
+      ACTOR,
+    );
     try {
-      createUser(db, { email: "DUP@viberr.test", name: "B", role: "member" }, ACTOR);
+      await createUser(
+        db,
+        { email: "DUP@viberr.test", name: "B", role: "member" },
+        ACTOR,
+      );
       expect.unreachable("duplicate email must throw");
     } catch (error) {
       expect(isAppError(error) && error.status === 409).toBe(true);
@@ -110,10 +122,10 @@ describe("createUser", () => {
 });
 
 describe("updateUser", () => {
-  it("updates role/name/title and audits the change", () => {
+  it("updates role/name/title and audits the change", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    const user = createUser(
+    const user = await createUser(
       db,
       { email: "m@viberr.test", name: "Member", role: "member" },
       ACTOR,
@@ -132,10 +144,10 @@ describe("updateUser", () => {
     expect(events[0]!.details).toMatchObject({ roleFrom: "member", roleTo: "admin" });
   });
 
-  it("disable destroys the user's sessions", () => {
+  it("disable destroys the user's sessions", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    const user = createUser(
+    const user = await createUser(
       db,
       { email: "d@viberr.test", name: "D", role: "member" },
       ACTOR,
@@ -150,7 +162,7 @@ describe("updateUser", () => {
     expect(listAuditEvents(db, { action: "org.user.enabled" })).toHaveLength(1);
   });
 
-  it("refuses to demote or disable the last active admin", () => {
+  it("refuses to demote or disable the last active admin", async () => {
     const db = ctx.makeDb();
     const admin = seedAdmin(db);
     for (const attempt of [
@@ -165,7 +177,7 @@ describe("updateUser", () => {
       }
     }
     // With a second admin, demotion works.
-    createUser(
+    await createUser(
       db,
       { email: "second@viberr.test", name: "Second", role: "admin" },
       ACTOR,
@@ -177,10 +189,10 @@ describe("updateUser", () => {
 });
 
 describe("resetPassword", () => {
-  it("sets a temp password, forces reset, kills sessions, audits", () => {
+  it("sets a temp password, forces reset, kills sessions, audits", async () => {
     const db = ctx.makeDb();
     seedAdmin(db);
-    const user = createUser(
+    const user = await createUser(
       db,
       {
         email: "r@viberr.test",
@@ -193,20 +205,23 @@ describe("resetPassword", () => {
     db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(user.id);
     seedSession(db, user.id);
 
-    const updated = resetPassword(db, user.id, "new-temp-pass", ACTOR);
+    const updated = await resetPassword(db, user.id, "new-temp-pass", ACTOR);
     expect(updated.pwresetRequired).toBe(true);
-    expect(verifyPassword("new-temp-pass", updated.passwordHash)).toBe(true);
-    expect(verifyPassword("first-password", updated.passwordHash)).toBe(false);
+    const passwordHash = credentialPasswordHash(db, updated.id);
+    await expect(verifyPassword("new-temp-pass", passwordHash)).resolves.toBe(true);
+    await expect(verifyPassword("first-password", passwordHash)).resolves.toBe(
+      false,
+    );
     expect(sessionCount(db, user.id)).toBe(0);
     expect(listAuditEvents(db, { action: "auth.password.reset" })).toHaveLength(1);
   });
 
-  it("enforces the temp password policy", () => {
+  it("enforces the temp password policy", async () => {
     const db = ctx.makeDb();
     const admin = seedAdmin(db);
-    expect(() => resetPassword(db, admin.id, "short", ACTOR)).toThrowError(
-      /at least 8/,
-    );
+    await expect(
+      resetPassword(db, admin.id, "short", ACTOR),
+    ).rejects.toThrowError(/at least 8/);
   });
 });
 
