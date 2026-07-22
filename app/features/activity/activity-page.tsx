@@ -64,8 +64,7 @@ function ActivityText({ text }: { text: string }) {
 }
 
 /**
- * Activity view — project-wide cross-task stream + audit logs
- * (activity.md, ported from design/html-app/app/activity.jsx).
+ * Project-wide cross-task activity stream and audit log.
  *
  * Read-only. The stream is a flattened projection over task_events
  * (loader), day-grouped here with the shared date formatter (ruling 4);

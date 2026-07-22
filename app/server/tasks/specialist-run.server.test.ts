@@ -16,8 +16,8 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
-import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
   assignReviewer,
   assignSpecialist,
@@ -31,8 +31,7 @@ import {
 
 /**
  * Assign a deployed specialist + start a specialist run — the "deploy a
- * specialist to a task and run it" surface. Simulated engine only (no real
- * keys in tests via configureRunServiceForTests).
+ * specialist to a task and run it" surface.
  */
 
 let ctx: TestDbContext;
@@ -42,9 +41,7 @@ function actor(user: { id: string; email: string }) {
   return { userId: user.id, label: user.email };
 }
 
-/** Poll until a run has streamed at least `n` log lines (the analyze stream
- * uses a realistic 1–3s cadence, so it does not finish within a microtask
- * flush — we only need to prove the simulated fallback is streaming). */
+/** Poll until a run has streamed at least `n` log lines. */
 async function waitForLines(
   runId: string,
   n = 1,
@@ -105,7 +102,7 @@ beforeEach(() => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
-  configureRunServiceForTests(); // no real backend keys → simulated engine
+  installFakeRuntime();
 });
 
 afterEach(() => {
@@ -356,7 +353,7 @@ describe("startSpecialistRun", () => {
     ).rejects.toThrow(/not eligible/i);
   });
 
-  it("creates a run row with the specialist backend + a simulated stream (>0 lines)", async () => {
+  it("creates a run row with the specialist backend and streams output", async () => {
     await assign();
     const result = await startAgentRun(
       store.db,
@@ -365,19 +362,17 @@ describe("startSpecialistRun", () => {
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("claude");
-    expect(result.simulated).toBe(true); // no real key
+    expect(result.simulated).toBe(false);
 
     const run = getRun(store.db, result.runId)!;
-    expect(run.backend).toBe("claude"); // requested backend kept for glyph fidelity
+    expect(run.backend).toBe("claude");
     expect(run.kind).toBe("primary");
     // Run rows carry the engagement's live role snapshot, not a kind literal.
     expect(run.role).toBe("developer");
-    expect(run.simulated).toBe(1);
-    // The simulated fallback streams a realistic analyze transcript (>0 lines).
+    expect(run.simulated).toBe(0);
     const lineCount = await waitForLines(result.runId, 1);
     expect(lineCount).toBeGreaterThan(0);
 
-    // Stop the realistic-cadence timer so it does not outlive the test.
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     interruptRun(
       store.db,
@@ -452,37 +447,6 @@ describe("startSpecialistRun", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(deliveringEngagement(file.parsed.frontmatter)?.backend).toBe("codex");
-  });
-
-  it("a directive-driven simulated report is a COMPLETION, not a bare findings summary", async () => {
-    const { simulatedFinalReport } = await import("./specialist-run.server");
-    for (const backend of ["claude", "codex"] as const) {
-      // With an operator directive, the simulated agent must report the work DONE —
-      // otherwise the operator (reading only a "findings" summary) keeps
-      // re-prompting the same canned reply and spirals (the CTL-3 bug).
-      const withDirective = simulatedFinalReport(backend, "@dev implement the feature and add a test");
-      expect(withDirective.toLowerCase()).toContain("done");
-      expect(withDirective.toLowerCase()).toContain("ready to advance");
-      expect(withDirective).not.toContain("Findings:");
-      // Deterministic, so a repeat trips the operator's no-progress guard.
-      expect(simulatedFinalReport(backend, "@dev implement the feature and add a test")).toBe(withDirective);
-      // Without a directive it is still the plain findings summary.
-      expect(simulatedFinalReport(backend)).toContain("Findings:");
-
-      // The report is ROLE-AWARE: the Reviewer is the single quality specialist
-      // (it reviews the diff AND authors/runs the validation suite — Tester merged
-      // in), so both "review" and "validation" roles report a verdict that covers
-      // tests, not an "implemented" summary.
-      const reviewReport = simulatedFinalReport(backend, "@reviewer review it", "Code review");
-      expect(reviewReport.toLowerCase()).toContain("approve");
-      expect(reviewReport).not.toContain("implemented what you asked for");
-      // A "Validation" role classifies as the Reviewer now — same verdict report,
-      // which also reports the tests passing.
-      const validationReport = simulatedFinalReport(backend, "@reviewer validate it", "Validation");
-      expect(validationReport.toLowerCase()).toContain("approve");
-      expect(validationReport.toLowerCase()).toContain("pass");
-      expect(validationReport).not.toContain("implemented what you asked for");
-    }
   });
 
   it("denies reviewer + viewer (admin|maintainer only)", async () => {
@@ -611,7 +575,7 @@ describe("startReviewerRun", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
-  it("creates a kind='reviewer' run on its own thread with a simulated stream", async () => {
+  it("creates a kind='reviewer' run on its own thread", async () => {
     await engage();
     const result = await startAgentRun(
       store.db,

@@ -39,9 +39,7 @@ describe("demo seed", () => {
     expect(rows(`SELECT count(*) AS c FROM project_members`)).toBe(7);
     // Clean dataset: no parse diagnostics on seeded files.
     expect(rows(`SELECT count(*) AS c FROM diagnostics`)).toBe(0);
-    // R7-2 (don't simulate at all): the seed ships ZERO fabricated run
-    // history — no agent_runs rows, no scripted run log lines. Run history
-    // only ever comes from real agent runs.
+    // The seed ships no fabricated run history.
     expect(rows(`SELECT count(*) AS c FROM agent_runs`)).toBe(0);
     expect(rows(`SELECT count(*) AS c FROM run_log_lines`)).toBe(0);
   });

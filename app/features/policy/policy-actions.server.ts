@@ -8,7 +8,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { ROLE_LABEL, BOUNDARIES, type RoleId } from "./policy-data";
+import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
 
 /**
  * Policy mutations (policy spec §5): member role assignment + workflow
@@ -147,7 +147,7 @@ export async function setMemberRole(
   const targetName = userName(db, input.targetUserId);
   if (!changed) {
     return {
-      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as RoleId]} · enforced on the next action`,
+      toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as ProjectRole]} · enforced on the next action`,
       changed: false,
     };
   }
@@ -163,7 +163,7 @@ export async function setMemberRole(
   });
 
   return {
-    toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as RoleId]} · enforced on the next action`,
+    toast: `${targetName.split(" ")[0]} is now ${ROLE_LABEL[role as ProjectRole]} · enforced on the next action`,
     changed: true,
   };
 }

@@ -27,7 +27,6 @@
   --teal-dark: #187574;
   --orange-light: #ffe6cd;
   --yellow-dark: #746019;
-  --pink: #fde0f0;
   --red-light: #fbd4d4;
 
   /* agent identity tint — violet, distinct from human blue */
@@ -46,7 +45,6 @@
   /* Motion: strong ease-out for entrances/presses (built-in `ease-out` is too
      weak); ease-in-out reserved for on-screen moves. */
   --ease-out: cubic-bezier(.23, 1, .32, 1);
-  --ease-in-out: cubic-bezier(.77, 0, .175, 1);
 
   --radius-button: 8px;
   --radius-chip: 999px;
@@ -117,19 +115,6 @@ h1, h2, h3, h4 {
   overflow-y: auto;
 }
 
-.rail-brand {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: .3rem .35rem 1rem;
-  background: none;
-  border: 0;
-  width: 100%;
-  text-align: left;
-}
-.rail-brand:hover .mark { transform: translateY(-1px); box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 40%); }
-.rail-brand .mark { transition: transform .15s ease, box-shadow .15s ease; }
-
 .mark {
   width: 34px;
   height: 34px;
@@ -143,8 +128,6 @@ h1, h2, h3, h4 {
   font-size: 1.1rem;
   box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 60%);
 }
-
-.rail-brand b { font-family: var(--font-display); font-weight: 800; font-size: 1.04rem; }
 
 .project-switch {
   display: flex;
@@ -205,26 +188,6 @@ h1, h2, h3, h4 {
 .nav-item.active .count { color: var(--blue-pressed); }
 
 .rail-spacer { flex: 1; }
-
-.rail-user-wrap { position: relative; margin-top: .4rem; border-top: 1px solid var(--hairline); }
-.rail-user {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: .55rem .5rem;
-  width: 100%;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-button);
-  text-align: left;
-  transition: background .14s ease;
-}
-.rail-user:hover, .rail-user.open { background: color-mix(in srgb, var(--fg), transparent 96%); }
-.rail-user > span:not(.avatar) { min-width: 0; flex: 1; }
-.rail-user .who { font-size: .86rem; font-weight: 700; font-family: var(--font-display); }
-.rail-user .role { font-size: .75rem; color: var(--faint); line-height: 1.3; }
-.rail-user .caret { width: 15px; height: 15px; color: var(--placeholder); transform: rotate(-90deg); transition: transform .15s ease; }
-.rail-user.open .caret { transform: rotate(90deg); }
 
 .menu-scrim { position: fixed; inset: 0; z-index: 40; }
 .user-menu {
@@ -853,7 +816,6 @@ h1, h2, h3, h4 {
 .profile-cell .val { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 .profile-cell .val .nm { font-family: var(--font-display); font-weight: 800; font-size: .9rem; }
 .profile-cell .val .sub { font-size: .72rem; color: var(--faint); }
-.profile-cell.span2 { grid-column: span 2; }
 
 .mem-row {
   display: flex; align-items: center; gap: .55rem;
@@ -1034,8 +996,6 @@ h1, h2, h3, h4 {
   letter-spacing: inherit;
 }
 .composer-foot { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
-.composer-hint { font-size: .74rem; color: var(--placeholder); }
-.composer-hint .at { font-family: var(--font-mono); font-weight: 700; color: var(--agent-dark); }
 
 /* O-3 — scheduled operator re-runs */
 .sched-list { list-style: none; margin: 0 0 .6rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
@@ -1051,7 +1011,6 @@ h1, h2, h3, h4 {
 .sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
 .sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .26rem; border-radius: 5px; }
-.addressees { display: flex; gap: .35rem; }
 .addr {
   display: inline-flex; align-items: center; gap: .35rem;
   font-size: .74rem; font-weight: 700;
@@ -1443,13 +1402,6 @@ dialog[data-closing]::backdrop {
 .pick-chip.mono { font-family: var(--font-mono); font-weight: 500; font-size: .78rem; }
 .pick-chip .ico { width: 13px; height: 13px; }
 
-.cap-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
-.cap-field .flabel { display: inline-flex; align-items: center; gap: .35rem; }
-.cap-field.direct .flabel { color: var(--teal-dark); }
-.cap-field.recommend .flabel { color: var(--blue-pressed); }
-.cap-field.forbidden .flabel { color: var(--coral-dark); }
-.cap-field .flabel .ico { width: 12px; height: 12px; }
-
 /* capability catalog matrix */
 .cap-matrix { display: flex; flex-direction: column; gap: .4rem; }
 .cap-mgroup { border: 1px solid var(--hairline); border-radius: var(--radius-button); overflow: hidden; }
@@ -1487,29 +1439,17 @@ dialog[data-closing]::backdrop {
 }
 .def-note .ico { width: 13px; height: 13px; margin-top: .15rem; flex: none; color: var(--placeholder); }
 .def-note code { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); }
-
-.tagbox {
-  display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
-  padding: .45rem .5rem; min-height: 42px;
-  border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface);
-  transition: border-color .14s ease, box-shadow .14s ease;
-}
-.tagbox:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
-.tagbox input { border: 0; outline: 0; flex: 1; min-width: 90px; background: transparent; font-size: .84rem; color: var(--fg); }
-.tagbox input::placeholder { color: var(--placeholder); }
 .tag {
   display: inline-flex; align-items: center; gap: .15rem;
   padding: .22rem .25rem .22rem .5rem; border-radius: 7px;
   background: color-mix(in srgb, var(--fg), transparent 95%); color: var(--muted);
   font-family: var(--font-mono); font-size: .72rem;
 }
-.tagbox.sent .tag { font-family: var(--font-body); font-size: .78rem; }
 .tag button { border: 0; background: none; display: grid; place-items: center; width: 16px; height: 16px; color: var(--placeholder); border-radius: 4px; }
 .tag button:hover { color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), transparent 50%); }
 .tag button .ico { width: 11px; height: 11px; }
 
 @media (max-width: 1100px) {
-  .cap-fields { grid-template-columns: 1fr; }
   .field-row { grid-template-columns: 1fr; }
 }
 
@@ -1757,30 +1697,6 @@ dialog[data-closing]::backdrop {
 .keybtn:hover { background: color-mix(in srgb, var(--blue), transparent 74%); }
 
 /* guardrails */
-.guard-row {
-  display: flex; align-items: flex-start; gap: .8rem;
-  padding: .68rem 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.guard-row:last-child { border-bottom: 0; padding-bottom: .2rem; }
-.guard-row:first-child { padding-top: .1rem; }
-.guard-main { flex: 1; min-width: 0; }
-.guard-main .gn { font-family: var(--font-mono); font-size: .78rem; font-weight: 600; color: var(--fg); }
-.guard-main .gd { font-size: .78rem; color: var(--faint); margin-top: .22rem; line-height: 1.45; }
-.guard-row .tgl { margin-top: .1rem; }
-.stepper {
-  display: inline-flex; align-items: center; gap: .1rem;
-  border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface);
-  padding: .1rem;
-}
-.stepper button {
-  width: 24px; height: 24px;
-  border: 0; background: none; border-radius: 6px;
-  display: grid; place-items: center;
-  color: var(--muted); font-weight: 700; font-size: .9rem;
-}
-.stepper button:hover { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
-.stepper .sv { font-family: var(--font-mono); font-size: .74rem; min-width: 74px; text-align: center; color: var(--fg); }
 
 /* policy activity */
 .pev-list { display: flex; flex-direction: column; }
@@ -1889,8 +1805,6 @@ dialog[data-closing]::backdrop {
 .stg-x.off:hover { background: none; color: var(--placeholder); }
 .stg-x .ico { width: 13px; height: 13px; }
 
-.guard-main .lockico { width: 12px; height: 12px; color: var(--placeholder); }
-
 /* ============================================================
    REVIEW QUEUE + GITHUB + polish
    ============================================================ */
@@ -1993,13 +1907,6 @@ dialog[data-closing]::backdrop {
 .pref-main { flex: 1; min-width: 0; }
 .pref-main .pn { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
 .pref-main .pd { font-size: .78rem; color: var(--faint); margin-top: .2rem; line-height: 1.45; }
-
-.ntf-head { display: flex; justify-content: flex-end; gap: .9rem; padding-bottom: .15rem; }
-.ntf-head .lbl {
-  width: 44px; text-align: center;
-  font-size: .62rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--placeholder);
-}
 .ntf-cols { display: inline-flex; gap: .9rem; flex: none; }
 .ntf-cell { width: 44px; display: grid; place-items: center; }
 
@@ -2054,7 +1961,6 @@ dialog[data-closing]::backdrop {
   --teal-dark: #6ce4dc;
   --orange-light: #45311a;
   --yellow-dark: #eccd72;
-  --pink: #3f2334;
   --red-light: #47211f;
 
   --agent: #957fff;
@@ -2396,10 +2302,7 @@ dialog[data-closing]::backdrop {
   .top-search input { font-size: .82rem; }
 }
 
-/* === app additions === */
-/* Everything below this line is Viberr app code, NOT part of the ported
-   design/html-app/app/viberr.css. New phases append here only — the ported
-   block above must stay verbatim so future mock diffs stay reviewable. */
+/* Runtime and page styles. */
 
 /* Copyable / expandable provider session id in the Agent logs meta line. */
 .session-id { display: inline-flex; align-items: center; gap: .25rem; }
@@ -2501,15 +2404,12 @@ dialog[data-closing]::backdrop {
 .md-collapse-toggle svg { width: 14px; height: 14px; transition: transform .15s ease; }
 .md-collapse-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 
-/* The mock HTML <head> overrides the display face because Roobert PRO is not
-   web-available; Manrope is the stand-in shipped with the app (bundled via
-   @fontsource, no CDN). Ported from the inline <style> in design/html-app/*.html. */
+/* Bundled display font. */
 :root {
   --font-display: "Manrope", "Avenir Next", system-ui, sans-serif;
 }
 
-/* Phase 1: centered splash/error layout used by the placeholder index route
-   and the root ErrorBoundary until the real app shell lands (phase 4). */
+/* Centered splash and error layout. */
 .app-splash {
   height: 100%;
   display: grid;
@@ -2534,19 +2434,13 @@ dialog[data-closing]::backdrop {
   background: color-mix(in srgb, var(--fg), transparent 96%);
 }
 
-/* Phase 2: login surface + shared bits, copied VERBATIM from
-   design/html-app/app/home.css. Phase 4 ported the REST of home.css below
-   (deduped against this block: login-*, .gmark, .idp-chip, .linkish and
-   the spin keyframes live here only). The body override is scoped (home.css
-   relaxes body overflow globally; the workspace shell in viberr.css expects
-   overflow:hidden) — phase 4 extends the scope to the Home page, and
-   standalone .home-shell pages (org settings) scroll the body too. */
+/* Login surface. */
 
 body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
 
-/* F10-27: desktop two-column composition (brand aside + sign-in card). The
+/* Desktop two-column composition (brand aside + sign-in card). The
    aside is hidden on narrow viewports, preserving the simple centered card on
    mobile. */
 .login-aside { display: none; }
@@ -2619,14 +2513,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .linkish:hover { color: var(--blue-pressed); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
-/* App addition: home.css scopes .spin to .store-strip; the login button's
-   refresh icon (busy state) needs the same animation globally. */
+/* Shared busy-state spinner. */
 .ico.spin { animation: spin 1s linear infinite; }
 
-/* Phase 4: design/html-app/app/home.css ported VERBATIM (page layer for the
-   Home surface + org-settings/kb rules consumed in phase 9). Deduped against
-   the phase-2 block above: the body overflow rule is scoped there, and
-   login-*, .gmark, .idp-chip, .linkish, @keyframes spin are NOT repeated. */
+/* Home and settings surfaces. */
 
 .home { min-height: 100vh; display: flex; flex-direction: column; }
 
@@ -2646,20 +2536,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   gap: 1rem;
   padding: 0 1.4rem;
 }
-
-.org-chip {
-  display: inline-flex; align-items: center; gap: .45rem;
-  padding: .32rem .4rem .32rem .62rem;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-chip);
-  background: var(--surface);
-  font-size: .8rem; font-weight: 700; font-family: var(--font-display);
-  color: var(--muted);
-  transition: border-color .15s ease, color .15s ease;
-}
-.org-chip:hover { border-color: var(--border); color: var(--fg); }
-.org-chip .sub { font-weight: 400; font-family: var(--font-mono); font-size: .68rem; color: var(--faint); }
-.org-chip .ico { width: 14px; height: 14px; color: var(--placeholder); transform: rotate(90deg); }
 
 /* search width + right-cluster geometry match the workspace topbar (viberr.css .top-search) */
 
@@ -2939,8 +2815,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
-.np-owner-input { width: 100%; padding: .5rem .7rem; margin-bottom: .5rem; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); color: var(--fg); font-size: .86rem; font-family: var(--font-mono); }
-.np-owner-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
 .repo-input .pre { font-family: var(--font-mono); font-size: .82rem; color: var(--faint); padding: .55rem 0 .55rem .7rem; white-space: nowrap; }
@@ -2978,12 +2852,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .conn-main .scope-chip { padding: .2rem .45rem; font-size: .68rem; }
 .conn-main .scope-chip .ico { width: 11px; height: 11px; }
 
-.add-row { display: flex; align-items: center; gap: .5rem; margin-top: .85rem; padding-top: .9rem; border-top: 1px solid var(--hairline); flex-wrap: wrap; }
-.add-row input { flex: 1; min-width: 150px; border: 1px solid var(--border); border-radius: var(--radius-button); padding: .45rem .6rem; background: var(--surface); color: var(--fg); font-family: var(--font-body); font-size: .84rem; transition: border-color .14s ease, box-shadow .14s ease; }
-.add-row input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 86%); }
-.add-row input::placeholder { color: var(--placeholder); }
-.add-row input.tok { font-family: var(--font-mono); font-size: .78rem; flex: 1.2; }
-
 .rsrc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; align-items: start; }
 .rsrc-list { display: flex; flex-direction: column; }
 .rsrc-row { display: flex; align-items: center; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--hairline); }
@@ -3020,7 +2888,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .be-opt .agent-glyph { width: 32px; height: 32px; }
 .be-opt .agent-glyph .ico { width: 16px; height: 16px; }
 .be-opt .bnm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .9rem; }
-.be-opt .bsub { display: block; font-family: var(--font-mono); font-size: .7rem; color: var(--faint); margin-top: .12rem; }
 .be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.8); transition: opacity .14s ease, transform .14s ease; }
 .be-opt.on .bcheck { opacity: 1; transform: scale(1); }
 .be-opt .bcheck .ico { width: 15px; height: 15px; }
@@ -3079,10 +2946,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
    "healthy now" (a stdio MCP is only re-checked on save/test). */
 .stat-dot.stale { background: var(--yellow-dark); }
 
-.chip-x { border: 0; background: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; color: var(--placeholder); border-radius: 4px; }
-.chip-x:hover { color: var(--coral-dark); background: color-mix(in srgb, var(--coral-light), transparent 50%); }
-.chip-x .ico { width: 11px; height: 11px; }
-
 @media (max-width: 1000px) {
   .set-layout { grid-template-columns: 1fr; }
   .set-nav { flex-direction: row; overflow-x: auto; position: static; }
@@ -3100,53 +2963,26 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .pj-row .pj-stats { display: none; }
 }
 
-/* Phase 4: app additions (not from the mock CSS). */
-
-/* Mock <button>s that became router links — neutralize anchor defaults.
-   Classes lacking their own color get inherit; .nav-item/.menu-item/.btn
-   and .crumbs a define colors in the ported CSS and keep them. */
+/* Neutralize anchor defaults on link-shaped controls. */
 a.card, a.nav-item, a.menu-item, a.project-switch, a.home-brand,
 a.org-tile, a.btn { text-decoration: none; }
 a.card, a.project-switch, a.home-brand { color: inherit; }
 
-/* Task-detail placeholder panel (replaced by the phase-5 task workspace)
-   + the minimal /profile panel. */
+/* Task preview and profile panel. */
 .task-preview { padding: 1.2rem 1.4rem; overflow-y: auto; }
 .task-preview .panel { max-width: 720px; display: flex; flex-direction: column; gap: .9rem; }
 .task-preview .panel-head h2 { font-size: 1.05rem; }
-.tp-pills { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.tp-section { display: flex; flex-direction: column; gap: .45rem; }
-.tp-label { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .tp-goal { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
-.tp-chips { display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap; }
 .tp-foot { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; padding-top: .7rem; border-top: 1px solid var(--hairline); }
-.tp-path { font-size: .72rem; color: var(--faint); }
-.tp-note { font-size: .78rem; color: var(--placeholder); margin-left: auto; }
 
-/* /notifications overlay page (phase-4 minimal list; phase 9 replaces the
-   body with the full notifications.jsx port). Reuses the popover list
-   classes inside the page overlay at full width. */
-.ntf-page { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.ntf-page .ntf-pop-head { padding: 1rem 1.2rem; padding-right: 4.4rem; }
-.ntf-page .ntf-pop-list { flex: 1; overflow-y: auto; padding: .4rem .6rem 1rem; }
-
-/* ============================================================
-   PRESS FEEDBACK + MOTION PREFERENCES (design-eng pass, 2026-07-16)
-   Pressables acknowledge pointer-down the instant it happens; each :active
-   composes with the element's resting/hover transform so nothing jumps.
-   ============================================================ */
+/* Press feedback and reduced-motion preferences. */
 .card:active, .pj-new:active { transform: scale(.99); }
 .opt:active, .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active, .org-tile.go:active, .pj-card:active { transform: translateY(0) scale(.99); }
 .deploy-row:active, .pj-row:active { transform: translateX(0) scale(.99); }
-.seg button:active, .fchip:active, .pick-chip:active, .tl-filter button:active,
-.cap-seg button:active, .mini-seg button:active, .stage-menu-btn:active,
-.own-btn:active, .rev-add:active, .org-chip:active, .addr:active,
-.handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
+.seg button:active, .fchip:active, .pick-chip:active, .tl-filter button:active, .cap-seg button:active, .mini-seg button:active, .stage-menu-btn:active, .own-btn:active, .rev-add:active, .addr:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
 .nav-item:active { transform: scale(.985); }
-.rev-x:active, .stg-x:active, .chip-x:active, .own-x:active,
-.tag button:active, .ag-add:active, .col-head .add:active,
-.session-id-copy:active { transform: scale(.9); }
+.rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .ag-add:active, .col-head .add:active, .session-id-copy:active { transform: scale(.9); }
 .fm-act:active { transform: translateY(0) scale(.94); }
 .pj-star:active { transform: scale(.9); }
 .pj-row .pj-star:active { transform: translateY(-50%) scale(.9); }

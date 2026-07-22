@@ -63,7 +63,7 @@ COPY --from=build --chown=node:node /app/build ./build
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
 # SQL migrations are applied automatically at boot (resolved from the
-# working directory), and the ops scripts (`npm run migrate|seed|rescan`)
+# working directory), and the ops scripts (`npm run seed|rescan`)
 # need the migration files + TypeScript sources to run via tsx inside the
 # container (e.g. `docker compose exec app npm run seed`).
 COPY --from=build --chown=node:node /app/db ./db

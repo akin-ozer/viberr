@@ -17,13 +17,14 @@ import {
 } from "./run-service.server";
 import { getRun, listRunLines } from "./run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import type { SimulatedScript } from "./simulated-runtime.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RunSpec, RuntimeAdapter } from "./adapter.server";
+import { setBackendAvailability, type AdapterSet } from "./runtime-registry.server";
 import {
-  setSimulatedRuntimePermittedForTests,
-  type AdapterSet,
-} from "./runtime-registry.server";
+  installFakeRuntime,
+  queueFakeRun,
+  type FakeRun,
+} from "../../../test-support/fake-runtime";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -36,7 +37,7 @@ beforeEach(() => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
-  configureRunServiceForTests(); // no real backend keys → simulated engine
+  installFakeRuntime();
 });
 
 afterEach(() => {
@@ -44,16 +45,13 @@ afterEach(() => {
   ctx.cleanup();
 });
 
-function instantScript(lines: LogLine[], backend: "claude" | "codex" = "claude"): SimulatedScript {
+function instantScript(lines: LogLine[], backend: "claude" | "codex" = "claude"): FakeRun {
   return {
     lines,
     occurredAt: lines.map(() => new Date().toISOString()),
     sessionId: "sess-test",
     backend,
-    model: "claude-sonnet-4-5",
-    op: false,
     keepRunning: false,
-    instant: true,
   };
 }
 
@@ -61,13 +59,14 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-describe("run-service lifecycle (simulated)", () => {
+describe("run-service lifecycle", () => {
   it("startRun materializes a run + persists lines + reaches finished", async () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "session x" },
       { t: "2", ev: "text", tag: "assistant", text: "hello" },
       { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 0.1, in: 5, cached: 2, out: 3 } },
     ]);
+    queueFakeRun(script);
     const { runId, simulated } = await startRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -76,16 +75,15 @@ describe("run-service lifecycle (simulated)", () => {
       backend: "claude",
       model: "claude-sonnet-4-5",
       prompt: "go",
-      script,
       dataRoot: store.dataRoot,
     });
-    expect(simulated).toBe(true); // no real key
+    expect(simulated).toBe(false);
     await settle();
 
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("finished");
-    expect(run.simulated).toBe(1);
-    expect(run.backend).toBe("claude"); // requested backend kept for glyph fidelity
+    expect(run.simulated).toBe(0);
+    expect(run.backend).toBe("claude");
     const lines = listRunLines(store.db, runId);
     expect(lines.length).toBe(3);
     // Tokens/cost derived from the REAL result envelope, not fabricated.
@@ -97,6 +95,7 @@ describe("run-service lifecycle (simulated)", () => {
     const script = instantScript([
       { t: "1", ev: "init", tag: "system·init", text: "session" },
     ]);
+    queueFakeRun(script);
     const primary = {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -105,7 +104,6 @@ describe("run-service lifecycle (simulated)", () => {
       backend: "claude" as const,
       model: "claude-sonnet-4-5",
       prompt: "go",
-      script,
       dataRoot: store.dataRoot,
     };
     // First delivering run — left in flight (NOT settled), so its row is still
@@ -137,6 +135,7 @@ describe("run-service lifecycle (simulated)", () => {
       { t: "2", ev: "text", tag: "assistant", text: "hello" },
       { t: "3", ev: "result", tag: "result", text: "done" },
     ]);
+    queueFakeRun(script);
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -145,7 +144,6 @@ describe("run-service lifecycle (simulated)", () => {
       backend: "claude",
       model: "claude-sonnet-4-5",
       prompt: "go",
-      script,
       dataRoot: store.dataRoot,
     });
     // The CI teardown race: a test's DB closes while the adapter's timers are
@@ -164,9 +162,10 @@ describe("run-service lifecycle (simulated)", () => {
       { t: "2", ev: "tool", tag: "tool_use", name: "Bash", text: "ls" },
       { t: "3", ev: "out", tag: "tool_result", text: "ok" },
     ]);
+    queueFakeRun(script);
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go", script, dataRoot: store.dataRoot,
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();
     const run = getRun(store.db, runId)!;
@@ -176,13 +175,16 @@ describe("run-service lifecycle (simulated)", () => {
   });
 
   it("listRunsForTask returns a RunView with derived render state + raw envelopes", async () => {
-    const { runId } = await startRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
-      backend: "codex", model: "gpt-5.4-codex", prompt: "go",
-      script: instantScript(
+    queueFakeRun(
+      instantScript(
         [{ t: "1", ev: "init", tag: "thread.started", text: "thread x" }, { t: "2", ev: "result", tag: "turn.completed", text: "done", usage: { input_tokens: 5, cached_input_tokens: 2, output_tokens: 3 } }],
         "codex",
       ),
+      "codex",
+    );
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "codex", model: "gpt-5.4-codex", prompt: "go",
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -191,18 +193,18 @@ describe("run-service lifecycle (simulated)", () => {
     expect(run.state).toBe("done");
     expect(run.backend).toBe("codex");
     expect(run.raw.length).toBe(run.lines.length);
-    expect(JSON.parse(run.raw[0]!).type).toBe("thread.started");
+    expect(JSON.parse(run.raw[0]!).line.ev).toBe("init");
   });
 
   it("getRunLog tails lines since a seq", async () => {
+    queueFakeRun(instantScript([
+      { t: "1", ev: "text", tag: "assistant", text: "a" },
+      { t: "2", ev: "text", tag: "assistant", text: "b" },
+      { t: "3", ev: "text", tag: "assistant", text: "c" },
+    ]));
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go",
-      script: instantScript([
-        { t: "1", ev: "text", tag: "assistant", text: "a" },
-        { t: "2", ev: "text", tag: "assistant", text: "b" },
-        { t: "3", ev: "text", tag: "assistant", text: "c" },
-      ]),
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -214,14 +216,14 @@ describe("run-service lifecycle (simulated)", () => {
   it("forwards input.effort onto the RunSpec handed to the adapter", async () => {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {
-      backend: "simulated",
+      backend: "claude",
       start(spec, cb) {
         specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "simulated", simulated: true, sessionId: null });
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", simulated: false, sessionId: null });
         return { runId: spec.runId, interrupt() {} };
       },
     };
-    const adapters: AdapterSet = { claude: capture, codex: capture, simulated: capture };
+    const adapters: AdapterSet = { claude: capture, codex: capture };
     configureRunServiceForTests(adapters);
 
     await startRun(store.db, {
@@ -243,15 +245,9 @@ describe("run-service lifecycle (simulated)", () => {
   });
 });
 
-describe("R7-2 fail-fast — unavailable backend produces an honest error run, never a fake stream", () => {
-  afterEach(() => {
-    setSimulatedRuntimePermittedForTests(undefined);
-  });
-
-  async function startUnavailable(simulate?: boolean) {
-    // Gate CLOSED (models prod/dev) + both backends credential-less (from
-    // configureRunServiceForTests in beforeEach).
-    setSimulatedRuntimePermittedForTests(false);
+describe("unavailable backend", () => {
+  async function startUnavailable() {
+    setBackendAvailability("claude", false);
     return startRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -260,7 +256,6 @@ describe("R7-2 fail-fast — unavailable backend produces an honest error run, n
       backend: "claude",
       model: "claude-sonnet-4-5",
       prompt: "go",
-      ...(simulate !== undefined ? { simulate } : {}),
       dataRoot: store.dataRoot,
     });
   }
@@ -300,24 +295,6 @@ describe("R7-2 fail-fast — unavailable backend produces an honest error run, n
     });
   });
 
-  it("an EXPLICIT simulate request outside the gate also fails fast (never converts to a paid run)", async () => {
-    const { runId, simulated } = await startUnavailable(true);
-    expect(simulated).toBe(false);
-    expect(getRun(store.db, runId)!.state).toBe("error");
-  });
-
-  it("inside the gate (vitest default) the unavailable backend still uses the test engine", async () => {
-    // No override — NODE_ENV === "test" keeps the gate open for the suite.
-    const { runId, simulated } = await startRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go",
-      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "x" }]),
-      dataRoot: store.dataRoot,
-    });
-    expect(simulated).toBe(true);
-    await settle();
-    expect(getRun(store.db, runId)!.state).toBe("finished");
-  });
 });
 
 describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
@@ -326,7 +303,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
   // before the caller can attach one. The fix must fire the late callback.
   function instantExitAdapter(outcome: "finished" | "error"): RuntimeAdapter {
     return {
-      backend: "simulated",
+      backend: "claude",
       start(spec, cb) {
         cb.onExit({ outcome, effectiveBackend: "claude", simulated: false, sessionId: null });
         return { runId: spec.runId, interrupt() {} };
@@ -336,7 +313,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
 
   it("chainRunCompletion fires immediately when the run already finalized", async () => {
     const a = instantExitAdapter("error");
-    configureRunServiceForTests({ claude: a, codex: a, simulated: a });
+    configureRunServiceForTests({ claude: a, codex: a });
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
@@ -350,7 +327,7 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
 
   it("registerRunCompletion fires immediately when the run already finalized", async () => {
     const a = instantExitAdapter("finished");
-    configureRunServiceForTests({ claude: a, codex: a, simulated: a });
+    configureRunServiceForTests({ claude: a, codex: a });
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
@@ -363,13 +340,14 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
   });
 
   it("does not fire twice when the run is still in flight then finishes", async () => {
-    // keepRunning script: run stays `running` until settle drains its stream.
+    queueFakeRun({
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "a" }],
+      occurredAt: [new Date().toISOString()],
+      sessionId: "s",
+    });
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "sonnet", prompt: "go",
-      script: { lines: [{ t: "1", ev: "text", tag: "assistant", text: "a" }],
-        occurredAt: [new Date().toISOString()], sessionId: "s", backend: "claude",
-        model: "claude-sonnet-4-5", op: false, keepRunning: false, instant: false },
       dataRoot: store.dataRoot,
     });
     let count = 0;
@@ -381,14 +359,14 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
 
 describe("interruptRun — RBAC + audit + idempotency", () => {
   async function startRunning() {
-    // A never-ending running run (keepRunning): interrupt is meaningful.
-    const script: SimulatedScript = {
+    queueFakeRun({
       lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
-      sessionId: "s", backend: "claude", model: "m", op: false, keepRunning: true, instant: true,
-    };
+      sessionId: "s",
+      keepRunning: true,
+    });
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go", script, dataRoot: store.dataRoot,
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();
     return runId;
@@ -426,7 +404,6 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "claude", model: "m", prompt: "go",
-      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "x" }]),
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -442,7 +419,6 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
-      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "x" }]),
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -455,7 +431,6 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", agentName: "dev", agentProfileId: "dev", prompt: "go",
-      script: instantScript([{ t: "1", ev: "init", tag: "system·init", text: "s" }, { t: "2", ev: "text", tag: "assistant", text: "x" }]),
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -463,7 +438,6 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     const resumed = await resumeRun(store.db, {
       runId,
       prompt: "follow up",
-      script: instantScript([{ t: "1", ev: "text", tag: "assistant", text: "reply" }]),
       dataRoot: store.dataRoot,
     });
     await settle();
@@ -483,14 +457,14 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   it("resumeRun forwards the run confinement onto the resumed RunSpec", async () => {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {
-      backend: "simulated",
+      backend: "claude",
       start(spec, cb) {
         specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "simulated", simulated: true, sessionId: null });
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", simulated: false, sessionId: null });
         return { runId: spec.runId, interrupt() {} };
       },
     };
-    configureRunServiceForTests({ claude: capture, codex: capture, simulated: capture });
+    configureRunServiceForTests({ claude: capture, codex: capture });
 
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",

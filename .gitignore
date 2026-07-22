@@ -8,9 +8,5 @@ node_modules/
 *.log
 .DS_Store
 /coverage/
-/playwright-report/
-/test-results/
-/e2e/.tmp-data/
-/e2e/.auth/
 .react-router/
 .agents/

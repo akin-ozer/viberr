@@ -142,10 +142,9 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
           : exit.outcome === "error"
             ? "error"
             : "interrupted";
-      // Keep the REQUESTED backend on the row for glyph fidelity — only the
-      // `simulated` flag records that the sim engine produced the run
-      // (real-vs-sim is separate from the glyph backend). The effective
-      // backend is used only for the raw .jsonl directory (set per-line).
+      // Keep the requested backend on the row; `simulated` remains only for
+      // compatibility with historical rows. The effective backend selects the
+      // raw .jsonl directory.
       effectiveBackend = exit.simulated ? "simulated" : exit.effectiveBackend;
       patchRun(db, spec.runId, {
         state,

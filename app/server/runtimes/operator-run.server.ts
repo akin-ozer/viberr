@@ -11,7 +11,6 @@ import {
 import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
-import type { LogLine } from "~/features/runtime/runtime-types";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   gate,
@@ -34,22 +33,16 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
-import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import {
   DEFAULT_GOAL,
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
-import {
-  isBackendAvailable,
-  simulatedRuntimePermitted,
-  type RealBackend,
-} from "./runtime-registry.server";
+import type { RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
-import { buildScript } from "./simulated-runtime.server";
 
 /**
- * Runs the OPERATOR as a real agent (Claude Code) or a deterministic scripted
- * drive (Codex / offline). The operator is given its persona (agent
+ * Runs the operator through Claude or Codex. The operator is given its persona
+ * (agent
  * definition) + the Viberr app-expertise skill as a system prompt, plus the
  * in-process governance tools (operator-toolkit). It drives the task toward
  * its next boundary under its capability policy + autonomy level.
@@ -62,13 +55,8 @@ import { buildScript } from "./simulated-runtime.server";
  *     same gated operator-actions as the Claude tools — so Codex honors the
  *     identical RBAC + autonomy, it just plans-then-executes instead of
  *     calling tools live.
- *   R7-2 test gate open (vitest / Playwright) → SCRIPTED drive: the same
- *     operator-actions are called deterministically in code (the board still
- *     advances honestly), and a simulated run streams the narrative to the
- *     agent logs. Unreachable in production/dev.
- *   no credential, gate closed → NO fabricated drive: the run starts anyway
- *     and startRun fails it fast as an honest error; the completion hook
- *     escalates a blocked recovery packet (F-OP1 path, "unavailable" class).
+ *   no credential → startRun records an honest error; the completion hook
+ *     escalates a blocked recovery packet.
  */
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
@@ -105,8 +93,6 @@ export interface RunOperatorInput {
 export interface RunOperatorResult {
   runId: string;
   backend: RealBackend;
-  /** "real" = LLM tool-driven · "scripted" = deterministic drive. */
-  mode: "real" | "scripted";
   autonomy: OperatorAutonomy;
 }
 
@@ -139,8 +125,8 @@ function inFlightOperatorRun(
  * was simply DROPPED: a human's "@operator …" landing while a run was in
  * flight was never answered.
  *
- * The lease is held from runOperator entry until the mode's coordination truly
- * ends (real: run completion; codex: plan executed; scripted: drive returned).
+ * The lease is held from runOperator entry through provider completion and,
+ * for Codex, structured-plan execution.
  * A trigger arriving while held is QUEUED (newest wins — the operator re-reads
  * the full task anyway, so the latest trigger subsumes older ones) and fired
  * exactly once on release.
@@ -182,8 +168,7 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
  * IDEMPOTENT per acquisition (adversarial-review #5/#7): `token` is the exact
  * lease-entry object captured when this drive acquired the lease. We only
  * delete/queue-fire when the currently-held entry IS that token — so a
- * second/late release (e.g. the scripted path's inner finally AND the outer
- * catch both firing) can never evict a SUCCESSOR's freshly-acquired lease or
+ * second or late release can never evict a successor's freshly-acquired lease or
  * double-fire the queued run. A release whose token no longer matches is a
  * no-op.
  */
@@ -293,8 +278,8 @@ export async function runOperator(
   // time. A trigger arriving while the lease is held — e.g. create-time
   // auto-invoke racing an "@operator …" comment — is QUEUED (newest wins) and
   // fired when the in-flight coordination truly ends, so no trigger is ever
-  // silently dropped and no two drives overlap. The process lease covers the
-  // scripted/codex windows the agent_runs row alone misses.
+  // silently dropped and no two drives overlap. The process lease also covers
+  // Codex plan execution after the provider run finishes.
   const leaseKey = leaseKeyFor(input.projectSlug, input.taskKey);
   const lease = leaseState();
   const heldByProcess = lease.held.get(leaseKey);
@@ -307,10 +292,6 @@ export async function runOperator(
     return {
       runId: heldByProcess.runId ?? "queued",
       backend: heldByProcess.backend,
-      mode:
-        heldByProcess.backend === "claude" && isBackendAvailable("claude")
-          ? "real"
-          : "scripted",
       autonomy: heldByProcess.autonomy,
     };
   }
@@ -330,7 +311,6 @@ export async function runOperator(
     return {
       runId: inflight.id,
       backend: inflight.backend,
-      mode: inflight.backend === "claude" && isBackendAvailable("claude") ? "real" : "scripted",
       autonomy: authority.autonomy,
     };
   }
@@ -365,36 +345,9 @@ export async function runOperator(
   const { markWaitingAgent } = await import("~/server/tasks/task-actions.server");
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
-  // Claude: real tool-driven operator (in-process MCP tools). Codex: no
-  // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
-  // model emits a decision plan we execute through the same capability-gated
-  // actions). The deterministic scripted drive is reachable ONLY inside the
-  // R7-2 test gate; with no credential and the gate closed the real path runs
-  // anyway — startRun fails it fast as an honest error run and the completion
-  // hook escalates (no fabricated coordination). The real/codex
-  // paths release the lease on run COMPLETION (chained callback); only a
-  // SYNCHRONOUS throw before that reaches the outer catch. The scripted path is
-  // synchronous, so it releases in its own finally — the outer catch must NOT
-  // also release it (that double-release is the bug). Idempotent-per-token
-  // release makes even an accidental double-release safe.
+  // Claude uses in-process governance tools. Codex emits a structured plan
+  // that the completion callback executes through the same governed actions.
   try {
-    if (backend === "claude" && isBackendAvailable("claude")) {
-      return await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    if (backend === "codex" && isBackendAvailable("codex")) {
-      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    if (simulatedRuntimePermitted()) {
-      try {
-        return await runScriptedOperatorDrive(db, ctx, input, authority);
-      } finally {
-        // Scripted coordination is fully synchronous with this call.
-        releaseOperatorLease(db, leaseKey, leaseToken);
-      }
-    }
-    // R7-2 fail-fast: the backend is unavailable and no test engine is
-    // permitted. Start the honest error run through the backend's own path —
-    // its completion callback releases the lease and escalates the failure.
     return backend === "codex"
       ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken)
       : await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
@@ -587,7 +540,7 @@ async function startCodexOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "codex", mode: "real", autonomy: authority.autonomy };
+  return { runId, backend: "codex", autonomy: authority.autonomy };
 }
 
 /** Parse the complete structured response and validate it before execution. */
@@ -881,7 +834,7 @@ async function startRealOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "claude", mode: "real", autonomy: authority.autonomy };
+  return { runId, backend: "claude", autonomy: authority.autonomy };
 }
 
 /**
@@ -937,262 +890,6 @@ async function escalateFailedOperatorRun(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-}
-
-// ------------------------------------------------------- scripted drive
-
-/**
- * Deterministic operator supervision: performs the same capability-gated
- * operator-actions in code, so a Codex / offline operator still moves the board.
- * Terminates: it makes at most one forward action per stage, stopping the first
- * time an action is only recommended (supervised autonomy) or denied.
- */
-async function runScriptedOperatorDrive(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  input: RunOperatorInput,
-  authority: OperatorAuthority,
-): Promise<RunOperatorResult> {
-  const { projectSlug, taskKey } = input;
-  const lines: LogLine[] = [];
-  const say = (text: string) =>
-    lines.push({ t: "", ev: "text", tag: "assistant", text });
-
-  lines.push({
-    t: "",
-    ev: "init",
-    tag: "system·init",
-    text: `operator runtime · ${authority.autonomy} autonomy · anchored projects/${projectSlug}/tasks/${taskKey}/task.md`,
-  });
-
-  try {
-    const isReact = (input.trigger ?? "manual") === "agent-reply";
-    let snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-    const doneStageId = snap.doneStageId;
-    // Classify stages from the workflow graph (NOT positionally): the review
-    // stage has an edge into Done, the work stage an edge into review. This is
-    // correct for custom/lightweight boards, not just the default 5-stage one.
-    const reviewStageId = snap.reviewStageId;
-    const workStageId = snap.workStageId;
-
-    say(
-      `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,
-    );
-
-    // COORDINATE the current stage: prompt its agent (reviewer at the review
-    // stage, specialist at the work stage), advancing through any pre-work
-    // stages first. Stops once it has prompted an agent (now waiting for that
-    // agent to report) or hit a recommend boundary under supervised autonomy.
-    const coordinate = async () => {
-      for (let step = 0; step < 8; step++) {
-        snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-        if (snap.stage === doneStageId) return;
-        if (snap.stage === reviewStageId) {
-          // Prompt EVERY engaged reviewer (not just the first) so each records a
-          // verdict; a single engaged/picked reviewer keeps the common case.
-          // FILTER by stage eligibility (F1): re-prompting an engaged reviewer
-          // whose profile isn't eligible for THIS stage would throw in
-          // assertStageEligible and hard-halt the whole coordination turn — skip
-          // the ineligible one instead (the snapshot precomputes eligibility).
-          const eligibleHere = (id: string) => {
-            const d = snap.deployedSpecialists.find((s) => s.id === id);
-            return !d || d.eligibleForCurrentStage;
-          };
-          const revIds = (
-            snap.reviewers.length
-              ? snap.reviewers.map((r) => r.profileId)
-              : [pickReviewer(snap)?.id].filter((x): x is string => !!x)
-          ).filter(eligibleHere);
-          if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
-            for (const rev of revIds) {
-              say(
-                (
-                  await operatorPromptAgentGeneric(
-                    db,
-                    ctx,
-                    { projectSlug, taskKey, profileId: rev, delivers: false },
-                    authority,
-                  )
-                ).message,
-              );
-            }
-          }
-          return;
-        }
-        if (snap.stage === workStageId || !workStageId) {
-          // Only re-run the assigned specialist if it's ELIGIBLE for the current
-          // stage (F1); otherwise fall back to an eligible pick (pickSpecialist
-          // already filters by eligibility) so an assigned-but-now-ineligible
-          // specialist doesn't throw and halt coordination.
-          const assigned = snap.specialist
-            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
-            : undefined;
-          const pick =
-            assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
-          if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
-            say(
-              (
-                await operatorPromptAgentGeneric(
-                  db,
-                  ctx,
-                  { projectSlug, taskKey, profileId: pick.id, delivers: true },
-                  authority,
-                )
-              ).message,
-            );
-          }
-          return;
-        }
-        // Pre-work stage — advance toward the work stage.
-        const nid = snap.nextStages[0]?.id;
-        if (!nid) return;
-        const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
-        say(t.message);
-        if (t.outcome !== "done") return; // recommended (supervised) → stop.
-      }
-    };
-
-    // REACT to an agent's report: propose the NEXT state change. Under full
-    // autonomy the move is performed and the new stage is coordinated; under
-    // supervised it is only recommended (a human bridges to the next stage).
-    const react = async () => {
-      snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-      if (snap.stage === doneStageId) return;
-      if (snap.stage === reviewStageId) {
-        say((await operatorAcceptCompletion(db, ctx, { projectSlug, taskKey }, authority)).message);
-        return;
-      }
-      const nid = snap.nextStages[0]?.id;
-      if (!nid) {
-        say("No further governed transition from here — handing back to humans.");
-        return;
-      }
-      const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
-      say(t.message);
-      if (t.outcome === "done") await coordinate(); // full: performed → coordinate the new stage.
-    };
-
-    // A human is talking to the operator directly (@operator) — acknowledge them
-    // first, then continue coordinating.
-    if (input.humanComment?.trim()) {
-      await operatorPostComment(
-        db,
-        ctx,
-        {
-          projectSlug,
-          taskKey,
-          text: `**Operator:** got your message — "${input.humanComment.trim()}". Reviewing ${taskKey} at “${snap.stageName}” and continuing to coordinate.`,
-        },
-        authority,
-      );
-    }
-
-    // ONE timeline entry per operator turn (decision E): the coordination
-    // actions themselves narrate the turn — the prompting comment, transition
-    // events, and recommendation cards ARE the plan made visible. No standalone
-    // "Plan: …" / "Read the report" pre-comments.
-    if (isReact) {
-      await react();
-    } else {
-      await coordinate();
-    }
-  } catch (error) {
-    logger.error("operator scripted drive failed", {
-      taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    say("Operator halted on an error — see the task timeline.");
-  }
-
-  lines.push({
-    t: "",
-    ev: "result",
-    tag: "result",
-    text: "operator pass complete",
-    stats: { subtype: "success", dur: 1200, api: 900, turns: 1, cost: 0, in: 0, cached: 0, out: 0 },
-  });
-
-  const sid = newId("op").replace("op_", "");
-  const now = new Date().toISOString();
-  const script = buildScript({
-    lines,
-    occurredAt: lines.map(() => now),
-    sessionId: sid,
-    backend: authority.backend,
-    model: authority.model,
-    op: true,
-    keepRunning: false,
-    instant: true,
-  });
-
-  const { runId } = await startRun(db, {
-    projectSlug,
-    taskKey,
-    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
-    role: "Operator",
-    kind: "operator",
-    backend: authority.backend,
-    model: authority.model,
-    agentName: authority.name,
-    agentProfileId: "operator",
-    prompt: `Supervise ${taskKey} toward its next boundary.`,
-    script,
-    simulate: true,
-    actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
-  });
-
-  logger.info("operator run started (scripted)", {
-    taskKey,
-    runId,
-    autonomy: authority.autonomy,
-  });
-  return { runId, backend: authority.backend, mode: "scripted", autonomy: authority.autonomy };
-}
-
-// ------------------------------------------------------- specialist picks
-
-/**
- * Pick an implementation specialist ELIGIBLE for the current stage (F1 — stage
- * eligibility is now real). Filters to specialists whose declared stages include
- * `snap.stage` (spanAll / no-stages count as eligible), then prefers an
- * implementation role. Returns null when no eligible specialist exists rather
- * than silently assigning one that can't work this stage.
- */
-function pickSpecialist(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter((s) =>
-    specialistEligibleForStage(s, snap.stage),
-  );
-  // Capability-first (generic-agents D11): a DELIVERY-capable profile is the
-  // structural signal for build work — no hardcoded ids. The legacy role
-  // heuristics remain only as last-resort tie-breakers for deployments with no
-  // capability grants at all.
-  return (
-    specs.find((s) => s.capabilities.delivery && !s.capabilities.verdict) ??
-    specs.find((s) => s.capabilities.delivery) ??
-    specs.find((s) => /develop|implement/i.test(s.role)) ??
-    specs.find((s) => !s.capabilities.verdict && !/review/i.test(s.role)) ??
-    specs[0] ??
-    null
-  );
-}
-
-/** Prefer a stage-eligible review specialist to engage before acceptance (F1). */
-function pickReviewer(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter(
-    (s) =>
-      specialistEligibleForStage(s, snap.stage) &&
-      !snap.reviewers.some((r) => r.profileId === s.id) &&
-      s.id !== snap.specialist?.profileId,
-  );
-  // Capability-first (D11): verdict capability IS what makes review-engaging a
-  // profile meaningful — its verdicts gate acceptance (G2).
-  return (
-    specs.find((s) => s.capabilities.verdict) ??
-    specs.find((s) => /review/i.test(s.role)) ??
-    specs[0] ??
-    null
-  );
 }
 
 // ------------------------------------------------------- system prompt

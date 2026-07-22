@@ -18,8 +18,7 @@ import type {
 } from "./github-query.server";
 
 /**
- * GitHub view (design/html-app/app/github.jsx → 1:1 port, github-view
- * spec): repository panel (connection + credential health incl. the
+ * GitHub repository panel (connection + credential health incl. the
  * VIB-142 scope-violation banner), pull-request list, execution-branch
  * table. All governed data comes from the loader; the only mutations are
  * the Reconcile and Grant-scope route actions (POST + CSRF, toast copy from

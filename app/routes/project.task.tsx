@@ -87,8 +87,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
-  // Runtime (Phase 8): the per-task run projection (the seed-resumer wiring
-  // was removed with the simulated-run seed data — R7-2 / F7-VEST1).
+  // Per-task provider run projection.
   const runtime = listRunsForTask(db, params.slug, params.key);
 
   // Deployed specialists the "Assign specialist" menu offers.
@@ -348,8 +347,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "run-specialist": {
-        // Start a real (or simulated-fallback) run for the assigned specialist.
-        // An optional `backend` forces the run onto the other engine — the
+        // Start a provider run for the assigned specialist. An optional
+        // `backend` forces the run onto the other engine — the
         // "retry on the other backend" affordance after an availability/quota
         // failure (D4).
         const result = await startAgentRun(
@@ -475,9 +474,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast:
-            `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy` +
-            (result.mode === "scripted" ? " (scripted)" : ""),
+          toast: `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy`,
         };
       }
       case "schedule-action": {

@@ -3,6 +3,10 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import {
+  installFakeRuntime,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
 import type { loader as taskLoader, action as taskAction } from "~/routes/project.task";
 
 /**
@@ -183,15 +187,10 @@ describe("loader — VIB-142 fidelity", () => {
 /* ------------------------------------------------------ comment routing */
 
 describe("comment action — @agent routing detection", () => {
-  // VIB-153 carries a codex specialist, so @operator/@codex now RESUME/START
-  // that agent (a runtime action). Force the simulated engine so those runs
-  // are deterministic + offline, and interrupt any run each test triggers so
-  // its cadence timer never outlives the shared app's DB.
+  // VIB-153 carries a Codex specialist, so @operator/@codex starts or resumes
+  // runtime work. Inject a fake adapter and stop any run left open by a test.
   beforeAll(async () => {
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    configureRunServiceForTests();
+    installFakeRuntime();
   });
 
   async function stopTaskRuns(key: string, userId: string) {
@@ -314,6 +313,10 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
   });
 
   it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    });
     const result = (await postIntent("VIB-142", ids.arda, {
       intent: "resolve-packet", option: "1",
     })) as { ok: true; kind: string; toast: string; navigateTo?: string };
@@ -616,6 +619,10 @@ describe("assign-specialist + run-specialist intents", () => {
   });
 
   it("run-specialist starts a run for the assigned specialist (streaming toast)", async () => {
+    queueFakeRun({
+      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+      keepRunning: true,
+    }, "codex");
     // VIB-166 now has the developer specialist assigned (from the earlier test).
     // The earlier assign/transition auto-invoked the operator, which may have
     // already started a primary run — F7-OP1 single-flight then (correctly)

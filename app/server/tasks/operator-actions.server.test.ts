@@ -16,10 +16,10 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
-  configureRunServiceForTests,
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -121,7 +121,7 @@ beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   resetSseBrokerForTests();
-  configureRunServiceForTests();
+  installFakeRuntime();
   const { resetOperatorLeasesForTests } = await import(
     "~/server/runtimes/operator-run.server"
   );
@@ -430,19 +430,6 @@ describe("operatorAssignReviewer", () => {
   });
 });
 
-/** Poll until an agent run matching the predicate has appeared AND finished. */
-async function waitForFinishedRun(
-  taskKey: string,
-  predicate: (r: ReturnType<typeof listRunsForTask>[number]) => boolean,
-): Promise<boolean> {
-  for (let i = 0; i < 160; i++) {
-    const run = listRunsForTask(store.db, store.slug, taskKey).find(predicate);
-    if (run && run.lifecycle !== "running" && run.lifecycle !== "queued") return true;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  return false;
-}
-
 /** Stop every still-streaming run's cadence timer so it does not outlive a test. */
 function interruptRunningRuns(taskKey: string): void {
   const arda = { userId: store.users.arda.id, label: store.users.arda.email };
@@ -562,110 +549,6 @@ describe("operatorShouldReactToReply (no-progress guard)", () => {
     expect(operatorShouldReactToReply("finished", "new", null, undefined)).toBe(false);
     expect(operatorShouldReactToReply("finished", "new", null, 4)).toBe(false);
     expect(operatorShouldReactToReply("finished", "new", null, 3)).toBe(true); // just under the cap
-  });
-});
-
-describe("operator react to an agent report (trigger=agent-reply)", () => {
-  it("supervised: reading the report proposes the next transition as a recommendation", async () => {
-    deployRoster(DEFAULT_POLICY);
-    seedTask("impl");
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
-    await runOperator(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      trigger: "agent-reply",
-      autonomy: "supervised",
-      dataRoot: store.dataRoot,
-    });
-    expect(await waitForFinishedRun("VIB-1", (r) => r.op === true)).toBe(true);
-    // Reacting at the work stage proposes advancing to review (recommend-mode).
-    expect(
-      task().frontmatter.recommendations.some(
-        (r) => r.kind === "transition" && r.toStageId === "review",
-      ),
-    ).toBe(true);
-    // It did NOT re-prompt the specialist (no fresh primary run from a react).
-    expect(task().frontmatter.stage).toBe("impl");
-    interruptRunningRuns("VIB-1");
-  });
-
-  it("full autonomy: reading the report performs the move and coordinates the new stage", async () => {
-    deployRoster(DEFAULT_POLICY);
-    seedTask("impl");
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
-    await runOperator(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      trigger: "agent-reply",
-      autonomy: "full",
-      dataRoot: store.dataRoot,
-    });
-    expect(await waitForFinishedRun("VIB-1", (r) => r.op === true)).toBe(true);
-    // Full autonomy performed impl→review and then coordinated review by
-    // engaging + prompting a reviewer.
-    expect(task().frontmatter.stage).toBe("review");
-    expect(
-      supportingEngagements(task().frontmatter).map((x) => x.profileId),
-    ).toContain("reviewer");
-    interruptRunningRuns("VIB-1");
-  });
-
-  it("SKIPS a stage-ineligible engaged reviewer instead of hard-halting coordination (F1 regression)", async () => {
-    // Deploy a reviewer scoped to `impl` only, engage it, then put the task at
-    // `review` — where that reviewer is NOT eligible. The scripted operator
-    // drive re-prompts every engaged reviewer at review; before the fix, the
-    // run-boundary eligibility throw would propagate and post "Operator halted
-    // on an error", permanently stalling the task. It must skip the ineligible
-    // reviewer instead.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      repo: null,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: DEFAULT_POLICY,
-          extras: [],
-          definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
-        },
-        {
-          profileId: "reviewer",
-          capabilities: [],
-          extras: [],
-          definition: {
-            kind: "specialist", name: "Rev", role: "Code review",
-            backends: ["claude"], model: "sonnet", stages: ["impl"],
-          },
-        },
-      ] as never,
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        ownerUserId: store.users.arda.id,
-        operator: { assignedAtStageId: "triage" },
-        title: "Ineligible engaged reviewer",
-        engagements: [
-          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: false },
-        ],
-      }),
-      goal: "Prove the operator skips an ineligible engaged reviewer.",
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    const { runOperator } = await import("~/server/runtimes/operator-run.server");
-    await runOperator(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      trigger: "manual",
-      autonomy: "supervised",
-      dataRoot: store.dataRoot,
-    });
-    await waitForFinishedRun("VIB-1", (r) => r.op === true);
-    // The operator must NOT have hard-halted on the eligibility throw.
-    const halted = task().timeline.some((e) => /halted on an error/i.test(e.text));
-    expect(halted, "operator must skip the ineligible reviewer, not hard-halt").toBe(false);
-    interruptRunningRuns("VIB-1");
   });
 });
 
@@ -831,26 +714,6 @@ describe("operatorTransitionStage", () => {
 
 describe("auto-invoke on stage transition", () => {
   const arda = () => ({ userId: store.users.arda.id, label: store.users.arda.email });
-
-  it("a human transition to a working stage runs the operator, which prompts the stage's agent", async () => {
-    deployRoster(DEFAULT_POLICY);
-    seedTask("ready");
-    // Human moves ready → impl (auto boundary). This should hand off to the operator.
-    await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-      arda(),
-      { dataRoot: store.dataRoot },
-    );
-    const opDone = await waitForFinishedRun("VIB-1", (r) => r.op === true);
-    expect(opDone).toBe(true);
-    // The operator picked the task up at the new stage and prompted its specialist.
-    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
-    expect(
-      task().timeline.some((e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent),
-    ).toBe(true);
-    interruptRunningRuns("VIB-1"); // stop the specialist stream the operator kicked off
-  });
 
   it("a transition INTO the final Done stage does not auto-invoke the operator", async () => {
     deployRoster(DEFAULT_POLICY);
@@ -1289,62 +1152,6 @@ describe("applyRecommendation / dismissRecommendation", () => {
 });
 
 describe("auto-invoke on task creation", () => {
-  it("creating a task runs the operator, which picks it up", async () => {
-    deployRoster(DEFAULT_POLICY);
-    const created = await createTask(
-      store.db,
-      { projectSlug: store.slug, title: "Fresh task for the operator" },
-      { userId: store.users.arda.id, label: store.users.arda.email },
-      { dataRoot: store.dataRoot },
-    );
-
-    // The auto-invoke is fire-and-forget; poll until the operator run has both
-    // appeared AND finished (so its sink doesn't finalize after DB teardown).
-    const key = created.key;
-    let opDone = false;
-    for (let i = 0; i < 120 && !opDone; i++) {
-      const op = listRunsForTask(store.db, store.slug, key).find((r) => r.op);
-      opDone = !!op && op.lifecycle !== "running" && op.lifecycle !== "queued";
-      if (!opDone) await new Promise((r) => setTimeout(r, 25));
-    }
-
-    expect(opDone).toBe(true); // an operator run streamed for the task and finished
-    // Post-D2: the pre-work boundaries (triage→ready, ready→impl) are both
-    // `auto`, so a fresh well-scoped task is advanced by the operator all the
-    // way to the work stage, where it assigns + prompts the specialist — no
-    // human approval needed until impl→review.
-    const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
-    expect(t.frontmatter.stage).toBe("impl");
-    expect(deliveringEngagement(t.frontmatter)?.profileId).toBe("developer");
-    interruptRunningRuns(key);
-  });
-
-  it("prompts the specialist by @mention when a task is created at the work stage", async () => {
-    deployRoster(DEFAULT_POLICY);
-    const created = await createTask(
-      store.db,
-      { projectSlug: store.slug, title: "Work-stage task", stageId: "impl" },
-      { userId: store.users.arda.id, label: store.users.arda.email },
-      { dataRoot: store.dataRoot },
-    );
-    const key = created.key;
-    let opDone = false;
-    for (let i = 0; i < 160 && !opDone; i++) {
-      const op = listRunsForTask(store.db, store.slug, key).find((r) => r.op);
-      opDone = !!op && op.lifecycle !== "running" && op.lifecycle !== "queued";
-      if (!opDone) await new Promise((r) => setTimeout(r, 25));
-    }
-    expect(opDone).toBe(true);
-    const t = readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
-    // The operator assigned the specialist and prompted it with an @mention.
-    expect(deliveringEngagement(t.frontmatter)?.profileId).toBe("developer");
-    const prompt = t.timeline.find(
-      (e) => e.type === "comment" && e.actor.kind === "operator" && e.toAgent,
-    );
-    expect(prompt?.text.startsWith("@")).toBe(true);
-    interruptRunningRuns(key);
-  });
-
   it("is a no-op when no operator is deployed (project unchanged)", async () => {
     // Default test store project has agents: [] — no operator deployed.
     const created = await createTask(

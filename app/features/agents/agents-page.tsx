@@ -20,7 +20,7 @@ import {
 } from "./create-profile-modal";
 
 /**
- * Agents view (design/html-app/app/agents.jsx → 1:1 port, agents spec):
+ * Agent profile and deployment view:
  * profile roster + detail (eligible stages, three-bucket capability policy,
  * context resources & runtime, active deployments), Live roster tab, and
  * the three modals. All governed data comes from the loader (real

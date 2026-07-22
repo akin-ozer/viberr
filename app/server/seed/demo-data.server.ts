@@ -21,8 +21,7 @@ import type { AgentProfileFrontmatter } from "~/server/files/agent-profile-file.
 import type { ActorRender } from "~/shared/mapping/actor.server";
 
 /**
- * The demo dataset — a faithful transcription of design/html-app/app/data.js
- * (domain-model spec) into the canonical file formats. Copy is VERBATIM
+ * Demo data in the canonical file formats. User-facing copy preserves
  * (curly quotes, U+00B7 middots, U+2212 minus signs, Turkish characters);
  * display timestamps become back-dated local-time ISO instants so Phase 4's
  * formatter reproduces the mock strings exactly (ruling 4).

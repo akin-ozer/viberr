@@ -25,7 +25,7 @@ import { CsrfInput } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 
 /**
- * /login — ported 1:1 from design/html-app/app/login.jsx.
+ * Login and required-password-reset surface.
  * Two server-driven modes:
  *   "login" — providers + local credentials form
  *   "reset" — the forced set-new-password step (pwreset_required gate)

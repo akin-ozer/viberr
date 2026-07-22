@@ -93,7 +93,7 @@ export interface RunView {
   profileId?: string | null;
   who: RunWho;
   backend: "claude" | "codex";
-  /** True when the simulated engine produced this run (real fallback or seed). */
+  /** Legacy flag retained when projecting historical run rows. */
   simulated: boolean;
   sdk: string;
   model: string;

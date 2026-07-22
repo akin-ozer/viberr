@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   deliveringEngagement,
   type FileActorRef,
@@ -8,8 +9,6 @@ import {
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
-import { buildScript, type SimulatedScript } from "~/server/runtimes/simulated-runtime.server";
-import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -426,49 +425,6 @@ export function runFailureReason(
 }
 
 // -------------------------------------------------------- resume workdir
-
-// ---------------------------------------------------- simulated reply stream
-
-/**
- * A short scripted reply stream for a resumed session on the GATED
- * deterministic test engine (R7-2 — the caller builds it only when the gate
- * is open), so the resumed run produces a final `assistant`/`agent_message`
- * line (→ an agent reply comment). On a real backend the transcript carries
- * the reply instead; with no backend and the gate closed the resume fails
- * fast. `instant` so the reply lands promptly (and the test is deterministic).
- */
-export function buildReplyScript(
-  backend: RealBackend,
-  model: string,
-): SimulatedScript {
-  const now = new Date().toISOString();
-  const replyText =
-    "Thanks for the comment — I re-read the task and my working tree. " +
-    "I've addressed the point you raised and pushed the adjustment; the " +
-    "analysis still holds. Let me know if you'd like a deeper pass on any part.";
-  const lines: LogLine[] =
-    backend === "codex"
-      ? [
-          { t: "", ev: "init", tag: "thread.started", text: "codex thread · resumed for a follow-up comment" },
-          { t: "", ev: "text", tag: "agent_message", text: replyText },
-          { t: "", ev: "result", tag: "turn.completed", text: "reply complete", usage: { input_tokens: 900, cached_input_tokens: 400, output_tokens: 120 } },
-        ]
-      : [
-          { t: "", ev: "init", tag: "system·init", text: "resumed session · follow-up comment" },
-          { t: "", ev: "text", tag: "assistant", text: replyText },
-          { t: "", ev: "result", tag: "result", text: "reply complete", stats: { subtype: "success", dur: 2400, api: 2100, turns: 1, cost: 0.01, in: 900, cached: 400, out: 120 } },
-        ];
-  return buildScript({
-    lines,
-    occurredAt: lines.map(() => now),
-    sessionId: "reply",
-    backend,
-    model,
-    op: false,
-    keepRunning: false,
-    instant: true,
-  });
-}
 
 /**
  * The working directory a resumed reply run should use: the specialist-run

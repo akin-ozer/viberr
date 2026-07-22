@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
-import { ROLE_IDS, type RoleId } from "~/features/policy/policy-data";
+import { ROLE_IDS } from "~/features/policy/policy-data";
+import type { ProjectRole } from "~/shared/rbac";
 import { ROLE_RANK } from "~/shared/rbac";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import {
@@ -32,7 +33,7 @@ export const NOTIFS_PREF_KEY = "notifs";
 export interface ProfileMembership {
   slug: string;
   name: string;
-  role: RoleId;
+  role: ProjectRole;
 }
 
 export interface ProfileView {
@@ -54,7 +55,7 @@ export interface ProfileView {
   /** Highest project role across memberships (admin > maintainer >
    * contributor > viewer, the shared ROLE_RANK scale); null when the user
    * is in no project. */
-  accessRole: RoleId | null;
+  accessRole: ProjectRole | null;
   prefs: {
     notifs: NotifPrefs;
     motion: MotionPreference;
@@ -80,7 +81,7 @@ export function listUserMemberships(
     )
     .all(userId) as { slug: string; role: string; name: string }[];
   return rows
-    .filter((r): r is { slug: string; role: RoleId; name: string } =>
+    .filter((r): r is { slug: string; role: ProjectRole; name: string } =>
       (ROLE_IDS as readonly string[]).includes(r.role),
     )
     .map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
@@ -136,7 +137,7 @@ export function getProfileView(
   const accessRole =
     memberships.length === 0
       ? null
-      : memberships.reduce<RoleId>(
+      : memberships.reduce<ProjectRole>(
           (best, m) => (ROLE_RANK[m.role] > ROLE_RANK[best] ? m.role : best),
           memberships[0]!.role,
         );

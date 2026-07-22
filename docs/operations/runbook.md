@@ -28,7 +28,7 @@ audit, notifications). Anything projection-shaped can be rebuilt from files.
   a schema migration that changes projection shape. Users/sessions/PATs/audit are **not**
   touched.
 
-The file watcher (chokidar, 250 ms debounce) drives incremental rebuilds automatically in
+The native recursive file watcher (250 ms debounce) drives incremental rebuilds automatically in
 both dev and prod; boot also runs a reconciling rescan so out-of-band edits made while the
 app was down converge before the first request.
 

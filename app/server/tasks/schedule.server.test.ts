@@ -8,7 +8,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
@@ -73,7 +73,7 @@ beforeEach(() => {
   store = setupTestStore(ctx);
   // Project the project so getProject() has its stages (terminal-stage checks).
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  configureRunServiceForTests();
+  installFakeRuntime();
 });
 afterEach(() => ctx.cleanup());
 

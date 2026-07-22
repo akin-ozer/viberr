@@ -29,7 +29,7 @@ import { createActorResolver } from "~/shared/mapping/actor.server";
  *
  * - Full rescan (`rebuildAll`) walks ${dataRoot}/projects, projects every
  *   project.md / tasks/<KEY>/task.md, and prunes rows whose files vanished.
- * - Single-file incremental (`rebuildPath`) — driven by the chokidar
+ * - Single-file incremental (`rebuildPath`) — driven by the file
  *   watcher and by every mutation ("write file → reproject").
  * - Content-hash short-circuit: an unchanged file is not re-projected
  *   (and records no provenance — nothing was rebuilt).

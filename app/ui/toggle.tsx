@@ -1,5 +1,5 @@
 /**
- * Toggle switch (`TglP`), ported 1:1 from design/html-app/app/ui.jsx.
+ * Controlled toggle switch.
  * Fully controlled; `onChange` takes no arguments — the caller flips its
  * own state. `label` is required aria copy (every mock call site passes it).
  */

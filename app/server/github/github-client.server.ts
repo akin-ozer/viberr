@@ -54,11 +54,6 @@ export type GithubResponse<T> =
     }
   | { ok: false; kind: "network"; message: string };
 
-export type GithubFailure<T = never> = Exclude<
-  GithubResponse<T>,
-  { ok: true }
->;
-
 export interface GithubClientOptions {
   token: string;
   /** Mock-transport hook for tests. Defaults to global fetch. */

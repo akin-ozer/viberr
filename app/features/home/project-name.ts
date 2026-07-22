@@ -1,3 +1,5 @@
+import { slugify } from "~/shared/ids/slugify";
+
 /**
  * Client-safe project-name derivations (home spec §5.9) — shared by the
  * New-project modal (live preview) and the create action.
@@ -12,15 +14,7 @@ export function keyFromName(name: string): string {
   return (parts.length > 1 ? parts.map((x) => x[0]).join("") : w.slice(0, 3)).slice(0, 4);
 }
 
-/** Canonical project slug: slugified name (lowercase, runs of non-alnum →
- * "-", trimmed). Decision documented in the phase-4 report (home spec §9.1). */
-export function slugifyProjectName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+export const slugifyProjectName = slugify;
 
 /** Inverse direction of the New-project modal's linked name↔repo pair:
  * derive a display name from a repo name ("payments-gateway" / "core_api" →

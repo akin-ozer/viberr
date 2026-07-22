@@ -49,7 +49,6 @@ export const TIMELINE_EVENT_TYPES = [
   "agent",
   "assign",
 ] as const;
-export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[number];
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,
  * never on English titles. */
@@ -177,7 +176,6 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
  * per-backend agent tool). Never fires on a terminal (Done) task.
  */
 export const SCHEDULE_ACTION_TYPES = ["run-operator"] as const;
-export type ScheduleActionType = (typeof SCHEDULE_ACTION_TYPES)[number];
 
 // F10-16 lifecycle: pending → claimed → fired (success) | failed (terminal).
 // `claimed` reserves an occurrence before the detached operator enqueue so a
@@ -191,7 +189,6 @@ export const SCHEDULE_STATUS_VALUES = [
   "failed",
   "cancelled",
 ] as const;
-export type ScheduleStatus = (typeof SCHEDULE_STATUS_VALUES)[number];
 
 export const scheduleSchema = z
   .object({
@@ -339,7 +336,6 @@ export const workRevisionSchema = z
 export type WorkRevision = z.infer<typeof workRevisionSchema>;
 
 export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
-export type ReviewVerdictResult = (typeof REVIEW_VERDICT_RESULTS)[number];
 
 /** One reviewing engagement's verdict, bound to the revision it judged (F10-15). */
 export const reviewVerdictSchema = z

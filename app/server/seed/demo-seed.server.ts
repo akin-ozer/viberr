@@ -39,10 +39,7 @@ import {
  * dataset as REAL canonical files + projections + per-user notification
  * rows, so the app boots looking like the mock.
  *
- * R7-2 (don't simulate at all): the seed ships ZERO fabricated run history —
- * no agent_runs rows, no run log lines, no scripted "running"/"finished"
- * streams. Tasks/projects/members/notifications remain; run history only
- * ever comes from real agent runs.
+ * The seed ships no run history; runs only appear after a user starts one.
  *
  * Idempotent: users are upserted by email, files are overwritten, the
  * rescan reconciles projections, notification rows use the mock's
@@ -256,9 +253,7 @@ export function runDemoSeed(
     });
   }
 
-  // 7. NO runtime dataset (R7-2). The old seed fabricated 18 agent_runs +
-  //    scripted log lines here; a demo store now starts with an empty run
-  //    history — the agent-logs panel is honestly empty until a real run.
+  // The demo store starts with empty run history.
 
   // 7b. The mock's one open scope violation (viberr-core · VIB-142 ·
   //    pull_request:write) so the rail Settings badge reads 1 out of the box.

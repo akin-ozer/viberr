@@ -27,17 +27,13 @@ import {
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
-  simulatedRuntimePermitted,
-  type AdapterDeps,
   type AdapterSet,
   type RealBackend,
-  type SelectResult,
 } from "./runtime-registry.server";
-import type { SimulatedScript } from "./simulated-runtime.server";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Run lifecycle service (BUILD-PLAN Phase 8 §3). The only module routes call
+ * The only module routes call
  * for runtime work:
  *   startRun / resumeRun / interruptRun / listRunsForTask / getRunLog
  *
@@ -162,26 +158,12 @@ export function chainRunCompletion(
   if (db) fireIfAlreadyTerminal(db, runId);
 }
 
-/** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
-export function configureRunServiceForTests(
-  adaptersOrDeps?: AdapterSet | AdapterDeps,
-): void {
-  // Deterministic: force both real backends unavailable so runs use the
-  // simulated engine regardless of any ambient credential in the dev `.env`
-  // (e.g. a CLAUDE_CODE_OAUTH_TOKEN). Under vitest the R7-2 gate is open
-  // (NODE_ENV === "test"), so unavailable backends still fall through to the
-  // deterministic test engine; a test exercising the PRODUCTION fail-fast
-  // path additionally calls setSimulatedRuntimePermittedForTests(false).
-  // A test that wants the real path injects
-  // a fake adapter AND calls setBackendAvailability(backend, true) after this.
+/** Test-only: reset live handles and install explicitly supplied adapters. */
+export function configureRunServiceForTests(adapters: AdapterSet): void {
   resetRegistryForTests();
-  setBackendAvailability("claude", false);
-  setBackendAvailability("codex", false);
+  setBackendAvailability("claude", true);
+  setBackendAvailability("codex", true);
   const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
-  const adapters =
-    adaptersOrDeps && "simulated" in adaptersOrDeps
-      ? (adaptersOrDeps as AdapterSet)
-      : createAdapters((adaptersOrDeps as AdapterDeps) ?? {});
   cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
 }
 
@@ -210,8 +192,6 @@ export interface StartRunInput {
   /** The deployed profile id persisted on the run (per-agent grouping key). */
   agentProfileId?: string | null;
   prompt: string;
-  /** Optional scripted stream (simulated backend / seed resumer). */
-  script?: SimulatedScript;
   /** Resume an existing provider session. */
   resumeSessionId?: string | null;
   autonomous?: boolean;
@@ -236,12 +216,6 @@ export interface StartRunInput {
   /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
    *  specialist's git to its workspace). Merged on top of the adapter env. */
   env?: Record<string, string>;
-  /** Request the simulated engine explicitly. Only the operator scripted
-   *  drive (itself reachable only inside the R7-2 test gate) sets this — the
-   *  real work is done by the operator-actions calls, this run is the log of
-   *  it. Outside the gate the request FAILS the run honestly instead of ever
-   *  converting into a paid real run or a fake stream. */
-  simulate?: boolean;
 }
 
 /** Runs started by the operator runtime itself (scheduling reactions). */
@@ -254,8 +228,7 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
 };
 
 /**
- * Starts a run: selects the adapter (the real one when its credential is
- * present, or the gated test engine with simulated=1), inserts the queued
+ * Starts a run: selects the requested provider adapter, inserts the queued
  * row, wires the sink and adapter callbacks, and kicks the adapter.
  *
  * R7-2: when the requested backend is UNAVAILABLE (and the test gate is
@@ -276,16 +249,8 @@ export async function startRun(
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
-  // An explicit simulate request is honored ONLY inside the R7-2 gate; a
-  // credential-based selection otherwise. Both funnel into one honest
-  // outcome: real adapter, gated test engine, or fail-fast `unavailable`.
-  const selection: SelectResult =
-    input.simulate === true
-      ? simulatedRuntimePermitted()
-        ? { kind: "simulated", adapter: state.adapters.simulated }
-        : { kind: "unavailable" }
-      : selectAdapter(input.backend, state.adapters);
-  const simulated = selection.kind === "simulated";
+  const selection = selectAdapter(input.backend, state.adapters);
+  const simulated = false;
 
   try {
     upsertRun(db, {
@@ -349,7 +314,7 @@ export async function startRun(
     },
   });
 
-  const spec: RunSpec & { script?: SimulatedScript } = {
+  const spec: RunSpec = {
     runId,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -363,7 +328,6 @@ export async function startRun(
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
-    script: input.script,
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
@@ -445,7 +409,6 @@ export async function resumeRun(
   input: {
     runId: string;
     prompt: string;
-    script?: SimulatedScript;
     /** Reuse the original run's clone workdir (defaults to the task dir). */
     workdir?: string;
     /** Override the model for the resumed turns (defaults to the prior run's).
@@ -482,9 +445,8 @@ export async function resumeRun(
 ): Promise<{ runId: string; simulated: boolean }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
-  // Historical `simulated` rows (pre-R7-2 fallback/demo data) resume onto the
-  // claude backend — startRun then applies the same honest selection as any
-  // fresh run (real, gated test engine, or fail-fast unavailable).
+  // Historical simulated rows resume through Claude; new runs are never
+  // simulated.
   const backend: RealBackend = prev.backend === "codex" ? "codex" : "claude";
   // A resume creates a NEW run row (a fresh stream) that shares the PROVIDER
   // session id. It must NOT reuse the prior thread_id — agent_runs is unique
@@ -511,7 +473,6 @@ export async function resumeRun(
     agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
-    ...(input.script ? { script: input.script } : {}),
     ...(input.workdir ? { workdir: input.workdir } : {}),
     ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
@@ -527,11 +488,7 @@ export async function resumeRun(
 }
 
 /** Wires the sink + adapter callbacks and starts the adapter process/timer. */
-function launch(
-  db: Database.Database,
-  spec: RunSpec & { script?: SimulatedScript },
-  adapter: RuntimeAdapter,
-): void {
+function launch(db: Database.Database, spec: RunSpec, adapter: RuntimeAdapter): void {
   const state = getState();
   const sink = createRunSink(db, spec);
 

@@ -160,7 +160,6 @@ describe("Codex structured operator completion", () => {
     const adapters: AdapterSet = {
       claude: adapter,
       codex: adapter,
-      simulated: adapter,
     };
     configureRunServiceForTests(adapters);
     setBackendAvailability("codex", true);

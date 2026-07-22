@@ -4,8 +4,7 @@ import { Pill, ValidationPill } from "~/ui/pill";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 /**
- * Review queue — the human acceptance boundary as a read-only triage list
- * (review-queue.md, ported 1:1 from design/html-app/app/review.jsx).
+ * Review queue — the human acceptance boundary as a read-only triage list.
  *
  * Zero mutations here: rows navigate to task detail (where packet
  * resolution lives, Phase 5), the policy chip navigates to Policy. The split is

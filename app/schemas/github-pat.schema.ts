@@ -25,7 +25,6 @@ export const PAT_VALIDATION_STATUS_VALUES = [
   "org_approval_missing",
   "network_error",
 ] as const;
-export type PatValidationStatus = (typeof PAT_VALIDATION_STATUS_VALUES)[number];
 
 export const PAT_TOKEN_KINDS = ["classic", "fine_grained", "unknown"] as const;
 export type PatTokenKind = (typeof PAT_TOKEN_KINDS)[number];

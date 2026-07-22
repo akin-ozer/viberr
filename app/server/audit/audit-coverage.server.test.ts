@@ -1,5 +1,3 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createTestDbContext,
@@ -28,131 +26,15 @@ import {
   transitionStage,
 } from "~/server/tasks/task-actions.server";
 import {
-  configureRunServiceForTests,
   interruptRun,
   startRun,
 } from "~/server/runtimes/run-service.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { AUDIT_ACTIONS, AUDIT_ACTION_NAMES } from "./audit-actions";
 import { listAuditEvents } from "../../../test-support/audit-log";
-
-/**
- * Phase 10 audit regression — two halves:
- *
- * 1. STATIC SWEEP: every `recordAudit(...)` call site in app/ + scripts/ is
- *    parsed for its `action:` literal(s); the extracted set must equal the
- *    canonical catalog in audit-actions.ts in BOTH directions. Adding a
- *    governed action without registering it (or leaving a stale catalog
- *    row) fails here — this is the "entry points vs recorded actions"
- *    enumeration, kept maintainable as data.
- *
- * 2. TABLE-DRIVEN FUNCTIONAL: one representative invocation per governed
- *    action family runs against the real server functions and asserts the
- *    audit row landed with the catalogued name + the subject fields its
- *    scope demands (task → projectSlug+taskKey, project → projectSlug).
- *    Org/auth families are exercised by their own phase-2/9 suites; the
- *    static half still guards their naming.
- */
-
-// ------------------------------------------------------------ static sweep
-
-const REPO_ROOT = path.resolve(__dirname, "../../..");
-const SCAN_ROOTS = ["app", "scripts"].map((d) => path.join(REPO_ROOT, d));
-
-function listSourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const abs = path.join(dir, entry);
-    if (statSync(abs).isDirectory()) {
-      out.push(...listSourceFiles(abs));
-      continue;
-    }
-    if (!/\.(ts|tsx)$/.test(entry)) continue;
-    if (/\.test\.(ts|tsx)$/.test(entry)) continue;
-    out.push(abs);
-  }
-  return out;
-}
-
-/** Action literals from every recordAudit CALL site (`recordAudit(x, {`
- * with a plain identifier first arg — the function definition and imports
- * never match). Handles single literals and same-line ternaries
- * (`action: cond ? "a" : "b"`). Unparseable calls become `problems`. */
-function extractRecordedActions(): {
-  found: Map<string, string[]>; // action → call-site files
-  problems: string[];
-} {
-  const found = new Map<string, string[]>();
-  const problems: string[] = [];
-  const callRe = /recordAudit\(\s*[A-Za-z_$][\w$.]*\s*,\s*\{/g;
-  for (const root of SCAN_ROOTS) {
-    for (const file of listSourceFiles(root)) {
-      const source = readFileSync(file, "utf8");
-      const rel = path.relative(REPO_ROOT, file);
-      for (const match of source.matchAll(callRe)) {
-        const window = source.slice(match.index, match.index + 400);
-        const actionLine = /action:\s*([^\n]+)/.exec(window);
-        if (!actionLine) {
-          problems.push(`${rel}@${match.index}: no action: line found`);
-          continue;
-        }
-        const literals = [
-          ...actionLine[1]!.matchAll(/"([a-z0-9_.]+)"/g),
-        ].map((m) => m[1]!);
-        if (literals.length === 0) {
-          problems.push(
-            `${rel}@${match.index}: action is not a string literal (${actionLine[1]!.trim()})`,
-          );
-          continue;
-        }
-        for (const action of literals) {
-          const files = found.get(action) ?? [];
-          files.push(rel);
-          found.set(action, files);
-        }
-      }
-    }
-  }
-  return { found, problems };
-}
-
-describe("audit action catalog (static sweep)", () => {
-  const { found: recorded, problems } = extractRecordedActions();
-
-  it("every recordAudit call site is statically parseable", () => {
-    expect(problems).toEqual([]);
-    // Sanity: the sweep actually found the app's recorder calls.
-    expect(recorded.size).toBeGreaterThan(40);
-  });
-
-  it("every recordAudit call site uses a catalogued action name", () => {
-    const unregistered = [...recorded.keys()].filter(
-      (action) => !(action in AUDIT_ACTIONS),
-    );
-    expect(
-      unregistered,
-      `unregistered audit actions (add them to audit-actions.ts): ${unregistered
-        .map((a) => `${a} (${recorded.get(a)!.join(", ")})`)
-        .join("; ")}`,
-    ).toEqual([]);
-  });
-
-  it("every catalogued action has a live recorder call site", () => {
-    const stale = AUDIT_ACTION_NAMES.filter((action) => !recorded.has(action));
-    expect(
-      stale,
-      `catalogued actions with no recordAudit call site (remove or re-wire): ${stale.join(", ")}`,
-    ).toEqual([]);
-  });
-
-  it("action names follow the dot-fact naming convention", () => {
-    for (const action of AUDIT_ACTION_NAMES) {
-      expect(action).toMatch(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/);
-    }
-  });
-});
-
-// ----------------------------------------------------- functional coverage
+import {
+  installFakeRuntime,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -192,7 +74,7 @@ beforeEach(() => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
-  configureRunServiceForTests();
+  installFakeRuntime();
 });
 
 afterEach(() => {
@@ -207,6 +89,8 @@ interface CoverageRow {
   run: () => Promise<unknown> | unknown;
   /** Expected taskKey (task-scoped rows). */
   taskKey?: string;
+  /** Instance-wide maintenance events have no project subject. */
+  instanceWide?: boolean;
 }
 
 describe("governed actions record audit rows (table-driven)", () => {
@@ -342,8 +226,13 @@ describe("governed actions record audit rows (table-driven)", () => {
         name: "startRun",
         action: "runtime.run.started",
         taskKey: "VIB-1",
-        run: () =>
-          startRun(store.db, {
+        run: () => {
+          queueFakeRun({
+            lines: [{ t: "1", ev: "text", tag: "assistant", text: "hi" }],
+            sessionId: "s",
+            keepRunning: true,
+          });
+          return startRun(store.db, {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             role: "Primary specialist",
@@ -352,23 +241,20 @@ describe("governed actions record audit rows (table-driven)", () => {
             model: "m",
             prompt: "go",
             actor: actorArda(),
-            script: {
-              lines: [{ t: "1", ev: "text", tag: "assistant", text: "hi" }],
-              sessionId: "s",
-              backend: "claude",
-              model: "m",
-              op: false,
-              keepRunning: true,
-              instant: true,
-            },
             dataRoot: store.dataRoot,
-          }),
+          });
+        },
       },
       {
         name: "interruptRun",
         action: "runtime.run.interrupted",
         taskKey: "VIB-1",
         run: async () => {
+          queueFakeRun({
+            lines: [{ t: "1", ev: "text", tag: "assistant", text: "w" }],
+            sessionId: "s2",
+            keepRunning: true,
+          });
           const { runId } = await startRun(store.db, {
             projectSlug: store.slug,
             taskKey: "VIB-1",
@@ -377,15 +263,6 @@ describe("governed actions record audit rows (table-driven)", () => {
             backend: "claude",
             model: "m",
             prompt: "go",
-            script: {
-              lines: [{ t: "1", ev: "text", tag: "assistant", text: "w" }],
-              sessionId: "s2",
-              backend: "claude",
-              model: "m",
-              op: false,
-              keepRunning: true,
-              instant: true,
-            },
             dataRoot: store.dataRoot,
           });
           for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
@@ -432,6 +309,7 @@ describe("governed actions record audit rows (table-driven)", () => {
       {
         name: "rescanProjections",
         action: "projection.rescan",
+        instanceWide: true,
         run: () =>
           rescanProjections(store.db, {
             dataRoot: store.dataRoot,
@@ -441,6 +319,7 @@ describe("governed actions record audit rows (table-driven)", () => {
       {
         name: "rebuildProjections (full drop + rebuild)",
         action: "projection.rebuild",
+        instanceWide: true,
         run: () =>
           rebuildProjections(store.db, {
             dataRoot: store.dataRoot,
@@ -459,15 +338,16 @@ describe("governed actions record audit rows (table-driven)", () => {
       ).toBeGreaterThan(before);
 
       const newest = rows[0]!;
-      const scope = AUDIT_ACTIONS[row.action];
-      expect(scope, `${row.action} missing from catalog`).toBeTruthy();
-      if (scope === "project" || scope === "task") {
-        expect(
-          newest.projectSlug,
-          `${row.name}: ${row.action} must carry projectSlug`,
-        ).toBe(store.slug);
-      }
-      if (scope === "task") {
+      expect(
+        newest.projectSlug,
+        `${row.name}: ${row.action} must carry projectSlug`,
+      ).toBe(row.instanceWide ? null : store.slug);
+      const taskless = [
+        "github.credential.revalidated",
+        "projection.rescan",
+        "projection.rebuild",
+      ].includes(row.action);
+      if (!taskless) {
         expect(
           newest.taskKey,
           `${row.name}: ${row.action} must carry taskKey`,

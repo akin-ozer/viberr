@@ -860,11 +860,9 @@ export async function commentToAgent(
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
-  const {
-    resolveMentionedAgent,
-    resumeWorkdir,
-    buildReplyScript,
-  } = await import("./agent-reply.server");
+  const { resolveMentionedAgent, resumeWorkdir } = await import(
+    "./agent-reply.server"
+  );
   const target = resolveMentionedAgent(
     db,
     ctx,
@@ -956,17 +954,6 @@ export async function commentToAgent(
       repo,
       ctx.dataRoot,
     );
-    // R7-2: the canned reply stream feeds ONLY the gated deterministic test
-    // engine — outside the gate the resume runs real, or fails fast honestly.
-    const { simulatedRuntimePermitted } = await import(
-      "~/server/runtimes/runtime-registry.server"
-    );
-    const script = simulatedRuntimePermitted()
-      ? buildReplyScript(
-          target.session.backend === "codex" ? "codex" : "claude",
-          target.model,
-        )
-      : undefined;
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
@@ -1001,7 +988,6 @@ export async function commentToAgent(
       agentName: target.name,
       agentProfileId: target.profileId,
       autonomous: true,
-      ...(script ? { script } : {}),
       ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
       actor: { userId: actor.userId, label: actor.label },
     });
@@ -2313,7 +2299,7 @@ export async function clearWaitingToHuman(
   }
 }
 
-/** Set `waiting: agent` when a real/simulated agent run is put in flight, so the
+/** Set `waiting: agent` when a provider run is put in flight, so the
  *  board reads "working" (not "waiting on human") while the agent runs. */
 export async function markWaitingAgent(
   db: Database.Database,

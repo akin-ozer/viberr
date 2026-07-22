@@ -6,6 +6,7 @@ import {
   coerceSpecialistCapabilityMode,
   normalizeDeliveryGrants,
 } from "~/shared/capabilities";
+import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
@@ -217,14 +218,6 @@ function createModalGrants(
   return normalizeDeliveryGrants(grants);
 }
 
-function slugifyProfileId(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
 // ------------------------------------------------------------------ create
 
 export async function createAgentProfile(
@@ -246,7 +239,7 @@ export async function createAgentProfile(
     const taken = new Set(parsed.frontmatter.agents.map((a) => a.profileId));
     // Server-generated slug id with a uniqueness check (agents spec §4.5) —
     // also avoid shadowing an undeployed org template file.
-    const base = slugifyProfileId(form.name) || "specialist";
+    const base = slugify(form.name) || "specialist";
     let candidate = base;
     let n = 2;
     while (

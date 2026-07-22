@@ -1,11 +1,13 @@
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 import { reactRouter } from "@react-router/dev/vite";
-import dotenv from "dotenv";
 import { defineConfig } from "vite";
 
-// Load .env so PORT (and the rest of the app env) is available in dev.
-// Values already present in the real environment always win.
-dotenv.config({ quiet: true });
+try {
+  loadEnvFile();
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
 
 // Resolve the active runtime data root the same way the app does
 // (app/server/config/env.server.ts). Task workspaces under it are full nested

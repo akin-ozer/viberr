@@ -640,18 +640,12 @@ viberr/
 │       ├── 0002_auth_metadata.sql
 │       └── 0003_provenance_and_diagnostics.sql
 ├── scripts/
-│   ├── run-migrations.ts
-│   ├── rebuild-projections.ts
-│   ├── verify-env.ts
-│   └── smoke-check.ts
+│   ├── seed.ts
+│   └── rescan.ts
 ├── public/
 │   ├── favicon.ico
 │   └── assets/
 │       └── logos/
-├── e2e/
-│   ├── auth-login.spec.ts
-│   ├── board-live-updates.spec.ts
-│   └── task-detail-readiness.spec.ts
 ├── test-support/
 │   ├── factories/
 │   │   ├── project-file.factory.ts

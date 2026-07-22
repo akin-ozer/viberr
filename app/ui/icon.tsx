@@ -1,7 +1,5 @@
 /**
- * Icon set ported 1:1 from design/html-app/app/ui.jsx (stroke, 24x24).
- * The FULL set is ported now — every later surface uses these names.
- * Unknown names fall back to "dot", exactly like the mock.
+ * Shared 24px stroke icon set. Unknown names fall back to "dot".
  */
 
 const ICON_PATHS = {

@@ -14,8 +14,7 @@ import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 
 /**
- * Project Settings view (design/html-app/app/settings.jsx → 1:1 port,
- * project-settings spec): project identity, workflow-stages editor
+ * Project settings: project identity and workflow-stages editor
  * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
  * members panel (invite/remove — roles live in Policy), repository &
  * credentials (shared CredentialCard + the real Grant-scope flow), danger

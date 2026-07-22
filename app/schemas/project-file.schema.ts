@@ -71,7 +71,6 @@ export const memberSchema = z
     role: z.preprocess(coerceProjectRole, z.enum(PROJECT_ROLES)),
   })
   .loose();
-export type ProjectMember = z.infer<typeof memberSchema>;
 
 export const capabilityGrantSchema = z
   .object({

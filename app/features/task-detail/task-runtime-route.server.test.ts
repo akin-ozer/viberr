@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  installFakeRuntime,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
 import type { loader as taskLoader, action as taskAction } from "~/routes/project.task";
 
 /**
@@ -34,24 +38,11 @@ beforeAll(async () => {
     selin: findUserByEmail(app.db, "selin@viberr.dev")!.id,
   };
 
-  // The seed ships no run history (R7-2) — materialize this file's runs on
-  // the deterministic test engine.
-  const { configureRunServiceForTests, startRun } = await import(
-    "~/server/runtimes/run-service.server"
-  );
-  configureRunServiceForTests();
+  const { startRun } = await import("~/server/runtimes/run-service.server");
+  installFakeRuntime();
 
-  const finished = await startRun(app.db, {
-    projectSlug: "viberr-core",
-    taskKey: "VIB-142",
-    threadId: "primary-test",
-    role: "Primary specialist",
-    kind: "primary",
-    backend: "codex",
-    model: "gpt-5.4-codex",
-    prompt: "analyze",
-    dataRoot: app.dataRoot,
-    script: {
+  queueFakeRun(
+    {
       lines: [
         { t: "", ev: "init", tag: "thread.started", text: "thread x" },
         { t: "", ev: "text", tag: "agent_message", text: "analysis done" },
@@ -69,15 +60,28 @@ beforeAll(async () => {
         new Date().toISOString(),
       ],
       sessionId: "sess-142",
-      backend: "codex",
-      model: "gpt-5.4-codex",
-      op: false,
-      keepRunning: false,
-      instant: true,
     },
+    "codex",
+  );
+  const finished = await startRun(app.db, {
+    projectSlug: "viberr-core",
+    taskKey: "VIB-142",
+    threadId: "primary-test",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "codex",
+    model: "gpt-5.4-codex",
+    prompt: "analyze",
+    dataRoot: app.dataRoot,
   });
   finishedRunId = finished.runId;
 
+  queueFakeRun({
+    lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+    occurredAt: [new Date().toISOString()],
+    sessionId: "sess-151",
+    keepRunning: true,
+  });
   const running = await startRun(app.db, {
     projectSlug: "viberr-core",
     taskKey: "VIB-151",
@@ -88,16 +92,6 @@ beforeAll(async () => {
     model: "claude-sonnet-4-5",
     prompt: "work",
     dataRoot: app.dataRoot,
-    script: {
-      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
-      occurredAt: [new Date().toISOString()],
-      sessionId: "sess-151",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      op: false,
-      keepRunning: true, // stays running until interrupted below
-      instant: true,
-    },
   });
   runningRunId = running.runId;
 

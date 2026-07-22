@@ -1111,9 +1111,8 @@ export function TaskDetailPage({
       r.kind === "operator" &&
       (r.lifecycle === "running" || r.lifecycle === "queued"),
   );
-  // ANY live run (operator / specialist / reviewer) — drives the hero's
-  // agent-working pill. `waiting` covers windows the runtime rows miss (the
-  // scripted operator coordinates before its row exists).
+  // Any live run (operator, specialist, or reviewer) drives the working pill.
+  // `waiting` also covers the short window before a runtime row exists.
   const anyRunLive =
     task.waiting === "agent" ||
     runtime.some(

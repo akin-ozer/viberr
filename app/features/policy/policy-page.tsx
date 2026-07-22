@@ -19,11 +19,11 @@ import {
   RBAC_ROWS,
   ROLE_IDS,
   ROLE_LABEL,
-  type RoleId,
 } from "./policy-data";
+import type { ProjectRole } from "~/shared/rbac";
 
 /**
- * Policy view (design/html-app/app/policy.jsx → 1:1 port, policy spec):
+ * Policy view:
  * Human access (member roles + the read-only 9-row RBAC grant table),
  * Agent capability (per-profile direct/recommend/human counts + the
  * always-human invariant list), Workflow rules (stage flow + per-transition
@@ -65,10 +65,10 @@ export function HumanAccess({
   members: MembershipView[];
   canManage: boolean;
   busy: boolean;
-  onSetRole: (member: MembershipView, role: RoleId) => void;
+  onSetRole: (member: MembershipView, role: ProjectRole) => void;
 }) {
   const push = useToast();
-  const counts: Record<RoleId, number> = {
+  const counts: Record<ProjectRole, number> = {
     admin: 0,
     maintainer: 0,
     contributor: 0,
@@ -76,7 +76,7 @@ export function HumanAccess({
   };
   for (const m of members) counts[m.role] += 1;
 
-  const setRole = (m: MembershipView, r: RoleId) => {
+  const setRole = (m: MembershipView, r: ProjectRole) => {
     if (m.role === r) return;
     if (m.role === "admin" && r !== "admin" && counts.admin <= 1) {
       // Client mirror of the server guard (UX sugar — the action re-checks).
@@ -441,7 +441,7 @@ export function PolicyPage({
   const busy =
     roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
 
-  const onSetRole = (member: MembershipView, role: RoleId) => {
+  const onSetRole = (member: MembershipView, role: ProjectRole) => {
     roleFetcher.submit(
       { intent: "set-role", _csrf: csrf, userId: member.userId, role },
       { method: "post" },

@@ -44,16 +44,6 @@ export interface AgentRunRow {
   updated_at: string;
 }
 
-export interface RunLogLineRow {
-  id: number;
-  run_id: string;
-  seq: number;
-  occurred_at: string;
-  raw_json: string;
-  display_json: string;
-  created_at: string;
-}
-
 export interface InsertRunInput {
   id: string;
   projectSlug: string;

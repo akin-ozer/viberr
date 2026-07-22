@@ -3,11 +3,11 @@
  * hard-requires two secrets at the first `getEnv()` call (fail-fast boot
  * validation), and some test paths reach it — e.g. `configureRunServiceForTests`
  * → `createAdapters` → `resolveClaudeConfigDir`. Locally a developer's `.env`
- * happens to satisfy it via dotenv; on CI and fresh clones nothing does, and
+ * may happen to satisfy it via a local .env; on CI and fresh clones nothing does, and
  * the whole suite fails on env validation.
  *
  * Seed deterministic test values BEFORE any app module loads (setup files run
- * first, and dotenv never overrides values already present). `??=` keeps an
+ * first, and .env loading never overrides values already present). `??=` keeps an
  * explicitly-exported real value in charge, but on a normal run the suite uses
  * these fixed values everywhere — identical behavior locally and on CI, no
  * dependence on anyone's real secrets.

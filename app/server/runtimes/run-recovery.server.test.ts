@@ -9,7 +9,7 @@ import {
 } from "../../../test-support/test-store";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { configureRunServiceForTests } from "./run-service.server";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
   finalizeOrphanedRuns,
   recoverUnreactedAgentRuns,
@@ -27,7 +27,7 @@ beforeEach(() => {
     frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  configureRunServiceForTests(); // no real backend → operator re-invoke is simulated
+  installFakeRuntime();
 });
 
 afterEach(() => ctx.cleanup());

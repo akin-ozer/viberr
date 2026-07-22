@@ -17,7 +17,7 @@ import { publishSseEvent, type SseRoute } from "./sse-broker.server";
  * EVERY mutation source already flows through the emitter — verified:
  * - task actions (comment/owner/transition/resolve/create) end in
  *   `rebuildPath` → `task.updated` (+ `project.updated` on key allocation);
- * - the chokidar watcher calls `rebuildPath` for external file edits;
+ * - the file watcher calls `rebuildPath` for external edits;
  * - rescan (`rebuildAll`) emits per-file events + one `projection.rebuilt`
  *   summary; the Home/Board Re-scan buttons call it;
  * - notification fan-out (`createNotification`) emits

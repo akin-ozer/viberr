@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * Pill + ReadinessPill + ValidationPill, ported from design/html-app/app/ui.jsx.
+ * Status, readiness, and validation pills.
  *
  * ORCHESTRATOR RULING 1: the canonical readiness enum is
  * `ready | input_required | inconsistency_risk_detected | blocked`; this is
