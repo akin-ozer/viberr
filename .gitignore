@@ -13,3 +13,4 @@ node_modules/
 /e2e/.tmp-data/
 /e2e/.auth/
 .react-router/
+.agents/
