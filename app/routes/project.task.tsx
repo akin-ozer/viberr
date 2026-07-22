@@ -104,10 +104,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (r) => r.lifecycle === "running" || r.lifecycle === "queued",
   );
   const deliveringActive = activeRuns.some((r) => r.kind === "primary" && !r.op);
-  const activeReviewerIds = activeRuns
-    .filter((r) => r.kind === "reviewer")
-    .map((r) => r.profileId)
-    .filter((id): id is string => !!id);
+  const activeReviewerIds = activeRuns.flatMap((r) =>
+    r.kind === "reviewer" && r.profileId ? [r.profileId] : [],
+  );
 
   // @-mention autocomplete directory for the comment composer: deployed
   // specialists, registered users, and the reserved backend/role handles —

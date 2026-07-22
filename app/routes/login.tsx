@@ -306,6 +306,9 @@ export default function Login({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ provider: which, callbackURL: returnTo ?? "/" }),
         });
+        // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
+        // read as a successful sign-in response.
+        if (!res.ok) throw new Error("sign-in request failed");
         const body = (await res.json()) as { url?: string };
         if (body.url) {
           window.location.href = body.url;

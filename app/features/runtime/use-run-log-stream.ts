@@ -108,13 +108,15 @@ export function useRunLogStream(input: {
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
 
-    let cancelled = false;
+    // Aborts in-flight tail fetches on unmount / task change — a bare
+    // `cancelled` flag would still let the response land and be parsed.
+    const abort = new AbortController();
 
     const fetchTail = async (runId: string, sinceSeq: number) => {
       try {
         const res = await fetch(
           `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
-          { headers: { Accept: "application/json" } },
+          { headers: { Accept: "application/json" }, signal: abort.signal },
         );
         if (!res.ok) return;
         const body = (await res.json()) as {
@@ -125,7 +127,7 @@ export function useRunLogStream(input: {
           };
         };
         const data = body.data;
-        if (!data || cancelled || data.lines.length === 0) return;
+        if (!data || abort.signal.aborted || data.lines.length === 0) return;
         const cursor = cursorsRef.current.get(runId);
         if (cursor) cursor.headSeq = data.headSeq;
         setLinesByThread((prev) => {
@@ -170,7 +172,7 @@ export function useRunLogStream(input: {
     });
 
     return () => {
-      cancelled = true;
+      abort.abort();
       source.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

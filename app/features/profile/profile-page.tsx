@@ -454,6 +454,9 @@ function ProfileGithub({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ provider: "github", callbackURL: "/profile" }),
         });
+        // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
+        // read as a successful connect response.
+        if (!res.ok) throw new Error("connect request failed");
         const body = (await res.json()) as { url?: string };
         if (body.url) {
           window.location.href = body.url;

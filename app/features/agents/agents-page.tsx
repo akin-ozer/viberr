@@ -600,8 +600,12 @@ export function AgentsPage({
   const counts = useMemo(() => {
     const sets = new Map<string, Set<string>>();
     for (const d of deployments) {
-      if (!sets.has(d.profileId)) sets.set(d.profileId, new Set());
-      sets.get(d.profileId)!.add(d.taskKey);
+      let keys = sets.get(d.profileId);
+      if (!keys) {
+        keys = new Set();
+        sets.set(d.profileId, keys);
+      }
+      keys.add(d.taskKey);
     }
     const out: Record<string, number> = {};
     for (const [k, v] of sets) out[k] = v.size;

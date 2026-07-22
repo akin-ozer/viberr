@@ -74,7 +74,7 @@ export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
 /** Agent reference: profile id is the join key (ruling: never join by role
  * string). backend+role are display data. Still the projection JSON shape for
  * the derived specialist/reviewers columns. */
-export const agentRefSchema = z
+const agentRefSchema = z
   .object({
     profileId: z.string().min(1),
     backend: z.enum(["codex", "claude"]),

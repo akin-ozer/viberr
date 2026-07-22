@@ -634,51 +634,50 @@ export function ExecutionProfile({
               above (glyph · name / role·backend · Run), with a release (×). */}
           <div className="val revs">
             {task.reviewers.length ? (
-              task.reviewers.map((c) => (
-                <div className="rev-agent" key={c.profileId}>
-                  <AgentGlyph backend={c.backend} />
-                  <span>
-                    <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
-                    <div className="sub">
-                      {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
-                    </div>
-                  </span>
-                  {canRunAgents && (
-                    <span className="right">
-                      <button
-                        type="button"
-                        className="btn primary sm"
-                        disabled={
-                          reviewerBusy ||
-                          activeReviewerIds.includes(c.profileId) ||
-                          closed
-                        }
-                        onClick={() => onRunReviewer(c.profileId)}
-                        title={
-                          closed
-                            ? "Task is closed (terminal stage) — no runs needed"
-                            : activeReviewerIds.includes(c.profileId)
-                              ? "A run for this reviewer is already streaming"
-                              : "Start a run for this reviewer"
-                        }
-                      >
-                        <Icon name="bolt" />
-                        {activeReviewerIds.includes(c.profileId) ? "Running…" : "Run"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rev-x"
-                        disabled={reviewerBusy}
-                        aria-label={`Release ${c.role} reviewer`}
-                        title="Release reviewer"
-                        onClick={() => onRemoveReviewer(c.profileId)}
-                      >
-                        <Icon name="x" />
-                      </button>
+              task.reviewers.map((c) => {
+                const running = activeReviewerIds.includes(c.profileId);
+                return (
+                  <div className="rev-agent" key={c.profileId}>
+                    <AgentGlyph backend={c.backend} />
+                    <span>
+                      <div className="nm">{agentNameOf(c.profileId, c.role)}</div>
+                      <div className="sub">
+                        {c.role} · {c.backend === "claude" ? "Claude Code" : "Codex"}
+                      </div>
                     </span>
-                  )}
-                </div>
-              ))
+                    {canRunAgents && (
+                      <span className="right">
+                        <button
+                          type="button"
+                          className="btn primary sm"
+                          disabled={reviewerBusy || running || closed}
+                          onClick={() => onRunReviewer(c.profileId)}
+                          title={
+                            closed
+                              ? "Task is closed (terminal stage) — no runs needed"
+                              : running
+                                ? "A run for this reviewer is already streaming"
+                                : "Start a run for this reviewer"
+                          }
+                        >
+                          <Icon name="bolt" />
+                          {running ? "Running…" : "Run"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rev-x"
+                          disabled={reviewerBusy}
+                          aria-label={`Release ${c.role} reviewer`}
+                          title="Release reviewer"
+                          onClick={() => onRemoveReviewer(c.profileId)}
+                        >
+                          <Icon name="x" />
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })
             ) : (
               <span className="sub">None engaged</span>
             )}
