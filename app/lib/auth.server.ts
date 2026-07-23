@@ -33,6 +33,22 @@ import { getDb } from "~/server/db/sqlite.server";
 
 export const AUTH_BASE_PATH = "/api/auth";
 
+/**
+ * Built-in Better Auth endpoints the app does NOT use and that must not be
+ * reachable through the `/api/auth/*` splat (P11-02). The app owns these flows
+ * itself (audited, session-revoking) — exposing Better Auth's versions would
+ * bypass that governance or split-brain the canonical `users` row.
+ */
+export const BLOCKED_AUTH_PATHS = new Set<string>([
+  "/change-password",
+  "/change-email",
+  "/update-user",
+  "/delete-user",
+  "/forget-password",
+  "/reset-password",
+  "/request-password-reset",
+]);
+
 /** The concrete better-auth instance type (with our plugins). */
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
@@ -153,6 +169,21 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
        */
       before: createAuthMiddleware(async (ctx) => {
         const ip = clientIpOf(ctx.headers);
+        // P11-02: the `/api/auth/*` handler is a splat (routes/api.auth.$.ts), so
+        // EVERY built-in Better Auth endpoint is reachable — including account
+        // mutations Viberr does NOT use because it owns those flows itself with
+        // auditing + session revocation (profile change-password, admin
+        // user-edit/reset). Left open, `/change-password` would bypass the app's
+        // audit + other-session kill, and `/update-user` would write Better
+        // Auth's `user.name` only, diverging from the canonical `users` row
+        // (split-brain). The password-reset endpoints are inert (no
+        // sendResetPassword configured) but still answer and share Better Auth's
+        // org-wide limiter bucket. Reject them all with a 404 so the splat only
+        // exposes the endpoints the app actually drives (sign-in, sign-out,
+        // get-session, the OAuth callback dance).
+        if (BLOCKED_AUTH_PATHS.has(ctx.path)) {
+          throw new APIError("NOT_FOUND", { message: "Not found." });
+        }
         if (ctx.path === "/sign-in/email") {
           const email =
             typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";

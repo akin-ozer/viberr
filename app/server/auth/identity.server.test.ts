@@ -158,4 +158,40 @@ describe("identity provisioning", () => {
     expect(isBetterAuthPasswordHash("")).toBe(false);
     expect(isBetterAuthPasswordHash(null)).toBe(false);
   });
+
+  it("blocks unused account-mutation endpoints on the splat, keeps sign-in reachable (P11-02)", async () => {
+    const db = ctx.makeDb();
+    const a = auth(db);
+    provisionIdentity(db, {
+      id: "u_b",
+      email: "blocked@viberr.dev",
+      name: "B",
+      passwordHash: await hashPassword("some-password"),
+    });
+    const post = (path: string, body: unknown) =>
+      a.handler(
+        new Request(`http://localhost:5173/api/auth${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    for (const path of [
+      "/change-password",
+      "/update-user",
+      "/delete-user",
+      "/forget-password",
+      "/reset-password",
+      "/request-password-reset",
+    ]) {
+      const res = await post(path, { email: "blocked@viberr.dev" });
+      expect(res.status, `${path} should be blocked`).toBe(404);
+    }
+    // The endpoints the app DOES drive stay reachable.
+    const ok = await post("/sign-in/email", {
+      email: "blocked@viberr.dev",
+      password: "some-password",
+    });
+    expect(ok.status).toBe(200);
+  });
 });
