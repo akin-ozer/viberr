@@ -78,6 +78,10 @@ export interface OperatorAuthority {
   skills: string[];
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
+  /** The deployment's persona override (P11-21) — when a project edits the
+   *  operator's persona in the UI, the run uses it in place of the shipped
+   *  operator definition. `null` falls back to the shipped/baked persona. */
+  persona: string | null;
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
 }
@@ -158,6 +162,7 @@ export function resolveOperatorAuthority(
       name: "Operator",
       skills: [],
       kb: [],
+      persona: null,
       deployed: false,
     };
   }
@@ -192,6 +197,10 @@ export function resolveOperatorAuthority(
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
+    persona:
+      isRecord(definition) && typeof definition.persona === "string"
+        ? definition.persona.trim() || null
+        : null,
     deployed: true,
   };
 }

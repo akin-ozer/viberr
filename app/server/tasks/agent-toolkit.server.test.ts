@@ -8,7 +8,7 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { postAgentComment, openAgentQuestionPacket } from "./agent-toolkit.server";
-import type { FileActorRef } from "~/server/files/actor-ref.server";
+import type { FileActorRef } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
