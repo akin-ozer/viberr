@@ -229,7 +229,12 @@ export type PrState = (typeof PR_STATE_VALUES)[number];
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
-    state: z.enum(PR_STATE_VALUES),
+    // Tolerant: an unknown string (e.g. a legacy raw GitHub "open") coerces
+    // to "review" instead of dropping the whole PR ref — parsers never throw.
+    // `pr` is read through tolerant(…, null), so WITHOUT this catch an
+    // unknown state nulls the entire ref (number + title + link) and the next
+    // write persists that loss back to task.md.
+    state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
   })
   .loose();

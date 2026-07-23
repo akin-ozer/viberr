@@ -226,7 +226,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     });
   });
 
-  it("pr.state accepts only the canonical four values", () => {
+  it('pr.state is the 4-value enum; unknown strings coerce to "review" (never throw, never drop)', () => {
     // Canonical values pass through untouched.
     for (const state of ["review", "merged", "closed", "accepted"]) {
       const result = parseTaskFrontmatter(
@@ -235,12 +235,20 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       );
       expect(result.frontmatter.pr?.state).toBe(state);
     }
-    const invalid = parseTaskFrontmatter(
+    // A legacy raw GitHub "open" (pre-B3 writes) coerces to "review" instead
+    // of dropping the whole PR ref. `pr` is parsed through tolerant(…, null),
+    // so a hard enum failure would null the number and title too — the link
+    // would then be lost from task.md on the next write.
+    const legacy = parseTaskFrontmatter(
       { ...valid, pr: { number: 318, state: "open", title: "x" } },
       { fallbackKey: "VIB-142" },
     );
-    expect(invalid.frontmatter.pr).toBeNull();
-    expect(invalid.diagnostics.some((d) => d.path === "pr")).toBe(true);
+    expect(legacy.frontmatter.pr).toMatchObject({
+      number: 318,
+      state: "review",
+      title: "x",
+    });
+    expect(legacy.diagnostics).toEqual([]);
   });
 
   it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
