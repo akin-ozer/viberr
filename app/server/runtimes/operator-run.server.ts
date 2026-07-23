@@ -1,20 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import {
-  getDataRoot,
   agentProfilesDir,
   skillDirPath,
 } from "~/server/files/file-store-root.server";
 import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
-import type { LogLine } from "~/features/runtime/runtime-types";
 import { newId } from "~/shared/ids/new-id.server";
 import {
-  gate,
   operatorAcceptCompletion,
   operatorEngageAgent,
   operatorOpenPacket,
@@ -34,22 +31,16 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
-import { specialistEligibleForStage } from "~/server/tasks/specialist-run.server";
 import {
   DEFAULT_GOAL,
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
-import {
-  isBackendAvailable,
-  simulatedRuntimePermitted,
-  type RealBackend,
-} from "./runtime-registry.server";
+import type { RealBackend } from "./runtime-registry.server";
 import { registerRunCompletion, startRun } from "./run-service.server";
-import { buildScript } from "./simulated-runtime.server";
 
 /**
- * Runs the OPERATOR as a real agent (Claude Code) or a deterministic scripted
- * drive (Codex / offline). The operator is given its persona (agent
+ * Runs the operator through Claude or Codex. The operator is given its persona
+ * (agent
  * definition) + the Viberr app-expertise skill as a system prompt, plus the
  * in-process governance tools (operator-toolkit). It drives the task toward
  * its next boundary under its capability policy + autonomy level.
@@ -62,13 +53,8 @@ import { buildScript } from "./simulated-runtime.server";
  *     same gated operator-actions as the Claude tools — so Codex honors the
  *     identical RBAC + autonomy, it just plans-then-executes instead of
  *     calling tools live.
- *   R7-2 test gate open (vitest / Playwright) → SCRIPTED drive: the same
- *     operator-actions are called deterministically in code (the board still
- *     advances honestly), and a simulated run streams the narrative to the
- *     agent logs. Unreachable in production/dev.
- *   no credential, gate closed → NO fabricated drive: the run starts anyway
- *     and startRun fails it fast as an honest error; the completion hook
- *     escalates a blocked recovery packet (F-OP1 path, "unavailable" class).
+ *   no credential → startRun records an honest error; the completion hook
+ *     escalates a blocked recovery packet.
  */
 
 const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
@@ -105,14 +91,12 @@ export interface RunOperatorInput {
 export interface RunOperatorResult {
   runId: string;
   backend: RealBackend;
-  /** "real" = LLM tool-driven · "scripted" = deterministic drive. */
-  mode: "real" | "scripted";
   autonomy: OperatorAutonomy;
 }
 
 /** A queued/running operator run for the same task, if one is already in flight. */
 function inFlightOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): { id: string; backend: RealBackend } | null {
@@ -139,8 +123,8 @@ function inFlightOperatorRun(
  * was simply DROPPED: a human's "@operator …" landing while a run was in
  * flight was never answered.
  *
- * The lease is held from runOperator entry until the mode's coordination truly
- * ends (real: run completion; codex: plan executed; scripted: drive returned).
+ * The lease is held from runOperator entry through provider completion and,
+ * for Codex, structured-plan execution.
  * A trigger arriving while held is QUEUED (newest wins — the operator re-reads
  * the full task anyway, so the latest trigger subsumes older ones) and fired
  * exactly once on release.
@@ -182,13 +166,12 @@ function leaseKeyFor(projectSlug: string, taskKey: string): string {
  * IDEMPOTENT per acquisition (adversarial-review #5/#7): `token` is the exact
  * lease-entry object captured when this drive acquired the lease. We only
  * delete/queue-fire when the currently-held entry IS that token — so a
- * second/late release (e.g. the scripted path's inner finally AND the outer
- * catch both firing) can never evict a SUCCESSOR's freshly-acquired lease or
+ * second or late release can never evict a successor's freshly-acquired lease or
  * double-fire the queued run. A release whose token no longer matches is a
  * no-op.
  */
 function releaseOperatorLease(
-  db: Database.Database,
+  db: DatabaseSync,
   key: string,
   token?: object,
 ): void {
@@ -230,7 +213,7 @@ function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } 
  *  a failed settle only leaves the board reading "working" until the next
  *  task mutation reprojects. */
 function settleWaitingAfterOperator(
-  db: Database.Database,
+  db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string },
 ): void {
   void (async () => {
@@ -241,7 +224,7 @@ function settleWaitingAfterOperator(
         "~/server/tasks/task-actions.server"
       );
       const ctx: TaskMutationContext =
-        ref.dataRoot !== undefined ? { dataRoot: ref.dataRoot } : {};
+        { dataRoot: ref.dataRoot };
       await clearWaitingToHuman(db, ctx, ref.projectSlug, ref.taskKey);
     } catch (error) {
       logger.warn("settleWaitingAfterOperator failed", {
@@ -254,7 +237,7 @@ function settleWaitingAfterOperator(
 
 /** Any queued/running run (operator, specialist or reviewer) on the task. */
 function inFlightAgentRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): boolean {
@@ -277,11 +260,11 @@ export function resetOperatorLeasesForTests(): void {
 }
 
 export async function runOperator(
-  db: Database.Database,
+  db: DatabaseSync,
   input: RunOperatorInput,
 ): Promise<RunOperatorResult> {
   const ctx: TaskMutationContext = {
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   };
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, {
     ...(input.backend ? { backend: input.backend } : {}),
@@ -293,8 +276,8 @@ export async function runOperator(
   // time. A trigger arriving while the lease is held — e.g. create-time
   // auto-invoke racing an "@operator …" comment — is QUEUED (newest wins) and
   // fired when the in-flight coordination truly ends, so no trigger is ever
-  // silently dropped and no two drives overlap. The process lease covers the
-  // scripted/codex windows the agent_runs row alone misses.
+  // silently dropped and no two drives overlap. The process lease also covers
+  // Codex plan execution after the provider run finishes.
   const leaseKey = leaseKeyFor(input.projectSlug, input.taskKey);
   const lease = leaseState();
   const heldByProcess = lease.held.get(leaseKey);
@@ -307,10 +290,6 @@ export async function runOperator(
     return {
       runId: heldByProcess.runId ?? "queued",
       backend: heldByProcess.backend,
-      mode:
-        heldByProcess.backend === "claude" && isBackendAvailable("claude")
-          ? "real"
-          : "scripted",
       autonomy: heldByProcess.autonomy,
     };
   }
@@ -330,7 +309,6 @@ export async function runOperator(
     return {
       runId: inflight.id,
       backend: inflight.backend,
-      mode: inflight.backend === "claude" && isBackendAvailable("claude") ? "real" : "scripted",
       autonomy: authority.autonomy,
     };
   }
@@ -344,7 +322,7 @@ export async function runOperator(
     autonomy: authority.autonomy,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -365,36 +343,9 @@ export async function runOperator(
   const { markWaitingAgent } = await import("~/server/tasks/task-actions.server");
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
-  // Claude: real tool-driven operator (in-process MCP tools). Codex: no
-  // in-process tool channel, so it runs a real STRUCTURED-OUTPUT operator (the
-  // model emits a decision plan we execute through the same capability-gated
-  // actions). The deterministic scripted drive is reachable ONLY inside the
-  // R7-2 test gate; with no credential and the gate closed the real path runs
-  // anyway — startRun fails it fast as an honest error run and the completion
-  // hook escalates (no fabricated coordination). The real/codex
-  // paths release the lease on run COMPLETION (chained callback); only a
-  // SYNCHRONOUS throw before that reaches the outer catch. The scripted path is
-  // synchronous, so it releases in its own finally — the outer catch must NOT
-  // also release it (that double-release is the bug). Idempotent-per-token
-  // release makes even an accidental double-release safe.
+  // Claude uses in-process governance tools. Codex emits a structured plan
+  // that the completion callback executes through the same governed actions.
   try {
-    if (backend === "claude" && isBackendAvailable("claude")) {
-      return await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    if (backend === "codex" && isBackendAvailable("codex")) {
-      return await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
-    }
-    if (simulatedRuntimePermitted()) {
-      try {
-        return await runScriptedOperatorDrive(db, ctx, input, authority);
-      } finally {
-        // Scripted coordination is fully synchronous with this call.
-        releaseOperatorLease(db, leaseKey, leaseToken);
-      }
-    }
-    // R7-2 fail-fast: the backend is unavailable and no test engine is
-    // permitted. Start the honest error run through the backend's own path —
-    // its completion callback releases the lease and escalates the failure.
     return backend === "codex"
       ? await startCodexOperatorRun(db, ctx, input, authority, leaseKey, leaseToken)
       : await startRealOperatorRun(db, ctx, input, authority, leaseKey, leaseToken);
@@ -427,14 +378,6 @@ const OPERATOR_PLAN_TOOLS = [
   "engage_agent",
   "run_agent",
   "prompt_agent",
-  // Legacy aliases (pre-generic plans / model drift) — dispatched to the same
-  // generic handlers with the delivers flag implied by the name.
-  "assign_specialist",
-  "run_specialist",
-  "prompt_specialist",
-  "assign_reviewer",
-  "run_reviewer",
-  "prompt_reviewer",
   "transition_stage",
   "accept_completion",
 ] as const;
@@ -483,8 +426,7 @@ const OPERATOR_PLAN_SCHEMA = {
 const operatorPlanActionSchema = z.strictObject({
   tool: z.enum(OPERATOR_PLAN_TOOLS),
   profileId: z.string().nullable(),
-  // Optional (not just nullable): legacy stored plans predate the field.
-  delivers: z.boolean().nullable().optional(),
+  delivers: z.boolean().nullable(),
   toStageId: z.string().nullable(),
   packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
   text: z.string().nullable(),
@@ -520,7 +462,7 @@ function defaultPacketOptions(
 }
 
 async function startCodexOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -552,7 +494,7 @@ async function startCodexOperatorRun(
     outputSchema: OPERATOR_PLAN_SCHEMA,
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   });
 
   // When the run finishes, parse its decision plan and execute it through the
@@ -587,7 +529,7 @@ async function startCodexOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "codex", mode: "real", autonomy: authority.autonomy };
+  return { runId, backend: "codex", autonomy: authority.autonomy };
 }
 
 /** Parse the complete structured response and validate it before execution. */
@@ -604,7 +546,7 @@ function parseOperatorPlan(text: string): OperatorPlan | null {
 
 /** Execute a finished codex operator run's decision plan (capability-gated). */
 async function executeCodexPlan(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -656,24 +598,17 @@ async function executeCodexPlan(
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
   }
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
-  // One operator turn → one comment. The plan's `reasoning` IS that comment;
-  // codex often ALSO emits redundant `post_comment` actions repeating it almost
-  // verbatim (observed live: three near-identical "Observed…/Recommended…"
-  // comments in one turn). Track what we've already said and drop duplicates so
-  // the timeline stays a decision log, not an echo chamber.
-  const postedComments = new Set<string>();
-  const commentKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
-  if (plan.reasoning) {
+  // Actions narrate themselves. Only a reply-only plan needs its reasoning
+  // copied to the timeline.
+  if (plan.actions.length === 0 && plan.reasoning) {
     await operatorPostComment(db, ctx, { ...base, text: plan.reasoning }, authority);
-    postedComments.add(commentKey(plan.reasoning));
   }
   for (const a of plan.actions) {
     try {
       switch (a.tool) {
         case "post_comment":
-          if (a.text && !postedComments.has(commentKey(a.text))) {
+          if (a.text) {
             await operatorPostComment(db, ctx, { ...base, text: a.text }, authority);
-            postedComments.add(commentKey(a.text));
           }
           break;
         case "open_packet": {
@@ -693,52 +628,33 @@ async function executeCodexPlan(
             );
           break;
         }
-        // Generic engagement actions + legacy aliases → ONE dispatch. The
-        // alias implies the delivers flag its name always meant.
         case "engage_agent":
-        case "assign_specialist":
-        case "assign_reviewer":
-          if (a.profileId)
+          if (a.profileId && a.delivers !== null)
             await operatorEngageAgent(
               db,
               ctx,
               {
                 ...base,
                 profileId: a.profileId,
-                delivers:
-                  a.tool === "assign_specialist"
-                    ? true
-                    : a.tool === "assign_reviewer"
-                      ? false
-                      : (a.delivers ?? true),
+                delivers: a.delivers,
                 ...(a.reason ? { reason: a.reason } : {}),
               },
               authority,
             );
           break;
         case "run_agent":
-        case "run_specialist":
-        case "run_reviewer":
           await operatorRunAgent(
             db,
             ctx,
             {
               ...base,
               ...(a.profileId ? { profileId: a.profileId } : {}),
-              ...(a.tool === "run_specialist"
-                ? { delivers: true }
-                : a.tool === "run_reviewer"
-                  ? { delivers: false }
-                  : a.delivers != null
-                    ? { delivers: a.delivers }
-                    : {}),
+              ...(a.delivers != null ? { delivers: a.delivers } : {}),
             },
             authority,
           );
           break;
         case "prompt_agent":
-        case "prompt_specialist":
-        case "prompt_reviewer":
           if (a.profileId)
             await operatorPromptAgentGeneric(
               db,
@@ -747,13 +663,7 @@ async function executeCodexPlan(
                 ...base,
                 profileId: a.profileId,
                 ...(a.text ? { directive: a.text } : {}),
-                ...(a.tool === "prompt_specialist"
-                  ? { delivers: true }
-                  : a.tool === "prompt_reviewer"
-                    ? { delivers: false }
-                    : a.delivers != null
-                      ? { delivers: a.delivers }
-                      : {}),
+                ...(a.delivers != null ? { delivers: a.delivers } : {}),
               },
               authority,
             );
@@ -816,7 +726,7 @@ async function executeCodexPlan(
 // ------------------------------------------------------- real (tool-driven)
 
 async function startRealOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -856,7 +766,7 @@ async function startRealOperatorRun(
     allowedTools: toolkit.allowedTools,
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
+    dataRoot: input.dataRoot,
   });
 
   // The real operator coordinates DURING its run (in-proc MCP tools), so the
@@ -881,7 +791,7 @@ async function startRealOperatorRun(
     runId,
     autonomy: authority.autonomy,
   });
-  return { runId, backend: "claude", mode: "real", autonomy: authority.autonomy };
+  return { runId, backend: "claude", autonomy: authority.autonomy };
 }
 
 /**
@@ -892,7 +802,7 @@ async function startRealOperatorRun(
  * recovery packet through the operator's own gate, with quota/auth-aware copy.
  */
 async function escalateFailedOperatorRun(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: RunOperatorInput,
   authority: OperatorAuthority,
@@ -937,262 +847,6 @@ async function escalateFailedOperatorRun(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-}
-
-// ------------------------------------------------------- scripted drive
-
-/**
- * Deterministic operator supervision: performs the same capability-gated
- * operator-actions in code, so a Codex / offline operator still moves the board.
- * Terminates: it makes at most one forward action per stage, stopping the first
- * time an action is only recommended (supervised autonomy) or denied.
- */
-async function runScriptedOperatorDrive(
-  db: Database.Database,
-  ctx: TaskMutationContext,
-  input: RunOperatorInput,
-  authority: OperatorAuthority,
-): Promise<RunOperatorResult> {
-  const { projectSlug, taskKey } = input;
-  const lines: LogLine[] = [];
-  const say = (text: string) =>
-    lines.push({ t: "", ev: "text", tag: "assistant", text });
-
-  lines.push({
-    t: "",
-    ev: "init",
-    tag: "system·init",
-    text: `operator runtime · ${authority.autonomy} autonomy · anchored projects/${projectSlug}/tasks/${taskKey}/task.md`,
-  });
-
-  try {
-    const isReact = (input.trigger ?? "manual") === "agent-reply";
-    let snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-    const doneStageId = snap.doneStageId;
-    // Classify stages from the workflow graph (NOT positionally): the review
-    // stage has an edge into Done, the work stage an edge into review. This is
-    // correct for custom/lightweight boards, not just the default 5-stage one.
-    const reviewStageId = snap.reviewStageId;
-    const workStageId = snap.workStageId;
-
-    say(
-      `Supervising ${taskKey} at stage “${snap.stageName}” — ${isReact ? "reacting to an agent report" : "coordinating"}. Autonomy: ${authority.autonomy}.`,
-    );
-
-    // COORDINATE the current stage: prompt its agent (reviewer at the review
-    // stage, specialist at the work stage), advancing through any pre-work
-    // stages first. Stops once it has prompted an agent (now waiting for that
-    // agent to report) or hit a recommend boundary under supervised autonomy.
-    const coordinate = async () => {
-      for (let step = 0; step < 8; step++) {
-        snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-        if (snap.stage === doneStageId) return;
-        if (snap.stage === reviewStageId) {
-          // Prompt EVERY engaged reviewer (not just the first) so each records a
-          // verdict; a single engaged/picked reviewer keeps the common case.
-          // FILTER by stage eligibility (F1): re-prompting an engaged reviewer
-          // whose profile isn't eligible for THIS stage would throw in
-          // assertStageEligible and hard-halt the whole coordination turn — skip
-          // the ineligible one instead (the snapshot precomputes eligibility).
-          const eligibleHere = (id: string) => {
-            const d = snap.deployedSpecialists.find((s) => s.id === id);
-            return !d || d.eligibleForCurrentStage;
-          };
-          const revIds = (
-            snap.reviewers.length
-              ? snap.reviewers.map((r) => r.profileId)
-              : [pickReviewer(snap)?.id].filter((x): x is string => !!x)
-          ).filter(eligibleHere);
-          if (revIds.length && gate(authority, "summon-reviewers") !== "deny") {
-            for (const rev of revIds) {
-              say(
-                (
-                  await operatorPromptAgentGeneric(
-                    db,
-                    ctx,
-                    { projectSlug, taskKey, profileId: rev, delivers: false },
-                    authority,
-                  )
-                ).message,
-              );
-            }
-          }
-          return;
-        }
-        if (snap.stage === workStageId || !workStageId) {
-          // Only re-run the assigned specialist if it's ELIGIBLE for the current
-          // stage (F1); otherwise fall back to an eligible pick (pickSpecialist
-          // already filters by eligibility) so an assigned-but-now-ineligible
-          // specialist doesn't throw and halt coordination.
-          const assigned = snap.specialist
-            ? snap.deployedSpecialists.find((s) => s.id === snap.specialist!.profileId)
-            : undefined;
-          const pick =
-            assigned && assigned.eligibleForCurrentStage ? assigned : pickSpecialist(snap);
-          if (pick && gate(authority, "assign-primary-specialist") !== "deny") {
-            say(
-              (
-                await operatorPromptAgentGeneric(
-                  db,
-                  ctx,
-                  { projectSlug, taskKey, profileId: pick.id, delivers: true },
-                  authority,
-                )
-              ).message,
-            );
-          }
-          return;
-        }
-        // Pre-work stage — advance toward the work stage.
-        const nid = snap.nextStages[0]?.id;
-        if (!nid) return;
-        const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
-        say(t.message);
-        if (t.outcome !== "done") return; // recommended (supervised) → stop.
-      }
-    };
-
-    // REACT to an agent's report: propose the NEXT state change. Under full
-    // autonomy the move is performed and the new stage is coordinated; under
-    // supervised it is only recommended (a human bridges to the next stage).
-    const react = async () => {
-      snap = operatorSnapshot(db, ctx, projectSlug, taskKey, authority);
-      if (snap.stage === doneStageId) return;
-      if (snap.stage === reviewStageId) {
-        say((await operatorAcceptCompletion(db, ctx, { projectSlug, taskKey }, authority)).message);
-        return;
-      }
-      const nid = snap.nextStages[0]?.id;
-      if (!nid) {
-        say("No further governed transition from here — handing back to humans.");
-        return;
-      }
-      const t = await operatorTransitionStage(db, ctx, { projectSlug, taskKey, toStageId: nid }, authority);
-      say(t.message);
-      if (t.outcome === "done") await coordinate(); // full: performed → coordinate the new stage.
-    };
-
-    // A human is talking to the operator directly (@operator) — acknowledge them
-    // first, then continue coordinating.
-    if (input.humanComment?.trim()) {
-      await operatorPostComment(
-        db,
-        ctx,
-        {
-          projectSlug,
-          taskKey,
-          text: `**Operator:** got your message — "${input.humanComment.trim()}". Reviewing ${taskKey} at “${snap.stageName}” and continuing to coordinate.`,
-        },
-        authority,
-      );
-    }
-
-    // ONE timeline entry per operator turn (decision E): the coordination
-    // actions themselves narrate the turn — the prompting comment, transition
-    // events, and recommendation cards ARE the plan made visible. No standalone
-    // "Plan: …" / "Read the report" pre-comments.
-    if (isReact) {
-      await react();
-    } else {
-      await coordinate();
-    }
-  } catch (error) {
-    logger.error("operator scripted drive failed", {
-      taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    say("Operator halted on an error — see the task timeline.");
-  }
-
-  lines.push({
-    t: "",
-    ev: "result",
-    tag: "result",
-    text: "operator pass complete",
-    stats: { subtype: "success", dur: 1200, api: 900, turns: 1, cost: 0, in: 0, cached: 0, out: 0 },
-  });
-
-  const sid = newId("op").replace("op_", "");
-  const now = new Date().toISOString();
-  const script = buildScript({
-    lines,
-    occurredAt: lines.map(() => now),
-    sessionId: sid,
-    backend: authority.backend,
-    model: authority.model,
-    op: true,
-    keepRunning: false,
-    instant: true,
-  });
-
-  const { runId } = await startRun(db, {
-    projectSlug,
-    taskKey,
-    threadId: "op-" + newId("t").replace("t_", "").slice(0, 8),
-    role: "Operator",
-    kind: "operator",
-    backend: authority.backend,
-    model: authority.model,
-    agentName: authority.name,
-    agentProfileId: "operator",
-    prompt: `Supervise ${taskKey} toward its next boundary.`,
-    script,
-    simulate: true,
-    actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
-    ...(input.dataRoot !== undefined ? { dataRoot: input.dataRoot } : {}),
-  });
-
-  logger.info("operator run started (scripted)", {
-    taskKey,
-    runId,
-    autonomy: authority.autonomy,
-  });
-  return { runId, backend: authority.backend, mode: "scripted", autonomy: authority.autonomy };
-}
-
-// ------------------------------------------------------- specialist picks
-
-/**
- * Pick an implementation specialist ELIGIBLE for the current stage (F1 — stage
- * eligibility is now real). Filters to specialists whose declared stages include
- * `snap.stage` (spanAll / no-stages count as eligible), then prefers an
- * implementation role. Returns null when no eligible specialist exists rather
- * than silently assigning one that can't work this stage.
- */
-function pickSpecialist(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter((s) =>
-    specialistEligibleForStage(s, snap.stage),
-  );
-  // Capability-first (generic-agents D11): a DELIVERY-capable profile is the
-  // structural signal for build work — no hardcoded ids. The legacy role
-  // heuristics remain only as last-resort tie-breakers for deployments with no
-  // capability grants at all.
-  return (
-    specs.find((s) => s.capabilities.delivery && !s.capabilities.verdict) ??
-    specs.find((s) => s.capabilities.delivery) ??
-    specs.find((s) => /develop|implement/i.test(s.role)) ??
-    specs.find((s) => !s.capabilities.verdict && !/review/i.test(s.role)) ??
-    specs[0] ??
-    null
-  );
-}
-
-/** Prefer a stage-eligible review specialist to engage before acceptance (F1). */
-function pickReviewer(snap: OperatorTaskSnapshot) {
-  const specs = snap.deployedSpecialists.filter(
-    (s) =>
-      specialistEligibleForStage(s, snap.stage) &&
-      !snap.reviewers.some((r) => r.profileId === s.id) &&
-      s.id !== snap.specialist?.profileId,
-  );
-  // Capability-first (D11): verdict capability IS what makes review-engaging a
-  // profile meaningful — its verdicts gate acceptance (G2).
-  return (
-    specs.find((s) => s.capabilities.verdict) ??
-    specs.find((s) => /review/i.test(s.role)) ??
-    specs[0] ??
-    null
-  );
 }
 
 // ------------------------------------------------------- system prompt
@@ -1244,8 +898,7 @@ export function buildOperatorSystemPrompt(
     .join("\n");
 
   const parts = [definition];
-  // Load EVERY declared skill that exists in the store (not just one), so the
-  // operator's profile-declared skills are actually in its context.
+  // Load every declared skill that exists in the store.
   const skills = authority.skills.length ? authority.skills : ["viberr-app-expertise"];
   for (const name of skills) {
     const body = readSkillBody(name, dataRoot);
@@ -1266,29 +919,15 @@ export function buildOperatorSystemPrompt(
     }
   }
   parts.push(
-    "\n\n---\n# Your authority for this task\n\n" +
+    "\n\n---\n# Live authority\n\n" +
       `Autonomy: **${authority.autonomy}**.\n\n` +
       "Capability policy (capabilityId: mode):\n" +
       policyLines +
-      "\n\nRules:\n" +
-      "- `direct` capabilities: act via the matching tool.\n" +
-      "- `recommend` capabilities: under supervised autonomy the tool posts a recommendation and you must stop; under FULL autonomy it acts directly.\n" +
-      "- `human` / `off` / withheld: the tool is not offered — never attempt it.\n" +
-      "- When a task is at (or enters) a stage, TRIGGER its agent with a task-related prompt: prompt_specialist for a working stage, prompt_reviewer for the review stage. The prompt is the agent's directive — make it specific to this task and stage, never a bare 'proceed'.\n" +
-      "- Reach Done ONLY via accept_completion, and only under full autonomy; otherwise recommend acceptance.\n" +
-      "- Never write code, run shell commands, or touch the repository — those tools are withheld from you. Coordinate ONLY through the `mcp__viberr__*` governance tools (you may also read files and search to inform a decision).",
+      "\n\nUse only the governance tools offered for this run. Tool results enforce the policy; stop after a recommendation. Reach Done only through `accept_completion`.",
   );
   return parts.join("");
 }
 
-/**
- * The turn prompt for the CODEX structured-output operator. Persona + expertise
- * are supplied separately through Codex's supported `developer_instructions`
- * channel; this prompt contains only the live task snapshot and turn-specific
- * output instruction. Codex has no in-process SDK MCP channel, so it returns a
- * decision plan (constrained by OPERATOR_PLAN_SCHEMA) that we execute through
- * the same capability-gated actions.
- */
 /** The task goal is still the unspecified triage placeholder (or blank) — the
  * operator must draft it (set_goal) before prompting any agent against it. */
 function goalIsUnspecified(goal: string): boolean {
@@ -1296,154 +935,84 @@ function goalIsUnspecified(goal: string): boolean {
   return g === "" || g === DEFAULT_GOAL.trim();
 }
 
-export function buildCodexOperatorPrompt(
+type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
+
+function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
+  if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
+  const report = agentReply.slice(0, 4000);
+  const suffix = agentReply.length > report.length ? " (first 4,000 chars)" : "";
+  return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\``;
+}
+
+/** The turn-specific instruction shared by both operator backends. */
+function operatorTurnInstruction(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
+  trigger: OperatorTrigger,
   humanComment?: string,
-  agentReply?: string,
 ): string {
-  // Same rationale as the claude turn prompt: the react decision carries the
-  // agent's report verbatim so directives can quote concrete findings.
-  const reportBlock =
-    trigger === "agent-reply" && agentReply?.trim()
-      ? `\n\n# The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""})\n\n"""\n${agentReply.slice(0, 4000)}\n"""`
-      : "";
-  const decision = humanComment?.trim()
-    ? `A human just addressed YOU directly with: "${humanComment.trim()}". RESPOND to them: put your reply to the human in \`reasoning\` (answer their question or acknowledge their instruction, grounded in the task state), and add any coordination actions their message warrants (prompt an agent, transition, etc.) — or none if a reply is all that's needed.`
-    : trigger === "goal-updated"
-      ? "A human just EDITED THE TASK GOAL (the snapshot's `goal` is the new one). If the open packet (snapshot `packet`) " +
-        "asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, include a " +
-        "`resolve_packet` action with a short `reason` — the packet is moot. Then continue coordination for the current " +
-        "stage (prompt the right agent anchored on the NEW goal, or advance a pre-work stage). If the goal is still not " +
-        "actionable, say what's missing in `reasoning` — do NOT open a duplicate packet."
-      : trigger === "agent-reply"
-      ? "An agent you prompted has just REPORTED BACK (its report is included above verbatim). React to it: " +
-        "summarize what it reported (in `reasoning`), then PROPOSE THE NEXT STATE CHANGE — a transition_stage " +
-        "toward review if the implementation looks complete, or accept_completion if the review is clean. If the " +
-        "review REQUESTED CHANGES, re-prompt the specialist and QUOTE the reviewer's specific findings in the " +
-        "action's `text` (the specialist does not see this report otherwise). Only re-prompt the same agent " +
-        "(prompt_specialist/prompt_reviewer) if the work is clearly incomplete. Do not prompt just to repeat yourself."
-      : (goalIsUnspecified(snapshot.goal)
-          ? "THE GOAL IS UNSPECIFIED (still the triage placeholder). FIRST specify it: add a `set_goal` action whose " +
-            "`text` is a concrete scope + acceptance criteria drafted from the title/context (or open an `edit_goal` " +
-            "packet if you genuinely need the human to provide scope, and stop). Never prompt an agent against an " +
-            "unspecified goal. THEN "
-          : "") +
-        "TRIGGER the agent for THIS stage and then STOP: use prompt_specialist (a working stage) or prompt_reviewer " +
-        "(the review stage), putting a concrete task-related directive addressed to the agent (\"@dev implement …\") " +
-        "in the action's `text`. Do NOT also propose the stage transition yet — you will be re-invoked to react once " +
-        "the agent reports back. (You may advance a PRE-work stage like triage→ready if no implementation is needed there.)";
+  if (humanComment?.trim()) {
+    return (
+      `A human addressed you directly: "${humanComment.trim()}" Respond from the live task state, ` +
+      "then take only the coordination action it warrants. If none is needed, leave one concise reply."
+    );
+  }
+  if (trigger === "goal-updated") {
+    return (
+      "The goal was edited. If it now supplies the input requested by the open packet, resolve that packet as moot. " +
+      "Continue the current stage using the new goal. If it is still not actionable, state the missing input once; do not open a duplicate packet."
+    );
+  }
+  if (trigger === "agent-reply") {
+    return (
+      "React to the report above. Move completed implementation toward review; accept a clean review through `accept_completion`. " +
+      "If review requests changes, move back to the work stage and `prompt_agent` the delivering profile with the concrete findings. " +
+      "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+
+  const scope = goalIsUnspecified(snapshot.goal)
+    ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. "
+    : "";
   return (
-    "# This task\n\n" +
-    "```json\n" +
-    JSON.stringify(snapshot, null, 2) +
-    "\n```" +
-    reportBlock +
-    "\n\n# Your decision\n\n" +
-    "You cannot call tools. Instead, DECIDE the coordination actions to take now and return them as a plan. " +
-    "Use the deployedSpecialists' profileId values for assign/prompt actions, and nextStages' ids for transitions. " +
-    "SELECT the right agent by reading each profile's `desc` (its purpose) and `capabilities` " +
-    "(delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions) — " +
-    "never by guessing from names.\n\n" +
-    decision +
-    "\nRespect your capability policy + autonomy: under supervised autonomy, governed actions become recommendation cards; " +
-    "under full autonomy they are performed. Reach Done only via accept_completion (full autonomy).\n\n" +
-    "Return ONLY a JSON object of the form " +
-    `{ "reasoning": "<a concise operator comment>", "actions": [ { "tool": "prompt_agent", "profileId": "…", "delivers": true, "text": "<task-related directive>", "reason": "…" }, { "tool": "transition_stage", "toStageId": "…", "reason": "…" } ] }. ` +
-    "Include a short reason on each governed action (it is shown on the recommendation card)."
+    scope +
+    "Advance an eligible pre-work `auto` transition. At a work stage, choose the deployed profile by description and capabilities, " +
+    "then call `prompt_agent` with a concrete directive and `delivers: true` for implementation or `false` for supporting review. Stop after the handoff."
   );
 }
 
-/**
- * The operator's opening turn prompt. It differs by WHY the run fired:
- *   agent-reply → REACT: an agent the operator prompted just reported back; read
- *     its report and propose the next state change (do not re-prompt).
- *   otherwise  → COORDINATE: prompt the stage's agent with an "@handle …"
- *     directive and stop; the reaction comes when the agent reports.
- */
-export function buildOperatorTurnPrompt(
+/** Codex cannot call the in-process tools, so it returns a constrained plan. */
+
+export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
-  trigger: "create" | "transition" | "agent-reply" | "goal-updated" | "manual",
+  trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
 ): string {
-  const header =
-    `You are operating task ${snapshot.key} — "${snapshot.title}". ` +
-    `Goal: ${snapshot.goal}\n\n` +
-    `It is currently at stage "${snapshot.stageName}" (autonomy: ${snapshot.autonomy}).\n\n`;
-
-  // A human is talking to you directly (@operator). Answer them first, then take
-  // any coordination action that their message warrants.
-  if (humanComment?.trim()) {
-    return (
-      header +
-      `A human just addressed YOU directly with: "${humanComment.trim()}"\n\n` +
-      "Do this now:\n" +
-      "1. Call get_task to read the live state, your policy, and the allowed next stages.\n" +
-      "2. Post a `post_comment` that RESPONDS to the human's message — answer their question or acknowledge their instruction, grounded in the task's real state.\n" +
-      "3. If their message calls for a coordination action you're allowed to take (prompt an agent, engage a reviewer, recommend/perform a transition), do it and say so. If it does not, just respond.\n" +
-      "Respect your capability policy. Keep it concise and directly responsive."
-    );
-  }
-
-  if (trigger === "goal-updated") {
-    return (
-      header +
-      "A human just EDITED THE TASK GOAL (the goal above is the new one).\n\n" +
-      "Do this now:\n" +
-      "1. Call get_task — read the new goal and the open decision packet (`packet`), if any.\n" +
-      "2. If your open packet asked for exactly this input (scope / goal / acceptance criteria) and the new goal now provides it, call resolve_decision_packet with a short reason — the packet is moot, do not leave it standing.\n" +
-      "3. Then continue coordination for the current stage: prompt the right agent with a directive anchored on the NEW goal, or advance a pre-work stage if nothing needs to run here.\n" +
-      "4. If the new goal is still not actionable, post ONE brief comment saying exactly what is missing — do NOT open a duplicate packet while one is already standing.\n\n" +
-      "Respect your capability policy at every step. Keep comments concise."
-    );
-  }
-
-  if (trigger === "agent-reply") {
-    // Embed the report verbatim (capped): the operator's next directive must
-    // carry the agent's actual findings even when the timeline comment was
-    // dropped or trimmed.
-    const reportBlock = agentReply?.trim()
-      ? `The agent's report (verbatim${agentReply.length > 4000 ? ", first 4,000 chars" : ""}):\n"""\n${agentReply.slice(0, 4000)}\n"""\n\n`
-      : "";
-    return (
-      header +
-      "An agent you prompted has just REPORTED BACK.\n\n" +
-      reportBlock +
-      "Do this now:\n" +
-      "1. Call get_task and read the live state (the report above is the agent's reply).\n" +
-      "2. Post a brief comment summarizing what the agent reported.\n" +
-      "3. Based on that report, PROPOSE THE NEXT STATE CHANGE:\n" +
-      "   · if the implementation looks complete → transition_stage toward review (or recommend it under supervised);\n" +
-      "   · if the review looks clean → accept_completion (or recommend acceptance under supervised);\n" +
-      "   · if the review REQUESTED CHANGES → re-prompt the specialist and QUOTE the reviewer's specific findings in your directive (the specialist does not see this report otherwise — a directive that just says \"see the reviewer's comments\" hands it nothing);\n" +
-      "   · only if the work is clearly incomplete, re-prompt the SAME agent with prompt_specialist/prompt_reviewer, and say why.\n" +
-      "Do NOT prompt a fresh agent turn just to repeat yourself. React to the report, then act or recommend.\n\n" +
-      "Respect your capability policy at every step. Keep comments concise."
-    );
-  }
-
-  const goalUnspecified = goalIsUnspecified(snapshot.goal);
-  const goalStep = goalUnspecified
-    ? "0. THE GOAL IS UNSPECIFIED (it is still the triage placeholder). Specify it FIRST: call set_goal " +
-      "with a concrete scope + acceptance criteria drafted from the title and context — OR, if you genuinely " +
-      "need the human to provide scope, open an `edit_goal` decision packet and STOP. Never prompt an agent " +
-      "against an unspecified goal.\n"
-    : "";
   return (
-    header +
-    "Do this now:\n" +
-    goalStep +
-    "1. Call get_task to see the live state, your policy, and the allowed next stages.\n" +
-    "2. Post a brief plan comment.\n" +
-    "3. TRIGGER the right agent for THIS stage with a concrete, task-related directive, addressed to it by name (\"@dev implement …\"):\n" +
-    "   · a working stage (before review) → prompt_specialist(profileId, prompt) — assigns the\n" +
-    "     specialist, posts your \"@name …\" prompt to it, and starts its run on your directive;\n" +
-    "   · the review stage → prompt_reviewer(profileId, prompt) — engages + prompts + runs a reviewer.\n" +
-    "   Write the prompt about THIS task (its goal and what to do at this stage), not a generic 'go'.\n" +
-    "4. Then STOP and wait — do NOT propose the stage transition yet. When the agent reports back you\n" +
-    "   will be re-invoked to read its report and propose the next state change.\n" +
-    "   (Only advance a PRE-work stage, e.g. triage → ready, if no implementation is needed there yet.)\n\n" +
-    "Respect your capability policy at every step. Keep comments concise."
+    "# Task snapshot\n\n```json\n" +
+    JSON.stringify(snapshot, null, 2) +
+    "\n```" + agentReportBlock(trigger, agentReply) +
+    "\n\n# Your decision\n\n" +
+    "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
+    "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
+    operatorTurnInstruction(snapshot, trigger, humanComment) +
+    "\n\nUse `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
+    "Give governed actions a short `reason`. Return only the JSON plan."
+  );
+}
+
+/** Claude receives the same decision rule plus live tool access. */
+export function buildOperatorTurnPrompt(
+  snapshot: OperatorTaskSnapshot,
+  trigger: OperatorTrigger,
+  humanComment?: string,
+  agentReply?: string,
+): string {
+  return (
+    `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
+    `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
+    agentReportBlock(trigger, agentReply) +
+    "\n\n" +
+    operatorTurnInstruction(snapshot, trigger, humanComment)
   );
 }

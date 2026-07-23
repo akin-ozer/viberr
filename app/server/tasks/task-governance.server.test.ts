@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -762,10 +763,10 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", async () => {
-    const { configureRunServiceForTests, interruptRun } = await import(
+    const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
     );
-    configureRunServiceForTests(); // no real keys → simulated engine
+    installFakeRuntime();
     const store = prepared();
     const RETRY_PACKET: TaskPacket = {
       type: "blocked",

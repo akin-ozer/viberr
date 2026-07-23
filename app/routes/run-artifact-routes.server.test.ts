@@ -23,7 +23,7 @@ const RUN_ID = "run_authfixture";
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
@@ -42,8 +42,8 @@ beforeAll(async () => {
     threadId: "thread_authfixture",
     role: "developer",
     kind: "primary",
+    agentProfileId: "developer",
     backend: "claude",
-    simulated: true,
     model: "claude-opus-4-8",
     sdk: "claude-agent-sdk",
     state: "finished",
@@ -120,12 +120,11 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       `/resources/session-export?run=${RUN_ID}`,
       ids.arda,
     );
-    // The fixture run is simulated, so a MEMBER is refused for a different,
-    // non-authorization reason. The distinct status is the proof the gate
-    // opened for them: 404 (no exportable session), never 403.
+    // The fixture has no provider session, so a member is refused for a
+    // non-authorization reason. The distinct status proves the gate opened.
     expect(res.status).toBe(404);
     expect(res.status).not.toBe(403);
-    expect(res.body).toContain("no exportable provider session");
+    expect(res.body).toContain("never opened an exportable provider session");
   });
 
   it("the gate keys on the RUN's project, not a project the caller happens to be in", async () => {
@@ -143,8 +142,8 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       threadId: "thread_foreign",
       role: "developer",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "claude",
-      simulated: true,
       model: "claude-opus-4-8",
       sdk: "claude-agent-sdk",
       state: "finished",

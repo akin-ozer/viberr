@@ -32,8 +32,7 @@ import {
 } from "./project-name";
 
 /**
- * Home — multi-project landing, ported from design/html-app/app/home.jsx.
- * Prototype mechanics replaced: loader data instead of window.VIBERR,
+ * Multi-project home. Uses loader data,
  * per-user DB prefs instead of localStorage, real routes instead of hash
  * hops, per-project board links instead of the single WORKSPACE page.
  */

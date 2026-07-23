@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { StoreNode } from "~/features/kb-browser/tree";
 import { countKbFiles } from "~/features/kb-browser/tree";
 import {
@@ -139,7 +139,7 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
  * never advanced. A store mutation now ADOPTS such a resource into a real
  * metadata row first (same as editing/re-indexing it would), then touches.
  */
-function touchResource(db: Database.Database, target: StoreTarget): void {
+function touchResource(db: DatabaseSync, target: StoreTarget): void {
   const now = new Date().toISOString();
   if (target.kind === "kb") {
     const dir = path.basename(target.rootAbs);
@@ -211,7 +211,7 @@ export interface UploadResult {
  * replaced (mock merge semantics); a file never clobbers a directory.
  */
 export function writeStoreFiles(
-  db: Database.Database,
+  db: DatabaseSync,
   target: StoreTarget,
   dirPath: string[],
   files: UploadFileInput[],
@@ -287,7 +287,7 @@ export interface MkdirResult {
 /** mkdir -p semantics; "a/b/c" creates the chain; a FILE occupying a
  * segment refuses with the mock's exact message. */
 export function createStoreFolder(
-  db: Database.Database,
+  db: DatabaseSync,
   target: StoreTarget,
   dirPath: string[],
   name: string,
@@ -337,7 +337,7 @@ export interface DeleteNodeResult {
 
 /** Deletes a file or folder (recursive) at the store-relative path. */
 export function deleteStoreNode(
-  db: Database.Database,
+  db: DatabaseSync,
   target: StoreTarget,
   nodePath: string[],
   actor: AuditActor,
@@ -401,7 +401,7 @@ interface GitTreeEntry {
 }
 
 export async function importGithubSnapshot(
-  db: Database.Database,
+  db: DatabaseSync,
   target: StoreTarget,
   url: string,
   actor: AuditActor,

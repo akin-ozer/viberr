@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   deliveringEngagement,
   supportingEngagements,
@@ -28,7 +28,6 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
-  agentProfilesDir,
   skillDirPath,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -42,10 +41,8 @@ import {
 } from "~/server/secrets/pat-store.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import type { AgentProfileView } from "~/features/agents/agent-types";
-import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   isBackendAvailable,
-  simulatedRuntimePermitted,
   type RealBackend,
 } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -54,14 +51,7 @@ import {
   resolveRunEffort,
 } from "~/server/runtimes/model-catalog.server";
 import { taskBranchName } from "~/server/github/branch-sync.server";
-import {
-  buildScript,
-  type SimulatedScript,
-} from "~/server/runtimes/simulated-runtime.server";
-import {
-  listRunsForTask,
-  startRun,
-} from "~/server/runtimes/run-service.server";
+import { startRun } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
@@ -79,16 +69,7 @@ import {
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 
 /**
- * Assign a deployed specialist agent to a task, and start a real (or
- * simulated-fallback) agent run for it from the task-detail UI.
- *
- * This is the "deploy a specialist to a task and run it" surface the app was
- * missing: today runs only appear from seed data or the operator-scheduling
- * reaction. `assignSpecialist` writes the `specialist` frontmatter + a typed
- * `agent` timeline event; `startSpecialistRun` clones the repo (best-effort)
- * and hands off to the Phase-8 run service, streaming a realistic simulated
- * dev-agent-analyzing-a-repo transcript when no real backend credential is
- * present (and a real SDK run when one is).
+ * Assign a deployed specialist agent to a task and start its provider run.
  *
  * RBAC (both fns): admin|maintainer — contracts §3.2 "Open agent runtime
  * sessions". Mirrors the transition/interrupt project-membership check.
@@ -106,7 +87,7 @@ function taskRef(
   return {
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
@@ -169,7 +150,7 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
 
 /** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
 function mcpServersFor(
-  db: Database.Database,
+  db: DatabaseSync,
   names: string[],
 ): { mcpServers?: Record<string, unknown> } {
   const servers = resolveSpecialistMcpServers(db, names);
@@ -190,7 +171,7 @@ export function resolveDeployedSpecialist(
 ): ResolvedSpecialist {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
@@ -241,7 +222,7 @@ export interface AssignSpecialistResult {
  * (SSE rides the reproject). RBAC: admin|maintainer.
  */
 export async function assignSpecialist(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -343,7 +324,7 @@ export interface AssignReviewerResult {
  * profile already in `reviewers` is a no-op. RBAC: admin|maintainer.
  */
 export async function assignReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -449,7 +430,7 @@ export interface RemoveReviewerResult {
  * profile that isn't currently a reviewer is a no-op. RBAC: admin|maintainer.
  */
 export async function removeReviewer(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; profileId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -502,33 +483,12 @@ export async function removeReviewer(
 export interface StartAgentRunResult {
   runId: string;
   backend: RealBackend;
-  simulated: boolean;
   role: string;
 }
 
-/**
- * Starts a run for an ENGAGED agent — the ONE dispatch path for every agent on
- * a task (generic-agents G1: the former startSpecialistRun / startReviewerRun
- * twins differed only in slot lookup, thread prefix, role label and audit
- * copy — all of which are now data on the engagement).
- *
- * `profileId` selects the engagement; omitted → the delivering engagement
- * (the former "primary specialist" path). Behavior differences come from the
- * engagement, never from a kind:
- *   - single-flight guard iff `delivers` (one live run per task workspace —
- *     F7-OP1; supporting agents run concurrently on their own threads);
- *   - thread prefix `primary-` / `r<index>-` (the agents projection groups on
- *     it) is derived from `delivers`;
- *   - the run row records the engagement's live role snapshot.
- *
- * Builds the analyze prompt from the task title + goal, best-effort clones the
- * project repo into `<taskDir>/workspace/<repo>`, resolves model/effort/
- * skills/KB/MCPs/tool-denies from the CURRENT deployment (live profile wins
- * over the engage-time snapshot), and hands off to the run service. RBAC:
- * admin|maintainer (runtimeAuditActor).
- */
+/** Start an engaged agent from its current deployment and task workspace. */
 export async function startAgentRun(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -589,7 +549,6 @@ export async function startAgentRun(
         status: 409,
         userMessage:
           "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-        kind: "user",
       });
     }
   }
@@ -661,7 +620,7 @@ export async function startAgentRun(
     skills,
     kb,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
@@ -761,21 +720,6 @@ export async function startAgentRun(
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
     : basePrompt;
 
-  // R7-2: the canned analyze stream feeds ONLY the gated deterministic test
-  // engine — a real run never receives one, and an unavailable backend fails
-  // fast in startRun instead of falling back to this fabrication.
-  const script =
-    !realBackend && simulatedRuntimePermitted()
-      ? buildAnalyzeScript({
-          backend,
-          model,
-          repo,
-          cloned: !!clone,
-          role: engagement.role,
-          ...(input.directive ? { directive: input.directive } : {}),
-        })
-      : undefined;
-
   // Thread prefix: the delivering agent streams on `primary-…`; each
   // supporting agent groups on its `r<index>-…` prefix (the agents deployment
   // projection groups on it). Unique suffix so re-runs never collide on
@@ -816,7 +760,7 @@ export async function startAgentRun(
   const useEnvelopeSchema =
     backend === "codex" && realBackend && (collab.verdict || collab.ask);
 
-  const { runId, simulated } = await startRun(db, {
+  const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId,
@@ -833,7 +777,6 @@ export async function startAgentRun(
     agentName,
     agentProfileId: engagement.profileId,
     prompt,
-    ...(script ? { script } : {}),
     actor: auditActor,
     ...(disallowedTools.length ? { disallowedTools } : {}),
     // Profile MCPs (item-1/FR9) + the collaboration toolkit (Claude).
@@ -843,7 +786,7 @@ export async function startAgentRun(
     ...(useEnvelopeSchema ? { outputSchema: AGENT_OUTCOME_JSON_SCHEMA } : {}),
     ...(runWorkdir ? { workdir: runWorkdir } : {}),
     ...(realBackend ? { env: baseRunEnv } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 
   const backendLabel = backend === "claude" ? "Claude Code" : "Codex";
@@ -909,7 +852,6 @@ export async function startAgentRun(
       profileId: engagement.profileId,
       backend,
       delivers,
-      simulated,
       cloned: !!clone,
       ...(directiveOverrode ? { directiveRequestedDelivery: true } : {}),
     },
@@ -939,7 +881,7 @@ export async function startAgentRun(
     ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
   });
 
-  return { runId, backend, simulated, role: engagement.role };
+  return { runId, backend, role: engagement.role };
 }
 
 // ----------------------------------------------------------------- persona
@@ -967,17 +909,7 @@ function readSkillBody(name: string, dataRoot?: string): string {
   return "";
 }
 
-/**
- * Assemble a specialist's run PERSONA: its detailed definition (who it is + how
- * it works) followed by each of its declared skill bodies (its craft). This is
- * what makes a built-in agent behave as itself — the Developer implements and
- * reports back, the Reviewer critiques AND validates (tests) — rather than a
- * generic "analyze the repo" agent. Returns "" when the store ships neither a
- * definition nor any skill (the run still works on the analyze prompt alone).
- *
- * Threaded into the run as the system prompt for Claude, or folded into the turn
- * prompt for Codex (which has no system-prompt channel). Exported for tests.
- */
+/** Assemble the profile definition and attached skill/KB bodies into its persona. */
 export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
@@ -1137,157 +1069,11 @@ export function buildAnalyzePrompt(input: {
   return prompt;
 }
 
-/**
- * Does an operator directive try to make the specialist perform a delivery
- * action the SERVER owns (push / open-update-merge a PR)? Used to record the
- * contradiction in run evidence (F10-31) — the specialist prompt already gives
- * the typed contract precedence, and the workspace clone carries no push
- * credential, so a directive like this is inert; we surface it rather than let
- * it silently expand an agent's apparent authority.
- */
+/** Detect directives that contradict the server-owned delivery contract. */
 export function directiveRequestsDelivery(directive: string): boolean {
   return /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|open(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|create\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/i.test(
     directive,
   );
-}
-
-/** Classify a specialist by its role label so the simulated report and persona
- *  match what the agent actually does. The Reviewer is the single quality
- *  specialist (it reviews the diff AND authors/runs tests), so review/test/QA
- *  roles all classify as "reviewer". Anything unrecognized reports as a
- *  developer. */
-function classifyRole(role?: string): "developer" | "reviewer" {
-  const r = (role ?? "").toLowerCase();
-  if (/review|test|valid|qa/.test(r)) return "reviewer";
-  return "developer";
-}
-
-/**
- * The TEST-ENGINE agent's CLOSING report (R7-2: this text can only ever
- * stream inside the gated deterministic test runtime — production/dev runs
- * either use a real backend or fail fast, never this fabrication). ROLE-AWARE,
- * so the operator reads a report that matches the agent it prompted: the
- * Developer reports what it implemented, the Reviewer reports a review
- * verdict, the Tester reports a validation verdict. When the operator engaged
- * the agent with a directive this reports the work as DONE (otherwise the
- * operator, reading only a "findings" summary, keeps re-prompting the same
- * canned reply and spirals — the CTL-3 bug). The text is deterministic on
- * purpose: if the operator ever re-prompts a simulated agent, the identical
- * repeat trips its no-progress guard and stops the loop instead of
- * spiralling. Exported for tests.
- */
-export function simulatedFinalReport(
-  backend: RealBackend,
-  directive?: string,
-  role?: string,
-): string {
-  const kind = classifyRole(role);
-  if (directive?.trim()) {
-    if (kind === "reviewer") {
-      return (
-        `@operator — reviewed and validated the change against the goal. ` +
-        `Correctness: the logic holds on the paths that matter. Security: input ` +
-        `is validated and no secrets leak. Tests: authored and ran coverage for ` +
-        `the new behavior incl. the empty and boundary cases; full suite passes. ` +
-        `No blocking findings (one nit: a comment could be clearer). Verdict: ` +
-        `**approve** — ready to accept.`
-      );
-    }
-    const test = backend === "codex" ? "a test that exercises" : "a test covering";
-    return (
-      `@operator — done: implemented what you asked for, wired into the existing ` +
-      `structure (matching the conventions under src/), and added ${test} the new ` +
-      `behavior. Ran the suite and it passes. No blockers remaining — ready to advance.`
-    );
-  }
-  if (kind === "reviewer") {
-    return "Review findings: the change is small and localized; no obvious correctness or security issues in the diff. The existing tests pass, but coverage of the new path is thin — the empty and boundary cases are not exercised yet, which I'd want closed before acceptance.";
-  }
-  return backend === "codex"
-    ? "Findings: a small Node/TypeScript service (Express). Entry at src/index.ts, HTTP layer under src/server. Dependencies are lean; no test suite is wired yet — the main gap for this goal."
-    : "Findings: a small Node/TypeScript service (Express). Entry point src/index.ts; the HTTP layer lives under src/server. Dependencies are lean. Notable gap: there is no test suite wired up yet, which is the main risk for this goal.";
-}
-
-/**
- * A realistic dev-agent-analyzing-a-repo stream for the GATED deterministic
- * test engine (R7-2 — built only when the gate is open and no real backend
- * carries the run): system·init, a couple of tool_use Read/Bash lines, an
- * assistant findings summary, and a final result envelope with usage.
- */
-function buildAnalyzeScript(input: {
-  backend: RealBackend;
-  model: string;
-  repo: string | null;
-  cloned: boolean;
-  /** The agent's role — makes the simulated closing report role-appropriate. */
-  role?: string;
-  /** When the operator engaged this agent, its directive (shown as the opener). */
-  directive?: string;
-}): SimulatedScript {
-  const sid = newId("run").replace("run_", "");
-  const now = () => new Date().toISOString();
-  const repoName = input.repo ? input.repo.split("/").pop() ?? input.repo : "workspace";
-  const directive = input.directive?.trim();
-  const opener = directive
-    ? `The operator asked me to: ${directive} On it — scanning the repository first.`
-    : "Scanning the repository layout to understand its structure.";
-  const finalCodex = simulatedFinalReport("codex", directive, input.role);
-  const finalClaude = simulatedFinalReport("claude", directive, input.role);
-
-  const lines: LogLine[] =
-    input.backend === "codex"
-      ? [
-          { t: "", ev: "init", tag: "thread.started", text: `codex thread · analyzing ${repoName}` },
-          { t: "", ev: "text", tag: "agent_message", text: opener },
-          { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "ls -R", input: { command: "ls -R" } },
-          { t: "", ev: "out", tag: "command_output", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
-          { t: "", ev: "tool", tag: "command_execution", name: "exec", text: "cat package.json", input: { command: "cat package.json" } },
-          { t: "", ev: "out", tag: "command_output", text: '{ "name": "app", "dependencies": { "express": "^4" } }' },
-          {
-            t: "",
-            ev: "text",
-            tag: "agent_message",
-            text: finalCodex,
-          },
-          {
-            t: "",
-            ev: "result",
-            tag: "turn.completed",
-            text: "analysis complete",
-            usage: { input_tokens: 4200, cached_input_tokens: 1800, output_tokens: 640 },
-          },
-        ]
-      : [
-          { t: "", ev: "init", tag: "system·init", text: `analyzing ${repoName} · read-only pass` },
-          { t: "", ev: "text", tag: "assistant", text: directive ? opener : "Scanning the repository layout to understand its structure and dependencies." },
-          { t: "", ev: "tool", tag: "tool_use", name: "Bash", text: "ls -R", input: { command: "ls -R" } },
-          { t: "", ev: "out", tag: "tool_result", text: "src/\n  index.ts\n  server/\npackage.json\nREADME.md" },
-          { t: "", ev: "tool", tag: "tool_use", name: "Read", text: "package.json", input: { file_path: "package.json" } },
-          { t: "", ev: "out", tag: "tool_result", text: '{ "name": "app", "dependencies": { "express": "^4" } }' },
-          {
-            t: "",
-            ev: "text",
-            tag: "assistant",
-            text: finalClaude,
-          },
-          {
-            t: "",
-            ev: "result",
-            tag: "result",
-            text: "analysis complete",
-            stats: { subtype: "success", dur: 8400, api: 7100, turns: 3, cost: 0.06, in: 4200, cached: 1800, out: 640 },
-          },
-        ];
-
-  return buildScript({
-    lines,
-    occurredAt: lines.map(() => now()),
-    sessionId: sid,
-    backend: input.backend,
-    model: input.model,
-    op: false,
-    keepRunning: false,
-  });
 }
 
 // ------------------------------------------------------------------- repo clone
@@ -1295,32 +1081,12 @@ function buildAnalyzeScript(input: {
 function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | null {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return file?.parsed.frontmatter.repo ?? null;
 }
 
-/**
- * Best-effort `git clone` of `<owner>/<name>` into
- * `<taskDir>/workspace/<name>`. Supplies a project-bound PAT through an
- * ephemeral Git askpass process when one exists (private repos), else uses a
- * plain credential-free clone (public repos).
- * Returns the clone dir on success, null on any failure (the caller then
- * points the run at its dedicated workspace root and tells the agent to clone
- * into that directory itself).
- *
- * Never throws — clone failure must not break starting the run.
- */
-/**
- * The dedicated per-task workspace directory (`<taskDir>/workspace`). A
- * specialist run's cwd is ALWAYS inside here — NEVER the task dir itself —
- * and `GIT_CEILING_DIRECTORIES` is pinned to it, so an agent's git can never
- * walk UP to a host checkout even when `VIBERR_DATA_ROOT` lives inside a git
- * repo (the dogfooding hazard: a run once switched the running app's own
- * source onto its task branch). This only constrains Git discovery; autonomous
- * Codex specialists still need a separate OS/container boundary before this can
- * be treated as filesystem isolation.
- */
+/** Keep every specialist cwd below the task workspace and Git discovery ceiling. */
 function taskWorkspaceRoot(
   projectSlug: string,
   taskKey: string,
@@ -1329,17 +1095,9 @@ function taskWorkspaceRoot(
   return path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
 }
 
-/** The per-run env that stops Git from discovering a parent checkout. */
-/**
- * Runtime settings a resumed specialist (@mention comment) must re-apply so it
- * gets the SAME denylist, git ceiling, MCP set, and persona as its fresh run.
- * The denylist is enforced by Claude only; Codex's direct SDK has no equivalent.
- * Best-effort: if the
- * profile is no longer a current deployment we still return the always-human
- * denylist and the workspace git ceiling.
- */
+/** Reapply the fresh-run confinement and resources when resuming a specialist. */
 export function resolveResumeConfinement(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1379,7 +1137,7 @@ export function resolveResumeConfinement(
       skills: resolved.skills,
       kb: resolved.kb,
       ...(resolved.definition ? { definition: resolved.definition } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
     const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
@@ -1475,7 +1233,7 @@ function agentGitIdentityEnv(profileId: string): Record<string, string> {
 }
 
 async function cloneRepo(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -1556,13 +1314,13 @@ function agentHandleFor(role: string): string {
 // --------------------------------------------------------------------- shared
 
 function reproject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
 ): void {
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -1571,7 +1329,7 @@ function reproject(
  *  human runtime RBAC. Operator authority is gated upstream by its capability
  *  policy (operator-actions.server), so operator callers skip the human check. */
 function runtimeAuditActor(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1589,7 +1347,7 @@ function runtimeAuditActor(
  * audited D2 override. Mirrors the check transition/interrupt use.
  */
 function requireRuntimeRole(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
@@ -1597,7 +1355,7 @@ function requireRuntimeRole(
 ): ProjectRole {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
   // Shared run-agents helper — the tier + audit live in project-authority (§4g).
@@ -1687,13 +1445,12 @@ function assertStageEligible(
  * the Agents surface does.
  */
 export function listDeployedSpecialists(
-  db: Database.Database,
   projectSlug: string,
   ctx: TaskMutationContext = {},
 ): DeployedSpecialistView[] {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) return [];
   const out: DeployedSpecialistView[] = [];
@@ -1740,15 +1497,4 @@ export function listDeployedSpecialists(
     });
   }
   return out;
-}
-
-/** True when a run for this task is currently `running` (UI disables Run). */
-export function hasRunningRun(
-  db: Database.Database,
-  projectSlug: string,
-  taskKey: string,
-): boolean {
-  return listRunsForTask(db, projectSlug, taskKey).some(
-    (r) => r.lifecycle === "running",
-  );
 }

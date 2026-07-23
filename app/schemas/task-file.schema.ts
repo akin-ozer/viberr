@@ -49,7 +49,6 @@ export const TIMELINE_EVENT_TYPES = [
   "agent",
   "assign",
 ] as const;
-export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[number];
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,
  * never on English titles. */
@@ -75,7 +74,7 @@ export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
 /** Agent reference: profile id is the join key (ruling: never join by role
  * string). backend+role are display data. Still the projection JSON shape for
  * the derived specialist/reviewers columns. */
-export const agentRefSchema = z
+const agentRefSchema = z
   .object({
     profileId: z.string().min(1),
     backend: z.enum(["codex", "claude"]),
@@ -177,7 +176,6 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
  * per-backend agent tool). Never fires on a terminal (Done) task.
  */
 export const SCHEDULE_ACTION_TYPES = ["run-operator"] as const;
-export type ScheduleActionType = (typeof SCHEDULE_ACTION_TYPES)[number];
 
 // F10-16 lifecycle: pending → claimed → fired (success) | failed (terminal).
 // `claimed` reserves an occurrence before the detached operator enqueue so a
@@ -191,7 +189,6 @@ export const SCHEDULE_STATUS_VALUES = [
   "failed",
   "cancelled",
 ] as const;
-export type ScheduleStatus = (typeof SCHEDULE_STATUS_VALUES)[number];
 
 export const scheduleSchema = z
   .object({
@@ -234,6 +231,9 @@ export const prRefSchema = z
     number: z.number().int().min(1),
     // Tolerant: an unknown string (e.g. a legacy raw GitHub "open") coerces
     // to "review" instead of dropping the whole PR ref — parsers never throw.
+    // `pr` is read through tolerant(…, null), so WITHOUT this catch an
+    // unknown state nulls the entire ref (number + title + link) and the next
+    // write persists that loss back to task.md.
     state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
   })
@@ -275,10 +275,8 @@ export const packetOptionSchema = z
     t: z.string().min(1),
     d: z.string().default(""),
     rec: z.boolean().default(false),
-    // (No `accept` flag — acceptance is gated solely on kind === "accept_completion"
-    // + the admin|maintainer re-check in resolvePacket. A separate `accept` field
-    // implied an authority that nothing consumed; removed. `.loose()` keeps any
-    // legacy `accept:` key in an existing task.md parseable, just ignored.)
+    // Acceptance is gated solely on kind === "accept_completion" plus the
+    // admin|maintainer re-check in resolvePacket.
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
     /** retry_other_backend — the backend to re-run the failed agent on. */
@@ -339,7 +337,6 @@ export const workRevisionSchema = z
 export type WorkRevision = z.infer<typeof workRevisionSchema>;
 
 export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
-export type ReviewVerdictResult = (typeof REVIEW_VERDICT_RESULTS)[number];
 
 /** One reviewing engagement's verdict, bound to the revision it judged (F10-15). */
 export const reviewVerdictSchema = z
@@ -577,12 +574,15 @@ function tolerant<T>(
 }
 
 /**
- * Engagements parse (G1) with legacy absorption: a pre-engagements task.md
- * carries `specialist` (→ the delivering engagement) and `reviewers[]` /
- * `consultants[]` (→ supporting engagements). Legacy keys are absorbed here
- * and NOT preserved as unknown — the next write emits `engagements` only.
- * Invariant: at most one `delivers: true` (first wins; extras are demoted
- * with a diagnostic — never two workspace owners).
+ * Engagement parsing enforces one row per profile and at most one delivering
+ * workspace owner.
+ *
+ * Legacy absorption (G1): a pre-engagements task.md carries `specialist`
+ * (→ the delivering engagement) and `reviewers[]` / `consultants[]` (→ the
+ * supporting engagements). Those keys are absorbed here and NOT preserved as
+ * unknown — the next write emits `engagements` only. An explicit
+ * `engagements:` key always wins; the legacy slots are read only in its
+ * absence, so a file carrying both forms is never double-counted.
  */
 function parseEngagements(
   diagnostics: FileDiagnostic[],
@@ -610,6 +610,8 @@ function parseEngagements(
     );
     if (specialist)
       engagements.push({ ...specialist, delivers: true, verdictCapable: false });
+    // `reviewers` is the current legacy name; `consultants` is the older alias
+    // it replaced, so a stale `consultants` never shadows a live `reviewers`.
     const reviewers = tolerant(
       diagnostics,
       "reviewers",

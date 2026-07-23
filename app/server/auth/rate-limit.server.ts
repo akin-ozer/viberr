@@ -4,6 +4,18 @@
  * login throttling.
  *
  * Login policy: 10 attempts per email+ip per 15 minutes (continuous refill).
+ * The key always carries the email, so one account's failures can never deny
+ * sign-in to another account — the reason this lives here instead of relying
+ * on Better Auth's IP-keyed limiter (see lib/auth.server.ts).
+ *
+ * Social-start policy: 30 per provider+ip per minute. `/sign-in/social` has no
+ * identity to key on — it only mints a provider redirect URL, before anyone has
+ * authenticated — so this bucket is unavoidably shared org-wide on a
+ * proxy-less deployment (clientIpOf → "local"). It is therefore sized to clear
+ * realistic concurrent human use by a wide margin and only bound automation;
+ * it exists to DISPLACE Better Auth's 3-per-10s default on the same path,
+ * which is tight enough that a handful of simultaneous clicks locks social
+ * sign-in out for the whole org.
  */
 
 export interface TokenBucketOptions {
@@ -77,25 +89,50 @@ export const LOGIN_RATE_LIMIT = {
   refillIntervalMs: 15 * 60 * 1000,
 } as const;
 
-const LIMITER_KEY = Symbol.for("viberr.loginRateLimiter");
+/** See the social-start policy note at the top of this module. */
+export const SOCIAL_START_RATE_LIMIT = {
+  capacity: 30,
+  refillIntervalMs: 60 * 1000,
+} as const;
 
-/** Process-wide login limiter (survives HMR). */
-export function getLoginRateLimiter(): TokenBucketLimiter {
+const LIMITER_KEY = Symbol.for("viberr.loginRateLimiter");
+const SOCIAL_LIMITER_KEY = Symbol.for("viberr.socialStartRateLimiter");
+
+function cachedLimiter(
+  key: symbol,
+  options: TokenBucketOptions,
+): TokenBucketLimiter {
   const cache = globalThis as unknown as Record<
     symbol,
     TokenBucketLimiter | undefined
   >;
-  let limiter = cache[LIMITER_KEY];
+  let limiter = cache[key];
   if (!limiter) {
-    limiter = new TokenBucketLimiter(LOGIN_RATE_LIMIT);
-    cache[LIMITER_KEY] = limiter;
+    limiter = new TokenBucketLimiter(options);
+    cache[key] = limiter;
   }
   return limiter;
 }
 
-/** Best-effort client ip (X-Forwarded-For when behind a proxy). */
-export function clientIpOf(request: Request): string {
-  const forwarded = request.headers.get("X-Forwarded-For");
+/** Process-wide login limiter (survives HMR). */
+export function getLoginRateLimiter(): TokenBucketLimiter {
+  return cachedLimiter(LIMITER_KEY, LOGIN_RATE_LIMIT);
+}
+
+/** Process-wide `/sign-in/social` start limiter (survives HMR). */
+export function getSocialStartRateLimiter(): TokenBucketLimiter {
+  return cachedLimiter(SOCIAL_LIMITER_KEY, SOCIAL_START_RATE_LIMIT);
+}
+
+/**
+ * Best-effort client ip (X-Forwarded-For when behind a proxy). Falls back to
+ * "local" — the shipped deployment serves react-router-serve directly with no
+ * proxy, so there is no header to read and every request buckets under the
+ * same ip. That is safe here only because the bucket key also carries the
+ * email.
+ */
+export function clientIpOf(headers?: Headers | null): string {
+  const forwarded = headers?.get("X-Forwarded-For");
   if (forwarded) {
     const first = forwarded.split(",")[0]?.trim();
     if (first) return first;

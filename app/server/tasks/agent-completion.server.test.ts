@@ -20,10 +20,13 @@ import {
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { configureRunServiceForTests, startRun } from "~/server/runtimes/run-service.server";
+import { startRun } from "~/server/runtimes/run-service.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
-import { buildScript } from "~/server/runtimes/simulated-runtime.server";
+import {
+  installFakeRuntime,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
 import {
   applyAgentCompletionEffects,
   markWaitingAgent,
@@ -182,7 +185,7 @@ beforeEach(() => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
-  configureRunServiceForTests();
+  installFakeRuntime();
 });
 
 afterEach(() => {
@@ -216,15 +219,15 @@ describe("waiting-state bookkeeping (A2)", () => {
 });
 
 describe("applyAgentCompletionEffects (the shared effects)", () => {
-  /** Start a real (simulated-engine) run whose final assistant text is `text`,
-   *  wait for it to finish, and return its run id. `autonomous` — no default
+  /** Start a fake provider run whose final assistant text is `text`, wait for
+   *  it to finish, and return its run id. `autonomous` — no default
    *  completion hook is registered by startRun itself. Session/thread ids are
    *  unique per call so a test can drive more than one run without colliding on
    *  the (project, task, thread) uniqueness. */
   let runSeq = 0;
   async function finishedRunWith(text: string): Promise<string> {
     runSeq += 1;
-    const script = buildScript({
+    queueFakeRun({
       lines: [
         { t: "", ev: "init", tag: "system·init", text: "test session" },
         { t: "", ev: "text", tag: "assistant", text },
@@ -232,23 +235,18 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ],
       occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
       sessionId: `t-${runSeq}`,
-      backend: "claude",
-      model: "sonnet",
-      op: false,
-      keepRunning: false,
-      instant: true,
     });
     const started = await startRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       kind: "reviewer",
       role: "Reviewer",
+      agentProfileId: "reviewer",
       backend: "claude",
       model: "sonnet",
       prompt: "review",
       workdir: store.dataRoot,
       autonomous: true,
-      script,
       dataRoot: store.dataRoot,
       actor: actor(store.users.arda),
       threadId: `th-${runSeq}`,
@@ -284,7 +282,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "reviewer",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
@@ -329,7 +327,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "reviewer",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     // The verdict was recorded (snapshot is authoritative) → the only required
     // reviewer approved the current revision → validation derives healthy →
@@ -356,7 +354,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         store.db,
         { dataRoot: store.dataRoot },
         { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-        { id: runId, state: "finished", simulated: false },
+        { id: runId, state: "finished" },
       );
       const tl = taskFile().parsed.timeline;
       const reviewerComment = tl.find(
@@ -388,7 +386,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
 
     // VirtioFS serves the PRE-completion content to the next reader: revert
@@ -441,7 +439,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "finished", simulated: false },
+      { id: runId, state: "finished" },
     );
     const parsed = taskFile().parsed;
     expect(
@@ -484,7 +482,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    // Build the errored run SYNCHRONOUSLY (no startRun/simulated-drip) so the
+    // Build the errored run synchronously so the
     // test is deterministic — a real async run's lifecycle raced CI's slower
     // SQLite (the "database connection is not open" flood) and intermittently
     // dropped the watcher notification. Here the run row + its error log line
@@ -497,8 +495,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       threadId: "t-f8",
       role: "Developer",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "codex",
-      simulated: false,
       model: "gpt-5.5",
       sdk: "codex",
       state: "error",
@@ -529,7 +527,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error", simulated: false },
+      { id: runId, state: "error" },
     );
     const parsed = taskFile().parsed;
     // The typed failure event naming the reason (distinct from the operator's
@@ -555,7 +553,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 });
 
-describe("R7-2 fail-fast through the specialist start path (no fake runs)", () => {
+describe("unavailable backend through the specialist start path", () => {
   it("startSpecialistRun on an unavailable backend errors fast → blocked event with 'unavailable' copy + recovery packet", async () => {
     // Deploy an operator with generate-packets (opens the recovery packet).
     const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -588,49 +586,37 @@ describe("R7-2 fail-fast through the specialist start path (no fake runs)", () =
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    // Close the R7-2 gate: models prod/dev where the simulated engine must be
-    // unreachable — the credential-less claude backend now FAILS the run fast.
-    const { setSimulatedRuntimePermittedForTests } = await import(
+    const { setBackendAvailability } = await import(
       "~/server/runtimes/runtime-registry.server"
     );
-    setSimulatedRuntimePermittedForTests(false);
-    try {
-      const result = await startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      expect(result.simulated).toBe(false); // NEVER a fake run
-      const row = store.db
-        .prepare(`SELECT state, simulated FROM agent_runs WHERE id = ?`)
-        .get(result.runId) as { state: string; simulated: number };
-      expect(row.state).toBe("error");
-      expect(row.simulated).toBe(0);
+    setBackendAvailability("claude", false);
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const row = store.db
+      .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+      .get(result.runId) as { state: string };
+    expect(row.state).toBe("error");
 
-      // The EXISTING error-run path (F8) surfaces it: typed blocked event
-      // with the "unavailable" classification + a recovery packet + the
-      // waiting flag flipped back to human. The effects run async off the
-      // immediately-fired completion callback — poll for them.
-      const surfaced = await waitFor(() => {
-        const parsed = taskFile().parsed;
-        return (
-          parsed.timeline.some(
-            (e) => e.type === "blocked" && /unavailable/i.test(e.text),
-          ) && parsed.packet?.type === "blocked"
-        );
-      });
-      expect(surfaced, "blocked event + recovery packet must land").toBe(true);
+    const surfaced = await waitFor(() => {
       const parsed = taskFile().parsed;
-      const failureEvent = parsed.timeline.find(
-        (e) => e.type === "blocked" && /unavailable/i.test(e.text),
-      )!;
-      expect(failureEvent.text).toContain("no usable credential");
-      expect(failureEvent.text).toContain("Configure a credential");
-      expect(parsed.frontmatter.waiting).toBe("human");
-    } finally {
-      setSimulatedRuntimePermittedForTests(undefined);
-    }
+      return (
+        parsed.timeline.some(
+          (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+        ) && parsed.packet?.type === "blocked"
+      );
+    });
+    expect(surfaced, "blocked event + recovery packet must land").toBe(true);
+    const parsed = taskFile().parsed;
+    const failureEvent = parsed.timeline.find(
+      (e) => e.type === "blocked" && /unavailable/i.test(e.text),
+    )!;
+    expect(failureEvent.text).toContain("no usable credential");
+    expect(failureEvent.text).toContain("Configure a credential");
+    expect(parsed.frontmatter.waiting).toBe("human");
   });
 });
 
@@ -656,9 +642,16 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    // With a directive the simulated reviewer report closes with an explicit
-    // "Verdict: **approve**" — the completion hook must classify it and flip
-    // validation to healthy without any operator/@mention involvement.
+    queueFakeRun({
+      lines: [
+        {
+          t: "",
+          ev: "text",
+          tag: "assistant",
+          text: "Review complete. Verdict: **approve**.",
+        },
+      ],
+    });
     const result = await startAgentRun(
       store.db,
       {
@@ -680,37 +673,33 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
 });
 
 describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
-  /** A finished simulated run whose final assistant text is `text` (local copy
+  /** A finished fake run whose final assistant text is `text` (local copy
    *  of the shared-effects describe's helper — that one is block-scoped).
    *  Session ids are unique so two runs in ONE test don't collide on the
    *  (project, task, thread) uniqueness. */
   let runSeq = 0;
   async function finishedRunWith(text: string): Promise<string> {
-    const script = buildScript({
+    runSeq += 1;
+    queueFakeRun({
       lines: [
         { t: "", ev: "init", tag: "system·init", text: "test session" },
         { t: "", ev: "text", tag: "assistant", text },
         { t: "", ev: "result", tag: "result", text: "done" },
       ],
       occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-      sessionId: `t-${++runSeq}`,
-      backend: "claude",
-      model: "sonnet",
-      op: false,
-      keepRunning: false,
-      instant: true,
+      sessionId: `t-${runSeq}`,
     });
     const started = await startRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       kind: "reviewer",
       role: "Reviewer",
+      agentProfileId: "reviewer",
       backend: "claude",
       model: "sonnet",
       prompt: "review",
       workdir: store.dataRoot,
       autonomous: true,
-      script,
       dataRoot: store.dataRoot,
       actor: actor(store.users.arda),
       // Distinct thread per helper call — two runs in one test otherwise
@@ -749,7 +738,16 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   const redirect = { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false };
-  const retryPrimary = { kind: "retry_other_backend", t: "Retry on Claude Code", d: "", rec: true, backend: "claude" };
+  // Deliberately UNSTAMPED — the operator's open_decision_packet option shape
+  // has no profileId field, so a primary-subject retry never names one. Adding
+  // a profileId here silently drops the unstamped case out of coverage.
+  const retryPrimary = {
+    kind: "retry_other_backend",
+    t: "Retry on Claude Code",
+    d: "",
+    rec: true,
+    backend: "claude",
+  };
   const retryReviewer = { ...retryPrimary, profileId: "style" };
 
   async function runEffects(
@@ -770,7 +768,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
         workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state, simulated: false },
+      { id: runId, state },
     );
   }
 
@@ -824,6 +822,19 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       .prepare(`UPDATE agent_runs SET agent_profile_id = ? WHERE id = ?`)
       .run("style", reviewerRun);
     await runEffects(reviewerRun, { delivers: false, profileId: "style" });
+    expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  it("an unstamped retry option is primary-subject — a reviewer success leaves it, the delivering run withdraws it", async () => {
+    await openBlockedPacket([retryPrimary, redirect]);
+    // No profileId on the option → the subject is the delivering specialist, so
+    // a non-delivering reviewer's success must NOT withdraw it.
+    const reviewerRun = await finishedRunWith("Read through the diff.");
+    await runEffects(reviewerRun, { delivers: false, profileId: "style" });
+    expect(taskFile().parsed.packet).not.toBeNull();
+    // The delivering specialist then succeeds — that falsifies "work stalled".
+    const primaryRun = await finishedRunWith("Primary delivered.");
+    await runEffects(primaryRun, { delivers: true });
     expect(taskFile().parsed.packet).toBeNull();
   });
 

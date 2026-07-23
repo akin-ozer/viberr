@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   parsePatValidation,
   type PatValidation,
@@ -83,7 +83,7 @@ export interface CreatePatInput {
 }
 
 export function createPat(
-  db: Database.Database,
+  db: DatabaseSync,
   input: CreatePatInput,
   actor: AuditActor,
 ): PatMetadata {
@@ -121,27 +121,13 @@ export function createPat(
 
 /** Metadata only — never the token. */
 export function getPatMetadata(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
 ): PatMetadata | null {
   const row = db
     .prepare(`SELECT ${PAT_META_COLUMNS} FROM github_pats WHERE id = ?`)
     .get(patId) as PatRow | undefined;
   return row ? mapRow(row) : null;
-}
-
-/** A user's stored PATs, newest first. Metadata only. */
-export function listPats(
-  db: Database.Database,
-  userId: string,
-): PatMetadata[] {
-  const rows = db
-    .prepare(
-      `SELECT ${PAT_META_COLUMNS} FROM github_pats
-       WHERE user_id = ? ORDER BY created_at DESC, id DESC`,
-    )
-    .all(userId) as PatRow[];
-  return rows.map(mapRow);
 }
 
 /**
@@ -151,7 +137,7 @@ export function listPats(
  * validation; callers record the fresh one via `recordPatValidation`.
  */
 export function replacePatToken(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
   token: string,
   actor: AuditActor,
@@ -180,7 +166,7 @@ export function replacePatToken(
 
 /** Deletes a PAT (project bindings cascade). Idempotent. */
 export function deletePat(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
   actor: AuditActor,
 ): boolean {
@@ -202,7 +188,7 @@ export function deletePat(
  * GitHub client; never into loader data, logs, timelines or errors.
  */
 export function getPatToken(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
 ): string | null {
   const row = db
@@ -214,7 +200,7 @@ export function getPatToken(
 
 /** Caches a validator run on the PAT row (validation_json + timestamp). */
 export function recordPatValidation(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
   validation: PatValidation,
 ): void {
@@ -228,7 +214,7 @@ export function recordPatValidation(
 // --------------------------------------------- project credential binding
 
 export function setProjectCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; patId: string },
   actor: AuditActor,
 ): PatMetadata {
@@ -254,7 +240,7 @@ export function setProjectCredential(
 }
 
 export function clearProjectCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
 ): boolean {
@@ -274,7 +260,7 @@ export function clearProjectCredential(
 
 /** The PAT bound to a project (metadata only), or null. */
 export function getProjectCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): PatMetadata | null {
   const row = db
@@ -335,7 +321,7 @@ interface CredentialPolicyDisplay {
 }
 
 function readCredentialPolicy(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): CredentialPolicyDisplay | null {
   const row = db
@@ -366,7 +352,7 @@ function readCredentialPolicy(
  * forces its chip to not-ok and carries the flagged task key.
  */
 export function getProjectCredentialHealth(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): ProjectCredentialHealth {
   const pat = getProjectCredential(db, projectSlug);

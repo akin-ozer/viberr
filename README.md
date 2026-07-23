@@ -20,11 +20,11 @@ never a crash), derives readiness, and materializes projections into SQLite for 
 SQLite handles app management only — users, sessions, encrypted secrets, projections,
 audit — never canonical business truth.
 
-Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · better-sqlite3 (WAL)
+Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 (native compiler) · `node:sqlite` (WAL)
 · Zod v4 · SSE for live updates (no websockets) · the ported `viberr.css` design system
 (no Tailwind). Agent runtimes: Claude Agent SDK + Codex SDK — configure a credential for
 at least one to run real agents. A backend with no credential is reported unavailable and
-runs on it fail fast with an honest error (there is no simulated fallback).
+runs on it fail fast with an honest error.
 
 ## Quickstart (local dev)
 
@@ -43,8 +43,7 @@ cp .env.example .env
 # 2. Install
 npm ci
 
-# 3. Database + demo data (migrations also auto-apply at boot)
-npm run migrate
+# 3. Demo data (migrations auto-apply at boot)
 npm run seed
 
 # 4. Run
@@ -78,16 +77,13 @@ first sign-in).
 | `npm run build` / `npm run start` | production build / serve it |
 | `npm run typecheck` | route typegen + tsc |
 | `npm test` | vitest unit + integration suite |
-| `npm run e2e` | Playwright golden paths (isolated data root, own port — safe to run next to a dev server; first time: `npx playwright install chromium`) |
-| `npm run migrate` | apply pending `db/migrations/*.sql` |
 | `npm run seed` | idempotent demo dataset (`-- --reset` wipes derived state first) |
 | `npm run rescan` | reconcile projections with the file store |
 
 ## Enabling real agent backends
 
 Out of the box no agent backend is configured, so runs fail fast with an honest
-"backend unavailable" error — there is no simulated fallback in dev or production (the
-simulated engine is a test-only adapter). To run real agents you can use a
+"backend unavailable" error. To run agents you can use a
 **subscription (no per-token API key)** or an API key; set it in `.env` and restart —
 detection is presence-only, no paid call:
 
@@ -179,27 +175,19 @@ app/
   shared/          # cross-surface helpers (dates, ids, mapping)
   app.css          # the ported viberr.css design system + marked additions
 db/migrations/     # SQL-first migrations (auto-applied at boot)
-scripts/           # migrate / seed / rescan (tsx)
-e2e/               # Playwright golden paths (isolated data root)
-test-support/      # in-memory app/db/store/github fakes for vitest
+scripts/           # seed / rescan (tsx)
+test-support/      # app/db/store/runtime/github fakes for vitest
 data/              # runtime data root (gitignored): projects/<slug>/tasks/<KEY>/task.md,
                    # agents/, runtimes/, kb/, state/projection.sqlite, logs/
 ```
 
 ## Architecture
 
-The authoritative planning artifacts live in [`planning/planning-artifacts/`](planning/planning-artifacts/)
-(PRD, architecture, epics, UX spec). Build-time documentation — phase-by-phase reports,
-conventions, cross-cutting contracts — lives in [`docs/build/`](docs/build/). Canonical
-file formats (project.md / task.md / timeline event grammar) are specified in
+The authoritative planning artifacts are the [PRD](planning/planning-artifacts/prd.md),
+[architecture](planning/planning-artifacts/architecture.md), and
+[UX specification](planning/planning-artifacts/ux-design-specification.md). Canonical
+project/task file formats and timeline grammar live in
 [`docs/architecture/file-formats.md`](docs/architecture/file-formats.md).
-
-## Screenshots / design parity
-
-The app is a 1:1 port of the high-fidelity design mock in `design/html-app/` — class
-names, tokens, light/dark themes, and copy are kept intact, so the reference screenshots
-under `design/html-app/_shots/` show exactly what the running app looks like (board,
-task workspace with decision packets, live agent runs, review queue, org settings…).
 
 ## Known gaps (V1 release notes)
 

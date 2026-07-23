@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
+import { useFetcher, useNavigate } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
+import { useActionToast } from "~/ui/use-action-toast";
 import {
   CredentialCard,
   CredentialManageActions,
 } from "~/features/github/credential-card";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
+import { stageLockReason } from "~/shared/workflow/stage-roles";
 
 /**
- * Project Settings view (design/html-app/app/settings.jsx → 1:1 port,
- * project-settings spec): project identity, workflow-stages editor
+ * Project settings: project identity and workflow-stages editor
  * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
  * members panel (invite/remove — roles live in Policy), repository &
  * credentials (shared CredentialCard + the real Grant-scope flow), danger
@@ -28,40 +29,8 @@ type ActionResult =
   | { ok: true; toast: string; stageId?: string }
   | { ok: false; error: string };
 
-function useActionToast(fetcher: FetcherWithComponents<ActionResult>) {
-  const push = useToast();
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
-    if (d.ok) {
-      if (d.toast) push(d.toast);
-    } else if (d.error) {
-      push(d.error);
-    }
-  }, [fetcher.state, fetcher.data, push]);
-}
-
 const PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" } as const;
 const POL_NOTE_STYLE = { marginBottom: 0, marginTop: ".8rem" } as const;
-
-/**
- * Client mirror of the server stage-lock guard: the entry (first) and terminal
- * (last) stages are structural and can't be removed — pinned by position, not
- * literal id, so custom/lightweight boards behave the same.
- */
-function stageLockReason(
-  stageId: string,
-  stages: readonly { id: string }[],
-): string | null {
-  if (stages.length === 0) return null;
-  if (stageId === stages[0]!.id) return "it's the entry point";
-  if (stageId === stages[stages.length - 1]!.id)
-    return "human acceptance stays terminal";
-  return null;
-}
 
 // ------------------------------------------------------------------ project
 

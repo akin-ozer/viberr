@@ -7,9 +7,14 @@ import { defineConfig, devices } from "@playwright/test";
  * The suite runs against a dev server on an ISOLATED data root
  * (e2e/.tmp-data) — the webServer command wipes it, seeds the full demo
  * dataset, then boots `npm run dev` on its own port, so a developer's
- * ./data store and 5173 server are never touched. Tests run serially in
- * one worker: the specs are ordered golden paths that intentionally
- * mutate governed state (packet resolution, ownership, comments).
+ * ./data store and 5173 server are never touched.
+ *
+ * Scope: these specs READ seeded state and exercise UI-owned mutations
+ * (theme cookie, mark-all-read, a real file-store mkdir). The specs that
+ * drove agent runs and packet resolution went with the simulated runtime;
+ * what is left needs no agent backend, so each spec stands alone rather
+ * than depending on an earlier one having mutated governed state. Still
+ * one worker, since they share the seeded store.
  */
 
 const E2E_PORT = 5177;
@@ -27,16 +32,10 @@ const E2E_ENV = {
   // bootstrap admin still gets the well-known dev password.
   VIBERR_SEED_ADMIN_EMAIL: "arda@viberr.dev",
   VIBERR_SEED_ADMIN_PASSWORD: "viberr-dev-2828",
-  // Force the DETERMINISTIC simulated/scripted engine for e2e. Emptying the
-  // credential vars isn't enough (dotenv re-loads a developer's `.env`), so use
-  // the explicit runtime override — the golden-path specs assert on the
-  // synchronous scripted operator, not live non-deterministic agent runs.
-  VIBERR_FORCE_SIMULATED_RUNTIME: "1",
-  // R7-2 fail-closed gate: the force flag above is inert unless NODE_ENV is
-  // "test" OR this second explicit ack is set. The e2e app server boots
-  // NODE_ENV=development, so the ack opens the test-engine gate here — and a
-  // stray force flag in a real dev/prod env stays harmless.
-  VIBERR_TEST_RUNTIME_OK: "1",
+  // NOTE: this config used to force the simulated/scripted runtime here. That
+  // engine is gone, and with it the two specs that drove agent runs (02-packet,
+  // 04-runtime). The remaining specs never start a run, so the server boots
+  // with no agent credential and any run would simply report unavailable.
 };
 
 export default defineConfig({

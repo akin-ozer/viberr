@@ -1,25 +1,4 @@
-/**
- * CAP_CATALOG — the shared, id-based agent capability catalog
- * (orchestrator ruling 2 / contracts §7 #7).
- *
- * Agent capability policy is stored as `{ capabilityId, mode }` against this
- * catalog; bespoke labels that have no catalog entry ride along as
- * display-only `extras` (`{ label, mode }`).
- *
- * ENFORCED-vs-advisory (honesty): a subset of these ids bind at the runtime tool
- * layer for Claude specialists (`specialist-tool-policy.ts` — branch/push/PR/
- * merge + `execute-code-or-write-repo`) or gate the operator toolkit
- * (`operator-actions.ts`). The remainder are advisory guidance injected into the
- * run persona. `capabilityEnforcement` reports both/claude-only/advisory so the
- * UI can label the difference rather than overstating authority.
- *
- * ALWAYS_HUMAN_CAPABILITY_IDS is the server-side invariant list — these are
- * never grantable to an agent in an actionable mode. Enforced at grant-persist
- * time: `grantsFor` (agent-profile-actions.server.ts) coerces any of these ids
- * to `human` mode whatever the submitted form says. The Done boundary is
- * additionally locked at the workflow layer (policy-actions.server.ts) and the
- * operator completion path (operator-actions.server.ts).
- */
+/** Shared capability catalog with honest runtime-enforcement metadata. */
 
 export interface CapabilityDef {
   id: string;
@@ -30,19 +9,7 @@ export interface CapabilityDef {
  * profile (generic-agents plan G1: reviewer is no longer a kind). */
 export type CapabilityKind = "operator" | "agent";
 
-/**
- * Unified catalog entry (generic-agents plan, 2026-07-19): ONE catalog drives
- * the profile editors for BOTH kinds — the former CAP_MODAL_CATALOG /
- * OPERATOR_CAP_CATALOG split is now derived per-kind from `kinds` + `group`.
- *
- * `group: null` → not a toggle in any editor; the capability only surfaces
- * read-only in the capability matrix's "Other actions" group (the pass-4
- * ruling-7 "no fake toggles" stance for ids with no runtime consumer).
- *
- * `promotable: false` → autonomy promotion may NEVER escalate this capability
- * to `direct` (absorbs the former `completion-for-acceptance` string
- * special-case in operator gate()).
- */
+/** `group: null` is matrix-only; non-promotable capabilities never become direct. */
 export interface UnifiedCapabilityDef {
   id: string;
   label: string;
@@ -107,13 +74,6 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
 export const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
   ({ id, label }) => ({ id, label }),
 );
-// Removed 2026-07-12 (role-bindings prune): `edit-other-task-branch` (its broad
-// `git checkout:*` deny defeated the granted create-task-branch and is moot under
-// per-task workspace isolation — F11), `open-or-merge-pr` (dead deny rule, never
-// granted; redundant with open-review-pr + merge-pull-request),
-// `compress-timelines` (compaction is guardrail-driven, never gated by a
-// capability), and `owner-reassignment` (never consumed at runtime).
-
 /** Server-side invariant: these capabilities are human-only, always —
  * merge PR · transition to done · change project policy. */
 export const ALWAYS_HUMAN_CAPABILITY_IDS: readonly string[] = [
@@ -127,19 +87,7 @@ const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
 const byId = new Map(CAP_CATALOG.map((c) => [c.id, c]));
 const byLabel = new Map(CAP_CATALOG.map((c) => [c.label, c]));
 
-/**
- * The capabilities that BIND at runtime (real enforcement), vs. the advisory
- * ones injected as persona guidance. Used by the capability matrix so it never
- * claims authority that doesn't actually confine an agent. Kept next to the
- * catalog so it's obvious which ids are enforced:
- *   - specialist tool policy: create-task-branch, commit-push-branch,
- *     open-review-pr, merge-pull-request, execute-code-or-write-repo
- *   - operator toolkit gate: assign-primary-specialist, summon-reviewers,
- *     generate-packets, append-typed-events, stage-transitions,
- *     completion-for-acceptance
- *   - structural human-only: merge-pull-request, transition-to-done,
- *     change-project-policy (also ALWAYS_HUMAN)
- */
+/** Capabilities whose absence actually constrains runtime behavior. */
 export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
@@ -161,22 +109,7 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "ask-human",
 ]);
 
-/**
- * Backend-asymmetric enforcement (S3, honest labeling).
- *
- * The SPECIALIST tool-denial capabilities bind only on Claude runs
- * (`disallowedTools` under the Claude Agent SDK); the Codex SDK ignores tool
- * allow/deny lists, so on a Codex specialist these are advisory-only. The
- * OPERATOR-gate + structural-human capabilities, by contrast, enforce on both
- * backends because the operator's actions route through the same gated server
- * functions regardless of the operator's engine.
- *
- * These ids are Claude-enforced / Codex-advisory (a specialist tool denylist).
- * NOTE: `merge-pull-request` is deliberately NOT here — it is an ALWAYS_HUMAN
- * structural capability (never grantable to an agent in an actionable mode), so
- * its restriction holds on BOTH backends. Labeling it "advisory on Codex" would
- * understate the single most safety-critical row; it classifies as "both".
- */
+/** Specialist tool-denial capabilities enforced by Claude but advisory on Codex. */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
@@ -201,26 +134,7 @@ export function capabilityEnforcement(id: string): EnforcementScope {
   return "advisory";
 }
 
-/** True when withholding `id` genuinely confines the agent at runtime (not just
- *  advisory persona guidance). */
-export function capabilityIsEnforced(id: string): boolean {
-  return ENFORCED_CAPABILITY_IDS.has(id);
-}
-
-/**
- * R7-5 — specialist capability modes collapse to 3 HONEST values.
- *
- * `recommend` (propose a card a human applies) is an OPERATOR-only concept: at
- * runtime a specialist holding a cap in `recommend` mode simply performs the
- * action (identical to `direct`) — the specialist tool/prompt contract has no
- * "recommend" behavior (`isWithheld` in specialist-tool-policy.ts denies only
- * `human`/`off`; F7-CAP1 live proof: a Docs Writer with open-review-pr=recommend
- * opened the PR directly). So the specialist picker offers only Allowed
- * (`direct`) / Human-only (`human`) / Off (`off`), and any stored `recommend`
- * grant on a specialist coerces to `direct` ('Allowed') on read AND on persist —
- * no data migration needed. The OPERATOR keeps all 4 modes, where `recommend`
- * has real semantics. Generic over the mode-string type so both the modal's
- * `CapMode` and the schema's `CapabilityMode` pass through unchanged. */
+/** Specialists have no recommend mode; coerce it to the equivalent direct mode. */
 export function coerceSpecialistCapabilityMode<M extends string>(mode: M): M {
   return (mode === "recommend" ? "direct" : mode) as M;
 }
@@ -234,18 +148,7 @@ export const SCOPED_DELIVERY_CAPABILITY_IDS: readonly string[] = [
   "open-review-pr",
 ];
 
-/**
- * Repair a contradictory deliverer capability policy. `execute-code-or-write-repo`
- * is the MASTER GATE for all delivery — with it withheld (off/human/absent) the
- * fine-grained branch/commit/PR grants are vetoed and the profile silently
- * delivers nothing (the VIB-1 "no commits, no PR" class). Owner ruling
- * (2026-07-19): the headline stays the master switch, so whenever any scoped
- * delivery capability is actionable (direct/recommend) we also grant the headline
- * `direct`, so a deliverer actually delivers. Applied at grant-persist (create /
- * edit) and by the seed. Idempotent, and a no-op for non-deliverers (e.g. the
- * reviewer, whose scoped delivery caps are off/human). Generic over the
- * mode-string type so both the modal's `CapMode` and the schema's
- * `CapabilityMode` pass through unchanged. */
+/** Keep the delivery headline enabled whenever any scoped delivery grant is active. */
 export function normalizeDeliveryGrants<
   G extends { capabilityId: string; mode: string },
 >(grants: readonly G[]): G[] {

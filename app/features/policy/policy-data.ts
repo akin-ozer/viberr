@@ -1,10 +1,10 @@
 import { ALWAYS_HUMAN_CAPABILITY_IDS, capabilityById } from "~/shared/capabilities";
 import {
   PROJECT_ROLES,
-  RBAC_TABLE,
-  ROLE_LABEL as RBAC_ROLE_LABEL,
+  RBAC_DEFINITIONS,
   type ProjectRole,
 } from "~/shared/rbac";
+export { ROLE_LABEL } from "~/shared/rbac";
 
 /**
  * Client-safe policy constants for the Policy/Profile UI. The role list, labels,
@@ -15,37 +15,24 @@ import {
  */
 
 export const ROLE_IDS = PROJECT_ROLES;
-/** @deprecated use `ProjectRole` from ~/shared/rbac */
-export type RoleId = ProjectRole;
-
-export const ROLE_LABEL: Record<RoleId, string> = RBAC_ROLE_LABEL;
 
 export interface RbacRow {
   action: string;
-  grant: Record<RoleId, 0 | 1>;
+  grant: Record<ProjectRole, 0 | 1>;
   /** App-wide (any signed-in user, member or not) — the role columns are
    * informational; the UI renders these as app-wide, not role-gated. */
   appWide?: boolean;
 }
 
-/**
- * PROJECT_CAP_MATRIX — the display projection of the canonical `RBAC_TABLE`
- * (app/shared/rbac.ts). Kept as a named export for the Policy + Profile pages;
- * the authoritative role sets live in `ACTION_ROLES`.
- */
-export const PROJECT_CAP_MATRIX: readonly {
-  action: string;
-  roles: readonly RoleId[];
-  appWide?: boolean;
-}[] = RBAC_TABLE;
-
-/** RBAC grant table — derived from the canonical table (never hand-maintained). */
-export const RBAC_ROWS: readonly RbacRow[] = PROJECT_CAP_MATRIX.map((cap) => ({
-  action: cap.action,
+export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => ({
+  action: cap.label,
   grant: Object.fromEntries(
-    ROLE_IDS.map((r) => [r, cap.roles.includes(r) ? 1 : 0]),
-  ) as Record<RoleId, 0 | 1>,
-  ...(cap.appWide ? { appWide: true } : {}),
+    ROLE_IDS.map((r) => [
+      r,
+      (cap.roles as readonly ProjectRole[]).includes(r) ? 1 : 0,
+    ]),
+  ) as Record<ProjectRole, 0 | 1>,
+  ...("appWide" in cap ? { appWide: cap.appWide } : {}),
 }));
 
 export type BoundaryId = "auto" | "approval" | "human";

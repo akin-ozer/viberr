@@ -7,10 +7,12 @@ import {
 } from "react-router";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
-import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
+import {
+  appErrorResponse,
+  requireFormAction,
+} from "~/server/auth/form-action.server";
+import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
   getTaskDetail,
@@ -87,12 +89,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
-  // Runtime (Phase 8): the per-task run projection (the seed-resumer wiring
-  // was removed with the simulated-run seed data — R7-2 / F7-VEST1).
+  // Per-task provider run projection.
   const runtime = listRunsForTask(db, params.slug, params.key);
 
   // Deployed specialists the "Assign specialist" menu offers.
-  const deployedSpecialists = listDeployedSpecialists(db, params.slug);
+  const deployedSpecialists = listDeployedSpecialists(params.slug);
   // F10-04: per-engagement run gating. The server single-flights only the
   // DELIVERING run; supporting/reviewing runs are read-only and may run
   // concurrently. So the delivering Run button disables only on an active
@@ -103,10 +104,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (r) => r.lifecycle === "running" || r.lifecycle === "queued",
   );
   const deliveringActive = activeRuns.some((r) => r.kind === "primary" && !r.op);
-  const activeReviewerIds = activeRuns
-    .filter((r) => r.kind === "reviewer")
-    .map((r) => r.profileId)
-    .filter((id): id is string => !!id);
+  const activeReviewerIds = activeRuns.flatMap((r) =>
+    r.kind === "reviewer" && r.profileId ? [r.profileId] : [],
+  );
 
   // @-mention autocomplete directory for the comment composer: deployed
   // specialists, registered users, and the reserved backend/role handles —
@@ -151,12 +151,13 @@ function backendOverride(formData: FormData): { backendOverride?: "claude" | "co
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
-  const intent = String(formData.get("intent") ?? "");
+  const {
+    auth: ctx,
+    db,
+    formData,
+    actor,
+    intent,
+  } = await requireFormAction(request);
   const projectSlug = params.slug;
   const taskKey = params.key;
 
@@ -348,8 +349,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "run-specialist": {
-        // Start a real (or simulated-fallback) run for the assigned specialist.
-        // An optional `backend` forces the run onto the other engine — the
+        // Start a provider run for the assigned specialist. An optional
+        // `backend` forces the run onto the other engine — the
         // "retry on the other backend" affordance after an availability/quota
         // failure (D4).
         const result = await startAgentRun(
@@ -462,7 +463,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           String(formData.get("autonomy") ?? "supervised") === "full"
             ? "full"
             : "supervised";
-        const result = await runOperator(db, {
+        await runOperator(db, {
           projectSlug,
           taskKey,
           backend,
@@ -475,9 +476,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast:
-            `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy` +
-            (result.mode === "scripted" ? " (scripted)" : ""),
+          toast: `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy`,
         };
       }
       case "schedule-action": {
@@ -547,13 +546,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
     }
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

@@ -1,8 +1,12 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { organization } from "better-auth/plugins";
-import type Database from "better-sqlite3";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
-import { hashPassword, verifyPassword } from "~/server/auth/password.server";
+import {
+  clientIpOf,
+  getLoginRateLimiter,
+  getSocialStartRateLimiter,
+} from "~/server/auth/rate-limit.server";
 import {
   applyOAuthUser,
   isOAuthWhitelisted,
@@ -14,21 +18,14 @@ import { getDb } from "~/server/db/sqlite.server";
 /**
  * better-auth instance (authN mechanics only).
  *
- * Scope decision (see design/better-auth-migration.md): better-auth owns
- * CREDENTIALS + SESSIONS + OAUTH + ORG MEMBERSHIP; the legacy `users` table
- * stays the app's canonical profile/role/disabled store. The two are bridged
- * by the invariant  better-auth `user.id` === legacy `users.id`, so every
- * profile/RBAC reader (findUserById, org-users, project_members, user_prefs,
- * audit) is untouched. `authenticate()` resolves a better-auth session, then
- * loads the legacy `users` row for the SessionUser it returns.
+ * Better Auth owns credentials, sessions, and OAuth. The `users` table owns
+ * application profile and authorization data. Both rows share the same id.
  *
  * - Cookie: `viberr.session_token` (cookiePrefix "viberr"), signed with the
  *   existing VIBERR_SESSION_SECRET — no new required env.
  * - Sessions: 30-day rolling (expiresIn) with a daily slide (updateAge), to
  *   match the retired hand-rolled session TTL.
- * - Passwords: our scrypt `hashPassword`/`verifyPassword` are plugged in as
- *   the hash/verify hooks, so better-auth reads the EXISTING 6-part
- *   `scrypt$N$r$p$salt$hash` strings verbatim — no forced reset.
+ * - Passwords: better-auth owns hashing and verification.
  * - Sign-up is disabled: identities are provisioned through the whitelist
  *   (seed admin, org-users invite, OAuth provisioning hooks), never open reg.
  */
@@ -39,8 +36,8 @@ export const AUTH_BASE_PATH = "/api/auth";
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
 export interface AuthDeps {
-  /** The app database handle (shared better-sqlite3 file). */
-  db: Database.Database;
+  /** The app database handle. */
+  db: DatabaseSync;
   /** Cookie-signing secret (>=32 chars) — reuse VIBERR_SESSION_SECRET. */
   secret: string;
   /**
@@ -95,12 +92,77 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // No open registration — the whitelist provisions identities.
       disableSignUp: true,
       minPasswordLength: MIN_PASSWORD_LENGTH,
-      // Plug Viberr's scrypt in so existing 6-part hashes verify unchanged.
-      password: {
-        hash: (password) => Promise.resolve(hashPassword(password)),
-        verify: ({ hash, password }) =>
-          Promise.resolve(verifyPassword(password, hash)),
+    },
+    rateLimit: {
+      enabled: true,
+      customRules: {
+        // Off here, throttled in server/auth/login.server.ts instead.
+        //
+        // Better Auth keys its limiter on the client ip, and Viberr ships
+        // without a reverse proxy (Dockerfile + compose.yml run
+        // react-router-serve directly), so there is no X-Forwarded-For and
+        // `getIp()` returns null outside dev/test. Every sign-in then shares
+        // ONE bucket, "no-trusted-ip|/sign-in/email" — under any max, N
+        // unauthenticated POSTs lock every user in the org out for the rest of
+        // the window. Raising the max only raises N; it cannot make the bucket
+        // stop being shared, so it stays a denial-of-login lever.
+        //
+        // The app-level token bucket in the `before` hook below is
+        // authoritative instead: its key is `email|ip`, so one identity's
+        // failures can never deny another's sign-in, and it holds the same
+        // 10-per-15-minutes policy. Setting a rule to `false` also suppresses
+        // Better Auth's /sign-in default (3 per 10s), which is the same shared
+        // bucket, only tighter.
+        "/sign-in/email": false,
+        // Same shared-bucket lever, same fix. `/sign-in/social` is a live path
+        // (login.tsx and profile-page.tsx both POST it to start GitHub/Google),
+        // and Better Auth's default here is the tighter 3-per-10s `/sign-in`
+        // rule — so three people clicking "Sign in with GitHub" at once is
+        // enough to deny social sign-in to the entire org for the window.
+        // Throttled in the `before` hook below instead.
+        "/sign-in/social": false,
       },
+    },
+    hooks: {
+      /**
+       * Per-`email|ip` login throttle. This lives on the HOOK rather than in
+       * loginWithCredentials because `/api/auth/*` is mounted as a splat
+       * (routes/api.auth.$.ts), so a POST straight to /api/auth/sign-in/email
+       * reaches better-auth without passing through the app's login action —
+       * throttling only in the app action would leave that path unlimited.
+       * loginWithCredentials also drives better-auth through `auth.handler`,
+       * so both entry points pass here and each attempt costs exactly one
+       * token. The pre-check failures that return before the handler
+       * (unknown_email / disabled / no_password) consume their own token in
+       * login.server.ts, so email enumeration is bounded by the same bucket.
+       */
+      before: createAuthMiddleware(async (ctx) => {
+        const ip = clientIpOf(ctx.headers);
+        if (ctx.path === "/sign-in/email") {
+          const email =
+            typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+          if (!getLoginRateLimiter().tryConsume(`${email}|${ip}`)) {
+            throw new APIError("TOO_MANY_REQUESTS", {
+              message: "Too many sign-in attempts. Try again later.",
+            });
+          }
+          return;
+        }
+        // `/sign-in/social` carries no identity — it only mints the provider
+        // redirect URL — so provider+ip is the finest key available and the
+        // bucket is org-wide without a proxy. Sized (30/min) to be unreachable
+        // by real use while still displacing Better Auth's 3-per-10s default,
+        // which is the actual denial-of-login lever on this path.
+        if (ctx.path === "/sign-in/social") {
+          const provider =
+            typeof ctx.body?.provider === "string" ? ctx.body.provider : "";
+          if (!getSocialStartRateLimiter().tryConsume(`${provider}|${ip}`)) {
+            throw new APIError("TOO_MANY_REQUESTS", {
+              message: "Too many sign-in attempts. Try again later.",
+            });
+          }
+        }
+      }),
     },
     session: {
       expiresIn: 60 * 60 * 24 * 30, // 30 days, matching the old SESSION_TTL_MS
@@ -162,13 +224,7 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         },
       },
     },
-    // Org/tenant membership + invitations (Option B). The org role continues
-    // to be enforced through Viberr's hierarchical check; the plugin supplies
-    // the membership tables and invitation flow.
-    plugins: [organization({ allowUserToCreateOrganization: false })],
-    advanced: {
-      cookiePrefix: "viberr",
-    },
+    advanced: { cookiePrefix: "viberr" },
   };
 }
 
@@ -183,7 +239,7 @@ export function createAuth(deps: AuthDeps): ReturnType<typeof betterAuth> {
 const AUTH_CACHE_KEY = Symbol.for("viberr.betterAuth");
 
 interface AuthCacheEntry {
-  db: Database.Database;
+  db: DatabaseSync;
   auth: ReturnType<typeof betterAuth>;
 }
 

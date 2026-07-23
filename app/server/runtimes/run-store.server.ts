@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { LogLine, RunBackend, RunKind, RunState } from "~/features/runtime/runtime-types";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
@@ -19,16 +19,14 @@ export interface AgentRunRow {
   role: string;
   kind: RunKind;
   backend: RunBackend;
-  simulated: number;
   model: string;
   session_id: string | null;
   sdk: string;
   /** The deployed agent's display name ("dev"/"Operator"/…); null on seed/
    *  historical rows (the projection falls back to the backend WHO_NAME). */
   agent_name: string | null;
-  /** The deployed profile id — the stable per-agent grouping key; null on
-   *  seed/historical rows (the projection falls back to the run's role). */
-  agent_profile_id: string | null;
+  /** The deployed profile id — the stable per-agent grouping key. */
+  agent_profile_id: string;
   state: RunState;
   phase: string | null;
   step: string | null;
@@ -44,16 +42,6 @@ export interface AgentRunRow {
   updated_at: string;
 }
 
-export interface RunLogLineRow {
-  id: number;
-  run_id: string;
-  seq: number;
-  occurred_at: string;
-  raw_json: string;
-  display_json: string;
-  created_at: string;
-}
-
 export interface InsertRunInput {
   id: string;
   projectSlug: string;
@@ -63,14 +51,13 @@ export interface InsertRunInput {
   kind: RunKind;
   /** Requested backend, kept for glyph fidelity. */
   backend: RunBackend;
-  simulated: boolean;
   model: string;
   sdk: string;
   sessionId?: string | null;
   /** The deployed agent's display name (grouped-picker label). */
   agentName?: string | null;
   /** The deployed profile id (per-agent grouping key). */
-  agentProfileId?: string | null;
+  agentProfileId: string;
   state: RunState;
   phase?: string | null;
   step?: string | null;
@@ -85,17 +72,17 @@ export interface InsertRunInput {
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
-export function upsertRun(db: Database.Database, input: InsertRunInput): void {
+export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO agent_runs
-       (id, task_key, project_slug, thread_id, role, kind, backend, simulated,
+       (id, task_key, project_slug, thread_id, role, kind, backend,
         model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, created_at, updated_at)
      VALUES
-       (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend, @simulated,
+       (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
         @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
@@ -103,7 +90,7 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
-        backend=excluded.backend, simulated=excluded.simulated, model=excluded.model,
+        backend=excluded.backend, model=excluded.model,
         session_id=excluded.session_id, sdk=excluded.sdk,
         agent_name=excluded.agent_name, agent_profile_id=excluded.agent_profile_id,
         state=excluded.state,
@@ -120,12 +107,11 @@ export function upsertRun(db: Database.Database, input: InsertRunInput): void {
     role: input.role,
     kind: input.kind,
     backend: input.backend,
-    simulated: input.simulated ? 1 : 0,
     model: input.model,
     sessionId: input.sessionId ?? null,
     sdk: input.sdk,
     agentName: input.agentName ?? null,
-    agentProfileId: input.agentProfileId ?? null,
+    agentProfileId: input.agentProfileId,
     state: input.state,
     phase: input.phase ?? null,
     step: input.step ?? null,
@@ -155,14 +141,16 @@ export interface RunPatch {
   outputTokens?: number;
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
-  simulated?: boolean;
   backend?: RunBackend;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
-export function patchRun(db: Database.Database, runId: string, patch: RunPatch): void {
+export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void {
   const cols: string[] = [];
-  const params: Record<string, unknown> = { id: runId, updatedAt: new Date().toISOString() };
+  const params: Record<string, SQLInputValue> = {
+    id: runId,
+    updatedAt: new Date().toISOString(),
+  };
   const map: Record<keyof RunPatch, string> = {
     sessionId: "session_id",
     state: "state",
@@ -176,25 +164,24 @@ export function patchRun(db: Database.Database, runId: string, patch: RunPatch):
     outputTokens: "output_tokens",
     totalCostUsd: "total_cost_usd",
     interruptedBy: "interrupted_by",
-    simulated: "simulated",
     backend: "backend",
   };
   for (const key of Object.keys(patch) as (keyof RunPatch)[]) {
     const value = patch[key];
     if (value === undefined) continue;
     cols.push(`${map[key]} = @${key}`);
-    params[key] = key === "simulated" ? (value ? 1 : 0) : (value as unknown);
+    params[key] = value;
   }
   if (cols.length === 0) return;
   db.prepare(`UPDATE agent_runs SET ${cols.join(", ")}, updated_at = @updatedAt WHERE id = @id`).run(params);
 }
 
-export function getRun(db: Database.Database, runId: string): AgentRunRow | null {
+export function getRun(db: DatabaseSync, runId: string): AgentRunRow | null {
   return (db.prepare(`SELECT * FROM agent_runs WHERE id = ?`).get(runId) as AgentRunRow | undefined) ?? null;
 }
 
 export function listRunsForTaskRows(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): AgentRunRow[] {
@@ -203,11 +190,11 @@ export function listRunsForTaskRows(
       `SELECT * FROM agent_runs WHERE project_slug = ? AND task_key = ?
        ORDER BY created_at ASC, rowid ASC`,
     )
-    .all(projectSlug, taskKey) as AgentRunRow[];
+    .all(projectSlug, taskKey) as unknown as AgentRunRow[];
 }
 
 /** Next append sequence for a run (max seq + 1, or 0). */
-export function nextSeq(db: Database.Database, runId: string): number {
+export function nextSeq(db: DatabaseSync, runId: string): number {
   const row = db.prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`).get(runId) as
     | { m: number | null }
     | undefined;
@@ -215,7 +202,7 @@ export function nextSeq(db: Database.Database, runId: string): number {
 }
 
 export function listRunLines(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
   sinceSeq = -1,
 ): { seq: number; occurredAt: string; raw: string; display: LogLine }[] {
@@ -242,7 +229,7 @@ export function listRunLines(
 
 /**
  * The canonical raw log path: runtimes/<backend>/<sessionOrRunId>.jsonl.
- * Uses the requested backend directory (claude/codex/simulated) and the
+ * Uses the requested backend directory and the
  * provider session id when known, else the run id.
  */
 export function rawLogPath(
@@ -267,7 +254,7 @@ export function appendRawLine(
 
 /** Insert one projected log line row (raw + display). Returns the seq used. */
 export function insertRunLine(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { runId: string; seq: number; occurredAt: string; raw: string; display: LogLine },
 ): void {
   db.prepare(

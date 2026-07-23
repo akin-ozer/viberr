@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { hashPassword } from "~/server/auth/password.server";
 import { verifyPassword } from "~/server/auth/password.server";
+import { credentialPasswordHash } from "~/server/auth/identity.server";
 import {
   findUserByEmail,
   insertUser,
@@ -41,7 +41,6 @@ function makeDb() {
     email: "admin@test.dev",
     name: "Admin Test",
     role: "admin",
-    passwordHash: hashPassword("viberr-dev-2828"),
   });
   return db;
 }
@@ -69,9 +68,9 @@ describe("whitelisting", () => {
     ).toThrowError(/already whitelisted/);
   });
 
-  it("google account → passwordless row (the row IS the whitelist)", () => {
+  it("google account → passwordless row (the row IS the whitelist)", async () => {
     const db = makeDb();
-    const { user } = whitelistGoogleAccount(
+    const { user } = await whitelistGoogleAccount(
       db,
       { email: "Deniz@Company.dev", role: "member" },
       ACTOR,
@@ -83,12 +82,12 @@ describe("whitelisting", () => {
       status: "whitelisted",
     });
     const record = findUserByEmail(db, "deniz@company.dev");
-    expect(record!.passwordHash).toBeNull();
+    expect(record!.hasPassword).toBe(false);
   });
 
-  it("local account → temp password surfaced once, status invited; first login flips to active", () => {
+  it("local account → temp password surfaced once, status invited; first login flips to active", async () => {
     const db = makeDb();
-    const { user, tempPassword } = createLocalAccount(
+    const { user, tempPassword } = await createLocalAccount(
       db,
       { name: "Yeni Kişi", email: "yeni@test.dev", role: "member" },
       ACTOR,
@@ -97,7 +96,9 @@ describe("whitelisting", () => {
     expect(user.pwreset).toBe(false); // invited absorbs the pending flag
     expect(tempPassword.length).toBeGreaterThanOrEqual(8);
     const record = findUserByEmail(db, "yeni@test.dev")!;
-    expect(verifyPassword(tempPassword, record.passwordHash)).toBe(true);
+    await expect(
+      verifyPassword(tempPassword, credentialPasswordHash(db, record.id)),
+    ).resolves.toBe(true);
     expect(record.pwresetRequired).toBe(true);
 
     recordUserLogin(db, record.id);
@@ -107,9 +108,9 @@ describe("whitelisting", () => {
 });
 
 describe("edit / role / reset / remove", () => {
-  it("updates a local user's name + email with dedupe", () => {
+  it("updates a local user's name + email with dedupe", async () => {
     const db = makeDb();
-    const { user } = createLocalAccount(
+    const { user } = await createLocalAccount(
       db,
       { name: "Yeni Kişi", email: "yeni@test.dev", role: "member" },
       ACTOR,
@@ -137,28 +138,32 @@ describe("edit / role / reset / remove", () => {
     ).toThrowError(/last active admin/);
   });
 
-  it("reset is local-only, kills the flag into a pending pill", () => {
+  it("reset is local-only, kills the flag into a pending pill", async () => {
     const db = makeDb();
     const gh = whitelistGithubUser(db, { handle: "octocat", role: "member" }, ACTOR);
-    expect(() => resetLocalPassword(db, gh.user.id, ACTOR)).toThrowError(
-      /signs in with GitHub/,
-    );
+    await expect(
+      resetLocalPassword(db, gh.user.id, ACTOR),
+    ).rejects.toThrowError(/signs in with GitHub/);
 
-    const local = createLocalAccount(
+    const local = await createLocalAccount(
       db,
       { name: "Selin Test", email: "selin@test.dev", role: "member" },
       ACTOR,
     );
     recordUserLogin(db, local.user.id); // now an active account
-    const { user, tempPassword } = resetLocalPassword(db, local.user.id, ACTOR);
+    const { user, tempPassword } = await resetLocalPassword(
+      db,
+      local.user.id,
+      ACTOR,
+    );
     expect(user.pwreset).toBe(true);
     expect(user.status).toBe("active");
     expect(tempPassword.length).toBeGreaterThanOrEqual(8);
   });
 
-  it("removes a user row but never the last active admin", () => {
+  it("removes a user row but never the last active admin", async () => {
     const db = makeDb();
-    const { user } = createLocalAccount(
+    const { user } = await createLocalAccount(
       db,
       { name: "Gidici", email: "gidici@test.dev", role: "member" },
       ACTOR,
@@ -174,9 +179,9 @@ describe("edit / role / reset / remove", () => {
 
   // WI-3: delete must remove the better-auth identity too, so re-creating the
   // same email later doesn't hit the UNIQUE constraint on "user".email.
-  it("delete removes the better-auth identity so the email can be reused", () => {
+  it("delete removes the better-auth identity so the email can be reused", async () => {
     const db = makeDb();
-    const { user } = createLocalAccount(
+    const { user } = await createLocalAccount(
       db,
       { name: "Reuse", email: "reuse@test.dev", role: "member" },
       ACTOR,
@@ -189,7 +194,7 @@ describe("edit / role / reset / remove", () => {
     expect(db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id)).toBeUndefined();
 
     // Re-creating the same email succeeds (no orphaned identity constraint).
-    const again = createLocalAccount(
+    const again = await createLocalAccount(
       db,
       { name: "Reuse Two", email: "reuse@test.dev", role: "member" },
       ACTOR,

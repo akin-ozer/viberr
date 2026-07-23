@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   deliveringEngagement,
   type FileActorRef,
@@ -8,8 +9,6 @@ import {
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
-import { buildScript, type SimulatedScript } from "~/server/runtimes/simulated-runtime.server";
-import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -112,38 +111,22 @@ function handleMatchesSpecialist(
  * backend alone let `@reviewer` resume the dev's most-recent claude session
  * (the dev then answered "as the dev"); this keeps each agent on its own thread.
  *
- * Pass 1 — the agent's own runs: `agent_profile_id === profileId` AND the run
- * kind matches how the agent is engaged (`primary` vs `reviewer`), so a run
- * stamped with an identity but the wrong kind (a legacy cross-agent resume) is
- * NOT reused. Pass 2 — a legacy fallback for the PRIMARY only: a pre-identity
- * (`agent_profile_id IS NULL`) primary run of the same backend, so primaries
- * that ran before the identity columns still resume.
+ * The profile id and engagement kind must both match; sharing a backend is not
+ * enough to reuse another agent's session.
  */
 function latestSessionRun(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  target: { profileId: string; backend: RealBackend; isPrimary: boolean },
+  target: { profileId: string; isPrimary: boolean },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
-  // Pass 1 — the agent's own session (identity + engagement kind).
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
     if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
       return row;
-    }
-  }
-  // Pass 2 — legacy null-identity primary session (pre-0010), same backend.
-  if (target.isPrimary) {
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i]!;
-      if (row.kind !== "primary") continue;
-      if (!row.session_id) continue;
-      if (row.agent_profile_id != null) continue;
-      const rowBackend: RealBackend = row.backend === "codex" ? "codex" : "claude";
-      if (rowBackend === target.backend) return row;
     }
   }
   return null;
@@ -160,7 +143,7 @@ function latestSessionRun(
  *   3. a deployed specialist by name / profile id / backend.
  */
 export function resolveMentionedAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -170,12 +153,12 @@ export function resolveMentionedAgent(
   if (handles.length === 0) return null;
   const handleSet = new Set(handles);
 
-  const specialists = listDeployedSpecialists(db, projectSlug, ctx);
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
 
   const existing = readTaskFile({
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const primaryRef = existing
     ? deliveringEngagement(existing.parsed.frontmatter)
@@ -226,7 +209,6 @@ export function resolveMentionedAgent(
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: primaryRef.profileId,
-        backend,
         isPrimary: true,
       }),
     };
@@ -248,7 +230,6 @@ export function resolveMentionedAgent(
       isOperator: false,
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
-        backend: matched.backend,
         isPrimary,
       }),
     };
@@ -272,7 +253,6 @@ export function resolveMentionedAgent(
         isOperator: false,
         session: latestSessionRun(db, projectSlug, taskKey, {
           profileId: primaryRef.profileId,
-          backend,
           isPrimary: true,
         }),
       };
@@ -361,7 +341,7 @@ function truncate(text: string): string {
 
 /** Read a run's persisted display lines (helper for the completion callback). */
 export function replyTextForRun(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): string | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
@@ -370,7 +350,7 @@ export function replyTextForRun(
 
 /** The full untruncated reply text of a run (for verdict + no-progress checks). */
 export function fullReplyTextForRun(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): string | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
@@ -394,7 +374,7 @@ export type RunFailureKind =
  * credential, so no agent process ever started.
  */
 export function runFailureReason(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): { kind: RunFailureKind; text: string } | null {
   const lines = listRunLines(db, runId).map((l) => l.display);
@@ -426,49 +406,6 @@ export function runFailureReason(
 }
 
 // -------------------------------------------------------- resume workdir
-
-// ---------------------------------------------------- simulated reply stream
-
-/**
- * A short scripted reply stream for a resumed session on the GATED
- * deterministic test engine (R7-2 — the caller builds it only when the gate
- * is open), so the resumed run produces a final `assistant`/`agent_message`
- * line (→ an agent reply comment). On a real backend the transcript carries
- * the reply instead; with no backend and the gate closed the resume fails
- * fast. `instant` so the reply lands promptly (and the test is deterministic).
- */
-export function buildReplyScript(
-  backend: RealBackend,
-  model: string,
-): SimulatedScript {
-  const now = new Date().toISOString();
-  const replyText =
-    "Thanks for the comment — I re-read the task and my working tree. " +
-    "I've addressed the point you raised and pushed the adjustment; the " +
-    "analysis still holds. Let me know if you'd like a deeper pass on any part.";
-  const lines: LogLine[] =
-    backend === "codex"
-      ? [
-          { t: "", ev: "init", tag: "thread.started", text: "codex thread · resumed for a follow-up comment" },
-          { t: "", ev: "text", tag: "agent_message", text: replyText },
-          { t: "", ev: "result", tag: "turn.completed", text: "reply complete", usage: { input_tokens: 900, cached_input_tokens: 400, output_tokens: 120 } },
-        ]
-      : [
-          { t: "", ev: "init", tag: "system·init", text: "resumed session · follow-up comment" },
-          { t: "", ev: "text", tag: "assistant", text: replyText },
-          { t: "", ev: "result", tag: "result", text: "reply complete", stats: { subtype: "success", dur: 2400, api: 2100, turns: 1, cost: 0.01, in: 900, cached: 400, out: 120 } },
-        ];
-  return buildScript({
-    lines,
-    occurredAt: lines.map(() => now),
-    sessionId: "reply",
-    backend,
-    model,
-    op: false,
-    keepRunning: false,
-    instant: true,
-  });
-}
 
 /**
  * The working directory a resumed reply run should use: the specialist-run

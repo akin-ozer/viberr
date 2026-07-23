@@ -11,7 +11,7 @@ import type { OrgSettingsView } from "~/server/org/org-view.server";
  * Route-level tests for /org/settings: admin-only RBAC on loader + action,
  * user-tab mutations through real Requests (phase-2 API + guards),
  * whitelist add, resource intents, and StoreBrowser fs intents (multipart
- * upload → REAL file under the data root). The old /org/users redirects.
+ * upload → REAL file under the data root).
  */
 
 let app: AppTestContext;
@@ -20,7 +20,7 @@ let ids: { arda: string; selin: string };
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedOrgResources } = await import("~/server/org/org-seed.server");
   seedOrgResources(app.db, { dataRoot: app.dataRoot });
   // Ships the *-expertise skill folders to disk (no DB rows) — the org view
@@ -299,14 +299,5 @@ describe("resource + store intents", () => {
     });
     expect(result.ok).toBe(false);
     expect(String(result.error)).toContain("No GitHub connection");
-  });
-});
-
-describe("old /org/users", () => {
-  it("redirects to the Users & access tab", async () => {
-    const { loader } = await import("~/routes/org.users");
-    const response = loader() as Response;
-    expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/org/settings?tab=users");
   });
 });

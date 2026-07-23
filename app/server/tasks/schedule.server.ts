@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   recordAudit,
   SYSTEM_ACTOR,
@@ -33,12 +33,7 @@ import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
  * a fired entry stays fired across restarts (the file is canonical).
  */
 
-/** Runner cadence. Overridable (VIBERR_SCHEDULE_TICK_MS) for tests + live checks. */
-export function scheduleTickMs(): number {
-  const raw = process.env.VIBERR_SCHEDULE_TICK_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n >= 1000 ? n : 60_000;
-}
+const SCHEDULE_TICK_MS = 60_000;
 
 function taskFileRef(
   ctx: TaskMutationContext,
@@ -48,18 +43,18 @@ function taskFileRef(
   return {
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
 function reproject(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
 ): void {
   rebuildPath(db, resolveTaskFilePath(taskFileRef(ctx, projectSlug, taskKey)), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -79,7 +74,7 @@ function scheduleEvent(
 }
 
 /** The project's final (terminal/Done) stage id, or null. */
-function terminalStageId(db: Database.Database, projectSlug: string): string | null {
+function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
   const stages = getProject(db, projectSlug)?.stages ?? [];
   return stages[stages.length - 1]?.id ?? null;
 }
@@ -102,7 +97,7 @@ export interface ScheduleInput {
  * past `dueAt` and a task that is already in its terminal stage.
  */
 export async function scheduleTaskAction(
-  db: Database.Database,
+  db: DatabaseSync,
   input: ScheduleInput,
   actor: AuditActor,
   ctx: TaskMutationContext = {},
@@ -160,7 +155,7 @@ export async function scheduleTaskAction(
 // ------------------------------------------------------------------ cancel
 
 export async function cancelScheduledAction(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; scheduleId: string },
   actor: AuditActor,
   ctx: TaskMutationContext = {},
@@ -216,7 +211,7 @@ const MAX_SCHEDULE_RETRIES = 3;
  * per operator run; one failure never blocks the others.
  */
 export async function fireDueSchedules(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<{ fired: number; skipped: number }> {
   const nowMs = Date.now();
@@ -227,7 +222,7 @@ export async function fireDueSchedules(
         WHERE schedules_json LIKE '%"status":"pending"%'
            OR schedules_json LIKE '%"status":"claimed"%'`,
     )
-    .all() as DueRow[];
+    .all() as unknown as DueRow[];
   if (rows.length === 0) return { fired: 0, skipped: 0 };
 
   const terminalCache = new Map<string, string | null>();
@@ -349,7 +344,7 @@ export async function fireDueSchedules(
             backend: t.backend,
             autonomy: t.autonomy,
             trigger: "manual",
-            ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+            dataRoot: ctx.dataRoot,
           });
           ok = true;
         } catch (error) {
@@ -417,7 +412,7 @@ let runnerHandle: ReturnType<typeof setInterval> | null = null;
  * that came due while the process was down), then on an interval. Non-
  * overlapping (a slow tick can't stack). Idempotent — a second call is a no-op.
  */
-export function startScheduleRunner(db: Database.Database): void {
+export function startScheduleRunner(db: DatabaseSync): void {
   void fireDueSchedules(db).catch(() => {});
   if (runnerHandle) return;
   let running = false;
@@ -433,7 +428,7 @@ export function startScheduleRunner(db: Database.Database): void {
       .finally(() => {
         running = false;
       });
-  }, scheduleTickMs());
+  }, SCHEDULE_TICK_MS);
   // Don't keep the process alive for the timer (tests, graceful shutdown).
   if (typeof runnerHandle.unref === "function") runnerHandle.unref();
 }

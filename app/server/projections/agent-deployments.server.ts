@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { AgentRef, OperatorRef, Waiting } from "~/schemas/task-file.schema";
 import type {
   AgentDeploymentView,
@@ -58,7 +58,7 @@ function reviewerIndex(threadId: string): number {
 }
 
 export function listAgentDeployments(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): AgentDeploymentView[] {
   const project = getProject(db, projectSlug);
@@ -73,7 +73,7 @@ export function listAgentDeployments(
         WHERE project_slug = ?
         ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
-    .all(projectSlug) as DeploymentTaskRow[];
+    .all(projectSlug) as unknown as DeploymentTaskRow[];
 
   const runningRows = db
     .prepare(
@@ -81,7 +81,7 @@ export function listAgentDeployments(
          FROM agent_runs
         WHERE project_slug = ? AND state = 'running'`,
     )
-    .all(projectSlug) as RunningRunRow[];
+    .all(projectSlug) as unknown as RunningRunRow[];
   const running = new Map<string, Set<string>>();
   for (const row of runningRows) {
     const key =

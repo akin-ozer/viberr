@@ -58,7 +58,7 @@ function getEmitter(): EventEmitter {
 }
 
 // Active collection buffer (see collectProjectionEvents). Module-local is
-// fine: better-sqlite3 transactions are synchronous, so a collection window
+// fine: node:sqlite transactions are synchronous, so a collection window
 // can never interleave with another request's emissions.
 let collectBuffer: ProjectionEvent[] | null = null;
 

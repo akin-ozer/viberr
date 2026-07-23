@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -30,7 +30,7 @@ const OPERATOR_PROFILE_ID = "operator";
  * starts, so there is no concurrent writer.
  */
 export function ensureBaseAgentsDeployed(
-  db: Database.Database,
+  db: DatabaseSync,
   dataRoot?: string,
 ): void {
   const base = baseAgentDeployments();
@@ -42,7 +42,7 @@ export function ensureBaseAgentsDeployed(
     try {
       const file = readProjectFile({
         projectSlug: project.slug,
-        ...(dataRoot !== undefined ? { dataRoot } : {}),
+        dataRoot,
       });
       if (!file) continue;
 
@@ -74,7 +74,7 @@ export function ensureBaseAgentsDeployed(
         serializeProjectFile(next),
       );
       rebuildPath(db, projectFilePath(project.slug, dataRoot), {
-        ...(dataRoot !== undefined ? { dataRoot } : {}),
+        dataRoot,
       });
       logger.info("backfilled built-in agents into project", {
         project: project.slug,

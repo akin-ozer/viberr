@@ -128,7 +128,6 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(lines[0]!.facts.sessionId).toBe("0199abc");
     expect(exit).toMatchObject({
       outcome: "finished",
-      simulated: false,
       effectiveBackend: "codex",
     });
   });
@@ -634,8 +633,8 @@ describe("codex failure classification survives redaction into runFailureReason 
       threadId: SPEC.threadId,
       role: SPEC.role,
       kind: SPEC.kind,
+      agentProfileId: "developer",
       backend: "codex",
-      simulated: false,
       model: SPEC.model,
       sdk: "codex-sdk",
       state: "error",

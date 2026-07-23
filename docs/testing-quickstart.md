@@ -18,13 +18,10 @@ Generate React Router types and run TypeScript checks:
 npm run typecheck
 ```
 
-## Playwright end-to-end tests
+## Production build
 
-Install Chromium once with `npx playwright install chromium`, then run:
+Build the same artifact CI validates:
 
 ```sh
-npm run e2e
+npm run build
 ```
-
-For hermetic CI, run `export VIBERR_DATA_ROOT="$(mktemp -d)"` before the test gates.
-Playwright also resets and uses its own `e2e/.tmp-data` sandbox.

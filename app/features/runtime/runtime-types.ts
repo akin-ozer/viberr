@@ -19,8 +19,7 @@ export type RunState =
   | "error"
   | "interrupted";
 
-/** The requested backend — kept for glyph/SDK fidelity even when simulated. */
-export type RunBackend = "claude" | "codex" | "simulated";
+export type RunBackend = "claude" | "codex";
 
 export type RunKind = "operator" | "primary" | "reviewer";
 
@@ -88,13 +87,10 @@ export interface RunView {
   op?: boolean;
   role: string;
   kind: RunKind;
-  /** Deployed profile behind this run (null for operator / legacy rows) —
-   *  identifies WHICH reviewer to re-run on the D4 retry. */
-  profileId?: string | null;
+  /** Deployed profile behind this run; identifies which agent to re-run. */
+  profileId: string;
   who: RunWho;
   backend: "claude" | "codex";
-  /** True when the simulated engine produced this run (real fallback or seed). */
-  simulated: boolean;
   sdk: string;
   model: string;
   /** Provider session/thread id (may be null before init lands). */

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type LogLine,
   type RunState,
@@ -89,13 +89,13 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
 }
 
 function projectRow(
-  db: Database.Database,
+  db: DatabaseSync,
   row: AgentRunRow,
   lines: LogLine[],
   raw: string[],
 ): RunView {
   const op = row.kind === "operator";
-  const backend = row.backend === "simulated" ? "claude" : (row.backend as "claude" | "codex");
+  const backend = row.backend;
   // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
   // reviewer's name) when the run carries an identity; seed/historical rows
   // (null agent_name) fall back to the backend WHO_NAME so nothing regresses.
@@ -138,10 +138,9 @@ function projectRow(
     op: op ? true : undefined,
     role: row.role,
     kind: row.kind,
-    profileId: row.agent_profile_id ?? null,
+    profileId: row.agent_profile_id,
     who,
     backend,
-    simulated: row.simulated === 1,
     sdk: row.sdk || SDK_LABEL[backend] || "",
     model: row.model,
     sid: row.session_id,
@@ -168,13 +167,10 @@ function projectRow(
  *
  *   operator          → "operator"           (one operator thread per task)
  *   specialist/etc.   → "<kind>:<profileId>" (stable across resumes)
- *                       …falling back to "<kind>:<role>" for seed/historical
- *                       rows that predate agent_profile_id (still one entry per
- *                       distinct role, matching the seeded op/primary/c0 shape).
  */
 function groupKeyOf(row: AgentRunRow): string {
   if (row.kind === "operator") return "operator";
-  return `${row.kind}:${row.agent_profile_id ?? row.role}`;
+  return `${row.kind}:${row.agent_profile_id}`;
 }
 
 /**
@@ -206,7 +202,7 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
  * (with many resume runs) + an optional reviewer shows 2–3 named entries.
  */
 export function projectRunsForTask(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): RunView[] {

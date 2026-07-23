@@ -29,9 +29,8 @@ import {
 } from "./board-filters";
 
 /**
- * Board view — 1:1 port of design/html-app/app/board.jsx onto the Phase-3
- * projections. No DnD (stage transitions are governed actions elsewhere).
- * Deviations from the mock (documented in the phase report):
+ * Board view over the task projections. Stage transitions are governed
+ * actions rather than drag and drop.
  *   - filter/view/search live in URL params (survive refresh/share);
  *   - list view gains a minimal empty state (ruling 16);
  *   - re-scan toasts fire on real action completion, ".viberr" wording

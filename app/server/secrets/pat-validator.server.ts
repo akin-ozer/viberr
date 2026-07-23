@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   PatTokenKind,
   PatValidation,
@@ -317,7 +317,7 @@ export async function validatePatToken(
  * when the PAT id is unknown.
  */
 export async function validatePat(
-  db: Database.Database,
+  db: DatabaseSync,
   patId: string,
   options: ValidatePatTokenOptions = {},
 ): Promise<PatValidation | null> {
@@ -358,7 +358,7 @@ export interface RevalidateContext {
  * emitted projection/violation events.
  */
 export async function revalidateProjectCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor = SYSTEM_ACTOR,
   ctx: RevalidateContext = {},
@@ -435,7 +435,7 @@ export async function revalidateProjectCredential(
       db,
       violation.id,
       actor,
-      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      { dataRoot: ctx.dataRoot },
     );
     if (result?.resolved) resolvedViolations.push(result.violation);
   }

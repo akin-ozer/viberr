@@ -24,10 +24,10 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     expect(listScopeViolations(db, "viberr-core", { status: "open" })).toHaveLength(0);
   });
 
-  it("the demo seed re-adds the mock VIB-142 violation (rail badge = 1)", () => {
+  it("the demo seed re-adds the mock VIB-142 violation (rail badge = 1)", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
     expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
     expect(countOpenPolicyViolations(db, "deploy-pipeline")).toBe(0);
     const open = listScopeViolations(db, "viberr-core", { status: "open" });
@@ -40,10 +40,10 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     });
   });
 
-  it("rail-badge signature compatibility: demo seed keeps the count at exactly 1", () => {
+  it("rail-badge signature compatibility: demo seed keeps the count at exactly 1", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
     // Same call the /projects/:slug shell loader makes (routes/project.tsx).
     expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
     expect(countOpenPolicyViolations(db, "billing-service")).toBe(0);

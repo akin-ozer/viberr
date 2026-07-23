@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
@@ -35,7 +35,7 @@ export interface SettingsViewData {
 }
 
 export function getSettingsViewData(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): SettingsViewData | null {
@@ -51,7 +51,7 @@ export function getSettingsViewData(
 
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const overrideRaw = file?.parsed.unknownFrontmatter.taskRepoOverride;
 

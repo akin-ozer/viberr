@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { hashPassword } from "~/server/auth/password.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
   createConnection,
@@ -30,7 +29,6 @@ function makeDbWithUser() {
     email: "admin@test.dev",
     name: "Admin Test",
     role: "admin",
-    passwordHash: hashPassword("viberr-dev-2828"),
   });
   return db;
 }

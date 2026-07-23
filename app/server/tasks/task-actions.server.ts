@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   acceptanceBlockedReason,
   deliveringEngagement,
@@ -29,14 +29,12 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
   encodeActorRef,
-  roleToSlug,
 } from "~/server/files/actor-ref.server";
 import {
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   resolveTaskFilePath,
   createTaskFile,
@@ -63,16 +61,7 @@ import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
 
-/**
- * Task mutations (Phase 3 server functions; Phase 4/5 route actions call
- * them). Every mutation follows the canonical order:
- *
- *   file write → incremental reproject → audit → notification fan-out
- *
- * RBAC is enforced HERE against project membership roles (contracts §3.2
- * grant table); callers only authenticate the session user. All identity
- * comparisons are by user id (ruling 6).
- */
+/** Task mutations write the canonical file before projections, audit, and notifications. */
 
 export interface TaskActor {
   userId: string;
@@ -83,23 +72,9 @@ export interface TaskActor {
 export interface TaskMutationContext {
   /** Override the data root (tests). Defaults to env VIBERR_DATA_ROOT. */
   dataRoot?: string;
-  /**
-   * Set by the operator runtime (operator-actions.server) when an action is
-   * performed by the OPERATOR agent rather than a human. It bypasses the
-   * human project-membership RBAC (operator authority is enforced upstream by
-   * the operator's capability policy) and stamps operator actor/audit refs so
-   * the timeline and audit trail attribute the action to the operator, not a
-   * user. Never set from a route — only the in-process operator toolkit sets it.
-   */
+  /** In-process operator authority; routes must never set this. */
   operatorAuthorized?: boolean;
-  /**
-   * Set by the operator runtime for the duration of an operator run. Carries the
-   * run's backend + autonomy + react-depth so that when an operator-triggered
-   * agent replies, the reply-completion hook can RE-INVOKE the operator (trigger
-   * `agent-reply`) to read the reply and propose the next state change: the
-   * "prompt the agent, read its output, propose a state change" loop. The depth
-   * bounds that re-invocation chain so it can never run away.
-   */
+  /** Operator-run state needed to continue the bounded reply/react loop. */
   operatorRun?: {
     backend: RealBackend;
     autonomy: "supervised" | "full";
@@ -110,14 +85,7 @@ export interface TaskMutationContext {
 /** Hard cap on the operator's react re-invocation chain (runaway backstop). */
 const OPERATOR_REACT_DEPTH_CAP = 4;
 
-/**
- * Whether an operator-triggered agent run should re-invoke the operator to
- * REACT to its reply. False when the run did not finish cleanly, produced no
- * report, merely REPEATED its previous reply (no progress — reacting again would
- * only spiral, the CTL-3 bug), or the react-depth cap is reached (an undefined
- * depth means there is no active operator run to continue). Pure — exported for
- * tests.
- */
+/** Continue the operator loop only after a new, successful reply within its depth cap. */
 export function operatorShouldReactToReply(
   finishedState: string,
   replyText: string | null,
@@ -143,24 +111,6 @@ export const OPERATOR_TASK_ACTOR: TaskActor = {
 
 // ---------------------------------------------------------------- helpers
 
-function forbidden(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.FORBIDDEN,
-    status: 403,
-    userMessage,
-    kind: "user",
-  });
-}
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
-
 interface ProjectContext {
   slug: string;
   stages: { id: string; name: string }[];
@@ -181,7 +131,7 @@ function loadProjectContext(
 ): ProjectContext {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
   const fm = file.parsed.frontmatter;
@@ -237,21 +187,9 @@ export interface TaskWatcherNotice {
   exceptUserId?: string;
 }
 
-/**
- * Fan a governance event out to the humans who supervise a task: its owner (if
- * any) plus the project's admins and maintainers — the people entitled to act
- * on it. This is what turns a waiting-on-human task into a real "Waiting on you"
- * inbox item + bell increment, instead of a state a supervisor must discover by
- * scanning the board (FR26, Journey 2, and the "blocked tasks reach a human
- * decision quickly" success metric). Recipients are deduped and the triggering
- * user is skipped. Returns the user ids that were ACTUALLY notified — each
- * recipient's routing prefs are honored inside createNotification, so a
- * supervisor who silenced this category is dropped from the result. Never
- * throws on a missing task/project — a notification failure must not fail the
- * governed mutation.
- */
+/** Notify the owner and project supervisors, respecting routing preferences. */
 export function notifyTaskWatchers(
-  db: Database.Database,
+  db: DatabaseSync,
   notice: TaskWatcherNotice,
   ctx: TaskMutationContext = {},
 ): string[] {
@@ -304,7 +242,7 @@ export function notifyTaskWatchers(
  *  Routes through the single authority resolution, so an org admin passes as
  *  the audited D2 override. */
 function requireAnyMember(
-  db: Database.Database,
+  db: DatabaseSync,
   project: ProjectContext,
   actor: TaskActor,
   what: string,
@@ -315,17 +253,9 @@ function requireAnyMember(
   }).role;
 }
 
-/**
- * THE canonical project-role guard: resolves the actor's authority through the
- * single-source `ACTION_ROLES` map (app/shared/rbac.ts) — the same object the
- * Policy page renders. Every governed project mutation names its `RbacAction`
- * here instead of hard-coding a role list, so enforcement and display can never
- * drift. Org admins pass as the audited D2 emergency override when their
- * membership alone would be denied. Returns the EFFECTIVE role for downstream
- * branching ("admin" under an override).
- */
+/** Enforce the shared action-role policy and return the actor's effective role. */
 export function requireAction(
-  db: Database.Database,
+  db: DatabaseSync,
   project: ProjectContext,
   actor: TaskActor,
   action: RbacAction,
@@ -341,13 +271,7 @@ export function requireAction(
   }).role;
 }
 
-/**
- * The ONE task-owner exception (owner rulings Q2 + R6-2): the task's human
- * OWNER — whatever their tier — holds review/acceptance authority for THAT
- * task, provided they still hold LIVE `own-task` membership (contributor+; a
- * demoted viewer-owner or a removed member with a stale ownerUserId never
- * qualifies). Shared by requireAcceptCompletion and resolvePacket.
- */
+/** A live contributor-or-higher owner may accept their assigned task. */
 function ownerException(
   project: ProjectContext,
   actor: TaskActor,
@@ -361,19 +285,9 @@ function ownerException(
   );
 }
 
-/**
- * Accept-completion authority WITH the task-owner exception (owner ruling R6-2).
- *
- * A completion is accepted by the `accept-completion` tier (maintainer+) OR by
- * the task's human OWNER — even when that owner is only a Contributor. The owner
- * IS the task's designated reviewer/acceptance authority (the Policy page says
- * exactly this), so a contributor who owns a task may accept its own completion,
- * mirroring the resolve-packet owner exception (same `ownerException` helper).
- * The operator never routes through here (it is gated by its own capability
- * policy upstream).
- */
+/** Require normal acceptance authority or the live task-owner exception. */
 function requireAcceptCompletion(
-  db: Database.Database,
+  db: DatabaseSync,
   project: ProjectContext,
   actor: TaskActor,
   ownerUserId: string | null | undefined,
@@ -383,14 +297,14 @@ function requireAcceptCompletion(
   requireAction(db, project, actor, "accept-completion", what);
 }
 
-function userName(db: Database.Database, userId: string): string {
+function userName(db: DatabaseSync, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
     | undefined;
   return row?.name ?? userId;
 }
 
-function humanActorRef(db: Database.Database, actor: TaskActor) {
+function humanActorRef(db: DatabaseSync, actor: TaskActor) {
   return {
     kind: "human" as const,
     userId: actor.userId,
@@ -402,24 +316,24 @@ export function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: 
   return {
     projectSlug,
     taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
 /** file write already happened — reproject the task file incrementally. */
 export function reprojectTask(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
 ): void {
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
 function summaryOrThrow(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): TaskSummary {
@@ -452,7 +366,7 @@ export interface CreateTaskInput {
  * RBAC: any project member except viewers (board spec §5.1).
  */
 export async function createTask(
-  db: Database.Database,
+  db: DatabaseSync,
   input: CreateTaskInput,
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -476,7 +390,7 @@ export async function createTask(
 
   const projectRef = {
     projectSlug: input.projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
   const key = await allocateTaskKey(projectRef);
   const now = new Date().toISOString();
@@ -516,7 +430,7 @@ export async function createTask(
 
   // project.md changed too (counter bump) — reproject both.
   rebuildPath(db, projectFilePath(input.projectSlug, ctx.dataRoot), {
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   reprojectTask(db, ctx, input.projectSlug, key);
 
@@ -542,17 +456,9 @@ export async function createTask(
   };
 }
 
-/**
- * Edit a task's Goal / acceptance criteria (X11) — the canonical `## Goal`
- * body every agent re-anchors on. Previously nothing in the app could change
- * the goal after creation, so an @mention couldn't add acceptance criteria (the
- * agent re-reads the canonical goal and ignores comment-only criteria). RBAC:
- * admin|maintainer (it steers all downstream agent work). A `policy` timeline
- * event records the change so the edit is auditable on the task itself; the
- * operator is re-engaged so it re-reads the new goal.
- */
+/** Edit the canonical goal, audit it, and re-engage the operator. */
 export async function updateTaskGoal(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; goal: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -623,18 +529,9 @@ export async function updateTaskGoal(
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
-/**
- * Auto-invoke the operator to start coordinating a freshly-created task under
- * its deployed capability policy + autonomy (ADR-002 — one operator per active
- * task). Best-effort and non-blocking:
- *   - skipped when the project has no operator deployed (returns immediately,
- *     so a project without an operator behaves exactly as before);
- *   - a runtime failure is logged and never propagates to the create.
- * Dynamically imported to avoid a module cycle (operator-run → operator-actions
- * → task-actions).
- */
+/** Best-effort operator handoff; dynamically imported to avoid a module cycle. */
 async function autoInvokeOperator(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -649,7 +546,7 @@ async function autoInvokeOperator(
       projectSlug,
       taskKey,
       trigger,
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
   } catch (error) {
     logger.error("auto operator invocation failed", {
@@ -681,7 +578,7 @@ export interface AppendCommentResult {
  * name, case-insensitive); agent handles route the comment to the operator.
  */
 export async function appendComment(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -813,13 +710,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
   agent: { profileId: string; name: string; role: string } | null;
   /** How the mentioned agent was engaged (null when no agent was engaged). */
   triggered: "resumed" | "started" | null;
-  /**
-   * The Agent-logs selection id (a RunView.id — the grouped representative
-   * thread) for the engaged agent's reply run, so the UI can auto-select and
-   * stream it (BUG 3). Null when no run was triggered. Since the reply run is
-   * the newest for that agent, it is the group representative → selecting this
-   * shows its live output.
-   */
+  /** Agent-log group to select after a reply run starts. */
   logThreadId: string | null;
   /**
    * True when an agent was mentioned but the commenter lacks the runtime role
@@ -829,29 +720,9 @@ export interface CommentToAgentResult extends AppendCommentResult {
   runtimeDenied: boolean;
 }
 
-/**
- * App-wide commenting that ALSO resumes a mentioned agent's provider session
- * and posts the agent's reply back into the timeline as an agent-authored
- * comment (the "comment → resume that agent → reply as a comment" flow).
- *
- * Behavior:
- *  1. Always append the comment (existing `appendComment` behavior, `toAgent`
- *     when an agent handle is present). Non-agent comments behave exactly as
- *     before — this is a superset of `appendComment`.
- *  2. Resolve the @mentioned agent on the task (name/backend/role/generic).
- *     No agent mentioned → returns like `appendComment` with `agent: null`.
- *  3. RBAC: triggering a run is a runtime action — admin|maintainer only
- *     (mirrors specialist runs). A viewer/reviewer @mention still RECORDS the
- *     comment but does NOT trigger the run (`runtimeDenied: true`, no throw).
- *  4. If the agent has a prior session → RESUME it (reuse its clone workdir).
- *     If it has no prior session → start a FRESH specialist run (first-mention
- *     fallback so the agent still replies). Autonomous either way.
- *  5. Register a completion callback: when the run finishes, extract the final
- *     assistant text and append it as an AGENT-authored `comment` event
- *     (actor = the agent's actorRef, NOT toAgent) → reproject → SSE.
- */
+/** Append a comment and, when authorized, resume or start its mentioned agent. */
 export async function commentToAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; text: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -860,11 +731,9 @@ export async function commentToAgent(
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
-  const {
-    resolveMentionedAgent,
-    resumeWorkdir,
-    buildReplyScript,
-  } = await import("./agent-reply.server");
+  const { resolveMentionedAgent, resumeWorkdir } = await import(
+    "./agent-reply.server"
+  );
   const target = resolveMentionedAgent(
     db,
     ctx,
@@ -915,7 +784,7 @@ export async function commentToAgent(
       taskKey: input.taskKey,
       trigger: "manual",
       humanComment: input.text.trim(),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
     const logThreadId = resolveReplyLogThread(
@@ -956,17 +825,6 @@ export async function commentToAgent(
       repo,
       ctx.dataRoot,
     );
-    // R7-2: the canned reply stream feeds ONLY the gated deterministic test
-    // engine — outside the gate the resume runs real, or fails fast honestly.
-    const { simulatedRuntimePermitted } = await import(
-      "~/server/runtimes/runtime-registry.server"
-    );
-    const script = simulatedRuntimePermitted()
-      ? buildReplyScript(
-          target.session.backend === "codex" ? "codex" : "claude",
-          target.model,
-        )
-      : undefined;
     // Re-establish the specialist's run confinement — denylist, git ceiling,
     // MCP set, persona — that the fresh-run path applies. Without this a
     // resumed (@mention) specialist runs unconfined (XS-1).
@@ -1001,8 +859,7 @@ export async function commentToAgent(
       agentName: target.name,
       agentProfileId: target.profileId,
       autonomous: true,
-      ...(script ? { script } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
     runId = resumed.runId;
@@ -1101,7 +958,7 @@ export async function commentToAgent(
  * run's DB id; falls back to the run's own thread id, then null.
  */
 function resolveReplyLogThread(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   runId: string,
@@ -1123,14 +980,14 @@ function resolveReplyLogThread(
  *  authority resolution, so an org admin passes as the audited D2 override.
  *  Non-throwing: a lower role's comment is still recorded, the run is skipped. */
 function hasRuntimeRole(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actor: TaskActor,
 ): boolean {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   if (!file) return false;
   // Delegate the run-agents tier + audit to the ONE shared helper (§4g dedup).
@@ -1154,18 +1011,11 @@ function projectRepoFor(
 ): string | null {
   const file = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return file?.parsed.frontmatter.repo ?? null;
 }
 
-/**
- * Append the agent's reply as an agent-authored `comment` timeline event
- * (actor = the agent's actorRef, type "comment", NOT toAgent) → reproject
- * (SSE rides the file write). Best-effort: a failure here is logged and
- * never propagated (the run already finished; the transcript is in the logs).
- * When the run produced no usable text, we skip posting a comment.
- */
 /** The outcome of building an agent-reply comment: a ready-to-unshift timeline
  *  event, an empty reply (no comment), or a guardrail drop. */
 type PreparedReply =
@@ -1173,20 +1023,10 @@ type PreparedReply =
   | { status: "dropped" }
   | { status: "event"; event: TaskFileEvent };
 
-/**
- * Builds the agent-reply timeline comment (anti-noise guardrails + evidence
- * separation + simulated-run marking) WITHOUT writing it. Extracted so the
- * REVIEWER path can unshift the reply comment ATOMICALLY with its verdict event
- * in a single updateTaskFile: they used to be two separate writes, and a
- * bind-mount read-your-own-writes gap (VirtioFS) let the verdict's
- * read-modify-write read the pre-comment file and erase the reviewer's reply
- * (VIB-1/2/3/4, deterministic in docker). One write can't split them.
- */
+/** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
-  db: Database.Database,
   ctx: TaskMutationContext,
   projectSlug: string,
-  runId: string,
   actorRef: FileActorRef,
   replyText: string | null,
 ): Promise<PreparedReply> {
@@ -1206,18 +1046,6 @@ async function prepareAgentReplyEvent(
   const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
     ? separateEvidence(replyText)
     : replyText;
-  // Honesty guard (PRD "process theater" risk): a report from a SIMULATED run is
-  // fabricated (canned text with no real work). Mark it as such in the canonical
-  // timeline — the source of truth agents and humans re-anchor on.
-  const simulated =
-    (
-      db.prepare(`SELECT simulated FROM agent_runs WHERE id = ?`).get(runId) as
-        | { simulated: number }
-        | undefined
-    )?.simulated === 1;
-  const text = simulated
-    ? `_(simulated run — no real repository work was performed)_\n\n${separated}`
-    : separated;
   return {
     status: "event",
     event: {
@@ -1225,7 +1053,7 @@ async function prepareAgentReplyEvent(
       type: "comment",
       actor: actorRef,
       title: null,
-      text,
+      text: separated,
       toAgent: false,
       evidence: null,
     },
@@ -1236,7 +1064,7 @@ async function prepareAgentReplyEvent(
  *  `task.agent.replied`), noting a guardrail drop so a dropped reply isn't
  *  reprocessed on every restart (adversarial-review #11). */
 function recordAgentRepliedAudit(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   runId: string,
@@ -1256,7 +1084,7 @@ function recordAgentRepliedAudit(
 }
 
 export async function postAgentReplyComment(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1267,10 +1095,8 @@ export async function postAgentReplyComment(
   },
 ): Promise<void> {
   const prepared = await prepareAgentReplyEvent(
-    db,
     ctx,
     input.projectSlug,
-    input.runId,
     input.actorRef,
     input.replyText,
   );
@@ -1311,39 +1137,15 @@ export async function postAgentReplyComment(
 // ------------------------------------------------------------ operatorPromptAgent
 
 /**
- * Operator engages + PROMPTS an agent for the current stage: posts an
- * operator-authored comment that prompts the agent about the task (routed
- * to-agent, so the humans see the hand-off), triggers the agent's run with that
- * prompt woven in as its turn directive, and registers the agent's reply so its
- * response posts back as a comment. This is the mechanism the operator uses to
- * "hand the task to" the stage's specialist/reviewer when a task enters a new
- * stage — the operator triggers agents with a task-related prompt, not silently.
- *
- * Operator-only: it stamps operator authority (skips the human runtime RBAC on
- * the run) and attributes the prompt comment to the operator. The gating
- * (assign-primary-specialist / summon-reviewers) is applied by the callers in
- * operator-actions before they reach this direct-execution path.
- */
-/**
  * The agent's most-recent reply comment text on a task, or null when it has
- * never replied. Identity match: profileId (D7) with a legacy fallback on the
- * displayed role (pre-profileId events encoded a role slug — their displayed
- * role still equals the live role snapshot). Used to detect a no-progress
- * repeat before re-inviting the operator to react.
- *
- * `before` (the CURRENT run's start time) excludes THIS run's own mid-run
- * `post_comment` toolkit events — those live on the timeline before completion,
- * and counting one as the "previous reply" corrupts the no-progress comparison
- * (the guard would compare the final report against a comment this same run
- * just posted). Only comments that predate this run count as the prior reply.
+ * never replied. `before` excludes comments emitted by the current run.
  */
 function latestAgentReplyText(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   backend: RealBackend,
-  profileId: string | null,
-  role: string,
+  profileId: string,
   before?: string | null,
 ): string | null {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -1354,8 +1156,7 @@ function latestAgentReplyText(
       e.type === "comment" &&
       e.actor.kind === "agent" &&
       e.actor.backend === backend &&
-      ((profileId !== null && e.actor.profileId === profileId) ||
-        agentRoleDisplay(e.actor) === role)
+      e.actor.profileId === profileId
     ) {
       // Skip comments from the current run (occurredAt >= run start).
       if (!Number.isNaN(beforeMs) && Date.parse(e.occurredAt) >= beforeMs) {
@@ -1367,17 +1168,9 @@ function latestAgentReplyText(
   return null;
 }
 
-/**
- * Deterministic stuck-loop escalation (E1): the react guard stopped the
- * prompt↔react chain (no-progress repeat or depth cap), so raise a BLOCKED
- * recovery packet with concrete options instead of leaving a silent stall.
- * Idempotent: a task with an open packet is left alone (the human already has
- * a decision in front of them). Falls back through the operator's own
- * capability gate — when generate-packets is withheld, no packet opens and the
- * stall stays visible only via waiting=human (the pre-existing behavior).
- */
+/** Open one recovery packet when the bounded operator loop stalls. */
 async function openStuckLoopPacket(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -1448,32 +1241,16 @@ async function openStuckLoopPacket(
   }
 }
 
-/**
- * Owner ruling (2026-07-18): a SUCCESSFUL agent run withdraws a stale
- * "work stalled" recovery packet about that same agent — the question answered
- * itself, so no human should have to dismiss it (mirrors the divergence →
- * moot-recommendation ruling). Strictly scoped:
- *   - only `type: "blocked"` packets carrying NO `accept_completion` option —
- *     completion authorization (Review→Done) stays human, untouched;
- *   - subject match via the retry option's profileId (the join key — never the
- *     role string): a `retry_other_backend` option WITH profileId marks a
- *     reviewer-subject packet (withdrawn only when THAT reviewer profile
- *     succeeds); one WITHOUT marks the primary specialist. A packet with no
- *     retry option (redirect/hold-only) is agent-agnostic — any successful
- *     specialist/reviewer run falsifies "work stalled", so it withdraws.
- * The withdrawal is announced on the timeline and audited; the pending
- * decision drops out of "Waiting on you" through decisionsRequiring on the
- * reproject (F7-NOTIF1), so no extra notification is needed.
- */
+/** Withdraw a matching stale recovery packet after successful agent work. */
 async function withdrawSupersededStuckPacket(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
     taskKey: string;
     delivers: boolean;
     role: string;
-    runProfileId: string | null;
+    runProfileId: string;
   },
 ): Promise<void> {
   try {
@@ -1487,15 +1264,15 @@ async function withdrawSupersededStuckPacket(
     if (retryOptions.length > 0) {
       const subjectProfileId =
         retryOptions.find((o) => o.profileId)?.profileId ?? null;
-      // profileId is the join key when the packet names one (R3 — every new
-      // retry option is stamped); a legacy unstamped packet is about the
-      // delivering agent.
+      // profileId is the join key when the packet names one (a reviewer retry);
+      // an UNSTAMPED option is about the primary specialist — the operator's
+      // open_decision_packet option shape carries no profileId at all — so the
+      // delivering agent's success is what falsifies it.
       const matches = subjectProfileId
         ? input.runProfileId === subjectProfileId
         : input.delivers;
       if (!matches) return;
     }
-    const roleLabel = "agent";
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
@@ -1513,7 +1290,7 @@ async function withdrawSupersededStuckPacket(
         type: "transition",
         actor: { kind: "operator" },
         title: null,
-        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} ${roleLabel} run completed successfully after it was opened.`,
+        text: `**Packet withdrawn:** "${p.title}" is moot — the ${input.role} agent run completed successfully after it was opened.`,
         toAgent: false,
         evidence: null,
       });
@@ -1602,40 +1379,9 @@ export function classifyReviewerVerdict(
   return null;
 }
 
-/**
- * Emit a typed `quality` event from a reviewer's verdict and set the task's
- * validation health accordingly (FR15/FR24/FR35). request_changes → failing;
- * approve → healthy. Silent when the verdict is unclear. Idempotent-friendly:
- * writes one typed event per reviewer run.
- *
- * A clear verdict ALSO fans a `quality` notification to the task's watchers
- * (owner + supervisors, routing-prefs honored — FIX #6): before this, the
- * quality inbox card only ever existed in seed data, so a real reviewer verdict
- * updated the timeline + board but never pinged the human who owns acceptance.
- * Exported for tests.
- */
-/*
- * F10-32: `hasReworkSinceLastRejection` was DELETED. It treated any newer stage
- * transition or delivering-agent comment as "rework", so an approve could clear
- * a standing `failing` on an UNCHANGED commit. Rework is now defined by the
- * immutable review SUBJECT: a rejection only clears when a NEW work revision
- * (delivered head/tree change) is minted, which makes prior verdicts stale (see
- * `deriveValidation` / `nextWorkRevision` in task-file.schema.ts).
- */
-
-/**
- * THE universal finished-run record (generic-agents G2/G4/D8): ONE atomic
- * task-file write containing the agent's reply comment, its verdict effects
- * (typed quality event ATTRIBUTED TO THE AGENT + validation frontmatter), and
- * an ask-human question packet — whichever of them this completion carries.
- * One write can't split (the docker bind-mount lesson, VIB-1..12): nothing a
- * later read-modify-write can race away.
- *
- * The verdict/question have already been RESOLVED by the caller (envelope →
- * fallback, capability-gated) — this function only records.
- */
+/** Atomically record a finished run's reply, verdict, and human question. */
 export async function recordAgentCompletion(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -1650,10 +1396,8 @@ export async function recordAgentCompletion(
 ): Promise<void> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const prepared = await prepareAgentReplyEvent(
-    db,
     ctx,
     projectSlug,
-    runId,
     actorRef,
     replyText,
   );
@@ -1828,41 +1572,17 @@ export async function recordAgentCompletion(
   }
 }
 
-/**
- * THE single agent-run completion handler — installed by EVERY path that starts
- * or resumes a specialist/reviewer run (UI "Run", @mention, operator prompt,
- * boot recovery). `registerRunCompletion` is last-writer-wins, so a single
- * canonical hook prevents the old bug where the @mention path clobbered the
- * verdict + reconcile hook with a reply-only one. On completion it, in order:
- *
- *   1. posts the agent's reply as an agent-authored comment;
- *   2. reconciles agent-side GitHub delivery (branch/PR the agent opened with
- *      its own creds) into the canonical task file — real runs only;
- *   3. for a REVIEWER run, records the verdict (validation health + typed
- *      `quality` event + owner/supervisor notification) from the FULL reply;
- *   4. re-invokes the operator to READ the reply and propose the next state
- *      change — the "prompt → read → propose" loop — for EVERY completion, not
- *      just operator-initiated ones (a UI/@mention run starts a fresh react
- *      chain against the deployed operator). Bounded by the react-depth cap and
- *      the no-progress guard; a killed chain opens a BLOCKED recovery packet.
- *
- * `operatorRun` is set when this run was itself started inside an operator react
- * loop (so the chain continues at depth+1); absent for UI/@mention/recovery
- * (a fresh chain at depth 0). `waiting` is set to `agent` while the run is in
- * flight (by the start path) and cleared here when no further agent work
- * follows.
- */
+/** Register the single completion pipeline: record, reconcile, and continue coordination. */
 export async function registerAgentCompletion(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
     taskKey: string;
     runId: string;
     backend: RealBackend;
-    /** The engaged profile's id (identity for actor refs, D7); null only for
-     *  legacy recovered runs that predate identity columns. */
-    profileId: string | null;
+    /** The engaged profile's stable identity. */
+    profileId: string;
     role: string;
     /** The engagement owns the workspace/branch/PR (G1) — gates delivery
      *  reconcile + the single-flight semantics; NEVER a behavior kind. */
@@ -1884,7 +1604,6 @@ export async function registerAgentCompletion(
     void applyAgentCompletionEffects(db, ctx, input, {
       id: finished.id,
       state: finished.state,
-      simulated: finished.simulated === 1,
     }).catch((error: unknown) => {
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
@@ -1902,13 +1621,13 @@ export async function registerAgentCompletion(
  * whose callback fired in-process.
  */
 export async function applyAgentCompletionEffects(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
     taskKey: string;
     backend: RealBackend;
-    profileId: string | null;
+    profileId: string;
     role: string;
     delivers: boolean;
     outcomeKey?: string;
@@ -1916,17 +1635,13 @@ export async function applyAgentCompletionEffects(
     agentHandle: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
-  finished: { id: string; state: string; simulated: boolean },
+  finished: { id: string; state: string },
 ): Promise<void> {
-  const { replyTextForRun, fullReplyTextForRun } = await import(
-    "./agent-reply.server"
-  );
+  const { fullReplyTextForRun } = await import("./agent-reply.server");
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
-    // Legacy recovered runs may lack an identity - fall back to the role slug
-    // (exactly the pre-D7 ref), so their events keep their historical shape.
-    profileId: input.profileId ?? roleToSlug(input.role),
+    profileId: input.profileId,
     roleHint: input.role,
   };
   // The timeline comment stores the FULL reply (2026-07-17 ruling — the old
@@ -1944,7 +1659,6 @@ export async function applyAgentCompletionEffects(
     input.taskKey,
     input.backend,
     input.profileId,
-    input.role,
     thisRunStartedAt,
   );
   // 1. Resolve this run's OUTCOME ENVELOPE (G4) + collaboration gates, then
@@ -2059,7 +1773,7 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
-  if (finished.state === "error" && !finished.simulated) {
+  if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
     const backendLabel = input.backend === "claude" ? "Claude Code" : "Codex";
@@ -2112,13 +1826,9 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "unavailable";
     const altBackend: RealBackend = input.backend === "codex" ? "claude" : "codex";
     const altLabel = altBackend === "claude" ? "Claude Code" : "Codex";
-    // R3 normalization: EVERY retry option names its profile when known
-    // (startAgentRun resolves profileId → the right engagement either way);
-    // a legacy identity-less run only retries when it was the deliverer.
-    const failedProfileId =
-      input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null;
+    const failedProfileId = input.profileId;
     const retryOption =
-      backendFailure && (input.delivers || failedProfileId)
+      backendFailure
         ? [
             {
               kind: "retry_other_backend" as const,
@@ -2126,7 +1836,7 @@ export async function applyAgentCompletionEffects(
               detail: `Re-run the ${roleLabel} on ${altLabel} with a fresh context. The switch sticks — later prompts follow it.`,
               recommended: true,
               backend: altBackend,
-              ...(failedProfileId ? { profileId: failedProfileId } : {}),
+              profileId: failedProfileId,
             },
           ]
         : [];
@@ -2160,8 +1870,7 @@ export async function applyAgentCompletionEffects(
       taskKey: input.taskKey,
       delivers: input.delivers,
       role: input.role,
-      runProfileId:
-        input.profileId ?? getRun(db, finished.id)?.agent_profile_id ?? null,
+      runProfileId: input.profileId,
     });
   }
   // 2. Reconcile agent-side delivery (NFR15) — real PRIMARY runs only. A
@@ -2171,7 +1880,7 @@ export async function applyAgentCompletionEffects(
   //    read-modify-write of task.md could drop it) and could stamp task.md's
   //    branch/pr from the reviewer's checkout. Only the specialist that produced
   //    the change reconciles delivery.
-  if (input.delivers && finished.state === "finished" && !finished.simulated) {
+  if (input.delivers && finished.state === "finished") {
     const { reconcileWorkspaceDelivery } = await import(
       "~/server/github/workspace-delivery.server"
     );
@@ -2182,9 +1891,8 @@ export async function applyAgentCompletionEffects(
       backend: input.backend,
       profileId: input.profileId,
       role: input.role,
-      simulated: false,
       ...(input.workdir ? { workdir: input.workdir } : {}),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     }).catch((error) => {
       // F13: best-effort (must not break completion) but no longer SILENT — a
       // delivery-reconcile failure (git/network) was invisible, so a broken
@@ -2285,7 +1993,7 @@ export async function applyAgentCompletionEffects(
     // the next agent with no findings ("pull up the reviewer's comments…").
     // The run store is the source of truth for the reply; the prompt carries it.
     ...(replyText ? { agentReply: replyText } : {}),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
 }
 
@@ -2293,7 +2001,7 @@ export async function applyAgentCompletionEffects(
  *  agent work follows a completion. No-op when it's already not agent-waiting.
  *  Exported for the operator lease release (settle after the last drive). */
 export async function clearWaitingToHuman(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -2313,10 +2021,10 @@ export async function clearWaitingToHuman(
   }
 }
 
-/** Set `waiting: agent` when a real/simulated agent run is put in flight, so the
+/** Set `waiting: agent` when a provider run is put in flight, so the
  *  board reads "working" (not "waiting on human") while the agent runs. */
 export async function markWaitingAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -2337,7 +2045,7 @@ export async function markWaitingAgent(
 }
 
 export async function operatorPromptAgent(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -2432,7 +2140,7 @@ function withMention(handle: string, directive: string): string {
  * must be a member.
  */
 export async function setOwner(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; targetUserId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2457,11 +2165,11 @@ export async function setOwner(
     // instead of a hardcoded role literal); target must be able to OWN
     // (contributor+ — a viewer is read+comment only and can't hold the owner seat).
     if (currentOwnerId !== actor.userId && !roleCan(actorRole, "release-any-ownership")) {
-      throw forbidden("Only the current owner or a project admin can hand off ownership.");
+      throw AppError.forbidden("Only the current owner or a project admin can hand off ownership.");
     }
     const targetRole = project.memberRoles.get(input.targetUserId);
     if (!targetRole || !roleCan(targetRole, "own-task")) {
-      throw forbidden(
+      throw AppError.forbidden(
         "Ownership can only be handed to a project member who can own tasks (contributor or above).",
       );
     }
@@ -2529,7 +2237,7 @@ export async function setOwner(
  * may release anyone (recorded as an admin action in audit + event copy).
  */
 export async function releaseOwner(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2591,20 +2299,9 @@ export async function releaseOwner(
 
 // -------------------------------------------------------------- transition
 
-/**
- * Governed stage transition. The move must be a declared workflow boundary;
- * enforcement per boundary type (contracts §3.2 grants):
- *   auto      → any project member
- *   approval  → admin | maintainer ("Approve stage transitions")
- *   human     → admin | maintainer ("Accept completion → Done") — humans
- *               only by construction here; agent-triggered transitions arrive
- *               via the operator recommendation flow, which capability-checks
- *               them (ALWAYS_HUMAN caps like `transition-to-done` stay human).
- * Side effects: entering the final stage sets waiting → none; leaving the
- * first stage assigns the operator when none is attached (ruling 16).
- */
+/** Apply a declared workflow transition with its configured authority boundary. */
 export async function transitionStage(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -2692,7 +2389,7 @@ export async function transitionStage(
     // Done only through the controlled accept-completion route (full autonomy),
     // never a bare stage move.
     if (input.toStageId === lastStageId) {
-      throw forbidden(
+      throw AppError.forbidden(
         "The operator reaches Done only by accepting completion, not a bare transition.",
       );
     }
@@ -2818,25 +2515,15 @@ export async function transitionStage(
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
 
-/**
- * Best-effort review-PR open on entering the review stage. Isolated so a
- * GitHub failure (or an unconfigured repo) can never fail the governed
- * transition — every non-ok result is swallowed after logging.
- *
- * F-GH3: FIRST push the workspace branch via the project PAT so the remote
- * carries the developer's real commits (they were only local — see
- * push-workspace.server), THEN open the PR. If the branch genuinely has no diff
- * after that (empty delivery), surface it on the timeline + notify supervisors
- * instead of dead-ending at a swallowed "nothing_to_review" log line.
- */
+/** Push and open the review PR without letting GitHub failure break the transition. */
 async function openReviewPrBestEffort(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
 ): Promise<void> {
-  const dataCtx = { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) };
+  const dataCtx = { dataRoot: ctx.dataRoot };
   try {
     // F10-03: resolve the DELIVERING profile's repo-write authorization so the
     // server-owned push honors it. A profile whose `execute-code-or-write-repo`
@@ -2952,7 +2639,7 @@ async function openReviewPrBestEffort(
  * flip for the offline/seed case. Only meaningful for a human actor.
  */
 async function mergeTaskPrIfPossible(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -2965,7 +2652,7 @@ async function mergeTaskPrIfPossible(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+      { dataRoot: ctx.dataRoot },
     );
     return result.status === "merged";
   } catch (error) {
@@ -2979,21 +2666,9 @@ async function mergeTaskPrIfPossible(
 
 // ------------------------------------------------------------ reorderTask
 
-/**
- * Drag-to-reorder a card on the board: set its persistent `boardRank` so it
- * sits at the requested position within `toStageId`, and (when the stage
- * actually changes) route through the governed manual transition first — which
- * writes the **Transition:** timeline comment and hands the task to the operator
- * at its new stage. A pure same-stage reorder writes NO comment (a quiet
- * position change), only the rank.
- *
- * Position: `beforeKey` is the key of the card the moved card should land
- * immediately BEFORE (null = end of the column). The new rank is the midpoint
- * of that gap in the target column's current order (excluding the moved task),
- * so only THIS task's file is rewritten. RBAC: admin|maintainer.
- */
+/** Reorder one card by midpoint rank, using the governed transition path if it moves stages. */
 export async function reorderTask(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -3074,40 +2749,8 @@ export async function reorderTask(
 
 // ------------------------------------------------------------ resolvePacket
 
-/**
- * Resolves the task's active decision packet by option index, dispatching
- * on the option's stable `kind` (ruling 7) — NEVER on the English title.
- *
- *   accept_completion   human-only acceptance (admin|maintainer): stage →
- *                       done, waiting → none, pr.state → merged, packet
- *                       cleared, `completion` event ("Completion accepted").
- *   request_edit /
- *   redirect / custom   waiting → agent, readiness → ready, packet cleared,
- *                       `transition` event (option.ev or the fallback copy).
- *   block_on_policy     readiness → blocked, waiting → human, packet KEPT,
- *                       `blocked` event.
- *   hold_runtime_debug  readiness → blocked, packet KEPT, `blocked` event.
- *   retry_other_backend waiting → agent, readiness → ready, packet cleared,
- *                       then the failed agent RESTARTS on `option.backend`
- *                       (reviewer retries carry `option.profileId`); the
- *                       switch persists to the assignment snapshot (D4).
- *   edit_goal           packet KEPT but stamped `awaiting: goal_edit` — the
- *                       UI opens the goal editor, and updateTaskGoal clears
- *                       the packet the moment the edited goal is saved.
- *
- * Idempotent: a task without an open packet → 409 conflict (already
- * resolved elsewhere), never a crash. Every resolve marks the task's
- * packet + approval notifications read (server-side).
- */
-/**
- * A stable identity for a decision packet (F10-09). Prefers the explicit `id`
- * stamped when a NEW packet is opened; falls back to a content fingerprint for
- * packets that predate the id. Captured before the resolution lock and
- * re-checked inside it so a REPLACEMENT packet opened during the
- * read→(await merge)→lock window is never resolved/cleared by the stale action
- * (which reads the option by array index and would otherwise apply an old
- * choice to whatever packet happens to occupy that slot).
- */
+/** Resolve the active packet by stable option kind and mark its notifications read. */
+/** Identify a packet across an awaited resolution so replacements cannot be cleared. */
 export function packetIdentity(p: TaskPacket): string {
   if (p.id) return `id:${p.id}`;
   return `fp:${JSON.stringify({
@@ -3125,7 +2768,7 @@ export function packetIdentity(p: TaskPacket): string {
 }
 
 export async function resolvePacket(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; optionIndex: number },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -3135,7 +2778,7 @@ export async function resolvePacket(
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const packet = existing.parsed.packet;
   if (!packet) {
-    throw conflict("This packet was already resolved.");
+    throw AppError.conflict("This packet was already resolved.");
   }
   const option = packet.options[input.optionIndex];
   if (!option) {
@@ -3196,7 +2839,7 @@ export async function resolvePacket(
       // cleared.
       {
         const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-        if (blockReason) throw conflict(blockReason);
+        if (blockReason) throw AppError.conflict(blockReason);
       }
       const doneStageId =
         terminalStageIdOf(project) ??
@@ -3342,13 +2985,13 @@ export async function resolvePacket(
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     if (!parsed.packet) {
       // Raced with a concurrent resolve inside the lock window.
-      throw conflict("This packet was already resolved.");
+      throw AppError.conflict("This packet was already resolved.");
     }
     // F10-09: the packet in the file must be the SAME one we read and validated
     // the option against. A replacement (opened during our await) has a
     // different identity — reject rather than apply the stale choice to it.
     if (packetIdentity(parsed.packet) !== resolvedPacketIdentity) {
-      throw conflict(
+      throw AppError.conflict(
         "This decision was replaced by a newer one — refresh the task and choose again.",
       );
     }
@@ -3443,23 +3086,9 @@ export async function resolvePacket(
 
 // ---------------------------------------------------- operator recommendations
 
-/**
- * Apply a pending operator recommendation: a human accepts the operator's
- * recommended action (assign a specialist / engage a reviewer / move a stage),
- * executing it through the SAME governed mutation the manual affordance uses
- * (so RBAC + events are identical), then clearing the recommendation. RBAC is
- * enforced by the underlying mutation (admin|maintainer). Idempotent — an
- * already-resolved recommendation id is a friendly 409.
- */
-/**
- * Human acceptance of the review→done boundary: move the task to Done, mark the
- * review PR merged, clear any open packet, and record a `completion` event. RBAC:
- * admin|maintainer (acceptance authority — the always-human Done invariant). This
- * is the shared acceptance used by both the acceptance packet and the operator's
- * `accept_completion` recommendation card, so both paths reach Done identically.
- */
+/** Apply human acceptance through the shared Done transition and merge path. */
 async function acceptCompletion(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; force?: boolean },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -3483,7 +3112,7 @@ async function acceptCompletion(
   // review without any re-review.
   if (!input.force) {
     const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-    if (blockReason) throw conflict(blockReason);
+    if (blockReason) throw AppError.conflict(blockReason);
   }
 
   // Refuse to accept while an operator-raised BLOCKED decision is still open
@@ -3497,7 +3126,7 @@ async function acceptCompletion(
     existing.parsed.frontmatter.readiness === "blocked" &&
     existing.parsed.packet?.type === "blocked"
   ) {
-    throw conflict(
+    throw AppError.conflict(
       "This task has an open blocked decision — resolve the operator's packet before accepting it.",
     );
   }
@@ -3568,16 +3197,9 @@ async function acceptCompletion(
   });
 }
 
-/**
- * Complete the REAL GitHub merge of a PR that was accepted "merge pending"
- * (D3 / S2): when a task was accepted into Done but no server merge could run,
- * `pr.state` is "accepted" and the real PR stays open. Once a valid PAT is
- * configured, a human runs this to actually merge it and flip `pr.state` →
- * "merged". RBAC: admin|maintainer (the acceptance authority). Returns a typed
- * outcome so the UI can explain a still-blocked merge instead of pretending.
- */
+/** Complete a real GitHub merge after an offline acceptance left it pending. */
 export async function completeTaskMerge(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -3603,7 +3225,7 @@ export async function completeTaskMerge(
     throw AppError.validation("This task has no linked pull request to merge.");
   }
   if (pr.state !== "accepted") {
-    throw conflict(
+    throw AppError.conflict(
       pr.state === "merged"
         ? "This PR is already merged."
         : `This PR is "${pr.state}", not an accepted merge-pending PR.`,
@@ -3615,7 +3237,7 @@ export async function completeTaskMerge(
     db,
     { projectSlug: input.projectSlug, taskKey: input.taskKey },
     { userId: actor.userId, label: actor.label },
-    { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+    { dataRoot: ctx.dataRoot },
   );
 
   if (result.status === "merged") {
@@ -3644,7 +3266,7 @@ export async function completeTaskMerge(
 }
 
 export async function applyRecommendation(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; recId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -3662,7 +3284,7 @@ export async function applyRecommendation(
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,
   );
-  if (!rec) throw conflict("That recommendation was already resolved.");
+  if (!rec) throw AppError.conflict("That recommendation was already resolved.");
 
   // Execute the recommended action through the governed mutation (RBAC inside).
   if (rec.kind === "assign_specialist" && rec.profileId) {
@@ -3751,7 +3373,7 @@ export async function applyRecommendation(
  * lower roles). Idempotent — a missing id is a no-op.
  */
 export async function dismissRecommendation(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; recId: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},

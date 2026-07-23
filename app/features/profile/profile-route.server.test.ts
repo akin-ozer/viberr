@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  APP_TEST_PASSWORD,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -21,7 +22,7 @@ let murId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
-  runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
   murId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
@@ -192,7 +193,7 @@ describe("/profile action", () => {
 
     const short = await postAction(ardaId, {
       intent: "change-password",
-      current: "viberr-dev-2828",
+      current: APP_TEST_PASSWORD,
       next: "short",
       confirm: "short",
     });
@@ -201,7 +202,7 @@ describe("/profile action", () => {
 
     const mismatch = await postAction(ardaId, {
       intent: "change-password",
-      current: "viberr-dev-2828",
+      current: APP_TEST_PASSWORD,
       next: "a-long-enough-pw",
       confirm: "a-different-pw!!",
     });
@@ -218,7 +219,7 @@ describe("/profile action", () => {
     const body = new URLSearchParams({
       _csrf: csrf,
       intent: "change-password",
-      current: "viberr-dev-2828",
+      current: APP_TEST_PASSWORD,
       next: "murat-new-pw-9999",
       confirm: "murat-new-pw-9999",
     });
@@ -254,7 +255,7 @@ describe("/profile action", () => {
       (
         await loginWithCredentials(app.db, auth, {
           email: "murat@viberr.dev",
-          password: "viberr-dev-2828",
+          password: APP_TEST_PASSWORD,
         })
       ).ok,
     ).toBe(false);

@@ -24,9 +24,7 @@ function memberProjectSlugs(userId: string): string[] {
  *   - projects: every project/task-routed event, any project (Home);
  *   - user: this session user's targeted events (notification.created/read)
  *     plus broadcasts (projection.rebuilt).
- * Reconnect position: `Last-Event-ID` header (native EventSource retry) or
- * `?lastEventId=` (our client wrapper recreates the EventSource, which
- * never re-sends the header) — the param wins.
+ * Reconnect position: the native EventSource `Last-Event-ID` header.
  *
  * Auth: session cookie, same as every loader — but an unauthenticated
  * EventSource can't render a login page, so this returns plain 401 JSON
@@ -130,8 +128,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
-  const lastRaw =
-    url.searchParams.get("lastEventId") ?? request.headers.get("last-event-id");
+  const lastRaw = request.headers.get("last-event-id");
   const lastEventId =
     lastRaw !== null && /^\d+$/.test(lastRaw) ? Number(lastRaw) : null;
 

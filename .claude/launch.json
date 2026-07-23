@@ -6,7 +6,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-c",
-        "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm use >/dev/null 2>&1; exec npm run dev"
+        "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm use >/dev/null 2>&1; export VIBERR_DATA_ROOT=/Users/akinozer/projects/viberr/docker-data; export CODEX_HOME=/Users/akinozer/projects/viberr/docker-data/runtimes/codex-home; exec npm run dev"
       ],
       "port": 5173,
       "autoPort": true

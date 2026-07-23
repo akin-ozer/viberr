@@ -1,12 +1,5 @@
 import { ERROR_CODES, type ErrorCode } from "./error-codes";
 
-/**
- * user           — user-correctable (bad input, missing permission, not found)
- * diagnostic     — inconsistency detected in canonical data; surfaced, not fatal
- * infrastructure — our side broke (db, filesystem, upstream service)
- */
-export type AppErrorKind = "user" | "diagnostic" | "infrastructure";
-
 export interface AppErrorOptions {
   code: ErrorCode;
   /** HTTP status this error maps to. Default 500. */
@@ -17,7 +10,6 @@ export interface AppErrorOptions {
   userMessage?: string;
   /** Structured, secret-free context (ids, field names — never values of secrets). */
   details?: Record<string, unknown>;
-  kind?: AppErrorKind;
   cause?: unknown;
 }
 
@@ -28,7 +20,6 @@ export class AppError extends Error {
   readonly status: number;
   readonly userMessage: string;
   readonly details?: Record<string, unknown>;
-  readonly kind: AppErrorKind;
 
   constructor(options: AppErrorOptions) {
     super(options.message ?? options.userMessage ?? options.code, {
@@ -39,7 +30,6 @@ export class AppError extends Error {
     this.status = options.status ?? 500;
     this.userMessage = options.userMessage ?? DEFAULT_USER_MESSAGE;
     this.details = options.details;
-    this.kind = options.kind ?? "infrastructure";
   }
 
   static notFound(
@@ -51,7 +41,6 @@ export class AppError extends Error {
       status: 404,
       userMessage,
       details,
-      kind: "user",
     });
   }
 
@@ -64,7 +53,22 @@ export class AppError extends Error {
       status: 400,
       userMessage,
       details,
-      kind: "user",
+    });
+  }
+
+  static forbidden(userMessage: string): AppError {
+    return new AppError({
+      code: ERROR_CODES.FORBIDDEN,
+      status: 403,
+      userMessage,
+    });
+  }
+
+  static conflict(userMessage: string): AppError {
+    return new AppError({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage,
     });
   }
 
@@ -74,7 +78,6 @@ export class AppError extends Error {
       status: 500,
       message,
       cause,
-      kind: "infrastructure",
     });
   }
 }

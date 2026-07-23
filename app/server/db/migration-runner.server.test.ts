@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { isAppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
@@ -9,7 +9,7 @@ import { DEFAULT_MIGRATIONS_DIR, runMigrations } from "./migration-runner.server
 import { openDatabase } from "./sqlite.server";
 
 let tempDirs: string[] = [];
-let openDbs: Database.Database[] = [];
+let openDbs: DatabaseSync[] = [];
 
 function makeTempDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "viberr-migrations-test-"));
@@ -17,20 +17,20 @@ function makeTempDir(): string {
   return dir;
 }
 
-function makeDb(): Database.Database {
+function makeDb(): DatabaseSync {
   const db = openDatabase(path.join(makeTempDir(), "state", "test.sqlite"));
   openDbs.push(db);
   return db;
 }
 
 afterEach(() => {
-  for (const db of openDbs) if (db.open) db.close();
+  for (const db of openDbs) if (db.isOpen) db.close();
   openDbs = [];
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
   tempDirs = [];
 });
 
-function tableNames(db: Database.Database): string[] {
+function tableNames(db: DatabaseSync): string[] {
   return (
     db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
@@ -41,8 +41,14 @@ function tableNames(db: Database.Database): string[] {
 describe("openDatabase", () => {
   it("creates parent directories and applies pragmas", () => {
     const db = makeDb();
-    expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
+    expect(
+      (db.prepare("PRAGMA journal_mode").get() as { journal_mode: string })
+        .journal_mode,
+    ).toBe("wal");
+    expect(
+      (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })
+        .foreign_keys,
+    ).toBe(1);
   });
 });
 

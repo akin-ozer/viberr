@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { findUserByEmail } from "~/server/auth/user-store.server";
+import { credentialPasswordHash } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
 import { getBoard, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -10,16 +11,16 @@ import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "./demo-seed.server";
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-function seed() {
+async function seed() {
   const db = ctx.makeDb();
   const dataRoot = ctx.makeTempDir();
-  const summary = runDemoSeed(db, { dataRoot });
+  const summary = await runDemoSeed(db, { dataRoot });
   return { db, dataRoot, summary };
 }
 
 describe("demo seed", () => {
-  it("produces the expected counts", () => {
-    const { db, summary } = seed();
+  it("produces the expected counts", async () => {
+    const { db, summary } = await seed();
     expect(summary).toMatchObject({
       users: 5,
       projects: 3,
@@ -39,29 +40,32 @@ describe("demo seed", () => {
     expect(rows(`SELECT count(*) AS c FROM project_members`)).toBe(7);
     // Clean dataset: no parse diagnostics on seeded files.
     expect(rows(`SELECT count(*) AS c FROM diagnostics`)).toBe(0);
-    // R7-2 (don't simulate at all): the seed ships ZERO fabricated run
-    // history — no agent_runs rows, no scripted run log lines. Run history
-    // only ever comes from real agent runs.
+    // The seed ships no fabricated run history.
     expect(rows(`SELECT count(*) AS c FROM agent_runs`)).toBe(0);
     expect(rows(`SELECT count(*) AS c FROM run_log_lines`)).toBe(0);
   });
 
-  it("is idempotent — running twice keeps the same counts", () => {
+  it("is idempotent — running twice keeps the same counts", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
-    runDemoSeed(db, { dataRoot });
-    runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
+    await runDemoSeed(db, { dataRoot });
     const count = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
     expect(count(`SELECT count(*) AS c FROM users`)).toBe(5);
     expect(count(`SELECT count(*) AS c FROM task_projections`)).toBe(12);
     expect(count(`SELECT count(*) AS c FROM notifications`)).toBe(10);
   });
 
-  it("seeds users with compliant passwords + mock avatar tones", () => {
-    const { db } = seed();
+  it("seeds users with compliant passwords + mock avatar tones", async () => {
+    const { db } = await seed();
     const arda = findUserByEmail(db, "arda@viberr.dev");
     expect(arda?.role).toBe("admin");
-    expect(verifyPassword(SEED_DEFAULT_PASSWORD, arda?.passwordHash)).toBe(true);
+    await expect(
+      verifyPassword(
+        SEED_DEFAULT_PASSWORD,
+        credentialPasswordHash(db, arda!.id),
+      ),
+    ).resolves.toBe(true);
     const murat = findUserByEmail(db, "murat@viberr.dev");
     expect(murat?.name).toBe("Murat Yıldız");
     expect(murat?.avatarTone).toBe("teal");
@@ -70,8 +74,8 @@ describe("demo seed", () => {
     expect(deniz).not.toBeNull(); // registered, but member of no project
   });
 
-  it("boards look like the mock: stage buckets + stub projects", () => {
-    const { db } = seed();
+  it("boards look like the mock: stage buckets + stub projects", async () => {
+    const { db } = await seed();
     const projects = listProjects(db);
     expect(projects.map((p) => p.slug).sort()).toEqual([
       "billing-service",
@@ -101,8 +105,8 @@ describe("demo seed", () => {
     expect(billing.columns.map((c) => c.stage.id)).toEqual(["todo", "doing", "done"]);
   });
 
-  it("VIB-142 spot-check: packet + timeline fidelity vs data.js", () => {
-    const { db } = seed();
+  it("VIB-142 spot-check: packet + timeline fidelity vs data.js", async () => {
+    const { db } = await seed();
     const task = getTaskDetail(db, "viberr-core", "VIB-142")!;
 
     expect(task.title).toBe("Attach execution workspace to task runtime");
@@ -174,8 +178,8 @@ describe("demo seed", () => {
     expect(assignDate.getMinutes()).toBe(12);
   });
 
-  it("guest commenter on VIB-153 renders with the guest flag", () => {
-    const { db } = seed();
+  it("guest commenter on VIB-153 renders with the guest flag", async () => {
+    const { db } = await seed();
     const task = getTaskDetail(db, "viberr-core", "VIB-153")!;
     expect(task.timeline[0]?.actor).toMatchObject({
       kind: "human",
@@ -185,8 +189,8 @@ describe("demo seed", () => {
     });
   });
 
-  it("Arda's inbox matches the mock rows, sorted by real timestamp DESC", () => {
-    const { db } = seed();
+  it("Arda's inbox matches the mock rows, sorted by real timestamp DESC", async () => {
+    const { db } = await seed();
     const arda = findUserByEmail(db, "arda@viberr.dev")!;
     const list = listNotifications(db, arda.id);
     expect(list.map((n) => n.id)).toEqual([

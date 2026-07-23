@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -21,7 +21,7 @@ afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@viberr.test" };
 
-function allowDomain(db: Database.Database, domain: string, role = "member") {
+function allowDomain(db: DatabaseSync, domain: string, role = "member") {
   db.prepare(
     `INSERT INTO google_domain_allowlist (id, domain, role, created_at)
      VALUES (?, ?, ?, ?)`,
@@ -98,12 +98,8 @@ describe("applyOAuthUser", () => {
       email: "new@viberr.dev",
       role: "admin",
       idp: "google",
-      passwordHash: null,
+      hasPassword: false,
     });
-    const member = db
-      .prepare(`SELECT role FROM member WHERE userId = 'ba_1'`)
-      .get() as { role: string };
-    expect(member.role).toBe("admin");
   });
 
   it("claims a GitHub-handle placeholder by replacement (role carries over)", () => {

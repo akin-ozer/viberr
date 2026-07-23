@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   getProjectGithubContext,
   type GithubContextOptions,
@@ -34,7 +34,7 @@ interface GhRepo {
 }
 
 export async function checkRepoAccess(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   options: GithubContextOptions = {},
 ): Promise<RepoAccessResult> {

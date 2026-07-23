@@ -19,8 +19,7 @@ cp .env.example .env
 # 2. Install
 npm ci
 
-# 3. Database + demo data (migrations also auto-apply at boot)
-npm run migrate
+# 3. Demo data (migrations auto-apply at boot)
 npm run seed
 
 # 4. Run
@@ -47,20 +46,19 @@ Run these from the repository root after `npm ci`:
 ```sh
 npm run typecheck   # route typegen + tsc
 npm test            # vitest unit + integration suite
-npm run e2e         # Playwright golden paths (first time: npx playwright install chromium)
 npm run build       # production build, same as CI's final gate
 ```
 
-`npm run e2e` uses an isolated data root and its own port, so it's safe to run
-alongside a dev server. See [docs/testing-quickstart.md](docs/testing-quickstart.md)
-for more detail, including hermetic CI setup (`VIBERR_DATA_ROOT`).
+See [docs/testing-quickstart.md](docs/testing-quickstart.md) for the short test guide.
 
 ## Code review & acceptance
 
 - Every change lands through a pull request — no direct pushes to `main`.
 - CI must pass (typecheck, tests, build) before a PR is considered mergeable.
-- Follow the conventions in [docs/build/CONVENTIONS.md](docs/build/CONVENTIONS.md)
-  (layout, naming, behavior rules) and the canonical file formats in
+- Keep route modules thin, put domain behavior in feature/server modules, and use the
+  existing file writers so canonical markdown and SQLite projections stay in sync.
+- Preserve authorization, audit, and typed error paths when changing governed actions.
+- Follow the canonical file formats in
   [docs/architecture/file-formats.md](docs/architecture/file-formats.md) where
   relevant — reviewers will check against these.
 - Reviewers look for: correctness, test coverage for the change, adherence to existing
@@ -73,7 +71,6 @@ for more detail, including hermetic CI setup (`VIBERR_DATA_ROOT`).
 ## Where to look next
 
 - [README.md](README.md) — product overview, stack, quickstart, project layout.
-- [docs/build/CONVENTIONS.md](docs/build/CONVENTIONS.md) — condensed coding conventions.
 - [docs/architecture/file-formats.md](docs/architecture/file-formats.md) — canonical
   task/project file formats.
 - [docs/operations/](docs/operations/) — deployment and day-2 operations runbooks.

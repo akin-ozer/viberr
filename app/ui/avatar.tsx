@@ -1,6 +1,6 @@
 /**
- * Human avatar, ported 1:1 from design/html-app/app/ui.jsx (initials helper
- * lives in initials.ts). `tone` maps to the CSS classes .avatar.rose / .teal
+ * Human avatar. The initials helper lives in initials.ts. `tone` maps to the
+ * CSS classes .avatar.rose / .teal
  * / .violet (empty string = default). AgentGlyph/Identity arrive with the
  * surfaces that use them (phase 4+).
  */

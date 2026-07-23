@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit, SYSTEM_ACTOR } from "../audit/audit-recorder.server";
 import { logger } from "../logging/logger.server";
@@ -34,23 +34,22 @@ function nameForEmail(email: string): string {
     .join(" ");
 }
 
-export function seedInitialAdmin(
-  db: Database.Database,
+export async function seedInitialAdmin(
+  db: DatabaseSync,
   options: { email?: string; password?: string } = {},
-): SeedAdminResult {
+): Promise<SeedAdminResult> {
   if (countUsers(db) > 0) return { created: false };
 
   const email = (options.email ?? DEFAULT_SEED_ADMIN_EMAIL).toLowerCase();
   const generated = !options.password;
   const password = options.password ?? randomBytes(12).toString("base64url");
 
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
   const user = insertUser(db, {
     id: newId("u"),
     email,
     name: nameForEmail(email),
     role: "admin",
-    passwordHash,
     // A generated password is unknown to the human — force a reset.
     pwresetRequired: generated,
     idp: "local",
@@ -63,7 +62,6 @@ export function seedInitialAdmin(
     email: user.email,
     name: user.name,
     passwordHash,
-    role: "admin",
   });
 
   recordAudit(db, {

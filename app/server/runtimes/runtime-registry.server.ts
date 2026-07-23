@@ -13,7 +13,6 @@ import {
   createCodexAdapter,
   type CodexFactory,
 } from "./codex-runtime.server";
-import { createSimulatedAdapter } from "./simulated-runtime.server";
 
 /**
  * Runtime registry: selects the adapter for a requested backend and detects
@@ -28,11 +27,8 @@ import { createSimulatedAdapter } from "./simulated-runtime.server";
  *     `codex login`.
  * Overridable per process (cached HMR-safe global symbol).
  *
- * R7-2 (don't simulate at all): an unavailable backend NO LONGER falls back
- * to the simulated engine. Selection reports `unavailable` and the
- * run-service fails the run fast with an honest error. The simulated adapter
- * survives ONLY as a deterministic test engine behind a fail-closed gate
- * (see simulatedRuntimePermitted).
+ * An unavailable backend reports `unavailable`; the run service records an
+ * honest error instead of fabricating work.
  */
 
 export type RealBackend = "claude" | "codex";
@@ -42,8 +38,6 @@ interface RegistryState {
   detected: Partial<Record<RealBackend, boolean>>;
   /** Explicit overrides (setBackendAvailability) — sticky, never re-probed. */
   overrides: Partial<Record<RealBackend, boolean>>;
-  /** Test override for the R7-2 simulated-runtime gate (undefined → env). */
-  simPermitted?: boolean;
 }
 
 const REGISTRY_KEY = Symbol.for("viberr.runtimeRegistry");
@@ -67,7 +61,7 @@ function getState(): RegistryState {
  *   - codex: CODEX_ACCESS_TOKEN, CODEX_API_KEY / OPENAI_API_KEY, or
  *     VIBERR_CODEX_USE_CLI_AUTH=1.
  * When none is present the backend is UNAVAILABLE (R7-2: runs on it fail
- * fast with an honest error — no simulated fallback).
+ * fast with an honest error).
  */
 /**
  * When Codex CLI auth is the ONLY signal (no access token / API key), the
@@ -111,42 +105,7 @@ export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
-/**
- * R7-2 fail-closed gate: the simulated engine is reachable ONLY when this
- * returns true. Two ways in, both test-scoped:
- *   - NODE_ENV === "test" (vitest) — the unit suite drives the whole
- *     coordination pipeline on the deterministic engine;
- *   - VIBERR_FORCE_SIMULATED_RUNTIME=1 AND VIBERR_TEST_RUNTIME_OK=1 — the
- *     Playwright harness (its app server boots NODE_ENV=development).
- * Design note: gating on NODE_ENV !== "production" is NOT enough — dev
- * servers are exactly where the old silent fallback fabricated demo runs, so
- * dev must be as honest as prod. The force flag alone therefore has NO effect
- * outside a test env: a stray VIBERR_FORCE_SIMULATED_RUNTIME=1 in prod/dev
- * neither forces nor permits the simulated engine (fail-closed).
- */
-export function simulatedRuntimePermitted(env: NodeJS.ProcessEnv = process.env): boolean {
-  const override = getState().simPermitted;
-  if (override !== undefined) return override;
-  if (env.NODE_ENV === "test") return true;
-  return (
-    isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME) && isTruthy(env.VIBERR_TEST_RUNTIME_OK)
-  );
-}
-
-/** Test-only: override the R7-2 gate (fail-fast paths are testable). */
-export function setSimulatedRuntimePermittedForTests(value: boolean | undefined): void {
-  getState().simPermitted = value;
-}
-
 function hasCredential(backend: RealBackend, env: NodeJS.ProcessEnv = process.env): boolean {
-  // Explicit override: force the deterministic simulated engine regardless of
-  // any ambient credential (e.g. a developer's `.env` re-loaded by dotenv). The
-  // e2e harness sets this so the golden-path specs run against the synchronous
-  // scripted operator instead of live, non-deterministic agent runs. Only
-  // honored inside the R7-2 gate — outside it the flag is inert.
-  if (isTruthy(env.VIBERR_FORCE_SIMULATED_RUNTIME) && simulatedRuntimePermitted(env)) {
-    return false;
-  }
   if (backend === "claude") {
     return !!(
       env.ANTHROPIC_API_KEY ||
@@ -195,8 +154,12 @@ export function resetRegistryForTests(): void {
 
 /**
  * Force availability (tests / an explicit override). Sticky: unlike detected
- * values it is never re-probed, so the test harness's "both backends
- * unavailable" hold can't be flipped back by an ambient dev-`.env` credential.
+ * values it is never re-probed. The test harness relies on that twice:
+ * `setupAppTest` installs the fake runtime (configureRunServiceForTests), which
+ * forces BOTH backends available so route tests drive the deterministic fake
+ * adapters rather than a live re-probe; and a test that afterwards forces one
+ * backend unavailable keeps it unavailable for the rest of the file, immune to
+ * an ambient dev-`.env` credential.
  */
 export function setBackendAvailability(backend: RealBackend, available: boolean): void {
   getState().overrides[backend] = available;
@@ -207,7 +170,6 @@ export function setBackendAvailability(backend: RealBackend, available: boolean)
 export interface AdapterSet {
   claude: RuntimeAdapter;
   codex: RuntimeAdapter;
-  simulated: RuntimeAdapter;
 }
 
 export interface AdapterDeps {
@@ -215,6 +177,22 @@ export interface AdapterDeps {
   claudeQueryFn?: ClaudeQueryFn;
   /** Inject the Codex SDK factory (tests). */
   codexFactory?: CodexFactory;
+}
+
+const CREDENTIAL_ENV_RE =
+  /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i;
+const PRIVATE_RUNTIME_ENV_RE =
+  /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
+
+function filteredSpawnEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" &&
+        !CREDENTIAL_ENV_RE.test(entry[0]) &&
+        !PRIVATE_RUNTIME_ENV_RE.test(entry[0]),
+    ),
+  );
 }
 
 /**
@@ -228,22 +206,7 @@ export function codexSpawnEnv(
   accessToken?: string,
   preferCachedLogin = false,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== "string") continue;
-    // Keep ordinary runtime settings while excluding credentials belonging to
-    // the app, Claude, GitHub, cloud providers, package registries, etc. The SDK
-    // adds `apiKey` itself; subscription auth is restored explicitly below.
-    if (
-      /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i.test(
-        key,
-      ) ||
-      /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i.test(key)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
+  const out = filteredSpawnEnv();
   if (codexHome) out.CODEX_HOME = codexHome;
   if (accessToken) {
     out.CODEX_ACCESS_TOKEN = accessToken;
@@ -277,28 +240,16 @@ export function claudeSpawnEnv(
   apiKey?: string,
   oauthToken?: string,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== "string") continue;
-    if (
-      /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i.test(
-        key,
-      ) ||
-      /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i.test(key)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
+  const out = filteredSpawnEnv();
   out.CLAUDE_CONFIG_DIR = configDir;
   if (apiKey) out.ANTHROPIC_API_KEY = apiKey;
   if (oauthToken) out.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
   return out;
 }
 
-/** Constructs the three adapters (SDK factories injectable for tests). */
+/** Constructs the two provider adapters (SDK factories injectable for tests). */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
-  const env = safeEnv();
+  const env = getEnv();
   // A Codex access token is a ChatGPT-workspace credential, not a Platform API
   // key. Prefer it when both are configured so subscription runs cannot
   // silently fall through to usage-based API billing.
@@ -340,62 +291,19 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
       // process.env, strips credentials, then forces CODEX_HOME.
       env: codexEnv,
     }),
-    simulated: createSimulatedAdapter(),
   };
-}
-
-function safeEnv(): {
-  ANTHROPIC_API_KEY?: string;
-  CLAUDE_CODE_OAUTH_TOKEN?: string;
-  CLAUDE_CONFIG_DIR?: string;
-  CODEX_ACCESS_TOKEN?: string;
-  CODEX_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  CODEX_HOME?: string;
-  VIBERR_CODEX_USE_CLI_AUTH?: string;
-} {
-  try {
-    const env = getEnv();
-    return {
-      ...(env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {}),
-      ...(env.CLAUDE_CODE_OAUTH_TOKEN
-        ? { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }
-        : {}),
-      CLAUDE_CONFIG_DIR: resolveClaudeConfigDir(),
-      ...(env.CODEX_ACCESS_TOKEN
-        ? { CODEX_ACCESS_TOKEN: env.CODEX_ACCESS_TOKEN }
-        : {}),
-      ...(env.CODEX_API_KEY ? { CODEX_API_KEY: env.CODEX_API_KEY } : {}),
-      ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {}),
-      ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}),
-      ...(env.VIBERR_CODEX_USE_CLI_AUTH
-        ? { VIBERR_CODEX_USE_CLI_AUTH: env.VIBERR_CODEX_USE_CLI_AUTH }
-        : {}),
-    };
-  } catch {
-    // Env not configured (tests) — no real keys, simulated carries everything.
-    return {};
-  }
 }
 
 export type SelectResult =
   | { kind: "real"; adapter: RuntimeAdapter }
-  /** The gated deterministic test engine (simulated=1 on the run row). */
-  | { kind: "simulated"; adapter: RuntimeAdapter }
-  /** No credential, no test gate — the caller must FAIL the run honestly. */
+  /** No usable credential — the caller must fail the run honestly. */
   | { kind: "unavailable" };
 
 /**
- * Selects the adapter for a requested real backend: the real one when its
- * credential is present; the simulated TEST engine only inside the R7-2 gate
- * (the caller keeps the requested backend on the run row for glyph fidelity);
- * otherwise `unavailable` — there is NO silent simulated fallback anymore, an
- * unavailable backend must produce an honest error run, never a fake stream.
+ * Selects the requested adapter when its credential is present, otherwise
+ * reports that it is unavailable.
  */
 export function selectAdapter(backend: RealBackend, adapters: AdapterSet): SelectResult {
   if (isBackendAvailable(backend)) return { kind: "real", adapter: adapters[backend] };
-  if (simulatedRuntimePermitted()) {
-    return { kind: "simulated", adapter: adapters.simulated };
-  }
   return { kind: "unavailable" };
 }

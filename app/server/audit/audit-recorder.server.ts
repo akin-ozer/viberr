@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
 import { logger } from "../logging/logger.server";
 
@@ -34,7 +34,7 @@ export interface AuditEventInput {
 }
 
 export function recordAudit(
-  db: Database.Database,
+  db: DatabaseSync,
   event: AuditEventInput,
 ): void {
   try {

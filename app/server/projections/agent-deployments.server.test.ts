@@ -121,7 +121,6 @@ describe("listAgentDeployments", () => {
       role: "Primary specialist",
       model: "m",
       sdk: "sdk",
-      simulated: true,
     } as const;
     upsertRun(store.db, {
       ...base,
@@ -129,6 +128,7 @@ describe("listAgentDeployments", () => {
       taskKey: "VIB-2",
       threadId: "primary",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "claude",
       state: "running",
     });
@@ -138,6 +138,7 @@ describe("listAgentDeployments", () => {
       taskKey: "VIB-2",
       threadId: "c0",
       kind: "reviewer",
+      agentProfileId: "reviewer",
       backend: "codex",
       state: "running",
     });
@@ -147,6 +148,7 @@ describe("listAgentDeployments", () => {
       taskKey: "VIB-1",
       threadId: "primary",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "codex",
       state: "finished",
     });

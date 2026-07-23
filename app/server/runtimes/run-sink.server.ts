@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { RunBackend, RunState } from "~/features/runtime/runtime-types";
 import { logger } from "~/server/logging/logger.server";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
@@ -22,18 +22,7 @@ import {
  * event can always fetch the line it references.
  */
 
-export interface RunSink {
-  /** Persist + publish one line. */
-  line(line: EmittedLine): void;
-  /** Update the live phase/step (persisted to the row, publishes nothing). */
-  phase(phase: string | null, step: string | null): void;
-  /** Mark the run running + started (idempotent). */
-  markRunning(startedAtIso?: string): void;
-  /** Finalize on exit: state + finished_at + fallback flags + SSE. */
-  finalize(exit: RunExit, byInterrupt?: { userId: string }): void;
-}
-
-export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
+export function createRunSink(db: DatabaseSync, spec: RunSpec) {
   // Where the raw truth goes: requested backend dir + session id (or run id
   // until the session id lands). We buffer to the run-id file first, since
   // the session id arrives on the init/thread.started line — but to keep it
@@ -74,7 +63,7 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
       publishState("running");
     },
 
-    phase(phase, step) {
+    phase(phase: string | null, step: string | null) {
       patchRun(db, spec.runId, { phase, step });
     },
 
@@ -134,7 +123,7 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
       }
     },
 
-    finalize(exit, byInterrupt) {
+    finalize(exit: RunExit, byInterrupt?: { userId: string }) {
       if (exit.sessionId) sessionId = exit.sessionId;
       const state: RunState =
         exit.outcome === "finished"
@@ -142,15 +131,10 @@ export function createRunSink(db: Database.Database, spec: RunSpec): RunSink {
           : exit.outcome === "error"
             ? "error"
             : "interrupted";
-      // Keep the REQUESTED backend on the row for glyph fidelity — only the
-      // `simulated` flag records that the sim engine produced the run
-      // (real-vs-sim is separate from the glyph backend). The effective
-      // backend is used only for the raw .jsonl directory (set per-line).
-      effectiveBackend = exit.simulated ? "simulated" : exit.effectiveBackend;
+      effectiveBackend = exit.effectiveBackend;
       patchRun(db, spec.runId, {
         state,
         finishedAt: new Date().toISOString(),
-        simulated: exit.simulated,
         sessionId,
         phase: null,
         step: null,

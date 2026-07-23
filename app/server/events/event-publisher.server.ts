@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { Readiness } from "~/schemas/task-file.schema";
 import { sseEventSchema, type SseEvent } from "~/schemas/sse-event.schema";
 import { getDb } from "~/server/db/sqlite.server";
@@ -17,7 +17,7 @@ import { publishSseEvent, type SseRoute } from "./sse-broker.server";
  * EVERY mutation source already flows through the emitter — verified:
  * - task actions (comment/owner/transition/resolve/create) end in
  *   `rebuildPath` → `task.updated` (+ `project.updated` on key allocation);
- * - the chokidar watcher calls `rebuildPath` for external file edits;
+ * - the file watcher calls `rebuildPath` for external edits;
  * - rescan (`rebuildAll`) emits per-file events + one `projection.rebuilt`
  *   summary; the Home/Board Re-scan buttons call it;
  * - notification fan-out (`createNotification`) emits
@@ -143,7 +143,7 @@ export function translateProjectionEvent(
 }
 
 export function readTaskFacts(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): TaskFacts | null {

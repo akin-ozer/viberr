@@ -1,26 +1,18 @@
 import path from "node:path";
-import type Database from "better-sqlite3";
-import { watch, type FSWatcher } from "chokidar";
+import { watch, type FSWatcher } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
-import { createPathDebouncer, type PathDebouncer } from "./path-debounce.server";
 
 /**
- * File watcher: chokidar (v5) on the ${dataRoot}/projects tree, driving
- * single-file incremental projection rebuilds.
+ * Watches ${dataRoot}/projects and incrementally rebuilds projections.
  *
  * - 250 ms trailing debounce per path (editors fire bursts of events);
  * - ignores dotfiles and `*.tmp` (our atomic-write staging files);
- * - handles `unlinkDir` (E13): a recursive rm can delete a task/project
- *   directory faster than chokidar reports the per-file unlinks, which used
- *   to leave orphaned projection rows until the next manual rescan. A
- *   removed task dir reprojects that task (→ removed); a removed project
- *   dir (or tasks/ dir) reconciles the whole project against disk;
- * - a chokidar `error` CLEARS the cached handle (E8): the watcher is no
- *   longer trusted to deliver events, so `isFileWatcherAlive` — and the
- *   /resources/health `watcher` field — reports false instead of a zombie;
+ * - reconciles task/project rows after directory removals;
+ * - clears a failed watcher so the health route reports it accurately;
  * - started from server boot in dev AND prod;
  * - HMR-safe: the watcher handle lives behind a global symbol — a module
  *   reload reuses the running watcher instead of stacking a duplicate.
@@ -32,8 +24,8 @@ const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
 
 interface WatcherHandle {
   watcher: FSWatcher;
-  debouncer: PathDebouncer;
-  dirDebouncer: PathDebouncer;
+  fileTimers: Map<string, ReturnType<typeof setTimeout>>;
+  dirTimers: Map<string, ReturnType<typeof setTimeout>>;
   root: string;
 }
 
@@ -70,47 +62,38 @@ function cancelPendingReArm(lc: WatcherLifecycle): void {
   }
 }
 
-function shouldIgnore(candidate: string): boolean {
-  const base = path.basename(candidate);
-  return base.startsWith(".") || base.endsWith(".tmp");
+/** Keep only project/task directories and their two canonical Markdown files. */
+export function shouldIgnoreWatchPath(watchRoot: string, candidate: string): boolean {
+  const abs = path.isAbsolute(candidate) ? candidate : path.resolve(watchRoot, candidate);
+  const rel = path.relative(watchRoot, abs);
+  if (!rel || rel.startsWith("..")) return false;
+  const parts = rel.split(path.sep);
+  const base = parts.at(-1)!;
+  if (parts.some((part) => part.startsWith(".")) || base.endsWith(".tmp")) return true;
+  return parts.length >= 4 && !(parts.length === 4 && base === "task.md");
 }
 
-/**
- * Prune the watch TREE below the projection store's depth. Only
- * `projects/<slug>/project.md` and `projects/<slug>/tasks/<KEY>/task.md`
- * (plus directory unlinks down to the task dir) ever project; everything
- * deeper — a task's `workspace/` clones above all — is runtime scratch.
- * Without pruning, chokidar holds an open fd for EVERY file in EVERY
- * historical workspace clone (~550 per delivered task). Past ~10 240 fds,
- * macOS `posix_spawn` file actions fail with EBADF, so the app can no longer
- * spawn ANY child process — Claude/Codex runs die instantly the moment
- * enough workspaces have accumulated. Ignoring here (not in the event
- * handler) is what stops chokidar from descending and opening the fds.
- */
-export function shouldPruneSubtree(
-  watchRoot: string,
-  candidate: string,
-  stats?: { isDirectory(): boolean },
-): boolean {
-  const rel = path.relative(watchRoot, candidate);
-  if (rel === "" || rel.startsWith("..")) return false;
-  const depth = rel.split(path.sep).length;
-  // projects/<slug>/tasks/<KEY> = depth 3. Anything deeper than depth 4
-  // can never project; a DIRECTORY at depth 4 (workspace/, attachments/…)
-  // is the recursion mouth — prune it. Files at depth 4 (task.md) stay.
-  if (depth >= 5) return true;
-  if (depth === 4) {
-    if (stats?.isDirectory()) return true;
-    // Stats can be absent on the first ignored() pass — catch the one
-    // directory name that actually explodes, so we never descend into it.
-    return path.basename(candidate) === "workspace";
-  }
-  return false;
+function schedule(
+  timers: Map<string, ReturnType<typeof setTimeout>>,
+  key: string,
+  flush: (key: string) => void,
+): void {
+  const current = timers.get(key);
+  if (current) clearTimeout(current);
+  timers.set(key, setTimeout(() => {
+    timers.delete(key);
+    flush(key);
+  }, WATCH_DEBOUNCE_MS));
+}
+
+function cancelAll(timers: Map<string, ReturnType<typeof setTimeout>>): void {
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
 }
 
 /** Starts (or returns the already-running) projects-tree watcher. */
 export function startFileWatcher(
-  options: { dataRoot?: string; db?: Database.Database } = {},
+  options: { dataRoot?: string; db?: DatabaseSync } = {},
 ): FSWatcher {
   const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
   const root = getDataRoot(options.dataRoot);
@@ -122,14 +105,16 @@ export function startFileWatcher(
     // any pending re-arm so it can't resurrect the retired root (F10-08).
     cancelPendingReArm(lc);
     lc.generation += 1;
-    existing.debouncer.cancelAll();
-    existing.dirDebouncer.cancelAll();
-    void existing.watcher.close();
+    cancelAll(existing.fileTimers);
+    cancelAll(existing.dirTimers);
+    existing.watcher.close();
   }
 
   const resolveDb = () => options.db ?? getDb();
   const watchedDir = projectsDir(options.dataRoot);
-  const debouncer = createPathDebouncer(WATCH_DEBOUNCE_MS, (absPath) => {
+  const fileTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const dirTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const rebuildFile = (absPath: string) => {
     try {
       const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
       if (result.action !== "ignored" && result.action !== "unchanged") {
@@ -146,7 +131,7 @@ export function startFileWatcher(
         err: error instanceof Error ? error : new Error(String(error)),
       });
     }
-  });
+  };
 
   /**
    * E13 — a directory vanished. Map it onto the projection rows it backed:
@@ -157,7 +142,7 @@ export function startFileWatcher(
    * rows — ignored. The projects ROOT itself unlinking reconciles every
    * projected project.
    */
-  const dirDebouncer = createPathDebouncer(WATCH_DEBOUNCE_MS, (absDir) => {
+  const rebuildDir = (absDir: string) => {
     try {
       const db = resolveDb();
       const rel = path.relative(watchedDir, absDir);
@@ -195,7 +180,11 @@ export function startFileWatcher(
       if (segments.length === 2) return reconcileProject(slug);
       if (segments.length === 3) {
         // Single task dir: task.md is gone with it → projects the removal.
-        debouncer.schedule(path.resolve(taskFilePath(slug, segments[2]!, root)));
+        schedule(
+          fileTimers,
+          path.resolve(taskFilePath(slug, segments[2]!, root)),
+          rebuildFile,
+        );
       }
       // Deeper than the task dir: nothing projected lives there.
     } catch (error) {
@@ -204,29 +193,28 @@ export function startFileWatcher(
         err: error instanceof Error ? error : new Error(String(error)),
       });
     }
-  });
-
-  const watcher = watch(watchedDir, {
-    ignoreInitial: true,
-    ignored: (candidate: string, stats?: { isDirectory(): boolean }) =>
-      shouldIgnore(candidate) || shouldPruneSubtree(watchedDir, candidate, stats),
-  });
-
-  const schedule = (absPath: string) => {
-    if (shouldIgnore(absPath)) return;
-    const base = path.basename(absPath);
-    if (base !== "project.md" && base !== "task.md") return;
-    debouncer.schedule(path.resolve(absPath));
   };
 
-  watcher.on("add", schedule);
-  watcher.on("change", schedule);
-  watcher.on("unlink", schedule);
-  watcher.on("unlinkDir", (absDir: string) => {
-    if (shouldIgnore(absDir)) return;
-    dirDebouncer.schedule(path.resolve(absDir));
-  });
-  watcher.on("error", (error) => {
+  const onChange = (event: "rename" | "change", filename: string | null) => {
+    if (!filename) {
+      schedule(dirTimers, watchedDir, rebuildDir);
+      return;
+    }
+    const absPath = path.resolve(watchedDir, filename);
+    if (shouldIgnoreWatchPath(watchedDir, absPath)) return;
+    const base = path.basename(absPath);
+    if (base === "project.md" || base === "task.md") {
+      schedule(fileTimers, absPath, rebuildFile);
+    }
+    if (event === "rename") schedule(dirTimers, absPath, rebuildDir);
+  };
+
+  const watcher = watch(watchedDir, {
+    recursive: true,
+    ignore: (candidate) => shouldIgnoreWatchPath(watchedDir, candidate),
+  }, onChange);
+
+  watcher.on("error", (error: NodeJS.ErrnoException) => {
     // E8: the handle can no longer be trusted to deliver events — clear it so
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
     // of a zombie watcher.
@@ -237,11 +225,11 @@ export function startFileWatcher(
     });
     const current = cache[WATCHER_KEY];
     if (current && current.watcher === watcher) {
-      current.debouncer.cancelAll();
-      current.dirDebouncer.cancelAll();
+      cancelAll(current.fileTimers);
+      cancelAll(current.dirTimers);
       cache[WATCHER_KEY] = undefined;
     }
-    void watcher.close();
+    watcher.close();
     // Self-heal (adversarial-review #16): transient FS-pressure errors
     // (EMFILE / ENFILE / ENOSPC / EPERM / EACCES) should not permanently kill
     // watching — re-arm after a short backoff instead of requiring a full
@@ -275,13 +263,12 @@ export function startFileWatcher(
   // A successful (re)start supersedes any pending re-arm and is a new generation.
   cancelPendingReArm(lc);
   lc.generation += 1;
-  cache[WATCHER_KEY] = { watcher, debouncer, dirDebouncer, root };
+  cache[WATCHER_KEY] = { watcher, fileTimers, dirTimers, root };
   logger.info("file watcher started", { dir: watchedDir, debounceMs: WATCH_DEBOUNCE_MS });
   return watcher;
 }
 
-/** True while a store watcher is running in this process (health route).
- * A chokidar error clears the handle, so this reflects real liveness. */
+/** True while a store watcher is running in this process. */
 export function isFileWatcherAlive(): boolean {
   const cache = globalThis as unknown as Record<symbol, WatcherHandle | undefined>;
   return cache[WATCHER_KEY] !== undefined;
@@ -297,8 +284,8 @@ export function stopFileWatcherForTests(): void {
   lc.generation += 1;
   const existing = cache[WATCHER_KEY] as WatcherHandle | undefined;
   if (!existing) return;
-  existing.debouncer.cancelAll();
-  existing.dirDebouncer.cancelAll();
-  void existing.watcher.close();
+  cancelAll(existing.fileTimers);
+  cancelAll(existing.dirTimers);
+  existing.watcher.close();
   cache[WATCHER_KEY] = undefined;
 }

@@ -1,12 +1,13 @@
 import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
 import type { loader as projectLoader } from "./project";
-import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth } from "~/server/auth/require-user.server";
+import {
+  appErrorResponse,
+  requireFormAction,
+} from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
 import {
   runClearCredential,
   runGrantScope,
@@ -51,12 +52,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
-  const intent = String(formData.get("intent") ?? "");
+  const { db, formData, actor, intent } = await requireFormAction(request);
   const field = (name: string) => String(formData.get(name) ?? "");
   const slug = params.slug;
 
@@ -175,13 +171,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
     }
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

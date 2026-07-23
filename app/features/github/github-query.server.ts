@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { formatRelative } from "~/shared/dates/format";
 import { deriveSyncState } from "~/server/github/branch-sync.server";
 import { githubWebHost } from "~/server/github/github-client.server";
@@ -81,7 +81,7 @@ export interface GithubViewData {
  * instead of re-preparing + running it per row inside `.map` (pass-4 WI-10 n+1).
  */
 function createBehindByResolver(
-  db: Database.Database,
+  db: DatabaseSync,
 ): (sourcePath: string) => number {
   const stmt = db.prepare(
     `SELECT details_json FROM provenance
@@ -115,12 +115,12 @@ function createBehindByResolver(
  */
 const REPO_ACCESS_TTL_MS = 30_000;
 const repoAccessCache = new WeakMap<
-  Database.Database,
+  DatabaseSync,
   Map<string, { result: RepoAccessResult; at: number }>
 >();
 
 async function checkRepoAccessCached(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { fetchImpl?: typeof fetch },
 ): Promise<RepoAccessResult> {
@@ -141,7 +141,7 @@ async function checkRepoAccessCached(
 }
 
 export async function getGithubViewData(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { fetchImpl?: typeof fetch } = {},
 ): Promise<GithubViewData | null> {

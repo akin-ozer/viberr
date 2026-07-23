@@ -12,8 +12,7 @@ import {
 } from "./notifications-page-helpers";
 
 /**
- * The full /notifications page (Phase 9C, notifications.md — ported from
- * design/html-app/app/notifications.jsx): "Waiting on you" packet/approval
+ * Notifications page: "Waiting on you" packet/approval
  * cards + "Everything else" day-grouped stream, All/Unread filter,
  * mark-all-read. Rendered inside the phase-4 PageOverlay route; read
  * mutations go through the ONE existing /notifications/read action.

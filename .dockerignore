@@ -12,7 +12,6 @@ docker-data
 .DS_Store
 *.log
 coverage
-playwright-report
 test-results
 e2e
 design

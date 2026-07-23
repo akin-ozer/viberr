@@ -23,12 +23,6 @@ import {
 export const PROJECT_ROLES = ["admin", "maintainer", "contributor", "viewer"] as const;
 export type ProjectRole = (typeof PROJECT_ROLES)[number];
 
-/** Legacy `reviewer` → `contributor` coercion for project.md files written
- * before the rename. Applied at parse time so no data migration is needed. */
-function coerceProjectRole(value: unknown): unknown {
-  return value === "reviewer" ? "contributor" : value;
-}
-
 /** Workflow transition boundaries (contracts §2.5). review→done is locked
  * `human` in V1 — enforced server-side, not just data. */
 export const BOUNDARY_VALUES = ["auto", "approval", "human"] as const;
@@ -68,10 +62,9 @@ export type WorkflowBoundary = z.infer<typeof workflowBoundarySchema>;
 export const memberSchema = z
   .object({
     userId: z.string().min(1),
-    role: z.preprocess(coerceProjectRole, z.enum(PROJECT_ROLES)),
+    role: z.enum(PROJECT_ROLES),
   })
   .loose();
-export type ProjectMember = z.infer<typeof memberSchema>;
 
 export const capabilityGrantSchema = z
   .object({

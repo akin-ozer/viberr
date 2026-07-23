@@ -92,7 +92,7 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: true as const, intent };
       }
       case "change-password": {
-        const { toast } = changeOwnPassword(
+        const { toast } = await changeOwnPassword(
           db,
           { ...actor, sessionId: ctx.sessionId },
           {

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { StoreNode } from "~/features/kb-browser/tree";
 import { countKbFiles } from "~/features/kb-browser/tree";
 import {
@@ -18,7 +18,6 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
   isSecretBox,
   openSecret,
@@ -56,15 +55,6 @@ import { scanStoreTree, type StoreTarget } from "./store-files.server";
  * stdio, short timeout). Tool counts are never fabricated — discovery success
  * stores the real count + up=1, failure leaves up=0 / count null.
  */
-
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
 
 export interface OrgSeedContext {
   dataRoot?: string;
@@ -192,12 +182,12 @@ const KB_SQL = `SELECT id, name, dir, refresh, last_indexed_at
                 FROM org_knowledge_bases`;
 
 export function listKnowledgeBases(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: OrgSeedContext = {},
 ): KbView[] {
   const rows = db
     .prepare(`${KB_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as KbRow[];
+    .all() as unknown as KbRow[];
   const rowByDir = new Map(rows.map((r) => [r.dir, r]));
   const dirs = unionDiskAndRows(
     rows.map((r) => r.dir),
@@ -207,7 +197,7 @@ export function listKnowledgeBases(
 }
 
 export function getKnowledgeBase(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
 ): KbView | null {
@@ -221,7 +211,7 @@ export function getKnowledgeBase(
 }
 
 export function saveKnowledgeBase(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { id?: string | null; name: string; refresh: string },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
@@ -260,7 +250,7 @@ export function saveKnowledgeBase(
     const oldAbs = kbDirPath(oldDir, ctx.dataRoot);
     const newAbs = kbDirPath(dir, ctx.dataRoot);
     if (clash || existsSync(newAbs)) {
-      throw conflict(`A knowledge-base folder ${dir}/ already exists.`);
+      throw AppError.conflict(`A knowledge-base folder ${dir}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
     else mkdirSync(newAbs, { recursive: true });
@@ -290,7 +280,7 @@ export function saveKnowledgeBase(
   const clash = db
     .prepare(`SELECT id FROM org_knowledge_bases WHERE dir = ?`)
     .get(dir);
-  if (clash) throw conflict(`A knowledge-base folder ${dir}/ already exists.`);
+  if (clash) throw AppError.conflict(`A knowledge-base folder ${dir}/ already exists.`);
   const id = newId("kb");
   db.prepare(
     `INSERT INTO org_knowledge_bases
@@ -313,7 +303,7 @@ export function saveKnowledgeBase(
 }
 
 export function deleteKnowledgeBase(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
@@ -337,7 +327,7 @@ export function deleteKnowledgeBase(
 /** Honest re-index: re-scan the folder, refresh counts + the timestamp. A
  * disk-only folder is adopted into a metadata row so the timestamp sticks. */
 export function reindexKnowledgeBase(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
@@ -424,7 +414,7 @@ function mapMcp(row: McpRow): McpView {
  * so a run degrades to no-auth instead of crashing.
  */
 export function getMcpCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   name: string,
 ): string | null {
   const row = db
@@ -441,15 +431,15 @@ export function getMcpCredential(
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at FROM org_mcp_servers`;
 
-export function listMcpServers(db: Database.Database): McpView[] {
+export function listMcpServers(db: DatabaseSync): McpView[] {
   const rows = db
     .prepare(`${MCP_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as McpRow[];
+    .all() as unknown as McpRow[];
   return rows.map(mapMcp);
 }
 
 export function getMcpServer(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
 ): McpView | null {
   const row = db.prepare(`${MCP_SQL} WHERE id = ?`).get(id) as
@@ -640,7 +630,7 @@ export async function probeMcpTarget(
 }
 
 export async function saveMcpServer(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     id?: string | null;
     name: string;
@@ -680,7 +670,7 @@ export async function saveMcpServer(
   const clash = db
     .prepare(`SELECT id FROM org_mcp_servers WHERE name = ? AND id != ?`)
     .get(name, input.id ?? "") as { id: string } | undefined;
-  if (clash) throw conflict(`An MCP server named ${name} already exists.`);
+  if (clash) throw AppError.conflict(`An MCP server named ${name} already exists.`);
 
   const now = new Date().toISOString();
 
@@ -763,9 +753,8 @@ export async function saveMcpServer(
 }
 
 export async function testMcpServer(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
-  actor: AuditActor,
   options: McpProbeOptions = {},
 ): Promise<{ mcp: McpView; toast: string }> {
   const existing = getMcpServer(db, id);
@@ -814,7 +803,7 @@ export async function testMcpServer(
 }
 
 export function deleteMcpServer(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
 ): { toast: string } {
@@ -914,12 +903,12 @@ function buildSkill(
 const SKILL_SQL = `SELECT id, name, summary, updated_at FROM org_skills`;
 
 export function listSkills(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: OrgSeedContext = {},
 ): SkillView[] {
   const rows = db
     .prepare(`${SKILL_SQL} ORDER BY created_at ASC, id ASC`)
-    .all() as SkillRow[];
+    .all() as unknown as SkillRow[];
   const rowByName = new Map(rows.map((r) => [r.name, r]));
   const names = unionDiskAndRows(
     rows.map((r) => r.name),
@@ -929,7 +918,7 @@ export function listSkills(
 }
 
 export function getSkill(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
 ): SkillView | null {
@@ -945,7 +934,7 @@ export function getSkill(
 }
 
 export function saveSkill(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     id?: string | null;
     name: string;
@@ -984,7 +973,7 @@ export function saveSkill(
   // A brand-new create must not clobber an existing on-disk folder (writing
   // SKILL.md would blank it) — editing a disk-only skill goes through oldName.
   if (!input.id && existsSync(skillDirPath(name, ctx.dataRoot))) {
-    throw conflict(`A skill folder ${name}/ already exists.`);
+    throw AppError.conflict(`A skill folder ${name}/ already exists.`);
   }
 
   // E4 write policy for EXISTING skills, decided BEFORE the folder moves:
@@ -1012,7 +1001,7 @@ export function saveSkill(
     const oldAbs = skillDirPath(oldName, ctx.dataRoot);
     const newAbs = skillDirPath(name, ctx.dataRoot);
     if (clash || existsSync(newAbs)) {
-      throw conflict(`A skill folder ${name}/ already exists.`);
+      throw AppError.conflict(`A skill folder ${name}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
   }
@@ -1046,7 +1035,7 @@ export function saveSkill(
 
   // Create, or adopt a disk-only folder into a fresh metadata row.
   const clash = db.prepare(`SELECT id FROM org_skills WHERE name = ?`).get(name);
-  if (clash) throw conflict(`A skill folder ${name}/ already exists.`);
+  if (clash) throw AppError.conflict(`A skill folder ${name}/ already exists.`);
   const id = newId("sk");
   db.prepare(
     `INSERT INTO org_skills (id, name, summary, created_at, updated_at)
@@ -1066,7 +1055,7 @@ export function saveSkill(
 }
 
 export function deleteSkill(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
@@ -1095,7 +1084,7 @@ export function deleteSkill(
 /** Resolves a StoreBrowser target (kb dir / skill folder) for the file
  * actions. Ensures the folder exists (uploads into a fresh KB work). */
 export function resolveStoreTarget(
-  db: Database.Database,
+  db: DatabaseSync,
   kind: string,
   id: string,
   ctx: OrgSeedContext = {},

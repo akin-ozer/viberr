@@ -80,7 +80,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // raw_json is the exact stringified SDK message.
     expect(JSON.parse(lines[0]!.raw).type).toBe("system");
     expect(lines[0]!.facts.sessionId).toBe("sess-1");
-    expect(exit).toMatchObject({ outcome: "finished", simulated: false, effectiveBackend: "claude", sessionId: "sess-1" });
+    expect(exit).toMatchObject({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-1" });
   });
 
   it("accumulates live usage + turns from assistant messages so the counter grows during the run", async () => {

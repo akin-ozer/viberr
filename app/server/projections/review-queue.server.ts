@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { Validation, Waiting } from "~/schemas/task-file.schema";
 import { acceptanceBlockedReason } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -59,7 +59,7 @@ export interface ReviewQueueData {
 }
 
 export function getReviewQueue(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   opts: { viewerUserId?: string; dataRoot?: string } = {},
 ): ReviewQueueData {
@@ -81,7 +81,7 @@ export function getReviewQueue(
     const file = readTaskFile({
       projectSlug: slug,
       taskKey: t.key,
-      ...(opts.dataRoot !== undefined ? { dataRoot: opts.dataRoot } : {}),
+      dataRoot: opts.dataRoot,
     });
     blockReasonByKey.set(
       t.key,

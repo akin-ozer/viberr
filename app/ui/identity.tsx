@@ -1,7 +1,7 @@
 import { Icon } from "./icon";
 
 /**
- * AgentGlyph, ported from design/html-app/app/ui.jsx.
+ * Agent backend glyph.
  *
  * `backend === "claude"` → sparkle/claude; anything else → cpu/codex (mock
  * fallback, kept). The Operator variant (`.agent-glyph.op` + shield) is

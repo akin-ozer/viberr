@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -8,7 +8,6 @@ import {
 } from "../../../test-support/test-store";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { insertUser } from "~/server/auth/user-store.server";
-import { hashPassword } from "~/server/auth/password.server";
 import { rebuildAll } from "./rebuilder.server";
 import {
   onProjectionEvent,
@@ -30,13 +29,12 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 /** Real users row (user_prefs FKs to users), so a test can store a pref. */
-function mkUser(db: Database.Database, id: string): void {
+function mkUser(db: DatabaseSync, id: string): void {
   insertUser(db, {
     id,
     email: `${id}@viberr.test`,
     name: id,
     role: "member",
-    passwordHash: hashPassword("viberr-dev-2828"),
   });
 }
 

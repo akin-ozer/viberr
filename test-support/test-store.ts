@@ -1,5 +1,4 @@
-import type Database from "better-sqlite3";
-import { hashPassword } from "~/server/auth/password.server";
+import type { DatabaseSync } from "node:sqlite";
 import { insertUser } from "~/server/auth/user-store.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
@@ -36,7 +35,7 @@ export interface TestStoreUser {
 }
 
 export interface TestStore {
-  db: Database.Database;
+  db: DatabaseSync;
   dataRoot: string;
   slug: string;
   users: {
@@ -67,7 +66,6 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
       email,
       name: `${name} Test`,
       role,
-      passwordHash: hashPassword("viberr-dev-2828"),
     });
     return { id: record.id, email, name: record.name, projectRole };
   };

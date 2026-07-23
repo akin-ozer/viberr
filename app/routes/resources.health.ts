@@ -11,12 +11,12 @@ import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
  *
  * 200 `{ ok, projections: { projects, tasks }, watcher, backends }` when the
  * database answers; `watcher` is true while the in-process store watcher is
- * running — a chokidar error clears the watcher handle (E8), so false here
+ * running — a watcher error clears the handle, so false here
  * is REAL (dead watcher), not just "never started". `backends.{claude,codex}`
  * reports whether a real credential is configured (env-presence only — NOT a
  * validity check; an expired token still reads "real"): "real" means runs
  * execute the SDK, "unavailable" means runs on that backend FAIL FAST with an
- * honest error (R7-2 — there is no simulated fallback). This is
+ * honest error rather than fabricating a run. This is
  * how you confirm, e.g. via `docker compose logs` / a curl, that a Claude
  * key/token reached the container.
  * 503 `{ ok: false }` when the database cannot be read.

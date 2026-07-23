@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { getDefaultConnection } from "~/server/org/connections.server";
 import {
@@ -33,7 +33,7 @@ export interface GithubActionOutcome {
 
 /** Reconcile button (github-view §4.1/§5.1): reconcileProject → toast. */
 export async function runReconcile(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
   ctx: GithubActionContext = {},
@@ -60,7 +60,7 @@ export async function runReconcile(
  * event to each violation's own task — this wrapper only picks the toast.
  */
 export async function runGrantScope(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
   ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
@@ -98,7 +98,7 @@ export async function runGrantScope(
  * replaced). No default connection is a degraded VALUE, never a throw.
  */
 export function runSetCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
 ): GithubActionOutcome {
@@ -127,7 +127,7 @@ export function runSetCredential(
  * credentialPolicy display, or "none"). Idempotent.
  */
 export function runClearCredential(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
 ): GithubActionOutcome {

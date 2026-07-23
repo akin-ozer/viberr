@@ -66,12 +66,9 @@ describe("TokenBucketLimiter", () => {
 describe("clientIpOf", () => {
   it("uses the first X-Forwarded-For hop, else 'local'", () => {
     expect(
-      clientIpOf(
-        new Request("http://x/", {
-          headers: { "X-Forwarded-For": "203.0.113.9, 10.0.0.1" },
-        }),
-      ),
+      clientIpOf(new Headers({ "X-Forwarded-For": "203.0.113.9, 10.0.0.1" })),
     ).toBe("203.0.113.9");
-    expect(clientIpOf(new Request("http://x/"))).toBe("local");
+    expect(clientIpOf(new Headers())).toBe("local");
+    expect(clientIpOf(undefined)).toBe("local");
   });
 });

@@ -18,17 +18,17 @@ import { listKnowledgeBases, listMcpServers, listSkills } from "./resources.serv
 const dbCtx = createTestDbContext();
 afterEach(dbCtx.cleanup);
 
-function seedAll(reset = false) {
+async function seedAll(reset = false) {
   const db = dbCtx.makeDb();
   const dataRoot = dbCtx.makeTempDir();
-  const demo = runDemoSeed(db, { dataRoot, reset });
+  const demo = await runDemoSeed(db, { dataRoot, reset });
   const org = seedOrgResources(db, { dataRoot, reset });
   return { db, dataRoot, demo, org };
 }
 
 describe("seedOrgResources", () => {
-  it("adds org resources with REAL files while the demo dataset stays intact", () => {
-    const { db, dataRoot, demo, org } = seedAll();
+  it("adds org resources with REAL files while the demo dataset stays intact", async () => {
+    const { db, dataRoot, demo, org } = await seedAll();
 
     // Existing seed output regression (brief contract). 12 tasks = 10
     // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 3 profiles after the
@@ -87,8 +87,8 @@ describe("seedOrgResources", () => {
     expect(listDomains(db).map((d) => d.domain)).toEqual(["@viberr.dev"]);
   });
 
-  it("is idempotent and --reset restores a pristine org dataset", () => {
-    const { db, dataRoot } = seedAll();
+  it("is idempotent and --reset restores a pristine org dataset", async () => {
+    const { db, dataRoot } = await seedAll();
 
     // Second plain run: same counts, nothing duplicated. No fabricated
     // credentials are ever seeded (honest empty slate).
@@ -102,7 +102,7 @@ describe("seedOrgResources", () => {
     // Mutate, then --reset: resource tables + folders rebuilt; still no
     // fabricated connection/MCP appears.
     db.prepare(`DELETE FROM org_skills`).run();
-    runDemoSeed(db, { dataRoot, reset: true });
+    await runDemoSeed(db, { dataRoot, reset: true });
     const org = seedOrgResources(db, { dataRoot, reset: true });
     expect(org).toMatchObject({ kbs: 3, skills: 4, mcps: 0, connections: 0 });
     expect(listSkills(db, { dataRoot })).toHaveLength(4);

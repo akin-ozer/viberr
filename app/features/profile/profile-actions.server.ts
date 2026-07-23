@@ -1,6 +1,9 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
-import { setCredentialPassword } from "~/server/auth/identity.server";
+import {
+  credentialPasswordHash,
+  setCredentialPassword,
+} from "~/server/auth/identity.server";
 import {
   hashPassword,
   MIN_PASSWORD_LENGTH,
@@ -42,7 +45,7 @@ export interface ProfileActor {
 /** Name/Title blur-commit. Toast copy is the mock's, parameterized with
  * the first membership's project name (single-project mock literal). */
 export function updateProfileIdentity(
-  db: Database.Database,
+  db: DatabaseSync,
   actor: ProfileActor,
   input: { name: string; title: string },
 ): { toast: string } {
@@ -69,7 +72,7 @@ export function updateProfileIdentity(
 
 /** Notification-routing toggle (app channel only — ruling 13). */
 export function setNotifRoutingPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   category: string,
   on: boolean,
@@ -87,7 +90,7 @@ export function setNotifRoutingPref(
 }
 
 export function setMotionPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   motion: string,
 ): MotionPreference {
@@ -99,7 +102,7 @@ export function setMotionPref(
 }
 
 export function setTimelineDefaultPref(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   value: string,
 ): TimelineDefault {
@@ -115,19 +118,20 @@ export function setTimelineDefaultPref(
  * shared MIN_PASSWORD_LENGTH, login-flow validation copy). Keeps the
  * current session, signs out every other one.
  */
-export function changeOwnPassword(
-  db: Database.Database,
+export async function changeOwnPassword(
+  db: DatabaseSync,
   actor: ProfileActor & { sessionId: string },
   input: { current: string; next: string; confirm: string },
-): { toast: string } {
+): Promise<{ toast: string }> {
   const user = findUserById(db, actor.userId);
   if (!user) throw AppError.notFound("Account not found.");
-  if (!user.passwordHash) {
+  const currentHash = credentialPasswordHash(db, user.id);
+  if (!currentHash) {
     throw AppError.validation(
       "This account has no local password — it signs in through an identity provider.",
     );
   }
-  if (!verifyPassword(input.current, user.passwordHash)) {
+  if (!(await verifyPassword(input.current, currentHash))) {
     throw AppError.validation("Current password is incorrect.");
   }
   if (input.next.length < MIN_PASSWORD_LENGTH) {
@@ -138,8 +142,7 @@ export function changeOwnPassword(
   if (input.next !== input.confirm) {
     throw AppError.validation("Passwords don't match.");
   }
-  const hash = hashPassword(input.next);
-  updateUserFields(db, actor.userId, { passwordHash: hash });
+  const hash = await hashPassword(input.next);
   // better-auth holds the credential that sign-in verifies.
   setCredentialPassword(db, actor.userId, hash);
   // Sign out every OTHER session; the one making this change survives.
@@ -163,7 +166,7 @@ export function changeOwnPassword(
  * lock itself out). Audit-relevant per profile.md §5.
  */
 export function disconnectGithubIdentity(
-  db: Database.Database,
+  db: DatabaseSync,
   actor: ProfileActor,
 ): { toast: string } {
   const user = findUserById(db, actor.userId);
@@ -171,7 +174,7 @@ export function disconnectGithubIdentity(
   if (user.idp !== "github") {
     throw AppError.validation("GitHub isn't connected on this account.");
   }
-  if (!user.passwordHash) {
+  if (!user.hasPassword) {
     throw AppError.validation(
       "Set a password first — this account signs in only through GitHub.",
     );

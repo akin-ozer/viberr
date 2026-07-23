@@ -4,12 +4,12 @@ import {
   requireRunAgents,
   type AuthorityProject,
 } from "./project-authority.server";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 
 describe("run-agents authority — archived read-only gate (F17)", () => {
   let ctx: TestDbContext;
-  let db: Database.Database;
+  let db: DatabaseSync;
   const actor = { userId: "u_admin", label: "admin@viberr.dev" };
   const project = (archived: boolean): AuthorityProject => ({
     slug: "proj",

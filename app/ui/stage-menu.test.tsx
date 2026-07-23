@@ -138,7 +138,7 @@ describe("StageMenu keyboard contract (F10-25)", () => {
 
   it("picking a stage reports it, closes, and returns focus to the trigger", () => {
     const view = renderMenu();
-    const menu = openMenu(view);
+    openMenu(view);
 
     fireEvent.click(view.getByRole("menuitemradio", { name: /In Progress/ }));
 

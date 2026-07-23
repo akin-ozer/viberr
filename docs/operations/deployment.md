@@ -87,7 +87,7 @@ server-owned Git push/PR delivery so repository credentials never enter the
 agent's environment.
 
 Without any credential a backend is **unavailable**: starting a run on it fails fast
-with an honest error run + a blocked recovery packet (there is no simulated fallback).
+with an honest error run and a blocked recovery packet.
 Confirm what's active:
 
 ```bash

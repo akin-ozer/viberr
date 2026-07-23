@@ -2,21 +2,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Route-level test harness (phase 4): points the PROCESS env at a temp data
- * root, resets the env + db singletons, and hands back the same getDb()
- * handle the route loaders/actions will use — so tests can call the actual
- * route module functions with real Requests (signed session cookies, CSRF
- * tokens) end to end.
+ * root, resets the env + db singletons, installs the fake runtime, and hands
+ * back the same getDb() handle the route loaders/actions will use — so tests
+ * can call the actual route module functions with real Requests (signed
+ * session cookies, CSRF tokens) end to end.
  *
  * Import route modules AFTER setupAppTest() (dynamic import in the test) so
  * their module graph reads the overridden env.
  */
 
 export interface AppTestContext {
-  db: Database.Database;
+  db: DatabaseSync;
   dataRoot: string;
   sessionSecret: string;
   /** Cookie header value for a fresh session of the given user. */
@@ -30,6 +30,8 @@ export interface AppTestContext {
   ): Request;
   cleanup(): void;
 }
+
+export const APP_TEST_PASSWORD = "test-harness-password-000";
 
 export async function setupAppTest(): Promise<AppTestContext> {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-app-test-"));
@@ -49,6 +51,17 @@ export async function setupAppTest(): Promise<AppTestContext> {
   closeDb();
   const db = getDb();
 
+  // Fail closed on the runtime too: every route-level test gets the fake
+  // adapters. Without this a test that reaches autoInvokeOperator falls through
+  // to selectAdapter and either constructs a REAL adapter (if a credential ever
+  // leaks in — a paid provider call from `npm test`) or, with none, reports
+  // "unavailable" and drives the operator run into an async failure escalation
+  // that races the assertions. The fakes complete deterministically instead.
+  // Overrides are sticky, so a test that afterwards forces a backend
+  // unavailable (setBackendAvailability(…, false)) still wins.
+  const { installFakeRuntime } = await import("./fake-runtime");
+  installFakeRuntime();
+
   const [
     { getAuth },
     { provisionIdentity },
@@ -65,8 +78,6 @@ export async function setupAppTest(): Promise<AppTestContext> {
 
   // cookieFor signs the user in through better-auth, so it needs a known
   // credential — provisioning overwrites the user's credential with this.
-  const HARNESS_PASSWORD = "test-harness-password-000";
-
   return {
     db,
     dataRoot,
@@ -79,11 +90,22 @@ export async function setupAppTest(): Promise<AppTestContext> {
         id: user.id,
         email: user.email,
         name: user.name,
-        passwordHash: hashPassword(HARNESS_PASSWORD),
-        role: user.role,
+        passwordHash: await hashPassword(APP_TEST_PASSWORD),
       });
+      // cookieFor is harness plumbing that mints a session, not a login under
+      // test, but it goes through better-auth's sign-in hook and so spends a
+      // token from the per-`email|ip` login bucket — which is a per-process
+      // global shared by every test in this worker. Clear just this key first
+      // so a file that signs the same user in more than ten times doesn't
+      // start failing with "Too many sign-in attempts". Tests that assert
+      // throttling drive loginWithCredentials / the handler directly and are
+      // unaffected.
+      const { clientIpOf, getLoginRateLimiter } = await import(
+        "~/server/auth/rate-limit.server"
+      );
+      getLoginRateLimiter().reset(`${user.email.trim().toLowerCase()}|${clientIpOf()}`);
       const res = await getAuth().api.signInEmail({
-        body: { email: user.email, password: HARNESS_PASSWORD },
+        body: { email: user.email, password: APP_TEST_PASSWORD },
         asResponse: true,
       });
       const setCookie = res.headers

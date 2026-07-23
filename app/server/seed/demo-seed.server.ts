@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { provisionIdentity } from "~/server/auth/identity.server";
 import { hashPassword } from "~/server/auth/password.server";
@@ -39,10 +39,7 @@ import {
  * dataset as REAL canonical files + projections + per-user notification
  * rows, so the app boots looking like the mock.
  *
- * R7-2 (don't simulate at all): the seed ships ZERO fabricated run history —
- * no agent_runs rows, no run log lines, no scripted "running"/"finished"
- * streams. Tasks/projects/members/notifications remain; run history only
- * ever comes from real agent runs.
+ * The seed ships no run history; runs only appear after a user starts one.
  *
  * Idempotent: users are upserted by email, files are overwritten, the
  * rescan reconciles projections, notification rows use the mock's
@@ -85,16 +82,16 @@ const DERIVED_TABLES = [
   "projects",
 ];
 
-function upsertUsers(
-  db: Database.Database,
+async function upsertUsers(
+  db: DatabaseSync,
   options: DemoSeedOptions,
-): SeedUserIds {
+): Promise<SeedUserIds> {
   const ids = {} as SeedUserIds;
   for (const person of SEED_PEOPLE) {
     const existing = findUserByEmail(db, person.email);
     if (existing) {
       // Keep credentials; align display fields with the mock dataset.
-      const updated = updateUserFields(db, existing.id, {
+      updateUserFields(db, existing.id, {
         name: person.name,
         role: person.orgRole,
         avatarTone: person.tone,
@@ -104,8 +101,7 @@ function upsertUsers(
         id: existing.id,
         email: existing.email,
         name: person.name,
-        passwordHash: updated?.passwordHash ?? existing.passwordHash,
-        role: person.orgRole,
+        passwordHash: null,
       });
       ids[person.handle] = existing.id;
       continue;
@@ -114,13 +110,12 @@ function upsertUsers(
       person.handle === "arda"
         ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
         : SEED_DEFAULT_PASSWORD;
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const created = insertUser(db, {
       id: newId("u"),
       email: person.email,
       name: person.name,
       role: person.orgRole,
-      passwordHash,
       idp: "local",
       avatarTone: person.tone,
       createdBy: null,
@@ -131,17 +126,16 @@ function upsertUsers(
       email: created.email,
       name: created.name,
       passwordHash,
-      role: person.orgRole,
     });
     ids[person.handle] = created.id;
   }
   return ids;
 }
 
-export function runDemoSeed(
-  db: Database.Database,
+export async function runDemoSeed(
+  db: DatabaseSync,
   options: DemoSeedOptions,
-): DemoSeedSummary {
+): Promise<DemoSeedSummary> {
   const dataRoot = options.dataRoot;
   ensureDataRootDirs(dataRoot);
 
@@ -168,7 +162,7 @@ export function runDemoSeed(
   }
 
   // 1. Users (upsert by email — tolerates the phase-2 boot-seeded admin).
-  const ids = upsertUsers(db, options);
+  const ids = await upsertUsers(db, options);
 
   // 2. Org-level agent profile templates (two-layer model, layer 1).
   for (const profile of SEED_AGENT_PROFILES) {
@@ -256,9 +250,7 @@ export function runDemoSeed(
     });
   }
 
-  // 7. NO runtime dataset (R7-2). The old seed fabricated 18 agent_runs +
-  //    scripted log lines here; a demo store now starts with an empty run
-  //    history — the agent-logs panel is honestly empty until a real run.
+  // The demo store starts with empty run history.
 
   // 7b. The mock's one open scope violation (viberr-core · VIB-142 ·
   //    pull_request:write) so the rail Settings badge reads 1 out of the box.

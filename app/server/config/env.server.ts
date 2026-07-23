@@ -1,9 +1,11 @@
-import dotenv from "dotenv";
+import { loadEnvFile } from "node:process";
 import { z } from "zod";
 
-// Load .env for local dev. Values already present in the real environment
-// always win (dotenv never overrides). No-ops silently when .env is absent.
-dotenv.config({ quiet: true });
+try {
+  loadEnvFile();
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -86,9 +88,8 @@ const envSchema = z.object({
     .min(8, "must be at least 8 characters")
     .optional(),
 
-  // Optional runtime-backend API keys (Phase 8). When absent the backend is
-  // UNAVAILABLE and runs on it fail fast with an honest error (R7-2 — no
-  // simulated fallback). Presence is a cheap auth check — the
+  // Optional runtime-backend API keys. When absent, runs fail fast with an
+  // availability error. Presence is a cheap auth check; the
   // registry NEVER makes a paid call to detect availability.
   //  - Claude Agent SDK: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (from
   //    `claude setup-token` — the subscription/OAuth path), or set

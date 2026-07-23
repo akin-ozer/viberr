@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
-import { createSseClient } from "~/features/live-updates/sse-client";
 import { buildEventsUrl, sseScopes } from "~/features/live-updates/event-types";
 import type { LogLine } from "./runtime-types";
 
@@ -109,13 +108,15 @@ export function useRunLogStream(input: {
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
 
-    let cancelled = false;
+    // Aborts in-flight tail fetches on unmount / task change — a bare
+    // `cancelled` flag would still let the response land and be parsed.
+    const abort = new AbortController();
 
     const fetchTail = async (runId: string, sinceSeq: number) => {
       try {
         const res = await fetch(
           `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
-          { headers: { Accept: "application/json" } },
+          { headers: { Accept: "application/json" }, signal: abort.signal },
         );
         if (!res.ok) return;
         const body = (await res.json()) as {
@@ -126,7 +127,7 @@ export function useRunLogStream(input: {
           };
         };
         const data = body.data;
-        if (!data || cancelled || data.lines.length === 0) return;
+        if (!data || abort.signal.aborted || data.lines.length === 0) return;
         const cursor = cursorsRef.current.get(runId);
         if (cursor) cursor.headSeq = data.headSeq;
         setLinesByThread((prev) => {
@@ -139,37 +140,40 @@ export function useRunLogStream(input: {
       }
     };
 
-    const client = createSseClient({
-      url: buildEventsUrl([sseScopes.task(projectSlug, taskKey)]),
-      onEvent: (name, event) => {
-        if (name === "run.log-appended") {
-          try {
-            const parsed = JSON.parse(event.data) as { data: RunLogAppendedData };
-            const d = parsed.data;
-            if (d.projectSlug !== projectSlug || d.taskKey !== taskKey) return;
-            const cursor = cursorsRef.current.get(d.runId);
-            const since = cursor ? cursor.headSeq : -1;
-            if (d.seq <= since) return; // already have it
-            void fetchTail(d.runId, since);
-          } catch {
-            // Malformed frame — ignore.
-          }
-        } else if (name === "run.state-changed") {
-          try {
-            const parsed = JSON.parse(event.data) as { data: RunStateChangedData };
-            if (parsed.data.projectSlug !== projectSlug || parsed.data.taskKey !== taskKey) return;
-            // Lifecycle is loader-owned (strip appears/disappears, pill flips).
-            void revalidateRef.current();
-          } catch {
-            // Ignore.
-          }
+    const source = new EventSource(
+      buildEventsUrl([sseScopes.task(projectSlug, taskKey)]),
+    );
+    source.addEventListener("run.log-appended", (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as { data: RunLogAppendedData };
+        const d = parsed.data;
+        if (d.projectSlug !== projectSlug || d.taskKey !== taskKey) return;
+        const cursor = cursorsRef.current.get(d.runId);
+        const since = cursor ? cursor.headSeq : -1;
+        if (d.seq <= since) return;
+        void fetchTail(d.runId, since);
+      } catch {
+        // Malformed frame — ignore.
+      }
+    });
+    source.addEventListener("run.state-changed", (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as { data: RunStateChangedData };
+        if (
+          parsed.data.projectSlug !== projectSlug ||
+          parsed.data.taskKey !== taskKey
+        ) {
+          return;
         }
-      },
+        void revalidateRef.current();
+      } catch {
+        // Malformed frame — ignore.
+      }
     });
 
     return () => {
-      cancelled = true;
-      client.close();
+      abort.abort();
+      source.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSlug, taskKey]);

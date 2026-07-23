@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
   recordAudit,
   type AuditActor,
@@ -72,7 +72,7 @@ function mapRow(row: ScopeViolationRow): ScopeViolationRecord {
  * do not change without updating that call site.
  */
 export function countOpenPolicyViolations(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): number {
   const row = db
@@ -86,7 +86,7 @@ export function countOpenPolicyViolations(
 
 /** Newest-first listing; optionally filtered by status. */
 export function listScopeViolations(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   options: { status?: ScopeViolationStatus } = {},
 ): ScopeViolationRecord[] {
@@ -106,12 +106,12 @@ export function listScopeViolations(
              ORDER BY created_at DESC, id DESC`,
           )
           .all(projectSlug)
-  ) as ScopeViolationRow[];
+  ) as unknown as ScopeViolationRow[];
   return rows.map(mapRow);
 }
 
 export function getScopeViolation(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
 ): ScopeViolationRecord | null {
   const row = db
@@ -122,7 +122,7 @@ export function getScopeViolation(
 
 /** The open violation for (project, scope, task), if any. */
 export function findOpenScopeViolation(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   scope: string,
   taskKey: string | null,
@@ -153,7 +153,7 @@ export interface OpenScopeViolationInput {
  * written — retries never duplicate rows, audit events or SSE.
  */
 export function openScopeViolation(
-  db: Database.Database,
+  db: DatabaseSync,
   input: OpenScopeViolationInput,
 ): { violation: ScopeViolationRecord; created: boolean } {
   const taskKey = input.taskKey ?? null;
@@ -212,7 +212,7 @@ export function openScopeViolation(
  * `resolved: false` with the stored record; unknown ids return null.
  */
 export function resolveScopeViolation(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor = SYSTEM_ACTOR,
 ): { violation: ScopeViolationRecord; resolved: boolean } | null {

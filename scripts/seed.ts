@@ -15,7 +15,7 @@ import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/demo-seed
 const env = getEnv();
 const reset = process.argv.includes("--reset");
 
-const summary = runDemoSeed(getDb(), {
+const summary = await runDemoSeed(getDb(), {
   dataRoot: env.VIBERR_DATA_ROOT,
   reset,
   adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,

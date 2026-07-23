@@ -38,63 +38,42 @@ export const ROLE_LABEL: Record<ProjectRole, string> = {
   viewer: "Viewer",
 };
 
-/** Every governed project action. Server guards pass one of these to `requireAction`. */
-export type RbacAction =
-  // app-wide (any authenticated user — NOT gated by requireAction; here for display)
-  | "view"
-  | "comment"
-  // contributor+ (Q5 clean tiering: viewer is strictly read + comment)
-  | "create-task"
-  | "own-task" // take / release one's OWN task ownership
-  // maintainer+
-  | "approve-transition"
-  | "resolve-packet" // non-completion; the task owner (contributor+) is additionally allowed at the call site
-  | "accept-completion"
-  | "run-agents" // assign/run specialist+reviewer, @mention trigger, run operator, interrupt a run
-  | "reorder-board"
-  | "update-goal"
-  | "grant-github-scope"
-  | "reconcile-github" // re-derives canonical state from GitHub — maintainer+ (R8-4: aligned with rescan-project)
-  | "rescan-project" // board re-scan: rebuild projections from the file store
-  // admin only
-  | "release-any-ownership"
-  | "manage-members"
-  | "manage-agents" // agent profile CRUD
-  | "edit-policy"; // workflow boundaries, role assignment
-// note: "edit-settings" (identity/stages/repo/archive/delete) is admin and shares
-// the "edit-policy" tier; project settings actions use requireProjectAdmin → edit-policy.
-
 const A = "admin" as const;
 const M = "maintainer" as const;
 const C = "contributor" as const;
 const V = "viewer" as const;
 
-/**
- * The canonical action → allowed-roles map. This is the object the Policy page
- * renders AND the object every server guard consults.
- */
-export const ACTION_ROLES: Record<RbacAction, readonly ProjectRole[]> = {
-  view: [A, M, C, V],
-  comment: [A, M, C, V],
+/** One source for enforcement and the Policy/Profile permission tables. */
+export const RBAC_DEFINITIONS = [
+  { id: "view", label: "View board, tasks & timelines", roles: [A, M, C, V], appWide: true },
+  { id: "comment", label: "Comment on tasks", roles: [A, M, C, V], appWide: true },
+  { id: "create-task", label: "Create tasks", roles: [A, M, C] },
+  { id: "own-task", label: "Take / release own task ownership", roles: [A, M, C] },
+  { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
+  { id: "resolve-packet", label: "Resolve decision packets", roles: [A, M] },
+  { id: "accept-completion", label: "Accept completion → Done", roles: [A, M] },
+  { id: "update-goal", label: "Edit the task goal", roles: [A, M] },
+  { id: "run-agents", label: "Run agents", roles: [A, M] },
+  { id: "reorder-board", label: "Reorder the board", roles: [A, M] },
+  { id: "reconcile-github", label: "Reconcile GitHub state", roles: [A, M] },
+  { id: "grant-github-scope", label: "Grant GitHub scope", roles: [A, M] },
+  { id: "rescan-project", label: "Re-scan project files & projections", roles: [A, M] },
+  { id: "release-any-ownership", label: "Release any task owner", roles: [A] },
+  { id: "manage-members", label: "Manage members & roles", roles: [A] },
+  { id: "manage-agents", label: "Manage agent profiles", roles: [A] },
+  { id: "edit-policy", label: "Edit workflow & policy", roles: [A] },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  roles: readonly ProjectRole[];
+  appWide?: boolean;
+}[];
 
-  "create-task": [A, M, C],
-  "own-task": [A, M, C],
+export type RbacAction = (typeof RBAC_DEFINITIONS)[number]["id"];
 
-  "approve-transition": [A, M],
-  "resolve-packet": [A, M],
-  "accept-completion": [A, M],
-  "run-agents": [A, M],
-  "reorder-board": [A, M],
-  "update-goal": [A, M],
-  "grant-github-scope": [A, M],
-  "reconcile-github": [A, M],
-  "rescan-project": [A, M],
-
-  "release-any-ownership": [A],
-  "manage-members": [A],
-  "manage-agents": [A],
-  "edit-policy": [A],
-};
+export const ACTION_ROLES = Object.fromEntries(
+  RBAC_DEFINITIONS.map(({ id, roles }) => [id, roles]),
+) as unknown as Record<RbacAction, readonly ProjectRole[]>;
 
 /** Does this project role hold this action? A null role (non-member) never does. */
 export function roleCan(role: ProjectRole | null | undefined, action: RbacAction): boolean {
@@ -106,36 +85,3 @@ export function roleCan(role: ProjectRole | null | undefined, action: RbacAction
 export function rolesForAction(action: RbacAction): readonly ProjectRole[] {
   return ACTION_ROLES[action];
 }
-
-/**
- * The Policy-page permission table: human-readable rows, each derived from the
- * canonical map above so the UI shows exactly what the server enforces. Order:
- * broadest grant → narrowest. Every enforced `RbacAction` appears here (nothing
- * silently omitted). `appWide` rows are granted to any *authenticated* user
- * regardless of project membership — the role columns are informational only,
- * and the UI must render them as app-wide rather than role-gated.
- */
-export const RBAC_TABLE: readonly {
-  action: string;
-  roles: readonly ProjectRole[];
-  /** True for `view`/`comment`: any signed-in user, member or not (FR4). */
-  appWide?: boolean;
-}[] = [
-  { action: "View board, tasks & timelines", roles: ACTION_ROLES.view, appWide: true },
-  { action: "Comment on tasks", roles: ACTION_ROLES.comment, appWide: true },
-  { action: "Create tasks", roles: ACTION_ROLES["create-task"] },
-  { action: "Take / release own task ownership", roles: ACTION_ROLES["own-task"] },
-  { action: "Approve stage transitions", roles: ACTION_ROLES["approve-transition"] },
-  { action: "Resolve decision packets", roles: ACTION_ROLES["resolve-packet"] },
-  { action: "Accept completion → Done", roles: ACTION_ROLES["accept-completion"] },
-  { action: "Edit the task goal", roles: ACTION_ROLES["update-goal"] },
-  { action: "Run agents", roles: ACTION_ROLES["run-agents"] },
-  { action: "Reorder the board", roles: ACTION_ROLES["reorder-board"] },
-  { action: "Reconcile GitHub state", roles: ACTION_ROLES["reconcile-github"] },
-  { action: "Grant GitHub scope", roles: ACTION_ROLES["grant-github-scope"] },
-  { action: "Re-scan project files & projections", roles: ACTION_ROLES["rescan-project"] },
-  { action: "Release any task owner", roles: ACTION_ROLES["release-any-ownership"] },
-  { action: "Manage members & roles", roles: ACTION_ROLES["manage-members"] },
-  { action: "Manage agent profiles", roles: ACTION_ROLES["manage-agents"] },
-  { action: "Edit workflow & policy", roles: ACTION_ROLES["edit-policy"] },
-];

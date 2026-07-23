@@ -18,10 +18,10 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
-  configureRunServiceForTests,
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
+import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
   insertRunLine,
   listRunsForTaskRows,
@@ -35,20 +35,15 @@ import {
   resolveMentionedAgent,
   runFailureReason,
 } from "./agent-reply.server";
-import {
-  assignSpecialist,
-  resolveResumeConfinement,
-  startAgentRun,
-} from "./specialist-run.server";
+import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 
 /**
  * Agent-mention resolution + comment→resume→reply flow.
  *
- * Simulated engine only (configureRunServiceForTests forces backends off), so
- * resumed/started reply runs replay a scripted stream deterministically and
- * offline. The reply lands as an agent-authored comment via the completion
+ * Provider calls use the injected fake adapter. The reply lands as an
+ * agent-authored comment via the completion
  * registry wired in run-service.
  */
 
@@ -114,7 +109,7 @@ beforeEach(() => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   resetSseBrokerForTests();
-  configureRunServiceForTests();
+  installFakeRuntime();
 });
 
 afterEach(() => {
@@ -309,8 +304,8 @@ describe("runFailureReason (F7-RUN1)", () => {
       threadId: "primary",
       role: "Primary specialist",
       kind: "primary",
+      agentProfileId: "developer",
       backend: "codex",
-      simulated: false,
       model: "gpt-5.4-codex",
       sdk: "codex-sdk",
       state: "error",

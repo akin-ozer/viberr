@@ -28,7 +28,7 @@ audit, notifications). Anything projection-shaped can be rebuilt from files.
   a schema migration that changes projection shape. Users/sessions/PATs/audit are **not**
   touched.
 
-The file watcher (chokidar, 250 ms debounce) drives incremental rebuilds automatically in
+The native recursive file watcher (250 ms debounce) drives incremental rebuilds automatically in
 both dev and prod; boot also runs a reconciling rescan so out-of-band edits made while the
 app was down converge before the first request.
 
@@ -60,7 +60,7 @@ readiness downgrade (tolerant parsing):
 
 - With no `ANTHROPIC_API_KEY` / `CODEX_API_KEY`, the backend is **unavailable**: a run
   started on it fails fast with an honest "backend unavailable" error and a blocked
-  recovery packet (no simulated fallback). Add a key and restart to enable the real
+  recovery packet. Add a key and restart to enable the real
   Claude Agent SDK / Codex SDK backends.
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/`; the log
   panel projects them. Interrupt is admin/maintainer-gated and audited.

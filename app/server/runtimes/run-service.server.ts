@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { LogLine, RunKind, RunView } from "~/features/runtime/runtime-types";
 import {
   recordAudit,
@@ -27,17 +27,13 @@ import {
   resetRegistryForTests,
   selectAdapter,
   setBackendAvailability,
-  simulatedRuntimePermitted,
-  type AdapterDeps,
   type AdapterSet,
   type RealBackend,
-  type SelectResult,
 } from "./runtime-registry.server";
-import type { SimulatedScript } from "./simulated-runtime.server";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Run lifecycle service (BUILD-PLAN Phase 8 §3). The only module routes call
+ * The only module routes call
  * for runtime work:
  *   startRun / resumeRun / interruptRun / listRunsForTask / getRunLog
  *
@@ -83,8 +79,6 @@ function getState(): ServiceState {
     state = { handles: new Map(), adapters: createAdapters(), completions: new Map() };
     cache[SERVICE_KEY] = state;
   }
-  // Older cached states (hot-reload / tests) may predate the completions map.
-  if (!state.completions) state.completions = new Map();
   return state;
 }
 
@@ -99,7 +93,7 @@ function getState(): ServiceState {
  * means "already finalized"; fire the callback immediately and consume it.
  */
 function fireIfAlreadyTerminal(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
 ): void {
   const state = getState();
@@ -131,7 +125,7 @@ function fireIfAlreadyTerminal(
 export function registerRunCompletion(
   runId: string,
   cb: RunCompletionCallback,
-  db?: Database.Database,
+  db?: DatabaseSync,
 ): void {
   getState().completions.set(runId, cb);
   if (db) fireIfAlreadyTerminal(db, runId);
@@ -148,7 +142,7 @@ export function registerRunCompletion(
 export function chainRunCompletion(
   runId: string,
   cb: RunCompletionCallback,
-  db?: Database.Database,
+  db?: DatabaseSync,
 ): void {
   const state = getState();
   const existing = state.completions.get(runId);
@@ -162,26 +156,12 @@ export function chainRunCompletion(
   if (db) fireIfAlreadyTerminal(db, runId);
 }
 
-/** Test-only: reset live handles + swap in test adapters (or SDK-fake deps). */
-export function configureRunServiceForTests(
-  adaptersOrDeps?: AdapterSet | AdapterDeps,
-): void {
-  // Deterministic: force both real backends unavailable so runs use the
-  // simulated engine regardless of any ambient credential in the dev `.env`
-  // (e.g. a CLAUDE_CODE_OAUTH_TOKEN). Under vitest the R7-2 gate is open
-  // (NODE_ENV === "test"), so unavailable backends still fall through to the
-  // deterministic test engine; a test exercising the PRODUCTION fail-fast
-  // path additionally calls setSimulatedRuntimePermittedForTests(false).
-  // A test that wants the real path injects
-  // a fake adapter AND calls setBackendAvailability(backend, true) after this.
+/** Test-only: reset live handles and install explicitly supplied adapters. */
+export function configureRunServiceForTests(adapters: AdapterSet): void {
   resetRegistryForTests();
-  setBackendAvailability("claude", false);
-  setBackendAvailability("codex", false);
+  setBackendAvailability("claude", true);
+  setBackendAvailability("codex", true);
   const cache = globalThis as unknown as Record<symbol, ServiceState | undefined>;
-  const adapters =
-    adaptersOrDeps && "simulated" in adaptersOrDeps
-      ? (adaptersOrDeps as AdapterSet)
-      : createAdapters((adaptersOrDeps as AdapterDeps) ?? {});
   cache[SERVICE_KEY] = { handles: new Map(), adapters, completions: new Map() };
 }
 
@@ -208,10 +188,8 @@ export interface StartRunInput {
    *  picker label). Null → the projection falls back to the backend name. */
   agentName?: string | null;
   /** The deployed profile id persisted on the run (per-agent grouping key). */
-  agentProfileId?: string | null;
+  agentProfileId: string;
   prompt: string;
-  /** Optional scripted stream (simulated backend / seed resumer). */
-  script?: SimulatedScript;
   /** Resume an existing provider session. */
   resumeSessionId?: string | null;
   autonomous?: boolean;
@@ -236,12 +214,6 @@ export interface StartRunInput {
   /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
    *  specialist's git to its workspace). Merged on top of the adapter env. */
   env?: Record<string, string>;
-  /** Request the simulated engine explicitly. Only the operator scripted
-   *  drive (itself reachable only inside the R7-2 test gate) sets this — the
-   *  real work is done by the operator-actions calls, this run is the log of
-   *  it. Outside the gate the request FAILS the run honestly instead of ever
-   *  converting into a paid real run or a fake stream. */
-  simulate?: boolean;
 }
 
 /** Runs started by the operator runtime itself (scheduling reactions). */
@@ -254,8 +226,7 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
 };
 
 /**
- * Starts a run: selects the adapter (the real one when its credential is
- * present, or the gated test engine with simulated=1), inserts the queued
+ * Starts a run: selects the requested provider adapter, inserts the queued
  * row, wires the sink and adapter callbacks, and kicks the adapter.
  *
  * R7-2: when the requested backend is UNAVAILABLE (and the test gate is
@@ -267,62 +238,43 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
  * Returns the run id.
  */
 export async function startRun(
-  db: Database.Database,
+  db: DatabaseSync,
   input: StartRunInput,
-): Promise<{ runId: string; simulated: boolean }> {
+): Promise<{ runId: string }> {
   const state = getState();
   const threadId = input.threadId ?? DEFAULT_THREAD[input.kind];
   const runId = newId("run");
   const workdir =
     input.workdir ?? taskDir(input.projectSlug, input.taskKey, input.dataRoot);
 
-  // An explicit simulate request is honored ONLY inside the R7-2 gate; a
-  // credential-based selection otherwise. Both funnel into one honest
-  // outcome: real adapter, gated test engine, or fail-fast `unavailable`.
-  const selection: SelectResult =
-    input.simulate === true
-      ? simulatedRuntimePermitted()
-        ? { kind: "simulated", adapter: state.adapters.simulated }
-        : { kind: "unavailable" }
-      : selectAdapter(input.backend, state.adapters);
-  const simulated = selection.kind === "simulated";
-
+  const selection = selectAdapter(input.backend, state.adapters);
   try {
     upsertRun(db, {
-    id: runId,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    threadId,
-    role: input.role,
-    kind: input.kind,
-    backend: input.backend,
-    simulated,
-    model: input.model,
-    sdk: SDK_LABEL[input.backend] ?? "",
-    sessionId: input.resumeSessionId ?? null,
-    agentName: input.agentName ?? null,
-    agentProfileId: input.agentProfileId ?? null,
-    state: "queued",
+      id: runId,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      threadId,
+      role: input.role,
+      kind: input.kind,
+      backend: input.backend,
+      model: input.model,
+      sdk: SDK_LABEL[input.backend] ?? "",
+      sessionId: input.resumeSessionId ?? null,
+      agentName: input.agentName ?? null,
+      agentProfileId: input.agentProfileId,
+      state: "queued",
     });
   } catch (err) {
-    // F10-05: the partial unique index idx_agent_runs__one_delivering rejects a
-    // SECOND active delivering ("primary") run for the task. The service
-    // preflights, but two racing dispatches can both pass that check during
-    // their awaits; this is the authoritative atomic guard. Translate the
-    // constraint violation into a clean 409 (nothing was audited or launched
-    // yet). Any other DB error is a real fault — rethrow it.
-    const code = (err as { code?: string } | null)?.code;
+    const errcode = (err as { errcode?: number } | null)?.errcode;
     if (
       input.kind === "primary" &&
-      typeof code === "string" &&
-      code.startsWith("SQLITE_CONSTRAINT")
+      errcode === 2067 // SQLITE_CONSTRAINT_UNIQUE
     ) {
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
         status: 409,
         userMessage:
           "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-        kind: "user",
       });
     }
     throw err;
@@ -342,14 +294,13 @@ export async function startRun(
       backend: input.backend,
       role: input.role,
       kind: input.kind,
-      simulated,
       resumed: Boolean(input.resumeSessionId),
       // R7-2 fail-fast marker: the run never spawned a backend process.
       ...(selection.kind === "unavailable" ? { failedUnavailable: true } : {}),
     },
   });
 
-  const spec: RunSpec & { script?: SimulatedScript } = {
+  const spec: RunSpec = {
     runId,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -363,7 +314,6 @@ export async function startRun(
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
-    script: input.script,
     ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
@@ -376,11 +326,11 @@ export async function startRun(
 
   if (selection.kind === "unavailable") {
     failRunUnavailable(db, spec);
-    return { runId, simulated: false };
+    return { runId };
   }
 
   launch(db, spec, selection.adapter);
-  return { runId, simulated };
+  return { runId };
 }
 
 /**
@@ -391,7 +341,7 @@ export async function startRun(
  * identical to any other terminal run, so registered completion callbacks
  * fire immediately via the already-terminal path and the F8 escalation runs.
  */
-function failRunUnavailable(db: Database.Database, spec: RunSpec): void {
+function failRunUnavailable(db: DatabaseSync, spec: RunSpec): void {
   const sink = createRunSink(db, spec);
   sink.markRunning();
   const now = new Date().toISOString();
@@ -406,7 +356,6 @@ function failRunUnavailable(db: Database.Database, spec: RunSpec): void {
   sink.finalize({
     outcome: "error",
     effectiveBackend: spec.backend,
-    simulated: false,
     sessionId: spec.resumeSessionId ?? null,
   });
 }
@@ -441,11 +390,10 @@ export function backendUnavailableMessage(backend: RealBackend): string {
  * default to the bare task dir and lose the checkout. Returns the new run id.
  */
 export async function resumeRun(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     runId: string;
     prompt: string;
-    script?: SimulatedScript;
     /** Reuse the original run's clone workdir (defaults to the task dir). */
     workdir?: string;
     /** Override the model for the resumed turns (defaults to the prior run's).
@@ -457,7 +405,7 @@ export async function resumeRun(
      *  with the prior run in the Agent-logs picker. Defaults to the prior
      *  row's agent_name/agent_profile_id. */
     agentName?: string | null;
-    agentProfileId?: string | null;
+    agentProfileId?: string;
     autonomous?: boolean;
     dataRoot?: string;
     actor?: AuditActor;
@@ -479,13 +427,10 @@ export async function resumeRun(
      *  its envelope, a fresh-vs-resume parity break (F7). */
     outputSchema?: unknown;
   },
-): Promise<{ runId: string; simulated: boolean }> {
+): Promise<{ runId: string }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
-  // Historical `simulated` rows (pre-R7-2 fallback/demo data) resume onto the
-  // claude backend — startRun then applies the same honest selection as any
-  // fresh run (real, gated test engine, or fail-fast unavailable).
-  const backend: RealBackend = prev.backend === "codex" ? "codex" : "claude";
+  const backend: RealBackend = prev.backend;
   // A resume creates a NEW run row (a fresh stream) that shares the PROVIDER
   // session id. It must NOT reuse the prior thread_id — agent_runs is unique
   // on (project, task, thread), and the prior row still exists. Derive a fresh
@@ -511,7 +456,6 @@ export async function resumeRun(
     agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
     prompt: input.prompt,
     resumeSessionId: prev.session_id,
-    ...(input.script ? { script: input.script } : {}),
     ...(input.workdir ? { workdir: input.workdir } : {}),
     ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
     ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
@@ -527,11 +471,7 @@ export async function resumeRun(
 }
 
 /** Wires the sink + adapter callbacks and starts the adapter process/timer. */
-function launch(
-  db: Database.Database,
-  spec: RunSpec & { script?: SimulatedScript },
-  adapter: RuntimeAdapter,
-): void {
+function launch(db: DatabaseSync, spec: RunSpec, adapter: RuntimeAdapter): void {
   const state = getState();
   const sink = createRunSink(db, spec);
 
@@ -612,7 +552,7 @@ export interface InterruptResult {
  * `already-terminal`, never an error.
  */
 export function interruptRun(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; runId: string },
   actor: { userId: string; label: string },
 ): InterruptResult {
@@ -691,7 +631,7 @@ export function interruptRun(
 
 /** All runs for a task as RunView[] (task-detail loader). */
 export function listRunsForTask(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
 ): RunView[] {
@@ -708,7 +648,7 @@ export interface RunLog {
 
 /** Tail of a run's log lines since `sinceSeq` (for the dedicated consumer). */
 export function getRunLog(
-  db: Database.Database,
+  db: DatabaseSync,
   runId: string,
   sinceSeq = -1,
 ): RunLog | null {
@@ -719,6 +659,6 @@ export function getRunLog(
   return { runId, threadId: run.thread_id, state: run.state, lines, headSeq: head };
 }
 
-function projectOne(db: Database.Database, run: AgentRunRow): RunView {
+function projectOne(db: DatabaseSync, run: AgentRunRow): RunView {
   return projectRunsForTask(db, run.project_slug, run.task_key).find((r) => r.id === run.thread_id) ?? projectRunsForTask(db, run.project_slug, run.task_key)[0]!;
 }

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   GithubCache,
   PrRef,
@@ -73,12 +73,12 @@ function taskRefOf(
   return {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
 }
 
 function recordGithubProvenance(
-  db: Database.Database,
+  db: DatabaseSync,
   input: {
     absPath: string;
     dataRoot?: string;
@@ -97,7 +97,7 @@ function recordGithubProvenance(
   );
 }
 
-function userName(db: Database.Database, userId: string): string {
+function userName(db: DatabaseSync, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
     | undefined;
@@ -140,7 +140,7 @@ const POLICY_ENGINE_NOTIFY_FROM = {
  * provenance row for the observation.
  */
 export async function reconcileTask(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
   ctx: GithubActionContext = {},
@@ -184,7 +184,7 @@ export async function reconcileTask(
         ),
         actor,
       },
-      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      { dataRoot: ctx.dataRoot },
     );
     return {
       status: "scope_violation",
@@ -335,7 +335,7 @@ export async function reconcileTask(
       });
     }
     rebuildPath(db, resolveTaskFilePath(ref), {
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
     // Notify the task's supervisors (owner + admins/maintainers) so the
     // divergence reaches an inbox, not just the timeline. Dynamic import keeps
@@ -356,7 +356,7 @@ export async function reconcileTask(
           text: divergenceText,
           from: POLICY_ENGINE_NOTIFY_FROM,
         },
-        ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+        { dataRoot: ctx.dataRoot },
       );
     }
   }
@@ -368,7 +368,7 @@ export async function reconcileTask(
 
   recordGithubProvenance(db, {
     absPath: resolveTaskFilePath(ref),
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
     action: "github.reconcile",
     details: {
       repo: gh.repo,
@@ -422,7 +422,7 @@ export interface ProjectReconcileSummary {
  * network call.
  */
 export async function reconcileProject(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
   ctx: GithubActionContext = {},
@@ -515,7 +515,7 @@ interface GhMergeResponse {
  * scenario; the seeded violation row is simply reused).
  */
 export async function mergeTaskPr(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor & { userId: string },
   ctx: GithubActionContext = {},
@@ -580,11 +580,11 @@ export async function mergeTaskPr(
       evidence: null,
     });
     rebuildPath(db, resolveTaskFilePath(ref), {
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
     recordGithubProvenance(db, {
       absPath: resolveTaskFilePath(ref),
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
       action: "github.merge",
       details: { repo: gh.repo, prNumber, sha },
     });
@@ -610,7 +610,7 @@ export async function mergeTaskPr(
         db,
         open.id,
         actor,
-        ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+        { dataRoot: ctx.dataRoot },
       );
     }
     return { status: "merged", prNumber, sha };
@@ -639,7 +639,7 @@ export async function mergeTaskPr(
         ),
         actor,
       },
-      ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+      { dataRoot: ctx.dataRoot },
     );
     recordAudit(db, {
       action: "github.pr.merge_refused",

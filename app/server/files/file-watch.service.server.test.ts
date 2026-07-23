@@ -8,18 +8,13 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { projectDir, projectsDir, taskDir } from "./file-store-root.server";
+import { projectDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
-  shouldPruneSubtree,
+  shouldIgnoreWatchPath,
   startFileWatcher,
   stopFileWatcherForTests,
 } from "./file-watch.service.server";
-
-/**
- * Real-chokidar watcher tests (temp store, injected test db — the watcher
- * must never touch the env-default database from a test).
- */
 
 const ctx = createTestDbContext();
 afterEach(() => {
@@ -40,18 +35,6 @@ async function waitFor(cond: () => boolean, what: string): Promise<void> {
 
 async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
   const watcher = startFileWatcher({ dataRoot: store.dataRoot, db: store.db });
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, 2000); // safety net if already ready
-    watcher.once("ready", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-  // chokidar's "ready" fires when the initial scan completes, but there is a
-  // small gap before the OS-level watches on the just-scanned subdirectories are
-  // fully established. A recursive rm that lands in that gap can miss the
-  // unlinkDir event — the source of an intermittent flake in the rm tests. A
-  // short settle after ready closes the window deterministically.
   await new Promise((r) => setTimeout(r, 250));
   return watcher;
 }
@@ -105,25 +88,17 @@ describe("unlinkDir handling (E13)", () => {
 describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
   const root = "/data/projects";
   it("keeps project.md and task.md, prunes workspace clones", () => {
-    // Store paths that MUST be watched (they project).
-    expect(shouldPruneSubtree(root, `${root}/p/project.md`)).toBe(false);
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/task.md`)).toBe(false);
-    expect(shouldPruneSubtree(root, `${root}/p/tasks`, { isDirectory: () => true })).toBe(false);
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1`, { isDirectory: () => true })).toBe(false);
-    // The workspace dir (and anything below it) is runtime scratch — prune it so
-    // chokidar never opens an fd per cloned-repo file.
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace`, { isDirectory: () => true })).toBe(true);
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace/repo/src/index.ts`)).toBe(true);
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace/repo/package.json`)).toBe(true);
-  });
-
-  it("prunes a directory named workspace even before stats resolve", () => {
-    expect(shouldPruneSubtree(root, `${root}/p/tasks/VIB-1/workspace`)).toBe(true);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/project.md`)).toBe(false);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/tasks/VIB-1/task.md`)).toBe(false);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/tasks`)).toBe(false);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/tasks/VIB-1`)).toBe(false);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/tasks/VIB-1/workspace`)).toBe(true);
+    expect(shouldIgnoreWatchPath(root, `${root}/p/tasks/VIB-1/workspace/repo/src/index.ts`)).toBe(true);
   });
 
   it("does not prune outside the watch root", () => {
-    expect(shouldPruneSubtree(root, root)).toBe(false);
-    expect(shouldPruneSubtree(root, "/somewhere/else")).toBe(false);
+    expect(shouldIgnoreWatchPath(root, root)).toBe(false);
+    expect(shouldIgnoreWatchPath(root, "/somewhere/else")).toBe(false);
   });
 
   it("integration: a workspace-file write never reprojects; task.md edits still do", async () => {
@@ -139,7 +114,7 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
     await startWatcherReady(store);
 
     // Write a file deep inside the task's workspace clone — must be ignored (the
-    // pruning is what keeps chokidar from opening an fd per cloned-repo file).
+    // pruning keeps the recursive watcher out of cloned-repo files).
     const wsDir = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "repo", "src");
     mkdirSync(wsDir, { recursive: true });
     writeFileSync(path.join(wsDir, "index.ts"), "export const x = 1;\n");
@@ -159,7 +134,7 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
 });
 
 describe("watcher liveness (E8)", () => {
-  it("a chokidar error clears the cached handle — health reports the truth", async () => {
+  it("an fs watcher error clears the cached handle", async () => {
     const store = setupTestStore(ctx);
     const watcher = await startWatcherReady(store);
     expect(isFileWatcherAlive()).toBe(true);
@@ -175,7 +150,7 @@ describe("watcher re-arm lifecycle (F10-08)", () => {
     const watcher = await startWatcherReady(store);
     expect(isFileWatcherAlive()).toBe(true);
 
-    // Only fake the timer functions so chokidar's fs mechanics stay real.
+    // Only fake timers so the native watcher stays real.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       // A transient error WITH a code schedules the 2s self-heal re-arm.

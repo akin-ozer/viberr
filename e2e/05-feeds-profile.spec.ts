@@ -1,12 +1,17 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Golden path (e): review queue reflects VIB-142's post-resolution state,
- * the activity feed renders, notifications mark-all-read works, and the
- * profile theme switch persists across a reload.
+ * Golden path (e): the review queue partitions correctly, the activity feed
+ * renders, notifications mark-all-read works, and the profile theme switch
+ * persists across a reload.
+ *
+ * These assert against SEEDED state. They used to run after the packet and
+ * ownership specs and describe themselves in terms of those mutations; those
+ * specs went with the simulated runtime, so the narrative is rewritten to say
+ * what the seed actually provides. The assertions are unchanged.
  */
 
-test("review queue shows VIB-142 with the agents after the request-edit decision", async ({
+test("review queue lists VIB-142 with the agents, not awaiting acceptance", async ({
   page,
 }) => {
   await page.goto("/projects/viberr-core/review");
@@ -20,8 +25,8 @@ test("review queue shows VIB-142 with the agents after the request-edit decision
   await expect(waitingPanel).toBeVisible();
   await expect(agentsPanel).toBeVisible();
 
-  // Spec 02 resolved VIB-142 with request_edit → waiting flipped to agent,
-  // so the row left "Waiting on your acceptance" and sits with the agents.
+  // VIB-142 seeds as waiting on the agent side, so it sits in the agents
+  // panel and must NOT appear under "Waiting on your acceptance".
   await expect(waitingPanel.getByText("VIB-142")).toHaveCount(0);
   await expect(agentsPanel.getByText("VIB-142")).toBeVisible();
 });
@@ -30,7 +35,7 @@ test("activity feed renders day-grouped events", async ({ page }) => {
   await page.goto("/projects/viberr-core/activity");
 
   await expect(page.locator(".act-day").first()).toBeVisible();
-  // Specs 02/03 wrote governed events today as Arda.
+  // The seed writes governed events attributed to Arda.
   await expect(page.getByText("Arda Kaya").first()).toBeVisible();
 });
 

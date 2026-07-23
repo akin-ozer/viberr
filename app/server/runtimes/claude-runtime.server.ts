@@ -171,8 +171,7 @@ const SUPPORTING_DENIED_BUILTINS = [
  * `mcp__*` channel (the backend-agnostic way viberr grants real capabilities to
  * BOTH backends). If viberr ever wants a scheduled/recurring-task capability
  * (the "Cron on a not-yet-Done task" idea), the parity-correct form is a governed
- * `mcp__viberr__schedule_*` tool + capability toggle, NOT the Claude Cron tool.
- * See planning/discovery-2026-07-17/plan-bundled-tool-isolation.md.
+ * `mcp__viberr__schedule_*` tool + capability toggle, not the Claude Cron tool.
  */
 const BASE_DENIED_BUILTINS = [
   "Skill", // viberr injects each agent's declared skill as system-prompt text
@@ -356,7 +355,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
-        cb.onExit({ outcome, effectiveBackend: "claude", simulated: false, sessionId });
+        cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
       };
 
       const run = async () => {

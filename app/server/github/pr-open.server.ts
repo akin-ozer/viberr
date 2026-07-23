@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { PrRef } from "~/schemas/task-file.schema";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -115,7 +115,7 @@ interface GhPull {
  * cache is left untouched.
  */
 export async function openTaskPr(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor & { userId?: string },
   ctx: OpenTaskPrContext = {},
@@ -123,7 +123,7 @@ export async function openTaskPr(
   const ref = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found" };
@@ -233,7 +233,7 @@ export async function openTaskPr(
         ),
         ...(actor ? { actor } : {}),
       },
-      { ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}) },
+      { dataRoot: ctx.dataRoot },
     );
     return {
       status: "scope_violation",
@@ -254,7 +254,7 @@ export async function openTaskPr(
 }
 
 async function writePrToTask(
-  db: Database.Database,
+  db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string },
   input: { projectSlug: string; taskKey: string },
   gh: { repo: string },
@@ -315,7 +315,7 @@ async function writePrToTask(
   }
   if (changed || created) {
     rebuildPath(db, resolveTaskFilePath(ref), {
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
   }
   recordAudit(db, {

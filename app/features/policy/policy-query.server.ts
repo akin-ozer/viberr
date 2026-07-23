@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { AgentProfileView } from "~/features/agents/agent-types";
 import { assembleAgentRoster } from "~/features/agents/agents-query.server";
 import {
@@ -45,7 +45,7 @@ export const POLICY_AUDIT_ACTIONS = [
 ] as const;
 
 export function latestPolicyChange(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
 ): { by: string; t: string } | null {
   const placeholders = POLICY_AUDIT_ACTIONS.map(() => "?").join(", ");
@@ -73,7 +73,7 @@ export function latestPolicyChange(
 }
 
 export function getPolicyViewData(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): PolicyViewData | null {

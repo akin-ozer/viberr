@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { listDeployedSpecialists } from "./specialist-run.server";
@@ -75,18 +75,18 @@ function emailLocalPart(email: string): string {
  * registered user, matching the server-side resolver's scope).
  */
 export function getMentionables(
-  db: Database.Database,
+  db: DatabaseSync,
   projectSlug: string,
   _taskKey: string,
   opts: { dataRoot?: string } = {},
 ): Mentionables {
-  const ctx = opts.dataRoot !== undefined ? { dataRoot: opts.dataRoot } : {};
+  const ctx = { dataRoot: opts.dataRoot };
 
   // Agents: the project's deployed specialists. Handle = name lowercased,
   // de-duped (two deployments could share a display name).
   const agentSeen = new Set<string>();
   const agents: MentionableAgent[] = [];
-  for (const sp of listDeployedSpecialists(db, projectSlug, ctx)) {
+  for (const sp of listDeployedSpecialists(projectSlug, ctx)) {
     const handle = sp.name.toLowerCase();
     if (agentSeen.has(handle)) continue;
     agentSeen.add(handle);

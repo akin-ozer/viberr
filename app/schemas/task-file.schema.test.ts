@@ -226,7 +226,7 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     });
   });
 
-  it("pr.state is the 4-value enum; unknown strings coerce to \"review\" (never throw, never drop)", () => {
+  it('pr.state is the 4-value enum; unknown strings coerce to "review" (never throw, never drop)', () => {
     // Canonical values pass through untouched.
     for (const state of ["review", "merged", "closed", "accepted"]) {
       const result = parseTaskFrontmatter(
@@ -236,12 +236,19 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       expect(result.frontmatter.pr?.state).toBe(state);
     }
     // A legacy raw GitHub "open" (pre-B3 writes) coerces to "review" instead
-    // of dropping the whole PR ref.
+    // of dropping the whole PR ref. `pr` is parsed through tolerant(…, null),
+    // so a hard enum failure would null the number and title too — the link
+    // would then be lost from task.md on the next write.
     const legacy = parseTaskFrontmatter(
       { ...valid, pr: { number: 318, state: "open", title: "x" } },
       { fallbackKey: "VIB-142" },
     );
-    expect(legacy.frontmatter.pr).toMatchObject({ number: 318, state: "review" });
+    expect(legacy.frontmatter.pr).toMatchObject({
+      number: 318,
+      state: "review",
+      title: "x",
+    });
+    expect(legacy.diagnostics).toEqual([]);
   });
 
   it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
@@ -288,6 +295,24 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
     expect(result.frontmatter.engagements).toEqual([
       { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
+    ]);
+    expect(result.unknown).toEqual({});
+  });
+
+  it("an explicit `engagements` key wins over leftover legacy slots (no double-count)", () => {
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        specialist: { profileId: "stale-dev", backend: "codex", role: "Developer" },
+        reviewers: [{ profileId: "stale-reviewer", backend: "claude", role: "Reviewer" }],
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.diagnostics).toEqual([]);
+    // Only the `engagements` rows survive — the legacy slots are neither
+    // appended nor preserved as unknown fields.
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
     ]);
     expect(result.unknown).toEqual({});
   });

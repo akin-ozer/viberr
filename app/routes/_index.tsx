@@ -1,11 +1,13 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/_index";
 import type { loader as rootLoader } from "../root";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
-import { assertCsrf } from "~/server/auth/csrf.server";
+import {
+  appErrorResponse,
+  requireFormAction,
+} from "~/server/auth/form-action.server";
+import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getEnv } from "~/server/config/env.server";
-import { isAppError } from "~/server/errors/app-error.server";
 import {
   countUnreadNotifications,
   listNotifications,
@@ -50,12 +52,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
-  const intent = String(formData.get("intent") ?? "");
+  const {
+    auth: ctx,
+    db,
+    formData,
+    actor,
+    intent,
+  } = await requireFormAction(request);
 
   try {
     if (intent === "pin") {
@@ -134,13 +137,7 @@ export async function action({ request }: Route.ActionArgs) {
       { status: 400 },
     );
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

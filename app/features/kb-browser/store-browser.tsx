@@ -27,9 +27,7 @@ import {
 } from "./tree";
 
 /**
- * StoreBrowser — the store-folder file manager popup (kb-browser spec,
- * 1:1 port of design/html-app/app/kb-browser.jsx). Differences from the
- * mock are the sanctioned real-app replacements:
+ * Store-folder file manager popup.
  *
  * - the tree comes from the loader (a real disk scan) and every mutation
  *   is a fetcher POST to the org-settings action → real fs write → the

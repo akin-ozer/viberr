@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   recordAudit,
@@ -25,7 +25,6 @@ import {
   updateUserFields,
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -70,15 +69,6 @@ export interface OrgUserView {
   disabled: boolean;
 }
 
-function conflict(userMessage: string): AppError {
-  return new AppError({
-    code: ERROR_CODES.CONFLICT,
-    status: 409,
-    userMessage,
-    kind: "user",
-  });
-}
-
 function idpOf(user: UserRecord): "github" | "google" | "local" {
   return user.idp === "github" || user.idp === "google" ? user.idp : "local";
 }
@@ -108,7 +98,7 @@ export function toOrgUserView(user: UserRecord): OrgUserView {
   };
 }
 
-export function listOrgUsers(db: Database.Database): OrgUserView[] {
+export function listOrgUsers(db: DatabaseSync): OrgUserView[] {
   return listUsers(db).map(toOrgUserView);
 }
 
@@ -121,7 +111,7 @@ export function githubPlaceholderEmail(handle: string): string {
 }
 
 export function whitelistGithubUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { handle: string; role: UserRole },
   actor: AuditActor,
 ): { user: OrgUserView; toast: string } {
@@ -130,7 +120,7 @@ export function whitelistGithubUser(
     throw AppError.validation("Enter a GitHub username.");
   }
   if (findUserByEmail(db, githubPlaceholderEmail(handle))) {
-    throw conflict(`@${handle} is already whitelisted.`);
+    throw AppError.conflict(`@${handle} is already whitelisted.`);
   }
   // Placeholder identity until first sign-in; insertUser (not createUser)
   // because the placeholder "email" is deliberately not an email address.
@@ -139,7 +129,6 @@ export function whitelistGithubUser(
     email: githubPlaceholderEmail(handle),
     name: `@${handle}`,
     role: input.role,
-    passwordHash: null,
     idp: "github",
     avatarTone: "teal",
     createdBy: actor.userId,
@@ -157,15 +146,15 @@ export function whitelistGithubUser(
   };
 }
 
-export function whitelistGoogleAccount(
-  db: Database.Database,
+export async function whitelistGoogleAccount(
+  db: DatabaseSync,
   input: { email: string; role: UserRole },
   actor: AuditActor,
-): { user: OrgUserView; toast: string } {
+): Promise<{ user: OrgUserView; toast: string }> {
   const email = normalizeEmail(input.email);
   const name = email.split("@")[0] || email;
   // Phase-2 API: the row IS the whitelist; passwordless = OAuth-only.
-  const record = createUser(
+  const record = await createUser(
     db,
     { email, name, role: input.role, tempPassword: null },
     actor,
@@ -184,13 +173,13 @@ export function whitelistGoogleAccount(
   };
 }
 
-export function createLocalAccount(
-  db: Database.Database,
+export async function createLocalAccount(
+  db: DatabaseSync,
   input: { name: string; email: string; role: UserRole },
   actor: AuditActor,
-): { user: OrgUserView; tempPassword: string; toast: string } {
+): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
   const tempPassword = generateTempPassword();
-  const record = createUser(
+  const record = await createUser(
     db,
     {
       email: input.email,
@@ -224,7 +213,7 @@ export interface UpdateOrgUserInput {
  * the phase-2 updateUser.
  */
 export function updateOrgUser(
-  db: Database.Database,
+  db: DatabaseSync,
   input: UpdateOrgUserInput,
   actor: AuditActor,
 ): OrgUserView {
@@ -239,7 +228,7 @@ export function updateOrgUser(
     }
     if (email !== existing.email) {
       if (findUserByEmail(db, email)) {
-        throw conflict(`A user with email ${email} already exists.`);
+        throw AppError.conflict(`A user with email ${email} already exists.`);
       }
       db.prepare(`UPDATE users SET email = ?, updated_at = ? WHERE id = ?`).run(
         email,
@@ -273,7 +262,7 @@ export function updateOrgUser(
 }
 
 export function setOrgUserRole(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { userId: string; role: UserRole },
   actor: AuditActor,
 ): OrgUserView {
@@ -283,11 +272,11 @@ export function setOrgUserRole(
 
 /** Local password reset: temp password surfaced once; sessions killed;
  * the phase-2 forced-reset gate prompts at next sign-in. */
-export function resetLocalPassword(
-  db: Database.Database,
+export async function resetLocalPassword(
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
-): { user: OrgUserView; tempPassword: string; toast: string } {
+): Promise<{ user: OrgUserView; tempPassword: string; toast: string }> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.");
   if (idpOf(existing) !== "local") {
@@ -296,7 +285,7 @@ export function resetLocalPassword(
     );
   }
   const tempPassword = generateTempPassword();
-  const updated = resetPassword(db, userId, tempPassword, actor);
+  const updated = await resetPassword(db, userId, tempPassword, actor);
   return {
     user: toOrgUserView(updated),
     tempPassword,
@@ -311,7 +300,7 @@ export function resetLocalPassword(
  * removal), sessions/prefs/PATs cascade via FK.
  */
 export function deleteOrgUser(
-  db: Database.Database,
+  db: DatabaseSync,
   userId: string,
   actor: AuditActor,
 ): { user: OrgUserView; toast: string } {
@@ -322,9 +311,9 @@ export function deleteOrgUser(
     !existing.disabled &&
     countActiveAdmins(db) <= 1
   ) {
-    throw conflict("Cannot remove the last active admin.");
+    throw AppError.conflict("Cannot remove the last active admin.");
   }
-  // Remove the better-auth identity too (user/account/member/session cascade) —
+  // Remove the better-auth identity too (user/account/session cascade) —
   // otherwise the orphaned `user` row (email is UNIQUE NOT NULL) makes
   // re-creating the same email throw a raw constraint mid-flow (pass-4 WI-3).
   revokeUserSessions(db, userId);
@@ -365,13 +354,13 @@ function mapDomain(row: DomainRow): DomainRecord {
   };
 }
 
-export function listDomains(db: Database.Database): DomainRecord[] {
+export function listDomains(db: DatabaseSync): DomainRecord[] {
   const rows = db
     .prepare(
       `SELECT id, domain, role, created_at FROM google_domain_allowlist
        ORDER BY created_at ASC, id ASC`,
     )
-    .all() as DomainRow[];
+    .all() as unknown as DomainRow[];
   return rows.map(mapDomain);
 }
 
@@ -394,7 +383,7 @@ export type AddDomainResult =
   | { status: "invalid"; message: string };
 
 export function addDomain(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { domain: string; role: UserRole },
   actor: AuditActor,
 ): AddDomainResult {
@@ -436,7 +425,7 @@ export function addDomain(
 }
 
 export function removeDomain(
-  db: Database.Database,
+  db: DatabaseSync,
   id: string,
   actor: AuditActor,
 ): { domain: DomainRecord; toast: string } {
@@ -469,7 +458,7 @@ export function removeDomain(
  * domain is not allowlisted.
  */
 export function findDomainAllowlistRole(
-  db: Database.Database,
+  db: DatabaseSync,
   email: string,
 ): UserRole | null {
   const at = email.lastIndexOf("@");

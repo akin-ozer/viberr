@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { ResCatalogGroup } from "~/features/agents/capability-catalog";
 import { kbRootDir, skillsRootDir } from "~/server/files/file-store-root.server";
 import { listMcpServers, listSkills } from "./resources.server";
@@ -32,7 +32,7 @@ import { listMcpServers, listSkills } from "./resources.server";
 export const RESERVED_OPERATOR_MCP = "viberr";
 
 export function buildResourceCatalog(
-  db: Database.Database,
+  db: DatabaseSync,
   dataRoot?: string,
   opts: { profileKind?: "operator" | "specialist" } = {},
 ): ResCatalogGroup[] {

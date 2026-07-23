@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -52,7 +52,7 @@ export interface AgentToolkit {
 }
 
 interface AgentToolkitDeps {
-  db: Database.Database;
+  db: DatabaseSync;
   ctx: TaskMutationContext;
   projectSlug: string;
   taskKey: string;
@@ -74,7 +74,7 @@ function textResult(text: string) {
  * reply; a deliberate mid-run tool call is already intentional), audited as
  * task.agent.commented with the agent's identity. */
 export async function postAgentComment(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;
@@ -112,7 +112,7 @@ export async function postAgentComment(
  * Refuses (returns false) when a packet is already open: one decision at a
  * time per task, and an agent must never clobber a governance packet. */
 export async function openAgentQuestionPacket(
-  db: Database.Database,
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   input: {
     projectSlug: string;

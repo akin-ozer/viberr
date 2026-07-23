@@ -2,8 +2,7 @@ import type { LogLine, RunBackend, RunKind } from "~/features/runtime/runtime-ty
 import type { EnvelopeFacts } from "./wire-format.server";
 
 /**
- * Common runtime-adapter interface (BUILD-PLAN Phase 8). Each backend
- * (claude / codex / simulated) implements it; the run-service is the only
+ * Common runtime-adapter interface. Each backend implements it; run-service is the only
  * caller. Adapters do NOT touch the DB, files or the broker directly — they
  * emit lines/exit through callbacks and the run-service (via a RunSink)
  * persists (raw .jsonl append + DB row with computed display_json) THEN
@@ -20,7 +19,7 @@ export interface RunSpec {
   threadId: string;
   role: string;
   kind: RunKind;
-  /** The requested backend — kept for glyph fidelity even on fallback. */
+  /** The requested provider backend. */
   backend: "claude" | "codex";
   model: string;
   /** Reasoning/effort level for the run (claude: options.effort · codex:
@@ -74,10 +73,8 @@ export interface EmittedLine {
 export interface RunExit {
   /** finished | error | interrupted (queued/running never appear here). */
   outcome: "finished" | "error" | "interrupted";
-  /** The real backend actually used (== requested, or "simulated" on fallback). */
+  /** The backend actually used. */
   effectiveBackend: RunBackend;
-  /** True when a real backend fell back to the simulated engine. */
-  simulated: boolean;
   /** Provider session id captured during the run, if any. */
   sessionId?: string | null;
 }
@@ -93,7 +90,7 @@ export interface RunCallbacks {
 /** A running handle the service can interrupt. */
 export interface RunHandle {
   runId: string;
-  /** Send SIGINT (real) / stop the timer (simulated). Idempotent. */
+  /** Send SIGINT. Idempotent. */
   interrupt(byUserId: string, byLabel: string): void;
 }
 

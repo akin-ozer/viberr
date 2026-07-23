@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   FileActorRef,
   PrRef,
@@ -15,7 +15,6 @@ import {
 } from "~/schemas/task-file.schema";
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
-import { roleToSlug } from "~/server/files/actor-ref.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -41,7 +40,7 @@ import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
  * The canonical task.md then keeps `branch: null` / `pr: null`, so
  * task↔branch↔PR traceability (NFR15) is broken for agent-delivered work.
  *
- * After a REAL (non-simulated) specialist run finishes we inspect the run's
+ * After a specialist run finishes we inspect the run's
  * workspace git repo and reconcile the task record from what the agent
  * ACTUALLY did: the real branch, the real commits, and (best-effort, via the
  * run's own `gh` auth) the real PR. Everything here is best-effort and never
@@ -99,7 +98,7 @@ const defaultExec: CommandExec = async (file, args, opts) => {
 // ------------------------------------------------------------------- input
 
 export interface ReconcileWorkspaceDeliveryInput {
-  db: Database.Database;
+  db: DatabaseSync;
   projectSlug: string;
   taskKey: string;
   /** The repo working dir the run used (the specialist clone dir), when known.
@@ -111,10 +110,8 @@ export interface ReconcileWorkspaceDeliveryInput {
   /** The finished run's backend + identity — attribution for the typed
    *  events (D7: profileId is the identity; role is the display snapshot). */
   backend?: RealBackend;
-  profileId?: string | null;
+  profileId: string;
   role?: string;
-  /** Skip entirely for a simulated run (it did no real git work). */
-  simulated?: boolean;
   /** Injected command runner (tests). Defaults to a real `execFile` wrapper. */
   exec?: CommandExec;
 }
@@ -227,14 +224,10 @@ export async function reconcileWorkspaceDelivery(
   });
 
   try {
-    if (input.simulated) {
-      return noop("skipped", "simulated run — no real repository work");
-    }
-
     const ref = {
       projectSlug,
       taskKey,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     };
     const file = readTaskFile(ref);
     if (!file) return noop("task_not_found", "task file missing");
@@ -244,7 +237,7 @@ export async function reconcileWorkspaceDelivery(
     // its own git/gh creds, so we resolve config straight from the files.
     const projectFile = readProjectFile({
       projectSlug,
-      ...(dataRoot !== undefined ? { dataRoot } : {}),
+      dataRoot,
     });
     const repo = fm.repo ?? projectFile?.parsed.frontmatter.repo ?? null;
     if (!repo) return noop("no_repo", "project has no repo configured");
@@ -273,7 +266,7 @@ export async function reconcileWorkspaceDelivery(
     const actor: FileActorRef = {
       kind: "agent",
       backend,
-      profileId: input.profileId ?? roleToSlug(role),
+      profileId: input.profileId,
       roleHint: role,
     };
 
@@ -404,7 +397,7 @@ export async function reconcileWorkspaceDelivery(
         await patchTaskFrontmatter(ref, branchPatch);
       }
       rebuildPath(db, resolveTaskFilePath(ref), {
-        ...(dataRoot !== undefined ? { dataRoot } : {}),
+        dataRoot,
       });
     }
     // The branch-reconciled audit fires only for a real BRANCH or COMMIT change,
@@ -500,7 +493,7 @@ export async function reconcileWorkspaceDelivery(
               });
             }
             rebuildPath(db, resolveTaskFilePath(ref), {
-              ...(dataRoot !== undefined ? { dataRoot } : {}),
+              dataRoot,
             });
             recordAudit(db, {
               action: "github.workspace.pr_linked",

@@ -87,7 +87,7 @@ export function guardrailOn(
 ): boolean {
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   return (
     project?.parsed.frontmatter.guardrails?.some(
@@ -104,7 +104,7 @@ export function guardrailValue(
 ): number | null {
   const project = readProjectFile({
     projectSlug,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   });
   const g = project?.parsed.frontmatter.guardrails?.find(
     (x) => x.id === id && x.on === true,

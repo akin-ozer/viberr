@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LogLine } from "~/features/runtime/runtime-types";
-import { projectEnvelope, rawLineFromDisplay } from "./wire-format.server";
-
-const CTX = { backend: "claude" as const, sid: "sess-1234abcd", model: "claude-sonnet-4-5", op: false };
-const CTX_OP = { ...CTX, op: true };
-const CTX_CODEX = { backend: "codex" as const, sid: "0199a1f3-4c02-7d31", model: "gpt-5.4-codex", op: false };
+import { projectEnvelope } from "./wire-format.server";
 
 describe("projectEnvelope — Claude stream-json", () => {
   it("system·init → init line with session/model/tools/mcp facts", () => {
@@ -127,61 +122,5 @@ describe("projectEnvelope — Codex JSONL", () => {
 
   it("in-progress items other than command_execution yield no line", () => {
     expect(projectEnvelope("codex", { type: "item.started", item: { type: "reasoning", text: "x" } }).display).toBeNull();
-  });
-});
-
-describe("rawLineFromDisplay → projectEnvelope round-trip", () => {
-  const roundTrip = (
-    ctx: { backend: "claude" | "codex"; sid: string; model: string; op: boolean },
-    lines: LogLine[],
-  ) =>
-    lines.map((l, i) => {
-      const raw = rawLineFromDisplay(ctx, l, i, lines);
-      const parsed = JSON.parse(raw); // must be valid JSON
-      const projected = projectEnvelope(ctx.backend, parsed);
-      return { raw, projected };
-    });
-
-  it("claude: every ev fabricates valid wire JSON that re-projects to the same ev", () => {
-    const lines: LogLine[] = [
-      { t: "1", ev: "init", tag: "system·init", text: "session x" },
-      { t: "2", ev: "text", tag: "assistant", text: "hi" },
-      { t: "3", ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" },
-      { t: "4", ev: "out", tag: "tool_result", text: "ok" },
-      { t: "5", ev: "err", tag: "tool_result", text: "bad" },
-      { t: "6", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 0.1, in: 5, cached: 2, out: 3 } },
-    ];
-    const out = roundTrip(CTX, lines);
-    expect(out.map((o) => o.projected.display?.ev)).toEqual(["init", "text", "tool", "out", "err", "result"]);
-    // operator init carries the task-store MCP.
-    const opRaw = rawLineFromDisplay(CTX_OP, lines[0]!, 0, lines);
-    expect(opRaw).toContain("viberr-task-store");
-  });
-
-  it("claude tool_result ids match the preceding tool_use id (deterministic)", () => {
-    const lines: LogLine[] = [
-      { t: "1", ev: "tool", tag: "tool_use", name: "Bash", text: "ls" },
-      { t: "2", ev: "out", tag: "tool_result", text: "files" },
-    ];
-    const toolRaw = JSON.parse(rawLineFromDisplay(CTX, lines[0]!, 0, lines));
-    const resultRaw = JSON.parse(rawLineFromDisplay(CTX, lines[1]!, 1, lines));
-    const toolId = toolRaw.message.content[0].id;
-    const resultId = resultRaw.message.content[0].tool_use_id;
-    expect(resultId).toBe(toolId);
-  });
-
-  it("codex: every ev fabricates valid JSON that re-projects to the same ev", () => {
-    const lines: LogLine[] = [
-      { t: "1", ev: "init", tag: "thread.started", text: "thread x" },
-      { t: "2", ev: "meta", tag: "turn.started", text: "turn 1" },
-      { t: "3", ev: "think", tag: "reasoning", text: "reason" },
-      { t: "4", ev: "tool", tag: "command_execution", name: "exec", text: "rg foo" },
-      { t: "5", ev: "out", tag: "aggregated_output", text: "1 match" },
-      { t: "6", ev: "diff", tag: "file_change", text: "1 file", changes: [{ path: "a.ts", kind: "add" }] },
-      { t: "7", ev: "result", tag: "turn.completed", text: "done", usage: { input_tokens: 5, cached_input_tokens: 2, output_tokens: 3 } },
-    ];
-    const out = roundTrip(CTX_CODEX, lines);
-    // 'meta' re-projects to meta; the rest preserve their ev.
-    expect(out.map((o) => o.projected.display?.ev)).toEqual(["init", "meta", "think", "tool", "out", "diff", "result"]);
   });
 });

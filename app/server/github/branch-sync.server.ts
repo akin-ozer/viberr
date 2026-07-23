@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
@@ -165,7 +165,7 @@ interface GhRef {
  * creating the ref opens a `repo` scope violation carried by the task.
  */
 export async function ensureTaskBranch(
-  db: Database.Database,
+  db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,
   ctx: EnsureBranchContext = {},
@@ -173,7 +173,7 @@ export async function ensureTaskBranch(
   const taskRef = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+    dataRoot: ctx.dataRoot,
   };
   const file = readTaskFile(taskRef);
   if (!file) return { status: "task_not_found" };
@@ -248,7 +248,7 @@ export async function ensureTaskBranch(
             ),
             actor,
           },
-          ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+          { dataRoot: ctx.dataRoot },
         );
         return {
           status: "scope_violation",
@@ -276,7 +276,7 @@ export async function ensureTaskBranch(
           ),
           actor,
         },
-        ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {},
+        { dataRoot: ctx.dataRoot },
       );
       return {
         status: "scope_violation",
@@ -296,7 +296,7 @@ export async function ensureTaskBranch(
   if (file.parsed.frontmatter.branch !== branch) {
     await patchTaskFrontmatter(taskRef, { branch });
     rebuildPath(db, resolveTaskFilePath(taskRef), {
-      ...(ctx.dataRoot !== undefined ? { dataRoot: ctx.dataRoot } : {}),
+      dataRoot: ctx.dataRoot,
     });
   }
 

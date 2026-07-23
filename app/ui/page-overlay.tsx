@@ -3,8 +3,7 @@ import { Icon } from "./icon";
 import { useDialog } from "./use-dialog";
 
 /**
- * Full-page-as-popup modal, ported from design/html-app/app/ui.jsx, now on a
- * native <dialog> via useDialog (ruling 16 behaviors — focus trap, initial
+ * Full-page modal built on native <dialog> via useDialog (focus trap, initial
  * focus, Escape, backdrop-click close, scroll lock, focus restore — come from
  * showModal() + the hook; the old hand-rolled trap and scrim div are gone).
  */

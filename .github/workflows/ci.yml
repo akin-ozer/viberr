@@ -29,11 +29,6 @@ jobs:
       - name: Build
         run: npm run build
 
-  # F10-26: end-to-end golden paths gate. The Playwright config self-starts an
-  # isolated, demo-seeded dev server on a deterministic (VIBERR_FORCE_SIMULATED_
-  # RUNTIME) engine, so no provider credentials are needed and runs are
-  # reproducible. This catches stale UI/flow regressions the unit suite can't
-  # (e.g. the removed ownership→operator side effect).
   e2e:
     runs-on: ubuntu-latest
     steps:

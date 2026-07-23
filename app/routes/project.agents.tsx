@@ -1,11 +1,12 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
 import type { loader as projectLoader } from "./project";
-import { assertCsrf } from "~/server/auth/csrf.server";
-import { requireAuth } from "~/server/auth/require-user.server";
+import {
+  appErrorResponse,
+  requireFormAction,
+} from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
@@ -57,12 +58,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
-  const intent = String(formData.get("intent") ?? "");
+  const { db, formData, actor, intent } = await requireFormAction(request);
 
   const parsePayload = (): unknown => {
     try {
@@ -121,13 +117,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       { status: 400 },
     );
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import { getEnv } from "./config/env.server";
 import { getDb } from "./db/sqlite.server";
@@ -30,7 +30,7 @@ const BOOT_KEY = Symbol.for("viberr.booted");
  * projection counts, logged once at startup. Basic runtime sanity — no
  * security posture implied.
  */
-function logBootIntegrity(db: Database.Database): void {
+function logBootIntegrity(db: DatabaseSync): void {
   const root = getDataRoot();
   const missingDirs = DATA_ROOT_SUBDIRS.filter(
     (dir) => !existsSync(path.join(root, dir)),
@@ -70,7 +70,7 @@ function logBootIntegrity(db: Database.Database): void {
  * watcher takes over.
  * Called from entry.server.tsx module scope; safe to call repeatedly.
  */
-export function bootServer(): void {
+export async function bootServer(): Promise<void> {
   const cache = globalThis as unknown as Record<symbol, boolean | undefined>;
   if (cache[BOOT_KEY]) return;
 
@@ -83,7 +83,7 @@ export function bootServer(): void {
   seedDefaultAgentAssets();
   const db = getDb();
 
-  seedInitialAdmin(db, {
+  await seedInitialAdmin(db, {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
     password: env.VIBERR_SEED_ADMIN_PASSWORD,
   });
@@ -125,12 +125,9 @@ export function bootServer(): void {
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
 
-  // Finalize non-terminal runs at boot (F-RUN1 + R6-5): a run left
-  // `running`/`queued` has no live process in this fresh boot. Real orphans
-  // become `error` (interrupted-by-restart) and their tasks are re-coordinated;
-  // simulated rows (historical pre-R7-2 demo/fallback data — the seed no
-  // longer creates any) become `finished` so they never masquerade as live.
-  // Runs BEFORE
+  // Finalize non-terminal runs at boot: a run left `running`/`queued` has no
+  // live process in this fresh boot. Orphans become `error`
+  // (interrupted-by-restart) and their tasks are re-coordinated. Runs BEFORE
   // the reply recovery below so a just-finalized run is a clean terminal state.
   try {
     finalizeOrphanedRuns(db);

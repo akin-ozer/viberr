@@ -125,7 +125,6 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
       email: "orgadmin-viewer@viberr.test",
       name: "Org Admin Viewer",
       role: "admin",
-      passwordHash: null,
     });
     store.db
       .prepare(
@@ -146,7 +145,6 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
       email: "orgadmin-dec@viberr.test",
       name: "Org Admin",
       role: "admin",
-      passwordHash: null,
     });
     const result = decisionsRequiring(store.db, rec.id);
     expect(result.mine).toHaveLength(0);

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { DiagnosticSeverity } from "~/schemas/file-diagnostics";
 import { isAcceptedDisplayState } from "~/server/interpretation/readiness-policy.server";
 import { createActorRenderOverlay } from "~/shared/mapping/actor.server";
@@ -51,7 +51,7 @@ interface DiagnosticRow {
 }
 
 export function getTaskSummary(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   key: string,
 ): TaskSummary | null {
@@ -77,7 +77,7 @@ export function getTaskSummary(
 }
 
 export function listTaskEvents(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   key: string,
 ): TimelineEventRender[] {
@@ -86,7 +86,7 @@ export function listTaskEvents(
       `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
        ORDER BY position ASC`,
     )
-    .all(slug, key) as TaskEventRow[];
+    .all(slug, key) as unknown as TaskEventRow[];
   // E1: baked actor snapshots go stale on user rename — overlay the CURRENT
   // users-table identity at read time (deleted users keep the snapshot).
   const overlay = createActorRenderOverlay(db);
@@ -97,7 +97,7 @@ export function listTaskEvents(
 }
 
 export function listTaskDiagnostics(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   key: string,
 ): DiagnosticRecord[] {
@@ -107,7 +107,7 @@ export function listTaskDiagnostics(
        FROM diagnostics WHERE project_slug = ? AND task_key = ?
        ORDER BY id ASC`,
     )
-    .all(slug, key) as DiagnosticRow[];
+    .all(slug, key) as unknown as DiagnosticRow[];
   return rows.map((row) => ({
     id: row.id,
     severity: row.severity,
@@ -120,7 +120,7 @@ export function listTaskDiagnostics(
 }
 
 export function getTaskDetail(
-  db: Database.Database,
+  db: DatabaseSync,
   slug: string,
   key: string,
 ): TaskDetail | null {

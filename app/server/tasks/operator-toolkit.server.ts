@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -45,7 +45,7 @@ export interface OperatorToolkit {
 }
 
 interface ToolkitDeps {
-  db: Database.Database;
+  db: DatabaseSync;
   ctx: TaskMutationContext;
   projectSlug: string;
   taskKey: string;
@@ -220,11 +220,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     );
   }
 
-  // ONE generic engagement surface (generic-agents phase 3) — the former six
-  // kind-tools (assign/run/prompt_specialist + _reviewer) collapse into three;
-  // `delivers` selects the engagement shape and the existing capability gates
-  // still govern per shape (assign-primary-specialist / summon-reviewers)
-  // inside the dispatch, so a partially-granted operator is refused per call.
+  // `delivers` selects the engagement shape. Existing capability gates still
+  // govern each shape, so a partially-granted operator is refused per call.
   const canDeliverers = gate(authority, "assign-primary-specialist") !== "deny";
   const canSupporting = gate(authority, "summon-reviewers") !== "deny";
   if (canDeliverers || canSupporting) {

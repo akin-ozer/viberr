@@ -1,10 +1,10 @@
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import type { loader as projectLoader } from "./project";
-import { requireAuth } from "~/server/auth/require-user.server";
-import { assertCsrf } from "~/server/auth/csrf.server";
-import { getDb } from "~/server/db/sqlite.server";
-import { isAppError } from "~/server/errors/app-error.server";
+import {
+  appErrorResponse,
+  requireFormAction,
+} from "~/server/auth/form-action.server";
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
@@ -19,12 +19,7 @@ import { BoardPage } from "~/features/board/board-page";
  */
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
-  const intent = String(formData.get("intent") ?? "");
+  const { db, formData, actor, intent } = await requireFormAction(request);
 
   try {
     if (intent === "create-task") {
@@ -88,13 +83,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       { status: 400 },
     );
   } catch (error) {
-    if (isAppError(error)) {
-      return data(
-        { ok: false as const, error: error.userMessage },
-        { status: error.status },
-      );
-    }
-    throw error;
+    return appErrorResponse(error);
   }
 }
 

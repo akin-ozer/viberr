@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import { slugify } from "~/shared/ids/slugify";
+import { formatCalendarDate } from "~/shared/dates/format";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -16,18 +17,6 @@ import { useOrgAction, type OrgActionData } from "./use-org-action";
  * unvalidated on purpose). Add/replace run the REAL phase-7 validator —
  * failure copy renders in the modal's `.cred-warn` and nothing is saved.
  */
-
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-] as const;
-
-function formatExpiry(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
 
 const SCOPES = ["repo", "workflow", "pull_request:write"] as const;
 
@@ -218,7 +207,7 @@ export function ConnectionsPanel({
       </div>
       <div className="conn-list">
         {connections.map((c) => {
-          const expiry = formatExpiry(c.expiresAt);
+          const expiry = formatCalendarDate(c.expiresAt);
           const verified = c.validationState === "valid";
           return (
             <div className="conn-row" key={c.id}>

@@ -29,7 +29,7 @@ import { logger } from "~/server/logging/logger.server";
  * High-frequency streams (Phase 8 `run.log-appended`): publish straight to
  * `publishSseEvent` from the runtime adapter — do NOT route chatty streams
  * through the projection emitter (that path implies a projection rebuild
- * per event). See docs/build/reports/phase-6.md.
+ * per event).
  */
 
 export const HEARTBEAT_INTERVAL_MS = 25_000;

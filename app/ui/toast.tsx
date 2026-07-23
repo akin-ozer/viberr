@@ -10,9 +10,8 @@ import {
 import { Icon } from "./icon";
 
 /**
- * Toast stack, ported from design/html-app/app/ui.jsx: bottom-center,
- * auto-dismiss after 2600 ms, check icon (mock toasts are success-only —
- * errors render inline/route-level per CONVENTIONS). Phase 4 mounts ONE
+ * Bottom-center toast stack with 2600 ms auto-dismiss. Errors render
+ * inline or at route level; the root mounts one
  * ToastProvider in root.tsx; features call useToast() instead of the
  * mock's prop-drilled `push`.
  */

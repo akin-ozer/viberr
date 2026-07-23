@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
 import type { RunView } from "./runtime-types";
-import type { StreamedLine } from "./use-run-log-stream";
 
 afterEach(cleanup);
 
@@ -11,13 +10,14 @@ function mkRun(patch: Partial<RunView>): RunView {
   return {
     id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",
     who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
-    backend: "claude", simulated: true, sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
+    backend: "claude", sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
     sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
     phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
     finished: null, turns: 0, tokens: 0,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
     raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
     ...patch,
+    profileId: patch.profileId ?? "developer",
   };
 }
 
@@ -167,7 +167,7 @@ describe("AgentLogsPanel", () => {
 
   it("session id is trimmed but expandable and copyable in full", () => {
     const run = mkRun({ backend: "claude", sid: "51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151", state: "idle", lifecycle: "finished" });
-    const { getByRole, getByText } = render(
+    const { getByRole } = render(
       <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     // Trimmed by default.

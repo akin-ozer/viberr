@@ -8,15 +8,14 @@ import { TglP } from "~/ui/toggle";
 import { useToast } from "~/ui/toast";
 import { formatDayBucket } from "~/shared/dates/format";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
-import { RBAC_ROWS, type RoleId } from "~/features/policy/policy-data";
+import { RBAC_ROWS } from "~/features/policy/policy-data";
+import type { ProjectRole } from "~/shared/rbac";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { PROFILE_NTF, type NotifPrefs } from "./notification-prefs";
 
 /**
- * Profile & preferences overlay surface (Phase 9C, profile.md — ported
- * from design/html-app/app/profile.jsx). Four mock panels PLUS the
- * ruling-13 additions: ProfileAppearance is MOUNTED (the mock built it but
- * never rendered it) and a self-serve Change-password panel exists for
+ * Profile and preferences overlay, including appearance and a self-serve
+ * change-password panel for
  * accounts with a local password (phase-2 machinery, login-flow copy).
  *
  * Identity is the session user widened by the loader (ruling 6 — id is
@@ -40,8 +39,8 @@ export interface ProfileData {
     githubConnected: boolean;
     githubHandle: string | null;
   };
-  memberships: { slug: string; name: string; role: RoleId }[];
-  accessRole: RoleId | null;
+  memberships: { slug: string; name: string; role: ProjectRole }[];
+  accessRole: ProjectRole | null;
   prefs: {
     notifs: NotifPrefs;
     motion: "full" | "reduce";
@@ -360,7 +359,7 @@ function ProfileAccess({
   onNav,
   hasMembership,
 }: {
-  role: RoleId | null;
+  role: ProjectRole | null;
   onNav: (view: "policy" | "settings") => void;
   hasMembership: boolean;
 }) {
@@ -455,6 +454,9 @@ function ProfileGithub({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ provider: "github", callbackURL: "/profile" }),
         });
+        // fetch() resolves on 4xx/5xx, so an error payload would otherwise be
+        // read as a successful connect response.
+        if (!res.ok) throw new Error("connect request failed");
         const body = (await res.json()) as { url?: string };
         if (body.url) {
           window.location.href = body.url;
