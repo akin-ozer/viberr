@@ -7,9 +7,13 @@
 -- old chain, so a fresh DB gets exactly what the chain produced — minus the
 -- mock scope-violation the old 0005 seeded (schema only, zero demo data).
 --
--- The runner records this filename in schema_migrations and never re-runs it;
--- schema-reconcile.server heals any added-column drift from THIS file. New
--- schema changes go in new numbered migrations (0002_…) from here on.
+-- The runner records this filename in schema_migrations and never re-runs it,
+-- and it skips by FILENAME alone — so editing this file has no effect on any
+-- database that already applied it. There is no longer a drift healer
+-- (schema-reconcile.server was removed): a column added here reaches fresh
+-- databases ONLY, while existing ones silently lack it and every projection
+-- write for that column throws. NEVER add columns to this file. All schema
+-- changes go in new numbered migrations (0002_…, 0003_…) from here on.
 
 -- ============================ tables ============================
 

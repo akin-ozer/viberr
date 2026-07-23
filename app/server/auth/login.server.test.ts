@@ -143,7 +143,7 @@ describe("loginWithCredentials", () => {
     expect(result).toEqual({ ok: false, reason: "no_password" });
   });
 
-  it("uses Better Auth's per-IP rate limit and audits the trip", async () => {
+  it("throttles after 10 attempts per email+ip and audits the trip", async () => {
     const db = ctx.makeDb();
     const auth = makeAuth(db);
     await seedUser(db);
@@ -173,6 +173,79 @@ describe("loginWithCredentials", () => {
       requestDeps("192.0.2.7"),
     );
     expect(otherIp.ok).toBe(true);
+  });
+
+  it("a spent bucket never denies a different email on the same ip", async () => {
+    const db = ctx.makeDb();
+    const auth = makeAuth(db);
+    await seedUser(db);
+    const victim = await seedUser(db, {
+      id: "u_victim",
+      email: "murat@viberr.test",
+      name: "Murat",
+    });
+    // One attacker, one ip, burning through a single account's whole bucket.
+    const deps = requestDeps("192.0.2.10");
+    for (let i = 0; i < 12; i++) {
+      await loginWithCredentials(
+        db,
+        auth,
+        { email: "arda@viberr.test", password: "nope" },
+        deps,
+      );
+    }
+    expect(
+      await loginWithCredentials(
+        db,
+        auth,
+        { email: "arda@viberr.test", password: PASSWORD },
+        deps,
+      ),
+    ).toEqual({ ok: false, reason: "rate_limited" });
+    // Everyone else still signs in — the bucket key carries the email, and
+    // Better Auth's ip-keyed (org-wide, proxy-less) limiter is off for
+    // /sign-in/email so it cannot lock the org out either.
+    const other = await loginWithCredentials(
+      db,
+      auth,
+      { email: victim.email, password: PASSWORD },
+      deps,
+    );
+    expect(other.ok).toBe(true);
+  });
+
+  it("throttles a POST straight to /api/auth/sign-in/email, bypassing the login action", async () => {
+    // /api/auth/* is mounted as a splat (routes/api.auth.$.ts), so better-auth
+    // is reachable without going through loginWithCredentials. Throttling only
+    // in the login action would leave unlimited password guesses on this path.
+    const db = ctx.makeDb();
+    const auth = makeAuth(db);
+    await seedUser(db);
+    const post = () =>
+      auth.handler(
+        new Request("http://localhost:5173/api/auth/sign-in/email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "http://localhost:5173",
+            "X-Forwarded-For": "192.0.2.44",
+          },
+          body: JSON.stringify({ email: "arda@viberr.test", password: "nope" }),
+        }),
+      );
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) statuses.push((await post()).status);
+    // The first 10 are ordinary auth failures; the 11th trips the bucket.
+    expect(statuses.slice(0, 10).every((s) => s !== 429)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    // Keyed on email+ip, so a different account on that ip still gets in.
+    const other = await loginWithCredentials(
+      db,
+      auth,
+      { email: "arda@viberr.test", password: PASSWORD },
+      requestDeps("192.0.2.45"),
+    );
+    expect(other.ok).toBe(true);
   });
 
   it("signals the forced-reset gate when pwreset_required is set", async () => {

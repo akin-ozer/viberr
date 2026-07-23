@@ -5,6 +5,7 @@ import { recordAudit } from "../audit/audit-recorder.server";
 import { AppError } from "../errors/app-error.server";
 import { setCredentialPassword } from "./identity.server";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "./password.server";
+import { clientIpOf, getLoginRateLimiter } from "./rate-limit.server";
 import {
   findUserByEmail,
   normalizeEmail,
@@ -14,8 +15,8 @@ import {
 
 /**
  * Credentials login + forced-password-reset completion. Sessions are minted by
- * Better Auth; this layer keeps the nicer failure taxonomy and audit trail,
- * and enforces the whitelist checks (disabled / OAuth-only) that
+ * Better Auth; this layer keeps the nicer failure taxonomy, rate limiting, and
+ * audit trail, and enforces the whitelist checks (disabled / OAuth-only) that
  * better-auth's generic sign-in does not distinguish. Route modules map the
  * reasons to the login screen's copy.
  */
@@ -47,20 +48,39 @@ export interface LoginAttempt {
 }
 
 /**
- * Verifies credentials and mints a Better Auth session. Pre-checks the app
- * `users` row for the specific failure reasons (unknown email, disabled, no
- * password), then delegates password verification + session creation to
- * better-auth. The better-auth credential is synced to the current hash at
- * write time by the password writers (resetPassword / completeForcedPasswordReset),
- * so no sync happens here.
+ * Verifies credentials and mints a Better Auth session. Throttles per
+ * email+ip first, then pre-checks the app `users` row for the specific failure
+ * reasons (unknown email, disabled, no password), then delegates password
+ * verification + session creation to better-auth. The better-auth credential
+ * is synced to the current hash at write time by the password writers
+ * (resetPassword / completeForcedPasswordReset), so no sync happens here.
+ *
+ * The per-`email|ip` throttle itself lives on better-auth's sign-in hook (see
+ * lib/auth.server.ts) so that a POST straight to /api/auth/sign-in/email is
+ * throttled too; this function only spends a token for the pre-check failures
+ * that never reach that handler, and forgives the bucket on success.
  */
 export async function loginWithCredentials(
   db: DatabaseSync,
   auth: ViberrAuth,
   attempt: LoginAttempt,
-  deps: { requestHeaders?: Headers; requestUrl?: string } = {},
+  deps: {
+    requestHeaders?: Headers;
+    requestUrl?: string;
+  } = {},
 ): Promise<LoginSuccess | LoginFailure> {
   const email = normalizeEmail(attempt.email);
+  const limiter = getLoginRateLimiter();
+  const rateKey = `${email}|${clientIpOf(deps.requestHeaders)}`;
+
+  const rateLimited = (): LoginFailure => {
+    recordAudit(db, {
+      action: "auth.login.rate_limited",
+      actor: { userId: null, label: email },
+      details: { email },
+    });
+    return { ok: false, reason: "rate_limited" };
+  };
 
   const fail = (reason: LoginFailureReason): LoginFailure => {
     // Failure audit records the email only — never the password.
@@ -72,10 +92,16 @@ export async function loginWithCredentials(
     return { ok: false, reason };
   };
 
+  // These three fail BEFORE better-auth's handler runs, so the sign-in hook
+  // that normally spends the token never fires for them. Spend it here, or an
+  // attacker could enumerate addresses without ever touching the bucket.
   const user = findUserByEmail(db, email);
-  if (!user) return fail("unknown_email");
-  if (user.disabled) return fail("disabled");
-  if (!user.hasPassword) return fail("no_password");
+  if (!user || user.disabled || !user.hasPassword) {
+    if (!limiter.tryConsume(rateKey)) return rateLimited();
+    if (!user) return fail("unknown_email");
+    if (user.disabled) return fail("disabled");
+    return fail("no_password");
+  }
 
   let response: Response;
   try {
@@ -95,16 +121,13 @@ export async function loginWithCredentials(
   } catch {
     return fail("wrong_password");
   }
-  if (response.status === 429) {
-    recordAudit(db, {
-      action: "auth.login.rate_limited",
-      actor: { userId: null, label: email },
-      details: { email },
-    });
-    return { ok: false, reason: "rate_limited" };
-  }
+  // The sign-in hook in lib/auth.server.ts spends this attempt's token and
+  // answers 429 when the email+ip bucket is empty.
+  if (response.status === 429) return rateLimited();
   if (!response.ok) return fail("wrong_password");
 
+  // Success: forgive earlier typos so users don't stay near the limit.
+  limiter.reset(rateKey);
   recordUserLogin(db, user.id);
   recordAudit(db, {
     action: "auth.login.success",

@@ -243,6 +243,72 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     expect(invalid.diagnostics.some((d) => d.path === "pr")).toBe(true);
   });
 
+  it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {
+    const legacy: Record<string, unknown> = {
+      ...valid,
+      specialist: { profileId: "developer", backend: "codex", role: "Developer" },
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    };
+    delete legacy.engagements;
+    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
+    ]);
+    // Legacy slots are absorbed, NOT preserved as unknown fields (so a
+    // rewrite emits only `engagements:`, never both forms).
+    expect(result.unknown).toEqual({});
+  });
+
+  it("reads the pre-rename `consultants` key as supporting engagements (back-compat)", () => {
+    const legacy: Record<string, unknown> = {
+      ...valid,
+      consultants: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+    };
+    delete legacy.engagements;
+    const result = parseTaskFrontmatter(legacy, { fallbackKey: "VIB-142" });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
+    ]);
+    // The legacy alias is absorbed, NOT preserved as an unknown field (so a
+    // rewrite emits only `engagements:`, never both keys).
+    expect(result.unknown).toEqual({});
+  });
+
+  it("prefers `reviewers` over a stale `consultants` when both are present", () => {
+    const both: Record<string, unknown> = {
+      ...valid,
+      reviewers: [{ profileId: "reviewer", backend: "claude", role: "Reviewer" }],
+      consultants: [{ profileId: "old", backend: "codex", role: "Stale" }],
+    };
+    delete both.engagements;
+    const result = parseTaskFrontmatter(both, { fallbackKey: "VIB-142" });
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
+    ]);
+    expect(result.unknown).toEqual({});
+  });
+
+  it("an explicit `engagements` key wins over leftover legacy slots (no double-count)", () => {
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        specialist: { profileId: "stale-dev", backend: "codex", role: "Developer" },
+        reviewers: [{ profileId: "stale-reviewer", backend: "claude", role: "Reviewer" }],
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.diagnostics).toEqual([]);
+    // Only the `engagements` rows survive — the legacy slots are neither
+    // appended nor preserved as unknown fields.
+    expect(result.frontmatter.engagements).toEqual([
+      { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+    ]);
+    expect(result.unknown).toEqual({});
+  });
+
   it("demotes every delivering engagement after the first (single-writer invariant)", () => {
     const result = parseTaskFrontmatter(
       {

@@ -571,18 +571,55 @@ function tolerant<T>(
 /**
  * Engagement parsing enforces one row per profile and at most one delivering
  * workspace owner.
+ *
+ * Legacy absorption (G1): a pre-engagements task.md carries `specialist`
+ * (→ the delivering engagement) and `reviewers[]` / `consultants[]` (→ the
+ * supporting engagements). Those keys are absorbed here and NOT preserved as
+ * unknown — the next write emits `engagements` only. An explicit
+ * `engagements:` key always wins; the legacy slots are read only in its
+ * absence, so a file carrying both forms is never double-counted.
  */
 function parseEngagements(
   diagnostics: FileDiagnostic[],
   data: Record<string, unknown>,
 ): Engagement[] {
-  const engagements = tolerant(
-    diagnostics,
-    "engagements",
-    data.engagements,
-    taskFrontmatterSchema.shape.engagements,
-    [],
-  );
+  let engagements: Engagement[];
+  if (data.engagements !== undefined) {
+    engagements = tolerant(
+      diagnostics,
+      "engagements",
+      data.engagements,
+      taskFrontmatterSchema.shape.engagements,
+      [],
+    );
+  } else {
+    // Legacy slots → engagements. Each ref is validated independently so one
+    // bad reviewer never drops the specialist (or vice versa).
+    engagements = [];
+    const specialist = tolerant(
+      diagnostics,
+      "specialist",
+      data.specialist,
+      agentRefSchema.nullable(),
+      null,
+    );
+    if (specialist)
+      engagements.push({ ...specialist, delivers: true, verdictCapable: false });
+    // `reviewers` is the current legacy name; `consultants` is the older alias
+    // it replaced, so a stale `consultants` never shadows a live `reviewers`.
+    const reviewers = tolerant(
+      diagnostics,
+      "reviewers",
+      data.reviewers ?? data.consultants,
+      z.array(agentRefSchema),
+      [],
+    );
+    for (const reviewer of reviewers) {
+      // A migrated legacy reviewer is not verdict-capable until it carries an
+      // explicit report-validation-verdict:direct grant (F10-14).
+      engagements.push({ ...reviewer, delivers: false, verdictCapable: false });
+    }
+  }
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
   // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
   // resolves by the FIRST match), so keep the first occurrence and drop the
@@ -843,6 +880,10 @@ export function parseTaskFrontmatter(
 
   const unknown: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
+    // Legacy engagement slots (`specialist`/`reviewers` and the older
+    // `consultants` alias) are absorbed into `engagements` above; don't
+    // preserve them as "unknown" or a rewrite would emit both forms.
+    if (k === "consultants" || k === "specialist" || k === "reviewers") continue;
     if (!(TASK_FRONTMATTER_KEYS as readonly string[]).includes(k)) {
       unknown[k] = v;
     }

@@ -738,13 +738,15 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   const redirect = { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false };
+  // Deliberately UNSTAMPED — the operator's open_decision_packet option shape
+  // has no profileId field, so a primary-subject retry never names one. Adding
+  // a profileId here silently drops the unstamped case out of coverage.
   const retryPrimary = {
     kind: "retry_other_backend",
     t: "Retry on Claude Code",
     d: "",
     rec: true,
     backend: "claude",
-    profileId: "developer",
   };
   const retryReviewer = { ...retryPrimary, profileId: "style" };
 
@@ -820,6 +822,19 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       .prepare(`UPDATE agent_runs SET agent_profile_id = ? WHERE id = ?`)
       .run("style", reviewerRun);
     await runEffects(reviewerRun, { delivers: false, profileId: "style" });
+    expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  it("an unstamped retry option is primary-subject — a reviewer success leaves it, the delivering run withdraws it", async () => {
+    await openBlockedPacket([retryPrimary, redirect]);
+    // No profileId on the option → the subject is the delivering specialist, so
+    // a non-delivering reviewer's success must NOT withdraw it.
+    const reviewerRun = await finishedRunWith("Read through the diff.");
+    await runEffects(reviewerRun, { delivers: false, profileId: "style" });
+    expect(taskFile().parsed.packet).not.toBeNull();
+    // The delivering specialist then succeeds — that falsifies "work stalled".
+    const primaryRun = await finishedRunWith("Primary delivered.");
+    await runEffects(primaryRun, { delivers: true });
     expect(taskFile().parsed.packet).toBeNull();
   });
 

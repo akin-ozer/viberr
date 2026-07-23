@@ -1,6 +1,8 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
+import { clientIpOf, getLoginRateLimiter } from "~/server/auth/rate-limit.server";
 import {
   applyOAuthUser,
   isOAuthWhitelisted,
@@ -90,8 +92,50 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
     rateLimit: {
       enabled: true,
       customRules: {
-        "/sign-in/email": { window: 15 * 60, max: 10 },
+        // Off here, throttled in server/auth/login.server.ts instead.
+        //
+        // Better Auth keys its limiter on the client ip, and Viberr ships
+        // without a reverse proxy (Dockerfile + compose.yml run
+        // react-router-serve directly), so there is no X-Forwarded-For and
+        // `getIp()` returns null outside dev/test. Every sign-in then shares
+        // ONE bucket, "no-trusted-ip|/sign-in/email" — under any max, N
+        // unauthenticated POSTs lock every user in the org out for the rest of
+        // the window. Raising the max only raises N; it cannot make the bucket
+        // stop being shared, so it stays a denial-of-login lever.
+        //
+        // The app-level token bucket in the `before` hook below is
+        // authoritative instead: its key is `email|ip`, so one identity's
+        // failures can never deny another's sign-in, and it holds the same
+        // 10-per-15-minutes policy. Setting a rule to `false` also suppresses
+        // Better Auth's /sign-in default (3 per 10s), which is the same shared
+        // bucket, only tighter.
+        "/sign-in/email": false,
       },
+    },
+    hooks: {
+      /**
+       * Per-`email|ip` login throttle. This lives on the HOOK rather than in
+       * loginWithCredentials because `/api/auth/*` is mounted as a splat
+       * (routes/api.auth.$.ts), so a POST straight to /api/auth/sign-in/email
+       * reaches better-auth without passing through the app's login action —
+       * throttling only in the app action would leave that path unlimited.
+       * loginWithCredentials also drives better-auth through `auth.handler`,
+       * so both entry points pass here and each attempt costs exactly one
+       * token. The pre-check failures that return before the handler
+       * (unknown_email / disabled / no_password) consume their own token in
+       * login.server.ts, so email enumeration is bounded by the same bucket.
+       */
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-in/email") return;
+        const email =
+          typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+        const key = `${email}|${clientIpOf(ctx.headers)}`;
+        if (!getLoginRateLimiter().tryConsume(key)) {
+          throw new APIError("TOO_MANY_REQUESTS", {
+            message: "Too many sign-in attempts. Try again later.",
+          });
+        }
+      }),
     },
     session: {
       expiresIn: 60 * 60 * 24 * 30, // 30 days, matching the old SESSION_TTL_MS

@@ -1264,7 +1264,14 @@ async function withdrawSupersededStuckPacket(
     if (retryOptions.length > 0) {
       const subjectProfileId =
         retryOptions.find((o) => o.profileId)?.profileId ?? null;
-      if (!subjectProfileId || input.runProfileId !== subjectProfileId) return;
+      // profileId is the join key when the packet names one (a reviewer retry);
+      // an UNSTAMPED option is about the primary specialist — the operator's
+      // open_decision_packet option shape carries no profileId at all — so the
+      // delivering agent's success is what falsifies it.
+      const matches = subjectProfileId
+        ? input.runProfileId === subjectProfileId
+        : input.delivers;
+      if (!matches) return;
     }
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {

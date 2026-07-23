@@ -154,8 +154,12 @@ export function resetRegistryForTests(): void {
 
 /**
  * Force availability (tests / an explicit override). Sticky: unlike detected
- * values it is never re-probed, so the test harness's "both backends
- * unavailable" hold can't be flipped back by an ambient dev-`.env` credential.
+ * values it is never re-probed. The test harness relies on that twice:
+ * `setupAppTest` installs the fake runtime (configureRunServiceForTests), which
+ * forces BOTH backends available so route tests drive the deterministic fake
+ * adapters rather than a live re-probe; and a test that afterwards forces one
+ * backend unavailable keeps it unavailable for the rest of the file, immune to
+ * an ambient dev-`.env` credential.
  */
 export function setBackendAvailability(backend: RealBackend, available: boolean): void {
   getState().overrides[backend] = available;
