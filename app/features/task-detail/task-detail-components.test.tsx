@@ -594,6 +594,23 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain("task closed");
     expect(container.textContent).not.toContain("operator active");
   });
+
+  it("P11-41: the operator backend picker disables an unconfigured backend and defaults to an available one", () => {
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "codex", // configured backend...
+      backendAvailable: { claude: true, codex: false }, // ...but NOT available
+    });
+    const sel = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Operator backend"]',
+    )!;
+    const codexOpt = Array.from(sel.options).find((o) => o.value === "codex")!;
+    const claudeOpt = Array.from(sel.options).find((o) => o.value === "claude")!;
+    expect(codexOpt.disabled).toBe(true);
+    expect(codexOpt.textContent).toContain("not configured");
+    expect(claudeOpt.disabled).toBe(false);
+    // Defaults to the available backend, not the unconfigured configured one.
+    expect(sel.value).toBe("claude");
+  });
 });
 
 describe("ExecutionProfile — reviewers", () => {

@@ -2529,6 +2529,38 @@ export async function transitionStage(
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
 
+/**
+ * Whether the server-owned Review push may commit+push the delivering profile's
+ * workspace (F10-03). Resolves the DELIVERING profile's `execute-code-or-write-repo`
+ * authorization; a withheld grant → false. P11-13: when a deliverer is NAMED but
+ * its profile can no longer be resolved (undeployed between the run and Review),
+ * fall back CONSERVATIVE (false) — never push a workspace whose grant we can't
+ * confirm. Only a task with NO deliverer at all (no grant to enforce) is
+ * permissive. Extracted + exported so the guard is unit-tested directly.
+ */
+export async function resolveDeliveryPushGrant(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<boolean> {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const deliverer = file ? deliveringEngagement(file.parsed.frontmatter) : null;
+  if (!deliverer) return true; // no grant to enforce
+  try {
+    const { resolveDeployedSpecialist } = await import(
+      "~/server/tasks/specialist-run.server"
+    );
+    const { resolveDeliveryPermissions } = await import(
+      "~/server/tasks/specialist-tool-policy"
+    );
+    const resolved = resolveDeployedSpecialist(ctx, projectSlug, deliverer.profileId);
+    return resolveDeliveryPermissions(resolved.capabilities).canCommitPush;
+  } catch {
+    // Known deliverer, unresolvable grant → conservative deny.
+    return false;
+  }
+}
+
 /** Push and open the review PR without letting GitHub failure break the transition. */
 async function openReviewPrBestEffort(
   db: DatabaseSync,
@@ -2539,41 +2571,7 @@ async function openReviewPrBestEffort(
 ): Promise<void> {
   const dataCtx = { dataRoot: ctx.dataRoot };
   try {
-    // F10-03: resolve the DELIVERING profile's repo-write authorization so the
-    // server-owned push honors it. A profile whose `execute-code-or-write-repo`
-    // grant is withheld must not have its workspace staged/committed/pushed.
-    let canCommitPush = true;
-    let hadDeliverer = false;
-    try {
-      const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-      const deliverer = file
-        ? deliveringEngagement(file.parsed.frontmatter)
-        : null;
-      if (deliverer) {
-        const { resolveDeployedSpecialist } = await import(
-          "~/server/tasks/specialist-run.server"
-        );
-        const { resolveDeliveryPermissions } = await import(
-          "~/server/tasks/specialist-tool-policy"
-        );
-        const resolved = resolveDeployedSpecialist(
-          ctx,
-          projectSlug,
-          deliverer.profileId,
-        );
-        canCommitPush = resolveDeliveryPermissions(
-          resolved.capabilities,
-        ).canCommitPush;
-      }
-      hadDeliverer = !!deliverer;
-    } catch {
-      // P11-13: resolution failed on a KNOWN deliverer (e.g. its profile was
-      // undeployed between the run and Review). We can no longer confirm its
-      // repo-write grant, so DON'T assume permissive — a withheld-grant profile
-      // must not have its workspace pushed on a resolution error. Only fall back
-      // permissive when there is no deliverer at all (no grant to enforce).
-      canCommitPush = !hadDeliverer;
-    }
+    const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
     // 1. Push the workspace commits to the remote task branch (best-effort).
     const { pushWorkspaceBranch } = await import(

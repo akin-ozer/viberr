@@ -2,7 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { kbDirOfChange } from "./kb-watch.service.server";
+import {
+  kbDirOfChange,
+  startKbWatcher,
+  stopKbWatcher,
+} from "./kb-watch.service.server";
 import { reindexKnowledgeBaseByDir, saveKnowledgeBase } from "~/server/org/resources.server";
 
 describe("kbDirOfChange", () => {
@@ -69,5 +73,64 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     expect(reindexKnowledgeBaseByDir(db, "ghost", { dataRoot })).toBeNull();
+  });
+});
+
+describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
+  const ctx = createTestDbContext();
+  afterEach(() => {
+    stopKbWatcher();
+    ctx.cleanup();
+  });
+
+  function kbFile(dataRoot: string, dir: string, file: string, body = "x") {
+    const abs = path.join(dataRoot, "kb", dir);
+    mkdirSync(abs, { recursive: true });
+    writeFileSync(path.join(abs, file), body);
+    return path.join(abs, file);
+  }
+
+  it("re-indexes an 'on change' KB when a store file changes (debounced)", async () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    kbFile(dataRoot, "notes", "a.md");
+    saveKnowledgeBase(
+      db,
+      { name: "Notes", refresh: "on change" },
+      { userId: "u", label: "u" },
+      { dataRoot },
+    );
+    const before = db
+      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
+      .get() as { last_indexed_at: string | null };
+
+    const watcher = startKbWatcher({ dataRoot, db });
+    expect(watcher).not.toBeNull();
+
+    // Add a doc; the watcher debounces (250ms) then re-indexes.
+    kbFile(dataRoot, "notes", "b.md", "more");
+    await new Promise((r) => setTimeout(r, 600));
+
+    const after = db
+      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
+      .get() as { last_indexed_at: string | null };
+    expect(after.last_indexed_at).not.toBe(before.last_indexed_at);
+    expect(after.last_indexed_at).not.toBeNull();
+  });
+
+  it("is a HMR-safe singleton — a second start on the same root reuses the watcher", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    mkdirSync(path.join(dataRoot, "kb"), { recursive: true });
+    const first = startKbWatcher({ dataRoot, db });
+    const second = startKbWatcher({ dataRoot, db });
+    expect(second).toBe(first); // same handle, not a stacked duplicate
+  });
+
+  it("returns null when the kb root does not exist", () => {
+    const db = ctx.makeDb();
+    // A temp dir with NO kb/ subdir.
+    const dataRoot = ctx.makeTempDir();
+    expect(startKbWatcher({ dataRoot, db })).toBeNull();
   });
 });

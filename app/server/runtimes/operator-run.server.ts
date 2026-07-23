@@ -477,18 +477,21 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  * default set. Caps at 4 options and ensures exactly one is marked recommended
  * (the first, if the model marked none or several).
  */
-function authoredPacketOptions(
+export function authoredPacketOptions(
   authored: { kind: PacketOptionKind; title: string; recommended: boolean }[] | null,
 ): { kind: PacketOptionKind; title: string; recommended?: boolean }[] | null {
   if (!authored || authored.length === 0) return null;
-  const cleaned = authored
-    .filter((o) => o.title.trim() !== "")
-    .slice(0, 4)
-    .map((o) => ({ kind: o.kind, title: o.title.trim(), recommended: false }));
-  if (cleaned.length === 0) return null;
-  const recIdx = authored.findIndex((o) => o.recommended && o.title.trim() !== "");
-  cleaned[recIdx >= 0 && recIdx < cleaned.length ? recIdx : 0].recommended = true;
-  return cleaned;
+  // Filter+cap FIRST, then locate the recommended within the KEPT set — an
+  // earlier empty-title option (dropped here) would otherwise shift the raw
+  // index and mark the wrong kept option recommended.
+  const kept = authored.filter((o) => o.title.trim() !== "").slice(0, 4);
+  if (kept.length === 0) return null;
+  const recIdx = kept.findIndex((o) => o.recommended);
+  return kept.map((o, i) => ({
+    kind: o.kind,
+    title: o.title.trim(),
+    recommended: i === (recIdx >= 0 ? recIdx : 0),
+  }));
 }
 
 function defaultPacketOptions(
