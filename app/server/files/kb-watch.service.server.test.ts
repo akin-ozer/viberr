@@ -37,7 +37,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     makeKbDir(dataRoot, "notes", ["a.md"]);
     const { kb } = saveKnowledgeBase(
       db,
-      { name: "Notes", dir: "notes", refresh: "on change" },
+      { name: "Notes", refresh: "on change" },
       { userId: "u", label: "u" },
       { dataRoot },
     );
@@ -58,7 +58,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     makeKbDir(dataRoot, "pinned", ["a.md"]);
     saveKnowledgeBase(
       db,
-      { name: "Pinned", dir: "pinned", refresh: "manual" },
+      { name: "Pinned", refresh: "manual" },
       { userId: "u", label: "u" },
       { dataRoot },
     );

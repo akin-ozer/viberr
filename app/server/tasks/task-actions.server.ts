@@ -2535,6 +2535,7 @@ async function openReviewPrBestEffort(
     // server-owned push honors it. A profile whose `execute-code-or-write-repo`
     // grant is withheld must not have its workspace staged/committed/pushed.
     let canCommitPush = true;
+    let hadDeliverer = false;
     try {
       const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const deliverer = file
@@ -2556,10 +2557,14 @@ async function openReviewPrBestEffort(
           resolved.capabilities,
         ).canCommitPush;
       }
+      hadDeliverer = !!deliverer;
     } catch {
-      // Undeployed profile / resolution failure: fall back to permissive — the
-      // deliverer already ran and the common case is a granted profile.
-      canCommitPush = true;
+      // P11-13: resolution failed on a KNOWN deliverer (e.g. its profile was
+      // undeployed between the run and Review). We can no longer confirm its
+      // repo-write grant, so DON'T assume permissive — a withheld-grant profile
+      // must not have its workspace pushed on a resolution error. Only fall back
+      // permissive when there is no deliverer at all (no grant to enforce).
+      canCommitPush = !hadDeliverer;
     }
 
     // 1. Push the workspace commits to the remote task branch (best-effort).
@@ -2580,6 +2585,75 @@ async function openReviewPrBestEffort(
       });
     }
 
+    // P11-12: a capability-policy refusal is NOT an empty delivery — surface it
+    // as its own signal so a human sees the branch was blocked, not stalled.
+    if (push.status === "grant_withheld") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery withheld by policy",
+        `${taskKey} reached Review but its delivering agent's repo-write capability is ` +
+          `withheld, so its workspace branch was not pushed. Grant the capability or ` +
+          `deliver the change by hand before accepting.`,
+      );
+      return;
+    }
+
+    // P11-11: a push that FAILED (bad/absent credential, non-zero git push) can
+    // leave the remote carrying stale or partial content while the PR still
+    // opens over it — a silent "newest work is missing" hazard. Surface it.
+    if (push.status === "push_failed" || push.status === "no_pat") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push failed",
+        `${taskKey} reached Review but pushing its execution branch failed (${push.status}). ` +
+          `Any review PR may not reflect the newest commits — check the credential and re-scan.`,
+      );
+      // Still attempt the PR below (a prior push may carry earlier content), now
+      // that the failure is visible.
+    }
+
+    // P11-10: `pushed` means the push may have AUTO-COMMITTED an uncommitted
+    // working tree just now (push-workspace.server), so the remote head can
+    // postdate the workRevision minted at run completion — reviewer verdicts
+    // would bind to a stale sha. Re-reconcile the workspace so the revision
+    // reflects exactly what the PR delivers. Best-effort; never blocks the PR.
+    if (push.status === "pushed") {
+      try {
+        const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+        const deliverer = file
+          ? deliveringEngagement(file.parsed.frontmatter)
+          : null;
+        if (deliverer) {
+          const { reconcileWorkspaceDelivery } = await import(
+            "~/server/github/workspace-delivery.server"
+          );
+          await reconcileWorkspaceDelivery({
+            db,
+            projectSlug,
+            taskKey,
+            profileId: deliverer.profileId,
+            ...(deliverer.backend ? { backend: deliverer.backend } : {}),
+            ...(deliverer.role ? { role: deliverer.role } : {}),
+            ...dataCtx,
+          });
+        }
+      } catch (reconcileErr) {
+        logger.warn("post-push delivery reconcile failed (best-effort)", {
+          taskKey,
+          err:
+            reconcileErr instanceof Error
+              ? reconcileErr
+              : new Error(String(reconcileErr)),
+        });
+      }
+    }
+
     // 2. Open (or reuse) the review PR now that the remote carries the diff.
     const { openTaskPr } = await import("~/server/github/pr-open.server");
     const result = await openTaskPr(
@@ -2592,47 +2666,71 @@ async function openReviewPrBestEffort(
     logger.info("review PR not opened", { taskKey, reason: result.status });
 
     // 3. An empty-diff branch (nothing_to_review) that ALSO had no local commits
-    //    to push means the delivery produced no change — make that visible to a
-    //    human rather than silently stalling at Review with no PR.
-    if (result.status === "nothing_to_review") {
-      try {
-        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "github",
-            actor: { kind: "system", systemId: "delivery" },
-            title: null,
-            text:
-              "No review pull request could be opened — the execution branch has no " +
-              "commits ahead of the default branch. The delivery may have produced no " +
-              "change, or the commits never reached the remote.",
-            toAgent: false,
-            evidence: null,
-          });
-        });
-        reprojectTask(db, ctx, projectSlug, taskKey);
-        notifyTaskWatchers(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            kind: "policy",
-            title: "Review has no PR",
-            text: `${taskKey} reached Review but its branch has no diff — no PR was opened.`,
-          },
-          ctx,
-        );
-      } catch (surfaceErr) {
-        logger.warn("failed to surface empty-diff review", {
-          taskKey,
-          err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
-        });
-      }
+    //    to push means the delivery produced no change — but only when the push
+    //    itself did not already explain WHY (a withheld grant / failed push was
+    //    surfaced above with a precise reason). Avoid a misleading "no change"
+    //    message on top of a policy refusal or push failure (P11-12/P11-11).
+    if (
+      result.status === "nothing_to_review" &&
+      push.status !== "push_failed" &&
+      push.status !== "no_pat"
+    ) {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Review has no PR",
+        "No review pull request could be opened — the execution branch has no " +
+          "commits ahead of the default branch. The delivery may have produced no " +
+          "change, or the commits never reached the remote.",
+      );
     }
   } catch (error) {
     logger.warn("review PR open failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Surface a delivery-stage signal as a timeline event + watcher notification
+ * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
+ * something a human must see, not just a log line. Best-effort — a failure to
+ * surface only logs.
+ */
+async function surfaceDeliveryEvent(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  title: string,
+  text: string,
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    notifyTaskWatchers(
+      db,
+      { projectSlug, taskKey, kind: "policy", title, text },
+      ctx,
+    );
+  } catch (surfaceErr) {
+    logger.warn("failed to surface delivery event", {
+      taskKey,
+      title,
+      err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
     });
   }
 }
