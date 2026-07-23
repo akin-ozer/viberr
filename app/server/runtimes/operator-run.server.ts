@@ -27,7 +27,7 @@ import {
   type OperatorAutonomy,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
-import type { PacketOptionKind } from "~/schemas/task-file.schema";
+import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
@@ -409,8 +409,25 @@ const OPERATOR_PLAN_SCHEMA = {
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
           text: { type: ["string", "null"], description: "For post_comment and prompt_/open_packet: the comment text, agent prompt, or packet title; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
+          // P11-27: let the Codex operator AUTHOR the packet's option set from its
+          // own reasoning (2–4 options), instead of always getting the canned
+          // default set. Null → use the packet type's default options.
+          packetOptions: {
+            type: ["array", "null"],
+            description: "For open_packet ONLY: 2–4 options the human chooses from, mark exactly one recommended; null to use the packet type's defaults.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                kind: { type: "string", enum: [...PACKET_OPTION_KINDS] },
+                title: { type: "string" },
+                recommended: { type: "boolean" },
+              },
+              required: ["kind", "title", "recommended"],
+            },
+          },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions"],
       },
     },
   },
@@ -431,6 +448,15 @@ const operatorPlanActionSchema = z.strictObject({
   packetType: z.enum(OPERATOR_PACKET_TYPES).nullable(),
   text: z.string().nullable(),
   reason: z.string().nullable(),
+  packetOptions: z
+    .array(
+      z.strictObject({
+        kind: z.enum(PACKET_OPTION_KINDS),
+        title: z.string(),
+        recommended: z.boolean(),
+      }),
+    )
+    .nullable(),
 });
 
 const operatorPlanRuntimeSchema = z.strictObject({
@@ -446,6 +472,27 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  * usable default option set keyed to the packet type instead — the human still
  * gets a real, resolvable FR26 packet rather than a comment wall.
  */
+/**
+ * Normalize the Codex operator's AUTHORED packet options (P11-27) into the shape
+ * `operatorOpenPacket` expects, or null when it supplied nothing usable (empty,
+ * or every option lacked a title) — the caller then falls back to the type's
+ * default set. Caps at 4 options and ensures exactly one is marked recommended
+ * (the first, if the model marked none or several).
+ */
+function authoredPacketOptions(
+  authored: { kind: PacketOptionKind; title: string; recommended: boolean }[] | null,
+): { kind: PacketOptionKind; title: string; recommended?: boolean }[] | null {
+  if (!authored || authored.length === 0) return null;
+  const cleaned = authored
+    .filter((o) => o.title.trim() !== "")
+    .slice(0, 4)
+    .map((o) => ({ kind: o.kind, title: o.title.trim(), recommended: false }));
+  if (cleaned.length === 0) return null;
+  const recIdx = authored.findIndex((o) => o.recommended && o.title.trim() !== "");
+  cleaned[recIdx >= 0 && recIdx < cleaned.length ? recIdx : 0].recommended = true;
+  return cleaned;
+}
+
 function defaultPacketOptions(
   packetType: "input" | "blocked",
 ): { kind: PacketOptionKind; title: string; recommended?: boolean }[] {
@@ -622,7 +669,9 @@ async function executeCodexPlan(
                 packetType,
                 title: a.text,
                 ...(a.reason ? { body: a.reason } : {}),
-                options: defaultPacketOptions(packetType),
+                // P11-27: honor the operator's authored options when it supplied
+                // a usable set (2–4); else fall back to the type's defaults.
+                options: authoredPacketOptions(a.packetOptions) ?? defaultPacketOptions(packetType),
               },
               authority,
             );
@@ -1020,7 +1069,8 @@ export function buildCodexOperatorPrompt(
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
     operatorTurnInstruction(snapshot, trigger, humanComment) +
-    "\n\nUse `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend`, `accept_completion`, `block_on_policy`. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );
 }
