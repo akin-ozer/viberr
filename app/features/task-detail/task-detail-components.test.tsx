@@ -457,6 +457,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
         operatorBackend="claude"
+        backendAvailable={{ claude: true, codex: true }}
         canRunAgents
         deliveringActive={false}
         activeReviewerIds={[]}

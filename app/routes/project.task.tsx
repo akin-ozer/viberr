@@ -41,7 +41,10 @@ import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
-import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  isBackendAvailable,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
 import {
   operatorBackendFor,
   type OperatorAutonomy,
@@ -141,6 +144,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     deployedSpecialists,
     // P11-76: the operator's configured backend so the run picker defaults to it.
     operatorBackend: operatorBackendFor({}, params.slug),
+    // P11-41: which backends are actually configured, so the run picker can
+    // disable an option that would fail fast rather than offering it blindly.
+    backendAvailable: {
+      claude: isBackendAvailable("claude"),
+      codex: isBackendAvailable("codex"),
+    },
     deliveringActive,
     activeReviewerIds,
     mentionables,
@@ -604,6 +613,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
+      backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}
       timelineHasMore={loaderData.timelineHasMore}

@@ -630,6 +630,7 @@ function ExecutionSection({
   onRelease,
   deployedSpecialists,
   operatorBackend,
+  backendAvailable,
   canRunAgents,
   deliveringActive,
   activeReviewerIds,
@@ -644,6 +645,7 @@ function ExecutionSection({
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
   operatorBackend: "claude" | "codex";
+  backendAvailable: { claude: boolean; codex: boolean };
   canRunAgents: boolean;
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
@@ -735,6 +737,7 @@ function ExecutionSection({
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
+      backendAvailable={backendAvailable}
       canRunAgents={canRunAgents}
       deliveringActive={deliveringActive}
       activeReviewerIds={activeReviewerIds}
@@ -1018,6 +1021,7 @@ export function TaskDetailPage({
   runtime,
   deployedSpecialists,
   operatorBackend,
+  backendAvailable,
   deliveringActive,
   activeReviewerIds,
   timelineHasMore,
@@ -1040,6 +1044,8 @@ export function TaskDetailPage({
   deployedSpecialists: DeployedSpecialistView[];
   /** The operator's configured backend — the run picker's default (P11-76). */
   operatorBackend: "claude" | "codex";
+  /** P11-41: which backends are configured, for the run picker. */
+  backendAvailable: { claude: boolean; codex: boolean };
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
   /** Reviewer profile ids with an active run — disables only that reviewer. */
@@ -1233,6 +1239,7 @@ export function TaskDetailPage({
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
+          backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}
           activeReviewerIds={activeReviewerIds}
