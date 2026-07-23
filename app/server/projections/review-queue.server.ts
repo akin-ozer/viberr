@@ -1,7 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Validation, Waiting } from "~/schemas/task-file.schema";
-import { acceptanceBlockedReason } from "~/schemas/task-file.schema";
-import { readTaskFile } from "~/server/files/task-writer.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
@@ -72,22 +70,10 @@ export function getReviewQueue(
     : [];
 
   // F10-11/F10-15: acceptance readiness comes from the revision-bound review
-  // model, not just `waiting`. Read each in-review task's frontmatter (a small
-  // set) and compute `acceptanceBlockedReason` — a failing verdict, an
-  // outstanding required reviewer, or no delivered revision all keep a task OUT
-  // of the "Waiting on your acceptance" panel it used to falsely populate.
-  const blockReasonByKey = new Map<string, string | null>();
-  for (const t of inReview) {
-    const file = readTaskFile({
-      projectSlug: slug,
-      taskKey: t.key,
-      dataRoot: opts.dataRoot,
-    });
-    blockReasonByKey.set(
-      t.key,
-      file ? acceptanceBlockedReason(file.parsed.frontmatter) : null,
-    );
-  }
+  // model, not just `waiting`. The reason (a failing verdict, an outstanding
+  // required reviewer, or no delivered revision) is PROJECTED into
+  // `task_projections.validation_block_reason` at rebuild time (P11-50), so this
+  // read model no longer re-reads task files on a loader path.
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();
@@ -112,7 +98,7 @@ export function getReviewQueue(
         }
       : null,
     validation: t.validation,
-    blockReason: blockReasonByKey.get(t.key) ?? null,
+    blockReason: t.blockReason,
   }));
 
   // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,

@@ -21,7 +21,7 @@ import {
   ROLE_IDS,
   ROLE_LABEL,
 } from "./policy-data";
-import type { ProjectRole } from "~/shared/rbac";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 
 /**
  * Policy view:
@@ -422,7 +422,7 @@ export function PolicyPage({
   useActionToast(boundaryFetcher);
   const [matrixOpen, setMatrixOpen] = useState(false);
 
-  const canManage = myRole === "admin";
+  const canManage = roleCan(myRole as ProjectRole | null, "edit-policy");
   const busy =
     roleFetcher.state !== "idle" || boundaryFetcher.state !== "idle";
 

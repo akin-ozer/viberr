@@ -4,6 +4,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
+  acceptanceBlockedReason,
   deliveringEngagement,
   supportingEngagements,
 } from "~/schemas/task-file.schema";
@@ -368,18 +369,20 @@ export function rebuildTaskFile(
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, validation, owner_user_id, specialist_json,
+        waiting, urgent, validation, validation_block_reason, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, recommendation_count, recommendation_kinds,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
        waiting = excluded.waiting, urgent = excluded.urgent,
-       validation = excluded.validation, owner_user_id = excluded.owner_user_id,
+       validation = excluded.validation,
+       validation_block_reason = excluded.validation_block_reason,
+       owner_user_id = excluded.owner_user_id,
        specialist_json = excluded.specialist_json,
        reviewers_json = excluded.reviewers_json,
        operator_json = excluded.operator_json, branch = excluded.branch,
@@ -406,6 +409,7 @@ export function rebuildTaskFile(
     fm.waiting,
     fm.urgent ? 1 : 0,
     fm.validation,
+    acceptanceBlockedReason(fm),
     fm.ownerUserId,
     // Derived legacy projection shapes (G1): the delivering engagement fills
     // the `specialist` column, the supporting engagements fill `reviewers`.

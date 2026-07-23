@@ -98,7 +98,7 @@ describe("ProfilePage", () => {
   });
 
   it("renders the 5 notification routing rows with app toggles that post", () => {
-    const { container, getByText } = renderProfile();
+    const { container, getByText, queryByText } = renderProfile();
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
     // 5 routing rows + 3 appearance rows.
@@ -117,7 +117,10 @@ describe("ProfilePage", () => {
       category: "packets",
       on: "0",
     });
-    expect(getByText("Decision packets for you notifications off")).toBeTruthy();
+    // P11-40: the confirmation toast is gated on the server RESULT now, not
+    // fired optimistically on submit — a failed POST must not report success.
+    // (The stubbed submit never resolves the fetcher, so no toast appears.)
+    expect(queryByText("Decision packets for you notifications off")).toBeNull();
   });
 
   it("MOUNTS the Appearance panel: theme seg, reduce motion, timeline default", () => {

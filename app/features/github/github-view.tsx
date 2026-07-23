@@ -1,4 +1,5 @@
 import { useFetcher, useNavigate } from "react-router";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -343,7 +344,7 @@ export function GithubViewPage({
 
   // Grant scope stays a governed credential action (conventions: PAT/policy
   // changes are admin-shaped; project roles admin|maintainer hold it).
-  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".

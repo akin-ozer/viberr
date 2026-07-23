@@ -79,6 +79,11 @@ CREATE TABLE task_projections (
   waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
   urgent INTEGER NOT NULL DEFAULT 0,
   validation TEXT NOT NULL CHECK (validation IN ('healthy', 'changed', 'failing', 'none')),
+  -- Derived from the revision-bound review model (acceptanceBlockedReason): NULL
+  -- when the current revision is acceptance-ready, a human-readable reason
+  -- otherwise. Projected (P11-50) so the review-queue read model doesn't re-read
+  -- task files on a loader path to recompute it.
+  validation_block_reason TEXT,
   owner_user_id TEXT,
   specialist_json TEXT,
   reviewers_json TEXT NOT NULL DEFAULT '[]',

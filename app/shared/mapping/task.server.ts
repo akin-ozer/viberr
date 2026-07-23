@@ -32,6 +32,7 @@ export interface TaskProjectionRow {
   waiting: Waiting;
   urgent: 0 | 1;
   validation: Validation;
+  validation_block_reason: string | null;
   owner_user_id: string | null;
   specialist_json: string | null;
   reviewers_json: string;
@@ -107,6 +108,10 @@ export interface TaskSummary {
   waitingOnMe?: boolean;
   urgent: boolean;
   validation: Validation;
+  /** Revision-bound acceptance block reason (P11-50): null when the current
+   *  revision is acceptance-ready, else why it isn't. Projected so read models
+   *  (review queue) don't re-read task files on a loader path. */
+  blockReason: string | null;
   owner: ActorRender | null;
   specialist: AgentRender | null;
   reviewers: AgentRender[];
@@ -233,6 +238,7 @@ export function mapTaskProjectionRow(
     waiting: row.waiting,
     urgent: row.urgent === 1,
     validation: row.validation,
+    blockReason: row.validation_block_reason,
     owner: context.owner,
     specialist,
     reviewers,

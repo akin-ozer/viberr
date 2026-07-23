@@ -199,19 +199,37 @@ function ProfileIdentity({
 
 function ProfileNotifications({
   notifs,
+  fetcher,
   submit,
 }: {
   notifs: NotifPrefs;
+  fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
 }) {
   const push = useToast();
   const [ntf, setNtf] = useState(notifs);
 
+  // Toast only once the server confirms the routing change — a failed POST
+  // (expired session/CSRF) must not report a false success (P11-40). The
+  // message is client-computed, so it's stashed on submit and pushed on the
+  // matching `set-notif` result (the prefs fetcher is shared with Appearance,
+  // hence the intent guard).
+  const pendingToast = useRef<string | null>(null);
+  const seen = useRef<ProfileActionData | null>(null);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (seen.current === fetcher.data) return;
+    seen.current = fetcher.data;
+    if (fetcher.data.intent !== "set-notif") return;
+    if (fetcher.data.ok && pendingToast.current) push(pendingToast.current);
+    pendingToast.current = null;
+  }, [fetcher.state, fetcher.data, push]);
+
   const flip = (row: (typeof PROFILE_NTF)[number]) => {
     const on = !ntf[row.id].app;
     setNtf({ ...ntf, [row.id]: { ...ntf[row.id], app: on } });
+    pendingToast.current = row.n + " notifications " + (on ? "on" : "off");
     submit({ intent: "set-notif", category: row.id, on: on ? "1" : "0" });
-    push(row.n + " notifications " + (on ? "on" : "off"));
   };
 
   return (
@@ -797,6 +815,7 @@ export function ProfilePage({
             />
             <ProfileNotifications
               notifs={data.prefs.notifs}
+              fetcher={fetchers.prefs}
               submit={submitWith(fetchers.prefs)}
             />
             <ProfileAppearance

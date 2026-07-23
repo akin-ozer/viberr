@@ -8,6 +8,7 @@ import {
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { createTask, reorderTask } from "~/server/tasks/task-actions.server";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { BoardPage } from "~/features/board/board-page";
 
 /**
@@ -93,12 +94,16 @@ export default function Board() {
   const canCreate = layout.myRole !== null && layout.myRole !== "viewer";
   const canTransition =
     layout.myRole === "admin" || layout.myRole === "maintainer";
+  // Re-scan visibility must track the server's `rescan-project` gate — not the
+  // approve-transition gate — so display and enforcement can't drift (P11-45).
+  const canRescan = roleCan(layout.myRole as ProjectRole | null, "rescan-project");
   return (
     <BoardPage
       columns={layout.board.columns}
       orphanTasks={layout.board.orphanTasks}
       canCreate={canCreate}
       canTransition={canTransition}
+      canRescan={canRescan}
     />
   );
 }

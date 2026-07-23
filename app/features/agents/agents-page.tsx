@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -454,9 +455,14 @@ const ENGAGEMENT_ORDER = { operator: 0, primary: 1, reviewer: 2 } as const;
 export function LiveRoster({
   deployments,
   onOpen,
+  nameById,
 }: {
   deployments: AgentDeploymentView[];
   onOpen: (taskKey: string) => void;
+  /** profileId → display name, so live rows show a human name instead of the
+   *  raw profileId (P11-42). The row falls back to the profileId when a name
+   *  can't be resolved. */
+  nameById?: Record<string, string>;
 }) {
   const sorted = deployments.toSorted(
     (a, b) =>
@@ -504,7 +510,7 @@ export function LiveRoster({
                 </span>
                 <span className="live-ident">
                   <span className="live-name">
-                    {isOp ? "Operator" : d.profileId}
+                    {isOp ? "Operator" : (nameById?.[d.profileId] ?? d.profileId)}
                   </span>
                   {!isOp && <span className="live-role-sub">{d.role}</span>}
                 </span>
@@ -583,7 +589,7 @@ export function AgentsPage({
   const [searchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
-  const canManage = myRole === "admin";
+  const canManage = roleCan(myRole as ProjectRole | null, "manage-agents");
   const [sel, setSel] = useState<string>(
     () => searchParams.get("profile") ?? "operator",
   );
@@ -611,6 +617,14 @@ export function AgentsPage({
     for (const [k, v] of sets) out[k] = v.size;
     return out;
   }, [deployments]);
+
+  // Live-roster rows carry only a profileId (AgentDeploymentView has no name);
+  // resolve a human display name from the profiles the page already holds,
+  // falling back to the profileId when unresolved (P11-42).
+  const nameById = useMemo(
+    () => Object.fromEntries(profiles.map((p) => [p.id, p.name])),
+    [profiles],
+  );
 
   const operators = deployments.filter((d) => d.engagement === "operator").length;
   const working = deployments.filter((d) => d.status === "working").length;
@@ -784,7 +798,7 @@ export function AgentsPage({
           )}
         </div>
       ) : (
-        <LiveRoster deployments={deployments} onOpen={onOpen} />
+        <LiveRoster deployments={deployments} onOpen={onOpen} nameById={nameById} />
       )}
 
       {creating && (

@@ -17,6 +17,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     waiting: "human",
     urgent: 0,
     validation: "healthy",
+    validation_block_reason: null,
     owner_user_id: null,
     specialist_json: null,
     reviewers_json: "[]",
