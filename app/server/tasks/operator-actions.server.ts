@@ -1360,7 +1360,28 @@ export async function operatorRunAgent(
     input.delivers,
   );
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
-  if (delivers) return operatorRunSpecialist(db, ctx, base, authority);
+  if (delivers) {
+    // P11-22: a delivering run always runs the CURRENT deliverer
+    // (operatorRunSpecialist ignores profileId). If the plan names a specific
+    // profileId that is NOT the current deliverer, DON'T silently run the wrong
+    // agent — refuse and point the operator at engage_agent to change who
+    // delivers (the single-deliverer invariant means only one can).
+    if (input.profileId) {
+      const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+      const current = file
+        ? deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null
+        : null;
+      if (current && current !== input.profileId) {
+        return {
+          outcome: "denied",
+          message:
+            `"${input.profileId}" is not the delivering agent ("${current}" is). ` +
+            "Engage it as the deliverer first if you want it to deliver — a delivering run always runs the current deliverer.",
+        };
+      }
+    }
+    return operatorRunSpecialist(db, ctx, base, authority);
+  }
   if (!input.profileId) {
     return {
       outcome: "denied",

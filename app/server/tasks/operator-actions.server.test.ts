@@ -42,6 +42,7 @@ import {
   operatorResolvePacket,
   operatorPromptReviewer,
   operatorPromptSpecialist,
+  operatorRunAgent,
   operatorRunReviewer,
   operatorRunSpecialist,
   operatorTransitionStage,
@@ -343,6 +344,49 @@ describe("operatorAssignSpecialist", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
+  });
+});
+
+describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
+  it("refuses a delivering run for a profileId that is NOT the current deliverer", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    // "reviewer" is not the deliverer ("developer" is) — a delivering run for it
+    // must be refused, not silently run as the developer.
+    const r = await operatorRunAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toContain("not the delivering agent");
+  });
+
+  it("allows a delivering run when the profileId IS the current deliverer", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const r = await operatorRunAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
+      authority("full"),
+    );
+    expect(r.outcome).not.toBe("denied");
   });
 });
 
