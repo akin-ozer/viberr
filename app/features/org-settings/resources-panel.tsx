@@ -376,7 +376,18 @@ function AgentModal({
     initial ? initial.backend : "codex",
   );
   const [summary, setSummary] = useState(initial ? initial.summary : "");
-  const [selStages, setSelStages] = useState<string[]>(initial ? initial.stages : ["impl"]);
+  // P11-47: default a new profile's eligible stages to a real work stage that
+  // exists, not a hardcoded "impl" that silently references nothing if the org
+  // stage template renames/removes it. Prefer a stage literally named "impl",
+  // else the middle non-terminal stage, else the first.
+  const workStages = stages.filter((s) => s.id !== "done");
+  const defaultStage =
+    workStages.find((s) => s.id === "impl")?.id ??
+    workStages[Math.floor(workStages.length / 2)]?.id ??
+    workStages[0]?.id;
+  const [selStages, setSelStages] = useState<string[]>(
+    initial ? initial.stages : defaultStage ? [defaultStage] : [],
+  );
   const [selSkills, setSelSkills] = useState<string[]>(
     initial ? match(initial.skills, skillNames) : [],
   );

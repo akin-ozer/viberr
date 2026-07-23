@@ -387,11 +387,9 @@ function TaskHero({
         </span>
       </div>
       {editing ? (
-        <goalFetcher.Form
-          method="post"
-          className="goal-edit"
-          onSubmit={() => setEditing(true)}
-        >
+        <goalFetcher.Form method="post" className="goal-edit">
+          {/* P11-47: the editor is already open (`editing` is true here); the
+              old onSubmit re-set it to true, a no-op leftover — removed. */}
           <input type="hidden" name="intent" value="update-goal" />
           <input type="hidden" name="_csrf" value={csrf} />
           <textarea
