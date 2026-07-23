@@ -397,14 +397,17 @@ function ReviewerControl({
 function OperatorRunControl({
   busy,
   disabled,
+  defaultBackend,
   onRun,
 }: {
   busy: boolean;
   /** Task is closed (terminal stage) — controls render disabled (G9). */
   disabled?: boolean;
+  /** The operator profile's configured backend — the picker's default (P11-76). */
+  defaultBackend: "claude" | "codex";
   onRun: (backend: string, autonomy: string) => void;
 }) {
-  const [backend, setBackend] = useState("claude");
+  const [backend, setBackend] = useState<string>(defaultBackend);
   const [autonomy, setAutonomy] = useState("supervised");
   const off = busy || disabled;
   return (
@@ -459,6 +462,7 @@ export function ExecutionProfile({
   onOwner,
   onRelease,
   deployedSpecialists,
+  operatorBackend,
   canRunAgents,
   deliveringActive,
   activeReviewerIds,
@@ -482,6 +486,8 @@ export function ExecutionProfile({
   onRelease: () => void;
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** The operator's configured backend — the run picker's default (P11-76). */
+  operatorBackend: "claude" | "codex";
   /** admin|maintainer — gates the assign/run affordances (server re-checks). */
   canRunAgents: boolean;
   /** A DELIVERING run is active (queued/running) — disables the delivering Run
@@ -571,6 +577,7 @@ export function ExecutionProfile({
               <OperatorRunControl
                 busy={operatorBusy}
                 disabled={closed}
+                defaultBackend={operatorBackend}
                 onRun={onRunOperator}
               />
             )}

@@ -629,6 +629,7 @@ function ExecutionSection({
   onOwner,
   onRelease,
   deployedSpecialists,
+  operatorBackend,
   canRunAgents,
   deliveringActive,
   activeReviewerIds,
@@ -642,6 +643,7 @@ function ExecutionSection({
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
+  operatorBackend: "claude" | "codex";
   canRunAgents: boolean;
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
@@ -732,6 +734,7 @@ function ExecutionSection({
       onOwner={onOwner}
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
+      operatorBackend={operatorBackend}
       canRunAgents={canRunAgents}
       deliveringActive={deliveringActive}
       activeReviewerIds={activeReviewerIds}
@@ -1014,6 +1017,7 @@ export function TaskDetailPage({
   task,
   runtime,
   deployedSpecialists,
+  operatorBackend,
   deliveringActive,
   activeReviewerIds,
   timelineHasMore,
@@ -1034,6 +1038,8 @@ export function TaskDetailPage({
   runtime: RunView[];
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** The operator's configured backend — the run picker's default (P11-76). */
+  operatorBackend: "claude" | "codex";
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
   /** Reviewer profile ids with an active run — disables only that reviewer. */
@@ -1225,6 +1231,7 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
+          operatorBackend={operatorBackend}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}
           activeReviewerIds={activeReviewerIds}

@@ -45,6 +45,7 @@ import {
   operatorRunReviewer,
   operatorRunSpecialist,
   operatorTransitionStage,
+  operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
 } from "./operator-actions.server";
@@ -162,6 +163,18 @@ describe("resolveOperatorAuthority backend override", () => {
     expect(codexAuth.backend).toBe("codex");
     expect(codexAuth.model).not.toBe("sonnet");
     expect(codexAuth.model).toBe(defaultModelFor("codex"));
+  });
+});
+
+describe("operatorBackendFor (P11-76 — run-picker default)", () => {
+  it("returns the operator deployment's configured backend", () => {
+    deployRoster(DEFAULT_POLICY); // definition backends [claude]
+    expect(operatorBackendFor({ dataRoot: store.dataRoot }, store.slug)).toBe("claude");
+  });
+  it("defaults to claude for an unknown project (no operator deployed)", () => {
+    expect(operatorBackendFor({ dataRoot: store.dataRoot }, "ghost-project")).toBe(
+      "claude",
+    );
   });
 });
 

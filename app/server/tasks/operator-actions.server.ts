@@ -107,6 +107,31 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
  * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
  * (the task-detail operator panel) without rewriting the deployment.
  */
+/**
+ * The operator deployment's configured backend for a project (P11-76) — a cheap
+ * read for the UI so the "Run operator" backend picker defaults to what the
+ * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
+ * when no operator is deployed (the same default the run path uses).
+ */
+export function operatorBackendFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): RealBackend {
+  try {
+    const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const deployment = file?.parsed.frontmatter.agents.find(
+      (a) => effectiveProfileView(a, ctx.dataRoot).kind === "operator",
+    );
+    if (!deployment) return "claude";
+    const view = effectiveProfileView(deployment, ctx.dataRoot);
+    return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
+      ? "codex"
+      : "claude";
+  } catch {
+    return "claude";
+  }
+}
+
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,

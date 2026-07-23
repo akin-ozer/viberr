@@ -434,6 +434,7 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onOwner={() => {}}
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
+        operatorBackend="claude"
         canRunAgents
         deliveringActive={false}
         activeReviewerIds={[]}
