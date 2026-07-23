@@ -76,3 +76,29 @@ KB mounted; MCP server attach + probe; envelope verdict on codex (outputSchema).
 
 Guardrails/operator: underspecified goal flagged at triage gate; operator brevity;
 packet options resolve; schedule re-run; ask-operator.
+
+## Phase 5 — post-implementation live validation (2026-07-24)
+
+Fresh project **Impl Validation** (`impl-validation`, prefix IVL, repo akin-ozer/viberr,
+Standard 5 stages, balanced). Members: arda admin, elif viewer, murat contributor. Agents:
+operator + developer + reviewer (global) + docs-writer/test-author/security-reviewer (custom).
+Run AFTER all 43+P11-14 fixes to prove they work live + no regression.
+
+| UC | Area | Scenario | Result |
+|----|------|----------|--------|
+| PV-01 | R-A operator | IVL-1 (docs task) auto Triage→Ready→Impl, no strand on the fresh code | PASS |
+| PV-02 | operator selection | operator picked **docs-writer** (among 5 specialists) for a docs task by desc | PASS |
+| PV-03 | operator triage gate | IVL-2 (junk goal "probe") held at Triage `input_required` with a "Goal needs scope" decision packet | PASS |
+| PV-04 | RBAC | elif (viewer) create-task → 403; murat (contributor) → 200 | PASS |
+| PV-05 | RBAC/P11-45 | elif (viewer) rescan → 403 (rescan-project capability gate) | PASS |
+| PV-06 | P11-14 UI | GitHub view shows "Update status" button + "Not yet synced" freshness (Reconcile renamed), poller started at boot | PASS |
+| PV-07 | delivery | IVL-1 docs-writer delivered (branch ivl-1, workRevision minted); apply move-to-review → server push + **real PR #88 opened** on akin-ozer/viberr | PASS |
+| PV-08 | acceptance | reviewer approved → validation healthy → apply accept_completion → **PR #88 MERGED on GitHub**, IVL-1 → Done. Full server-owned spine, no regression | PASS |
+| PV-09 | R-B/@mention | @docs-writer question on IVL-1 → agent ANSWERED directly (named the .env gotcha, offered a note), NOT a boilerplate review. The Phase-3 UC-19 partial is fixed | PASS |
+| PV-10 | Codex parity | IVL-3 test-author (Codex) delivered scripts/version-smoke.test.mjs on branch ivl-3 (commit, workRevision minted, operator move-to-review rec) — identical governed shape to the Claude deliverer | PASS |
+| PV-11 | P11-14 divergence + reject | IVL-3 move-to-review → **real PR #89 opened**; rejected out-of-band via `gh pr close 89`; "Update status" (renamed reconcile) → R8-6 Divergence event fired ("PR #89 closed without merging"), pr.state→closed. Manual path = the same reconcileProject the 5-min poller runs (poller unit-tested for active/archived/no-branch selection + skipAudit) | PASS |
+
+**Phase-5 result: 11 post-implementation live validations (PV-01..11), all PASS.** Real PRs
+on akin-ozer/viberr this pass: **#88 merged** (IVL-1 full accept flow), **#89 closed via gh**
+(IVL-3 divergence/reject). Confirms the 43 fixes + P11-14 work end-to-end with zero
+regression; the Phase-3 R-B partial (UC-19) is now a live PASS.
