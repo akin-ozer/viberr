@@ -9,6 +9,7 @@ import {
 } from "./login.server";
 import { credentialPasswordHash, provisionIdentity } from "./identity.server";
 import { hashPassword, verifyPassword } from "./password.server";
+import { SOCIAL_START_RATE_LIMIT } from "./rate-limit.server";
 import { findUserById, insertUser } from "./user-store.server";
 
 const ctx = createTestDbContext();
@@ -315,5 +316,61 @@ describe("completeForcedPasswordReset", () => {
     await expect(
       completeForcedPasswordReset(db, { user, newPassword: "short" }),
     ).rejects.toThrowError(/at least 8/);
+  });
+});
+
+/**
+ * `/sign-in/social` is reachable through the `/api/auth/*` splat and is POSTed
+ * by both login.tsx and profile-page.tsx. Better Auth's built-in limiter keys
+ * on the client ip, which is null on this proxy-less deployment, so its default
+ * `/sign-in` rule (3 per 10s) collapses to ONE org-wide bucket — a handful of
+ * simultaneous "Sign in with GitHub" clicks denies social sign-in to everyone.
+ * The rule is set to `false` and the app bucket in the `before` hook takes over.
+ */
+describe("social sign-in throttle", () => {
+  function makeSocialAuth(db: DatabaseSync): ViberrAuth {
+    return createAuth({
+      db,
+      secret: "test-secret-at-least-32-characters-long-000",
+      baseURL: "http://localhost:5173",
+      trustedOrigins: ["http://localhost:5173"],
+      github: { clientId: "gh-client", clientSecret: "gh-secret" },
+      google: { clientId: "goog-client", clientSecret: "goog-secret" },
+    });
+  }
+
+  function startSocial(auth: ViberrAuth, provider: string, ip: string) {
+    return auth.handler(
+      new Request("http://localhost:5173/api/auth/sign-in/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": ip },
+        body: JSON.stringify({ provider, callbackURL: "/" }),
+      }),
+    );
+  }
+
+  it("does not lock the org out after a few simultaneous starts", async () => {
+    const auth = makeSocialAuth(ctx.makeDb());
+    // Better Auth's default rule would 429 the 4th of these.
+    for (let i = 0; i < 8; i++) {
+      const res = await startSocial(auth, "github", "192.0.2.30");
+      expect(res.status).not.toBe(429);
+    }
+  });
+
+  it("throttles at the app capacity, and per provider", async () => {
+    const auth = makeSocialAuth(ctx.makeDb());
+    for (let i = 0; i < SOCIAL_START_RATE_LIMIT.capacity; i++) {
+      const res = await startSocial(auth, "github", "192.0.2.31");
+      expect(res.status).not.toBe(429);
+    }
+    const blocked = await startSocial(auth, "github", "192.0.2.31");
+    expect(blocked.status).toBe(429);
+    // The key carries the provider, so exhausting GitHub never denies Google…
+    const otherProvider = await startSocial(auth, "google", "192.0.2.31");
+    expect(otherProvider.status).not.toBe(429);
+    // …and behind a real proxy the ip separates callers too.
+    const otherIp = await startSocial(auth, "github", "192.0.2.32");
+    expect(otherIp.status).not.toBe(429);
   });
 });

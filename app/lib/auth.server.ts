@@ -2,7 +2,11 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
-import { clientIpOf, getLoginRateLimiter } from "~/server/auth/rate-limit.server";
+import {
+  clientIpOf,
+  getLoginRateLimiter,
+  getSocialStartRateLimiter,
+} from "~/server/auth/rate-limit.server";
 import {
   applyOAuthUser,
   isOAuthWhitelisted,
@@ -110,6 +114,13 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
         // Better Auth's /sign-in default (3 per 10s), which is the same shared
         // bucket, only tighter.
         "/sign-in/email": false,
+        // Same shared-bucket lever, same fix. `/sign-in/social` is a live path
+        // (login.tsx and profile-page.tsx both POST it to start GitHub/Google),
+        // and Better Auth's default here is the tighter 3-per-10s `/sign-in`
+        // rule — so three people clicking "Sign in with GitHub" at once is
+        // enough to deny social sign-in to the entire org for the window.
+        // Throttled in the `before` hook below instead.
+        "/sign-in/social": false,
       },
     },
     hooks: {
@@ -126,14 +137,30 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
        * login.server.ts, so email enumeration is bounded by the same bucket.
        */
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-in/email") return;
-        const email =
-          typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
-        const key = `${email}|${clientIpOf(ctx.headers)}`;
-        if (!getLoginRateLimiter().tryConsume(key)) {
-          throw new APIError("TOO_MANY_REQUESTS", {
-            message: "Too many sign-in attempts. Try again later.",
-          });
+        const ip = clientIpOf(ctx.headers);
+        if (ctx.path === "/sign-in/email") {
+          const email =
+            typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+          if (!getLoginRateLimiter().tryConsume(`${email}|${ip}`)) {
+            throw new APIError("TOO_MANY_REQUESTS", {
+              message: "Too many sign-in attempts. Try again later.",
+            });
+          }
+          return;
+        }
+        // `/sign-in/social` carries no identity — it only mints the provider
+        // redirect URL — so provider+ip is the finest key available and the
+        // bucket is org-wide without a proxy. Sized (30/min) to be unreachable
+        // by real use while still displacing Better Auth's 3-per-10s default,
+        // which is the actual denial-of-login lever on this path.
+        if (ctx.path === "/sign-in/social") {
+          const provider =
+            typeof ctx.body?.provider === "string" ? ctx.body.provider : "";
+          if (!getSocialStartRateLimiter().tryConsume(`${provider}|${ip}`)) {
+            throw new APIError("TOO_MANY_REQUESTS", {
+              message: "Too many sign-in attempts. Try again later.",
+            });
+          }
         }
       }),
     },
