@@ -1750,6 +1750,14 @@ export async function applyAgentCompletionEffects(
         );
       }
     }
+    // P11-26: question authority deliberately uses the LIVE ask grant, not the
+    // engage-time snapshot the verdict path uses. The snapshot exists ONLY for
+    // verdicts, where a live-grant read would let a removed grant leave a task
+    // permanently un-acceptable (a required reviewer that can approve but never
+    // record). A question is open-only — it never blocks acceptance — so there
+    // is no equivalent hazard, and honoring the current grant (an admin who just
+    // revoked ask-human means it now) is the correct behavior. The asymmetry is
+    // intentional, not an oversight.
     const question = collab.ask ? (outcome?.question ?? null) : null;
     await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
       actorRef,
