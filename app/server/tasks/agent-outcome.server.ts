@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import { UNIFIED_CAP_CATALOG } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type {
@@ -153,15 +154,25 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
 
 // ------------------------------------------------------- staged outcomes
 
-/** In-process staging for envelopes reported mid-run via the Claude toolkit's
+/**
+ * Staging for envelopes reported mid-run via the Claude toolkit's
  * `report_outcome` tool, keyed by the run's outcomeKey (generated at dispatch,
- * closed into the toolkit, threaded to the completion input). Lost on restart
- * — boot recovery still gets Codex envelopes (re-parsed from the stored reply)
- * and the prose fallback for verdict-granted Claude runs. */
+ * closed into the toolkit, threaded to the completion input). Backed by BOTH an
+ * in-process map (fast path) AND the `staged_outcomes` table (P11-28), so a
+ * restart between the run finishing and its completion callback firing no longer
+ * loses the structured verdict/question — boot recovery reads the persisted row
+ * instead of falling back to the prose regex.
+ */
 const staged = new Map<string, AgentOutcome>();
 const STAGED_MAX = 500;
+/** Orphan prune horizon: a staged outcome whose run never completed. */
+const STAGED_TTL_MS = 24 * 60 * 60 * 1000;
 
-export function stageOutcome(outcomeKey: string, outcome: AgentOutcome): void {
+export function stageOutcome(
+  db: DatabaseSync,
+  outcomeKey: string,
+  outcome: AgentOutcome,
+): void {
   if (staged.size >= STAGED_MAX && !staged.has(outcomeKey)) {
     const oldest = staged.keys().next().value;
     if (oldest !== undefined) staged.delete(oldest);
@@ -170,12 +181,43 @@ export function stageOutcome(outcomeKey: string, outcome: AgentOutcome): void {
   // reporting a newer judgment.
   staged.delete(outcomeKey);
   staged.set(outcomeKey, outcome);
+  try {
+    db.prepare(
+      `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(outcome_key) DO UPDATE SET
+         outcome_json = excluded.outcome_json, created_at = excluded.created_at`,
+    ).run(outcomeKey, JSON.stringify(outcome), new Date().toISOString());
+    // Cheap orphan prune (runs that staged but never completed).
+    db.prepare(`DELETE FROM staged_outcomes WHERE created_at < ?`).run(
+      new Date(Date.now() - STAGED_TTL_MS).toISOString(),
+    );
+  } catch {
+    // Persistence is best-effort — the in-process map still serves the common
+    // (no-restart) path; a DB failure must never break a live run.
+  }
 }
 
-export function takeStagedOutcome(outcomeKey: string): AgentOutcome | null {
-  const outcome = staged.get(outcomeKey) ?? null;
+export function takeStagedOutcome(
+  db: DatabaseSync,
+  outcomeKey: string,
+): AgentOutcome | null {
+  const inMemory = staged.get(outcomeKey);
   staged.delete(outcomeKey);
-  return outcome;
+  // Always clear the persisted row too (it is consumed exactly once).
+  let persisted: AgentOutcome | null = null;
+  try {
+    if (!inMemory) {
+      const row = db
+        .prepare(`SELECT outcome_json FROM staged_outcomes WHERE outcome_key = ?`)
+        .get(outcomeKey) as { outcome_json: string } | undefined;
+      if (row) persisted = JSON.parse(row.outcome_json) as AgentOutcome;
+    }
+    db.prepare(`DELETE FROM staged_outcomes WHERE outcome_key = ?`).run(outcomeKey);
+  } catch {
+    // Fall back to whatever the in-process map held.
+  }
+  return inMemory ?? persisted;
 }
 
 // ------------------------------------------------- capability resolution

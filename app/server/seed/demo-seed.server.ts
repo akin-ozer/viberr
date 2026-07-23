@@ -76,6 +76,7 @@ export interface DemoSeedSummary {
 }
 
 const DERIVED_TABLES = [
+  "staged_outcomes",
   "run_log_lines",
   "agent_runs",
   "notifications",

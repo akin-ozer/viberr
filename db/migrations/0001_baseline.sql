@@ -327,3 +327,16 @@ CREATE UNIQUE INDEX idx_run_log_lines__run_seq ON run_log_lines (run_id, seq);
 CREATE INDEX "session_userId_idx" on "session" ("userId");
 CREATE INDEX "account_userId_idx" on "account" ("userId");
 CREATE INDEX "verification_identifier_idx" on "verification" ("identifier");
+
+-- Staged agent outcomes (P11-28): the Claude `report_outcome` toolkit envelope
+-- is staged mid-run, keyed by the run's outcomeKey, and consumed when the run's
+-- completion is recorded. Persisted (not just in-process) so a server restart
+-- between the run finishing and its completion callback firing doesn't lose the
+-- structured verdict/question — boot recovery reads it here instead of falling
+-- back to the prose regex. Rows are deleted on consumption; a bounded age prune
+-- clears orphans from runs that never completed.
+CREATE TABLE staged_outcomes (
+  outcome_key TEXT PRIMARY KEY,
+  outcome_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);

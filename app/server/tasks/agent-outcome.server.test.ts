@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+import { createTestDbContext } from "../../../test-support/test-db";
 import {
   AGENT_OUTCOME_JSON_SCHEMA,
   effectiveCollabMode,
   parseAgentOutcomeJson,
   resolveAgentCollab,
+  stageOutcome,
+  takeStagedOutcome,
 } from "./agent-outcome.server";
 
 /** OpenAI strict structured-output invariant (the `codex_output_schema` rule
@@ -126,5 +129,36 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     );
     expect(o?.question?.title).toBe("Which DB?");
     expect(o?.question?.options?.length).toBe(4);
+  });
+});
+
+describe("staged outcomes — restart persistence (P11-28)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  it("round-trips through memory and consumes the row", () => {
+    const db = ctx.makeDb();
+    stageOutcome(db, "oc_1", { verdict: "approve", summary: "LGTM" });
+    // Persisted alongside memory.
+    expect(
+      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+    ).toBe(1);
+    expect(takeStagedOutcome(db, "oc_1")).toEqual({ verdict: "approve", summary: "LGTM" });
+    // Consumed exactly once — the row is gone.
+    expect(
+      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+    ).toBe(0);
+    expect(takeStagedOutcome(db, "oc_1")).toBeNull();
+  });
+
+  it("recovers a persisted outcome when the in-process map lost it (simulated restart)", () => {
+    const db = ctx.makeDb();
+    // A row that a PRIOR process staged but this process's memory never held.
+    db.prepare(
+      `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at) VALUES (?, ?, ?)`,
+    ).run("oc_restart", JSON.stringify({ verdict: "request_changes" }), new Date().toISOString());
+    expect(takeStagedOutcome(db, "oc_restart")).toEqual({ verdict: "request_changes" });
+    // And it is cleared after consumption.
+    expect(takeStagedOutcome(db, "oc_restart")).toBeNull();
   });
 });

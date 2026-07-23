@@ -288,7 +288,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .describe("One-paragraph justification (markdown allowed)."),
         },
         async (args) => {
-          stageOutcome(outcomeKey, {
+          stageOutcome(db, outcomeKey, {
             verdict: args.verdict,
             ...(args.summary ? { summary: prose(args.summary) } : {}),
           });

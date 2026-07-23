@@ -1708,7 +1708,7 @@ export async function applyAgentCompletionEffects(
     : collab.verdict;
   // Envelope: a Claude toolkit-staged outcome first; else a Codex
   // outputSchema reply (JSON) parsed from the stored full text.
-  let outcome = input.outcomeKey ? takeStagedOutcome(input.outcomeKey) : null;
+  let outcome = input.outcomeKey ? takeStagedOutcome(db, input.outcomeKey) : null;
   let replyText = fullText;
   if (!outcome && input.backend === "codex" && fullText) {
     const parsedEnvelope = parseAgentOutcomeJson(fullText);
