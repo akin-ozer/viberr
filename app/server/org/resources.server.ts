@@ -133,8 +133,14 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 
 // ------------------------------------------------------- knowledge bases
 
-export const KB_REFRESH_MODES = ["manual", "on change", "nightly"] as const;
+// R-D (P11-60): "on change" is now REAL — the file watcher re-indexes a KB when
+// its store files change, the same mechanism the rest of the store uses. The
+// old "nightly" mode was decorative (nothing ever scheduled it) and is removed;
+// a KB is either watcher-driven ("on change", the default) or pinned to explicit
+// re-scans only ("manual").
+export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
+export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
 
 export interface KbView {
   id: string;
@@ -361,6 +367,33 @@ export function reindexKnowledgeBase(
     docCount: kb.fileCount,
     toast: `${kb.name} re-scanned — ${kb.fileCount} docs`,
   };
+}
+
+/**
+ * Watcher-driven re-index (R-D): a KB's store files changed on disk, so re-scan
+ * that KB by its `dir`. Only KBs in "on change" mode are auto-re-indexed — a KB
+ * pinned to "manual" is left for the explicit re-scan button. Returns the new
+ * doc count, or null when the dir has no metadata row, no longer exists, or is
+ * pinned manual. Best-effort: never throws (the caller is a file-watch handler).
+ */
+export function reindexKnowledgeBaseByDir(
+  db: DatabaseSync,
+  dir: string,
+  ctx: OrgSeedContext = {},
+): { name: string; docCount: number } | null {
+  const row = db
+    .prepare(`SELECT id, name, refresh FROM org_knowledge_bases WHERE dir = ?`)
+    .get(dir) as { id: string; name: string; refresh: string } | undefined;
+  if (!row) return null;
+  if (row.refresh === "manual") return null;
+  const abs = kbDirPath(dir, ctx.dataRoot);
+  if (!existsSync(abs)) return null;
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(now, now, row.id);
+  const tree = scanStoreTree(abs);
+  return { name: row.name, docCount: countKbFiles(tree) };
 }
 
 // ------------------------------------------------------------ MCP servers

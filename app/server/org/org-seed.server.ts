@@ -50,7 +50,7 @@ const KB_SEEDS: {
   id: string;
   name: string;
   dir: string;
-  refresh: "manual" | "on change" | "nightly";
+  refresh: "manual" | "on change";
   indexed: [number, number, number?];
   files: SeedFile[];
 }[] = [
@@ -148,7 +148,7 @@ const KB_SEEDS: {
     id: "kb_seed_runbooks",
     name: "Deploy runbooks",
     dir: "deploy-runbooks",
-    refresh: "nightly",
+    refresh: "on change",
     indexed: [7, 3, 2],
     files: [
       {

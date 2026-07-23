@@ -12,6 +12,7 @@ import {
   getDataRoot,
 } from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
+import { startKbWatcher } from "./files/kb-watch.service.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
@@ -124,6 +125,10 @@ export async function bootServer(): Promise<void> {
   // File-native store watcher (dev AND prod) — drives incremental
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
+
+  // Knowledge-base watcher (R-D): re-index a KB when its store files change,
+  // so "on change" is real instead of a decorative cadence label.
+  startKbWatcher();
 
   // Finalize non-terminal runs at boot: a run left `running`/`queued` has no
   // live process in this fresh boot. Orphans become `error`
