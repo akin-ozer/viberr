@@ -18,6 +18,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
   openSecret,
@@ -453,10 +454,25 @@ export function getMcpCredential(
   const row = db
     .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { cred_ref: string | null } | undefined;
-  if (!row?.cred_ref || !isSecretBox(row.cred_ref)) return null;
+  if (!row?.cred_ref) return null;
+  // P11-61: a cred_ref is PRESENT but unusable — a legacy/non-secret-box value,
+  // or a sealed secret that no longer opens (the encryption key was rotated).
+  // The run degrades to no-auth, which is safe, but doing so SILENTLY hid a
+  // misconfigured integration. Warn so an operator can diagnose why an MCP that
+  // "has a credential" is being called unauthenticated.
+  if (!isSecretBox(row.cred_ref)) {
+    logger.warn("mcp credential is in a legacy/unreadable format — running no-auth", {
+      mcp: name,
+    });
+    return null;
+  }
   try {
     return openSecret(row.cred_ref);
-  } catch {
+  } catch (error) {
+    logger.warn("mcp credential failed to decrypt (rotated key?) — running no-auth", {
+      mcp: name,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
     return null;
   }
 }
