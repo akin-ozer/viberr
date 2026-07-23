@@ -1,0 +1,294 @@
+---
+stepsCompleted:
+  - step-01-init
+  - step-02-discovery
+  - step-02b-vision
+  - step-02c-executive-summary
+  - step-03-success
+  - step-04-journeys
+  - step-05-domain
+  - step-06-innovation
+  - step-07-project-type
+  - step-08-scoping
+  - step-09-functional
+  - step-10-nonfunctional
+  - step-11-polish
+inputDocuments:
+  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr.md
+  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr-distillate.md
+  - /Users/akinozer/projects/viberr/_bmad-output/brainstorming/brainstorming-session-2026-03-29-12-02-32.md
+workflowType: 'prd'
+documentCounts:
+  briefCount: 1
+  researchCount: 1
+  brainstormingCount: 1
+  projectDocsCount: 0
+classification:
+  projectType: web_app
+  domain: developer_productivity
+  complexity: medium
+  projectContext: greenfield
+---
+
+# Product Requirements Document - Viberr
+
+**Author:** akin-ozer
+**Date:** 2026-03-30 (scope simplified 2026-06-08; reviewer & commenting amendments 2026-07-04)
+
+## Executive Summary
+
+Viberr is a multi-user web application for governed AI software delivery, built for small AI-forward engineering teams that want persistent coding agents to do real delivery work while engineers keep control of flow, review, and acceptance. It closes a coordination gap: coding agents are improving fast, but task systems remain human-native and give multi-agent work no durable operating layer.
+
+Viberr makes the task the canonical operating contract between humans, agents, and GitHub execution. Each task carries state, execution context, timeline, decisions, and evidence in one readable file. A dedicated operator agent manages each active task, specialist agent threads do the stage work, and humans govern through policy, comments, decisions, and explicit acceptance of completion.
+
+V1 targets GitHub-backed delivery for small teams through a familiar board/task interface that behaves differently underneath: agents are the native workers, engineers govern the flow, and review stays human-authorized.
+
+**What makes it different.** Viberr is agent-native in both action and responsibility. In Jira-like tools humans are the default workers and AI helps at the edges; in Viberr agents own task execution while engineers govern movement, approvals, and quality boundaries. Persistent agent work can't be governed through scattered chats, branches, and status labels — so Viberr provides a durable coordination layer: canonical task contracts, a dedicated operator agent per task, persistent specialist threads, and PR-backed review tied directly to task progression.
+
+## Project Classification
+
+- **Project Type:** Web application (single-page, authenticated, desktop-first)
+- **Domain:** Developer productivity / governed AI delivery
+- **Complexity:** Medium
+- **Project Context:** Greenfield
+
+## Success Criteria
+
+**User success.** A small team can understand the state of agent-driven work without leaving Viberr or rebuilding context from other tools. For any active task, a user can quickly see the current stage, current owner, whether it's waiting on a human or an agent, the latest decision or blocker, and the linked branch/PR. The "aha" moment is supervising several persistent specialist agents across a complex project through one governed surface, instead of piecing state together from chat logs, branches, and notes.
+
+**Business success.** Teams move real delivery work through Viberr, keep using it across many tasks, and treat it as the authoritative coordination layer for agent execution rather than a side dashboard. The strongest signal is repeated use on complex tasks where multiple agents, human decisions, and GitHub review must stay aligned.
+
+**Technical success.** The task contract stays durable, readable, and authoritative as agent activity accumulates. Operator and specialist threads resume safely because agents re-anchor on the canonical task file, and runtime-history failures degrade gracefully instead of breaking delivery. GitHub state (branch, commits, PR) stays clearly reflected in the task and board, and multi-user collaboration stays stable without ambiguous ownership or noisy timeline collapse.
+
+**Measurable outcomes:**
+
+- At least 90% of active tasks show an unambiguous current owner, waiting state, and latest decision packet.
+- At least 90% of executed tasks keep direct traceability between task key, branch, commits, and PR.
+- Teams move an implementation task from execution start to review-ready PR faster than with their current human-native workflow.
+- Blocked tasks reach a human decision quickly because operator packets are concise and actionable.
+- Task readability stays acceptable on long-running tasks, with low friction from duplicated summaries or raw validation spam.
+
+## Product Scope
+
+**MVP.** Prove that a small team can govern persistent coding-agent work through a multi-user web interface: file-native management plane, canonical task records, rule-driven workflow, separate human RBAC and agent policy, a dedicated operator agent per task, a primary-specialist-plus-consultants model, Codex/Claude Code backends, single-repo GitHub execution, branch and PR traceability, typed important events, and a board/task UI built for operator supervision.
+
+**Growth (post-MVP).** Richer reusable agent profiles, stronger policy tooling, analytics on agent throughput and governance load, deeper review/validation workflows, better multi-user collaboration ergonomics, and task-graph + subtask orchestration.
+
+**Vision.** Viberr becomes the governed delivery layer for engineering organizations working with agents at scale: tasks as durable machine-readable contracts, operator agents as trusted coordinators, specialist threads as reusable expert memory, and delivery shifting from engineer-centered workflow management to agent-centered execution under human governance.
+
+## User Journeys
+
+**Journey 1 — Arda governs agent-driven delivery (primary success path).** Arda is a senior engineer on a small AI-forward team already using Codex and Claude Code ad hoc. Once work spans many tasks and contributors, he loses track of which agent owns what, what's blocked, and whether branch/PR state still matches reality. He opens Viberr to a familiar board, but each card shows current stage, assigned agent, waiting state, and validation status. Opening an active task, the top shows current state, execution profile, and the latest decision packet; the timeline tells a compact story — operator assigned the developer specialist, work advanced on branch `VIB-142`, the change summary ties commits and files back to the task. The win: he supervises several persistent agent threads across a complex project without losing the thread, commenting only where guidance or acceptance is needed.
+
+**Journey 2 — Arda intervenes on a drifted task (primary edge case).** A task stays active but its board signal flips to waiting-on-human with unhealthy validation, and the latest event is a typed blocking packet, not vague chatter. The packet is concise: what was observed, what changed, the branch or validation issue, recommended options, and the decision required. Arda picks a recovery path and comments to clarify a changed requirement that invalidated the previous direction. The operator updates the flow, re-engages the right specialist with a summon note, and the specialist re-anchors on the canonical task file before acting again. Failure becomes governable, visible, and recoverable rather than opaque.
+
+**Journey 3 — Elif configures a governed project (admin / operations).** Elif owns the workflow but doesn't monitor every task. She creates a project and configures the rule-driven workflow: stages, allowed transitions, default repo, and the conditions under which agent recommendations may advance or must stop for human review. She configures human RBAC and the agent capability matrix separately, because governing people and governing agents aren't the same problem. Setting up agent profiles, she decides which specialists are eligible for implementation, testing, and review, what skills/MCPs/knowledge bases each may load, and which agent actions are allowed in the project. Her work is front-loaded into project design and pays back in predictable behavior and lower coordination chaos.
+
+**Journey 4 — Murat investigates a continuity failure (support / troubleshooting).** Murat is the escalation point when things look inconsistent. He's called into a task where a specialist's provider-side history is unavailable and the team fears it's unrecoverable. Opening the task, he sees the operator already surfaced a continuity warning and recorded that the specialist was rehydrated from the canonical task file rather than its private runtime history; the timeline shows the last meaningful actions, the latest branch references, and the moment continuity degraded. He confirms the task file holds enough context to continue safely. If he needs deeper debugging he drops into the provider-native thread, but that's a debug session, not the primary record; anything that should affect the task he brings back as a task comment. Runtime-history failure degrades gracefully instead of destroying trust.
+
+**Capabilities these journeys imply:**
+
+- **Board supervision:** cards expose stage, owner, waiting state, and validation status for fast triage.
+- **Operator-first task detail:** current state, execution profile, and latest packet dominate the page.
+- **Canonical task contract:** authoritative, readable, and compact across long-lived multi-agent work.
+- **Governed intervention:** blocked tasks produce structured, actionable decision packets.
+- **Rule-driven workflow and policy:** configurable stage rules, approval boundaries, repo defaults, and agent capability matrices.
+- **Persistent but recoverable continuity:** threads persist across stages; the system recovers from missing runtime history.
+- **GitHub-linked execution:** branches, commits, and PR state stay tied to task truth.
+- **Multi-user governance:** distinct personas get different surfaces, from daily supervision to policy admin to deep troubleshooting.
+
+## Domain-Specific Requirements
+
+**Auditability.** Viberr isn't in a heavily regulated industry but operates in a governance-sensitive delivery domain. It must preserve reliable auditability of task progression, agent actions, human decisions, and repository-linked events: teams should be able to reconstruct who changed what, who approved what, and which human or agent action caused a transition.
+
+**Security and secrets.**
+
+- Agent execution must not expose repository, provider, or other secrets in task timelines, comments, logs, or generated evidence.
+- Operational task context must be separated from sensitive runtime secrets and credentials.
+- Secret access is scoped to the minimum required for the active task and agent profile.
+
+**Permission boundaries between humans and agents.**
+
+- Human and agent permissions stay distinct and enforceable.
+- The system defines which actions agents may perform directly, which they may only recommend, and which are reserved for humans.
+- Governance-critical transitions — especially task completion — stay explicitly human-authorized.
+
+**Runtime continuity.**
+
+- Persistent agent histories are useful but never the sole source of truth.
+- Any reactivated agent re-anchors on the canonical task artifact before acting.
+- If provider-side history is unavailable or corrupted, the system degrades gracefully from the canonical task file and current execution context.
+
+**GitHub integration.**
+
+- Authenticated access to repositories, branch creation, commit association, PR creation, and review-state awareness.
+- Project-level default repository with task-level override.
+- Repo-linked execution context reflected back into the task artifact compactly.
+- Branch and PR status stay visible alongside task state.
+
+**Risk mitigations.**
+
+- *Agents overreach their authority* → explicit agent capability policy, separate human RBAC, and human-authorized state changes.
+- *Secrets leak into task artifacts or logs* → strict secret isolation, sanitized logging, and clear separation of runtime credentials from shared task state.
+- *Audit trail is incomplete or ambiguous* → typed important events, durable task history, operator-mediated summaries, and direct task↔branch↔commit↔PR traceability.
+- *Persistent agent memory becomes stale or unsafe* → canonical re-anchor rule and graceful recovery from missing provider-side history.
+
+## Differentiators & Validation
+
+**Why it's a new operating model, not "kanban with AI":**
+
+- **Agent-native project management** — agents are the native workers; humans govern the flow. This changes the responsibility model of delivery, not just the interface.
+- **Canonical task as operating contract** — the task itself is the durable contract between humans, persistent agent threads, and GitHub execution, rather than a planning artifact pointing elsewhere.
+- **Persistent operator-and-specialist threads** — a task-dedicated operator plus persistent specialists that can be re-engaged over time, materially different from stateless automations or isolated agent chats.
+- **Governed AI delivery through a familiar surface** — a familiar multi-user task UI over a fundamentally different operating model, adoptable by teams already used to Jira-like coordination.
+
+**Market gap.** Today's alternatives are weak in three ways: human-native task tools where AI is peripheral; coding-agent CLIs and chats with no durable team coordination layer; and brittle, opaque internal automations. Viberr sits in the gap as the governed coordination layer for persistent agent-driven delivery — not a GitHub-review replacement or a generic AI assistant. The opportunity exists because companies increasingly want AI to build more of the codebase while senior engineers retain review and acceptance authority, yet current tooling still assumes an engineer-centered pipeline.
+
+**Validate through workflow behavior, not feature availability:**
+
+- Small AI-forward teams can supervise multiple persistent agent threads across real tasks without losing clarity.
+- Users understand task state, blockers, ownership, and repo execution faster than with Jira-like tools plus scattered agent sessions.
+- Governed intervention feels useful rather than bureaucratic, especially when a task is blocked.
+- The operator-agent model improves coordination instead of adding another noisy layer.
+
+The strongest early signal is repeated use on complex tasks where multiple agents, human approvals, and GitHub review must stay aligned. The main risks — timeline noise, operator verbosity, process theater, and memory drift — are mitigated by the anti-noise guardrails (below) and by keeping the canonical task as the single source of truth.
+
+## Web App Requirements
+
+- **Type:** single-page web app optimized for multi-user team workflows and agent-governance interactions — an internal operational workspace, not a public/marketing surface. SEO and crawlability are not requirements; on-premises, authenticated deployment is assumed and should inform architecture, configuration, and session handling.
+- **Architecture:** prioritize fast transitions between board supervision and task intervention, and dense-timeline rendering without overwhelming the user. Near-real-time updates matter because multiple humans and multiple agent threads change task state concurrently; the platform also retains explicit recovery actions such as manual re-scan and rebuild.
+- **Browser matrix:** current Chromium-based browsers, current Safari, and current Firefox desktop. Mobile and legacy browsers are not V1 targets.
+- **Responsive:** desktop-first; common laptop resolutions fully support board supervision, task detail, and multi-panel workflows. Tablet/narrow screens get review-first access (current state, latest packet, ownership/waiting status, safe lightweight actions), not full supervision.
+- **Performance:** board and task views feel immediate under typical small-team use; task detail stays fast on long histories via compact rendering and progressive disclosure; state updates appear quickly enough to trust Viberr as a live shared surface.
+- **Accessibility:** core workflows meet a WCAG 2.2 AA baseline in V1, with light and dark mode; broader accessibility work outside core workflows may phase after MVP.
+
+## Project Scoping & Phased Development
+
+**MVP approach.** Problem-solving MVP with real workflow utility: prove in live use that a small AI-forward team can govern persistent agent-driven delivery through a multi-user interface, with the task as the canonical contract and GitHub as the execution surface. Prove the operating model, not every future platform idea.
+
+**Resourcing.** A lean but strong team: 2 strong full-stack/product engineers (or 1 full-stack product engineer plus 1 systems/integration engineer), with product and UX owned by the founding team or technical lead. Workflow integrity, GitHub integration, agent-runtime orchestration, and task readability all have to be right at once — this is not a one-engineer weekend prototype if the goal is real delivery usage.
+
+**MVP feature set (Phase 1):**
+
+- Multi-user authenticated web app
+- Local file-native management store
+- Canonical task files in stable task directories
+- Rule-driven workflow with explicit stage transitions and approval boundaries
+- Dedicated operator agent per task
+- Primary specialist owner plus persistent consultant specialists
+- Codex / Claude Code backed non-interactive runs
+- Separate human RBAC and project-scoped agent capability policy
+- Single GitHub repo attachment per task
+- Task-key branch creation and commit traceability
+- PR-backed review stage; human-only transition to `done`
+- Board cards with current stage, waiting state, assigned agent, and validation status
+- Task detail page with current state, execution profile, latest decision packet, and unified timeline
+- Typed important events for quality flags, transition requests, blocked decisions, completion reports, and policy violations
+- Branch and PR status visibility
+- Anti-noise guardrails: meaningful-comment, operator brevity, no-duplicate-summary, compression-threshold, evidence-separation
+
+**Phase 2 (post-MVP):** richer agent-profile templates; analytics on throughput, governance load, and task health; deeper validation/testing workflows; stronger small-team collaboration ergonomics; task-graph and subtask orchestration; better reporting and audit exports; refined runtime management and recovery tooling.
+
+**Phase 3 (expansion):** broader organizational rollout for larger groups; more advanced policy and governance models; deeper planning-through-delivery lifecycle coverage; additional execution backends or ecosystem integrations if strategically justified; enterprise-grade deployment, administration, and scale.
+
+**Risk mitigation.**
+
+- *Technical* — the riskiest area is the intersection of persistent agent orchestration, canonical task state, and GitHub-linked execution. Keep the task as the source of truth, keep typed events minimal and meaningful, and surface branch/runtime inconsistency clearly.
+- *Market* — teams may call the idea compelling but not change behavior. Target small AI-forward teams already feeling the pain, and make the MVP strong enough to run real delivery work, not just demos.
+- *Resource* — building too much platform surface before proving the workflow. Keep V1 to one repo per task, GitHub only, small-team collaboration, and the minimum governance needed to make agent-native delivery trustworthy.
+
+## Functional Requirements
+
+### Workspace Access & Collaboration
+
+- FR1: Team members can sign in to Viberr and access shared workspaces.
+- FR2: Admin users can manage team membership and human roles, and the system enforces project and task permissions based on those roles.
+- FR3: Users can collaborate in the same project with shared visibility into task state changes.
+- FR4: Users can comment on tasks, addressing instructions or questions to specific agents or teammates in one unified timeline. *(Amended 2026-07-04)* Commenting is app-wide: every registered user may comment on any task, including tasks in projects they are not a member of, and non-member comments are visibly labeled as such.
+- FR37 *(added 2026-07-04, revised)*: Each task can have one human owner who acts as its reviewer and acceptance authority; owner rights are scoped to that task only — they may comment, review, and accept or reject that task's boundaries, but gain no rights over other tasks or project configuration. A task may be unowned until a member takes it. Extends FR14/FR27.
+- FR38 *(added 2026-07-04, revised)*: Any member assigned to the project can take or release task ownership (self-service, no admin involvement); project admins can additionally release any owner. Ownership changes are recorded as typed events in the task timeline, and admin releases also land in the audit trail. Extends FR2/FR16.
+
+### Project Governance & Policy
+
+- FR5: Admin users can create and configure governed delivery projects.
+- FR6: Admin users can define workflow stages, allowed transitions, and approval boundaries for a project.
+- FR7: Admin users can define a default GitHub repository for a project and allow task-level overrides.
+- FR8: Admin users can define separate human access policies (RBAC) and agent capability policies for each project.
+- FR9: Admin users can define reusable agent profiles (global base definitions with project customization), including each profile's eligible stages, permitted actions, permitted context resources (skills, MCPs, knowledge bases), and supported execution backend.
+
+### Task Records & Lifecycle
+
+- FR10: The system can maintain projects and task records in a file-native store that remains inspectable outside the application, and can recognize and reconcile task files that are created or edited directly in the store.
+- FR11: Users and authorized agents can create tasks within a project.
+- FR12: Each task can maintain a canonical operating record containing identity, goal, state, execution context, timeline, decisions, and execution references.
+- FR13: Tasks can move through project-defined workflow stages under governed transition rules.
+- FR14: Each task can have one primary specialist and additional consultant specialists doing the execution work; the task's human owner (FR37) is tracked separately as its reviewer and acceptance authority.
+- FR15: Agents can flag low-quality or underspecified tasks and request human clarification before execution proceeds.
+- FR16: Tasks can capture typed important events alongside conversational updates in a single chronology.
+- FR17: Tasks can record validation outcomes, linked evidence references, concise related change summaries, and compressed historical context while preserving continuity.
+
+### Agent Orchestration & Continuity
+
+- FR18: The system can maintain a dedicated operator agent for each active task.
+- FR19: The system can execute approved agent profiles against tasks through supported coding-agent backends (Codex / Claude Code).
+- FR20: Operator agents can recommend assignments, stage transitions, and human decisions, and can trigger specialist work and re-engage consultant specialists when needed.
+- FR21: Specialist agents can execute stage work and append outcomes, blockers, and evidence to the task record.
+- FR22: Persistent agent threads can be resumed across stages and later consultations, and reactivated agents can continue from the current canonical task state even when prior runtime history is unavailable.
+- FR23: Authorized users can access an agent's native runtime session for deeper debugging or intervention when needed.
+
+### Oversight Views & Human Governance
+
+- FR24: Users can view tasks on a board organized by workflow stage, with each card showing current stage, assigned agent, waiting state (human vs agent), and validation status.
+- FR25: Users can open a task detail view that prioritizes current state, execution profile, and latest decision packet before the ongoing timeline.
+- FR26: The system can generate structured blocking and decision packets for human review when agent work requires intervention.
+- FR27: Human users can approve, reject, or redirect consequential task changes (including stage advancement and completion), and only human users can transition a task to `done`.
+- FR28: Users can review current task progress without needing raw provider logs or raw validation output.
+
+### GitHub Delivery & Traceability
+
+- FR29: The system can authenticate to GitHub and access authorized repositories for task execution.
+- FR30: Each task can attach to one GitHub repository in V1, inheriting the project default unless overridden.
+- FR31: The system can create and manage task-key execution branches and associate commits, changed-file references, and review-stage pull requests with the originating task.
+- FR32: Users can view branch and pull request status alongside task state.
+
+### Integrity, Audit & Recovery
+
+- FR33: The system can preserve an auditable history of human decisions, agent actions, workflow changes, and policy-relevant events.
+- FR34: The system can isolate secrets and credentials from task-visible artifacts, comments, and audit records.
+- FR35: The system can record task quality issues and policy violations as first-class events.
+- FR36: Users can trigger manual project re-scan and state reconciliation when automated change detection misses updates.
+
+## Non-Functional Requirements
+
+### Performance
+
+- NFR1: The board view should load and render an active project with up to 200 visible task cards in 2 seconds or less under normal operating conditions.
+- NFR2: A task detail view should load its current state, latest decision packet, and recent timeline context in 2 seconds or less for at least 95% of requests under normal operating conditions.
+- NFR3: User-initiated actions that change governed task state (approval, reassignment, transition decisions) should reflect in the UI in 3 seconds or less for at least 95% of requests.
+- NFR4: Shared task-state updates within an active project should become visible to other connected users within 5 seconds under normal operating conditions.
+- NFR5: Timeline rendering for long-lived tasks should remain usable without requiring the client to load the full raw execution history at once.
+
+### Security
+
+- NFR6: All authenticated application traffic and external service traffic must be encrypted in transit.
+- NFR7: Repository credentials, provider credentials, tokens, and secrets must never be written to task-visible timelines, comments, audit views, or general application logs.
+- NFR8: The system must enforce separate permission boundaries for human users and agent profiles on every governed action.
+- NFR9: The system must apply least-privilege access for GitHub and runtime-provider credentials based on project policy and active task context.
+- NFR10: Security-relevant actions (policy changes, credential failures, unauthorized action attempts, and human approval actions) must be recorded in audit records.
+
+### Reliability & Recovery
+
+- NFR11: The system should maintain task-state consistency across application restarts without losing canonical task history or official workflow state.
+- NFR12: If an agent runtime history is unavailable, the system must allow task continuation from canonical task state without requiring manual reconstruction from external tools.
+- NFR13: Manual reconciliation and project re-scan operations must be available and complete without corrupting canonical task state.
+
+### Integration Integrity
+
+- NFR14: GitHub integration failures (including branch and PR status problems) must be surfaced to users with task-relevant context within 10 seconds of detection.
+- NFR15: Task-linked branch, commit, and PR references must remain uniquely traceable to the originating task key.
+- NFR16: The system must preserve idempotent behavior for external execution actions so that retries do not create duplicate official task transitions, duplicate branch records, or duplicate PR associations.
+- NFR17: Supported coding-agent runtime integrations must preserve agent-identity continuity across resumed task work, or fail explicitly when continuity cannot be maintained.
+
+### Auditability
+
+- NFR18: The system must preserve a durable audit trail of human approvals, workflow transitions, assignment changes, policy-relevant events, and agent-generated important events — enough for an authorized user to reconstruct who initiated a consequential action, when it occurred, and which task or project state changed — and must keep it available after application restarts, resynchronization events, and runtime failures.
