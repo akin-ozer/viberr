@@ -42,12 +42,13 @@ import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
  *                          email is what the OAuth callback whitelists
  * - github handles       → placeholder identity row (mock §4.2: name
  *                          "@handle", email "github.com/handle") until
- *                          first sign-in syncs the real identity — claiming
- *                          the placeholder in the GitHub callback is a
- *                          documented later-phase wiring
+ *                          first sign-in syncs the real identity — the GitHub
+ *                          OAuth sign-in claims the placeholder live via
+ *                          applyOAuthUser (oauth-provision.server), wired into
+ *                          better-auth databaseHooks in lib/auth.server
  * - google domains       → google_domain_allowlist rows (managed here;
- *                          callback wiring documented, findDomainAllowlistRole
- *                          is the one-line hook)
+ *                          findDomainAllowlistRole is the hook the live OAuth
+ *                          provisioning calls to map a domain to its role)
  *
  * Route-level RBAC (requireRole("admin")) is the access control; these
  * functions trust their caller and audit via `actor` (phase-2 pattern).
@@ -452,10 +453,10 @@ export function removeDomain(
 }
 
 /**
- * The one-line hook for the Google OAuth callback (later-phase wiring —
- * the callback modules are outside 9B ownership): the role a fresh Google
- * sign-in from this email's domain would join with, or null when the
- * domain is not allowlisted.
+ * The hook the live Google OAuth provisioning calls (oauth-provision.server,
+ * wired into better-auth databaseHooks in lib/auth.server): the role a fresh
+ * Google sign-in from this email's domain joins with, or null when the domain
+ * is not allowlisted.
  */
 export function findDomainAllowlistRole(
   db: DatabaseSync,

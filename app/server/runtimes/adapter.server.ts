@@ -90,8 +90,9 @@ export interface RunCallbacks {
 /** A running handle the service can interrupt. */
 export interface RunHandle {
   runId: string;
-  /** Send SIGINT. Idempotent. */
-  interrupt(byUserId: string, byLabel: string): void;
+  /** Send SIGINT. Idempotent. Interrupter attribution is stamped onto the run
+   *  row by the service (interruptRun), not passed here. */
+  interrupt(): void;
 }
 
 export interface RuntimeAdapter {

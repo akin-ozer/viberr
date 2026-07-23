@@ -240,7 +240,7 @@ export const prRefSchema = z
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
 
-/** GitHub projection cache mirrored into the file by the (future) Phase-7
+/** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
 export const githubCacheSchema = z
   .object({

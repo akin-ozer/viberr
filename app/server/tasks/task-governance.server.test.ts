@@ -145,6 +145,29 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect(res.option.kind).toBe("request_edit");
   });
 
+  it("P11-71: a resolution note is recorded on the decision timeline event", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 1, // request_edit
+        note: "Gate the /health/scripts route for contributor+ only.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const decisionEvent = file.parsed.timeline.find((e) => e.text.includes("Decision"));
+    expect(decisionEvent?.text).toContain("Gate the /health/scripts route");
+  });
+
   it("packet: a non-owner contributor is still forbidden (C3)", async () => {
     const store = prepared();
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);

@@ -1163,12 +1163,13 @@ export function TaskDetailPage({
     ownerFetcher.submit(fd, { method: "post" });
   };
 
-  const onResolve = (optionIndex: number) => {
+  const onResolve = (optionIndex: number, note = "") => {
     if (resolveBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "resolve-packet");
     fd.set("option", String(optionIndex));
+    if (note.trim()) fd.set("note", note);
     resolveFetcher.submit(fd, { method: "post" });
   };
 

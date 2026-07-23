@@ -15,7 +15,6 @@ import { getEnv } from "../config/env.server";
  *   skills/<name>/SKILL.md                (skill folders — Phase 9B;
  *                                          store://skills/<name>/)
  *   state/projection.sqlite               (SQLite — managed by db/)
- *   cache/  auth/  logs/
  *
  * UI copy renders REAL store-relative paths (orchestrator ruling 3):
  * `projects/viberr-core/tasks/VIB-142/task.md`, never the mock's `.viberr/…`.
@@ -35,9 +34,6 @@ export const DATA_ROOT_SUBDIRS = [
   "kb",
   "skills",
   "state",
-  "cache",
-  "auth",
-  "logs",
 ] as const;
 
 /** Absolute, resolved data root. Pass an explicit root in tests/scripts. */

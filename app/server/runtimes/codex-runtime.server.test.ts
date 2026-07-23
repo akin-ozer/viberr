@@ -550,7 +550,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
     // Let it start, then interrupt mid-stream.
     await new Promise((r) => setTimeout(r, 1));
-    handle.interrupt("u1", "arda");
+    handle.interrupt();
     await drain();
     expect(exit).toMatchObject({ outcome: "interrupted" });
   });

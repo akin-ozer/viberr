@@ -105,7 +105,29 @@ describe("DecisionPacket", () => {
     fireEvent.click(radios[1]!);
     expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(primary);
-    expect(onResolve).toHaveBeenCalledWith(1);
+    // P11-71: resolve carries the (optional, here empty) note as a second arg.
+    expect(onResolve).toHaveBeenCalledWith(1, "");
+  });
+
+  it("P11-71: passes a typed note to onResolve", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const note = container.querySelector<HTMLTextAreaElement>("textarea.packet-note")!;
+    fireEvent.change(note, { target: { value: "Gate the /health/scripts route" } });
+    fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+    expect(onResolve).toHaveBeenCalledWith(
+      expect.any(Number),
+      "Gate the /health/scripts route",
+    );
   });
 
   it("blocked packets tint blocked; no rec → first option preselected; Ask fires", () => {

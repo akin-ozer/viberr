@@ -214,9 +214,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+        const note = String(formData.get("note") ?? "").slice(0, 2000);
         const { option } = await resolvePacket(
           db,
-          { projectSlug, taskKey, optionIndex },
+          { projectSlug, taskKey, optionIndex, ...(note.trim() ? { note } : {}) },
           actor,
         );
         const toast =

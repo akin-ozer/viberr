@@ -25,7 +25,7 @@ export type ProjectionEvent =
   | { type: "project.removed"; projectSlug: string; occurredAt: string }
   | {
       type: "projection.rebuilt";
-      scope: "full" | "file" | "project";
+      scope: "full" | "project";
       occurredAt: string;
       /** Number of files whose projection actually changed. */
       changed: number;

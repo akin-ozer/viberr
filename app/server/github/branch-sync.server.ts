@@ -109,7 +109,7 @@ export async function getBranchCompare(
 
 /**
  * Commit association: branch commits carrying the `[VIB-n]` task-key
- * prefix convention (mock data contract).
+ * prefix convention.
  */
 export function taskCommits(
   commits: { sha: string; msg: string }[],

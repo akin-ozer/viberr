@@ -2873,7 +2873,15 @@ export function packetIdentity(p: TaskPacket): string {
 
 export async function resolvePacket(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; optionIndex: number },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    optionIndex: number;
+    /** P11-71: optional free-text the human types when resolving — recorded on
+     *  the decision event so an option that asks for input ("specify the
+     *  expected behavior", "which target") actually has a channel to carry it. */
+    note?: string;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
@@ -3106,7 +3114,14 @@ export async function resolvePacket(
     if (option.kind === "edit_goal" && parsed.packet) {
       parsed.packet.awaiting = "goal_edit";
     }
-    parsed.timeline.unshift(event);
+    // P11-71: carry the human's free-text into the recorded decision so an
+    // option that asked for input isn't resolved with an unstated reading — the
+    // operator (and reviewers reading the timeline) see exactly what was said.
+    const note = input.note?.trim();
+    const eventWithNote = note
+      ? { ...event, text: `${event.text}\n\n> ${note.replace(/\n/g, "\n> ")}` }
+      : event;
+    parsed.timeline.unshift(eventWithNote);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 

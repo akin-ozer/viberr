@@ -315,7 +315,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     const adapter = createClaudeAdapter({ queryFn: () => q });
     let exit: RunExit | null = null;
     const handle = adapter.start(SPEC, { onLine: () => {}, onExit: (e) => (exit = e) });
-    handle.interrupt("u1", "arda");
+    handle.interrupt();
     await drain();
     expect(wasInterrupted()).toBe(true);
     expect(exit).toMatchObject({ outcome: "interrupted" });
