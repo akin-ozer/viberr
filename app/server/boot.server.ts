@@ -13,6 +13,7 @@ import {
 } from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
 import { startKbWatcher } from "./files/kb-watch.service.server";
+import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
@@ -183,6 +184,12 @@ export async function bootServer(): Promise<void> {
   // interval. Backend-agnostic — it calls runOperator, so Claude & Codex behave
   // identically. Idempotent start; the timer is unref'd so it never blocks exit.
   startScheduleRunner(db);
+
+  // Start the GitHub PR-status poller (P11-14): reconcile every active branched
+  // project once at boot, then every 5 minutes, so a PR merged/closed out-of-band
+  // surfaces automatically instead of only when a maintainer clicks the manual
+  // "Update status" button. Idempotent start; the timer is unref'd.
+  startGithubReconcilePoller(db);
 
   logBootIntegrity(db);
 

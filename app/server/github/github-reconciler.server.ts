@@ -65,6 +65,11 @@ export interface GithubActionContext {
   dataRoot?: string;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
+  /** P11-14: the background poller reconciles every active project every 5 min;
+   *  it suppresses the per-project summary audit (a human clicking "Update
+   *  status" still audits) so poller ticks don't spam the audit log. The
+   *  meaningful per-task divergence EVENTS/notifications still fire. */
+  skipProjectAudit?: boolean;
 }
 
 function taskRefOf(
@@ -460,14 +465,16 @@ export async function reconcileProject(
     }
   }
 
-  recordAudit(db, {
-    action: "github.reconcile.project",
-    actor,
-    subjectKind: "project",
-    subjectId: projectSlug,
-    projectSlug,
-    details: { tasks: rows.length, reconciled, changed, failed },
-  });
+  if (!ctx.skipProjectAudit) {
+    recordAudit(db, {
+      action: "github.reconcile.project",
+      actor,
+      subjectKind: "project",
+      subjectId: projectSlug,
+      projectSlug,
+      details: { tasks: rows.length, reconciled, changed, failed },
+    });
+  }
   return { status: "ok", results, reconciled, changed, failed };
 }
 
