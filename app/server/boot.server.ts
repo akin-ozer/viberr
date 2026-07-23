@@ -76,6 +76,20 @@ export async function bootServer(): Promise<void> {
   if (cache[BOOT_KEY]) return;
 
   const env = getEnv();
+
+  // P11-03: behind a reverse proxy, better-auth needs BETTER_AUTH_URL to build
+  // OAuth callback + cookie URLs; unset, getAuth collapses trustedOrigins to []
+  // (see app/lib/auth.server.ts) and the OAuth flow breaks. Only matters when an
+  // OAuth provider is configured — without one the inferred origin is fine.
+  if (
+    !env.BETTER_AUTH_URL &&
+    (env.GITHUB_OAUTH_CLIENT_ID || env.GOOGLE_OAUTH_CLIENT_ID)
+  ) {
+    logger.warn(
+      "BETTER_AUTH_URL is unset but OAuth is configured — behind a reverse proxy this collapses trustedOrigins to [] and breaks OAuth callback/cookie URLs. Set BETTER_AUTH_URL to the app's public origin.",
+    );
+  }
+
   ensureDataRootDirs();
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks

@@ -3,11 +3,9 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
-import {
-  agentProfilesDir,
-  skillDirPath,
-} from "~/server/files/file-store-root.server";
+import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
+import { readSkillBody } from "~/server/files/skill-body.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -918,19 +916,9 @@ function readOperatorDefinition(dataRoot?: string): string {
   return FALLBACK_OPERATOR_DEFINITION;
 }
 
-/** Read one skill's body from the store, or "" when absent. */
-function readSkillBody(name: string, dataRoot?: string): string {
-  try {
-    const file = path.join(skillDirPath(name, dataRoot), "SKILL.md");
-    if (existsSync(file)) {
-      const { body } = splitFrontmatter(readFileSync(file, "utf8"));
-      return body.trim();
-    }
-  } catch {
-    // missing/unreadable skill — skip it
-  }
-  return "";
-}
+// P11-36: readSkillBody now lives in ~/server/files/skill-body.server (shared
+// with the specialist runtime) so the operator and specialists resolve declared
+// skills identically — one code path, one missing-skill warning.
 
 // readKbBody now lives in ~/server/files/kb-injection.server (shared with the
 // specialist runtime): recursive tree walk + all text-doc extensions, so

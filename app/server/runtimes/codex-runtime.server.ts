@@ -1,3 +1,4 @@
+import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
   Codex as CodexSdk,
@@ -170,7 +171,7 @@ function codexConfigForRun(
  *  turn/tool may produce no event before the run is treated as hung. Overridable
  *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8). */
 export function codexIdleTimeoutMs(): number {
-  const raw = process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+  const raw = getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
 }

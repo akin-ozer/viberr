@@ -1,3 +1,4 @@
+import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type {
   RunCallbacks,
@@ -269,7 +270,7 @@ type ClaudeFailureKind = "quota" | "auth" | "unknown";
  *  it; deployments tune it with VIBERR_CLAUDE_MAX_TURNS in .env. */
 const DEFAULT_CLAUDE_MAX_TURNS = 2000;
 function resolveMaxTurns(): number {
-  const raw = process.env.VIBERR_CLAUDE_MAX_TURNS;
+  const raw = getEnv().VIBERR_CLAUDE_MAX_TURNS;
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLAUDE_MAX_TURNS;
 }

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
@@ -27,12 +27,9 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import {
-  skillDirPath,
-  taskDir,
-} from "~/server/files/file-store-root.server";
+import { taskDir } from "~/server/files/file-store-root.server";
 import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
-import { splitFrontmatter } from "~/server/files/frontmatter.server";
+import { readSkillBody } from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -885,29 +882,6 @@ export async function startAgentRun(
 }
 
 // ----------------------------------------------------------------- persona
-
-/** Read one skill's body from the store, or "" when absent. */
-function readSkillBody(name: string, dataRoot?: string): string {
-  try {
-    const file = path.join(skillDirPath(name, dataRoot), "SKILL.md");
-    if (existsSync(file)) {
-      const { body } = splitFrontmatter(readFileSync(file, "utf8"));
-      return body.trim();
-    }
-    // F12: a declared skill that resolves to no file on disk (typo / deleted
-    // folder) was silently dropped, so the agent ran without craft it was
-    // configured to have and nobody noticed. Flag it — the run still proceeds.
-    logger.warn("declared agent skill not found on disk — run proceeds WITHOUT it", {
-      skill: name,
-    });
-  } catch (error) {
-    logger.warn("declared agent skill unreadable — run proceeds WITHOUT it", {
-      skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-  }
-  return "";
-}
 
 /** Assemble the profile definition and attached skill/KB bodies into its persona. */
 export function buildSpecialistPersona(input: {
