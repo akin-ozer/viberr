@@ -11,7 +11,7 @@ function mkRun(patch: Partial<RunView>): RunView {
     id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",
     who: { kind: "agent", backend: "claude", name: "Claude Code", role: "Developer" },
     backend: "claude", sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
-    sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
+    exportable: false, sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
     phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
     finished: null, turns: 0, tokens: 0,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
@@ -178,5 +178,31 @@ describe("AgentLogsPanel", () => {
     expect(idBtn.textContent).toBe("51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151");
     // A copy control is present.
     expect(getByRole("button", { name: /Copy full session id/ })).toBeTruthy();
+  });
+
+  it("P11-43: the Export link renders only when the run is exportable", () => {
+    const notExportable = mkRun({
+      backend: "claude",
+      sid: "aaaa-1111",
+      state: "idle",
+      lifecycle: "finished",
+      exportable: false,
+    });
+    const { queryByTitle, rerender } = render(
+      <AgentLogsPanel runtime={[notExportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(queryByTitle(/Export this session/)).toBeNull();
+
+    const exportable = mkRun({
+      backend: "claude",
+      sid: "aaaa-1111",
+      state: "idle",
+      lifecycle: "finished",
+      exportable: true,
+    });
+    rerender(
+      <AgentLogsPanel runtime={[exportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(queryByTitle(/Export this session/)).toBeTruthy();
   });
 });

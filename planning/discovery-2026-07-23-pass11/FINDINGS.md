@@ -9,6 +9,27 @@ for file:line detail.
 Status: OPEN (needs fix) / VERIFY (needs live confirmation in Phase 3) /
 RULING (owner decision needed) / NOTED (documented behavior, no action) / FIXED.
 
+## Implementation status (Phase 4)
+
+FIXED + tested (unit/integration, many live-verified): R-A P11-70, R-B P11-73,
+R-C P11-20, R-D P11-60, P11-01, P11-02, P11-04, P11-10, P11-11, P11-12, P11-13,
+P11-21, P11-22, P11-23, P11-26 (documented asymmetry), P11-29, P11-30, P11-33,
+P11-40, P11-42, P11-44, P11-45, P11-46, P11-50, P11-51, P11-52, P11-53, P11-56,
+P11-61, P11-71, P11-72, P11-76.
+
+Live-verified this pass: P11-01 (arda logs in on fresh better-auth hash),
+P11-02 (splat mutation endpoints 404), P11-04 (reset preserves codex auth),
+R-A (VLT-6 auto Triage→Ready→Impl→engaged), R-B (api-consultant answers),
+R-D (KB edit auto-reindexes last_indexed_at), P11-50 (block reason projected).
+
+RULING NEEDED (surfaced to owner, not guessed): P11-14 (divergence detection is
+manual-only; PRD NFR14 wants ~10s surfacing — needs a poll/webhook decision vs
+keeping manual; infra choice is the owner's).
+
+Remaining OPEN (LOW unless noted): P11-03, P11-16/17, P11-19, P11-27 (MED),
+P11-28, P11-31, P11-35, P11-36, P11-41 (MED), P11-43 (MED), P11-47, P11-49,
+P11-54, P11-55, P11-75.
+
 ## A. Auth & seed
 
 | ID | Sev | Status | Summary |

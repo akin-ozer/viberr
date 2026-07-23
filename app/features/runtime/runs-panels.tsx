@@ -410,7 +410,7 @@ export function AgentLogsPanel({
           <SessionIdChip
             sid={cur!.sid}
             runId={cur!.serverRunId}
-            exportable={!!cur!.sid}
+            exportable={cur!.exportable}
           />
         </span>
         <span className="spacer" />
