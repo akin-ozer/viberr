@@ -1688,7 +1688,7 @@ export async function applyAgentCompletionEffects(
       // undeployed — defaults apply
     }
   }
-  const collab = resolveAgentCollab(grants, input.delivers);
+  const collab = resolveAgentCollab(grants);
   // F10-15 consistency: the REQUIRED-reviewer set (acceptanceBlockedReason /
   // requiredReviewers) is computed from the engagement's engage-time
   // `verdictCapable` snapshot. Verdict RECORDING must use the SAME source, or a

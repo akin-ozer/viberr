@@ -42,41 +42,41 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     // decorative no-op there. It must NOT coerce to `direct` here (that would
     // arm verdict-veto on the builder against live pre-branch data — R1/R2).
     const grants = [grant("report-validation-verdict", "recommend")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", true)).toBe("off");
-    expect(resolveAgentCollab(grants, true).verdict).toBe(false);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab(grants).verdict).toBe(false);
   });
 
   it("F10-14: a SUPPORTING agent with NO verdict grant is OFF (explicit-only)", () => {
     // Verdict authority is explicit-only now — there is no implicit `direct`
     // default for a non-delivering engagement. A reviewer gains gating verdict
     // power ONLY via an explicit report-validation-verdict:direct grant.
-    expect(effectiveCollabMode([], "report-validation-verdict", false)).toBe("off");
-    expect(resolveAgentCollab([], false).verdict).toBe(false);
+    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab([]).verdict).toBe(false);
   });
 
   it("F10-14: a SUPPORTING agent WITH an explicit direct grant is ON", () => {
     const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", false)).toBe("direct");
-    expect(resolveAgentCollab(grants, false).verdict).toBe(true);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
+    expect(resolveAgentCollab(grants).verdict).toBe(true);
   });
 
   it("a DELIVERING agent with no verdict grant stays OFF", () => {
-    expect(effectiveCollabMode([], "report-validation-verdict", true)).toBe("off");
-    expect(resolveAgentCollab([], true).verdict).toBe(false);
+    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab([]).verdict).toBe(false);
   });
 
   it("an EXPLICIT direct grant arms verdict even on a delivering agent", () => {
     const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", true)).toBe("direct");
-    expect(resolveAgentCollab(grants, true).verdict).toBe(true);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
+    expect(resolveAgentCollab(grants).verdict).toBe(true);
   });
 
   it("an EXPLICIT human/off grant disables verdict even on a supporting agent", () => {
     expect(
-      effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict", false),
+      effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict"),
     ).toBe("off");
     expect(
-      effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict", false),
+      effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict"),
     ).toBe("human");
   });
 });

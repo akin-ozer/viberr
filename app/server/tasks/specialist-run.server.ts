@@ -266,7 +266,7 @@ export async function assignSpecialist(
           delivers: true,
           // F10-15: snapshot verdict authority. A deliverer is excluded from the
           // required-reviewer set regardless, but keep the snapshot honest.
-          verdictCapable: resolveAgentCollab(specialist.capabilities, true).verdict,
+          verdictCapable: resolveAgentCollab(specialist.capabilities).verdict,
         },
         ...supportingEngagements(parsed.frontmatter).filter(
           (e) => e.profileId !== ref.profileId,
@@ -379,7 +379,7 @@ export async function assignReviewer(
         // F10-15: a supporting engagement with an explicit verdict grant is a
         // REQUIRED reviewer — acceptance waits for its approval of the current
         // revision. Snapshot it at engage time from the resolved grants.
-        verdictCapable: resolveAgentCollab(reviewer.capabilities, false).verdict,
+        verdictCapable: resolveAgentCollab(reviewer.capabilities).verdict,
       });
       // Clear a matching pending "engage reviewer" recommendation.
       parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
@@ -622,7 +622,7 @@ export async function startAgentRun(
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
-  const collab = resolveAgentCollab(resolved?.capabilities ?? [], delivers);
+  const collab = resolveAgentCollab(resolved?.capabilities ?? []);
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",
@@ -1135,8 +1135,7 @@ export function resolveResumeConfinement(
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
     // Codex. Both key off the SAME collaboration grants the fresh run resolves.
-    const delivers = input.delivers ?? false;
-    const collab = resolveAgentCollab(resolved.capabilities, delivers);
+    const collab = resolveAgentCollab(resolved.capabilities);
     let outcomeKey: string | undefined;
     let toolkitServers: Record<string, unknown> = {};
     let outputSchema: unknown;
@@ -1477,7 +1476,7 @@ export function listDeployedSpecialists(
         // RECORDING rule, not a selection signal; applying it here made every
         // profile look review-capable and mis-picked the reviewer.
         verdict: granted("report-validation-verdict"),
-        askHuman: effectiveCollabMode(grants, "ask-human", false) === "direct",
+        askHuman: effectiveCollabMode(grants, "ask-human") === "direct",
       },
       resources: {
         skills: resolved.skills,

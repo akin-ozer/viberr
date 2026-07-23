@@ -212,7 +212,6 @@ export interface AgentCollab {
 export function effectiveCollabMode(
   grants: readonly CapabilityGrant[],
   capabilityId: string,
-  _delivers: boolean,
 ): "direct" | "human" | "off" {
   const grant = grants.find((g) => g.capabilityId === capabilityId);
   // An EXPLICIT direct/human/off grant is authoritative. `recommend` is NOT:
@@ -233,17 +232,17 @@ export function effectiveCollabMode(
   return def === "direct" ? "direct" : "off";
 }
 
-/** Resolve all three collaboration gates for one engagement. */
+/** Resolve all three collaboration gates for one engagement. Grants alone
+ *  decide (P11-31: the old `delivers` arg was vestigial — dead since F10-14
+ *  removed the supporting-defaults-to-verdict rule). */
 export function resolveAgentCollab(
   grants: readonly CapabilityGrant[],
-  delivers: boolean,
 ): AgentCollab {
   return {
-    comment: effectiveCollabMode(grants, "comment-on-task", delivers) === "direct",
-    ask: effectiveCollabMode(grants, "ask-human", delivers) === "direct",
+    comment: effectiveCollabMode(grants, "comment-on-task") === "direct",
+    ask: effectiveCollabMode(grants, "ask-human") === "direct",
     verdict:
-      effectiveCollabMode(grants, "report-validation-verdict", delivers) ===
-      "direct",
+      effectiveCollabMode(grants, "report-validation-verdict") === "direct",
   };
 }
 
