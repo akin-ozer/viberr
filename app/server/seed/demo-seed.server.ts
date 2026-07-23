@@ -2,7 +2,12 @@ import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
-import { provisionIdentity } from "~/server/auth/identity.server";
+import {
+  credentialPasswordHash,
+  isBetterAuthPasswordHash,
+  provisionIdentity,
+  setCredentialPassword,
+} from "~/server/auth/identity.server";
 import { hashPassword } from "~/server/auth/password.server";
 import {
   findUserByEmail,
@@ -103,6 +108,23 @@ async function upsertUsers(
         name: person.name,
         passwordHash: null,
       });
+      // Recovery path (P11-01): a credential left in a legacy/foreign format
+      // (e.g. a data root seeded before the better-auth migration) can never be
+      // verified — the account is locked out and `--reset` doesn't help because
+      // it preserves the auth tables. Detect that and re-hash the seed default
+      // so `npm run seed` restores access. A user who legitimately changed their
+      // password has a valid better-auth hash and is left untouched.
+      const currentHash = credentialPasswordHash(db, existing.id);
+      if (!isBetterAuthPasswordHash(currentHash)) {
+        const recoveryPassword =
+          person.handle === "arda"
+            ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
+            : SEED_DEFAULT_PASSWORD;
+        setCredentialPassword(db, existing.id, await hashPassword(recoveryPassword));
+        logger.warn("seed re-hashed a legacy/unverifiable credential", {
+          email: person.email,
+        });
+      }
       ids[person.handle] = existing.id;
       continue;
     }
@@ -149,10 +171,20 @@ export async function runDemoSeed(
       rmSync(profilesRoot, { recursive: true, force: true });
     }
     // Wipe the raw runtime .jsonl truth too — a reset store starts with no
-    // run history at all (R7-2: the seed never fabricates any).
+    // run history at all (R7-2: the seed never fabricates any). Scope the wipe
+    // to the per-backend TRANSCRIPT dirs (`runtimes/<backend>/<id>.jsonl`,
+    // run-store.server.ts) and NEVER the credential HOMES that also live under
+    // `runtimes/` — `codex-home/auth.json` (Codex subscription auth, which the
+    // deployment points CODEX_HOME at) and `claude-home`. Deleting those logged
+    // the whole instance out (P11-70/pass-11: a `seed --reset` flipped the Codex
+    // backend to unavailable), and a reset must not destroy configured runtime
+    // credentials. Any other `runtimes/*-home` dir is likewise preserved.
     const runtimesRoot = path.join(dataRoot, "runtimes");
-    if (existsSync(runtimesRoot)) {
-      rmSync(runtimesRoot, { recursive: true, force: true });
+    for (const backend of ["claude", "codex"] as const) {
+      const transcriptDir = path.join(runtimesRoot, backend);
+      if (existsSync(transcriptDir)) {
+        rmSync(transcriptDir, { recursive: true, force: true });
+      }
     }
     for (const table of DERIVED_TABLES) {
       db.prepare(`DELETE FROM ${table}`).run();

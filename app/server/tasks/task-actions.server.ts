@@ -2490,14 +2490,20 @@ export async function transitionStage(
   // Approving a requested transition resolves its approval notifications.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
-  // A stage transition is a coordination trigger: when a NON-operator moves a
-  // task onto a new (non-Done) stage, hand off to the operator so it picks the
-  // task up at that stage and prompts the stage's agent (ADR-002 — one operator
-  // per active task). Operator-authored transitions are excluded: the operator's
-  // own run already coordinates the stages it moves through, so re-invoking it
-  // here would be redundant and could recurse. Fire-and-forget — it never blocks
-  // or fails the transition, and it is a no-op when no operator is deployed.
-  if (!ctx.operatorAuthorized && input.toStageId !== lastStageId) {
+  // A stage transition is a coordination trigger: ANY move of a task onto a new
+  // (non-Done) stage hands off to the operator so it picks the task up AT THAT
+  // STAGE and does the stage-right thing (ADR-002 — one operator per active
+  // task). This includes the operator's OWN transitions: a single operator run
+  // may advance only one auto boundary (e.g. Triage → Ready) and stop, which
+  // used to strand the task at a pre-work stage with `waiting: human` and no
+  // packet (P11-70). Re-triggering on every transition is safe and self-bounding
+  // — `runOperator` holds a single-flight process lease per task and QUEUES a
+  // trigger that arrives mid-run (newest wins), firing it when the current drive
+  // ends; the chain terminates naturally once the operator reaches a stage where
+  // it deploys a specialist and waits (a specialist run is not a transition) or
+  // opens a packet. Fire-and-forget — it never blocks or fails the transition,
+  // and it is a no-op when no operator is deployed.
+  if (input.toStageId !== lastStageId) {
     void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
   }
 

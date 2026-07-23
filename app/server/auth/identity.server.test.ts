@@ -5,6 +5,7 @@ import { createAuth, type ViberrAuth } from "~/lib/auth.server";
 import { hashPassword } from "./password.server";
 import {
   CREDENTIAL_PROVIDER,
+  isBetterAuthPasswordHash,
   provisionIdentity,
   revokeUserSessions,
   setCredentialPassword,
@@ -127,5 +128,34 @@ describe("identity provisioning", () => {
     await expect(
       a.api.signInEmail({ body: { email: "p@viberr.dev", password: "old-password-1" } }),
     ).rejects.toBeTruthy();
+  });
+
+  it("a legacy/unverifiable credential hash reads as a wrong password (401), not a 500 (P11-01)", async () => {
+    const db = ctx.makeDb();
+    const a = auth(db);
+    provisionIdentity(db, {
+      id: "u_legacy",
+      email: "legacy@viberr.dev",
+      name: "Legacy",
+      passwordHash: await hashPassword("placeholder-pw"),
+    });
+    // Overwrite with a pre-better-auth scrypt hash the built-in verifier throws
+    // on. Without the total `password.verify` hook this surfaces as an unhandled
+    // 500 on the splat; with it, verification returns false → 401.
+    const legacyHash =
+      "scrypt$16384$8$1$firuPx6uzlhAacmTd73at1OAoHciD9IbvW83I1VQvO0=$pX5ob5jrx1kC1KRCGKpsYCtiHZNXCQPO9zbo8RsKN9aRNG7aA3uG0plZc9JfpeL/DQk8A+iAx+cvrJmgwaRfdg==";
+    setCredentialPassword(db, "u_legacy", legacyHash);
+    const res = await a.api.signInEmail({
+      body: { email: "legacy@viberr.dev", password: "placeholder-pw" },
+      asResponse: true,
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("isBetterAuthPasswordHash distinguishes the current format from legacy/empty", async () => {
+    expect(isBetterAuthPasswordHash(await hashPassword("some-password"))).toBe(true);
+    expect(isBetterAuthPasswordHash("scrypt$16384$8$1$abc$def")).toBe(false);
+    expect(isBetterAuthPasswordHash("")).toBe(false);
+    expect(isBetterAuthPasswordHash(null)).toBe(false);
   });
 });

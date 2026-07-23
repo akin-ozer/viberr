@@ -2,6 +2,7 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
+import { hashPassword, verifyPassword } from "~/server/auth/password.server";
 import {
   clientIpOf,
   getLoginRateLimiter,
@@ -92,6 +93,20 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // No open registration — the whitelist provisions identities.
       disableSignUp: true,
       minPasswordLength: MIN_PASSWORD_LENGTH,
+      // Total hashing hooks (P11-01): a stored credential in a legacy/foreign
+      // format (e.g. the pre-better-auth `scrypt$N$r$p$salt$key` shape) makes
+      // Better Auth's built-in verifier THROW "Invalid password hash". Because
+      // `/api/auth/*` is a splat (routes/api.auth.$.ts), that throw surfaces as
+      // an unhandled 500 on a direct `POST /api/auth/sign-in/email`, and the
+      // account is effectively unrecoverable. Routing through the app's own
+      // wrappers makes verification TOTAL: `verifyPassword` catches any parse
+      // failure and returns false, so an unparseable hash reads as a wrong
+      // password (401) rather than a 500 — and hashing uses the exact same
+      // format everywhere.
+      password: {
+        hash: (password) => hashPassword(password),
+        verify: ({ hash, password }) => verifyPassword(password, hash),
+      },
     },
     rateLimit: {
       enabled: true,

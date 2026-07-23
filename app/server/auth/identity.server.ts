@@ -108,6 +108,19 @@ export function credentialPasswordHash(
   return row?.password ?? null;
 }
 
+/**
+ * True when `hash` is in Better Auth's own credential format (`<saltHex>:<keyHex>`
+ * from `@better-auth/utils` scrypt). A stored hash that fails this — an empty
+ * value, or the pre-better-auth `scrypt$N$r$p$salt$key` shape — makes Better
+ * Auth's verifier throw "Invalid password hash" (an unrecoverable 500 on the
+ * `/api/auth/*` splat). The seed uses this to re-hash a legacy credential back
+ * into a working state (P11-01). Verification itself is made total separately
+ * via the custom `password.verify` hook.
+ */
+export function isBetterAuthPasswordHash(hash: string | null | undefined): boolean {
+  return typeof hash === "string" && /^[0-9a-f]+:[0-9a-f]+$/i.test(hash);
+}
+
 /** Syncs a user's email onto their better-auth identity (admin email edit). */
 export function syncIdentityEmail(
   db: DatabaseSync,
