@@ -36,6 +36,7 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { notifyMentionedUsers } from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
@@ -333,6 +334,15 @@ async function writeOperatorComment(
   });
   if (suppressed) return;
   reproject(db, ctx, projectSlug, taskKey);
+  // NEW-4: the operator is instructed to tag the person it answers ("@Arda …");
+  // the tag must actually notify them — same fan-out as every other comment.
+  notifyMentionedUsers(db, {
+    text,
+    projectSlug,
+    taskKey,
+    from: { kind: "agent", name: "Operator" },
+    occurredAt: event.occurredAt,
+  });
   if (variant === "recommend") {
     recordAudit(db, {
       action: "task.operator.recommended",
@@ -410,6 +420,13 @@ async function addRecommendation(
     projectSlug,
     taskKey,
     details: { kind: rec.kind },
+  });
+  // NEW-4: recommendation reasoning that tags a person pings them too.
+  notifyMentionedUsers(db, {
+    text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+    projectSlug,
+    taskKey,
+    from: { kind: "agent", name: "Operator" },
   });
   // Ping the supervisors: a supervised operator recommendation is a decision
   // waiting on a human. Without this, the recommendation card only appears if

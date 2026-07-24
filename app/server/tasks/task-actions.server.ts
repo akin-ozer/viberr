@@ -59,10 +59,15 @@ import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
-import type { ActorRender } from "~/shared/mapping/actor.server";
+import {
+  createActorResolver,
+  initialsOfName,
+  type ActorRender,
+} from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
+import { notifyMentionedUsers } from "./mention-notify.server";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -594,8 +599,6 @@ async function autoInvokeOperator(
 /** Mock routing rule (task-detail §5.1): mentions of these handles route
  * the comment to the agent side (`to: agent` tint). */
 const AGENT_HANDLE_RE = /@(agent|operator|codex|claude)\b/i;
-const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude"]);
 
 export interface AppendCommentResult {
   task: TaskSummary;
@@ -683,50 +686,27 @@ export async function appendComment(
     details: { toAgent },
   });
 
-  // Mention fan-out (notification kind `mention`, contracts §4).
-  const mentionedUserIds: string[] = [];
-  const handles = new Set<string>();
-  for (const match of text.matchAll(MENTION_RE)) {
-    const handle = match[1]!.toLowerCase();
-    if (!RESERVED_HANDLES.has(handle)) handles.add(handle);
-  }
-  if (handles.size > 0) {
-    const users = db
-      .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
-      .all() as { id: string; email: string; name: string }[];
-    const actorName = userName(db, actor.userId);
-    for (const user of users) {
-      if (user.id === actor.userId) continue;
-      const local = user.email.split("@")[0]?.toLowerCase() ?? "";
-      const first = user.name.split(/\s+/)[0]?.toLowerCase() ?? "";
-      if (handles.has(local) || handles.has(first)) {
-        mentionedUserIds.push(user.id);
-        createNotification(db, {
-          userId: user.id,
-          kind: "mention",
-          text: `mentioned you — “${text}”`,
-          from: {
-            kind: "human",
-            userId: actor.userId,
-            name: actorName,
-            initials: actorName
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((w) => w[0]?.toUpperCase() ?? "")
-              .join(""),
-            tone:
-              (db
-                .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
-                .get(actor.userId) as { avatar_tone: string | null } | undefined)
-                ?.avatar_tone ?? "",
-          },
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          occurredAt: event.occurredAt,
-        });
-      }
-    }
-  }
+  // Mention fan-out (notification kind `mention`, contracts §4) — the shared
+  // helper every comment writer (human AND agent) funnels through (NEW-4).
+  const actorName = userName(db, actor.userId);
+  const mentionedUserIds = notifyMentionedUsers(db, {
+    text,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    excludeUserId: actor.userId,
+    occurredAt: event.occurredAt,
+    from: {
+      kind: "human",
+      userId: actor.userId,
+      name: actorName,
+      initials: initialsOfName(actorName),
+      tone:
+        (db
+          .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
+          .get(actor.userId) as { avatar_tone: string | null } | undefined)
+          ?.avatar_tone ?? "",
+    },
+  });
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -750,6 +730,28 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * The route can toast about this; we never throw for a well-formed comment.
    */
   runtimeDenied: boolean;
+}
+
+/**
+ * The follow-up directive a mentioned SPECIALIST receives for a human's
+ * comment (NEW-4): it names the commenter and instructs the agent to tag them
+ * back — the tag is what fans out a `mention` notification (mention-notify),
+ * so an untagged reply may simply never be seen by the person who asked.
+ * Exported for the directive-content test.
+ */
+export function specialistReplyDirective(input: {
+  commenterName: string;
+  taskKey: string;
+  title: string;
+  text: string;
+}): string {
+  return (
+    `A human (${input.commenterName}) commented on task ${input.taskKey} ` +
+    `("${input.title}"): "${input.text}". Respond to their comment directly, ` +
+    `and start your reply by tagging them — "@${input.commenterName}" — so ` +
+    `they are notified. Continue or adjust your work on the repository in ` +
+    `your working directory as needed, then give a concise reply.`
+  );
 }
 
 /** Append a comment and, when authorized, resume or start its mentioned agent. */
@@ -805,6 +807,8 @@ export async function commentToAgent(
     };
   }
 
+  const commenterName = userName(db, actor.userId);
+
   // 3b. `@operator` → run the OPERATOR (a governed run), not a specialist. The
   //     human's comment is already on the timeline (appended above), so the
   //     operator reads it in its snapshot; it is also passed as the run's human
@@ -816,6 +820,7 @@ export async function commentToAgent(
       taskKey: input.taskKey,
       trigger: "manual",
       humanComment: input.text.trim(),
+      humanCommentBy: commenterName,
       dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
@@ -828,17 +833,17 @@ export async function commentToAgent(
     return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
   }
 
-  const commenterName = userName(db, actor.userId);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   const title = existing?.parsed.frontmatter.title ?? input.taskKey;
   const repo = existing?.parsed.frontmatter.repo ?? projectRepoFor(ctx, input.projectSlug);
 
   // The follow-up prompt built from the comment (autonomous reply).
-  const followUp =
-    `A human (${commenterName}) commented on task ${input.taskKey} ("${title}"): ` +
-    `"${input.text.trim()}". Respond to their comment directly. Continue or ` +
-    `adjust your work on the repository in your working directory as needed, ` +
-    `then give a concise reply.`;
+  const followUp = specialistReplyDirective({
+    commenterName,
+    taskKey: input.taskKey,
+    title,
+    text: input.text.trim(),
+  });
 
   const { resumeRun } = await import(
     "~/server/runtimes/run-service.server"
@@ -1156,6 +1161,15 @@ export async function postAgentReplyComment(
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
+      // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
+      // inbox — same fan-out as human comments, with the agent as `from`.
+      notifyMentionedUsers(db, {
+        text: prepared.event.text,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        from: createActorResolver(db)(input.actorRef),
+        occurredAt: prepared.event.occurredAt,
+      });
     })
     .catch((error: unknown) => {
       logger.error("agent reply comment write failed", {
