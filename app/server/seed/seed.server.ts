@@ -24,6 +24,7 @@ import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 import { builtinAgentProfileTemplate } from "./default-assets.server";
+import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 /**
  * PRODUCT seed — a clean sheet (owner ruling, 2026-07-24): no demo/mock board
@@ -52,7 +53,10 @@ import { builtinAgentProfileTemplate } from "./default-assets.server";
  * runtime credential homes survive.
  */
 
-export const SEED_DEFAULT_PASSWORD = "viberr-dev-2828";
+// Re-exported so every existing importer keeps working; the constant itself
+// lives in an import-free module so non-Vite consumers (playwright.config.ts)
+// can read it without pulling in the `?raw` asset imports.
+export { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 export interface SeedOptions {
   dataRoot: string;

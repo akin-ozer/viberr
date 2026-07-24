@@ -1,18 +1,51 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-// Bundle the shipped default agent assets INTO the server build (Vite `?raw`),
-// so they are available in every environment (dev, container, tests) without a
-// runtime dependency on the store/`data/` dir. These files under `assets/` are
-// the shipped-by-default SOURCE OF TRUTH (tracked in git; `data/` is generated
-// and gitignored). Editing them updates what ships; the boot step writes them
-// into the store's `skills/` + `agents/definitions/` on first run.
-import viberrSkillMd from "./assets/viberr-app-expertise.skill.md?raw";
-import developerSkillMd from "./assets/developer-expertise.skill.md?raw";
-import reviewerSkillMd from "./assets/reviewer-expertise.skill.md?raw";
-import operatorDefinitionMd from "./assets/operator.definition.md?raw";
-import developerDefinitionMd from "./assets/developer.definition.md?raw";
-import reviewerDefinitionMd from "./assets/reviewer.definition.md?raw";
-import operatorProfileMd from "./assets/operator.profile.md?raw";
+/**
+ * The shipped default agent assets, read from `assets/` at runtime.
+ *
+ * These files are the shipped-by-default SOURCE OF TRUTH (tracked in git;
+ * `data/` is generated and gitignored). Editing them updates what ships; the
+ * boot step writes them into the store's `skills/` + `agents/definitions/` on
+ * first run.
+ *
+ * They used to be pulled in with Vite's `?raw`, which bundles them into the
+ * server build — but that loader only exists under Vite. The moment
+ * `seed.server.ts` began emitting the shipped personas (P13-AP-03) this module
+ * joined the import graph of `tsx scripts/seed.ts`, and the DOCUMENTED INSTALL
+ * STEP `npm run seed` died with `ERR_UNKNOWN_FILE_EXTENSION ".md"`. Vitest and
+ * the Vite build both handled `?raw`, so typecheck, 1663 unit tests and the
+ * build were all green while a fresh install was broken — the e2e job was the
+ * only gate that ran a real CLI entrypoint.
+ *
+ * Reading from disk works under every runtime (Vite SSR output, tsx, node,
+ * vitest). Resolution tries the module's own directory first (correct from
+ * source), then `<cwd>/app/server/seed/assets` (correct for the container,
+ * whose Dockerfile copies `app/` next to the build output), and finally fails
+ * LOUDLY rather than shipping an agent with an empty persona.
+ */
+const ASSET_DIR_CANDIDATES = [
+  path.join(import.meta.dirname, "assets"),
+  path.resolve(process.cwd(), "app/server/seed/assets"),
+];
+
+function readAsset(file: string): string {
+  for (const dir of ASSET_DIR_CANDIDATES) {
+    const abs = path.join(dir, file);
+    if (existsSync(abs)) return readFileSync(abs, "utf8");
+  }
+  throw new Error(
+    `Viberr default asset ${file} was not found. Looked in: ${ASSET_DIR_CANDIDATES.join(", ")}. ` +
+      "These files ship with the app under app/server/seed/assets/.",
+  );
+}
+
+const viberrSkillMd = readAsset("viberr-app-expertise.skill.md");
+const developerSkillMd = readAsset("developer-expertise.skill.md");
+const reviewerSkillMd = readAsset("reviewer-expertise.skill.md");
+const operatorDefinitionMd = readAsset("operator.definition.md");
+const developerDefinitionMd = readAsset("developer.definition.md");
+const reviewerDefinitionMd = readAsset("reviewer.definition.md");
+const operatorProfileMd = readAsset("operator.profile.md");
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
