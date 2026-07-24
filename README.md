@@ -217,3 +217,7 @@ Deliberate scope boundaries, documented rather than half-built:
   first use (documented in the credential card).
 - **No scheduled GitHub reconcile** — PR/branch state refreshes via the explicit
   Reconcile action on the GitHub view.
+
+## Capstone test
+
+This change was delivered by a Viberr agent during pass-12 live testing.
