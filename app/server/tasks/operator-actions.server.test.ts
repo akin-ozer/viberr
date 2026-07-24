@@ -1319,4 +1319,26 @@ describe("operatorPostComment", () => {
     expect(top.actor.kind).toBe("operator");
     expect(top.text).toContain("On it.");
   });
+
+  // NEW-4: the operator is instructed to tag the person it answers; the tag
+  // must actually notify them (a `mention` row, from the Operator).
+  it("an operator comment that @tags a human notifies them, attributed to the Operator", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${store.users.arda.name.split(" ")[0]} summary: developer implemented and reviewer approved — no action needed.`,
+      },
+      authority("supervised"),
+    );
+    const notes = listNotifications(store.db, store.users.arda.id).filter(
+      (n) => n.kind === "mention",
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.from).toMatchObject({ kind: "agent", name: "Operator" });
+  });
 });

@@ -64,7 +64,9 @@ export interface GithubViewData {
   credential: ProjectCredentialHealth;
   prs: PrRowView[];
   branches: BranchRowView[];
-  /** F10-28: freshness of the cached GitHub state (last manual reconcile). */
+  /** F10-28: freshness of the cached GitHub state — the newest reconcile,
+   * from either the manual "Update status" button or the 5-min background
+   * poller (P11-14). */
   reconcile: {
     /** ISO of the newest reconcile across the project's tasks, or null. */
     at: string | null;
@@ -182,9 +184,10 @@ export async function getGithubViewData(
     }))
     .sort((a, b) => b.number - a.number);
 
-  // F10-28: GitHub state is served from cached projections + the LAST manual
-  // reconcile — there is no scheduled sync. Surface the freshest reconcile time
-  // so stale cached PR/branch state can't silently look current. `null` = never
+  // F10-28: GitHub state is served from cached projections refreshed by the
+  // newest reconcile — the manual "Update status" button OR the 5-min
+  // background poller (P11-14). Surface the freshest reconcile time so stale
+  // cached PR/branch state can't silently look current. `null` = never
   // reconciled. Newest `github.reconcile` provenance across the project's tasks.
   const lastReconcileRow = db
     .prepare(
@@ -199,7 +202,9 @@ export async function getGithubViewData(
   const reconcile = {
     at: lastReconciledAt,
     label: Number.isFinite(reconciledMs) ? formatRelative(lastReconciledAt!) : null,
-    // Stale = never reconciled, or older than an hour (manual-only sync).
+    // Stale = never reconciled, or older than an hour. With the 5-min poller
+    // (P11-14) healthy this only trips when GitHub/config has been broken for
+    // an hour — surfaced honestly by the freshness chip rather than a lie.
     stale:
       !Number.isFinite(reconciledMs) ||
       Date.now() - reconciledMs > 60 * 60_000,

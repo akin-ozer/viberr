@@ -347,4 +347,25 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
     expect(q.ready.map((t) => t.key)).toContain("VIB-8");
     expect(q.ready.find((t) => t.key === "VIB-8")!.blockReason).toBeNull();
   });
+
+  it("a REJECTED-PR task (closed on GitHub, no reviewer block) is NOT `ready` — it needs a rework/archive decision (NEW-1)", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-7", {
+        title: "Rejected on GitHub",
+        stage: "review",
+        waiting: "human",
+        branch: "vib-7-work",
+        // PR was CLOSED without merging (rejected via gh); no required-reviewer block.
+        pr: { number: 77, state: "closed", title: "Rejected on GitHub" },
+        validation: "healthy",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const q = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot });
+    // Human-waiting + no blockReason, but the PR was rejected → NOT acceptance-ready.
+    expect(q.ready.map((t) => t.key)).not.toContain("VIB-7");
+    const row = q.working.find((t) => t.key === "VIB-7")!;
+    expect(row.pr).toEqual({ number: 77, state: "closed" }); // closed preserved, not coerced to "review"
+  });
 });

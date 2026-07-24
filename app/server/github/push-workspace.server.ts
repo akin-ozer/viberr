@@ -36,7 +36,6 @@ const execFileAsync = promisify(execFile);
 
 export type PushWorkspaceResult =
   | { status: "pushed"; branch: string; commits: number }
-  | { status: "up_to_date"; branch: string }
   | {
       status:
         | "no_pat"
@@ -118,8 +117,9 @@ export interface PushWorkspaceBranchInput {
 /**
  * Push the task's workspace branch to origin using the project PAT. Returns a
  * typed result; never throws. `pushed` means the remote now carries the local
- * commits; `up_to_date` means the remote already matched; every other status is
- * a degraded reason the caller can log or surface.
+ * commits (a `git push` with nothing new still reports `pushed`); `no_commits`
+ * means the branch had no local commits ahead of the default branch; every
+ * other status is a degraded reason the caller can log or surface.
  */
 export async function pushWorkspaceBranch(
   input: PushWorkspaceBranchInput,

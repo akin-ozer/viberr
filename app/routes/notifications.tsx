@@ -29,17 +29,26 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Notifications · Viberr" }];
 }
 
+/** Most-recent notifications the page loads. The list is capped (no paging
+ *  past it), so the loader over-fetches by one to detect when the window is
+ *  full and surfaces `truncated` — the truncation used to be silent (P12/RU-4). */
+const NOTIF_PAGE_LIMIT = 200;
+
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
+  const rows = listNotifications(db, user.id, { limit: NOTIF_PAGE_LIMIT + 1 });
+  const truncated = rows.length > NOTIF_PAGE_LIMIT;
   return {
-    notifications: listNotifications(db, user.id, { limit: 200 }),
+    notifications: truncated ? rows.slice(0, NOTIF_PAGE_LIMIT) : rows,
     unread: countUnreadNotifications(db, user.id),
+    truncated,
+    limit: NOTIF_PAGE_LIMIT,
   };
 }
 
 export default function Notifications({ loaderData }: Route.ComponentProps) {
-  const { notifications, unread } = loaderData;
+  const { notifications, unread, truncated, limit } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -101,6 +110,8 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
       <NotificationsPage
         items={items}
         unread={unread}
+        truncated={truncated}
+        limit={limit}
         onRead={markRead}
         onReadAll={markAllRead}
         onOpen={openItem}

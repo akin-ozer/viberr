@@ -66,7 +66,7 @@ export interface AgentProfileView {
   autonomy?: "supervised" | "full";
   /** Display-label buckets (catalog labels + extras) — what CapColumns,
    * pcap counts and the matrix modal render. */
-  actions: { direct: string[]; recommend: string[]; forbidden: string[] };
+  actions: { direct: string[]; recommend: string[]; forbidden: string[]; off?: string[] };
   /** Id-based policy (edit-modal seeding; ruling 7). */
   capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
   /** Bespoke labels with no catalog id — display-only, preserved on save. */

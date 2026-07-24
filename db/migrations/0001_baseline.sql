@@ -280,7 +280,12 @@ CREATE TABLE "agent_runs" (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   agent_name TEXT,
-  agent_profile_id TEXT NOT NULL
+  agent_profile_id TEXT NOT NULL,
+  -- Staging key for a Claude report_outcome envelope (staged_outcomes). Persisted
+  -- so boot recovery (recoverUnreactedAgentRuns) can look the staged outcome up
+  -- after a restart — the in-process completion callback that held this key is
+  -- gone, so without it a recovered Claude verdict falls back to the prose regex.
+  outcome_key TEXT
 );
 CREATE TABLE run_log_lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

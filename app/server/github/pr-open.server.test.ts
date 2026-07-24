@@ -287,6 +287,93 @@ describe("openTaskPr", () => {
     expect(fm.pr).toMatchObject({ number: 43, state: "review" });
   });
 
+  it("a MERGED cached PR clears the way — a reworked branch opens a fresh PR (DG-1)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        // The prior PR on this branch already merged; the branch was then
+        // reworked (new commits). Resurrecting the merged PR would dead-end
+        // acceptance at "merge pending" forever.
+        pr: { number: 7, state: "merged", title: "[VIB-201] already merged" },
+      }),
+      goal: "Deliver.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000005" },
+      ACTOR,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+
+    const gh = fakeGithubFetch({
+      // No open PR for the branch → a fresh one is created (the merged #7 is
+      // never GET-reconciled or reused).
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 44, html_url: "https://github.com/akin-ozer/viberr/pull/44", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "ok", prNumber: 44, created: true });
+    // The merged PR was never fetched for reuse.
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/7`)).toHaveLength(0);
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 44, state: "review" });
+  });
+
+  it("a cached 'review' PR that GitHub reports MERGED out-of-band opens a fresh PR, not the dead one (DG-1)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        // Cache still says "review" (reconcile hasn't run), but the PR was
+        // merged out-of-band on GitHub and the branch reworked since.
+        pr: { number: 7, state: "review", title: "[VIB-201] merged out-of-band" },
+      }),
+      goal: "Deliver.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000006" },
+      ACTOR,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+
+    const gh = fakeGithubFetch({
+      // The live PR is CLOSED+merged on GitHub → must not be reused.
+      [`GET ${REPO_PATH}/pulls/7`]: {
+        body: { number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "closed", merged: true, merged_at: "2026-07-24T00:00:00Z" },
+      },
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 45, html_url: "https://github.com/akin-ozer/viberr/pull/45", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "ok", prNumber: 45, created: true });
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ number: 45, state: "review" });
+  });
+
   it("degrades cleanly when no repo/PAT is configured (no throw, typed result)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

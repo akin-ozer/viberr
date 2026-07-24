@@ -72,6 +72,24 @@ export type AgentProfileFrontmatter = z.infer<
   typeof agentProfileFrontmatterSchema
 >;
 
+/** Recognized top-level frontmatter keys — anything else is drift (seed #3). */
+const AGENT_PROFILE_KNOWN_KEYS = new Set<string>([
+  "id",
+  "kind",
+  "name",
+  "role",
+  "desc",
+  "icon",
+  "backends",
+  "model",
+  "scope",
+  "stages",
+  "spanAll",
+  "capabilities",
+  "extras",
+  "resources",
+]);
+
 export interface ParsedAgentProfile {
   frontmatter: AgentProfileFrontmatter;
   /** Markdown body — the profile description. */
@@ -99,6 +117,24 @@ export function parseAgentProfileContent(
       ),
     );
     return { parsed: null, diagnostics };
+  }
+  // Drift detection (seed #3): the schema is `.loose()`, so an unknown top-level
+  // key (e.g. a field renamed in code but not in a hand-edited/seeded file) is
+  // preserved but otherwise SILENT — the exact drift the task/project files guard
+  // against. Surface it as a warning so a stale profile is diagnosable (and a
+  // fixture guard can assert zero unknowns on the shipped profiles).
+  if (typeof data === "object" && data !== null) {
+    const unknown = Object.keys(data).filter(
+      (k) => !AGENT_PROFILE_KNOWN_KEYS.has(k),
+    );
+    if (unknown.length > 0) {
+      diagnostics.push(
+        diagWarning(
+          "agent_profile.unknown_field",
+          `Agent profile has unrecognized frontmatter field(s): ${unknown.join(", ")}. This usually means the file drifted from the current schema.`,
+        ),
+      );
+    }
   }
   return {
     parsed: { frontmatter: result.data, description: body.trim() },

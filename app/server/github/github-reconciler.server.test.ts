@@ -529,6 +529,28 @@ describe("reconcileTask", () => {
     expect(forbidden.status).toBe("scope_violation");
     expect(findOpenScopeViolation(store.db, store.slug, "repo", "VIB-301")).not.toBeNull();
   });
+
+  it("a RATE-LIMIT 403 is transient — no bogus repo scope violation (DG-3)", async () => {
+    const { store, actor } = setup();
+    const result = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch({
+          [`GET ${REPO_PATH}/compare/main...vib-301-workspace`]: {
+            status: 403,
+            headers: { "x-ratelimit-remaining": "0" },
+            body: { message: "API rate limit exceeded for installation" },
+          },
+        }).fetchImpl,
+      },
+    );
+    // Transient, NOT a permissions failure: skip without a scope violation.
+    expect(result.status).toBe("network_unavailable");
+    expect(findOpenScopeViolation(store.db, store.slug, "repo", "VIB-301")).toBeNull();
+  });
 });
 
 describe("reconcileProject", () => {

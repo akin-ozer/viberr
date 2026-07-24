@@ -341,9 +341,10 @@ export function createCodexAdapter(
         const factory = deps.codexFactory ?? (await realFactory());
         // The Codex SDK REPLACES the child env wholesale, so any per-run env
         // (e.g. the specialist's GIT_CEILING_DIRECTORIES) must be overlaid on a
-        // COMPLETE env — not `{}`. `deps.env` is the full spawn env, but it is
-        // only set when CODEX_HOME is configured; with API-key auth it's
-        // undefined, so we fall back to a snapshot of process.env. Overlaying
+        // COMPLETE env — not `{}`. `deps.env` is the full spawn env; the
+        // production adapter factory (createAdapters, runtime-registry) ALWAYS
+        // passes it, so the process.env-snapshot fallback below is a safety net
+        // for tests / direct construction that omit `deps.env`. Overlaying
         // spec.env on `{}` would strip PATH/HOME and break the spawned `codex`
         // binary (adversarial-review HIGH #3).
         const baseEnv =

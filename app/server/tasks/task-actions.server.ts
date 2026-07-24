@@ -25,7 +25,10 @@ import {
   isTerminalStage,
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  OPERATOR_AUDIT_ACTOR,
+  recordAudit,
+} from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
   encodeActorRef,
@@ -53,13 +56,18 @@ import {
 } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
-import { getRun } from "~/server/runtimes/run-store.server";
+import { agentNamesByProfile, getRun } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
-import type { ActorRender } from "~/shared/mapping/actor.server";
+import {
+  createActorResolver,
+  initialsOfName,
+  type ActorRender,
+} from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
+import { notifyMentionedUsers } from "./mention-notify.server";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -121,8 +129,10 @@ export function operatorShouldReactToReply(
   return true;
 }
 
-/** Audit actor for operator-performed mutations (no human user id). */
-export const OPERATOR_AUDIT_ACTOR = { userId: null, label: "operator" } as const;
+// Audit actor for operator-performed mutations — single-sourced in the audit
+// leaf module, imported above for local use and re-exported for the many
+// existing importers of task-actions.
+export { OPERATOR_AUDIT_ACTOR };
 
 /** Placeholder TaskActor the operator toolkit threads through the shared
  *  mutations; its user id is never read once `operatorAuthorized` is set (the
@@ -589,8 +599,6 @@ async function autoInvokeOperator(
 /** Mock routing rule (task-detail §5.1): mentions of these handles route
  * the comment to the agent side (`to: agent` tint). */
 const AGENT_HANDLE_RE = /@(agent|operator|codex|claude)\b/i;
-const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude"]);
 
 export interface AppendCommentResult {
   task: TaskSummary;
@@ -678,50 +686,27 @@ export async function appendComment(
     details: { toAgent },
   });
 
-  // Mention fan-out (notification kind `mention`, contracts §4).
-  const mentionedUserIds: string[] = [];
-  const handles = new Set<string>();
-  for (const match of text.matchAll(MENTION_RE)) {
-    const handle = match[1]!.toLowerCase();
-    if (!RESERVED_HANDLES.has(handle)) handles.add(handle);
-  }
-  if (handles.size > 0) {
-    const users = db
-      .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
-      .all() as { id: string; email: string; name: string }[];
-    const actorName = userName(db, actor.userId);
-    for (const user of users) {
-      if (user.id === actor.userId) continue;
-      const local = user.email.split("@")[0]?.toLowerCase() ?? "";
-      const first = user.name.split(/\s+/)[0]?.toLowerCase() ?? "";
-      if (handles.has(local) || handles.has(first)) {
-        mentionedUserIds.push(user.id);
-        createNotification(db, {
-          userId: user.id,
-          kind: "mention",
-          text: `mentioned you — “${text}”`,
-          from: {
-            kind: "human",
-            userId: actor.userId,
-            name: actorName,
-            initials: actorName
-              .split(/\s+/)
-              .slice(0, 2)
-              .map((w) => w[0]?.toUpperCase() ?? "")
-              .join(""),
-            tone:
-              (db
-                .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
-                .get(actor.userId) as { avatar_tone: string | null } | undefined)
-                ?.avatar_tone ?? "",
-          },
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          occurredAt: event.occurredAt,
-        });
-      }
-    }
-  }
+  // Mention fan-out (notification kind `mention`, contracts §4) — the shared
+  // helper every comment writer (human AND agent) funnels through (NEW-4).
+  const actorName = userName(db, actor.userId);
+  const mentionedUserIds = notifyMentionedUsers(db, {
+    text,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    excludeUserId: actor.userId,
+    occurredAt: event.occurredAt,
+    from: {
+      kind: "human",
+      userId: actor.userId,
+      name: actorName,
+      initials: initialsOfName(actorName),
+      tone:
+        (db
+          .prepare(`SELECT avatar_tone FROM users WHERE id = ?`)
+          .get(actor.userId) as { avatar_tone: string | null } | undefined)
+          ?.avatar_tone ?? "",
+    },
+  });
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -745,6 +730,28 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * The route can toast about this; we never throw for a well-formed comment.
    */
   runtimeDenied: boolean;
+}
+
+/**
+ * The follow-up directive a mentioned SPECIALIST receives for a human's
+ * comment (NEW-4): it names the commenter and instructs the agent to tag them
+ * back — the tag is what fans out a `mention` notification (mention-notify),
+ * so an untagged reply may simply never be seen by the person who asked.
+ * Exported for the directive-content test.
+ */
+export function specialistReplyDirective(input: {
+  commenterName: string;
+  taskKey: string;
+  title: string;
+  text: string;
+}): string {
+  return (
+    `A human (${input.commenterName}) commented on task ${input.taskKey} ` +
+    `("${input.title}"): "${input.text}". Respond to their comment directly, ` +
+    `and start your reply by tagging them — "@${input.commenterName}" — so ` +
+    `they are notified. Continue or adjust your work on the repository in ` +
+    `your working directory as needed, then give a concise reply.`
+  );
 }
 
 /** Append a comment and, when authorized, resume or start its mentioned agent. */
@@ -800,6 +807,8 @@ export async function commentToAgent(
     };
   }
 
+  const commenterName = userName(db, actor.userId);
+
   // 3b. `@operator` → run the OPERATOR (a governed run), not a specialist. The
   //     human's comment is already on the timeline (appended above), so the
   //     operator reads it in its snapshot; it is also passed as the run's human
@@ -811,6 +820,7 @@ export async function commentToAgent(
       taskKey: input.taskKey,
       trigger: "manual",
       humanComment: input.text.trim(),
+      humanCommentBy: commenterName,
       dataRoot: ctx.dataRoot,
       actor: { userId: actor.userId, label: actor.label },
     });
@@ -823,17 +833,17 @@ export async function commentToAgent(
     return { ...base, agent: agentIdentity, triggered: "started", logThreadId, runtimeDenied: false };
   }
 
-  const commenterName = userName(db, actor.userId);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   const title = existing?.parsed.frontmatter.title ?? input.taskKey;
   const repo = existing?.parsed.frontmatter.repo ?? projectRepoFor(ctx, input.projectSlug);
 
   // The follow-up prompt built from the comment (autonomous reply).
-  const followUp =
-    `A human (${commenterName}) commented on task ${input.taskKey} ("${title}"): ` +
-    `"${input.text.trim()}". Respond to their comment directly. Continue or ` +
-    `adjust your work on the repository in your working directory as needed, ` +
-    `then give a concise reply.`;
+  const followUp = specialistReplyDirective({
+    commenterName,
+    taskKey: input.taskKey,
+    title,
+    text: input.text.trim(),
+  });
 
   const { resumeRun } = await import(
     "~/server/runtimes/run-service.server"
@@ -1151,6 +1161,18 @@ export async function postAgentReplyComment(
     .then(() => {
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
+      // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
+      // inbox — same fan-out as human comments, with the agent as `from`
+      // (under its OWN name, not the runtime label — NEW-5).
+      notifyMentionedUsers(db, {
+        text: prepared.event.text,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, input.projectSlug),
+        })(input.actorRef),
+        occurredAt: prepared.event.occurredAt,
+      });
     })
     .catch((error: unknown) => {
       logger.error("agent reply comment write failed", {
@@ -1624,6 +1646,15 @@ export async function registerAgentCompletion(
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
 ): Promise<void> {
+  // Persist the staging key on the run row so boot recovery can re-find the
+  // staged report_outcome envelope after a restart (AO-1) — the in-process
+  // callback below holds it only in a closure that dies with the process.
+  if (input.outcomeKey) {
+    db.prepare(`UPDATE agent_runs SET outcome_key = ? WHERE id = ?`).run(
+      input.outcomeKey,
+      input.runId,
+    );
+  }
   const { registerRunCompletion } = await import(
     "~/server/runtimes/run-service.server"
   );
@@ -1700,8 +1731,9 @@ export async function applyAgentCompletionEffects(
     takeStagedOutcome,
   } = await import("./agent-outcome.server");
   // Gates resolve at COMPLETION time from the live deployment (recovery gets
-  // identical behavior); an undeployed profile falls back to the transition
-  // defaults (supporting → verdict on, delivering → verdict off).
+  // identical behavior); an undeployed profile falls back to the catalog
+  // defaults — verdict is OFF unless a profile explicitly grants it (F10-14
+  // removed the old "supporting → verdict on" implicit rule).
   let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] = [];
   if (input.profileId) {
     try {
@@ -1720,9 +1752,10 @@ export async function applyAgentCompletionEffects(
   // requiredReviewers) is computed from the engagement's engage-time
   // `verdictCapable` snapshot. Verdict RECORDING must use the SAME source, or a
   // required reviewer whose live grant was later removed/undeployed can approve
-  // but never record — leaving the task un-acceptable forever (neither accept
-  // path has a force bypass). Prefer the engagement snapshot; fall back to the
-  // live grant only when there is no engagement row (legacy/ad-hoc runs).
+  // but never record — leaving the task un-acceptable through the normal accept
+  // paths (an admin can still `forceAcceptCompletion`, audited — DG-2). Prefer
+  // the engagement snapshot; fall back to the live grant only when there is no
+  // engagement row (legacy/ad-hoc runs).
   const verdictEngagement = input.profileId
     ? readTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
@@ -2641,7 +2674,7 @@ async function openReviewPrBestEffort(
       canCommitPush,
       ...dataCtx,
     });
-    if (push.status !== "pushed" && push.status !== "up_to_date") {
+    if (push.status !== "pushed") {
       logger.info("workspace push before review PR did not push", {
         taskKey,
         status: push.status,
@@ -2747,6 +2780,35 @@ async function openReviewPrBestEffort(
         "No review pull request could be opened — the execution branch has no " +
           "commits ahead of the default branch. The delivery may have produced no " +
           "change, or the commits never reached the remote.",
+      );
+    }
+    // DG-5: a GitHub/credential FAILURE at the review boundary (auth, network,
+    // missing PAT/repo) previously only logged — the task silently reached Review
+    // with no PR and no explanation. Surface it so a human knows the review PR is
+    // missing and why. (scope_violation already carries its own task-visible
+    // violation; nothing_to_review is handled above.)
+    else if (
+      result.status === "auth_failed" ||
+      result.status === "network_unavailable" ||
+      result.status === "no_pat_configured" ||
+      result.status === "no_repo_configured"
+    ) {
+      const why =
+        result.status === "auth_failed"
+          ? "GitHub rejected the credential (authentication failed)"
+          : result.status === "network_unavailable"
+            ? "GitHub was unreachable (network error)"
+            : result.status === "no_pat_configured"
+              ? "no GitHub credential is configured for this project"
+              : "no GitHub repository is configured for this task";
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Review PR could not be opened",
+        `${taskKey} reached Review but no pull request could be opened — ${why}. ` +
+          "Fix the repository/credential settings, then use “Update status” to open the review PR.",
       );
     }
   } catch (error) {
@@ -3313,6 +3375,17 @@ async function acceptCompletion(
     );
   }
 
+  // NEW-1 (defense-in-depth): a task whose review PR was CLOSED on GitHub without
+  // merging was REJECTED — its work was declined, so it can't be "accepted" into
+  // Done (there's nothing to merge). The human reworks + reopens or archives it.
+  // The review queue already hides such tasks from the acceptance panel; this
+  // guards the direct action path (and the operator's accept_completion rec).
+  if (!input.force && existing.parsed.frontmatter.pr?.state === "closed") {
+    throw AppError.conflict(
+      `${input.taskKey}'s review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.`,
+    );
+  }
+
   const doneStageId =
     terminalStageIdOf(project) ??
     project.stages[project.stages.length - 1]?.id ??
@@ -3377,6 +3450,60 @@ async function acceptCompletion(
     taskKey: input.taskKey,
     details: { to: doneStageId, boundary: "human", via: "accept_completion" },
   });
+}
+
+/**
+ * Admin-only override of the acceptance gate (DG-2). When a task is wedged —
+ * a required reviewer that can no longer record a verdict, or a stale blocked
+ * packet — a plain accept throws forever. An admin may force it: we record the
+ * exact reason being bypassed to the audit log, then accept with `force: true`.
+ */
+export async function forceAcceptCompletion(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(
+    db,
+    project,
+    actor,
+    "force-accept-completion",
+    "force-accept past the review gate",
+  );
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  // Already Done → acceptCompletion is a no-op; don't record a misleading
+  // "forced" audit for an override that overrode nothing.
+  const doneStageId =
+    terminalStageIdOf(project) ??
+    project.stages[project.stages.length - 1]?.id ??
+    "done";
+  if (existing.parsed.frontmatter.stage === doneStageId) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  }
+  const bypassed =
+    acceptanceBlockedReason(existing.parsed.frontmatter) ??
+    (existing.parsed.frontmatter.readiness === "blocked"
+      ? "an open blocked decision packet"
+      : "no gate (already acceptable)");
+  recordAudit(db, {
+    action: "task.acceptance.forced",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { bypassed },
+  });
+  await acceptCompletion(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, force: true },
+    actor,
+    ctx,
+  );
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
 /** Complete a real GitHub merge after an offline acceptance left it pending. */

@@ -160,6 +160,32 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(countReplayAudits("run_dropped")).toBe(1);
   });
 
+  it("consumes a persisted staged report_outcome envelope on recovery (AO-1)", async () => {
+    seedDroppedReplyRun("run_staged");
+    // Simulate a run whose completion was registered (outcome_key persisted to
+    // the row) and whose report_outcome envelope was staged — then the process
+    // died before the callback fired. Pre-fix, recovery had no key and the
+    // staged row was orphaned (verdict fell back to the prose regex).
+    store.db
+      .prepare(`UPDATE agent_runs SET outcome_key = 'oc_staged' WHERE id = 'run_staged'`)
+      .run();
+    store.db
+      .prepare(
+        `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at)
+         VALUES ('oc_staged', '{"kind":"report"}', ?)`,
+      )
+      .run(new Date().toISOString());
+
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(1);
+    // The staged envelope was TAKEN by its key (consumed once) — proof the
+    // recovery path reached it via the persisted outcome_key.
+    const remaining = store.db
+      .prepare(`SELECT COUNT(*) AS n FROM staged_outcomes WHERE outcome_key = 'oc_staged'`)
+      .get() as { n: number };
+    expect(remaining.n).toBe(0);
+  });
+
   it("does not reprocess a run after a successful recovery (idempotent)", async () => {
     seedDroppedReplyRun("run_dropped");
     expect((await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot })).recovered).toBe(1);

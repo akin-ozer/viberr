@@ -59,7 +59,7 @@ describe("HumanAccess", () => {
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
     // Grant rows (derived from PROJECT_CAP_MATRIX) — total table, every enforced action.
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(17);
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(18);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
     expect(getByText("Re-scan project files & projections")).toBeTruthy();

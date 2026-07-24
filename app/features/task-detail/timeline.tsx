@@ -153,7 +153,6 @@ export function TimelineItem({
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
-  const role = "role" in actor ? actor.role : undefined;
   const guest = actor.kind === "human" && "guest" in actor && actor.guest;
   return (
     <div className="tl-item">
@@ -165,16 +164,21 @@ export function TimelineItem({
       </div>
       <div className="tl-body">
         <div className="tl-meta">
-          <span className="tl-actor">
-            {actor.name}
-            {role ? " · " + role : ""}
-          </span>
+          {/* Identity is the actor's NAME only — for agents that is the
+              agent's own name (e.g. "Reviewer"), never the runtime label or a
+              trailing role. */}
+          <span className="tl-actor">{actor.name}</span>
           {isTyped && (
             <Pill kind={typedKind(ev.type)} sm>
               {meta.label}
             </Pill>
           )}
-          {actor.kind === "agent" && (
+          {/* The "agent" badge marks a COMMENT written by an agent — the one
+              place it adds signal (agent- vs human-authored message). A typed
+              event is already an agent/system action (colored node + category
+              pill), so the badge there was redundant noise that made an event
+              look identical to a comment (NEW-6). */}
+          {!isTyped && actor.kind === "agent" && (
             <Pill kind="agent" sm>
               agent
             </Pill>

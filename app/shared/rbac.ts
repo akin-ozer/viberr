@@ -62,6 +62,11 @@ export const RBAC_DEFINITIONS = [
   { id: "manage-members", label: "Manage members & roles", roles: [A] },
   { id: "manage-agents", label: "Manage agent profiles", roles: [A] },
   { id: "edit-policy", label: "Edit workflow & policy", roles: [A] },
+  // Admin-only override of the required-reviewer / blocked-packet acceptance gate
+  // (DG-2). A stuck task — e.g. a required reviewer that can no longer record a
+  // verdict — is otherwise permanently un-acceptable; this is the audited escape
+  // hatch, stricter than plain accept-completion. Narrowest grant → table tail.
+  { id: "force-accept-completion", label: "Force-accept past the review gate", roles: [A] },
 ] as const satisfies readonly {
   id: string;
   label: string;

@@ -3,11 +3,11 @@ import type { RepoAccessResult } from "~/server/github/repo-access-check.server"
 
 /**
  * Client-safe pill mappings for the GitHub view (github-view spec §4.3/§4.4,
- * ruling 12). These mirror the server contracts in
- * `app/server/github/pr-linker.server.ts` (`prPillFor`) and
- * `branch-sync.server.ts` (`deriveSyncState` labels) — duplicated here only
- * because server modules must never reach client components; the shapes are
- * covered by tests on both sides.
+ * ruling 12). `prStatePill` is the single PR-state → pill mapping (the old
+ * server-side `prPillFor` duplicate was removed); the sync labels mirror
+ * `branch-sync.server.ts` (`deriveSyncState`) — duplicated here only because
+ * server modules must never reach client components; the shapes are covered by
+ * tests on both sides.
  */
 
 export interface PillView {

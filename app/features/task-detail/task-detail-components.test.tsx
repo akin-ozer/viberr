@@ -2,9 +2,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
+import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter } from "react-router";
 import { DecisionPacket } from "./decision-packet";
+import { GithubTrace } from "./task-detail-page";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -182,7 +184,10 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "comment",
-          actor: { kind: "agent", backend: "claude", name: "Claude Code", role: "developer" },
+          // NEW-5: the actor name is the agent's OWN name (resolved server-side),
+          // and the timeline shows the NAME ONLY — never the runtime label or a
+          // trailing "· role".
+          actor: { kind: "agent", backend: "claude", name: "Reviewer", role: "Review & validation" },
           text: "Re-checked the parser — the edge case is handled now.",
           toAgent: false,
         })}
@@ -191,10 +196,8 @@ describe("TimelineItem", () => {
     // Renders in the comment area (a comment-card), NOT the toagent tint.
     expect(container.querySelector(".comment-card")).not.toBeNull();
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
-    // Shows the agent identity (name · role) and the agent pill.
-    expect(container.querySelector(".tl-actor")!.textContent).toBe(
-      "Claude Code · developer",
-    );
+    // Shows the agent's NAME ONLY — no runtime label, no "· role" suffix.
+    expect(container.querySelector(".tl-actor")!.textContent).toBe("Reviewer");
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
@@ -230,7 +233,8 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "completion",
-          actor: { kind: "agent", backend: "codex", name: "Codex", role: "Developer" },
+          // NEW-5: agent identity is its own name ("Developer"), shown alone.
+          actor: { kind: "agent", backend: "codex", name: "Developer", role: "Implementation" },
           title: "Completion report",
           text: "Implemented repo attach.",
           evidence: [
@@ -245,13 +249,14 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".tl-body strong")!.textContent).toBe(
       "Completion report",
     );
-    expect(container.querySelector(".tl-actor")!.textContent).toBe(
-      "Codex · Developer",
-    );
+    expect(container.querySelector(".tl-actor")!.textContent).toBe("Developer");
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
-    expect(pills).toEqual(["Completion report", "agent"]);
+    // NEW-6: a typed event carries only its category pill — the "agent" badge
+    // is comment-only now (the colored node + category pill already say it's an
+    // agent action, so the badge was redundant on events).
+    expect(pills).toEqual(["Completion report"]);
     const rows = container.querySelectorAll(".tl-card.evidence .ev-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.querySelector(".add")!.textContent).toBe("+14");
@@ -740,3 +745,83 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
     expect(names.join(" ")).toContain("Selin Aksoy"); // contributor — can own
   });
 });
+
+/* -------------------------------------------------- GithubTrace force-accept */
+
+function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
+  return {
+    ...taskFixture("u-arda", "Arda Kaya"),
+    projectSlug: "viberr-core",
+    branch: "vib-151",
+    pr: null,
+    blockReason: null,
+    commits: [],
+    timeline: [],
+    diagnostics: [],
+    stages: [],
+    ...patch,
+  } as unknown as TaskDetail;
+}
+
+describe("GithubTrace — admin force-accept (DG-2)", () => {
+  it("renders the block reason + Force-accept button when blocked AND onForceAccept is provided", () => {
+    const onForceAccept = vi.fn();
+    const { container, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({
+            blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+          })}
+          onForceAccept={onForceAccept}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByText(/Waiting on 1 required reviewer approval/)).toBeTruthy();
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    expect(onForceAccept).toHaveBeenCalled();
+  });
+
+  it("surfaces force-accept for a blocked-packet wedge (null blockReason) even with no branch/PR", () => {
+    const onForceAccept = vi.fn();
+    const { container, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({
+            branch: null,
+            pr: null,
+            blockReason: null,
+            packet: { type: "blocked" },
+          })}
+          onForceAccept={onForceAccept}
+        />
+      </MemoryRouter>,
+    );
+    // No branch → the GitHub panel shows the empty state, but the admin escape
+    // hatch is still rendered (a crashed pre-work wedge must be escapable).
+    expect(getByText(/No branch yet/)).toBeTruthy();
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    expect(onForceAccept).toHaveBeenCalled();
+  });
+
+  it("shows NO force-accept control for a non-admin (onForceAccept undefined), even when blocked", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({ blockReason: "Waiting on 1 required reviewer approval." })}
+        />
+      </MemoryRouter>,
+    );
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    );
+    expect(btn).toBeUndefined();
+  });
+})

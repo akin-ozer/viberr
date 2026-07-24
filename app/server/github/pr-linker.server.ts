@@ -4,12 +4,15 @@ import type { GithubClient } from "./github-client.server";
 /**
  * PR linker (Phase 7): finds the pull request for a task's execution
  * branch, fetches state/draft/merged + a checks summary, and maps real
- * GitHub PR states to the task-file cache vocabulary + mock pill kinds
- * (orchestrator ruling 12):
+ * GitHub PR states to the task-file cache vocabulary (orchestrator ruling
+ * 12):
  *
- *   merged            → cache "merged" → done pill "merged"
- *   open (incl draft) → cache "review" → info pill "in review"
- *   closed-unmerged   → cache "closed" → risk pill "closed"
+ *   merged            → cache "merged"
+ *   open (incl draft) → cache "review"
+ *   closed-unmerged   → cache "closed"
+ *
+ * Pill rendering from those cache states lives client-side in
+ * `app/features/github/github-pills.ts` (`prStatePill`).
  *
  * Plus one state GitHub never reports but Viberr sets itself: "accepted" — a
  * human accepted the completion but the REAL merge couldn't run (no reachable
@@ -30,24 +33,6 @@ export function mapPrToCacheState(pr: {
   if (pr.merged || pr.merged_at) return "merged";
   if (pr.state === "closed") return "closed";
   return "review"; // open + draft both read "in review" (ruling 12)
-}
-
-/** Pill rendering contract for the UI step (mirrored client-side by
- * `github-pills.prStatePill` — keep the two in lockstep). */
-export function prPillFor(state: PrCacheState): {
-  label: string;
-  kind: "done" | "info" | "risk" | "input";
-} {
-  switch (state) {
-    case "merged":
-      return { label: "merged", kind: "done" };
-    case "accepted":
-      return { label: "merge pending", kind: "input" };
-    case "closed":
-      return { label: "closed", kind: "risk" };
-    default:
-      return { label: "in review", kind: "info" };
-  }
 }
 
 export interface PrChecksSummary {

@@ -28,7 +28,7 @@ describe("prStatePill (ruling 12 incl. the closed-unmerged risk state)", () => {
       label: "merge pending",
     });
   });
-  it("unknown states fall back to 'in review' (mirrors prPillFor)", () => {
+  it("unknown states fall back to 'in review'", () => {
     expect(prStatePill("open")).toEqual({ kind: "info", label: "in review" });
   });
 });

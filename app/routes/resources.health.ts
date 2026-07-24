@@ -1,6 +1,7 @@
 import { data } from "react-router";
 import { getDb } from "~/server/db/sqlite.server";
 import { isFileWatcherAlive } from "~/server/files/file-watch.service.server";
+import { isKbWatcherAlive } from "~/server/files/kb-watch.service.server";
 import { logger } from "~/server/logging/logger.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 
@@ -36,6 +37,7 @@ export async function loader() {
       ok: true as const,
       projections: { projects, tasks },
       watcher: isFileWatcherAlive(),
+      kbWatcher: isKbWatcherAlive(),
       backends: {
         // Env-presence only — never probes token validity (see docblock).
         claude: isBackendAvailable("claude") ? "real" : "unavailable",

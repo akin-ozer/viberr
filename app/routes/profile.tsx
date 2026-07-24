@@ -156,6 +156,8 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
     };
 
   const onTheme = (next: ThemePreference, label: string) => {
+    // RU-1: re-selecting the active theme is a no-op — don't re-submit or toast.
+    if (next === theme) return;
     applyThemePreference(next);
     const fd = new FormData();
     fd.set("_csrf", csrf);

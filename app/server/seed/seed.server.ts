@@ -76,6 +76,13 @@ const DERIVED_TABLES = [
   "notifications",
   "provenance",
   "diagnostics",
+  // Board/task-derived state. scope_violations + user_prefs were previously
+  // left behind, so an open violation or a per-user pref survived a clean-sheet
+  // reset and resurfaced as a phantom Settings badge when a same-slug project
+  // was recreated (DM-3). A clean sheet clears the work, keeping only org config
+  // (GitHub connections, MCP servers, KBs, skills) + auth/credentials.
+  "scope_violations",
+  "user_prefs",
   "task_events",
   "task_projections",
   "project_members",

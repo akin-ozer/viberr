@@ -24,6 +24,10 @@ export const EVENT_META: Record<string, EventMeta> = {
   quality: { node: "quality", icon: "flag", label: "Quality flag" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
+  // The operator's coordination actions (deploy/engage/run/release a specialist).
+  // Keeps the "Operator" category label — the event/comment distinction is now
+  // carried by the "agent" badge being COMMENT-ONLY (NEW-6), so this pill needn't
+  // rename; the row still reads as the operator's own action.
   agent: { node: "agent", icon: "agents", label: "Operator" },
   assign: { node: "transition", icon: "user", label: "Ownership" },
 };

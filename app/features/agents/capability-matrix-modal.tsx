@@ -25,6 +25,8 @@ type Mode = "direct" | "recommend" | "human" | "off";
 function modeOf(profile: MatrixProfile, label: string): Mode {
   if (profile.actions.direct.includes(label)) return "direct";
   if (profile.actions.recommend.includes(label)) return "recommend";
+  // `forbidden` = genuine always-human lock (coral); an explicitly WITHHELD ("off")
+  // capability is just not granted (grey), same as an absent one (NEW-3).
   if (profile.actions.forbidden.includes(label)) return "human";
   return "off";
 }
@@ -59,6 +61,7 @@ export function CapabilityMatrixModal({
       p.actions.direct,
       p.actions.recommend,
       p.actions.forbidden,
+      p.actions.off ?? [],
     ]) {
       for (const label of bucket) {
         if (!known.has(label)) extras.add(label);

@@ -95,6 +95,20 @@ export function resolveSpecialistDisallowedTools(
   return [...denied];
 }
 
+/**
+ * The disallowedTools for a run whose profile can NO LONGER be resolved to a
+ * live deployment (undeployed/deleted between engage and resume). We can't
+ * confirm any grant, and the safe-by-default polarity treats "unspecified" as
+ * full access — which would leave a resumed run of a vanished profile nearly
+ * unconfined (only `gh pr merge` denied). So treat EVERY delivery capability as
+ * explicitly withheld: an undeployed run may read/validate but never deliver.
+ */
+export function resolveUndeployedDisallowedTools(): string[] {
+  return resolveSpecialistDisallowedTools(
+    CAP_DENY_RULES.map((r) => ({ capabilityId: r.capabilityId, mode: "off" })),
+  );
+}
+
 export interface DeliveryPermissions {
   canBranch: boolean;
   canCommitPush: boolean;

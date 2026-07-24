@@ -62,10 +62,11 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
 
-function GithubTrace({
+export function GithubTrace({
   task,
   githubHost,
   onCompleteMerge,
+  onForceAccept,
   merging,
 }: {
   task: TaskDetail;
@@ -73,8 +74,38 @@ function GithubTrace({
   githubHost?: string;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
+  /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
+  onForceAccept?: () => void;
   merging?: boolean;
 }) {
+  // Admin escape hatch (DG-2): acceptance is wedged either by the required-reviewer
+  // gate (task.blockReason) OR by an open blocked decision packet a crashed run left
+  // behind. Surfaced for admins (onForceAccept present) regardless of branch/PR, so a
+  // no-branch pre-work wedge is still escapable.
+  const forceAcceptReason =
+    task.blockReason ??
+    (task.packet?.type === "blocked"
+      ? "An open blocked decision is holding this task."
+      : null);
+  const forceAcceptRow =
+    forceAcceptReason && onForceAccept ? (
+      <div style={{ marginTop: ".8rem" }}>
+        <p className="hint" style={{ margin: "0 0 .4rem" }}>
+          Acceptance is blocked: {forceAcceptReason}
+        </p>
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ width: "100%" }}
+          disabled={merging}
+          onClick={onForceAccept}
+          title="Admin override: accept this task into Done past the review gate. Audited."
+        >
+          <Icon name="shield" />
+          Force accept (override review gate)
+        </button>
+      </div>
+    ) : null;
   if (!task.branch && !task.pr) {
     return (
       <div className="panel">
@@ -85,6 +116,7 @@ function GithubTrace({
         <div className="empty" style={{ padding: "1rem .5rem" }}>
           No branch yet. A task-key branch is created when execution starts.
         </div>
+        {forceAcceptRow}
       </div>
     );
   }
@@ -172,6 +204,7 @@ function GithubTrace({
             Complete merge
           </button>
         )}
+        {forceAcceptRow}
         {ghHref && (
           <a
             className="btn ghost sm"
@@ -968,7 +1001,29 @@ function useRunControls({
         runFetcher.submit(fd, { method: "post" });
       }
     : undefined;
-  return { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge };
+  // Admin-only override of a stuck acceptance gate (DG-2). Server re-checks the
+  // admin role AND re-derives the block; this only wires the affordance.
+  const canForceAccept = roleCan(
+    myRole as ProjectRole | null,
+    "force-accept-completion",
+  );
+  const onForceAccept = canForceAccept
+    ? () => {
+        if (runBusy) return;
+        const fd = new FormData();
+        fd.set("_csrf", csrf);
+        fd.set("intent", "force-accept");
+        runFetcher.submit(fd, { method: "post" });
+      }
+    : undefined;
+  return {
+    runBusy,
+    canInterrupt,
+    onInterrupt,
+    onRetryBackend,
+    onCompleteMerge,
+    onForceAccept,
+  };
 }
 
 /**
@@ -1147,8 +1202,14 @@ export function TaskDetailPage({
     hasActiveRun: runtime.some((r) => r.state === "running"),
   });
 
-  const { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge } =
-    useRunControls({ csrf, runtime, myRole, canRunAgents });
+  const {
+    runBusy,
+    canInterrupt,
+    onInterrupt,
+    onRetryBackend,
+    onCompleteMerge,
+    onForceAccept,
+  } = useRunControls({ csrf, runtime, myRole, canRunAgents });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
     useLogSelection(runtime);
 
@@ -1273,6 +1334,7 @@ export function TaskDetailPage({
           task={task}
           {...(githubHost ? { githubHost } : {})}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
+          {...(onForceAccept ? { onForceAccept } : {})}
           merging={runBusy}
         />
         <CurrentStatePanel

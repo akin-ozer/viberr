@@ -7,7 +7,7 @@ export interface ReviewRowView {
   waiting: "human" | "agent" | "none";
   packet: { kind: string; title: string } | null;
   latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" } | null;
+  pr: { number: number; state: "review" | "merged" | "closed" } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
    *  Only ever populated on "Still in review" rows — the acceptance panel holds

@@ -138,25 +138,41 @@ export async function openTaskPr(
   // 0. The task already carries a live PR — e.g. captured from agent-side
   //    delivery on a branch the head= dedup below would never match. Never
   //    open a duplicate: reconcile the cached record against the real PR and
-  //    reuse it. Only a closed-unmerged PR clears the way for a fresh one.
-  if (fm.pr && fm.pr.state !== "closed") {
+  //    reuse it. A TERMINAL cached PR (closed unmerged OR already merged) clears
+  //    the way for a fresh one — reworking a branch whose PR already merged must
+  //    open a new review PR, not resurrect the merged one (which would dead-end
+  //    acceptance at "merge pending" forever).
+  const cachedPrIsTerminal =
+    fm.pr?.state === "closed" || fm.pr?.state === "merged";
+  if (fm.pr && !cachedPrIsTerminal) {
     const live = await gh.client.request<GhPull>(
       "GET",
       `/repos/${gh.repo}/pulls/${fm.pr.number}`,
     );
     if (live.ok) {
-      await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
-      return {
-        status: "ok",
-        prNumber: live.data.number,
-        created: false,
-        url: live.data.html_url,
-      };
-    }
-    if (live.kind === "network") {
+      // Even a cached "review"/"accepted" PR may have been merged or closed
+      // out-of-band on GitHub since we last reconciled. Reuse ONLY a PR that is
+      // still genuinely open; otherwise fall through to open a FRESH PR so a
+      // reworked branch is never stapled to a dead (merged/closed) PR (DG-1). We
+      // do NOT reconcile the terminal PR into the cache here — that would record
+      // a misleading `github.pr.opened` audit for a PR being discarded; the
+      // reconcile poller keeps the cache honest, and the create path below
+      // overwrites it with the fresh PR on success.
+      const liveIsOpen =
+        live.data.state === "open" && live.data.merged !== true;
+      if (liveIsOpen) {
+        await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
+        return {
+          status: "ok",
+          prNumber: live.data.number,
+          created: false,
+          url: live.data.html_url,
+        };
+      }
+      // terminal on GitHub → fall through to the create path below.
+    } else if (live.kind === "network") {
       return { status: "network_unavailable", message: live.message };
-    }
-    if (live.kind === "http" && live.status === 401) {
+    } else if (live.kind === "http" && live.status === 401) {
       return { status: "auth_failed", message: live.message };
     }
     // Any other refusal (404 gone, 403 read scope): the cached PR can't be

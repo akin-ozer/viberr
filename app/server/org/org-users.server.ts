@@ -12,7 +12,6 @@ import {
 } from "~/server/auth/user-admin.server";
 import {
   deleteIdentity,
-  revokeUserSessions,
   syncIdentityEmail,
 } from "~/server/auth/identity.server";
 import {
@@ -314,10 +313,11 @@ export function deleteOrgUser(
   ) {
     throw AppError.conflict("Cannot remove the last active admin.");
   }
-  // Remove the better-auth identity too (user/account/session cascade) —
-  // otherwise the orphaned `user` row (email is UNIQUE NOT NULL) makes
-  // re-creating the same email throw a raw constraint mid-flow (pass-4 WI-3).
-  revokeUserSessions(db, userId);
+  // Remove the better-auth identity too — otherwise the orphaned `user` row
+  // (email is UNIQUE NOT NULL) makes re-creating the same email throw a raw
+  // constraint mid-flow (pass-4 WI-3). Deleting the `user` row cascades its
+  // `session` and `account` rows (FK ON DELETE CASCADE, 0001_baseline.sql), so
+  // an explicit session revoke here would be a no-op prelude (rbac #5).
   deleteIdentity(db, userId);
   db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
   recordAudit(db, {

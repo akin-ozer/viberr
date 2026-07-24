@@ -30,8 +30,10 @@ import { notifyTaskWatchers } from "~/server/tasks/task-actions.server";
  * resolve → resolve row + typed `policy` update event on the violation's
  *           own task + reprojection. Also idempotent.
  *
- * The seeded VIB-142 violation (migration 0005) already has its policy
- * event and notification from the phase-3 seed — flagging it again is a
+ * The product seed ships zero demo data — the violations table starts
+ * empty (migrations are squashed to db/migrations/0001_baseline.sql, schema
+ * only). Only the e2e fixture seeds a VIB-142 violation with its policy event
+ * and notification (test-support/demo-seed.ts); there, flagging it again is a
  * no-op because the row is already open.
  */
 

@@ -78,6 +78,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Manage members & roles",
       "Manage agent profiles",
       "Edit workflow & policy",
+      "Force-accept past the review gate",
     ]);
     expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
     // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
@@ -91,13 +92,13 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Comment on tasks",
     ]);
     expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([
-      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);
     expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([
-      1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);
     expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
     ]);
   });
 });

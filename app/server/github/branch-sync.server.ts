@@ -61,6 +61,11 @@ export type BranchCompareResult =
   | { status: "ok"; compare: BranchCompare }
   | { status: "missing_ref" }
   | { status: "forbidden"; message: string }
+  // A 403 caused by RATE LIMITING, not a missing scope (DG-3). GitHub returns
+  // 403 for both; conflating them lets a transient rate-limit blip auto-open a
+  // bogus `repo` scope violation. Callers treat this as transient (skip/retry),
+  // never as a permissions failure.
+  | { status: "rate_limited"; message: string }
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string };
 
@@ -99,6 +104,14 @@ export async function getBranchCompare(
     return { status: "auth_failed", message: result.message };
   }
   if (result.kind === "http" && result.status === 403) {
+    // Rate-limit 403 vs scope 403 (DG-3): GitHub zeroes x-ratelimit-remaining on
+    // a primary limit, and secondary limits carry a "rate limit" message.
+    const isRateLimited =
+      result.rateLimit.remaining === 0 ||
+      /rate limit/i.test(result.message);
+    if (isRateLimited) {
+      return { status: "rate_limited", message: result.message };
+    }
     return { status: "forbidden", message: result.message };
   }
   return {

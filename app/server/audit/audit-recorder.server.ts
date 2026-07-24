@@ -22,6 +22,11 @@ export interface AuditActor {
 
 export const SYSTEM_ACTOR: AuditActor = { userId: null, label: "system" };
 
+/** Audit actor for operator-performed mutations (no human user id). Lives here
+ * (a leaf module) so task-actions and the operator runtime share ONE definition
+ * instead of drifting copies. */
+export const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
+
 export interface AuditEventInput {
   /** lowercase dot-separated fact, e.g. "auth.login.success". */
   action: string;

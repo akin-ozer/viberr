@@ -20,6 +20,70 @@ import {
 
 export const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
 
+const POLICY_ENGINE_NOTIFY_FROM = {
+  kind: "system" as const,
+  name: "Policy engine",
+};
+
+/**
+ * Nudge for tasks accepted into Done whose PR is still OPEN on GitHub — the
+ * "merge pending" state (F12-05). An Autonomous-preset operator can self-accept
+ * a task (Done), but `merge-pull-request` is always-human, so nothing actually
+ * merges the PR: without a nudge, a Done task's PR dangles unmerged forever.
+ * Deduped by the notification's distinctive per-(project, task, PR) title so a
+ * steady poll doesn't re-notify. (Notification retention can eventually evict an
+ * old nudge row, after which the poller re-reminds — benign, since the merge is
+ * genuinely still pending.) A human completes the merge (Complete-merge / gh).
+ */
+async function nudgeMergePendingTasks(
+  db: DatabaseSync,
+  ctx: GithubActionContext,
+): Promise<number> {
+  const rows = db
+    .prepare(
+      `SELECT t.project_slug AS slug, t.task_key AS key, t.pr_json AS pr
+         FROM task_projections t
+         JOIN projects p ON p.slug = t.project_slug
+        WHERE p.archived = 0 AND t.pr_json LIKE '%"state":"accepted"%'`,
+    )
+    .all() as { slug: string; key: string; pr: string }[];
+  let nudged = 0;
+  for (const row of rows) {
+    let pr: { number?: number; state?: string };
+    try {
+      pr = JSON.parse(row.pr);
+    } catch {
+      continue;
+    }
+    if (pr.state !== "accepted" || !pr.number) continue;
+    const title = `PR #${pr.number} accepted — merge to finish ${row.key}`;
+    const exists = db
+      .prepare(
+        `SELECT 1 FROM notifications
+          WHERE project_slug = ? AND task_key = ? AND kind = 'policy' AND title = ? LIMIT 1`,
+      )
+      .get(row.slug, row.key, title);
+    if (exists) continue;
+    const { notifyTaskWatchers } = await import(
+      "~/server/tasks/task-actions.server"
+    );
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: row.slug,
+        taskKey: row.key,
+        kind: "policy",
+        title,
+        text: `${row.key} was accepted into Done, but PR #${pr.number} is still open on GitHub — merge it to finish delivery. (Autonomous acceptance can't merge a PR; a human completes the merge from the task's Complete-merge button or via GitHub.)`,
+        from: POLICY_ENGINE_NOTIFY_FROM,
+      },
+      ctx,
+    );
+    nudged += 1;
+  }
+  return nudged;
+}
+
 /** Active projects that have at least one branched task worth reconciling. */
 function projectsToPoll(db: DatabaseSync): string[] {
   return (
@@ -52,6 +116,7 @@ export async function pollGithubReconcile(
       const summary = await reconcileProject(db, slug, SYSTEM_ACTOR, {
         ...ctx,
         skipProjectAudit: true,
+        skipUnchangedProvenance: true,
       });
       reconciled += summary.reconciled;
       changed += summary.changed;
@@ -62,11 +127,22 @@ export async function pollGithubReconcile(
       });
     }
   }
-  if (changed > 0) {
+  // F12-05: nudge the human to finish any merge-pending (accepted-but-open) PR.
+  // Best-effort — a nudge failure never aborts the poll.
+  let nudged = 0;
+  try {
+    nudged = await nudgeMergePendingTasks(db, ctx);
+  } catch (error) {
+    logger.warn("merge-pending nudge failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  if (changed > 0 || nudged > 0) {
     logger.info("github reconcile poll surfaced changes", {
       projects: slugs.length,
       reconciled,
       changed,
+      mergePendingNudged: nudged,
     });
   }
   return { projects: slugs.length, reconciled, changed };
@@ -94,7 +170,13 @@ function pollerCache(): Record<symbol, ReturnType<typeof setInterval> | undefine
 export function startGithubReconcilePoller(db: DatabaseSync): void {
   const cache = pollerCache();
   if (cache[POLLER_KEY]) return;
-  void pollGithubReconcile(db).catch(() => {});
+  // Boot pass: log a failure like the interval tick does, so a boot-time poll
+  // failure (e.g. a misconfigured PAT) is diagnosable instead of silent.
+  void pollGithubReconcile(db).catch((error) => {
+    logger.warn("github reconcile poller boot pass failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
   let running = false;
   const handle = setInterval(() => {
     if (running) return;

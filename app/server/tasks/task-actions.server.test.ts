@@ -30,6 +30,7 @@ import {
   recordAgentCompletion,
   releaseOwner,
   setOwner,
+  specialistReplyDirective,
   transitionStage,
 } from "./task-actions.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
@@ -393,6 +394,46 @@ describe("appendComment", () => {
       task_key: "VIB-1",
       read_at: null,
     });
+  });
+
+  // NEW-4: an AGENT reply that tags a human must fan out the same `mention`
+  // notification a human comment would — otherwise the tag the agents are now
+  // instructed to write pings no one. The `from` chip is the agent, not a human.
+  it("an agent reply that @tags a human notifies them, attributed to the agent", async () => {
+    const store = prepared();
+    withTask(store);
+    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      runId: "run_test",
+      actorRef: REVIEWER_REF,
+      replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
+    });
+
+    const rows = store.db
+      .prepare(`SELECT user_id, kind, actor_json FROM notifications`)
+      .all() as { user_id: string; kind: string; actor_json: string | null }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.user_id).toBe(store.users.arda.id);
+    expect(rows[0]!.kind).toBe("mention");
+    // Attributed to the reviewer agent (kind agent + backend), NOT a human.
+    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
+  });
+});
+
+describe("specialistReplyDirective (NEW-4)", () => {
+  it("names the commenter and instructs the agent to @tag them back", () => {
+    const directive = specialistReplyDirective({
+      commenterName: "Arda Test",
+      taskKey: "VIB-1",
+      title: "Add the file listing",
+      text: "can you summarize what you did?",
+    });
+    expect(directive).toContain("A human (Arda Test) commented");
+    expect(directive).toContain("can you summarize what you did?");
+    // The whole point: it must tell the agent to tag the person by @handle.
+    expect(directive).toContain("@Arda Test");
+    expect(directive.toLowerCase()).toContain("notified");
   });
 });
 

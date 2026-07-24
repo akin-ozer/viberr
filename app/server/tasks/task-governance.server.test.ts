@@ -21,12 +21,14 @@ import { getBoard } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
+  forceAcceptCompletion,
   recordAgentCompletion,
   reorderTask,
   resolvePacket,
   transitionStage,
   updateTaskGoal,
 } from "./task-actions.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -295,6 +297,73 @@ describe("P3.7 governance & lifecycle fixes", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("forceAcceptCompletion lets an ADMIN override a blocked task, audited (DG-2)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")], // required reviewer requested changes
+        validation: "failing",
+      },
+      PACKET,
+    );
+    const res = await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda), // admin
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.task.stage).toBe("done");
+    // The override is audited with the exact reason it bypassed.
+    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(forced).toHaveLength(1);
+    expect((forced[0]!.details as { bypassed?: string }).bypassed).toContain("request");
+  });
+
+  it("forceAcceptCompletion on an already-Done task is a no-op — no misleading audit (DG-2)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "done", ownerUserId: store.users.arda.id, validation: "healthy" });
+    const res = await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.task.stage).toBe("done");
+    // Overrode nothing → no forced-acceptance audit row.
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
+  it("forceAcceptCompletion denies a NON-admin (maintainer) — admin-only override (DG-2)", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        verdicts: [rejectionVerdict("rev_1")],
+        validation: "failing",
+      },
+      PACKET,
+    );
+    await expect(
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.murat), // maintainer, not admin
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it("dragging a card into Done reports acceptance, not a bare move (C4)", async () => {

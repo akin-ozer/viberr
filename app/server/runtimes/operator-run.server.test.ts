@@ -263,8 +263,9 @@ describe("Codex structured operator completion", () => {
             text: "Which config should this target?",
             reason: "The task names no specific endpoint.",
             packetOptions: [
-              { kind: "edit_goal", title: "Refine the goal with the exact endpoint", recommended: true },
-              { kind: "custom", title: "Confirm it's intentionally broad", recommended: false },
+              // A real strict-schema Codex model always emits `detail` (null when unused).
+              { kind: "edit_goal", title: "Refine the goal with the exact endpoint", detail: "State the target endpoint", recommended: true },
+              { kind: "custom", title: "Confirm it's intentionally broad", detail: null, recommended: false },
             ],
           },
         ],

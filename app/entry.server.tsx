@@ -1,7 +1,11 @@
 import { PassThrough, Readable } from "node:stream";
 
-import type { EntryContext, RouterContextProvider } from "react-router";
-import { ServerRouter } from "react-router";
+import type {
+  EntryContext,
+  HandleErrorFunction,
+  RouterContextProvider,
+} from "react-router";
+import { isRouteErrorResponse, ServerRouter } from "react-router";
 import type { RenderToPipeableStreamOptions } from "react-dom/server";
 import { renderToPipeableStream } from "react-dom/server";
 
@@ -12,6 +16,23 @@ import { logger } from "./server/logging/logger.server";
 await bootServer();
 
 export const streamTimeout = 5_000;
+
+/**
+ * Server error sink (F12-02). Without a `handleError`, React Router's default
+ * logs EVERY handler error — including routine 404s — so each `/favicon.ico`
+ * hit (browsers auto-request it; we ship `favicon.svg`, linked in root.tsx)
+ * and every crawler probe of a stray path spams the log with a full
+ * "No route matches URL …" entry. Swallow aborted requests (client navigated
+ * away / stream timed out) and route-not-found 404s as routine; log everything
+ * else through the app logger like the streaming-render path does.
+ */
+export const handleError: HandleErrorFunction = (error, { request }) => {
+  if (request.signal.aborted) return;
+  if (isRouteErrorResponse(error) && error.status === 404) return;
+  logger.error("request handler error", {
+    err: error instanceof Error ? error : new Error(String(error)),
+  });
+};
 
 export default function handleRequest(
   request: Request,

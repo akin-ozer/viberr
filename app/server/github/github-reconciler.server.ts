@@ -70,6 +70,11 @@ export interface GithubActionContext {
    *  status" still audits) so poller ticks don't spam the audit log. The
    *  meaningful per-task divergence EVENTS/notifications still fire. */
   skipProjectAudit?: boolean;
+  /** DG-3: a no-change reconcile records a provenance "observation" row — fine
+   *  for a human-triggered reconcile, but the 5-min poller would grow provenance
+   *  unboundedly with heartbeats. When set, poller ticks record provenance ONLY
+   *  when the task cache actually changed. */
+  skipUnchangedProvenance?: boolean;
 }
 
 function taskRefOf(
@@ -176,6 +181,12 @@ export async function reconcileTask(
   }
   if (compareResult.status === "auth_failed") {
     return { status: "auth_failed", message: compareResult.message };
+  }
+  if (compareResult.status === "rate_limited") {
+    // Transient — a rate-limit 403 is NOT a missing scope (DG-3). Skip this
+    // task's reconcile without opening a bogus `repo` scope violation; the next
+    // poll tick (or a manual Update status) retries once the window resets.
+    return { status: "network_unavailable", message: compareResult.message };
   }
   if (compareResult.status === "forbidden") {
     const { violation } = await flagScopeViolation(
@@ -372,6 +383,9 @@ export async function reconcileTask(
     behindBy: compare?.behindBy ?? 0,
   });
 
+  // DG-3: skip the no-change heartbeat row on poller ticks so provenance doesn't
+  // grow unboundedly; still record every observation for a human-triggered reconcile.
+  if (changed || !ctx.skipUnchangedProvenance)
   recordGithubProvenance(db, {
     absPath: resolveTaskFilePath(ref),
     dataRoot: ctx.dataRoot,
