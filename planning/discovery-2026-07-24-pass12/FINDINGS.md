@@ -74,6 +74,21 @@ CAP-1 (PR #95 merged out-of-band via gh) → accepting it (reorder→Done) corre
 existing merge: 200 "Accepted CAP-1 — moved to Done", stage=done, pr.state=merged. No double-merge,
 no error. Behavior was already correct; verified live.
 
+### NEW-4 (MED · UX/notification) — agents (incl. operator) didn't @tag the human they answered — FIXED (8942866)
+USER-REPORTED (screenshot): a human tags `@operator`; the operator replies but names no one, so the
+person who asked is never notified. Two gaps: (1) GENERATION — no directive told agents to tag anyone;
+the operator turn instruction now takes `humanCommentBy` and tells the operator to open with "@Name",
+the specialist reply directive does the same, and the operator persona (shipped asset + FALLBACK
+definition) states the convention. (2) NOTIFICATION — only the HUMAN comment path (`appendComment`)
+fanned out `mention` notifications, so an agent tag pinged no one. New shared `notifyMentionedUsers`
+helper (mention-notify.server.ts — same email-local/first-name match, reserved handles excluded) is
+wired into EVERY comment writer: appendComment (refactored onto it), the operator comment +
+recommendation writers, the specialist final reply, and mid-run agent comments, with the agent/operator
+as the notification `from`. Verified LIVE on VIB-1: 4/4 fresh `@operator` comments produced "@Arda …"
+replies, each landing as an "Operator · mentioned you" inbox notification and rendering as a `.mention`
+pill on the timeline. +11 tests (helper match/exclusions, agent-reply fan-out, operator fan-out, both
+directive-content tests); suite 1499→1510; typecheck green.
+
 ## CONFIRMED in main context
 
 ### F12-01 (MED · test-integrity) — kb-watch live-watcher test is timing-flaky
