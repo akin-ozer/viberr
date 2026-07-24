@@ -30,6 +30,8 @@ function counts(db: ReturnType<typeof ctx.makeDb>) {
     tasks: c(`SELECT count(*) AS c FROM task_projections`),
     notifications: c(`SELECT count(*) AS c FROM notifications`),
     runs: c(`SELECT count(*) AS c FROM agent_runs`),
+    scopeViolations: c(`SELECT count(*) AS c FROM scope_violations`),
+    userPrefs: c(`SELECT count(*) AS c FROM user_prefs`),
   };
 }
 
@@ -39,13 +41,16 @@ describe("runSeed (clean-sheet product seed)", () => {
     const dataRoot = ctx.makeTempDir();
     const summary = await runSeed(db, { dataRoot });
 
-    // Clean sheet: no projects, tasks, notifications, or run history.
+    // Clean sheet: no projects, tasks, notifications, run history, or
+    // board-derived leftovers.
     expect(counts(db)).toEqual({
       users: 1,
       projects: 0,
       tasks: 0,
       notifications: 0,
       runs: 0,
+      scopeViolations: 0,
+      userPrefs: 0,
     });
 
     // The built-in catalog templates are on disk (operator/developer/reviewer).
@@ -119,7 +124,17 @@ describe("runSeed (clean-sheet product seed)", () => {
     // A store carrying the old demo dataset (the test fixture writes exactly
     // what the old production seed wrote).
     await runDemoSeed(db, { dataRoot });
-    expect(counts(db).projects).toBeGreaterThan(0);
+    const before = counts(db);
+    expect(before.projects).toBeGreaterThan(0);
+    // Board-derived leftovers that used to survive a reset (DM-3). The demo
+    // fixture already carries an open scope violation; add a per-user pref too.
+    const anyUser = (db.prepare(`SELECT id FROM users LIMIT 1`).get() as { id: string }).id;
+    db.prepare(
+      `INSERT OR REPLACE INTO user_prefs (user_id, key, value_json, updated_at)
+       VALUES (?, 'theme', '"dark"', '2026-07-24T00:00:00Z')`,
+    ).run(anyUser);
+    expect(before.scopeViolations).toBeGreaterThan(0);
+    expect(counts(db).userPrefs).toBeGreaterThan(0);
 
     await runSeed(db, { dataRoot, reset: true });
 
@@ -127,6 +142,9 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(after.projects).toBe(0);
     expect(after.tasks).toBe(0);
     expect(after.notifications).toBe(0);
+    // The board-derived leftovers are gone — no phantom badges on re-create.
+    expect(after.scopeViolations).toBe(0);
+    expect(after.userPrefs).toBe(0);
     // Users/auth survive a reset (the demo people remain until a DB wipe).
     expect(after.users).toBeGreaterThan(0);
   });

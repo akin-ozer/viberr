@@ -73,6 +73,8 @@ function GithubTrace({
   githubHost?: string;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
+  /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
+  onForceAccept?: () => void;
   merging?: boolean;
 }) {
   if (!task.branch && !task.pr) {
@@ -171,6 +173,24 @@ function GithubTrace({
             <Icon name="check" />
             Complete merge
           </button>
+        )}
+        {task.blockReason && onForceAccept && (
+          <div style={{ marginTop: ".8rem" }}>
+            <p className="hint" style={{ margin: "0 0 .4rem" }}>
+              Acceptance is blocked: {task.blockReason}
+            </p>
+            <button
+              type="button"
+              className="btn ghost sm"
+              style={{ width: "100%" }}
+              disabled={merging}
+              onClick={onForceAccept}
+              title="Admin override: accept this task into Done past the review gate. Audited."
+            >
+              <Icon name="shield" />
+              Force accept (override review gate)
+            </button>
+          </div>
         )}
         {ghHref && (
           <a
@@ -968,7 +988,29 @@ function useRunControls({
         runFetcher.submit(fd, { method: "post" });
       }
     : undefined;
-  return { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge };
+  // Admin-only override of a stuck acceptance gate (DG-2). Server re-checks the
+  // admin role AND re-derives the block; this only wires the affordance.
+  const canForceAccept = roleCan(
+    myRole as ProjectRole | null,
+    "force-accept-completion",
+  );
+  const onForceAccept = canForceAccept
+    ? () => {
+        if (runBusy) return;
+        const fd = new FormData();
+        fd.set("_csrf", csrf);
+        fd.set("intent", "force-accept");
+        runFetcher.submit(fd, { method: "post" });
+      }
+    : undefined;
+  return {
+    runBusy,
+    canInterrupt,
+    onInterrupt,
+    onRetryBackend,
+    onCompleteMerge,
+    onForceAccept,
+  };
 }
 
 /**
@@ -1147,8 +1189,14 @@ export function TaskDetailPage({
     hasActiveRun: runtime.some((r) => r.state === "running"),
   });
 
-  const { runBusy, canInterrupt, onInterrupt, onRetryBackend, onCompleteMerge } =
-    useRunControls({ csrf, runtime, myRole, canRunAgents });
+  const {
+    runBusy,
+    canInterrupt,
+    onInterrupt,
+    onRetryBackend,
+    onCompleteMerge,
+    onForceAccept,
+  } = useRunControls({ csrf, runtime, myRole, canRunAgents });
   const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
     useLogSelection(runtime);
 
@@ -1273,6 +1321,7 @@ export function TaskDetailPage({
           task={task}
           {...(githubHost ? { githubHost } : {})}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
+          {...(onForceAccept ? { onForceAccept } : {})}
           merging={runBusy}
         />
         <CurrentStatePanel

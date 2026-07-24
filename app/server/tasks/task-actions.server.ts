@@ -1624,6 +1624,15 @@ export async function registerAgentCompletion(
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
   },
 ): Promise<void> {
+  // Persist the staging key on the run row so boot recovery can re-find the
+  // staged report_outcome envelope after a restart (AO-1) — the in-process
+  // callback below holds it only in a closure that dies with the process.
+  if (input.outcomeKey) {
+    db.prepare(`UPDATE agent_runs SET outcome_key = ? WHERE id = ?`).run(
+      input.outcomeKey,
+      input.runId,
+    );
+  }
   const { registerRunCompletion } = await import(
     "~/server/runtimes/run-service.server"
   );
@@ -2749,6 +2758,35 @@ async function openReviewPrBestEffort(
           "change, or the commits never reached the remote.",
       );
     }
+    // DG-5: a GitHub/credential FAILURE at the review boundary (auth, network,
+    // missing PAT/repo) previously only logged — the task silently reached Review
+    // with no PR and no explanation. Surface it so a human knows the review PR is
+    // missing and why. (scope_violation already carries its own task-visible
+    // violation; nothing_to_review is handled above.)
+    else if (
+      result.status === "auth_failed" ||
+      result.status === "network_unavailable" ||
+      result.status === "no_pat_configured" ||
+      result.status === "no_repo_configured"
+    ) {
+      const why =
+        result.status === "auth_failed"
+          ? "GitHub rejected the credential (authentication failed)"
+          : result.status === "network_unavailable"
+            ? "GitHub was unreachable (network error)"
+            : result.status === "no_pat_configured"
+              ? "no GitHub credential is configured for this project"
+              : "no GitHub repository is configured for this task";
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Review PR could not be opened",
+        `${taskKey} reached Review but no pull request could be opened — ${why}. ` +
+          "Fix the repository/credential settings, then use “Update status” to open the review PR.",
+      );
+    }
   } catch (error) {
     logger.warn("review PR open failed", {
       taskKey,
@@ -3377,6 +3415,51 @@ async function acceptCompletion(
     taskKey: input.taskKey,
     details: { to: doneStageId, boundary: "human", via: "accept_completion" },
   });
+}
+
+/**
+ * Admin-only override of the acceptance gate (DG-2). When a task is wedged —
+ * a required reviewer that can no longer record a verdict, or a stale blocked
+ * packet — a plain accept throws forever. An admin may force it: we record the
+ * exact reason being bypassed to the audit log, then accept with `force: true`.
+ */
+export async function forceAcceptCompletion(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(
+    db,
+    project,
+    actor,
+    "force-accept-completion",
+    "force-accept past the review gate",
+  );
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const bypassed =
+    acceptanceBlockedReason(existing.parsed.frontmatter) ??
+    (existing.parsed.frontmatter.readiness === "blocked"
+      ? "an open blocked decision packet"
+      : "no gate (already acceptable)");
+  recordAudit(db, {
+    action: "task.acceptance.forced",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { bypassed },
+  });
+  await acceptCompletion(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, force: true },
+    actor,
+    ctx,
+  );
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
 /** Complete a real GitHub merge after an offline acceptance left it pending. */

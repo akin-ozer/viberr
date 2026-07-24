@@ -23,6 +23,7 @@ import {
   commentToAgent,
   completeTaskMerge,
   dismissRecommendation,
+  forceAcceptCompletion,
   releaseOwner,
   resolvePacket,
   setOwner,
@@ -262,6 +263,16 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast: result.merged
             ? result.message
             : `Not merged — ${result.message}`,
+        };
+      }
+      case "force-accept": {
+        // Admin-only override of the review gate (DG-2): accept a task wedged on
+        // an un-recordable required reviewer or a stale blocked packet. Audited.
+        await forceAcceptCompletion(db, { projectSlug, taskKey }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toast: `Force-accepted ${taskKey} — moved to Done (review gate overridden)`,
         };
       }
       case "owner-take": {

@@ -101,13 +101,50 @@ export function startKbWatcher(
     return null;
   }
 
-  watcher.on("error", (err) => {
-    logger.error("kb watcher error", { err });
+  watcher.on("error", (err: NodeJS.ErrnoException) => {
+    // DM-2: a zombie watcher stops delivering events but stayed cached forever —
+    // isKbWatcherAlive() (and /resources/health) then lied. Clear the handle so
+    // health reports the truth, then re-arm on transient FS-pressure errors
+    // (mirrors the store file watcher) so a blip doesn't permanently stop KB
+    // re-indexing until a restart.
+    const code = (err as { code?: string } | null)?.code;
+    logger.error("kb watcher error — clearing watcher handle", {
+      err: err instanceof Error ? err : new Error(String(err)),
+      code,
+    });
+    const current = cache[KB_WATCHER_KEY];
+    if (current && current.watcher === watcher) {
+      for (const t of current.timers.values()) clearTimeout(t);
+      cache[KB_WATCHER_KEY] = undefined;
+    }
+    watcher.close();
+    const TRANSIENT = new Set(["EMFILE", "ENFILE", "ENOSPC", "EPERM", "EACCES"]);
+    if (code && TRANSIENT.has(code)) {
+      setTimeout(() => {
+        if (cache[KB_WATCHER_KEY] !== undefined) return; // someone re-armed already
+        logger.info("kb watcher re-arming after a transient error", { code });
+        try {
+          startKbWatcher(options);
+        } catch (reErr) {
+          logger.error("kb watcher re-arm failed", {
+            err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+          });
+        }
+      }, 1000).unref?.();
+    }
   });
 
   cache[KB_WATCHER_KEY] = { watcher, timers, root };
   logger.info("kb watcher started", { kbRoot });
   return watcher;
+}
+
+/** True while the KB watcher handle is live — /resources/health parity (DM-2).
+ *  A watcher error clears the handle, so `false` is REAL (dead/never-started),
+ *  not a zombie. */
+export function isKbWatcherAlive(): boolean {
+  const cache = globalThis as unknown as Record<symbol, KbWatcherHandle | undefined>;
+  return cache[KB_WATCHER_KEY] !== undefined;
 }
 
 /** Stops the kb watcher (tests + teardown). */

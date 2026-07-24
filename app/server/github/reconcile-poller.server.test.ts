@@ -97,4 +97,36 @@ describe("pollGithubReconcile (P11-14)", () => {
     const summary = await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
     expect(summary.projects).toBe(0);
   });
+
+  it("nudges a merge-pending (accepted, PR open) Done task ONCE, deduped (F12-05)", async () => {
+    const store = setupTestStore(ctx);
+    // A Done task an autonomous operator accepted — PR still OPEN ("accepted").
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Autonomously accepted",
+        stage: "done",
+        branch: "vib-1",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 77, state: "accepted", title: "[VIB-1] work" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const countNudges = () =>
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-1' AND kind = 'policy' AND title LIKE 'PR #77 accepted%'`,
+          )
+          .get() as { n: number }
+      ).n;
+
+    await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
+    const first = countNudges();
+    expect(first).toBeGreaterThan(0); // owner (+ admins/maintainers) notified
+
+    // A second poll must NOT re-notify — the nudge fires once per (task, PR).
+    await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
+    expect(countNudges()).toBe(first);
+  });
 });

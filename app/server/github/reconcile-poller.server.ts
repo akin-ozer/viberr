@@ -20,6 +20,68 @@ import {
 
 export const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
 
+const POLICY_ENGINE_NOTIFY_FROM = {
+  kind: "system" as const,
+  name: "Policy engine",
+};
+
+/**
+ * Nudge for tasks accepted into Done whose PR is still OPEN on GitHub — the
+ * "merge pending" state (F12-05). An Autonomous-preset operator can self-accept
+ * a task (Done), but `merge-pull-request` is always-human, so nothing actually
+ * merges the PR: without a nudge, a Done task's PR dangles unmerged forever.
+ * Fires ONCE per (task, PR) — deduped by the notification's distinctive title
+ * (rows are never deleted and read is monotonic, so "exists" means "already
+ * nudged"). A human still completes the merge (Complete-merge / gh).
+ */
+async function nudgeMergePendingTasks(
+  db: DatabaseSync,
+  ctx: GithubActionContext,
+): Promise<number> {
+  const rows = db
+    .prepare(
+      `SELECT t.project_slug AS slug, t.task_key AS key, t.pr_json AS pr
+         FROM task_projections t
+         JOIN projects p ON p.slug = t.project_slug
+        WHERE p.archived = 0 AND t.pr_json LIKE '%"state":"accepted"%'`,
+    )
+    .all() as { slug: string; key: string; pr: string }[];
+  let nudged = 0;
+  for (const row of rows) {
+    let pr: { number?: number; state?: string };
+    try {
+      pr = JSON.parse(row.pr);
+    } catch {
+      continue;
+    }
+    if (pr.state !== "accepted" || !pr.number) continue;
+    const title = `PR #${pr.number} accepted — merge to finish ${row.key}`;
+    const exists = db
+      .prepare(
+        `SELECT 1 FROM notifications WHERE task_key = ? AND kind = 'policy' AND title = ? LIMIT 1`,
+      )
+      .get(row.key, title);
+    if (exists) continue;
+    const { notifyTaskWatchers } = await import(
+      "~/server/tasks/task-actions.server"
+    );
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: row.slug,
+        taskKey: row.key,
+        kind: "policy",
+        title,
+        text: `${row.key} was accepted into Done, but PR #${pr.number} is still open on GitHub — merge it to finish delivery. (Autonomous acceptance can't merge a PR; a human completes the merge from the task's Complete-merge button or via GitHub.)`,
+        from: POLICY_ENGINE_NOTIFY_FROM,
+      },
+      ctx,
+    );
+    nudged += 1;
+  }
+  return nudged;
+}
+
 /** Active projects that have at least one branched task worth reconciling. */
 function projectsToPoll(db: DatabaseSync): string[] {
   return (
@@ -52,6 +114,7 @@ export async function pollGithubReconcile(
       const summary = await reconcileProject(db, slug, SYSTEM_ACTOR, {
         ...ctx,
         skipProjectAudit: true,
+        skipUnchangedProvenance: true,
       });
       reconciled += summary.reconciled;
       changed += summary.changed;
@@ -62,11 +125,22 @@ export async function pollGithubReconcile(
       });
     }
   }
-  if (changed > 0) {
+  // F12-05: nudge the human to finish any merge-pending (accepted-but-open) PR.
+  // Best-effort — a nudge failure never aborts the poll.
+  let nudged = 0;
+  try {
+    nudged = await nudgeMergePendingTasks(db, ctx);
+  } catch (error) {
+    logger.warn("merge-pending nudge failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  if (changed > 0 || nudged > 0) {
     logger.info("github reconcile poll surfaced changes", {
       projects: slugs.length,
       reconciled,
       changed,
+      mergePendingNudged: nudged,
     });
   }
   return { projects: slugs.length, reconciled, changed };

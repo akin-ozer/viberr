@@ -204,6 +204,34 @@ function releaseOperatorLease(
   });
 }
 
+/** Drain the pending trigger after a CROSS-BOOT in-flight run finishes (a DB
+ *  row with no process lease, e.g. resumed after a restart). Unlike
+ *  releaseOperatorLease, this NEVER deletes a held lease — a token-less release
+ *  there would evict a live successor drive that acquired the lease in the
+ *  meantime and fire the queued trigger anyway, double-driving the task (AO-2).
+ *  If a successor now holds the lease, it will drain the pending queue on its
+ *  own release, so this is a no-op. */
+function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
+  const state = leaseState();
+  if (state.held.has(key)) return; // a live successor owns the lease — leave it.
+  const queued = state.pending.get(key);
+  if (!queued) {
+    settleWaitingAfterOperator(db, leaseRefFromKey(key));
+    return;
+  }
+  state.pending.delete(key);
+  logger.info("cross-boot in-flight finished — firing the queued trigger", {
+    key,
+    trigger: queued.trigger ?? "manual",
+  });
+  void runOperator(db, queued).catch((error) => {
+    logger.error("queued operator trigger failed", {
+      key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
+}
+
 /** Recover the task ref from a lease key (slugs are kebab-case — the first
  *  "/" is the separator). Fallback for releases with no held entry. */
 function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } {
@@ -303,7 +331,7 @@ export async function runOperator(
   if (inflight) {
     lease.pending.set(leaseKey, input);
     const { chainRunCompletion } = await import("./run-service.server");
-    chainRunCompletion(inflight.id, () => releaseOperatorLease(db, leaseKey));
+    chainRunCompletion(inflight.id, () => drainPendingAfterInFlight(db, leaseKey));
     logger.info("operator run queued — DB row already in flight", {
       taskKey: input.taskKey,
       runId: inflight.id,

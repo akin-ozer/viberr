@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  isKbWatcherAlive,
   kbDirOfChange,
   startKbWatcher,
   stopKbWatcher,
@@ -100,21 +101,28 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
       { userId: "u", label: "u" },
       { dataRoot },
     );
-    const before = db
-      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
-      .get() as { last_indexed_at: string | null };
+    // Pin `last_indexed_at` to a deterministic OLD sentinel. saveKnowledgeBase's
+    // initial index and the watcher re-index can land in the SAME wall-clock
+    // millisecond (their ISO strings then compare equal → flaky). Seeding an
+    // old value makes the re-index's `now` provably different without depending
+    // on sub-millisecond timing.
+    const OLD = "2000-01-01T00:00:00.000Z";
+    db.prepare(`UPDATE org_knowledge_bases SET last_indexed_at = ? WHERE dir='notes'`).run(OLD);
 
     const watcher = startKbWatcher({ dataRoot, db });
     expect(watcher).not.toBeNull();
 
-    // Add a doc; the watcher debounces (250ms) then re-indexes.
+    // Add a doc; the watcher debounces (250ms) then re-indexes. Poll until the
+    // sentinel is overwritten (or time out) so the assertion never races.
     kbFile(dataRoot, "notes", "b.md", "more");
-    await new Promise((r) => setTimeout(r, 600));
-
-    const after = db
-      .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
-      .get() as { last_indexed_at: string | null };
-    expect(after.last_indexed_at).not.toBe(before.last_indexed_at);
+    let after = { last_indexed_at: OLD as string | null };
+    for (let i = 0; i < 40 && after.last_indexed_at === OLD; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      after = db
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
+        .get() as { last_indexed_at: string | null };
+    }
+    expect(after.last_indexed_at).not.toBe(OLD);
     expect(after.last_indexed_at).not.toBeNull();
   });
 
@@ -132,5 +140,16 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     // A temp dir with NO kb/ subdir.
     const dataRoot = ctx.makeTempDir();
     expect(startKbWatcher({ dataRoot, db })).toBeNull();
+  });
+
+  it("isKbWatcherAlive tracks the handle for /resources/health parity (DM-2)", () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    mkdirSync(path.join(dataRoot, "kb"), { recursive: true });
+    expect(isKbWatcherAlive()).toBe(false); // not started yet
+    startKbWatcher({ dataRoot, db });
+    expect(isKbWatcherAlive()).toBe(true);
+    stopKbWatcher();
+    expect(isKbWatcherAlive()).toBe(false);
   });
 });

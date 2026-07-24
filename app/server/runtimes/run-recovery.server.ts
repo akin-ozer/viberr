@@ -185,7 +185,7 @@ export async function recoverUnreactedAgentRuns(
   const rows = db
     .prepare(
       `SELECT r.id, r.project_slug, r.task_key, r.backend, r.role, r.kind,
-              r.agent_profile_id
+              r.agent_profile_id, r.outcome_key
          FROM agent_runs r
          JOIN task_projections t
            ON t.project_slug = r.project_slug AND t.task_key = r.task_key
@@ -207,6 +207,7 @@ export async function recoverUnreactedAgentRuns(
     role: string;
     kind: string;
     agent_profile_id: string;
+    outcome_key: string | null;
   }[];
 
   if (rows.length === 0) return { recovered: 0, capped: 0 };
@@ -284,6 +285,10 @@ export async function recoverUnreactedAgentRuns(
           profileId: row.agent_profile_id,
           role: row.role,
           delivers: row.kind === "primary",
+          // AO-1: re-supply the staging key so the staged report_outcome envelope
+          // (persisted in staged_outcomes) is consumed on recovery — a Claude
+          // verdict survives a restart instead of falling back to the prose regex.
+          ...(row.outcome_key ? { outcomeKey: row.outcome_key } : {}),
           workdir: null,
           agentHandle: row.role.trim().split(/[\s/&]+/)[0]?.toLowerCase() ?? row.role,
         },
