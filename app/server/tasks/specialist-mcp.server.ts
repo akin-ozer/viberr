@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { logger } from "~/server/logging/logger.server";
 import { getMcpCredential, listMcpServers } from "~/server/org/resources.server";
 
 /**
@@ -46,12 +47,25 @@ export function resolveSpecialistMcpServers(
   for (const name of mcpNames) {
     if (name === "viberr") continue; // operator's in-process server, not for specialists
     const row = byName.get(name);
-    if (!row || !row.target) continue;
+    if (!row || !row.target) {
+      // P13-KM-11: a declared MCP that resolves to no registry row used to be
+      // dropped in silence, so a run went out without a tool surface its profile
+      // promised and nothing anywhere said so. Same honesty rule as skills/KBs.
+      logger.warn("declared MCP server not in the org registry — run proceeds WITHOUT it", {
+        mcp: name,
+      });
+      continue;
+    }
     const token = getMcpCredential(db, name);
     if (row.transport === "stdio") {
-      const parts = row.target.trim().split(/\s+/);
+      const parts = splitCommand(row.target);
       const command = parts[0];
-      if (!command) continue;
+      if (!command) {
+        logger.warn("MCP stdio command is empty — run proceeds WITHOUT it", {
+          mcp: name,
+        });
+        continue;
+      }
       servers[name] = {
         command,
         args: parts.slice(1),
@@ -66,4 +80,19 @@ export function resolveSpecialistMcpServers(
     }
   }
   return servers;
+}
+
+/**
+ * Split a stdio command line into argv. P13-KM-17: a naive whitespace split
+ * mangles any argument containing a space (a path, a JSON blob, a connection
+ * string), so quoted segments are kept whole.
+ */
+function splitCommand(target: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(target.trim())) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3] ?? "");
+  }
+  return out.filter(Boolean);
 }

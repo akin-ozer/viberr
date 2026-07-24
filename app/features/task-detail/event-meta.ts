@@ -37,8 +37,16 @@ export const EVENT_META: Record<string, EventMeta> = {
   assign: { node: "transition", icon: "user", label: "Ownership" },
 };
 
+/**
+ * UI-57: an UNKNOWN event type used to fall back to the comment meta, but
+ * `timeline.tsx` renders the typed branch whenever `type !== "comment"` — so an
+ * unrecognized type rendered a pill literally labelled "commented". A tolerant
+ * renderer must stay tolerant AND honest: the fallback now names the raw type.
+ */
 export function eventMeta(type: string): EventMeta {
-  return EVENT_META[type] ?? EVENT_META.comment!;
+  const known = EVENT_META[type];
+  if (known) return known;
+  return { node: "", icon: "message", label: type || "event" };
 }
 
 const TYPED_KIND: Record<string, PillKind> = {

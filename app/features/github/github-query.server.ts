@@ -78,28 +78,33 @@ export interface GithubViewData {
 }
 
 /**
- * Latest reconciled behindBy per task file, from provenance (or 0). Factory:
- * prepare the provenance statement ONCE and map many branch rows through it,
- * instead of re-preparing + running it per row inside `.map` (pass-4 WI-10 n+1).
+ * Latest reconciled behindBy per task file, from provenance — or **null when the
+ * branch was never compared** (UI-05). This used to return 0 for "no data",
+ * which `deriveSyncState` cannot distinguish from a real "0 commits behind", so
+ * an unreconciled branch was painted green "synced".
+ *
+ * Factory: prepare the provenance statement ONCE and map many branch rows
+ * through it, instead of re-preparing + running it per row inside `.map`
+ * (pass-4 WI-10 n+1).
  */
 function createBehindByResolver(
   db: DatabaseSync,
-): (sourcePath: string) => number {
+): (sourcePath: string) => number | null {
   const stmt = db.prepare(
     `SELECT details_json FROM provenance
      WHERE source_path = ? AND action = 'github.reconcile'
      ORDER BY id DESC LIMIT 1`,
   );
-  return (sourcePath: string): number => {
+  return (sourcePath: string): number | null => {
     const row = stmt.get(sourcePath) as
       | { details_json: string | null }
       | undefined;
-    if (!row?.details_json) return 0;
+    if (!row?.details_json) return null;
     try {
       const details = JSON.parse(row.details_json) as { behindBy?: unknown };
-      return typeof details.behindBy === "number" ? details.behindBy : 0;
+      return typeof details.behindBy === "number" ? details.behindBy : null;
     } catch {
-      return 0;
+      return null;
     }
   };
 }

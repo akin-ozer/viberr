@@ -205,12 +205,17 @@ function codexConfigForRun(
     project_doc_max_bytes: 0,
     // LV-13: drop the CLI's whole skills channel. `include_instructions: false`
     // removes the "## Skills" block (bundled + user-installed alike);
-    // `bundled: false` additionally refuses the self-installed `.system` set.
-    // Both were confirmed effective — and unknown keys confirmed inert — with
-    // `codex debug prompt-input` against codex-cli 0.144.6.
+    // `bundled.enabled: false` additionally refuses the `.system` set the CLI
+    // self-installs into EVERY home on startup. Both keys were confirmed
+    // effective, and near-miss keys (`skills.enabled`, `skills.disabled`,
+    // `skills.roots`) confirmed inert, with `codex debug prompt-input` against
+    // codex-cli 0.144.6. `bundled` is a STRUCT there — a bare
+    // `skills.bundled = false` makes the CLI refuse to load its configuration
+    // at all ("invalid type: boolean, expected struct BundledSkillsConfig"),
+    // which would fail every run.
     skills: {
       include_instructions: false,
-      bundled: false,
+      bundled: { enabled: false },
     },
     features: {
       ...baseFeatures,

@@ -56,12 +56,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     })),
     projectName: project.name,
     // Live store resources for the profile-editor picker (item-2): a skill/MCP/
-    // KB created in org settings is now grantable to an agent, replacing the
-    // hardcoded mock catalog whose items resolved to nothing. Scoped to
-    // `specialist` (F7-RES3): new profiles are specialists, so the reserved
-    // in-process `viberr` operator toolkit is excluded from the attachable set.
+    // KB created in org settings is grantable to an agent, replacing the
+    // hardcoded mock catalog whose items resolved to nothing.
+    //
+    // P13-KM-09/UI-28: this was ALWAYS built as `specialist`, which excludes the
+    // reserved in-process `viberr` toolkit — so opening Edit Operator rendered
+    // the operator's REAL governance-server grant as a red "no longer in the
+    // store — click to remove this grant" chip, i.e. the UI instructed an admin
+    // to break the operator. The editor is one modal for both kinds, so the
+    // catalog now carries the operator set (which is a superset: it merely adds
+    // the reserved name) and the specialist picker filters it out per profile.
     resourceCatalog: buildResourceCatalog(db, undefined, {
-      profileKind: "specialist",
+      profileKind: "operator",
     }),
     // Per-backend credential availability (same cheap SDK-auth check the run
     // service uses). The create/edit modal disables a backend that isn't

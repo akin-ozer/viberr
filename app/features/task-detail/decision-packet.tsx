@@ -55,6 +55,7 @@ export function DecisionPacket({
   busy,
   canResolve,
   canResolveCompletion,
+  canEditGoal,
   onResolve,
   onAsk,
 }: {

@@ -200,7 +200,7 @@ describe("the completion path attributes and preserves the agent's question (P13
         runId: "run_1",
         replyText: "Blocked on the format decision.",
         verdict: null,
-        question: { title: "Which changelog format?", body: null },
+        question: { title: "Which changelog format?" },
       },
     );
     // A second agent finishes while that decision is still open. Claude's
@@ -217,7 +217,7 @@ describe("the completion path attributes and preserves the agent's question (P13
         runId: "run_2",
         replyText: "Also blocked.",
         verdict: null,
-        question: { title: "Do we still document the v1 endpoints?", body: null },
+        question: { title: "Do we still document the v1 endpoints?" },
       },
     );
 

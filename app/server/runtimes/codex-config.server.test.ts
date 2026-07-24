@@ -76,6 +76,7 @@ describe("prepareCodexHome", () => {
     const env = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
+      VIBERR_CODEX_USE_CLI_AUTH: "1",
     } as NodeJS.ProcessEnv;
     const result = prepareCodexHome(env);
 
@@ -100,6 +101,7 @@ describe("prepareCodexHome", () => {
     const env = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
+      VIBERR_CODEX_USE_CLI_AUTH: "1",
     } as NodeJS.ProcessEnv;
 
     expect(prepareCodexHome(env).authMirrored).toBe(true);
@@ -122,6 +124,7 @@ describe("prepareCodexHome", () => {
     const env = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: login,
+      VIBERR_CODEX_USE_CLI_AUTH: "1",
     } as NodeJS.ProcessEnv;
     expect(prepareCodexHome(env).authMirrored).toBe(true);
     expect(readFileSync(path.join(home, "auth.json"), "utf8")).toBe(
@@ -134,9 +137,28 @@ describe("prepareCodexHome", () => {
     const env = {
       VIBERR_DATA_ROOT: path.join(root, "data"),
       CODEX_HOME: path.join(root, "nope"),
+      VIBERR_CODEX_USE_CLI_AUTH: "1",
     } as NodeJS.ProcessEnv;
     const result = prepareCodexHome(env);
     expect(result.authMirrored).toBe(false);
     expect(lstatSync(result.home).isDirectory()).toBe(true);
+  });
+
+  it("touches nothing outside cached-login mode (npm test must never link ~/.codex)", () => {
+    // Token / API-key auth carries the credential in the spawn env; auth.json is
+    // only consulted for a cached `codex login`. The suite blanks the opt-in
+    // (F10-10), so this is also what keeps a developer's personal login out of
+    // every test data root.
+    const root = tmp();
+    const login = path.join(root, "login-codex");
+    mkdirSync(login, { recursive: true });
+    writeFileSync(path.join(login, "auth.json"), "{}");
+    const env = {
+      VIBERR_DATA_ROOT: path.join(root, "data"),
+      CODEX_HOME: login,
+    } as NodeJS.ProcessEnv;
+    const result = prepareCodexHome(env);
+    expect(result.authMirrored).toBe(false);
+    expect(() => lstatSync(result.home)).toThrow();
   });
 });

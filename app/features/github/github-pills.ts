@@ -15,17 +15,27 @@ export interface PillView {
   label: string;
 }
 
-/** Sync column vocabulary (ruling 12: merged > behind > synced). */
-export type SyncState = "merged" | "behind_main" | "synced";
+/**
+ * Sync column vocabulary (ruling 12: merged > behind > synced), plus `unknown`.
+ *
+ * UI-05: `unknown` exists because "we never measured this" is NOT "synced". The
+ * behind-by resolver defaulted to 0 when no `github.reconcile` provenance row
+ * existed, so every branch on a project that has never successfully reconciled
+ * (no credential, repo not found, poller failing) showed the green "synced"
+ * pill — flatly contradicting the page-level "Not yet synced" freshness chip,
+ * and read by maintainers as "this branch is up to date with main".
+ */
+export type SyncState = "merged" | "behind_main" | "synced" | "unknown";
 
 export const SYNC_PILL: Record<SyncState, PillView> = {
   merged: { kind: "done", label: "merged" },
   behind_main: { kind: "risk", label: "behind main" },
   synced: { kind: "ready", label: "synced" },
+  unknown: { kind: "neutral", label: "not compared" },
 };
 
 export function syncPill(state: SyncState): PillView {
-  return SYNC_PILL[state] ?? SYNC_PILL.synced;
+  return SYNC_PILL[state] ?? SYNC_PILL.unknown;
 }
 
 /**

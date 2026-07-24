@@ -352,11 +352,13 @@ export function Timeline({
         <Icon name="activity" />
         <h2>Timeline</h2>
         <span className="right tl-filter">
+          {/* UI-57: the filter tabs carried selection by CSS class only. */}
           {TL_FILTERS.map((x) => (
             <button
               type="button"
               key={x.id}
               className={f === x.id ? "on" : ""}
+              aria-pressed={f === x.id}
               onClick={() => setF(x.id)}
             >
               {x.label}
@@ -455,9 +457,17 @@ export function Timeline({
       </div>
 
       <div className="timeline" style={{ marginTop: "1.1rem" }}>
+        {/* UI-40: `items` is the FILTERED view of an already-bounded slice, so
+            "this task hasn't started" was printed for a task with plenty of
+            history whenever the active tab matched nothing — with "Show older
+            events · N more" rendered directly beneath it. */}
         {items.length === 0 ? (
           <div className="empty">
-            No activity yet — this task hasn't started its operator loop.
+            {events.length === 0
+              ? "No activity yet — this task hasn't started its operator loop."
+              : f === "comment"
+                ? "No comments in the loaded history — switch to All, or load older events."
+                : "No governance events in the loaded history — switch to All, or load older events."}
           </div>
         ) : (
           items.map((ev) => (

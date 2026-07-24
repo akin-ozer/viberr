@@ -7,7 +7,6 @@ import { resolveClaudeConfigDir } from "./claude-config.server";
 import {
   prepareCodexHome,
   resolveCodexAuthSource,
-  resolveCodexHome,
 } from "./codex-config.server";
 import {
   createClaudeAdapter,
@@ -91,34 +90,28 @@ function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
  *
  * P13-LV-13/LV-14: runs no longer execute in `$CODEX_HOME` — they get an
  * app-owned run home (`resolveCodexHome`) that `prepareCodexHome` mirrors the
- * login into. Auth is therefore usable when EITHER dir holds an `auth.json`;
- * the reported path is the run home when that is where the file already is, so
- * the "copy it here" copy names the dir the runs actually read.
+ * login into. The probe deliberately still asks about the LOGIN dir, not the
+ * mirror: the login is what a human manages, and a probe that also accepted the
+ * mirror would go sticky (a run home keeps a stale copy long after the login was
+ * removed) and lose the self-healing property below. In the container the two
+ * paths are the same dir, so the documented docker recipe is unchanged.
  */
-function existsQuiet(file: string): boolean {
-  try {
-    return existsSync(file);
-  } catch {
-    return false;
-  }
-}
-
 export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
   optIn: boolean;
   authJsonPath: string;
   authJsonExists: boolean;
 } {
-  const sourceAuth = path.join(resolveCodexAuthSource(env), "auth.json");
-  const runAuth = path.join(resolveCodexHome(env), "auth.json");
-  const sourceExists = existsQuiet(sourceAuth);
-  const runExists = sourceAuth === runAuth ? sourceExists : existsQuiet(runAuth);
+  const authJsonPath = path.join(resolveCodexAuthSource(env), "auth.json");
+  let authJsonExists = false;
+  try {
+    authJsonExists = existsSync(authJsonPath);
+  } catch {
+    authJsonExists = false;
+  }
   return {
     optIn: isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH),
-    // Name the login dir when nothing exists yet (that is where `codex login`
-    // writes and where the docker recipe copies from); otherwise name whichever
-    // dir actually holds the credential.
-    authJsonPath: sourceExists || !runExists ? sourceAuth : runAuth,
-    authJsonExists: sourceExists || runExists,
+    authJsonPath,
+    authJsonExists,
   };
 }
 

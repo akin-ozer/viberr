@@ -893,6 +893,15 @@ export async function saveMcpServer(
     cred = null;
   }
   if (name.length < 2) throw AppError.validation("Give the server a name.");
+  // P13-KM-12: `viberr` is the OPERATOR's in-process governance server and
+  // `viberr_agent` is the specialist toolkit. A row under either name is
+  // unusable — the resolvers skip the reserved name — and shadows differently
+  // per backend, so refuse it at save instead of accepting a dead server.
+  if (name === "viberr" || name === "viberr_agent" || name === "viberr-agent") {
+    throw AppError.validation(
+      `"${name}" is reserved for Viberr's built-in agent tools — pick another name.`,
+    );
+  }
   if (target.length < 4) {
     throw AppError.validation(
       transport === "stdio" ? "Enter the command." : "Enter the endpoint.",

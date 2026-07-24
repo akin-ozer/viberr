@@ -86,12 +86,22 @@ function mtimeMs(file: string): number {
   }
 }
 
+function isTruthy(v: string | undefined): boolean {
+  return v === "1" || v === "true" || v === "yes";
+}
+
 /**
  * Materialize the run home: create it, and mirror the human's `auth.json` into
  * it when the two differ. Prefers a SYMLINK (the CLI refreshes the subscription
  * token in place, so a link keeps the app and the operator's own `codex` CLI on
  * one credential); falls back to a copy where symlinks are unavailable, and
  * refreshes a stale copy when the source is newer (a re-login).
+ *
+ * Only touches the filesystem in CACHED-LOGIN mode (`VIBERR_CODEX_USE_CLI_AUTH`)
+ * — that is the only auth mode where `auth.json` is consulted at all; token and
+ * API-key modes carry the credential in the spawn env. That also keeps `npm
+ * test` (which blanks the flag, F10-10) from ever linking a developer's
+ * personal `~/.codex/auth.json` into a data root.
  *
  * Never throws — an unpreparable home degrades to "codex unavailable" through
  * the normal credential probe rather than crashing adapter construction.
@@ -105,6 +115,9 @@ export function prepareCodexHome(env: NodeJS.ProcessEnv = process.env): {
   const home = resolveCodexHome(env);
   const authSource = path.resolve(resolveCodexAuthSource(env));
   let authMirrored = false;
+  if (!isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH)) {
+    return { home, authSource, authMirrored };
+  }
   try {
     mkdirSync(home, { recursive: true });
     if (authSource === home) return { home, authSource, authMirrored };

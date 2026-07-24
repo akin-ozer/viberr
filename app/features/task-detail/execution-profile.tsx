@@ -15,6 +15,21 @@ export interface DeployedSpecialistView {
   role: string;
   backend: "codex" | "claude";
   model: string;
+  /**
+   * UI-39: the loader has always shipped these (specialist-run.server.ts builds
+   * them from the deployment's real capability grants) and the client type
+   * simply didn't declare them — so "Assign delivering agent" offered agents
+   * with NO repo-write grant (the run starts, streams, and delivers nothing),
+   * and the reviewer menu gave no hint which reviewers actually gate acceptance.
+   */
+  capabilities?: {
+    /** Holds a repo-write grant in `direct` mode — can own branch/PR delivery. */
+    delivery: boolean;
+    /** Holds `report-validation-verdict` — its verdict gates acceptance. */
+    verdict: boolean;
+    /** May raise ask-human question packets. */
+    askHuman: boolean;
+  };
 }
 
 /**
@@ -271,22 +286,36 @@ function SpecialistControl({
       {open && (
         <div className="own-menu" role="menu" aria-label="Assign a delivering agent">
           <div className="own-lbl">Deployed agents</div>
-          {specialists.map((s) => (
-            <button
-              type="button"
-              className="menu-item"
-              role="menuitem"
-              key={s.id}
-              onClick={() => {
-                setOpen(false);
-                onAssign(s.id);
-              }}
-            >
-              <AgentGlyph backend={s.backend} />
-              {s.name}
-              <span className="own-role">{s.role}</span>
-            </button>
-          ))}
+          {/* UI-39: an agent with no repo-write grant cannot deliver — its run
+              starts, streams, and produces no branch or PR. Say so on the chip
+              rather than silently offering a dead end. */}
+          {specialists.map((s) => {
+            const cannotDeliver = s.capabilities?.delivery === false;
+            return (
+              <button
+                type="button"
+                className="menu-item"
+                role="menuitem"
+                key={s.id}
+                title={
+                  cannotDeliver
+                    ? `${s.name} has no repo-write grant — it can analyse and comment, but it can't produce a branch or PR. Grant one on the Agents page.`
+                    : undefined
+                }
+                onClick={() => {
+                  setOpen(false);
+                  onAssign(s.id);
+                }}
+              >
+                <AgentGlyph backend={s.backend} />
+                {s.name}
+                <span className="own-role">
+                  {s.role}
+                  {cannotDeliver ? " · no repo write" : ""}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -365,12 +394,22 @@ function ReviewerControl({
               <span className="sub">All deployed agents are already reviewing.</span>
             </div>
           ) : (
+            // UI-39: badge the reviewers whose verdict actually GATES
+            // acceptance (`report-validation-verdict`, snapshotted at engage
+            // time) — the menu gave no way to tell them apart.
             specialists.map((s) => (
               <button
                 type="button"
                 className="menu-item"
                 role="menuitem"
                 key={s.id}
+                title={
+                  s.capabilities?.verdict
+                    ? `${s.name} reports validation verdicts — engaging it makes its approval required before acceptance.`
+                    : s.capabilities
+                      ? `${s.name} has no verdict grant — it can review and comment, but its opinion does not gate acceptance.`
+                      : undefined
+                }
                 onClick={() => {
                   setOpen(false);
                   onAssign(s.id);
@@ -378,7 +417,10 @@ function ReviewerControl({
               >
                 <AgentGlyph backend={s.backend} />
                 {s.name}
-                <span className="own-role">{s.role}</span>
+                <span className="own-role">
+                  {s.role}
+                  {s.capabilities?.verdict ? " · gates acceptance" : ""}
+                </span>
               </button>
             ))
           )}

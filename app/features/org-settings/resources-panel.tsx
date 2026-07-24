@@ -678,7 +678,7 @@ function KbPanel({
   onDelete,
 }: {
   kbs: KbView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (slug: string) => number;
   reindexing: string | null;
   onNew: () => void;
   onBrowse: (kb: KbView) => void;
@@ -712,8 +712,8 @@ function KbPanel({
               </span>
               <span className="sub">
                 read live · re-scanned {rel(kb.lastIndexedAt)}
-                {usedBy(kb.id, kb.name) > 0
-                  ? " · " + usedBy(kb.id, kb.name) + " profiles"
+                {usedBy(kb.dir) > 0
+                  ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
                   : ""}
               </span>
             </span>
@@ -875,7 +875,7 @@ function SkillPanel({
   onDelete,
 }: {
   skills: SkillView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (slug: string) => number;
   onNew: () => void;
   onBrowse: (s: SkillView) => void;
   onEdit: (s: SkillView) => void;
@@ -910,8 +910,8 @@ function SkillPanel({
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
-                {usedBy(s.id, s.name) > 0
-                  ? " · " + usedBy(s.id, s.name) + " profiles"
+                {usedBy(s.name) > 0
+                  ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
                   : ""}
               </span>
             </span>
@@ -1052,8 +1052,18 @@ export function ResourcesPanel({
   const [reindexing, setReindexing] = useBusyRow(reindexAction);
   const [testing, setTesting] = useBusyRow(testAction);
 
-  const usedBy = (key: "skills" | "mcps" | "kbs", id: string, name: string) =>
-    gagents.filter((a) => a[key].includes(id) || a[key].includes(name)).length;
+  /**
+   * How many GLOBAL TEMPLATES reference this resource.
+   *
+   * P13-KM-08: this compared against the row `id` (a `kb_…`/`sk_…` value that
+   * never appears in a grant) and the display `name`, but a grant stores the
+   * store SLUG — so the KB count was structurally always 0 while the skill
+   * count only worked because a skill's name IS its folder. Callers now pass
+   * the slug. The label says "templates" because project deployments carry
+   * their own copies and are not counted here.
+   */
+  const usedBy = (key: "skills" | "mcps" | "kbs", slug: string) =>
+    gagents.filter((a) => a[key].includes(slug)).length;
 
   const doDelete = () => {
     if (!confirm) return;
@@ -1074,7 +1084,7 @@ export function ResourcesPanel({
       <div className="rsrc-grid">
         <KbPanel
           kbs={kbs}
-          usedBy={(id, name) => usedBy("kbs", id, name)}
+          usedBy={(slug) => usedBy("kbs", slug)}
           reindexing={reindexing}
           onNew={() => setModal({ kind: "kb", item: null })}
           onBrowse={(kb) => setBrowsing({ kind: "kb", id: kb.id })}
@@ -1100,7 +1110,7 @@ export function ResourcesPanel({
 
         <SkillPanel
           skills={skills}
-          usedBy={(id, name) => usedBy("skills", id, name)}
+          usedBy={(slug) => usedBy("skills", slug)}
           onNew={() => setModal({ kind: "skill", item: null })}
           onBrowse={(s) => setBrowsing({ kind: "skill", id: s.id })}
           onEdit={(s) => setModal({ kind: "skill", item: s })}

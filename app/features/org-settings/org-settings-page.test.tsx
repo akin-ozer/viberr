@@ -315,7 +315,7 @@ describe("ResourcesPanel", () => {
     expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
-      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 profiles/),
+      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 template/),
     ).toBeTruthy();
     expect(getByText(/Codex · Ready · In Progress · 2 context resources · used in 4 projects/)).toBeTruthy();
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();

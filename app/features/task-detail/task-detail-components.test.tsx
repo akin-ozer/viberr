@@ -67,7 +67,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -96,7 +96,7 @@ describe("DecisionPacket", () => {
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     // F-UI1: the button no longer echoes the (often long, multi-line) option
@@ -119,6 +119,7 @@ describe("DecisionPacket", () => {
         busy={false}
         canResolve
         canResolveCompletion
+        canEditGoal
         onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -141,7 +142,7 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={onAsk} />,
     );
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
@@ -292,11 +293,15 @@ describe("TimelineItem", () => {
     }
   });
 
-  it("unknown event types fall back to comment rendering (tolerant)", () => {
+  // UI-57: REWRITTEN — this test pinned the bug. The tolerant fallback reused
+  // the COMMENT meta, but the renderer takes the typed branch for anything that
+  // is not literally `comment`, so an unknown type rendered a pill labelled
+  // "commented" — a row asserting it was a comment when it was not one. The
+  // fallback now names the raw type instead.
+  it("unknown event types render a neutral pill naming the raw type", () => {
     const { container } = render(<TimelineItem ev={ev({ type: "mystery" })} />);
     expect(container.querySelector(".comment-card")).toBeNull(); // not a comment…
-    // …but gets the neutral typed pill with comment meta's dead label.
-    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("commented");
+    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("mystery");
   });
 });
 

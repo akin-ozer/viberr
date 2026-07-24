@@ -274,11 +274,24 @@ export async function action({ request, params }: Route.ActionArgs) {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
         const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // UI-43: the "Retrying on X · streaming to agent logs" toast was
+        // computed from the option KIND alone. `resolvePacket` catches a failed
+        // `startAgentRun` and merely appends a timeline note ("The retry could
+        // not start — …"), so the user was told the retry was streaming when
+        // nothing was. Snapshot the run ids and report what actually happened.
+        const runIdsBefore = new Set(
+          listRunsForTask(db, projectSlug, taskKey).map((r) => r.serverRunId),
+        );
         const { option } = await resolvePacket(
           db,
           { projectSlug, taskKey, optionIndex, ...(note.trim() ? { note } : {}) },
           actor,
         );
+        const retryStarted =
+          option.kind === "retry_other_backend" &&
+          listRunsForTask(db, projectSlug, taskKey).some(
+            (r) => !runIdsBefore.has(r.serverRunId),
+          );
         const toast =
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
@@ -287,7 +300,9 @@ export async function action({ request, params }: Route.ActionArgs) {
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug — the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
-                  ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                  ? retryStarted
+                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                    : "Decision recorded, but the retry could NOT start — the reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded — type the new goal; the packet clears when it lands"
                     : `Decision recorded: ${option.t}`;

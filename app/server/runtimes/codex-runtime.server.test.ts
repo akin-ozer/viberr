@@ -748,9 +748,13 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
 
   it("closes the CLI's own skills channel (bundled + user-installed)", async () => {
     const config = await configFor({});
+    // `bundled` is a STRUCT in the CLI's config schema — a bare
+    // `skills.bundled = false` makes it refuse to load its configuration at all
+    // ("invalid type: boolean, expected struct BundledSkillsConfig"), which
+    // would fail EVERY run. Verified against codex-cli 0.144.6.
     expect(config?.skills).toEqual({
       include_instructions: false,
-      bundled: false,
+      bundled: { enabled: false },
     });
   });
 
@@ -776,7 +780,7 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
       codexFactory: run.factory,
       config: {
         project_doc_max_bytes: 32_000,
-        skills: { include_instructions: true, bundled: true },
+        skills: { include_instructions: true, bundled: { enabled: true } },
         features: { apps: true, plugins: true, hooks: true },
       },
     }).start(SPEC, { onLine: () => {}, onExit: () => {} });
@@ -785,7 +789,7 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
     expect(config?.project_doc_max_bytes).toBe(0);
     expect(config?.skills).toEqual({
       include_instructions: false,
-      bundled: false,
+      bundled: { enabled: false },
     });
     expect(config?.features).toMatchObject({
       apps: false,
@@ -889,7 +893,7 @@ describe("codex idle timeout classifies as a hang, not a generic failure (P13-RT
           events: asSdkEvents(
             (async function* () {
               // Never yields — the idle guard is the only thing that settles it.
-              await new Promise((resolve, reject) => {
+              await new Promise((_resolve, reject) => {
                 signal?.addEventListener("abort", () =>
                   reject(new DOMException("aborted", "AbortError")),
                 );

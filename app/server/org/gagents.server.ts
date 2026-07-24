@@ -77,10 +77,19 @@ function readTemplateFile(
   return parsed;
 }
 
-/** Distinct-project deployment counts per profileId (the `used` fact). */
+/**
+ * Distinct-project deployment counts per profileId (the `used` fact).
+ *
+ * P13-AP-10: archived projects were counted, so a template could be
+ * undeletable ("detach it from its N projects first") because of a project
+ * nobody can edit any more. Archived projects are excluded.
+ */
 export function usedByProject(db: DatabaseSync): Record<string, number> {
   const rows = db
-    .prepare(`SELECT slug, agent_policy_json FROM projects`)
+    .prepare(
+      `SELECT slug, agent_policy_json FROM projects
+       WHERE COALESCE(archived, 0) = 0`,
+    )
     .all() as { slug: string; agent_policy_json: string }[];
   const counts: Record<string, number> = {};
   for (const row of rows) {
@@ -142,6 +151,33 @@ export function listGlobalAgentProfiles(
     const parsed = readTemplateFile(id, ctx);
     if (!parsed || parsed.frontmatter.kind !== "specialist") continue;
     out.push(toView(id, parsed, used[id] ?? 0));
+  }
+  return out;
+}
+
+/** Projects whose deployment list already carries `profileId`. */
+function projectsUsingProfileId(db: DatabaseSync, profileId: string): string[] {
+  const rows = db
+    .prepare(`SELECT slug, agent_policy_json FROM projects`)
+    .all() as { slug: string; agent_policy_json: string }[];
+  const out: string[] = [];
+  for (const row of rows) {
+    try {
+      const deployments = JSON.parse(row.agent_policy_json) as unknown;
+      if (!Array.isArray(deployments)) continue;
+      if (
+        deployments.some(
+          (d) =>
+            typeof d === "object" &&
+            d !== null &&
+            (d as { profileId?: unknown }).profileId === profileId,
+        )
+      ) {
+        out.push(row.slug);
+      }
+    } catch {
+      // tolerated — a malformed projection row blocks nothing
+    }
   }
   return out;
 }
@@ -223,6 +259,14 @@ export function saveGlobalAgentProfile(
   if (id.length < 2) throw AppError.validation("Give the profile a name.");
   if (existsSync(agentProfileFilePath(id, ctx.dataRoot))) {
     throw AppError.conflict(`A profile named ${name} already exists.`);
+  }
+  // P13-AP-12: a project-local profile already owns this id, so a template
+  // under the same id would be ambiguous the moment a project adopts it.
+  const localClash = projectsUsingProfileId(db, id);
+  if (localClash.length > 0) {
+    throw AppError.conflict(
+      `${localClash[0]} already has a project profile with the id ${id} — pick another name.`,
+    );
   }
   const created: ParsedTemplate = {
     frontmatter: {
