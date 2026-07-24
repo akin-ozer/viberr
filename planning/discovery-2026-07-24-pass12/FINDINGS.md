@@ -7,6 +7,36 @@ Status: OPEN / CONFIRMED / FIXED. Each finding is self-contained for an implemen
 Baseline: full suite **1472/1473 pass**; the single failure is a FLAKE (F12-01),
 green on `main` in isolation. Build assumed green (verify before implementation).
 
+## IMPLEMENTATION STATUS (pass 12, branch pass12/product-fixes)
+
+**FIXED + tested:** DG-1 (merged-PR reuse), DG-2 (admin force-accept — RBAC action +
+server fn + route + task-detail UI + audit), DG-3 (rate-limit-403 vs scope-403 +
+poller provenance retention), DG-4 (removed dead `up_to_date` push variant), DG-5
+(PR-open failures surfaced at Review), AO-1 (staged-outcome survives restart via
+persisted outcome_key), AO-2 (cross-boot lease drain guarded — reasoning + suite green),
+AO-3 (fixed stale "supporting→verdict on" + "no force bypass" comments), DM-2 (KB watcher
+health parity + self-heal), DM-3b (reset clears scope_violations + user_prefs),
+F12-01 (deterministic kb-watch test), F12-05 (poller merge-pending nudge). Broadened
+`directiveRequestsDelivery` (AO-5 regex). Owner rulings applied (F12-05/DG-2/DM-3b).
+
+**TRIAGED — NOT A BUG:** DM-1 (validation vs validation_block_reason are orthogonal by
+design: work-health vs review-gate; acceptance gates on the block reason, so a stale
+`validation` can't bypass the gate — "healthy + blocked" is legitimate).
+
+**VERIFIED-BENIGN (no change):** duplicated OPERATOR_AUDIT_ACTOR (two identical
+`{userId:null,label:"operator"}` consts; dedup risks a task-actions↔operator-run import
+cycle for zero behavioral gain).
+
+**Polish cluster (subagent):** F12-02 (favicon 404 via handleError), F12-03 (rm
+test-support/livesix/), RU-2 (create-profile backend availability), RU-3 (role-literal→
+roleCan), RU-4 (notifications truncation surfacing), ALLOWED_AUTH_PATHS test coverage,
+buildAuthOptions docstring.
+
+**LOW residuals accepted (noise, no user impact):** AO-5 batch remainder (near-open resume
+confinement edge case, "coordinating model" copy, Codex packet options `detail`, partial-
+react replay gap), DM-5 residuals (dual user tables, legacy json cols — pre-prod schema),
+DG-6 stale comments, RU-1 (profile toast-on-no-op — subagent may cover), RU-5.
+
 ---
 
 ## CONFIRMED in main context
@@ -53,6 +83,19 @@ Human acceptance (UC-11, PR #91) DOES merge. So "Done" means different things by
 irreversible merge, human finishes the merge), or should autonomous completion be blocked until
 a human merges (so Done always ⇒ merged), or should the reconcile poller surface the dangling PR
 as needing a human merge? Currently nothing nudges the human to finish the merge.
+
+## Bugs the LIVE re-validation caught in my OWN pass-12 fixes (both fixed + now tested)
+
+- **SELF-1 (task-detail 500):** the DG-2 UI referenced `onForceAccept` in JSX but never
+  destructured it from `GithubTrace`'s props → `ReferenceError: onForceAccept is not defined`
+  → every task with a non-null blockReason 500'd. The component tests passed because none
+  rendered a blocked task. FIXED (destructure) + a new GithubTrace force-accept component
+  test (renders the button on admin, hides it otherwise). LESSON: cover the new render branch.
+- **SELF-2 (pr-open type error):** splitting the `if (live.ok)` block in the DG-1 fix broke
+  TypeScript's narrowing for the subsequent `live.kind`/`.status`/`.message` error path.
+  `npm run build` (esbuild) does NOT typecheck, so it was green while `npm run typecheck`
+  (tsc) failed. FIXED (single `if (live.ok) {…} else if …` so narrowing holds). LESSON:
+  `npm run typecheck` is a REQUIRED gate — build passing ≠ types passing.
 
 ## Findings candidates from discovery subagents (to be triaged/merged)
 

@@ -62,10 +62,11 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
 
-function GithubTrace({
+export function GithubTrace({
   task,
   githubHost,
   onCompleteMerge,
+  onForceAccept,
   merging,
 }: {
   task: TaskDetail;

@@ -172,12 +172,19 @@ function NtfStream({
 export function NotificationsPage({
   items,
   unread,
+  truncated = false,
+  limit,
   onRead,
   onReadAll,
   onOpen,
 }: {
   items: NotificationPageItem[];
   unread: number;
+  /** The loader capped the list — true once the most-recent window is full,
+   *  so the page says so instead of silently dropping older rows (RU-4). */
+  truncated?: boolean;
+  /** The cap that was applied (only meaningful when `truncated`). */
+  limit?: number;
   onRead: (id: string) => void;
   onReadAll: () => void;
   onOpen: (n: NotificationPageItem) => void;
@@ -228,6 +235,15 @@ export function NotificationsPage({
       <div className="policy-wrap">
         <NtfNeedsYou items={needs} onRead={onRead} onOpen={onOpen} />
         <NtfStream items={rest} onRead={onRead} onOpen={onOpen} />
+        {truncated && (
+          <p
+            className="ntf-truncated sub"
+            style={{ textAlign: "center", color: "var(--faint)", margin: 0 }}
+          >
+            Showing the most recent {limit} notifications. Older ones aren't
+            listed here.
+          </p>
+        )}
       </div>
     </div>
   );

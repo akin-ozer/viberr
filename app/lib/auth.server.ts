@@ -78,8 +78,9 @@ export interface AuthDeps {
 }
 
 /**
- * Pure options builder — the gen/validation script and the app both use this
- * so the schema that ships is exactly the schema the app runs against.
+ * Pure options builder — factored out of `createAuth` (its sole caller) so the
+ * exact Better Auth options the app runs against are assembled in one place
+ * that unit tests can construct without spinning up the live handler.
  */
 export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
   const socialProviders: NonNullable<BetterAuthOptions["socialProviders"]> = {};

@@ -10,6 +10,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { buildResourceCatalog } from "~/server/org/resource-catalog.server";
+import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
@@ -54,6 +55,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     resourceCatalog: buildResourceCatalog(db, undefined, {
       profileKind: "specialist",
     }),
+    // Per-backend credential availability (same cheap SDK-auth check the run
+    // service uses). The create/edit modal disables a backend that isn't
+    // configured so a new profile can't be pinned to a runtime whose every run
+    // would fail (RU-2).
+    backendAvailable: {
+      claude: isBackendAvailable("claude"),
+      codex: isBackendAvailable("codex"),
+    },
   };
 }
 
@@ -132,6 +141,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
       resourceCatalog={loaderData.resourceCatalog}
+      backendAvailable={loaderData.backendAvailable}
     />
   );
 }

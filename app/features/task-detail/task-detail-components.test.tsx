@@ -2,9 +2,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
+import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter } from "react-router";
 import { DecisionPacket } from "./decision-packet";
+import { GithubTrace } from "./task-detail-page";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -740,3 +742,57 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
     expect(names.join(" ")).toContain("Selin Aksoy"); // contributor — can own
   });
 });
+
+/* -------------------------------------------------- GithubTrace force-accept */
+
+function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
+  return {
+    ...taskFixture("u-arda", "Arda Kaya"),
+    projectSlug: "viberr-core",
+    branch: "vib-151",
+    pr: null,
+    blockReason: null,
+    commits: [],
+    timeline: [],
+    diagnostics: [],
+    stages: [],
+    ...patch,
+  } as unknown as TaskDetail;
+}
+
+describe("GithubTrace — admin force-accept (DG-2)", () => {
+  it("renders the block reason + Force-accept button when blocked AND onForceAccept is provided", () => {
+    const onForceAccept = vi.fn();
+    const { container, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({
+            blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+          })}
+          onForceAccept={onForceAccept}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByText(/Waiting on 1 required reviewer approval/)).toBeTruthy();
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    expect(onForceAccept).toHaveBeenCalled();
+  });
+
+  it("shows NO force-accept control for a non-admin (onForceAccept undefined), even when blocked", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({ blockReason: "Waiting on 1 required reviewer approval." })}
+        />
+      </MemoryRouter>,
+    );
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    );
+    expect(btn).toBeUndefined();
+  });
+})

@@ -200,9 +200,15 @@ function IdentityFields({
 function BackendField({
   backend,
   setBackend,
+  available,
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
+  /** Per-backend credential availability (from the loader). An unconfigured
+   *  backend is disabled so a profile can't be pinned to a runtime whose every
+   *  run would fail — EXCEPT the one an edited profile already runs on, which
+   *  stays selectable so re-saving doesn't force a backend change (RU-2). */
+  available: Record<"codex" | "claude", boolean>;
 }) {
   // Chip groups have no labelable control — a `<label>` here names nothing.
   // role="group" + aria-labelledby gives screen readers the same caption.
@@ -214,17 +220,26 @@ function BackendField({
         <span className="fhint">pick exactly one</span>
       </span>
       <div className="pick-chips">
-        {BACKENDS.map((b) => (
-          <button
-            type="button"
-            key={b.id}
-            className={"pick-chip" + (backend === b.id ? " on" : "")}
-            onClick={() => setBackend(b.id)}
-          >
-            <AgentGlyph backend={b.id} />
-            {b.label}
-          </button>
-        ))}
+        {BACKENDS.map((b) => {
+          const usable = available[b.id] || backend === b.id;
+          return (
+            <button
+              type="button"
+              key={b.id}
+              className={"pick-chip" + (backend === b.id ? " on" : "")}
+              onClick={() => setBackend(b.id)}
+              disabled={!usable}
+              title={
+                usable
+                  ? undefined
+                  : `${b.label} isn't configured — add its credential to run agents on it`
+              }
+            >
+              <AgentGlyph backend={b.id} />
+              {b.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -704,6 +719,7 @@ export function CreateProfileModal({
   onClose,
   onSubmit,
   resourceCatalog,
+  backendAvailable,
 }: {
   /** Edit mode when set. */
   initial: AgentProfileView | null;
@@ -717,6 +733,10 @@ export function CreateProfileModal({
   /** Live store resources for the context-resource picker. Falls back to the
    *  built-in defaults when omitted (e.g. in isolated component tests). */
   resourceCatalog?: readonly ResCatalogGroup[];
+  /** Per-backend credential availability (from the loader). Omitted defaults to
+   *  both available (isolated component tests); the picker disables backends
+   *  that aren't configured so a new profile can't be pinned to a dead runtime. */
+  backendAvailable?: Record<"codex" | "claude", boolean>;
 }) {
   const editing = initial !== null;
   const isOperator = initial?.kind === "operator";
@@ -725,6 +745,7 @@ export function CreateProfileModal({
   // R7-5: the specialist picker offers 3 honest modes (Allowed/Human-only/Off);
   // the operator keeps all 4 (`recommend` is real for the operator only).
   const capModes = isOperator ? OPERATOR_CAP_MODES : SPECIALIST_CAP_MODES;
+  const available = backendAvailable ?? { codex: true, claude: true };
   const { ref: dialogRef, close } = useDialog(onClose);
   const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
@@ -862,7 +883,11 @@ export function CreateProfileModal({
           setRole={setRole}
         />
 
-        <BackendField backend={backend} setBackend={setBackend} />
+        <BackendField
+          backend={backend}
+          setBackend={setBackend}
+          available={available}
+        />
 
         {isOperator && (
           <AutonomyField autonomy={autonomy} setAutonomy={setAutonomy} />

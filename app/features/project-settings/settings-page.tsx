@@ -14,6 +14,7 @@ import {
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 
 /**
  * Project settings: project identity and workflow-stages editor
@@ -733,8 +734,14 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
 
+  // `isAdmin` is a generic admin-only flag reused across four structurally
+  // distinct panels (project identity, stages/policy, members, repo override)
+  // that map to different admin-tier RbacActions — no single action names all
+  // four — so it stays an explicit role check. `canGrant` gates ONLY the
+  // GitHub-scope grant, whose exact role set (admin+maintainer) is the
+  // `grant-github-scope` action, so it routes through the shared helper.
   const isAdmin = myRole === "admin";
-  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can

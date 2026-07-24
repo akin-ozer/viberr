@@ -1061,9 +1061,13 @@ export function buildAnalyzePrompt(input: {
   return prompt;
 }
 
-/** Detect directives that contradict the server-owned delivery contract. */
+/** Detect directives that contradict the server-owned delivery contract. This
+ *  is a SECONDARY reminder — the base specialist prompt already forbids pushing
+ *  unconditionally — so a missed phrasing only drops the extra nudge, never the
+ *  guarantee. Kept broad (open/create/raise/submit/publish a PR, git push,
+ *  commit-and-push) so the common delivery phrasings are covered. */
 export function directiveRequestsDelivery(directive: string): boolean {
-  return /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|open(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|create\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/i.test(
+  return /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|commit\s+and\s+push|publish\s+(?:the\s+|your\s+)?branch|(?:open|create|raise|submit|file)(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/i.test(
     directive,
   );
 }

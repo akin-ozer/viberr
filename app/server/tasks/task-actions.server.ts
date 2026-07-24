@@ -1709,8 +1709,9 @@ export async function applyAgentCompletionEffects(
     takeStagedOutcome,
   } = await import("./agent-outcome.server");
   // Gates resolve at COMPLETION time from the live deployment (recovery gets
-  // identical behavior); an undeployed profile falls back to the transition
-  // defaults (supporting → verdict on, delivering → verdict off).
+  // identical behavior); an undeployed profile falls back to the catalog
+  // defaults — verdict is OFF unless a profile explicitly grants it (F10-14
+  // removed the old "supporting → verdict on" implicit rule).
   let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] = [];
   if (input.profileId) {
     try {
@@ -1729,9 +1730,10 @@ export async function applyAgentCompletionEffects(
   // requiredReviewers) is computed from the engagement's engage-time
   // `verdictCapable` snapshot. Verdict RECORDING must use the SAME source, or a
   // required reviewer whose live grant was later removed/undeployed can approve
-  // but never record — leaving the task un-acceptable forever (neither accept
-  // path has a force bypass). Prefer the engagement snapshot; fall back to the
-  // live grant only when there is no engagement row (legacy/ad-hoc runs).
+  // but never record — leaving the task un-acceptable through the normal accept
+  // paths (an admin can still `forceAcceptCompletion`, audited — DG-2). Prefer
+  // the engagement snapshot; fall back to the live grant only when there is no
+  // engagement row (legacy/ad-hoc runs).
   const verdictEngagement = input.profileId
     ? readTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
@@ -2650,7 +2652,7 @@ async function openReviewPrBestEffort(
       canCommitPush,
       ...dataCtx,
     });
-    if (push.status !== "pushed" && push.status !== "up_to_date") {
+    if (push.status !== "pushed") {
       logger.info("workspace push before review PR did not push", {
         taskKey,
         status: push.status,

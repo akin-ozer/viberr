@@ -573,6 +573,7 @@ export function AgentsPage({
   projectName,
   myRole,
   resourceCatalog,
+  backendAvailable,
 }: {
   profiles: AgentProfileView[];
   deployments: AgentDeploymentView[];
@@ -582,6 +583,9 @@ export function AgentsPage({
   myRole: string | null;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
+  /** Per-backend credential availability — the create/edit modal disables a
+   *  backend that isn't configured so a profile can't be pinned to it (RU-2). */
+  backendAvailable?: Record<"codex" | "claude", boolean>;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -809,6 +813,7 @@ export function AgentsPage({
           busy={fetcher.state !== "idle"}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
+          {...(backendAvailable ? { backendAvailable } : {})}
           onClose={() => {
             setCreating(false);
             setFormError(null);
@@ -825,6 +830,7 @@ export function AgentsPage({
           busy={fetcher.state !== "idle"}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
+          {...(backendAvailable ? { backendAvailable } : {})}
           onClose={() => {
             setEditing(null);
             setFormError(null);

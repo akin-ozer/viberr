@@ -313,6 +313,8 @@ function ProfileAppearance({
   };
 
   const pickTl = (v: "all" | "typed" | "comment", l: string) => {
+    // RU-1: re-picking the active default is a no-op — don't re-submit or toast.
+    if (v === tl) return;
     setTl(v);
     submit({ intent: "set-tl-default", tlDefault: v });
     push("Timeline opens on “" + l + "”");
