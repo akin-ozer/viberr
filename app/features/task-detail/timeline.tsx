@@ -173,7 +173,12 @@ export function TimelineItem({
               {meta.label}
             </Pill>
           )}
-          {actor.kind === "agent" && (
+          {/* The "agent" badge marks a COMMENT written by an agent — the one
+              place it adds signal (agent- vs human-authored message). A typed
+              event is already an agent/system action (colored node + category
+              pill), so the badge there was redundant noise that made an event
+              look identical to a comment (NEW-6). */}
+          {!isTyped && actor.kind === "agent" && (
             <Pill kind="agent" sm>
               agent
             </Pill>

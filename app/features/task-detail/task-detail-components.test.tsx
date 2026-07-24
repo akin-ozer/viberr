@@ -253,7 +253,10 @@ describe("TimelineItem", () => {
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
-    expect(pills).toEqual(["Completion report", "agent"]);
+    // NEW-6: a typed event carries only its category pill — the "agent" badge
+    // is comment-only now (the colored node + category pill already say it's an
+    // agent action, so the badge was redundant on events).
+    expect(pills).toEqual(["Completion report"]);
     const rows = container.querySelectorAll(".tl-card.evidence .ev-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.querySelector(".add")!.textContent).toBe("+14");
