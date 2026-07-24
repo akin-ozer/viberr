@@ -20,7 +20,7 @@ let denizId: string;
 
 beforeAll(async () => {
   app = await setupAppTest();
-  const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
+  const { runDemoSeed } = await import("../../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedOrgResources } = await import("~/server/org/org-seed.server");
   seedOrgResources(app.db, { dataRoot: app.dataRoot });

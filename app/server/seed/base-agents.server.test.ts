@@ -7,14 +7,14 @@ import { projectFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { runDemoSeed } from "./demo-seed.server";
+import { runDemoSeed } from "../../../test-support/demo-seed";
 import { seedDefaultAgentAssets } from "./default-assets.server";
 import { ensureBaseAgentsDeployed } from "./ensure-base-agents.server";
 import {
   baseAgentDeployments,
   BASE_AGENT_PROFILE_IDS,
   SEED_AGENT_PROFILES,
-} from "./demo-data.server";
+} from "./agent-catalog.server";
 import { buildSpecialistPersona } from "~/server/tasks/specialist-run.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 

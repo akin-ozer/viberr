@@ -10,12 +10,13 @@ import { countUsers, insertUser } from "./user-store.server";
 /**
  * Boot-time bootstrap: when the users table is EMPTY, create the initial
  * admin from VIBERR_SEED_ADMIN_EMAIL / VIBERR_SEED_ADMIN_PASSWORD.
- * Without env credentials it falls back to arda@viberr.dev with a random
+ * Without env credentials it falls back to admin@viberr.dev with a random
  * generated password that is logged ONCE (clearly marked) and must be
- * changed at first login (pwreset_required = 1).
+ * changed at first login (pwreset_required = 1). The seed CLI runs the same
+ * bootstrap with a known default password (seed.server.ts).
  */
 
-export const DEFAULT_SEED_ADMIN_EMAIL = "arda@viberr.dev";
+export const DEFAULT_SEED_ADMIN_EMAIL = "admin@viberr.dev";
 
 export interface SeedAdminResult {
   created: boolean;
@@ -25,7 +26,6 @@ export interface SeedAdminResult {
 }
 
 function nameForEmail(email: string): string {
-  if (email === DEFAULT_SEED_ADMIN_EMAIL) return "Arda Kaya"; // mock identity
   const local = email.split("@")[0] ?? "Admin";
   return local
     .split(/[._-]+/)

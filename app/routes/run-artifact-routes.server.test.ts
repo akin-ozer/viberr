@@ -22,7 +22,7 @@ const RUN_ID = "run_authfixture";
 
 beforeAll(async () => {
   app = await setupAppTest();
-  const { runDemoSeed } = await import("~/server/seed/demo-seed.server");
+  const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 
   const { findUserByEmail } = await import("~/server/auth/user-store.server");

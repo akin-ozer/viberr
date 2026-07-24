@@ -6,7 +6,7 @@ import { serializeProjectFile } from "~/server/files/project-file.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
-import { baseAgentDeployments } from "./demo-data.server";
+import { baseAgentDeployments } from "./agent-catalog.server";
 
 /** The system operator's profile id (never removable, always ensured). */
 const OPERATOR_PROFILE_ID = "operator";

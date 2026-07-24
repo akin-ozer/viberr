@@ -108,10 +108,10 @@ docker compose logs -f app  # watch the boot integrity log (dirs, migrations, co
 
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
-  / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once). This is *not* the
-  demo dataset.
-- To load the demo org/projects/tasks (the mock content) into a fresh store:
-  `docker compose exec app npm run seed`. Omit this for a clean production instance.
+  / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).
+- `docker compose exec app npm run seed` seeds the product baseline — the built-in agent
+  catalog, knowledge bases, skills — and nothing else: no demo/mock board data. The board
+  always starts as a clean sheet.
 - Health: `GET /resources/health` → `{ ok, projections: { projects, tasks }, watcher }`.
   Compose has a healthcheck hitting it; container platforms should use it as the readiness
   probe.
