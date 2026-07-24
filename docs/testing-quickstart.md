@@ -10,6 +10,10 @@ Run the Vitest unit and integration suite:
 npm test
 ```
 
+### Run the unit suite
+
+Use `npm run test` before pushing changes to verify the unit tests still pass.
+
 ## Typecheck
 
 Generate React Router types and run TypeScript checks:
