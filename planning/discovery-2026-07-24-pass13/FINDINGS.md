@@ -299,3 +299,42 @@ justify. 58 findings; the HIGH set is `UI-01`, `UI-02`, `UI-28`, `UI-29`, `UI-30
 ## D. Live use-case results
 
 See `USECASES.md` (run log, PASS/FAIL + evidence per case).
+
+
+---
+
+## E. Final disposition summary (end of pass 13)
+
+**Gates:** `npm run typecheck` clean · `npm run test` **1663 passing** · `npm run build` green.
+
+### LIVE findings
+| id | disposition |
+| --- | --- |
+| LV-01 / AP-04 | **RULED + DONE** — owner ruling 2: the Lightweight template is removed rather than remapped. A regression asserts every seeded specialist is stage-eligible on a board that project creation produces. |
+| LV-02 | **DONE** — chips honor `spanAll`, the counter counts only stages on this board, stale grants render as such. |
+| LV-03 | **DONE** — new neutral `note` event type; benign emitters moved off `policy`. LIVE: "Note · Goal updated". |
+| LV-04 | **DONE** — one resolver + honest "removed account" label; stale memberships visible and removable. |
+| LV-05 | **DONE** — credential mutations invalidate the repo-access memo that kept the pill stale. |
+| LV-06 | **DONE (owner ruling 3)** — "New document" in the KB store browser. LIVE: authored doc reached a real run. |
+| LV-07 | **DONE** — the task-key input states its alphabet, names what it stripped, and Create always explains why it is disabled. |
+| LV-08 | **DONE** — board scroll-snap + a fade edge marking the cut. |
+| LV-09 | **DONE** — pluralization and `OWNER null` → "unassigned". |
+| LV-10 | **DONE** — real MCP handshake over Streamable HTTP. LIVE: 16 tools discovered where the old probe said only "reachable". |
+| LV-11 | **DONE** — one shared mention matcher. LIVE: `@Docs Writer` now starts a run. |
+| LV-12 | **DONE** — only handles that route are chipped. |
+| LV-13 / LV-14 / RT-04 | **DONE** — app-owned Codex run home + config that closes host skills, host MCP servers and repo `AGENTS.md`; verified against the real CLI (and a first attempt that would have broken every Codex run was caught by that live check). |
+| LV-15 | **DONE (disclosed)** — the hyphen/underscore rename is in the capability matrix; it happens inside the codex binary. |
+| LV-16 | **NOT-A-BUG (disclosed)** — the in-process toolkit is Claude-only by design; the matrix now says so per capability. |
+| LV-17 | **DONE (disclosed)** — MCP server instructions reach the run; the matrix states that MCP tools are outside the capability policy and every run carries the no-merge rule. |
+| LV-18 | **DONE (owner ruling 4)** — `use-web-search-fetch` capability, granted by default, enforced by tool denial for specialists and the operator. |
+| LV-19 | **DONE** — the probe declares the client capabilities a run declares; counts went 13 → 16 to match what runs actually see. |
+| LV-20 | **DONE** — write side (`clearWaitingToHuman`) + read side (rebuilder). LIVE: a closed task stays `waiting: none` after an operator turn. |
+
+### Subsystem streams
+All `KM-01..20`, `AP-01..12`, `RT-01..14` and `UI-01..58` rows above carry an explicit
+disposition. Two are **RULED** rather than fixed, with the rationale recorded inline:
+`KM-19` (the MCP probe is an admin-supplied URL fetch — that is what registering an MCP
+server IS) and `UI-17` (the audit's premise was wrong; `validation: "changed"` is produced
+on real write paths). Three are **defensive-by-design** and documented in place: `UI-16`,
+`UI-57`'s empty state, and `UI-18` (`data-screen-label` spans surfaces outside this pass's
+scope and wants one repo-wide sweep).
