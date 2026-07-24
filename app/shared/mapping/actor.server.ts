@@ -84,10 +84,16 @@ export function createActorRenderOverlay(
   };
 }
 
-/** Cached per-call-site lookup helper for resolving many refs at once. */
+/** Cached per-call-site lookup helper for resolving many refs at once.
+ *
+ * `agentNames` (profile id → display name, from run rows — see
+ * `agentNamesByProfile`) makes an agent actor render under the agent's OWN name
+ * (e.g. "Reviewer"), not its runtime/backend label ("Claude Code"). Without it,
+ * agents fall back to the backend label — historical behaviour, kept so a
+ * caller with no project context never crashes. */
 export function createActorResolver(
   db: DatabaseSync,
-  options: { projectMemberIds?: Set<string> } = {},
+  options: { projectMemberIds?: Set<string>; agentNames?: Map<string, string> } = {},
 ): (ref: FileActorRef) => ActorRender {
   const stmt = db.prepare(`SELECT id, name, avatar_tone FROM users WHERE id = ?`);
   const cache = new Map<string, UserDisplayRow | null>();
@@ -100,7 +106,10 @@ export function createActorResolver(
         return {
           kind: "agent",
           backend: ref.backend,
-          name: agentBackendName(ref.backend),
+          // The agent's own name is the identity; the backend is the runtime,
+          // not who acted. Fall back to the backend label only when the name is
+          // unknown (nameless seed/legacy run, or no project context).
+          name: options.agentNames?.get(ref.profileId) ?? agentBackendName(ref.backend),
           role: agentRoleDisplay(ref),
         };
       case "system":

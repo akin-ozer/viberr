@@ -21,6 +21,7 @@ import {
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { notifyMentionedUsers } from "./mention-notify.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
+import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 import {
   notifyTaskWatchers,
   reprojectTask,
@@ -110,12 +111,15 @@ export async function postAgentComment(
     details: { actorRef: encodeActorRef(input.actorRef) },
   });
   // NEW-4: a mid-run agent comment that tags a person notifies them, same as
-  // any other comment — the tag is a real ping, not decoration.
+  // any other comment — the tag is a real ping, not decoration. NEW-5: the
+  // `from` chip is the agent's own name, not its runtime label.
   notifyMentionedUsers(db, {
     text: input.text,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    from: createActorResolver(db)(input.actorRef),
+    from: createActorResolver(db, {
+      agentNames: agentNamesByProfile(db, input.projectSlug),
+    })(input.actorRef),
   });
 }
 

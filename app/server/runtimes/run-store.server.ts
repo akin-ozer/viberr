@@ -193,6 +193,31 @@ export function listRunsForTaskRows(
     .all(projectSlug, taskKey) as unknown as AgentRunRow[];
 }
 
+/**
+ * Map of agent profile id → the agent's DISPLAY NAME, drawn from its run rows
+ * for a project (most-recent name wins). This is the authoritative source for
+ * "what is this agent CALLED" when rendering a timeline/notification actor:
+ * every agent that authored an event necessarily has a run row, and the run
+ * carried the deployment's own name (e.g. "Reviewer") — not the backend/runtime
+ * label. Rows without a stored name are skipped so callers fall back to the
+ * backend label only for genuinely nameless (seed/legacy) agents.
+ */
+export function agentNamesByProfile(
+  db: DatabaseSync,
+  projectSlug: string,
+): Map<string, string> {
+  const rows = db
+    .prepare(
+      `SELECT agent_profile_id AS pid, agent_name AS name FROM agent_runs
+       WHERE project_slug = ? AND agent_name IS NOT NULL AND agent_name <> ''
+       ORDER BY created_at ASC, rowid ASC`,
+    )
+    .all(projectSlug) as { pid: string; name: string }[];
+  const map = new Map<string, string>();
+  for (const row of rows) map.set(row.pid, row.name); // later row → most recent name
+  return map;
+}
+
 /** Next append sequence for a run (max seq + 1, or 0). */
 export function nextSeq(db: DatabaseSync, runId: string): number {
   const row = db.prepare(`SELECT MAX(seq) AS m FROM run_log_lines WHERE run_id = ?`).get(runId) as

@@ -56,7 +56,7 @@ import {
 } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
-import { getRun } from "~/server/runtimes/run-store.server";
+import { agentNamesByProfile, getRun } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
@@ -1162,12 +1162,15 @@ export async function postAgentReplyComment(
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       recordAgentRepliedAudit(db, input.projectSlug, input.taskKey, input.runId, false);
       // NEW-4: an agent reply that tags a person ("@Arda …") must reach their
-      // inbox — same fan-out as human comments, with the agent as `from`.
+      // inbox — same fan-out as human comments, with the agent as `from`
+      // (under its OWN name, not the runtime label — NEW-5).
       notifyMentionedUsers(db, {
         text: prepared.event.text,
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        from: createActorResolver(db)(input.actorRef),
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, input.projectSlug),
+        })(input.actorRef),
         occurredAt: prepared.event.occurredAt,
       });
     })

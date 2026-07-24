@@ -153,7 +153,6 @@ export function TimelineItem({
   const meta = eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
-  const role = "role" in actor ? actor.role : undefined;
   const guest = actor.kind === "human" && "guest" in actor && actor.guest;
   return (
     <div className="tl-item">
@@ -165,10 +164,10 @@ export function TimelineItem({
       </div>
       <div className="tl-body">
         <div className="tl-meta">
-          <span className="tl-actor">
-            {actor.name}
-            {role ? " · " + role : ""}
-          </span>
+          {/* Identity is the actor's NAME only — for agents that is the
+              agent's own name (e.g. "Reviewer"), never the runtime label or a
+              trailing role. */}
+          <span className="tl-actor">{actor.name}</span>
           {isTyped && (
             <Pill kind={typedKind(ev.type)} sm>
               {meta.label}

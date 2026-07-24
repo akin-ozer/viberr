@@ -184,7 +184,10 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "comment",
-          actor: { kind: "agent", backend: "claude", name: "Claude Code", role: "developer" },
+          // NEW-5: the actor name is the agent's OWN name (resolved server-side),
+          // and the timeline shows the NAME ONLY — never the runtime label or a
+          // trailing "· role".
+          actor: { kind: "agent", backend: "claude", name: "Reviewer", role: "Review & validation" },
           text: "Re-checked the parser — the edge case is handled now.",
           toAgent: false,
         })}
@@ -193,10 +196,8 @@ describe("TimelineItem", () => {
     // Renders in the comment area (a comment-card), NOT the toagent tint.
     expect(container.querySelector(".comment-card")).not.toBeNull();
     expect(container.querySelector(".comment-card.toagent")).toBeNull();
-    // Shows the agent identity (name · role) and the agent pill.
-    expect(container.querySelector(".tl-actor")!.textContent).toBe(
-      "Claude Code · developer",
-    );
+    // Shows the agent's NAME ONLY — no runtime label, no "· role" suffix.
+    expect(container.querySelector(".tl-actor")!.textContent).toBe("Reviewer");
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );
@@ -232,7 +233,8 @@ describe("TimelineItem", () => {
       <TimelineItem
         ev={ev({
           type: "completion",
-          actor: { kind: "agent", backend: "codex", name: "Codex", role: "Developer" },
+          // NEW-5: agent identity is its own name ("Developer"), shown alone.
+          actor: { kind: "agent", backend: "codex", name: "Developer", role: "Implementation" },
           title: "Completion report",
           text: "Implemented repo attach.",
           evidence: [
@@ -247,9 +249,7 @@ describe("TimelineItem", () => {
     expect(container.querySelector(".tl-body strong")!.textContent).toBe(
       "Completion report",
     );
-    expect(container.querySelector(".tl-actor")!.textContent).toBe(
-      "Codex · Developer",
-    );
+    expect(container.querySelector(".tl-actor")!.textContent).toBe("Developer");
     const pills = [...container.querySelectorAll(".tl-meta .pill")].map(
       (p) => p.textContent,
     );

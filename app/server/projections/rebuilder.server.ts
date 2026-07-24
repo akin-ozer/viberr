@@ -24,6 +24,7 @@ import {
 import { deriveReadiness } from "~/server/interpretation/readiness-policy.server";
 import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
+import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 
 /**
  * Projection rebuilder: files → SQLite.
@@ -360,8 +361,11 @@ export function rebuildTaskFile(
   });
 
   const memberIds = project ? getMemberIds(db, slug) : undefined;
+  // Agent events render under the agent's OWN name (e.g. "Reviewer"), not the
+  // backend/runtime label — resolved from this project's run rows.
   const resolveActor = createActorResolver(db, {
     ...(memberIds ? { projectMemberIds: memberIds } : {}),
+    agentNames: agentNamesByProfile(db, slug),
   });
 
   const commentCount = parsed.timeline.filter((e) => e.type === "comment").length;
