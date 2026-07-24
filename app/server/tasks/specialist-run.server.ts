@@ -17,7 +17,12 @@ import {
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
 import { buildAgentToolkit } from "./agent-toolkit.server";
-import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  CapabilityGrant,
+  ProjectRole,
+} from "~/schemas/project-file.schema";
+import { explicitAgentGrants } from "~/features/agents/capability-catalog";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -146,6 +151,32 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
   };
 }
 
+/**
+ * The grants a deployment ACTUALLY runs under.
+ *
+ * P13-AP-06: an empty grant list is not "no opinion" — the tool-policy polarity
+ * denies only on an explicit `human`/`off`, so `capabilities: []` read back as
+ * "everything unspecified" and handed the agent Edit/Write/`git commit` plus
+ * canBranch/canCommitPush/canOpenPr — full repo-write power, with nothing in
+ * any UI to show for it. Every write path now persists explicit grants, so an
+ * empty list can only come from a hand-edited/imported `project.md`. Resolve it
+ * to an explicitly WITHHELD set (the same posture
+ * `resolveUndeployedDisallowedTools` takes for a run whose profile vanished):
+ * nobody granted this agent anything, so it may read and validate but not
+ * deliver. Logged, because it means the file is missing its policy.
+ */
+function deploymentGrants(
+  deployment: AgentDeployment,
+  projectSlug: string,
+): CapabilityGrant[] {
+  if (deployment.capabilities.length > 0) return deployment.capabilities;
+  logger.warn(
+    "agent deployment carries NO capability grants — running it fully withheld",
+    { projectSlug, profileId: deployment.profileId },
+  );
+  return explicitAgentGrants("withheld") as CapabilityGrant[];
+}
+
 /** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
 function mcpServersFor(
   db: DatabaseSync,
@@ -188,8 +219,12 @@ export function resolveDeployedSpecialist(
     );
   }
   // Carry the deployment's stored capability grants so the run can confine its
-  // tools to them (specialist-tool-policy).
-  return { ...toResolved(view), capabilities: deployment.capabilities };
+  // tools to them (specialist-tool-policy). An EMPTY list is resolved to an
+  // explicitly withheld set rather than "unspecified = allowed" (AP-06).
+  return {
+    ...toResolved(view),
+    capabilities: deploymentGrants(deployment, projectSlug),
+  };
 }
 
 function agentEvent(text: string): TaskFileEvent {
@@ -1457,7 +1492,9 @@ export function listDeployedSpecialists(
     const view = effectiveProfileView(deployment, ctx.dataRoot);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
-    const grants = deployment.capabilities;
+    // Same empty-grant resolution the run path uses (AP-06), so what the
+    // operator is told a candidate can do matches what it may actually do.
+    const grants = deploymentGrants(deployment, projectSlug);
     // Delivery capability: any repo-write grant in direct mode (the same set
     // the tool denylist binds on).
     const granted = (id: string) =>

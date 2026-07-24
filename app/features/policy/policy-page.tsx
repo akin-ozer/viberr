@@ -59,7 +59,12 @@ export function HumanAccess({
     contributor: 0,
     viewer: 0,
   };
-  for (const m of members) counts[m.role] += 1;
+  // LV-04/UI-29: a membership whose org account was deleted is NOT a member for
+  // any counting purpose — the role headers describe who can actually perform
+  // an action, and the ghost can perform none of them.
+  const live = members.filter((m) => !m.missing);
+  const stale = members.filter((m) => m.missing);
+  for (const m of live) counts[m.role] += 1;
 
   const setRole = (m: MembershipView, r: ProjectRole) => {
     if (m.role === r) return;
@@ -77,7 +82,10 @@ export function HumanAccess({
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {members.length} member{members.length === 1 ? "" : "s"}
+          {live.length} member{live.length === 1 ? "" : "s"}
+          {stale.length > 0
+            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            : ""}
         </span>
       </div>
       <div className="pol-note">
@@ -93,8 +101,33 @@ export function HumanAccess({
           <div className="member-row" key={m.userId}>
             <Avatar person={{ initials: m.initials, tone: m.tone }} />
             <span className="member-main">
-              <div className="nm">{m.name}</div>
-              <div className="em">{m.email}</div>
+              <div className="nm">
+                {m.name}
+                {m.missing && (
+                  <>
+                    {" "}
+                    <Pill kind="blocked" sm>
+                      removed account
+                    </Pill>
+                  </>
+                )}
+                {!m.missing && m.disabled && (
+                  <>
+                    {" "}
+                    <Pill kind="neutral" sm>
+                      disabled
+                    </Pill>
+                  </>
+                )}
+              </div>
+              <div className="em">
+                {/* LV-04: an unresolvable id used to render as the bare
+                    `u_RT7-QeTWOwP4` string with an empty email, indistinguishable
+                    from a real person. */}
+                {m.missing
+                  ? "This account no longer exists — remove it in Settings → Members."
+                  : m.email}
+              </div>
             </span>
             <div className="mini-seg" role="radiogroup" aria-label={"Role for " + m.name}>
               {ROLE_IDS.map((r) => (
@@ -104,7 +137,9 @@ export function HumanAccess({
                   role="radio"
                   aria-checked={m.role === r}
                   className={m.role === r ? "on" : ""}
-                  disabled={!canManage || busy}
+                  // A deleted account cannot hold a role: the control is dead,
+                  // so it no longer pretends to be live (UI-29).
+                  disabled={!canManage || busy || m.missing}
                   onClick={() => setRole(m, r)}
                 >
                   {ROLE_LABEL[r]}

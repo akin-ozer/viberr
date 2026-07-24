@@ -177,7 +177,7 @@ describe("demo fixture", () => {
     expect(vib139.readiness).toBe("ready");
     expect(vib139.displayReadiness).toBe("merged");
 
-    // Lightweight template stub (ruling 15).
+    // Custom 3-stage board fixture (ruling 15).
     const billing = getBoard(db, "billing-service")!;
     expect(billing.columns.map((c) => c.stage.id)).toEqual(["todo", "doing", "done"]);
   });

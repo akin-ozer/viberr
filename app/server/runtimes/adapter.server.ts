@@ -47,6 +47,12 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
+  /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
+   *  `human`). Codex enforces it with a read-only sandbox — a physical block,
+   *  strictly stronger than Claude's tool denylist (P13-RT-02). Deliberately
+   *  NOT folded into `autonomous`, which also drives Claude's `permissionMode`
+   *  (flipping that would hang a server run on an unanswerable approval). */
+  repoWriteWithheld?: boolean;
   /** JSON schema constraining the run's final output. Codex only (it has no
    *  in-process tool channel). Used by BOTH the structured-output operator (a
    *  decision plan the caller parses + executes) AND every generic specialist/

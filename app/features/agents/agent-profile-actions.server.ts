@@ -17,13 +17,15 @@ import {
   defaultEffortFor,
   defaultModelFor,
 } from "~/server/runtimes/model-catalog.server";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
   effectiveProfileView,
   type AgentDeploymentDefinition,
 } from "./agents-query.server";
 import {
   CAP_MODAL_DEFAULTS,
+  explicitAgentGrants,
   MODAL_CAP_IDS,
   OPERATOR_CAP_DEFAULTS,
   OPERATOR_CAP_IDS,
@@ -175,16 +177,23 @@ function grantsFor(
   return normalizeDeliveryGrants(grants);
 }
 
-/** CREATE-path grants: persist EXACTLY the modal caps the form submitted, with
- * the ALWAYS_HUMAN coercion — and nothing else.
+/** CREATE-path grants: persist the modal caps the form submitted, with the
+ * ALWAYS_HUMAN coercion — and an EXPLICIT `off` for every governed capability
+ * the form left out.
  *
  * Unlike `grantsFor` (the edit path), this deliberately does NOT seed the
  * unspecified caps from the permissive catalog defaults. Merging defaults on
  * create was a safe-by-default violation: a form that submitted 2 caps
  * persisted ~12, silently granting repo-mutating power (create-task-branch,
  * commit-push-branch, open-review-pr) the creator never chose. A capability the
- * form omits now stays ABSENT — off, not direct. Only governed modal-catalog
- * ids are persisted; anything outside the curated set is ignored.
+ * form omits is NOT granted.
+ *
+ * P13-AP-06: "not granted" is now WRITTEN DOWN rather than left absent. The
+ * runtime polarity is "deny only on an explicit `human`/`off`", so an omitted
+ * id read back as *unspecified* — i.e. allowed. A form that submitted nothing
+ * produced `capabilities: []` and therefore an agent with full repo-write
+ * power, the exact opposite of what omitting the toggles means. Every governed
+ * id is now materialized; only ids outside the curated set are ignored.
  *
  * Create is ALWAYS a specialist profile, so a submitted `recommend` coerces to
  * `direct` ('Allowed') per R7-5; always-human ids stay `human`. */
@@ -192,16 +201,19 @@ function createModalGrants(
   caps: Record<string, CapMode>,
 ): { capabilityId: string; mode: CapabilityMode }[] {
   const grants: { capabilityId: string; mode: CapabilityMode }[] = [];
-  for (const [capabilityId, submitted] of Object.entries(caps)) {
-    if (!MODAL_CAP_IDS.has(capabilityId)) continue;
+  for (const capabilityId of MODAL_CAP_IDS) {
+    const submitted = caps[capabilityId];
     const mode = ALWAYS_HUMAN.has(capabilityId)
       ? "human"
-      : capabilityId === "report-validation-verdict"
-        ? // F10-07/F10-14: verdict is explicit-only — direct or nothing.
-          submitted === "direct"
-          ? "direct"
-          : "off"
-        : coerceSpecialistCapabilityMode(submitted);
+      : submitted === undefined
+        ? // Omitted by the form → withheld, and stored as such.
+          "off"
+        : capabilityId === "report-validation-verdict"
+          ? // F10-07/F10-14: verdict is explicit-only — direct or nothing.
+            submitted === "direct"
+            ? "direct"
+            : "off"
+          : coerceSpecialistCapabilityMode(submitted);
     grants.push({ capabilityId, mode: mode as CapabilityMode });
   }
   // F14: a deliverer must hold the headline repo-write capability (master gate).
@@ -280,6 +292,112 @@ export async function createAgentProfile(
     details: { name: form.name, role: form.role, backend: form.backend, projectName },
   });
   return { profileId, name: form.name };
+}
+
+// --------------------------------------------------- deploy from library
+
+/**
+ * Copy an org-level TEMPLATE into this project's `agents:` deployment list —
+ * the project side of "Global agent profiles are a real template library"
+ * (owner ruling 1, P13-AP-05).
+ *
+ * Before this, no code path anywhere added a template to a project, so a
+ * profile created in org settings was permanently unreachable: never deployed,
+ * never run, never offered to the operator. The org editor promised a
+ * lifecycle it could not complete.
+ *
+ * What is copied:
+ *  - a FULL definition snapshot of the template (the same shape the project
+ *    editor writes), so the deployment is self-contained and editable here;
+ *  - EXPLICIT capability grants — the template's own grants when it has any,
+ *    else the catalog defaults. Never `[]`: an empty grant list means
+ *    "unspecified", and unspecified means GRANTED at the tool layer, so
+ *    copying an org template's empty array would have handed the new agent
+ *    full repo-write power (P13-AP-06).
+ */
+export async function deployAgentProfileFromLibrary(
+  db: DatabaseSync,
+  input: { projectSlug: string; profileId: string },
+  actor: ProfileActor,
+  ctx: ProfileMutationContext = {},
+): Promise<{ profileId: string; name: string }> {
+  const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
+  const profileId = input.profileId.trim();
+  if (!profileId) throw AppError.validation("Pick a profile to add.");
+
+  const absPath = agentProfileFilePath(profileId, ctx.dataRoot);
+  if (!existsSync(absPath)) {
+    throw AppError.notFound(`No global agent profile \`${profileId}\`.`);
+  }
+  const { parsed } = parseAgentProfileContent(readFileSync(absPath, "utf8"), {
+    fallbackId: profileId,
+  });
+  if (!parsed || parsed.frontmatter.kind !== "specialist") {
+    throw AppError.validation(
+      `\`${profileId}\` is not a specialist template and can't be added to a project.`,
+    );
+  }
+  const fm = parsed.frontmatter;
+
+  await updateProjectFile(
+    { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
+    (project) => {
+      if (project.frontmatter.agents.some((a) => a.profileId === profileId)) {
+        throw AppError.conflict(
+          `${fm.name} is already deployed in this project.`,
+        );
+      }
+      const backend = fm.backends[0] === "codex" ? "codex" : "claude";
+      const definition: AgentDeploymentDefinition = {
+        kind: "specialist",
+        name: fm.name,
+        role: fm.role || fm.name,
+        icon: fm.icon,
+        backends: fm.backends.length ? fm.backends : [backend],
+        model: fm.model.trim() || defaultModelFor(backend),
+        effort: defaultEffortFor(backend),
+        scope: `Added from the global library to ${project.frontmatter.name}`,
+        desc: fm.desc || parsed.description,
+        ...(parsed.description ? { persona: parsed.description } : {}),
+        stages: fm.stages,
+        spanAll: fm.spanAll,
+        resources: {
+          skills: fm.resources.skills,
+          mcps: fm.resources.mcps,
+          kb: fm.resources.kb,
+        },
+      };
+      const deployment: AgentDeployment = {
+        profileId,
+        // AP-06: explicit grants, never an empty list.
+        capabilities: normalizeDeliveryGrants(
+          (fm.capabilities.length
+            ? fm.capabilities
+            : explicitAgentGrants("catalog")
+          ).map((g) => ({
+            capabilityId: g.capabilityId,
+            mode: (ALWAYS_HUMAN.has(g.capabilityId)
+              ? "human"
+              : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
+          })),
+        ),
+        extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
+      };
+      (deployment as Record<string, unknown>).definition = definition;
+      project.frontmatter.agents.push(deployment);
+    },
+  );
+
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.agent_profile.deployed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "agent_profile",
+    subjectId: profileId,
+    projectSlug: input.projectSlug,
+    details: { name: fm.name, source: "library", projectName },
+  });
+  return { profileId, name: fm.name };
 }
 
 // ------------------------------------------------------------------ update

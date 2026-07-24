@@ -24,6 +24,13 @@ import {
   updateUserFields,
 } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { projectFilePath } from "~/server/files/file-store-root.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { listProjects } from "~/server/projections/board-query.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOfName } from "~/shared/mapping/actor.server";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
@@ -294,16 +301,71 @@ export async function resetLocalPassword(
 }
 
 /**
+ * UI-29: drop `userId` from every project.md membership list.
+ *
+ * `deleteOrgUser` used to delete the identity and the `users` row and stop
+ * there, leaving the account in each project's canonical membership store. The
+ * result was a GOVERNANCE HOLE, not just cosmetics: the settings/policy panels
+ * rendered a row named `usr_9f3a…` with a live role radiogroup, and
+ * `setMemberRole`'s last-admin guard counted the ghost as an admin — so the
+ * only real admin could demote themselves and leave a project whose sole
+ * "admin" is a deleted account, with nobody able to change policy, manage
+ * members or delete the project.
+ *
+ * Membership is stored in project.md (the projection is derived), so the prune
+ * writes the file through the shared writer and re-projects each project it
+ * touched. Returns the slugs it changed.
+ */
+export async function pruneUserFromProjects(
+  db: DatabaseSync,
+  userId: string,
+  actor: AuditActor,
+  ctx: { dataRoot?: string } = {},
+): Promise<string[]> {
+  const changed: string[] = [];
+  for (const project of listProjects(db)) {
+    const ref = { projectSlug: project.slug, dataRoot: ctx.dataRoot };
+    const file = readProjectFile(ref);
+    if (!file) continue;
+    if (!file.parsed.frontmatter.members.some((m) => m.userId === userId)) {
+      continue;
+    }
+    await updateProjectFile(ref, (parsed) => {
+      parsed.frontmatter.members = parsed.frontmatter.members.filter(
+        (m) => m.userId !== userId,
+      );
+    });
+    rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
+      dataRoot: ctx.dataRoot,
+    });
+    recordAudit(db, {
+      action: "project.member.removed",
+      actor,
+      subjectKind: "user",
+      subjectId: userId,
+      projectSlug: project.slug,
+      details: { reason: "org account removed", targetUserId: userId },
+    });
+    changed.push(project.slug);
+  }
+  return changed;
+}
+
+/**
  * Removes an instance account (the mock's row X). The phase-2 API has no
  * delete (only disable) — this is the 9B addition: audit history keeps the
  * denormalized actor snapshots (contracts §1.3, events survive member
  * removal), sessions/prefs/PATs cascade via FK.
+ *
+ * Async since UI-29: project.md memberships are pruned in the same call, and
+ * the project-file writer is lock-based.
  */
-export function deleteOrgUser(
+export async function deleteOrgUser(
   db: DatabaseSync,
   userId: string,
   actor: AuditActor,
-): { user: OrgUserView; toast: string } {
+  ctx: { dataRoot?: string } = {},
+): Promise<{ user: OrgUserView; toast: string; projectsPruned: string[] }> {
   const existing = findUserById(db, userId);
   if (!existing) throw AppError.notFound("No such user.");
   if (
@@ -313,6 +375,9 @@ export function deleteOrgUser(
   ) {
     throw AppError.conflict("Cannot remove the last active admin.");
   }
+  // UI-29: prune BEFORE the identity/user rows go, so a failure here leaves the
+  // account intact rather than half-deleted with live memberships.
+  const projectsPruned = await pruneUserFromProjects(db, userId, actor, ctx);
   // Remove the better-auth identity too — otherwise the orphaned `user` row
   // (email is UNIQUE NOT NULL) makes re-creating the same email throw a raw
   // constraint mid-flow (pass-4 WI-3). Deleting the `user` row cascades its
@@ -325,9 +390,20 @@ export function deleteOrgUser(
     actor,
     subjectKind: "user",
     subjectId: userId,
-    details: { email: existing.email, name: existing.name },
+    details: {
+      email: existing.email,
+      name: existing.name,
+      projectsPruned,
+    },
   });
-  return { user: toOrgUserView(existing), toast: `${existing.name} removed` };
+  return {
+    user: toOrgUserView(existing),
+    toast:
+      projectsPruned.length > 0
+        ? `${existing.name} removed — also dropped from ${projectsPruned.length} project${projectsPruned.length === 1 ? "" : "s"}`
+        : `${existing.name} removed`,
+    projectsPruned,
+  };
 }
 
 // ---------------------------------------------------------------- domains

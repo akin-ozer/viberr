@@ -19,7 +19,6 @@ import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.se
 import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
-  LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
 import { defaultAgentDeployments } from "~/server/seed/agent-catalog.server";
 import { slugifyProjectName } from "./project-name";
@@ -133,7 +132,6 @@ export interface CreateProjectInput {
   owner: string;
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
-  template: "governed" | "light";
   policy: "strict" | "balanced" | "auto";
 }
 
@@ -181,8 +179,13 @@ export async function createProject(
       userMessage: `A project at projects/${slug} already exists.`,
     });
   }
-  const template =
-    input.template === "light" ? LIGHTWEIGHT_TEMPLATE : GOVERNED_TEMPLATE;
+  // P13-AP-04 / owner ruling 2: the Standard 5-stage board is the ONLY preset.
+  // The "Lightweight · 3 stages" template was deleted — it created a board
+  // (`todo`/`doing`/`done`) that the preinstalled roster's governed stage ids
+  // could never match, so no specialist was assignable. Custom boards are
+  // edited in project settings, after creation, where the stage grants can be
+  // adjusted alongside them.
+  const template = GOVERNED_TEMPLATE;
   const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
@@ -208,10 +211,7 @@ export async function createProject(
 
   // Synthesized description — verbatim mock mapping (home spec §5.10).
   const desc =
-    (input.template === "light"
-      ? "Lightweight 3-stage workflow"
-      : "Standard 5-stage workflow") +
-    " · " +
+    "Standard 5-stage workflow · " +
     (input.policy === "strict"
       ? "strict human-gate policy."
       : input.policy === "auto"

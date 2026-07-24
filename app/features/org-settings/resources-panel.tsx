@@ -369,13 +369,21 @@ function AgentModal({
 }) {
   const skillNames = skills.map((s) => s.name);
   const mcpNames = mcps.map((m) => m.name);
-  const kbNames = kbs.map((k) => k.name);
+  // P13-KM-01: a KB grant is stored — and resolved at run time — by its store
+  // DIRECTORY (`readKbBody` reads `${DATA_ROOT}/kb/<dir>`). This picker used to
+  // key on the display NAME, so granting "P13 facts" wrote `kb: ["P13 facts"]`
+  // and every run silently got zero bytes while both UIs showed it attached.
+  const kbIds = kbs.map((k) => k.dir);
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
     initial ? initial.backend : "codex",
   );
   const [summary, setSummary] = useState(initial ? initial.summary : "");
+  // P13-AP-01: the persona (the agent's system prompt) is edited on its own,
+  // separately from the one-line blurb the operator reads. Editing the blurb no
+  // longer flattens the persona.
+  const [persona, setPersona] = useState(initial ? initial.persona : "");
   // P11-47: default a new profile's eligible stages to a real work stage that
   // exists, not a hardcoded "impl" that silently references nothing if the org
   // stage template renames/removes it. Prefer a stage literally named "impl",
@@ -395,14 +403,14 @@ function AgentModal({
     initial ? match(initial.mcps, mcpNames) : [],
   );
   const [selKbs, setSelKbs] = useState<string[]>(
-    initial ? match(initial.kbs, kbNames) : [],
+    initial ? match(initial.kbs, kbIds) : [],
   );
   // Legacy template resource strings that don't match an org resource are
   // preserved untouched on save (documented deviation).
   const legacy = {
     skills: initial ? unmatched(initial.skills, skillNames) : [],
     mcps: initial ? unmatched(initial.mcps, mcpNames) : [],
-    kbs: initial ? unmatched(initial.kbs, kbNames) : [],
+    kbs: initial ? unmatched(initial.kbs, kbIds) : [],
   };
   const { action, err, setErr } = useModalAction(() => onClose());
 
@@ -423,8 +431,12 @@ function AgentModal({
       saveLabel={initial ? "Save changes" : "Create profile"}
       footHint={
         initial && initial.used > 0
-          ? "used in " + initial.used + " project" + (initial.used === 1 ? "" : "s") + " — changes apply on next run"
-          : "not deployed yet"
+          ? "adopted by " +
+            initial.used +
+            " project" +
+            (initial.used === 1 ? "" : "s") +
+            " — each keeps its own copy; re-adopt to pick up this edit"
+          : "a template — add it to a project from Agents → Add from library"
       }
       onSave={() => {
         if (!canSave) return;
@@ -435,6 +447,7 @@ function AgentModal({
           name: name.trim(),
           backend,
           summary: summary.trim(),
+          persona: persona.trim(),
           stages: JSON.stringify(selStages),
           skills: JSON.stringify([...selSkills, ...legacy.skills]),
           mcps: JSON.stringify([...selMcps, ...legacy.mcps]),
@@ -493,7 +506,8 @@ function AgentModal({
       </div>
       <div className="field">
         <label className="flabel" htmlFor="ga-sum">
-          Role summary
+          Role summary{" "}
+          <span className="fhint">the OPERATOR reads this when choosing an agent</span>
         </label>
         <input
           id="ga-sum"
@@ -501,6 +515,22 @@ function AgentModal({
           value={summary}
           placeholder="One line the operator sees when assigning work"
           onChange={(e) => setSummary(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="ga-persona">
+          Persona / instructions{" "}
+          <span className="fhint">
+            the agent's working instructions — its system prompt on every run; markdown ok
+          </span>
+        </label>
+        <textarea
+          id="ga-persona"
+          className="ta"
+          rows={6}
+          value={persona}
+          placeholder="How this agent works: its responsibilities, standards, reporting format…"
+          onChange={(e) => setPersona(e.target.value)}
         />
       </div>
       <div className="field">
@@ -566,8 +596,9 @@ function AgentModal({
                 <button
                   type="button"
                   key={k.id}
-                  className={"pick-chip" + (selKbSet.has(k.name) ? " on" : "")}
-                  onClick={() => toggle(selKbs, setSelKbs, k.name)}
+                  className={"pick-chip" + (selKbSet.has(k.dir) ? " on" : "")}
+                  onClick={() => toggle(selKbs, setSelKbs, k.dir)}
+                  title={k.uri + "/"}
                 >
                   {k.name}
                 </button>
@@ -929,6 +960,9 @@ function AgentPanel({
               <AgentGlyph backend={a.backend} />
               <span className="rsrc-main">
                 <b>{a.name}</b>
+                {/* P13-AP-09: the row subtitle is the SHORT blurb. It used to
+                    render the markdown body — i.e. the agent's entire persona —
+                    so a seeded profile printed a 600-word system prompt here. */}
                 <span className="sub">{a.summary}</span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}

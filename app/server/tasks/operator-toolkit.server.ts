@@ -23,6 +23,7 @@ import {
 } from "./operator-actions.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { normalizeEscapedNewlines } from "./model-prose.server";
+import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
@@ -356,5 +357,21 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     tools,
   });
 
-  return { mcpServers: { viberr: server }, allowedTools: allowed };
+  // P13-KM-03: the operator's DECLARED org MCP servers now actually mount. They
+  // were offered by the resource catalog and rendered as granted, but nothing
+  // ever resolved them for an operator run — `OperatorAuthority` carried skills
+  // and kb only, so a live operator granted `everything-mcp` correctly reported
+  // "MCP servers/tools I can call: none". `resolveSpecialistMcpServers` skips
+  // the reserved `viberr` name, so the in-process toolkit can never be shadowed.
+  // Their tools must also be ALLOWED: `allowedTools` confines an operator run to
+  // exactly the listed names, so mounting without allowing would be decorative.
+  const orgServers = resolveSpecialistMcpServers(db, authority.mcps);
+  for (const name of Object.keys(orgServers)) {
+    allowed.push(`mcp__${name}`);
+  }
+
+  return {
+    mcpServers: { viberr: server, ...orgServers },
+    allowedTools: allowed,
+  };
 }

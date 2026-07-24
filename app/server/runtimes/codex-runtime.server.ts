@@ -124,29 +124,93 @@ export function resolveCodexReasoningEffort(
 }
 
 /**
+ * Per-run env that must cross into the model's OWN shell (as opposed to the
+ * CLI's process env, which carries subscription auth and must not leak to
+ * tools). `shell_environment_policy.inherit: "core"` strips everything else, so
+ * anything Viberr promises the agent's shell has to be named here.
+ *
+ * P13-RT-10: `agentGitIdentityEnv` documents "these override any `git config`
+ * the agent sets … so codex and claude are indistinguishable in the git
+ * history". That only held on Claude (whose spec.env is merged into the whole
+ * child env); on Codex the identity was stripped before any `git commit` the
+ * agent ran, leaving the repo-local `git config user.*` written at clone as the
+ * only mechanism — a weaker guarantee than the docstring claims, and none at
+ * all when `setIdentity` failed.
+ */
+const SHELL_EXPORTED_ENV_KEYS = [
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+] as const;
+
+function shellExportedEnv(spec: RunSpec): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of SHELL_EXPORTED_ENV_KEYS) {
+    const value = spec.env?.[key];
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+/**
  * Config inherited by the Codex CLI is distinct from the environment exposed
  * to shell commands the model runs. Keep the former intact for subscription
  * auth, while using the CLI's supported shell policy to expose only platform
- * essentials to generated commands. The git ceiling is the sole per-run value
- * that currently needs to cross that boundary.
+ * essentials to generated commands.
+ *
+ * ISOLATION (P13-LV-13 / LV-14 / RT-04): the CLI merges `--config` overrides
+ * into whatever `$CODEX_HOME/config.toml` already declares, so config alone
+ * cannot close the host channels — the app-owned run home
+ * (`resolveCodexHome`/`prepareCodexHome`) is what does. These keys are the
+ * second half of the same fence, because the CLI RE-INSTALLS its five bundled
+ * `.system` skills into *any* home on startup (verified with
+ * `codex debug prompt-input` on a pristine home: `imagegen`, `openai-docs`,
+ * `plugin-creator`, `skill-creator`, `skill-installer` were still advertised),
+ * and because the repo's own `AGENTS.md` is read from the WORKSPACE, not the
+ * home. Viberr injects every declared skill/KB doc as prompt text, so a run
+ * needs none of the CLI's own instruction sources.
  */
 function codexConfigForRun(
   spec: RunSpec,
   base?: CodexOptions["config"],
 ): CodexConfig {
-  const gitCeiling = spec.env?.GIT_CEILING_DIRECTORIES;
   const baseFeatures = isRecord(base?.features) ? base.features : {};
+  const exported = shellExportedEnv(spec);
   return {
     ...(base ?? {}),
     ...(spec.systemPrompt ? { developer_instructions: spec.systemPrompt } : {}),
     // Enforce these after base config so a host/deployment override cannot
     // re-expose CODEX_ACCESS_TOKEN or other server credentials to tools.
     allow_login_shell: false,
+    // RT-04: the checked-out repo's `AGENTS.md` (and any fallback project doc)
+    // is otherwise merged into the run's INSTRUCTIONS at a higher trust tier
+    // than the repository contents the trust-boundary block calls untrusted —
+    // a prompt-injection ingress with no Claude counterpart (`settingSources:
+    // []` means a repo's CLAUDE.md never loads). 0 bytes = never read one.
+    project_doc_max_bytes: 0,
+    // LV-13: drop the CLI's whole skills channel. `include_instructions: false`
+    // removes the "## Skills" block (bundled + user-installed alike);
+    // `bundled: false` additionally refuses the self-installed `.system` set.
+    // Both were confirmed effective — and unknown keys confirmed inert — with
+    // `codex debug prompt-input` against codex-cli 0.144.6.
+    skills: {
+      include_instructions: false,
+      bundled: false,
+    },
     features: {
       ...baseFeatures,
       // Viberr exposes only a profile's declared external MCPs; ambient
       // ChatGPT apps/connectors must not appear as extra tools.
       apps: false,
+      // LV-13/LV-14 defense in depth: a plugin contributes BOTH skills and MCP
+      // servers (the host leak included `github:yeet` and a plugin-supplied
+      // `sites-design-picker` server). The run home carries no plugins, but a
+      // deployment that points CODEX_HOME at a populated dir must not re-open
+      // the channel. Hooks are host-configured shell callbacks — same class.
+      plugins: false,
+      hooks: false,
     },
     // Match Claude's per-run isolation: no cross-run memory generation,
     // injection, or memory-specific tools from the managed Codex home.
@@ -157,14 +221,35 @@ function codexConfigForRun(
     },
     // The SDK accepts arbitrary supported CLI config overrides. Translate the
     // portable HTTP/stdio declarations and replace any base declaration so a
-    // run sees only the MCPs its profile selected.
+    // run sees only the MCPs its profile selected. NOTE: the CLI merges this
+    // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
+    // home declares — the app-owned run home is what makes this exhaustive.
     mcp_servers: codexMcpServers(spec.mcpServers),
     shell_environment_policy: {
       inherit: "core",
       ignore_default_excludes: false,
-      ...(gitCeiling ? { set: { GIT_CEILING_DIRECTORIES: gitCeiling } } : {}),
+      ...(Object.keys(exported).length ? { set: exported } : {}),
     },
   };
+}
+
+/**
+ * The sandbox a run gets. `spec.autonomous` deliberately does NOT decide repo
+ * write access: it also drives Claude's `permissionMode`, and flipping it to
+ * `"default"` would hang a server run on an approval nobody can answer.
+ *
+ * P13-RT-02: a delivering Codex agent whose `execute-code-or-write-repo` grant
+ * is withheld used to run at `danger-full-access` — exactly as unconstrained as
+ * a fully-granted one, while the capability matrix showed the withholding as
+ * enforced. The read-only sandbox PHYSICALLY blocks writes (strictly stronger
+ * than Claude's tool denylist), and Viberr already relies on it for supporting
+ * runs, so the headline gate maps straight onto it.
+ */
+export function resolveCodexSandboxMode(spec: RunSpec): SandboxMode {
+  // Operators coordinate and reviewers advise — neither mutates the workspace.
+  if (spec.kind === "operator" || spec.kind === "reviewer") return "read-only";
+  if (spec.repoWriteWithheld) return "read-only";
+  return spec.autonomous ? "danger-full-access" : "workspace-write";
 }
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
@@ -190,7 +275,7 @@ function safeCodexError(error: unknown): Error {
  * stderr. Mirrors the routing classes `runFailureReason` (agent-reply) returns;
  * "unavailable" is the fail-fast (no credential) class handled upstream, never
  * here — the codex process only reaches this classifier once it has started. */
-export type CodexFailureKind = "quota" | "auth" | "unknown";
+export type CodexFailureKind = "quota" | "auth" | "idle_timeout" | "unknown";
 
 /** Classify a provider failure IN MEMORY before its raw text is redacted, and
  * pair the class with a redaction-safe canonical message. The raw error can
@@ -369,24 +454,14 @@ export function createCodexAdapter(
         const codex = factory(codexOptions);
         // Fully autonomous: no approval gating. `danger-full-access` mirrors
         // Claude's bypassPermissions so a server-spawned run never blocks on
-        // an approval it can't answer; a non-autonomous run stays sandboxed.
-        // Operators are coordinators rather than coding agents, so enforce the
-        // closest direct-SDK equivalent to Claude's denied mutation tools:
-        // read-only files, no network, and no web search.
-        //
-        // Supporting/reviewing runs (`kind: "reviewer"`) are read-only too
-        // (F10-12 / F10-04, owner ruling "supporting agents read-only by
-        // default"): only the single delivering engagement mutates the
-        // workspace. A read-only Codex sandbox PHYSICALLY blocks writes — this
-        // is stronger than Claude's tool denylist and closes the VIB-30 class
-        // where a reviewer committed + pushed. Network stays enabled so declared
-        // MCP resources still work (only the operator disables egress).
-        const sandboxMode: SandboxMode =
-          spec.kind === "operator" || spec.kind === "reviewer"
-            ? "read-only"
-            : spec.autonomous
-              ? "danger-full-access"
-              : "workspace-write";
+        // an approval it can't answer. Operators are coordinators rather than
+        // coding agents, so they get the closest direct-SDK equivalent to
+        // Claude's denied mutation tools: read-only files, no network, no web
+        // search. Supporting/reviewing runs are read-only too (F10-12 /
+        // F10-04), as are delivering runs whose repo-write grant is withheld
+        // (P13-RT-02). Network stays enabled so declared MCP resources still
+        // work (only the operator disables egress).
+        const sandboxMode: SandboxMode = resolveCodexSandboxMode(spec);
         const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
         const threadOptions: ThreadOptions = {
           model: spec.model,
@@ -454,8 +529,11 @@ export function createCodexAdapter(
           // them so a hung run settles `error` (→ react/stuck-packet) while a
           // user interrupt stays `interrupted`.
           if (idleTimedOut) {
+            // Classified so the timeline copy can say "hung", not "failed" —
+            // and so it reads the same as the Claude idle guard (P13-RT-11).
             emitAdapterFailure(
               `Codex stopped after ${idleMs} ms without producing an event.`,
+              "idle_timeout",
             );
             return settle("error");
           }

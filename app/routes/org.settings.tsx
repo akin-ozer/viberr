@@ -182,7 +182,9 @@ export async function action({ request }: Route.ActionArgs) {
         if (field("userId") === admin.id) {
           return fail("You can't remove your own account", 409);
         }
-        const result = deleteOrgUser(db, field("userId"), actor);
+        // UI-29: now async — it also prunes the account from every project.md
+        // membership list before deleting the identity.
+        const result = await deleteOrgUser(db, field("userId"), actor);
         return ok(result.toast);
       }
       case "user-disable": {
@@ -246,7 +248,7 @@ export async function action({ request }: Route.ActionArgs) {
 
       // ------------------------------------------------- agent resources
       case "kb-save": {
-        const result = saveKnowledgeBase(
+        const result = await saveKnowledgeBase(
           db,
           {
             id: field("kbId") || null,
@@ -258,7 +260,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "kb-delete":
-        return ok(deleteKnowledgeBase(db, field("kbId"), actor).toast);
+        return ok((await deleteKnowledgeBase(db, field("kbId"), actor)).toast);
       case "kb-reindex":
         return ok(reindexKnowledgeBase(db, field("kbId"), actor).toast);
       case "mcp-save": {
@@ -278,9 +280,9 @@ export async function action({ request }: Route.ActionArgs) {
       case "mcp-test":
         return ok((await testMcpServer(db, field("mcpId"))).toast);
       case "mcp-delete":
-        return ok(deleteMcpServer(db, field("mcpId"), actor).toast);
+        return ok((await deleteMcpServer(db, field("mcpId"), actor)).toast);
       case "skill-save": {
-        const result = saveSkill(
+        const result = await saveSkill(
           db,
           {
             id: field("skillId") || null,
@@ -293,7 +295,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "skill-delete":
-        return ok(deleteSkill(db, field("skillId"), actor).toast);
+        return ok((await deleteSkill(db, field("skillId"), actor)).toast);
       case "agent-save": {
         const result = saveGlobalAgentProfile(
           db,
@@ -302,6 +304,7 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             backend: field("backend") === "claude" ? "claude" : "codex",
             summary: field("summary"),
+            persona: field("persona"),
             stages: parseJsonStringArray(field("stages")),
             skills: parseJsonStringArray(field("skills")),
             mcps: parseJsonStringArray(field("mcps")),

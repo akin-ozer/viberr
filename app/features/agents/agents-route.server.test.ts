@@ -344,7 +344,15 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     await postAction(ids.arda, { intent: "delete-profile", profileId: "locked-dev" });
   });
 
-  it("persists the submitted governed caps — no permissive defaults merged, but the F14 headline repair applies (#37)", async () => {
+  // REWRITTEN for P13-AP-06. This used to assert that a capability the form
+  // omitted stays ABSENT from the stored grants ("no blanket default merge",
+  // #37). The intent was right — an omitted cap must NOT be granted — but the
+  // implementation enshrined the bug: the tool-policy polarity denies only on
+  // an explicit `human`/`off`, so an absent id reads back as *unspecified* and
+  // is therefore ALLOWED. The #37 protection (never merge the permissive
+  // catalog defaults) is what this asserts now, with "not granted" written down
+  // as an explicit `off` instead of an absence that silently means the opposite.
+  it("persists the submitted governed caps and an explicit `off` for the rest — no permissive defaults merged, F14 headline repair still applies (#37 / AP-06)", async () => {
     const result = (await postAction(ids.arda, {
       intent: "create-profile",
       payload: JSON.stringify({
@@ -364,25 +372,31 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     const created = (await runLoader(ids.arda)).profiles.find(
       (p) => p.id === "minimal-dev",
     )!;
-    const persisted = created.capabilities
-      .map((c) => [c.capabilityId, c.mode])
-      .sort();
+    const mode = (id: string) =>
+      created.capabilities.find((c) => c.capabilityId === id)?.mode;
     // F14: granting scoped delivery (create-task-branch/open-review-pr) is a
     // deliverer, so the headline `execute-code-or-write-repo` (the master gate)
     // is repaired to `direct` — otherwise the chosen delivery caps would be
-    // silently vetoed by the tool policy (the VIB-1 "no commits" class). The
-    // repair adds ONLY the headline; the rest of the catalog is still NOT merged.
-    expect(persisted).toEqual([
-      ["create-task-branch", "direct"],
-      ["execute-code-or-write-repo", "direct"],
-      ["open-review-pr", "direct"],
+    // silently vetoed by the tool policy (the VIB-1 "no commits" class).
+    expect(mode("create-task-branch")).toBe("direct");
+    expect(mode("open-review-pr")).toBe("direct");
+    expect(mode("execute-code-or-write-repo")).toBe("direct");
+    // Powers the creator never chose are NOT granted — and that is now written
+    // down (`off`) rather than left absent, because absent means "unspecified"
+    // and unspecified means allowed at the tool layer (AP-06). No blanket
+    // permissive default merge either: nothing extra became `direct`.
+    expect(mode("commit-push-branch")).toBe("off");
+    expect(mode("comment-on-task")).toBe("off");
+    expect(mode("report-validation-verdict")).toBe("off");
+    // Always-human ids stay the structural lock.
+    expect(mode("merge-pull-request")).toBe("human");
+    expect(
+      created.capabilities.filter((c) => c.mode === "direct").map((c) => c.capabilityId).sort(),
+    ).toEqual([
+      "create-task-branch",
+      "execute-code-or-write-repo",
+      "open-review-pr",
     ]);
-    // Powers the creator never chose (and that the repair doesn't need) stay
-    // ABSENT — no blanket default merge (the original #37 regression).
-    const capIds = created.capabilities.map((c) => c.capabilityId);
-    expect(capIds).not.toContain("commit-push-branch");
-    expect(capIds).not.toContain("merge-pull-request");
-    expect(capIds).not.toContain("comment-on-task");
 
     await postAction(ids.arda, {
       intent: "delete-profile",

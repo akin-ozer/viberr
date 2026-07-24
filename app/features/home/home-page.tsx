@@ -9,8 +9,11 @@ import { Link, useFetcher } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import type { HomePrefs } from "~/server/prefs/user-prefs.server";
-import { formatRelative } from "~/shared/dates/format";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { Avatar } from "~/ui/avatar";
+import { useRelativeTime } from "~/ui/use-relative-time";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { SkipLink } from "~/ui/skip-link";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -100,12 +103,31 @@ export function StageMeter({
             style={{
               flex: n,
               background: s.color,
-              opacity: s.id === "done" ? 0.45 : 1,
+              // UI-15: the completed band is dimmed because it is the
+              // project's TERMINAL stage, not because its id is "done" —
+              // stage ids are per-project and renameable
+              // (shared/workflow/stage-roles.ts).
+              opacity: isTerminalStage(s.id, stages) ? 0.45 : 1,
             }}
           ></span>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * "updated 2m ago" on a project card. UI-02: a project with no tasks has no
+ * change timestamp at all (the old `parsed_at` fallback made every task-less
+ * card read "updated just now" after any projection rebuild), so it says so.
+ */
+function UpdatedLabel({ updatedAt }: { updatedAt: string | null }) {
+  const relative = useRelativeTime(updatedAt);
+  if (!updatedAt) return <span className="upd">no task activity yet</span>;
+  return (
+    <time className="upd" dateTime={updatedAt} suppressHydrationWarning>
+      updated {relative}
+    </time>
   );
 }
 
@@ -143,8 +165,11 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           {p.waiting} waiting on you
         </Pill>
       )}
-      {p.waiting === 0 && p.overrideWaiting > 0 && (
-        <span title="You are not a member — these need a decision you could make with your org-admin override.">
+      {/* UI-22: shown ALONGSIDE a personal count, not only when it is zero —
+          an admin with 2 personal and 3 override-eligible decisions used to see
+          no trace of the other 3. */}
+      {p.overrideWaiting > 0 && (
+        <span title="These need a decision your project role can't make — reachable through your org-admin override.">
           <Pill kind="neutral" sm>
             {p.overrideWaiting} override-available
           </Pill>
@@ -205,9 +230,7 @@ function ProjectCard({
         <ProjectStats p={p} />
         <div className="pj-foot">
           <MemberStack members={p.members} />
-          <span className="upd">
-            updated {p.updatedAt ? formatRelative(p.updatedAt) : "—"}
-          </span>
+          <UpdatedLabel updatedAt={p.updatedAt} />
         </div>
       </Link>
       <button
@@ -284,6 +307,8 @@ function NewProjectNameFields({
   effKey,
   setKey,
   setKeyTouched,
+  keyStripped,
+  setKeyStripped,
   submit,
 }: {
   nameRef: RefObject<HTMLInputElement | null>;
@@ -292,6 +317,8 @@ function NewProjectNameFields({
   effKey: string;
   setKey: (v: string) => void;
   setKeyTouched: (v: boolean) => void;
+  keyStripped: boolean;
+  setKeyStripped: (v: boolean) => void;
   submit: () => void;
 }) {
   return (
@@ -312,9 +339,15 @@ function NewProjectNameFields({
           }}
         />
       </div>
+      {/* LV-07: the input silently dropped every non-letter (typing "P13" left
+          "P") and Create then sat disabled with no explanation. The accepted
+          alphabet is stated up front, and a live note names what was stripped.
+          Letters-only is the stored contract — `taskPrefix` is
+          `/^[A-Za-z]+$/` in app/schemas/project-file.schema.ts. */}
       <div className="field">
         <label className="flabel" htmlFor="np-key">
-          Task key
+          Task key{" "}
+          <span className="fhint">2–4 letters · task ids look like {(effKey || "PAY") + "-1"}</span>
         </label>
         <input
           id="np-key"
@@ -322,16 +355,25 @@ function NewProjectNameFields({
           className="mono"
           value={effKey}
           placeholder="PAY"
+          aria-describedby="np-key-note"
           onChange={(e) => {
             setKeyTouched(true);
-            setKey(
-              e.target.value
-                .toUpperCase()
-                .replace(/[^A-Z]/g, "")
-                .slice(0, 4),
-            );
+            const raw = e.target.value;
+            const cleaned = raw
+              .toUpperCase()
+              .replace(/[^A-Z]/g, "")
+              .slice(0, 4);
+            setKeyStripped(raw.toUpperCase().replace(/[A-Z]/g, "").trim().length > 0);
+            setKey(cleaned);
           }}
         />
+        <div className="fhint" id="np-key-note">
+          {keyStripped
+            ? "Only letters are kept — digits and symbols aren't allowed in a task key."
+            : effKey.length > 0 && effKey.length < 2
+              ? "At least 2 letters."
+              : ""}
+        </div>
       </div>
     </div>
   );
@@ -418,36 +460,26 @@ function NewProjectRepoField({
   );
 }
 
-function NewProjectTemplateField({
-  template,
-  setTemplate,
-}: {
-  template: "governed" | "light";
-  setTemplate: (t: "governed" | "light") => void;
-}) {
+/**
+ * P13-AP-04 / owner ruling 2: the "Lightweight · 3 stages" preset was DELETED —
+ * it created a `todo`/`doing`/`done` board while the preinstalled roster's
+ * eligible stages are the governed ids, so no specialist was ever assignable
+ * (LV-01, live-proven). With one template left there is nothing to pick, so the
+ * chip row is replaced by an honest statement of the board a project starts on
+ * and where to change it.
+ */
+function NewProjectWorkflowField() {
   return (
     <div className="field">
-      <span className="flabel">Workflow template</span>
+      <span className="flabel">
+        Workflow
+        <span className="fhint">customize the stages in project settings</span>
+      </span>
       <div className="pick-chips">
-        <button
-          type="button"
-          className={"pick-chip" + (template === "governed" ? " on" : "")}
-          onClick={() => setTemplate("governed")}
-        >
+        <span className="pick-chip on" aria-disabled="true">
           <span className="sdot" style={{ background: "var(--blue)" }}></span>
           Standard · 5 stages
-        </button>
-        <button
-          type="button"
-          className={"pick-chip" + (template === "light" ? " on" : "")}
-          onClick={() => setTemplate("light")}
-        >
-          <span
-            className="sdot"
-            style={{ background: "var(--teal-dark)" }}
-          ></span>
-          Lightweight · 3 stages
-        </button>
+        </span>
       </div>
     </div>
   );
@@ -507,6 +539,7 @@ function NewProjectFooter({
   storeRoot,
   slug,
   ok,
+  blockedReason,
   busy,
   onClose,
   submit,
@@ -514,6 +547,8 @@ function NewProjectFooter({
   storeRoot: string;
   slug: string;
   ok: boolean;
+  /** LV-07: why Create is disabled — never a dead button with no explanation. */
+  blockedReason: string | null;
   busy: boolean;
   onClose: () => void;
   submit: () => void;
@@ -524,6 +559,11 @@ function NewProjectFooter({
         creates {storeRoot}/projects/{slug || "…"}/
       </span>
       <span className="foot-actions">
+        {!ok && blockedReason && (
+          <span className="foot-hint" role="status">
+            {blockedReason}
+          </span>
+        )}
         <button type="button" className="btn ghost" onClick={onClose}>
           Cancel
         </button>
@@ -531,6 +571,7 @@ function NewProjectFooter({
           type="button"
           className="btn primary"
           disabled={!ok || busy}
+          {...(!ok && blockedReason ? { title: blockedReason } : {})}
           style={!ok ? { opacity: 0.55, pointerEvents: "none" } : undefined}
           onClick={submit}
           aria-busy={busy}
@@ -557,9 +598,9 @@ function NewProjectModal({
   const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
+  const [keyStripped, setKeyStripped] = useState(false);
   const [repo, setRepo] = useState("");
   const [repoTouched, setRepoTouched] = useState(false);
-  const [template, setTemplate] = useState<"governed" | "light">("governed");
   const [policy, setPolicy] = useState<"strict" | "balanced" | "auto">(
     "balanced",
   );
@@ -615,6 +656,18 @@ function NewProjectModal({
     effKey.length >= 2 &&
     effOwner.length > 0 &&
     effRepo.length > 0;
+  // LV-07: name the FIRST unmet requirement so a disabled Create is never
+  // unexplained (the previous modal offered no message anywhere).
+  const blockedReason =
+    name.trim().length <= 1
+      ? "Enter a project name (2+ characters)."
+      : effKey.length < 2
+        ? "Task key needs at least 2 letters."
+        : effOwner.length === 0
+          ? "Pick a GitHub connection."
+          : effRepo.length === 0
+            ? "Enter a repository name."
+            : null;
   const serverError =
     fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
@@ -639,7 +692,6 @@ function NewProjectModal({
     fd.set("key", effKey);
     fd.set("owner", effOwner);
     fd.set("repoName", effRepo);
-    fd.set("template", template);
     fd.set("policy", policy);
     fetcher.submit(fd, { method: "post" });
   };
@@ -686,6 +738,8 @@ function NewProjectModal({
           effKey={effKey}
           setKey={setKey}
           setKeyTouched={setKeyTouched}
+          keyStripped={keyStripped}
+          setKeyStripped={setKeyStripped}
           submit={submit}
         />
         <NewProjectConnectionField
@@ -699,10 +753,7 @@ function NewProjectModal({
           effOwner={effOwner}
           effRepo={effRepo}
         />
-        <NewProjectTemplateField
-          template={template}
-          setTemplate={setTemplate}
-        />
+        <NewProjectWorkflowField />
         <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />
         {serverError && (
           <div className="form-err">
@@ -717,6 +768,7 @@ function NewProjectModal({
         storeRoot={storeRoot}
         slug={slug}
         ok={ok}
+        blockedReason={blockedReason}
         busy={busy}
         onClose={close}
         submit={submit}
@@ -797,6 +849,27 @@ function HomeTopBar({
   );
 }
 
+/**
+ * UI-19: the loader computes the greeting from the SERVER's clock, so a user in
+ * another timezone was told "Good evening" at 9am. The server value is kept as
+ * the SSR text (no flash of empty heading) and corrected from the browser clock
+ * on mount — the `<h1>` already carries `suppressHydrationWarning`.
+ */
+function useLocalGreeting(serverGreet: string): string {
+  const [greet, setGreet] = useState(serverGreet);
+  useEffect(() => {
+    const hour = new Date().getHours();
+    setGreet(
+      hour < 12
+        ? "Good morning"
+        : hour < 18
+          ? "Good afternoon"
+          : "Good evening",
+    );
+  }, []);
+  return greet;
+}
+
 function HomeHero({
   greet,
   firstName,
@@ -818,15 +891,35 @@ function HomeHero({
   onView: (v: "grid" | "list") => void;
   onNew: () => void;
 }) {
+  const localGreet = useLocalGreeting(greet);
   return (
     <div className="home-hero">
       <div>
         <h1 suppressHydrationWarning>
-          {greet}, {firstName}
+          {localGreet}, {firstName}
         </h1>
+        {/* UI-10: the copy (and the animated `.working` pulse dot) asserted
+            activity even at zero — "Your agents kept working — •0 runs active".
+            The zero case now reads as the quiet state it is, and the pulse dot
+            renders only when something is actually running. */}
         <p className="sub">
           {projectCount === 0 ? (
             "No projects yet — create your first project below."
+          ) : totalRunning === 0 ? (
+            <>
+              All quiet — no agent runs right now.{" "}
+              {totalWaiting > 0 ? (
+                <>
+                  <b>
+                    {totalWaiting}{" "}
+                    {totalWaiting === 1 ? "decision" : "decisions"}
+                  </b>{" "}
+                  waiting on you.
+                </>
+              ) : (
+                "Nothing is waiting on you."
+              )}
+            </>
           ) : (
             <>
               Your agents kept working —{" "}
@@ -844,10 +937,13 @@ function HomeHero({
         </p>
       </div>
       <div className="hero-actions">
+        {/* UI-13: selection was conveyed by the `on` class alone — invisible to
+            assistive tech. `aria-pressed` carries it now. */}
         <div className="seg" role="group" aria-label="View">
           <button
             type="button"
             className={view === "grid" ? "on" : ""}
+            aria-pressed={view === "grid"}
             onClick={() => onView("grid")}
           >
             <Icon name="board" />
@@ -856,6 +952,7 @@ function HomeHero({
           <button
             type="button"
             className={view === "list" ? "on" : ""}
+            aria-pressed={view === "list"}
             onClick={() => onView("list")}
           >
             <Icon name="review" />
@@ -964,8 +1061,15 @@ function ProjectSections({
           <h2>{pinned.length > 0 ? "Everything else" : "All projects"}</h2>
           <span className="ct">{rest.length}</span>
         </div>
-        {rest.length === 0 && query ? (
+        {/* UI-21: "no match" must account for the pinned group rendered above —
+            it used to claim nothing matched while a matching pinned card was
+            on screen. */}
+        {rest.length === 0 && pinned.length === 0 && query ? (
           <div className="empty">No project matches “{query}”.</div>
+        ) : rest.length === 0 && query ? (
+          <div className="empty">
+            Every match for “{query}” is pinned above.
+          </div>
         ) : view === "grid" ? (
           <div className="pj-grid">
             {rest.map((p) => (
@@ -1090,6 +1194,9 @@ function SettingsPanel({ org }: { org: HomeOrgSummary }) {
               <div className="sub">
                 {org.users.admins} admin{org.users.admins === 1 ? "" : "s"} ·{" "}
                 {org.users.members} member{org.users.members === 1 ? "" : "s"}
+                {org.users.disabled > 0
+                  ? ` · ${org.users.disabled} disabled`
+                  : ""}
               </div>
             </span>
           </span>
@@ -1177,13 +1284,19 @@ export function HomePage({
   const searchRef = useRef<HTMLInputElement>(null);
   const csrf = useCsrfToken();
   const push = useToast();
-  const prefsFetcher = useFetcher();
+  const prefsFetcher = useFetcher<{
+    ok: boolean;
+    intent?: "pin" | "view";
+    pinned?: boolean;
+    error?: string;
+  }>();
   const rescanFetcher = useFetcher<{
     ok: boolean;
     projects?: number;
     changed?: number;
     removed?: number;
     errors?: number;
+    error?: string;
   }>();
 
   // ⌘K / Ctrl-K focuses the project search (mock behavior).
@@ -1227,29 +1340,39 @@ export function HomePage({
     fd.set("slug", slug);
     fd.set("pinned", next ? "1" : "0");
     prefsFetcher.submit(fd, { method: "post" });
-    push(next ? "Pinned — it will stay at the top" : "Unpinned");
   };
 
-  const scanning = rescanFetcher.state !== "idle";
-  const rescanDone = useRef(false);
-  useEffect(() => {
-    if (rescanFetcher.state === "submitting") rescanDone.current = false;
-    if (
-      rescanFetcher.state === "idle" &&
-      rescanFetcher.data?.ok &&
-      !rescanDone.current
-    ) {
-      rescanDone.current = true;
-      const d = rescanFetcher.data;
-      const drift = (d.changed ?? 0) + (d.removed ?? 0) + (d.errors ?? 0);
-      push(
-        "Store re-scanned — " +
-          d.projects +
-          " project dirs, " +
-          (drift === 0 ? "no drift found" : drift + " changed"),
-      );
+  // UI-06: the pin/view toasts settle on the RESULT (the shared
+  // `useFetcherResult` contract the bell/user-menu/profile already use). A
+  // rejected submit now reports the failure instead of claiming success and
+  // silently reverting on the next revalidation.
+  useFetcherResult(prefsFetcher, (d) => {
+    if (!d.ok) {
+      push(d.error ?? "Couldn't save that preference — please try again");
+      return;
     }
-  }, [rescanFetcher.state, rescanFetcher.data, push]);
+    if (d.intent === "pin") {
+      push(d.pinned ? "Pinned — it will stay at the top" : "Unpinned");
+    }
+  });
+
+  const scanning = rescanFetcher.state !== "idle";
+  // UI-07: a failed re-scan (403 for a non-admin, or an app error) used to
+  // render NOTHING — the spinner just stopped and the page looked as if the
+  // scan had succeeded. Both outcomes toast now, mirroring the rebuild handler.
+  useFetcherResult(rescanFetcher, (d) => {
+    if (!d.ok) {
+      push(d.error ?? "Re-scan failed — check the server log");
+      return;
+    }
+    const drift = (d.changed ?? 0) + (d.removed ?? 0) + (d.errors ?? 0);
+    push(
+      "Store re-scanned — " +
+        d.projects +
+        " project dirs, " +
+        (drift === 0 ? "no drift found" : drift + " changed"),
+    );
+  });
   const rescan = () => {
     if (scanning) return;
     const fd = new FormData();
@@ -1318,6 +1441,8 @@ export function HomePage({
       data-density="comfortable"
       data-screen-label="Home — project selection"
     >
+      {/* UI-12: bypass block ahead of the brand/search/bell/avatar header. */}
+      <SkipLink />
       <HomeTopBar
         searchRef={searchRef}
         query={query}
@@ -1328,7 +1453,7 @@ export function HomePage({
         theme={theme}
       />
 
-      <main className="home-shell">
+      <main className="home-shell" id="main-content" tabIndex={-1}>
         <HomeHero
           greet={data.greet}
           firstName={firstName}

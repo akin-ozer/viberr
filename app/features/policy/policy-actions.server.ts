@@ -7,6 +7,10 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import {
+  countLiveAdmins,
+  removedAccountLabel,
+} from "~/features/project-settings/membership.server";
 import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
 
 /**
@@ -65,7 +69,8 @@ function userName(db: DatabaseSync, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
     | undefined;
-  return row?.name ?? userId;
+  // LV-04: never echo the raw `u_…` id as if it were a display name.
+  return row?.name ?? removedAccountLabel(userId);
 }
 
 // ---------------------------------------------------------------- set role
@@ -111,9 +116,11 @@ export async function setMemberRole(
     previousRole = member.role;
     if (member.role === role) return; // no-op, no event
     if (member.role === "admin" && role !== "admin") {
-      const admins = parsed.frontmatter.members.filter(
-        (m) => m.role === "admin",
-      ).length;
+      // UI-29: count admins with a LIVE, enabled account. Counting project.md
+      // entries let one ghost admin (an org-deleted user project.md still
+      // listed) satisfy the guard, so the only real admin could demote
+      // themselves into a project nobody could govern.
+      const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (admins <= 1) {
         // Last-admin guard — exact mock copy, project name parameterized.
         throw AppError.conflict(

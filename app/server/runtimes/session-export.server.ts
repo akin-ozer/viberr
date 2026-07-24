@@ -1,8 +1,7 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { getEnv } from "../config/env.server";
 import { resolveClaudeConfigDir } from "./claude-config.server";
+import { codexSessionRoots } from "./codex-config.server";
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
@@ -12,7 +11,7 @@ import type { RealBackend } from "./runtime-registry.server";
  * its own resumable transcript there, keyed by the session id the UI shows:
  *
  *   Claude Code : $CLAUDE_CONFIG_DIR/projects/<cwd-slashes-as-dashes>/<sid>.jsonl
- *   Codex       : $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
+ *   Codex       : <codex run home>/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
  *
  * We locate the file by the session id itself (globbing the per-project dirs /
  * dated rollout dirs) so we never depend on reproducing the cwd→folder
@@ -33,10 +32,13 @@ export interface LocatedTranscript {
   bytes: number;
 }
 
-/** Resolve Codex's home dir: explicit CODEX_HOME, else the conventional ~/.codex. */
-function codexHome(): string {
-  const env = getEnv();
-  return env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+/** Every `…/sessions` dir a codex rollout may live in. Runs write into the
+ *  app-owned run home (P13-LV-13); the human's login dir is still searched so a
+ *  transcript recorded before that split stays exportable. */
+function codexSessionDirs(): string[] {
+  return codexSessionRoots()
+    .map((root) => path.join(root, "sessions"))
+    .filter((dir) => existsSync(dir));
 }
 
 /** Read the cwd baked into a Claude/Codex transcript's first line that carries one. */
@@ -88,12 +90,11 @@ function locateClaude(sessionId: string): string | null {
 }
 
 /** Codex: a `rollout-…jsonl` whose filename embeds the session id, found by
- *  recursively walking the dated dirs under `$CODEX_HOME/sessions`.
+ *  recursively walking the dated dirs under each codex `sessions` root.
  *  Filename-only walk — no file reads. */
 function codexTranscriptByFilename(sessionId: string): string | null {
-  const sessionsDir = path.join(codexHome(), "sessions");
-  if (!existsSync(sessionsDir)) return null;
-  const stack: string[] = [sessionsDir];
+  const stack: string[] = codexSessionDirs();
+  if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: Dirent[];
@@ -119,9 +120,8 @@ function codexTranscriptByFilename(sessionId: string): string | null {
 /** Content fallback: the id appears in the session-meta (first line). Reads
  *  every candidate file — export-route only, never on a loader path. */
 function codexTranscriptByContent(sessionId: string): string | null {
-  const sessionsDir = path.join(codexHome(), "sessions");
-  if (!existsSync(sessionsDir)) return null;
-  const stack: string[] = [sessionsDir];
+  const stack: string[] = codexSessionDirs();
+  if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: Dirent[];

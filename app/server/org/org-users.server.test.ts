@@ -168,11 +168,11 @@ describe("edit / role / reset / remove", () => {
       { name: "Gidici", email: "gidici@test.dev", role: "member" },
       ACTOR,
     );
-    const removed = deleteOrgUser(db, user.id, ACTOR);
+    const removed = await deleteOrgUser(db, user.id, ACTOR);
     expect(removed.toast).toBe("Gidici removed");
     expect(findUserByEmail(db, "gidici@test.dev")).toBeNull();
 
-    expect(() => deleteOrgUser(db, "u_admin", ACTOR)).toThrowError(
+    await expect(deleteOrgUser(db, "u_admin", ACTOR)).rejects.toThrowError(
       /last active admin/,
     );
   });
@@ -190,7 +190,7 @@ describe("edit / role / reset / remove", () => {
       db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id),
     ).toBeTruthy();
 
-    deleteOrgUser(db, user.id, ACTOR);
+    await deleteOrgUser(db, user.id, ACTOR);
     expect(db.prepare(`SELECT id FROM "user" WHERE id=?`).get(user.id)).toBeUndefined();
 
     // Re-creating the same email succeeds (no orphaned identity constraint).
@@ -221,7 +221,7 @@ describe("edit / role / reset / remove", () => {
       db.prepare(`SELECT id FROM "session" WHERE userId = ?`).get(user.id),
     ).toBeTruthy();
 
-    deleteOrgUser(db, user.id, ACTOR);
+    await deleteOrgUser(db, user.id, ACTOR);
 
     expect(
       db.prepare(`SELECT id FROM "session" WHERE userId = ?`).get(user.id),

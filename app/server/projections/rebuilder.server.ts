@@ -24,6 +24,7 @@ import {
 import { deriveReadiness } from "~/server/interpretation/readiness-policy.server";
 import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 
 /**
@@ -351,6 +352,27 @@ export function rebuildTaskFile(
     ...referenceDiagnostics({ stage: fm.stage, knownStageIds: stageIds }),
   ];
 
+  // LV-20: a task sitting in the project's TERMINAL stage is closed — there is
+  // nothing left for a human (or an agent) to decide, so it must never be
+  // counted as pending. A conversational operator turn on an already-Done task
+  // leaves `waiting: human` in the file forever (the run start flips it to
+  // `agent`, the run end flips it to `human` — see the note below), which made a
+  // Done+merged task report "Waiting on: Human decision", inflated the board's
+  // "N waiting on a human decision" subtitle, and disagreed with the review
+  // queue (which filters on the review boundary and reported 0).
+  //
+  // Every waiting-sensitive surface — board cards, the board subtitle, the task
+  // detail "Waiting on" row, the review queue's `isReady`, `decisionsRequiring`
+  // — reads `task_projections`, so normalizing once here fixes all of them
+  // consistently. The canonical task file is untouched: move the task back out
+  // of the terminal stage and its stored `waiting` applies again.
+  const projectedWaiting = isTerminalStage(
+    fm.stage,
+    stageIds.map((id) => ({ id })),
+  )
+    ? "none"
+    : fm.waiting;
+
   // Stored readiness is NULL when the field was missing/invalid in the file
   // (a readiness-path diagnostic exists in that case).
   const readinessWasInvalid = allDiagnostics.some((d) => d.path === "readiness");
@@ -410,7 +432,7 @@ export function rebuildTaskFile(
     fm.stage,
     derivation.readiness,
     storedReadiness,
-    fm.waiting,
+    projectedWaiting,
     fm.urgent ? 1 : 0,
     fm.validation,
     acceptanceBlockedReason(fm),

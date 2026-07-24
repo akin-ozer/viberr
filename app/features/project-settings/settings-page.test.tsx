@@ -33,9 +33,9 @@ const STAGES = [
 ];
 
 const MEMBERS: MembershipView[] = [
-  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
-  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
-  { userId: "u_new", role: "viewer", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal" },
+  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "", missing: false, disabled: false },
+  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose", missing: false, disabled: false },
+  { userId: "u_new", role: "viewer", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal", missing: false, disabled: false },
 ];
 
 // A REAL bound PAT carrying an open scope violation — the honest case that

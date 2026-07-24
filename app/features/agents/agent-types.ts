@@ -76,6 +76,23 @@ export interface AgentProfileView {
   source: "template" | "project";
 }
 
+/**
+ * One org-level TEMPLATE offered by the project's "Add from library" picker —
+ * a global profile this project has not deployed yet (owner ruling 1 /
+ * P13-AP-05). Assembled by `listLibraryProfiles` (agents-query.server).
+ */
+export interface LibraryProfileView {
+  id: string;
+  name: string;
+  role: string;
+  /** Short scannable copy — the frontmatter `desc`, else the body's opening. */
+  desc: string;
+  backends: ("codex" | "claude")[];
+  stages: string[];
+  spanAll: boolean;
+  resources: { skills: string[]; mcps: string[]; kb: string[] };
+}
+
 /** Minimal profile shape the CapabilityMatrixModal needs (Policy passes
  * the same roster). */
 export type MatrixProfile = Pick<

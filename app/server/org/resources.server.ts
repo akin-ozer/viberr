@@ -33,6 +33,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
+import { updateResourceReferences } from "./resource-references.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -217,12 +218,12 @@ export function getKnowledgeBase(
   return null;
 }
 
-export function saveKnowledgeBase(
+export async function saveKnowledgeBase(
   db: DatabaseSync,
   input: { id?: string | null; name: string; refresh: string },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { kb: KbView; toast: string } {
+): Promise<{ kb: KbView; toast: string }> {
   const name = input.name.trim();
   const dir = slugify(name);
   if (name.length < 2 || !dir) {
@@ -261,6 +262,10 @@ export function saveKnowledgeBase(
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
     else mkdirSync(newAbs, { recursive: true });
+    // P13-KM-07: a rename used to move the folder and leave every agent grant
+    // pointing at the old dir — silently, on both the template and deployment
+    // side. Rewrite the references with the move.
+    await updateResourceReferences("kb", oldDir, dir, ctx.dataRoot);
   } else {
     mkdirSync(kbDirPath(dir, ctx.dataRoot), { recursive: true });
   }
@@ -309,15 +314,18 @@ export function saveKnowledgeBase(
   };
 }
 
-export function deleteKnowledgeBase(
+export async function deleteKnowledgeBase(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { toast: string } {
+): Promise<{ toast: string }> {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
   rmSync(kbDirPath(kb.dir, ctx.dataRoot), { recursive: true, force: true });
+  // P13-KM-07: drop the now-dangling grants instead of leaving every profile
+  // pointing at a folder that no longer exists.
+  await updateResourceReferences("kb", kb.dir, null, ctx.dataRoot);
   // Key on the folder (dir is UNIQUE) so a disk-only synthetic id also clears
   // any metadata row that happens to exist.
   db.prepare(`DELETE FROM org_knowledge_bases WHERE dir = ?`).run(kb.dir);
@@ -851,14 +859,17 @@ export async function testMcpServer(
   return { mcp: fresh, toast };
 }
 
-export function deleteMcpServer(
+export async function deleteMcpServer(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-): { toast: string } {
+  ctx: OrgSeedContext = {},
+): Promise<{ toast: string }> {
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
   db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run(id);
+  // P13-KM-07: an MCP grant is a name reference like a KB/skill one.
+  await updateResourceReferences("mcps", existing.name, null, ctx.dataRoot);
   recordAudit(db, {
     action: "org.mcp.removed",
     actor,
@@ -982,7 +993,7 @@ export function getSkill(
   return null;
 }
 
-export function saveSkill(
+export async function saveSkill(
   db: DatabaseSync,
   input: {
     id?: string | null;
@@ -996,7 +1007,7 @@ export function saveSkill(
   },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { skill: SkillView; toast: string } {
+): Promise<{ skill: SkillView; toast: string }> {
   const name = slugify(input.name);
   const summary = input.summary.trim();
   if (name.length < 2) throw AppError.validation("Give the skill a name.");
@@ -1053,6 +1064,8 @@ export function saveSkill(
       throw AppError.conflict(`A skill folder ${name}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
+    // P13-KM-07: keep every grant pointing at the renamed skill.
+    await updateResourceReferences("skills", oldName, name, ctx.dataRoot);
   }
 
   const dir = skillDirPath(name, ctx.dataRoot);
@@ -1103,18 +1116,20 @@ export function saveSkill(
   };
 }
 
-export function deleteSkill(
+export async function deleteSkill(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { toast: string } {
+): Promise<{ toast: string }> {
   const skill = getSkill(db, id, ctx);
   if (!skill) throw AppError.notFound("No such skill.");
   rmSync(skillDirPath(skill.name, ctx.dataRoot), {
     recursive: true,
     force: true,
   });
+  // P13-KM-07: drop the dangling grants with the folder.
+  await updateResourceReferences("skills", skill.name, null, ctx.dataRoot);
   // Key on the folder (name is UNIQUE) so a disk-only synthetic id also clears
   // any metadata row that happens to exist.
   db.prepare(`DELETE FROM org_skills WHERE name = ?`).run(skill.name);

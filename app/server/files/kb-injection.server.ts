@@ -6,6 +6,7 @@ import {
   realpathSync,
 } from "node:fs";
 import path from "node:path";
+import { logger } from "~/server/logging/logger.server";
 import { kbDirPath } from "./file-store-root.server";
 
 /**
@@ -129,8 +130,26 @@ export function readKbBody(
 ): string {
   try {
     const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir)) return "";
+    if (!existsSync(dir)) {
+      // P13-KM-02: a granted KB that resolves to NOTHING used to be perfectly
+      // silent — no log, no evidence line — which is exactly what hid KM-01
+      // (a grant stored under the display name) and KM-07 (a rename that
+      // orphaned every reference). Live-proven: after renaming a KB, a fresh
+      // run reported "there is no p13-facts knowledge base reaching this run"
+      // while every UI still showed it attached. Mirrors readSkillBody.
+      logger.warn(
+        "declared knowledge base not found in the store — run proceeds WITHOUT it",
+        { kb: name },
+      );
+      return "";
+    }
     const docs = collectKbDocs(dir);
+    if (docs.length === 0) {
+      logger.warn("declared knowledge base is empty — run proceeds WITHOUT it", {
+        kb: name,
+      });
+      return "";
+    }
     const parts: string[] = [];
     let budget = budgetChars;
     let omitted = 0;
@@ -163,7 +182,11 @@ export function readKbBody(
       );
     }
     return parts.join("\n\n");
-  } catch {
+  } catch (error) {
+    logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
+      kb: name,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
     return "";
   }
 }

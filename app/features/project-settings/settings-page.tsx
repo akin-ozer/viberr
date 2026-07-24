@@ -3,6 +3,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
@@ -370,7 +371,11 @@ export function MembersPanel({
     }
     if (
       m.role === "admin" &&
-      members.filter((x) => x.role === "admin").length <= 1
+      // UI-29: mirror the server's live-account guard. Counting file entries
+      // let a ghost admin satisfy it client-side too.
+      members.filter((x) => x.role === "admin" && !x.missing && !x.disabled)
+        .length <= 1 &&
+      !m.missing
     ) {
       push(`${m.name} is the only admin — assign another admin in Policy first`);
       return;
@@ -378,13 +383,21 @@ export function MembersPanel({
     onRemove(m);
   };
 
+  // LV-04/UI-29: memberships whose org account was deleted are counted and
+  // labelled separately — they are not active members, and the row exists so an
+  // admin can SEE and REMOVE the stale entry.
+  const stale = members.filter((m) => m.missing);
+
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="user" />
         <h2>Members</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {members.length} active
+          {members.length - stale.length} active
+          {stale.length > 0
+            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            : ""}
         </span>
       </div>
       <div className="member-list" style={{ marginBottom: 0 }}>
@@ -395,15 +408,39 @@ export function MembersPanel({
               <div className="nm">
                 {m.name}
                 {m.userId === meId && <span className="you-tag">you</span>}
+                {m.missing && (
+                  <>
+                    {" "}
+                    <Pill kind="blocked" sm>
+                      removed account
+                    </Pill>
+                  </>
+                )}
+                {!m.missing && m.disabled && (
+                  <>
+                    {" "}
+                    <Pill kind="neutral" sm>
+                      disabled
+                    </Pill>
+                  </>
+                )}
               </div>
-              <div className="em">{m.email}</div>
+              <div className="em">
+                {m.missing
+                  ? "The org account was deleted — remove this stale membership."
+                  : m.email}
+              </div>
             </span>
             {canManage && (
               <button
                 type="button"
                 className="stg-x"
                 aria-label={"Remove " + m.name}
-                title="Remove member"
+                title={
+                  m.missing
+                    ? "Remove this stale membership"
+                    : "Remove member"
+                }
                 disabled={busy}
                 onClick={() => remove(m)}
               >

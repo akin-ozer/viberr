@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isTerminalStage, resolveStageRoles } from "./stage-roles";
-import { GOVERNED_TEMPLATE, LIGHTWEIGHT_TEMPLATE } from "./templates";
+import { CUSTOM_3_STAGE_BOARD } from "../../../test-support/custom-board";
+import { GOVERNED_TEMPLATE } from "./templates";
 
 describe("resolveStageRoles", () => {
   it("resolves the default 5-stage governed board from its workflow graph", () => {
@@ -16,10 +17,14 @@ describe("resolveStageRoles", () => {
     });
   });
 
-  it("resolves the lightweight 3-stage board (no literal 'review'/'triage')", () => {
+  // The 3-stage board is now a CUSTOM board fixture, not a shipped preset —
+  // P13-AP-04 deleted the "Lightweight · 3 stages" template (its roster could
+  // never be stage-eligible). Custom boards still exist, so role resolution on
+  // non-default stage ids is still the thing under test.
+  it("resolves a custom 3-stage board (no literal 'review'/'triage')", () => {
     const roles = resolveStageRoles(
-      LIGHTWEIGHT_TEMPLATE.stages,
-      LIGHTWEIGHT_TEMPLATE.workflow,
+      CUSTOM_3_STAGE_BOARD.stages,
+      CUSTOM_3_STAGE_BOARD.workflow,
     );
     // entry=todo, terminal=done; review = the stage with an edge into done
     // (doing); work = the stage before review (todo, positional fallback).
@@ -76,7 +81,7 @@ describe("resolveStageRoles", () => {
   });
 
   it("isTerminalStage keys off position, not literal ids", () => {
-    const stages = LIGHTWEIGHT_TEMPLATE.stages;
+    const stages = CUSTOM_3_STAGE_BOARD.stages;
     expect(isTerminalStage("done", stages)).toBe(true);
     expect(isTerminalStage("doing", stages)).toBe(false);
   });

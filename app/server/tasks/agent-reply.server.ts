@@ -119,21 +119,38 @@ function handleMatchesSpecialist(
  * backend alone let `@reviewer` resume the dev's most-recent claude session
  * (the dev then answered "as the dev"); this keeps each agent on its own thread.
  *
- * The profile id and engagement kind must both match; sharing a backend is not
- * enough to reuse another agent's session.
+ * The profile id, engagement kind AND backend must all match. A provider
+ * session is not portable across backends: a Claude session id means nothing to
+ * Codex and vice versa.
+ *
+ * P13-RT-12: the backend clause used to be missing while the comment at the
+ * `@agent` branch below already CLAIMED it ("Sessions never match across
+ * backends"). After an admin switched a profile's backend, an @mention resumed
+ * the DEAD backend's session with the new backend's model — `resumeRun` takes
+ * the backend from the prior run row and the model from the caller, so the run
+ * recorded e.g. `backend: claude, model: gpt-5.6-sol`, a pairing that never
+ * existed. `resolveClaudeModel` doesn't recognize it and returns undefined, so
+ * the run silently used the subscription default on the backend the admin had
+ * just moved away from (typically because it was out of quota). Filtering here
+ * makes the first post-switch mention start a FRESH run on the new backend,
+ * which is what the comment always promised.
  */
 function latestSessionRun(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  target: { profileId: string; isPrimary: boolean },
+  target: { profileId: string; isPrimary: boolean; backend: RealBackend },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
-    if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
+    if (
+      row.agent_profile_id === target.profileId &&
+      row.kind === wantKind &&
+      row.backend === target.backend
+    ) {
       return row;
     }
   }
@@ -222,6 +239,7 @@ export function resolveMentionedAgent(
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: primaryRef.profileId,
         isPrimary: true,
+        backend,
       }),
     };
   }
@@ -243,6 +261,7 @@ export function resolveMentionedAgent(
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
         isPrimary,
+        backend: matched.backend,
       }),
     };
   }
@@ -266,6 +285,7 @@ export function resolveMentionedAgent(
         session: latestSessionRun(db, projectSlug, taskKey, {
           profileId: primaryRef.profileId,
           isPrimary: true,
+          backend,
         }),
       };
     }
@@ -281,13 +301,24 @@ const MAX_REPLY_CHARS = 1200;
 
 /**
  * Extract the FULL (untruncated) reply from a finished run's persisted lines:
- * prefer the LAST substantial `assistant`/`agent_message` text line, else fall
- * back to the final `result`/`turn.completed` text. Whitespace is preserved as
- * the agent wrote it. Returns null when nothing usable was produced.
+ * the LAST substantial `assistant`/`agent_message` text line. Whitespace is
+ * preserved as the agent wrote it. Returns null when the run produced no
+ * report of its own.
  *
  * The verdict classifier and the no-progress guard consume THIS (full) text —
  * a reviewer's verdict frequently lands well past 1200 chars, so classifying on
  * the truncated comment would silently drop the verdict.
+ *
+ * P13-RT-09: there used to be a fallback to the terminal `result` line, whose
+ * text is RUNTIME STATISTICS, not prose — `"success · 3 turns · 12s · $0.02"`
+ * on Claude, `"in 4.1k (cached 2.0k) · out 0.3k tokens"` on Codex
+ * (wire-format). A run that only edited files and exited therefore posted
+ * `success · 7 turns · 214s · $0.31` to the timeline as the agent's report, fed
+ * that string to the prose verdict classifier, and — because two such Codex
+ * runs can produce byte-identical text — tripped the "verbatim repeat"
+ * stuck-loop detector for the wrong reason. A run with no report now honestly
+ * has none: `postAgentReplyComment` logs it and posts nothing, and the stats
+ * stay where they belong, in the run panel.
  */
 export function extractFullReplyText(lines: LogLine[]): string | null {
   const isReplyText = (l: LogLine) =>
@@ -298,12 +329,6 @@ export function extractFullReplyText(lines: LogLine[]): string | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (isReplyText(line)) return normalizeWorkspacePaths(line.text.trim());
-  }
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    if (line.ev === "result" && line.text.trim().length > 0) {
-      return normalizeWorkspacePaths(line.text.trim());
-    }
   }
   return null;
 }
@@ -375,6 +400,9 @@ export type RunFailureKind =
   | "auth"
   | "unavailable"
   | "max_turns"
+  /** The stream produced nothing for the whole idle window — the run was HUNG,
+   *  not failed by the task. Both adapters emit it (P13-RT-11). */
+  | "idle_timeout"
   | "unknown";
 
 /**
@@ -404,7 +432,9 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  const tagged = /·(quota|auth|unavailable|max_turns|unknown)$/.exec(last.tag ?? "");
+  const tagged = /·(quota|auth|unavailable|max_turns|idle_timeout|unknown)$/.exec(
+    last.tag ?? "",
+  );
   if (tagged) return { kind: tagged[1] as RunFailureKind, text };
   const kind: RunFailureKind =
     /is unavailable|no usable credential/i.test(text)

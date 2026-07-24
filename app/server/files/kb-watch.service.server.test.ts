@@ -40,7 +40,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     makeKbDir(dataRoot, "notes", ["a.md"]);
-    const { kb } = saveKnowledgeBase(
+    const { kb } = await saveKnowledgeBase(
       db,
       { name: "Notes", refresh: "on change" },
       { userId: "u", label: "u" },
@@ -61,7 +61,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     makeKbDir(dataRoot, "pinned", ["a.md"]);
-    saveKnowledgeBase(
+    await saveKnowledgeBase(
       db,
       { name: "Pinned", refresh: "manual" },
       { userId: "u", label: "u" },
@@ -95,7 +95,7 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     kbFile(dataRoot, "notes", "a.md");
-    saveKnowledgeBase(
+    await saveKnowledgeBase(
       db,
       { name: "Notes", refresh: "on change" },
       { userId: "u", label: "u" },

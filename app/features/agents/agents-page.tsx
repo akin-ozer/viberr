@@ -12,6 +12,7 @@ import {
   deploymentStatusKind,
   type AgentDeploymentView,
   type AgentProfileView,
+  type LibraryProfileView,
 } from "./agent-types";
 import { CAP_META, type ResCatalogGroup } from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
@@ -208,6 +209,99 @@ function DeleteConfirm({
           <Icon name="x" />
           Delete profile
         </button>
+      </div>
+    </dialog>
+  );
+}
+
+// ------------------------------------------------------------ library picker
+
+/**
+ * "Add from library" — deploy an org-level template into this project
+ * (owner ruling 1 / P13-AP-05). Until this existed, a profile created in
+ * Settings → Global agent profiles could never be deployed, run or selected:
+ * no code path copied a template into a project's roster, so the org editor
+ * offered a lifecycle it could not finish.
+ */
+export function LibraryPicker({
+  library,
+  projectName,
+  busy,
+  onClose,
+  onAdd,
+}: {
+  library: LibraryProfileView[];
+  projectName: string;
+  busy: boolean;
+  onClose: () => void;
+  onAdd: (profileId: string) => void;
+}) {
+  const { ref: dialogRef, close } = useDialog(onClose);
+  return (
+    <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
+      <div className="modal-head">
+        <span className="agent-glyph lg">
+          <Icon name="agents" />
+        </span>
+        <div className="mh-main">
+          <h2>Add from library</h2>
+          <div className="mh-sub">
+            Global agent profiles not yet deployed in {projectName}. Adding one
+            copies its definition and capability grants into this project.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body">
+        {library.length === 0 ? (
+          <div className="empty" style={{ padding: "1rem .5rem" }}>
+            Every global profile is already deployed here. Create more in org
+            settings → Global agent profiles.
+          </div>
+        ) : (
+          <div className="deploy-list">
+            {library.map((t) => (
+              <button
+                type="button"
+                className="deploy-row"
+                key={t.id}
+                disabled={busy}
+                onClick={() => onAdd(t.id)}
+              >
+                <span className="deploy-eng">{t.role || "Specialist"}</span>
+                <span className="deploy-task">
+                  <span className="key mono">{t.name}</span> {t.desc}
+                </span>
+                {t.backends.map((b) => (
+                  <BackendChip key={b} b={b} />
+                ))}
+                <Pill kind="neutral" sm>
+                  {t.spanAll
+                    ? "every stage"
+                    : t.stages.length + " stage" + (t.stages.length === 1 ? "" : "s")}
+                </Pill>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">
+          The global profile stays the source; this project gets its own
+          editable copy.
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Close
+          </button>
+        </div>
       </div>
     </dialog>
   );
@@ -567,6 +661,7 @@ type ProfileActionResult =
 
 export function AgentsPage({
   profiles,
+  library,
   deployments,
   stages,
   projectSlug,
@@ -576,6 +671,8 @@ export function AgentsPage({
   backendAvailable,
 }: {
   profiles: AgentProfileView[];
+  /** Org templates not yet deployed here — the "Add from library" options. */
+  library?: LibraryProfileView[];
   deployments: AgentDeploymentView[];
   stages: StageView[];
   projectSlug: string;
@@ -599,12 +696,14 @@ export function AgentsPage({
   );
   const [tab, setTab] = useState<"profiles" | "live">("profiles");
   const [creating, setCreating] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const operator = profiles.find((p) => p.kind === "operator") ?? null;
   const specialists = profiles.filter((p) => p.kind !== "operator");
+  const libraryProfiles = library ?? [];
   const current = profiles.find((a) => a.id === sel) ?? profiles[0] ?? null;
 
   const counts = useMemo(() => {
@@ -650,6 +749,7 @@ export function AgentsPage({
     if (d.ok) {
       push(d.toast);
       setCreating(false);
+      setLibraryOpen(false);
       setEditing(null);
       setFormError(null);
       if (d.profileId) setSel(d.profileId);
@@ -669,6 +769,13 @@ export function AgentsPage({
         ...(editing ? { profileId: editing.id } : {}),
         payload: JSON.stringify(payload),
       },
+      { method: "post" },
+    );
+  };
+
+  const deployFromLibrary = (profileId: string) => {
+    fetcher.submit(
+      { intent: "deploy-profile", _csrf: csrf, profileId },
       { method: "post" },
     );
   };
@@ -714,6 +821,19 @@ export function AgentsPage({
             <Icon name="shield" />
             Capability matrix
           </button>
+          {canManage && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => setLibraryOpen(true)}
+            >
+              <Icon name="agents" />
+              Add from library
+              {libraryProfiles.length > 0 && (
+                <span style={{ opacity: 0.6 }}>· {libraryProfiles.length}</span>
+              )}
+            </button>
+          )}
           {canManage && (
             <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
               <Icon name="plus" />
@@ -787,6 +907,16 @@ export function AgentsPage({
                 New specialist profile
               </button>
             )}
+            {canManage && libraryProfiles.length > 0 && (
+              <button
+                type="button"
+                className="ag-newbtn"
+                onClick={() => setLibraryOpen(true)}
+              >
+                <Icon name="agents" />
+                Add from library · {libraryProfiles.length}
+              </button>
+            )}
           </aside>
           {current && (
             <ProfileDetail
@@ -836,6 +966,15 @@ export function AgentsPage({
             setFormError(null);
           }}
           onSubmit={submitProfile}
+        />
+      )}
+      {libraryOpen && (
+        <LibraryPicker
+          library={libraryProfiles}
+          projectName={projectName}
+          busy={fetcher.state !== "idle"}
+          onClose={() => setLibraryOpen(false)}
+          onAdd={deployFromLibrary}
         />
       )}
       {matrixOpen && (

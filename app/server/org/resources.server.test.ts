@@ -97,9 +97,9 @@ function setup() {
 const respondingFetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
 
 describe("knowledge bases", () => {
-  it("create makes the real folder; scan sees files added outside Viberr", () => {
+  it("create makes the real folder; scan sees files added outside Viberr", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { kb, toast } = saveKnowledgeBase(
+    const { kb, toast } = await saveKnowledgeBase(
       db,
       { name: "Architecture notes", refresh: "on change" },
       ACTOR,
@@ -123,13 +123,13 @@ describe("knowledge bases", () => {
     expect(reindexed.toast).toBe("Architecture notes re-scanned — 1 docs");
   });
 
-  it("rename moves the folder; collisions are refused", () => {
+  it("rename moves the folder; collisions are refused", async () => {
     const { db, dataRoot, ctx } = setup();
-    const a = saveKnowledgeBase(db, { name: "Alpha", refresh: "manual" }, ACTOR, ctx);
-    saveKnowledgeBase(db, { name: "Beta", refresh: "manual" }, ACTOR, ctx);
+    const a = await saveKnowledgeBase(db, { name: "Alpha", refresh: "manual" }, ACTOR, ctx);
+    await saveKnowledgeBase(db, { name: "Beta", refresh: "manual" }, ACTOR, ctx);
     writeFileSync(path.join(kbDirPath("alpha", dataRoot), "x.md"), "x");
 
-    const renamed = saveKnowledgeBase(
+    const renamed = await saveKnowledgeBase(
       db,
       { id: a.kb.id, name: "Alpha Two", refresh: "manual" },
       ACTOR,
@@ -139,15 +139,15 @@ describe("knowledge bases", () => {
     expect(existsSync(kbDirPath("alpha", dataRoot))).toBe(false);
     expect(existsSync(path.join(kbDirPath("alpha-two", dataRoot), "x.md"))).toBe(true);
 
-    expect(() =>
+    await expect(
       saveKnowledgeBase(db, { id: a.kb.id, name: "Beta", refresh: "manual" }, ACTOR, ctx),
-    ).toThrowError(/already exists/);
+    ).rejects.toThrowError(/already exists/);
   });
 
-  it("delete removes the folder and the row", () => {
+  it("delete removes the folder and the row", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { kb } = saveKnowledgeBase(db, { name: "Gone Soon", refresh: "manual" }, ACTOR, ctx);
-    const { toast } = deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
+    const { kb } = await saveKnowledgeBase(db, { name: "Gone Soon", refresh: "manual" }, ACTOR, ctx);
+    const { toast } = await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
     expect(toast).toBe("Gone Soon deleted — agents lose it on next context load");
     expect(existsSync(kbDirPath("gone-soon", dataRoot))).toBe(false);
     expect(listKnowledgeBases(db, ctx)).toHaveLength(0);
@@ -155,9 +155,9 @@ describe("knowledge bases", () => {
 });
 
 describe("skills", () => {
-  it("create writes a real SKILL.md; body round-trips from disk", () => {
+  it("create writes a real SKILL.md; body round-trips from disk", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill, toast } = saveSkill(
+    const { skill, toast } = await saveSkill(
       db,
       {
         name: "Terraform Review",
@@ -173,7 +173,7 @@ describe("skills", () => {
     expect(skill.body).toContain("state safety");
     expect(skill.tree.map((n) => n.name)).toContain("SKILL.md");
 
-    const updated = saveSkill(
+    const updated = await saveSkill(
       db,
       { id: skill.id, name: "terraform-review", summary: "Updated.", body: "## New body" },
       ACTOR,
@@ -183,9 +183,9 @@ describe("skills", () => {
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
   });
 
-  it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", () => {
+  it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "# precious content" },
       ACTOR,
@@ -194,7 +194,7 @@ describe("skills", () => {
 
     // Summary-only edit round-trips an empty body (e.g. the modal field was
     // cleared / never loaded) — the on-disk body must survive.
-    const updated = saveSkill(
+    const updated = await saveSkill(
       db,
       { id: skill.id, name: "api-design", summary: "Updated summary.", body: "" },
       ACTOR,
@@ -208,7 +208,7 @@ describe("skills", () => {
     expect(updated.skill.summary).toBe("Updated summary.");
 
     // The explicit clear flag is the ONLY way to blank it.
-    const cleared = saveSkill(
+    const cleared = await saveSkill(
       db,
       {
         id: skill.id,
@@ -224,9 +224,9 @@ describe("skills", () => {
     expect(readFileSync(onDisk, "utf8")).toBe("");
   });
 
-  it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", () => {
+  it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "big-skill", summary: "Huge on disk.", body: "seed" },
       ACTOR,
@@ -237,19 +237,19 @@ describe("skills", () => {
     const onDisk = path.join(skillDirPath("big-skill", dataRoot), "SKILL.md");
     writeFileSync(onDisk, "x".repeat(256 * 1024 + 10));
 
-    expect(() =>
+    await expect(
       saveSkill(
         db,
         { id: skill.id, name: "big-skill", summary: "Huge on disk.", body: "truncated round-trip" },
         ACTOR,
         ctx,
       ),
-    ).toThrowError(/256 KB/);
+    ).rejects.toThrowError(/256 KB/);
     // Nothing was written.
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
 
     // A body-keeping save (empty body, e.g. summary edit) still works.
-    const kept = saveSkill(
+    const kept = await saveSkill(
       db,
       { id: skill.id, name: "big-skill", summary: "New summary here.", body: "" },
       ACTOR,
@@ -259,15 +259,15 @@ describe("skills", () => {
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
   });
 
-  it("rename moves the skill folder; delete removes it", () => {
+  it("rename moves the skill folder; delete removes it", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "# body" },
       ACTOR,
       ctx,
     );
-    const renamed = saveSkill(
+    const renamed = await saveSkill(
       db,
       { id: skill.id, name: "api-guidelines", summary: "REST rules.", body: "# body" },
       ACTOR,
@@ -276,7 +276,7 @@ describe("skills", () => {
     expect(renamed.skill.name).toBe("api-guidelines");
     expect(existsSync(skillDirPath("api-design", dataRoot))).toBe(false);
 
-    const { toast } = deleteSkill(db, skill.id, ACTOR, ctx);
+    const { toast } = await deleteSkill(db, skill.id, ACTOR, ctx);
     expect(toast).toBe("Skill api-guidelines deleted");
     expect(existsSync(skillDirPath("api-guidelines", dataRoot))).toBe(false);
   });
@@ -373,7 +373,7 @@ describe("mcp servers", () => {
     expect(dead.mcp.up).toBe(false);
     expect(dead.toast).toContain("github-mcp unreachable");
 
-    const { toast } = deleteMcpServer(db, mcp.id, ACTOR);
+    const { toast } = await deleteMcpServer(db, mcp.id, ACTOR);
     expect(toast).toBe("github-mcp removed");
   });
 
@@ -438,14 +438,14 @@ describe("disk is truth (finding #7)", () => {
     expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
   });
 
-  it("editing a disk-only skill adopts it into a real metadata row", () => {
+  it("editing a disk-only skill adopts it into a real metadata row", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("reviewer-expertise", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# original");
 
     const before = getSkill(db, "disk:reviewer-expertise", ctx)!;
-    const { skill, toast } = saveSkill(
+    const { skill, toast } = await saveSkill(
       db,
       { id: before.id, name: "reviewer-expertise", summary: "Review verdicts.", body: "# edited" },
       ACTOR,
@@ -458,13 +458,13 @@ describe("disk is truth (finding #7)", () => {
     expect(listSkills(db, ctx).filter((s) => s.name === "reviewer-expertise")).toHaveLength(1);
   });
 
-  it("delete removes a disk-only skill folder even with no row", () => {
+  it("delete removes a disk-only skill folder even with no row", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("orphan-expertise", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# body");
 
-    const { toast } = deleteSkill(db, "disk:orphan-expertise", ACTOR, ctx);
+    const { toast } = await deleteSkill(db, "disk:orphan-expertise", ACTOR, ctx);
     expect(toast).toBe("Skill orphan-expertise deleted");
     expect(existsSync(dir)).toBe(false);
     expect(listSkills(db, ctx)).toHaveLength(0);
@@ -486,25 +486,25 @@ describe("disk is truth (finding #7)", () => {
     expect(after.lastIndexedAt).not.toBeNull();
   });
 
-  it("a fresh create refuses to clobber an existing on-disk skill folder", () => {
+  it("a fresh create refuses to clobber an existing on-disk skill folder", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("api-design", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# keep me");
 
-    expect(() =>
+    await expect(
       saveSkill(
         db,
         { name: "api-design", summary: "New skill.", body: "" },
         ACTOR,
         ctx,
       ),
-    ).toThrowError(/already exists/);
+    ).rejects.toThrowError(/already exists/);
     // Original content untouched.
     expect(getSkill(db, "disk:api-design", ctx)!.body).toContain("# keep me");
   });
 
-  it("rejects a path-traversal disk id instead of escaping the store root", () => {
+  it("rejects a path-traversal disk id instead of escaping the store root", async () => {
     const { db, ctx } = setup();
     // A crafted synthetic id must NOT resolve to a path outside the store.
     for (const evil of [
@@ -513,10 +513,149 @@ describe("disk is truth (finding #7)", () => {
       "disk:a/b",
       "disk:a\\b",
     ]) {
-      expect(() => deleteSkill(db, evil, ACTOR, ctx)).toThrowError(/No such skill/);
-      expect(() => deleteKnowledgeBase(db, evil, ACTOR, ctx)).toThrowError(
-        /No such knowledge base/,
+      await expect(deleteSkill(db, evil, ACTOR, ctx)).rejects.toThrowError(
+        /No such skill/,
       );
+      await expect(
+        deleteKnowledgeBase(db, evil, ACTOR, ctx),
+      ).rejects.toThrowError(/No such knowledge base/);
     }
+  });
+});
+
+/* --------------------------------- resource reference integrity (P13-KM-07) */
+
+describe("resource reference integrity", () => {
+  function writeProfileTemplate(dataRoot: string, id: string, kb: string[]) {
+    mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "agents", "profiles", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: specialist",
+        `name: ${id}`,
+        `role: ${id}`,
+        'desc: "t"',
+        "icon: cpu",
+        "backends:",
+        "  - claude",
+        'model: ""',
+        "scope: Global base",
+        "stages:",
+        "  - impl",
+        "spanAll: false",
+        "capabilities: []",
+        "extras: []",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb:",
+        ...kb.map((k) => `    - ${k}`),
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  function grantsOf(dataRoot: string, id: string): string {
+    return readFileSync(path.join(dataRoot, "agents", "profiles", `${id}.md`), "utf8");
+  }
+
+  it("renaming a KB rewrites every profile grant instead of orphaning it", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "P13 facts", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    expect(kb.dir).toBe("p13-facts");
+    writeProfileTemplate(dataRoot, "scout", ["p13-facts"]);
+
+    await saveKnowledgeBase(
+      db,
+      { id: kb.id, name: "P13 facts v2", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+
+    // Live-proven failure before this fix: the folder moved, the row moved, and
+    // seven profiles kept pointing at `p13-facts` with no warning anywhere — a
+    // fresh run then reported "there is no p13-facts knowledge base reaching
+    // this run" while the UI still showed the grant attached.
+    expect(existsSync(kbDirPath("p13-facts-v2", dataRoot))).toBe(true);
+    expect(grantsOf(dataRoot, "scout")).toContain("p13-facts-v2");
+    expect(grantsOf(dataRoot, "scout")).not.toMatch(/- p13-facts$/m);
+  });
+
+  it("deleting a KB drops the grant rather than leaving it dangling", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Throwaway", refresh: "manual" },
+      ACTOR,
+      ctx,
+    );
+    writeProfileTemplate(dataRoot, "scout", [kb.dir, "keep-me"]);
+
+    await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
+
+    const raw = grantsOf(dataRoot, "scout");
+    expect(raw).not.toContain("throwaway");
+    expect(raw).toContain("keep-me");
+  });
+
+  it("renaming a skill rewrites its grants too", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = await saveSkill(
+      db,
+      { name: "old-craft", summary: "Old craft.", body: "# old" },
+      ACTOR,
+      ctx,
+    );
+    mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "agents", "profiles", "scout.md"),
+      [
+        "---",
+        "id: scout",
+        "kind: specialist",
+        "name: scout",
+        "role: scout",
+        'desc: "t"',
+        "icon: cpu",
+        "backends:",
+        "  - claude",
+        'model: ""',
+        "scope: Global base",
+        "stages:",
+        "  - impl",
+        "spanAll: false",
+        "capabilities: []",
+        "extras: []",
+        "resources:",
+        "  skills:",
+        "    - old-craft",
+        "  mcps: []",
+        "  kb: []",
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+
+    await saveSkill(
+      db,
+      { id: skill.id, name: "new-craft", summary: "New craft.", body: "" },
+      ACTOR,
+      ctx,
+    );
+
+    expect(grantsOf(dataRoot, "scout")).toContain("new-craft");
+    expect(grantsOf(dataRoot, "scout")).not.toContain("old-craft");
   });
 });

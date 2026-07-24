@@ -209,6 +209,10 @@ export interface StartRunInput {
   /** Tool denylist confining a specialist run to its granted capabilities.
    *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
+  /** The run's `execute-code-or-write-repo` grant is withheld — Codex enforces
+   *  it with a read-only sandbox (P13-RT-02). Omit to let `startRun` derive it
+   *  from `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
+  repoWriteWithheld?: boolean;
   /** JSON schema constraining the run's final output. Codex only — used by the
    *  structured-output operator AND every generic specialist/reviewer run's
    *  report_outcome envelope; the caller parses + executes/records it. */
@@ -226,6 +230,33 @@ const DEFAULT_THREAD: Record<RunKind, string> = {
   primary: "primary",
   reviewer: "r0",
 };
+
+/**
+ * The file-write built-ins `resolveSpecialistDisallowedTools` emits for a
+ * WITHHELD `execute-code-or-write-repo` grant (specialist-tool-policy). They
+ * are the one deny rule whose presence means "this profile may not write the
+ * repo" — the other rules gate branch/push/PR, which a read-only sandbox would
+ * over-block.
+ */
+const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
+
+/**
+ * Whether a run's capability denylist says its repo-write grant is withheld.
+ *
+ * P13-RT-02: `disallowedTools` is computed for EVERY run from the same
+ * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
+ * no effect on Codex, which has no denylist channel. Deriving the flag from it
+ * means the Codex read-only sandbox binds for exactly the profiles the matrix
+ * already shows as withheld, with no second source of truth to drift. Callers
+ * that know the grant directly may still pass `repoWriteWithheld` explicitly.
+ */
+export function repoWriteWithheldFromDenylist(
+  disallowedTools?: readonly string[],
+): boolean {
+  if (!disallowedTools?.length) return false;
+  const denied = new Set(disallowedTools);
+  return REPO_WRITE_DENY_MARKERS.every((t) => denied.has(t));
+}
 
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
@@ -321,6 +352,12 @@ export async function startRun(
     ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
     ...(input.disallowedTools && input.disallowedTools.length
       ? { disallowedTools: input.disallowedTools }
+      : {}),
+    // Codex has no denylist channel; the withheld repo-write grant becomes a
+    // read-only sandbox instead (P13-RT-02). Explicit caller value wins.
+    ...((input.repoWriteWithheld ??
+      repoWriteWithheldFromDenylist(input.disallowedTools))
+      ? { repoWriteWithheld: true }
       : {}),
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
     ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),

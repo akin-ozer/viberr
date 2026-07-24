@@ -166,7 +166,7 @@ describe("home loader (seeded)", () => {
     expect(core.dist.review).toBe(2);
     expect(core.dist.done).toBe(2);
     expect(core.members.length).toBe(4);
-    // Lightweight stub project carries its OWN 3-stage list (ruling 15).
+    // Custom 3-stage board fixture carries its OWN stage list (ruling 15).
     const billing = result.projects.find((p) => p.slug === "billing-service")!;
     expect(billing.stages.map((s) => s.id)).toEqual(["todo", "doing", "done"]);
     // Seeded pins mirror the mock's starred flags.
@@ -359,7 +359,9 @@ describe("create-project action (home)", () => {
           key: "PAY",
           owner: "akin-ozer",
           repoName: "payments-gateway",
-          template: "light",
+          // P13-AP-04: no `template` field any more — the "Lightweight ·
+          // 3 stages" preset was deleted (owner ruling 2), so creation always
+          // produces the Standard 5-stage board.
           policy: "strict",
         }),
       }),
@@ -391,10 +393,18 @@ describe("create-project action (home)", () => {
     expect(project.name).toBe("Payments Gateway");
     expect(project.taskPrefix).toBe("PAY");
     expect(project.repo).toBe("akin-ozer/payments-gateway");
-    // Lightweight template stages (ruling 15).
-    expect(project.stages.map((s) => s.id)).toEqual(["todo", "doing", "done"]);
+    // P13-AP-04: the Standard 5-stage board is the ONLY template creation can
+    // produce (this used to assert the deleted Lightweight preset's
+    // todo/doing/done board and its description).
+    expect(project.stages.map((s) => s.id)).toEqual([
+      "triage",
+      "ready",
+      "impl",
+      "review",
+      "done",
+    ]);
     expect(project.description).toBe(
-      "Lightweight 3-stage workflow · strict human-gate policy.",
+      "Standard 5-stage workflow · strict human-gate policy.",
     );
   });
 

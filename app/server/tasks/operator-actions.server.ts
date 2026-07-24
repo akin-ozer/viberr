@@ -79,6 +79,14 @@ export interface OperatorAuthority {
   skills: string[];
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
+  /**
+   * The operator's declared org MCP servers. P13-KM-03: these were parsed by
+   * the resource catalog and shown as granted in the UI, but never reached a
+   * run on EITHER backend — `OperatorAuthority` carried skills and kb only.
+   * Live-proven: an operator granted `everything-mcp` reported "MCP
+   * servers/tools I can call: none".
+   */
+  mcps: string[];
   /** The deployment's persona override (P11-21) — when a project edits the
    *  operator's persona in the UI, the run uses it in place of the shipped
    *  operator definition. `null` falls back to the shipped/baked persona. */
@@ -164,6 +172,7 @@ export function resolveOperatorAuthority(
       skills: [],
       kb: [],
       persona: null,
+      mcps: [],
       deployed: false,
     };
   }
@@ -198,6 +207,7 @@ export function resolveOperatorAuthority(
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
+    mcps: view.resources.mcps ?? [],
     persona:
       isRecord(definition) && typeof definition.persona === "string"
         ? definition.persona.trim() || null

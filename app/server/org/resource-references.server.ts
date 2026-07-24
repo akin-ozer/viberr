@@ -1,0 +1,187 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import {
+  agentProfileFilePath,
+  agentProfilesDir,
+  projectsDir,
+} from "~/server/files/file-store-root.server";
+import { updateProjectFile } from "~/server/files/project-writer.server";
+import {
+  parseAgentProfileContent,
+  serializeAgentProfile,
+} from "~/server/files/agent-profile-file.server";
+import { logger } from "~/server/logging/logger.server";
+
+/**
+ * Referential integrity for agent RESOURCES (P13-KM-07).
+ *
+ * A knowledge base, skill or MCP server is referenced by SLUG from two places:
+ *
+ *   - `${DATA_ROOT}/agents/profiles/<id>.md` → frontmatter `resources.{skills,
+ *     mcps,kb}` (the global templates), and
+ *   - `${DATA_ROOT}/projects/<slug>/project.md` → `agents[].definition
+ *     .resources.{…}` (each project's deployed copy).
+ *
+ * Renaming a KB moved its folder and its metadata row but rewrote NEITHER, so
+ * every grant silently pointed at a directory that no longer existed. Verified
+ * live: renaming "P13 facts" → "P13 facts v2" left seven profile references on
+ * `p13-facts`, no warning anywhere, and a fresh run reported "there is no
+ * p13-facts knowledge base reaching this run". Deleting had the same shape.
+ *
+ * These helpers run inside the rename/delete mutations so a reference is either
+ * rewritten (rename) or dropped (delete) atomically with the store change. They
+ * are best-effort per file: one malformed profile can never block the rename.
+ */
+
+export type ResourceKind = "skills" | "mcps" | "kb";
+
+export interface ReferenceUpdate {
+  /** How many profile/deployment reference lists changed. */
+  updated: number;
+}
+
+/** Rewrite `from` → `to` (rename) or drop `from` (`to: null`, delete). */
+export async function updateResourceReferences(
+  kind: ResourceKind,
+  from: string,
+  to: string | null,
+  dataRoot?: string,
+): Promise<ReferenceUpdate> {
+  if (!from || from === to) return { updated: 0 };
+  let updated = 0;
+  updated += rewriteTemplates(kind, from, to, dataRoot);
+  updated += await rewriteProjects(kind, from, to, dataRoot);
+  if (updated > 0) {
+    logger.info(
+      to
+        ? "resource reference rewritten after rename"
+        : "resource reference dropped after delete",
+      { kind, from, ...(to ? { to } : {}), updated },
+    );
+  }
+  return { updated };
+}
+
+/** Apply the rename/drop to one reference list; null when unchanged. */
+function nextList(
+  list: readonly string[] | undefined,
+  from: string,
+  to: string | null,
+): string[] | null {
+  if (!list || !list.includes(from)) return null;
+  const out: string[] = [];
+  for (const entry of list) {
+    if (entry !== from) {
+      out.push(entry);
+      continue;
+    }
+    if (to && !out.includes(to)) out.push(to);
+  }
+  return out;
+}
+
+function rewriteTemplates(
+  kind: ResourceKind,
+  from: string,
+  to: string | null,
+  dataRoot?: string,
+): number {
+  const dir = agentProfilesDir(dataRoot);
+  if (!existsSync(dir)) return 0;
+  let updated = 0;
+  for (const entry of readdirSync(dir).sort()) {
+    if (!entry.endsWith(".md")) continue;
+    const id = entry.slice(0, -3);
+    const file = agentProfileFilePath(id, dataRoot);
+    try {
+      const { parsed } = parseAgentProfileContent(readFileSync(file, "utf8"));
+      if (!parsed) continue;
+      const resources = parsed.frontmatter.resources;
+      const next = nextList(resources[kind], from, to);
+      if (!next) continue;
+      writeFileAtomic(
+        file,
+        serializeAgentProfile({
+          frontmatter: {
+            ...parsed.frontmatter,
+            resources: { ...resources, [kind]: next },
+          },
+          description: parsed.description,
+        }),
+      );
+      updated += 1;
+    } catch (error) {
+      logger.warn("could not rewrite resource reference in an agent template", {
+        kind,
+        from,
+        profileId: id,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return updated;
+}
+
+/**
+ * Project deployments carry a full definition SNAPSHOT, so the reference lives
+ * in `project.md`. The file is edited as text through its YAML frontmatter via
+ * the project writer, but the shape is nested arbitrarily deep inside
+ * `agents[].definition.resources`, so a targeted structural edit is done here
+ * with the same parse → mutate → serialize contract the writer uses.
+ */
+async function rewriteProjects(
+  kind: ResourceKind,
+  from: string,
+  to: string | null,
+  dataRoot?: string,
+): Promise<number> {
+  const root = projectsDir(dataRoot);
+  if (!existsSync(root)) return 0;
+  let updated = 0;
+  for (const slug of readdirSync(root).sort()) {
+    const file = path.join(root, slug, "project.md");
+    if (!existsSync(file)) continue;
+    try {
+      let changed = false;
+      await updateProjectFile({ projectSlug: slug, dataRoot }, (parsed) => {
+        const fm = parsed.frontmatter;
+        const agents = fm.agents.map((deployment) => {
+          const definition = (deployment as Record<string, unknown>).definition;
+          if (!definition || typeof definition !== "object") return deployment;
+          const resources = (definition as Record<string, unknown>).resources;
+          if (!resources || typeof resources !== "object") return deployment;
+          const list = (resources as Record<string, unknown>)[kind];
+          const next = nextList(
+            Array.isArray(list) ? (list as string[]) : undefined,
+            from,
+            to,
+          );
+          if (!next) return deployment;
+          changed = true;
+          return {
+            ...deployment,
+            definition: {
+              ...(definition as Record<string, unknown>),
+              resources: {
+                ...(resources as Record<string, unknown>),
+                [kind]: next,
+              },
+            },
+          };
+        });
+        if (!changed) return parsed;
+        return { ...parsed, frontmatter: { ...fm, agents } as typeof fm };
+      });
+      if (changed) updated += 1;
+    } catch (error) {
+      logger.warn("could not rewrite resource reference in a project", {
+        kind,
+        from,
+        projectSlug: slug,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  return updated;
+}

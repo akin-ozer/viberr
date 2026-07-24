@@ -76,6 +76,14 @@ export interface HomeProjectCard {
    * (non-member org admins). Surfaced distinctly, never folded into `waiting`. */
   overrideWaiting: number;
   members: HomeMember[];
+  /**
+   * Newest task `updated_at` in the project, or `null` when the project has no
+   * tasks at all. UI-02: this used to fall back to `project.parsedAt`, which is
+   * `nowIso()` at (re)projection time — so "Rebuild projections" (or any
+   * restart-time rescan) made every task-less card read "updated just now"
+   * although nothing changed. A project with no task activity has no recency
+   * signal; the card says so instead of inventing one.
+   */
   updatedAt: string | null;
   accent: string;
 }
@@ -242,7 +250,9 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
       waiting,
       overrideWaiting: 0,
       members,
-      updatedAt: agg?.updated_at ?? project.parsedAt,
+      // UI-02: NEVER fall back to `project.parsedAt` — that column is
+      // `nowIso()` at projection time, not a change timestamp.
+      updatedAt: agg?.updated_at ?? null,
       accent: accentForSlug(project.slug),
     };
   });
@@ -256,6 +266,9 @@ export interface HomeOrgSummary {
     total: number;
     admins: number;
     members: number;
+    /** Disabled accounts inside `total` — disclosed so the tile's population
+     * matches the users panel it links to (UI-24). */
+    disabled: number;
     first: HomeMember[];
   };
   /** Org agent profile templates on disk (agents/profiles/<id>.md). */
@@ -275,8 +288,13 @@ export function getHomeOrgSummary(
   const owners = new Set<string>();
   for (const c of listConnections(db)) owners.add(c.owner);
 
-  const users = listUsers(db).filter((u) => !u.disabled);
+  // UI-24: count EVERY account, the same population the Users & access panel
+  // this tile links to reports. Filtering `!disabled` here meant the number
+  // changed the moment you clicked the tile. Disabled accounts are disclosed
+  // separately instead of being silently dropped.
+  const users = listUsers(db);
   const admins = users.filter((u) => u.role === "admin").length;
+  const disabled = users.filter((u) => u.disabled).length;
 
   // F10-21: count SPECIALIST profiles only — the same population the Org
   // Resources catalog lists (`listGlobalAgentProfiles` filters kind, excluding
@@ -299,6 +317,7 @@ export function getHomeOrgSummary(
       total: users.length,
       admins,
       members: users.length - admins,
+      disabled,
       first: users.slice(0, 5).map((u) => ({
         name: u.name,
         initials: initialsOfName(u.name),

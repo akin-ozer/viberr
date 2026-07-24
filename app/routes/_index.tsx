@@ -61,6 +61,9 @@ export async function action({ request }: Route.ActionArgs) {
   } = await requireFormAction(request);
 
   try {
+    // UI-06: both pref intents echo the intent back so the client can toast
+    // from the SETTLED result instead of at submit time (the star used to
+    // report "Pinned" and then silently revert on a CSRF/session failure).
     if (intent === "pin") {
       const slug = String(formData.get("slug") ?? "");
       const pinned = formData.get("pinned") === "1";
@@ -68,12 +71,12 @@ export async function action({ request }: Route.ActionArgs) {
       patchHomePrefs(db, ctx.user.id, {
         stars: { ...prefs.stars, [slug]: pinned },
       });
-      return { ok: true as const };
+      return { ok: true as const, intent: "pin" as const, pinned };
     }
     if (intent === "view") {
       const view = formData.get("view") === "list" ? "list" : ("grid" as const);
       patchHomePrefs(db, ctx.user.id, { view: view as "grid" | "list" });
-      return { ok: true as const };
+      return { ok: true as const, intent: "view" as const };
     }
     if (intent === "rescan") {
       // A global re-scan reprojects EVERY project from files — an
@@ -120,7 +123,9 @@ export async function action({ request }: Route.ActionArgs) {
           key: String(formData.get("key") ?? ""),
           owner: String(formData.get("owner") ?? ""),
           repoName: String(formData.get("repoName") ?? ""),
-          template: formData.get("template") === "light" ? "light" : "governed",
+          // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
+          // ruling 2) — the Standard 5-stage board is the only template, so
+          // there is no `template` field to read.
           policy:
             formData.get("policy") === "strict"
               ? "strict"

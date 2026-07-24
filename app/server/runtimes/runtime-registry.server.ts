@@ -1,10 +1,14 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RuntimeAdapter } from "./adapter.server";
 import { resolveClaudeConfigDir } from "./claude-config.server";
+import {
+  prepareCodexHome,
+  resolveCodexAuthSource,
+  resolveCodexHome,
+} from "./codex-config.server";
 import {
   createClaudeAdapter,
   type ClaudeQueryFn,
@@ -84,24 +88,37 @@ function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
  * lives on the wiped-able volume, so recreating `docker-data` silently drops
  * auth.json while the opt-in flag (from .env) stays set — the error must name
  * the missing FILE, not re-suggest the flag.
+ *
+ * P13-LV-13/LV-14: runs no longer execute in `$CODEX_HOME` — they get an
+ * app-owned run home (`resolveCodexHome`) that `prepareCodexHome` mirrors the
+ * login into. Auth is therefore usable when EITHER dir holds an `auth.json`;
+ * the reported path is the run home when that is where the file already is, so
+ * the "copy it here" copy names the dir the runs actually read.
  */
+function existsQuiet(file: string): boolean {
+  try {
+    return existsSync(file);
+  } catch {
+    return false;
+  }
+}
+
 export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
   optIn: boolean;
   authJsonPath: string;
   authJsonExists: boolean;
 } {
-  const home = env.CODEX_HOME || path.join(homedir(), ".codex");
-  const authJsonPath = path.join(home, "auth.json");
-  let authJsonExists = false;
-  try {
-    authJsonExists = existsSync(authJsonPath);
-  } catch {
-    authJsonExists = false;
-  }
+  const sourceAuth = path.join(resolveCodexAuthSource(env), "auth.json");
+  const runAuth = path.join(resolveCodexHome(env), "auth.json");
+  const sourceExists = existsQuiet(sourceAuth);
+  const runExists = sourceAuth === runAuth ? sourceExists : existsQuiet(runAuth);
   return {
     optIn: isTruthy(env.VIBERR_CODEX_USE_CLI_AUTH),
-    authJsonPath,
-    authJsonExists,
+    // Name the login dir when nothing exists yet (that is where `codex login`
+    // writes and where the docker recipe copies from); otherwise name whichever
+    // dir actually holds the credential.
+    authJsonPath: sourceExists || !runExists ? sourceAuth : runAuth,
+    authJsonExists: sourceExists || runExists,
   };
 }
 
@@ -257,8 +274,14 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const codexApiKey = env.CODEX_ACCESS_TOKEN || preferCachedCodexLogin
     ? undefined
     : (env.CODEX_API_KEY ?? env.OPENAI_API_KEY);
+  // P13-LV-13/LV-14: a run gets an APP-OWNED CODEX_HOME, never the operator's
+  // personal `~/.codex`. That home is the only isolation boundary the Codex SDK
+  // offers — `--config` overrides merge into whatever the home declares, so a
+  // host home leaks its `config.toml` MCP servers, `skills/`, `plugins/` and
+  // `AGENTS.md` into every governed run. `prepareCodexHome` mirrors the login's
+  // auth.json in so subscription auth keeps working.
   const codexEnv = codexSpawnEnv(
-    env.CODEX_HOME,
+    prepareCodexHome().home,
     env.CODEX_ACCESS_TOKEN,
     preferCachedCodexLogin,
   );

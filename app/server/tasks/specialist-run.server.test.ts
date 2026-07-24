@@ -141,6 +141,51 @@ describe("resolveDeployedSpecialist", () => {
   });
 });
 
+describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
+  // The test fixture's `dev` deployment carries `capabilities: []` (a
+  // hand-written project.md, or an import). The tool-policy polarity denies
+  // only on an explicit `human`/`off`, so an empty list used to resolve as
+  // "everything unspecified" = Edit/Write/`git commit` granted and
+  // canBranch/canCommitPush/canOpenPr all true — full repo-write power nobody
+  // chose, invisible in every UI. It now resolves to an explicit withheld set.
+  it("resolveDeployedSpecialist materializes explicit withheld grants", async () => {
+    const resolved = resolveDeployedSpecialist(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "dev",
+    );
+    expect(resolved.capabilities.length).toBeGreaterThan(0);
+    const modeOf = (id: string) =>
+      resolved.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(modeOf("execute-code-or-write-repo")).toBe("off");
+    expect(modeOf("commit-push-branch")).toBe("off");
+    // Structural always-human ids stay `human`, not `off`.
+    expect(modeOf("merge-pull-request")).toBe("human");
+
+    const { resolveDeliveryPermissions, resolveSpecialistDisallowedTools } =
+      await import("./specialist-tool-policy");
+    expect(resolveDeliveryPermissions(resolved.capabilities)).toEqual({
+      canBranch: false,
+      canCommitPush: false,
+      canOpenPr: false,
+    });
+    expect(resolveSpecialistDisallowedTools(resolved.capabilities)).toContain(
+      "Write",
+    );
+  });
+
+  it("the operator's candidate view reports the same withheld capabilities", () => {
+    const [dev] = listDeployedSpecialists(store.slug, {
+      dataRoot: store.dataRoot,
+    });
+    // What the operator is told must match what the run may actually do —
+    // an ungranted deployment used to advertise `delivery: false` while the
+    // tool layer let it write anyway.
+    expect(dev!.capabilities.delivery).toBe(false);
+    expect(dev!.capabilities.verdict).toBe(false);
+  });
+});
+
 describe("assignSpecialist", () => {
   it("writes frontmatter + a typed agent event + audit", async () => {
     const result = await assignSpecialist(

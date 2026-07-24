@@ -14,6 +14,7 @@ import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
+import { countLiveAdmins, removedAccountLabel } from "./membership.server";
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
@@ -389,7 +390,9 @@ export async function removeMember(
   const userRow = db
     .prepare(`SELECT name, email FROM users WHERE id = ?`)
     .get(input.targetUserId) as { name: string; email: string } | undefined;
-  const displayName = userRow?.name ?? input.targetUserId;
+  // LV-04: an org-deleted member is named honestly in the toast instead of
+  // echoing the raw `u_…` id back at the admin removing it.
+  const displayName = userRow?.name ?? removedAccountLabel(input.targetUserId);
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const member = parsed.frontmatter.members.find(
@@ -399,9 +402,8 @@ export async function removeMember(
       throw AppError.notFound("That user is not a member of this project.");
     }
     if (member.role === "admin") {
-      const admins = parsed.frontmatter.members.filter(
-        (m) => m.role === "admin",
-      ).length;
+      // UI-29: only LIVE, enabled accounts count — see countLiveAdmins.
+      const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (admins <= 1) {
         throw AppError.conflict(
           `${displayName} is the only admin — assign another admin in Policy first`,

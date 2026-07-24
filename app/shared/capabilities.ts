@@ -81,6 +81,24 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("change-project-policy", "Change project policy", ["agent"], "Reserved for humans", "human", false),
 ] as const;
 
+/**
+ * The explicit default grant list for a profile of `kind` — every capability
+ * the catalog offers that kind, at its documented default mode.
+ *
+ * P13-AP-06: `capabilities: []` does NOT mean "no powers" — the tool policy
+ * treats an unspecified capability as GRANTED, so a profile persisted with an
+ * empty list silently carried full repo-write authority. Every creation path
+ * (org template, library copy, project create) persists these defaults instead.
+ */
+export function defaultGrantsFor(
+  kind: CapabilityKind,
+): { capabilityId: string; mode: UnifiedCapabilityDef["defaultMode"] }[] {
+  return UNIFIED_CAP_CATALOG.filter((c) => c.kinds.includes(kind)).map((c) => ({
+    capabilityId: c.id,
+    mode: c.defaultMode,
+  }));
+}
+
 /** Flat id+label view — the shape most consumers key on. */
 export const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
   ({ id, label }) => ({ id, label }),

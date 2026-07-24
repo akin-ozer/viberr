@@ -287,10 +287,11 @@ const SKILLS: SkillView[] = [
 ];
 const GAGENTS: GagentView[] = [
   { id: "developer", name: "Developer", backend: "codex",
-    summary: "Primary implementation specialist.", stages: ["ready", "impl"],
+    summary: "Primary implementation specialist.",
+    persona: "", stages: ["ready", "impl"],
     skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 4 },
   { id: "spare", name: "Spare", backend: "claude", summary: "Unused.",
-    stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
+    persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
 const STAGES = [
   { id: "triage", name: "Triage", color: "#a5a8b5" },

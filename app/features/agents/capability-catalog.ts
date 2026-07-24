@@ -70,6 +70,34 @@ export const CAP_MODAL_DEFAULTS: Readonly<Record<string, CapMode>> =
     ).map((e) => [e.id, e.defaultMode]),
   );
 
+/**
+ * P13-AP-06 — an EXPLICIT grant for every agent capability the editor governs.
+ *
+ * The grant polarity is "deny only on an explicit `human`/`off`", so an
+ * UNSPECIFIED capability is GRANTED: a deployment carrying `capabilities: []`
+ * gets Edit/Write/`git commit` and canBranch/canCommitPush/canOpenPr all true —
+ * full repo-write power that nobody chose and no UI shows. Every write path
+ * therefore materializes a complete grant list instead of leaving ids absent.
+ *
+ * `mode` picks what the unspecified ids become:
+ *   - "catalog"  → the catalog's own defaultMode (what the create modal seeds
+ *                  into a new profile's form). Used when a human is deploying a
+ *                  profile and can see/edit the result.
+ *   - "withheld" → `off` for everything grantable (always-human ids stay
+ *                  `human`). Used at RUN time for a deployment that carries no
+ *                  grants at all: nobody granted it anything, so it gets
+ *                  nothing — the same safe-by-default posture
+ *                  `resolveUndeployedDisallowedTools` already takes.
+ */
+export function explicitAgentGrants(
+  mode: "catalog" | "withheld",
+): { capabilityId: string; mode: CapMode }[] {
+  return Object.entries(CAP_MODAL_DEFAULTS).map(([capabilityId, def]) => ({
+    capabilityId,
+    mode: mode === "catalog" || def === "human" ? def : ("off" as CapMode),
+  }));
+}
+
 /** The OPERATOR editor catalog — derived from the same unified source. */
 export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] =
   editorCatalog("operator");

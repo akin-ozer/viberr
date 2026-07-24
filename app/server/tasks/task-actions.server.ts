@@ -1464,6 +1464,9 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
+  /** Set when the envelope's question could not open a packet (one already is)
+   *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
+  let questionDeferred: string | null = null;
   let validation: TaskFrontmatter["validation"] = "healthy";
   // The title/summary are computed from the RESOLVED (derived) validation, not
   // the raw verdict, so the event can never read "Review passed / Validation:
@@ -1561,9 +1564,48 @@ export async function recordAgentCompletion(
           evidence: null,
         });
         questionOpened = true;
+      } else if (question) {
+        // P13-RT-06 (same site): the envelope carried a question but a decision
+        // is already open, so it cannot become a packet. Claude's `ask_human`
+        // tool tells the model that mid-run ("[refused] … mention your question
+        // there instead") and it folds the question into its report; the Codex
+        // envelope had no such channel and the question vanished with no
+        // timeline trace at all. Record it so the open decision's reader sees
+        // what else the agent needs.
+        questionDeferred = question.title.trim();
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: actorRef,
+          title: null,
+          text:
+            `**Question held — a decision is already open:** ${questionDeferred}` +
+            (question.body?.trim() ? `\n\n${question.body.trim()}` : "") +
+            "\n\nAnswer it alongside the open decision, or re-prompt the agent once that decision is resolved.",
+          toAgent: false,
+          evidence: null,
+        });
       }
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
+    // P13-RT-01 (NEW-4, broken on its PRIMARY path): a FINISHED agent's report
+    // that tags a human ("@Arda …") must reach their inbox. Only the
+    // interrupted/errored path (postAgentReplyComment) and Claude's mid-run
+    // post_comment tool fanned out, so the common case — the agent replies,
+    // the run completes — notified nobody, on either backend. The reply
+    // directive explicitly instructs the agent to tag the commenter, so this
+    // was the majority of agent @tags. Same helper/`from` shape as :1169.
+    if (prepared.status === "event") {
+      notifyMentionedUsers(db, {
+        text: prepared.event.text,
+        projectSlug,
+        taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, projectSlug),
+        })(actorRef),
+        occurredAt: prepared.event.occurredAt,
+      });
+    }
     // Recovery-idempotency audit for the reply (posted or guardrail-dropped).
     if (prepared.status !== "empty") {
       recordAgentRepliedAudit(
@@ -1577,12 +1619,21 @@ export async function recordAgentCompletion(
     if (questionOpened) {
       recordAudit(db, {
         action: "task.agent.packet_opened",
-        actor: OPERATOR_AUDIT_ACTOR,
+        // P13-RT-06: the AGENT asked, not the operator. The Claude transport
+        // has attributed this correctly since P11-23
+        // (agent-toolkit.server.ts); the Codex transport recorded the same
+        // action id under OPERATOR_AUDIT_ACTOR, so an actor-filtered audit view
+        // credited every Codex agent's question to the operator.
+        actor: { userId: null, label: encodeActorRef(actorRef) },
         subjectKind: "task",
         subjectId: taskKey,
         projectSlug,
         taskKey,
-        details: { runId, title: question!.title.trim() },
+        details: {
+          runId,
+          title: question!.title.trim(),
+          actorRef: encodeActorRef(actorRef),
+        },
       });
       notifyTaskWatchers(
         db,
@@ -1595,6 +1646,12 @@ export async function recordAgentCompletion(
         },
         ctx,
       );
+    } else if (questionDeferred) {
+      logger.info("agent question held — a decision packet is already open", {
+        taskKey,
+        runId,
+        question: questionDeferred,
+      });
     }
     if (verdict) {
       recordAudit(db, {

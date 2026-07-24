@@ -38,18 +38,18 @@ afterEach(dbCtx.cleanup);
 
 const ACTOR = { userId: "u_t", label: "t@test" };
 
-function setupKb() {
+async function setupKb() {
   const db = dbCtx.makeDb();
   const dataRoot = dbCtx.makeTempDir();
   const ctx = { dataRoot };
-  const { kb } = saveKnowledgeBase(db, { name: "API contracts", refresh: "manual" }, ACTOR, ctx);
+  const { kb } = await saveKnowledgeBase(db, { name: "API contracts", refresh: "manual" }, ACTOR, ctx);
   const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
   return { db, dataRoot, ctx, kb, target };
 }
 
 describe("uploads", () => {
-  it("writes real files, preserves structure, skips dotfiles", () => {
-    const { db, target } = setupKb();
+  it("writes real files, preserves structure, skips dotfiles", async () => {
+    const { db, target } = await setupKb();
     const result = writeStoreFiles(
       db,
       target,
@@ -80,8 +80,8 @@ describe("uploads", () => {
     expect(readFileSync(path.join(target.rootAbs, "versioning.md"), "utf8")).toBe("v2");
   });
 
-  it("refuses traversal and file-over-directory clobbering", () => {
-    const { db, target } = setupKb();
+  it("refuses traversal and file-over-directory clobbering", async () => {
+    const { db, target } = await setupKb();
     expect(() =>
       writeStoreFiles(
         db,
@@ -98,10 +98,10 @@ describe("uploads", () => {
     ).toThrowError(/already exists there/);
   });
 
-  it("flags a root-level SKILL.md landing in a skill folder (capture)", () => {
+  it("flags a root-level SKILL.md landing in a skill folder (capture)", async () => {
     const db = dbCtx.makeDb();
     const ctx = { dataRoot: dbCtx.makeTempDir() };
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "old" },
       ACTOR,
@@ -122,8 +122,8 @@ describe("uploads", () => {
 });
 
 describe("mkdir + delete", () => {
-  it("mkdir -p a/b/c; a FILE occupying a segment refuses with mock copy", () => {
-    const { db, target } = setupKb();
+  it("mkdir -p a/b/c; a FILE occupying a segment refuses with mock copy", async () => {
+    const { db, target } = await setupKb();
     const made = createStoreFolder(db, target, [], "a/b/c", ACTOR);
     expect(made.createdPath).toEqual(["a", "b", "c"]);
     expect(existsSync(path.join(target.rootAbs, "a", "b", "c"))).toBe(true);
@@ -134,8 +134,8 @@ describe("mkdir + delete", () => {
     );
   });
 
-  it("deletes files and folders recursively with real counts", () => {
-    const { db, target } = setupKb();
+  it("deletes files and folders recursively with real counts", async () => {
+    const { db, target } = await setupKb();
     writeStoreFiles(
       db,
       target,
@@ -154,8 +154,8 @@ describe("mkdir + delete", () => {
     );
   });
 
-  it("scan sorts dirs before files and skips dotfiles", () => {
-    const { db, target } = setupKb();
+  it("scan sorts dirs before files and skips dotfiles", async () => {
+    const { db, target } = await setupKb();
     writeStoreFiles(
       db,
       target,
@@ -177,7 +177,7 @@ describe("mkdir + delete", () => {
 
 describe("github import", () => {
   it("returns the honest no-connection state when no validated token exists", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     const result = await importGithubSnapshot(
       db,
       target,
@@ -188,7 +188,7 @@ describe("github import", () => {
   });
 
   it("rejects garbage URLs with the mock copy", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     const result = await importGithubSnapshot(db, target, "not-a-github-link", ACTOR);
     expect(result.status).toBe("invalid_url");
     if (result.status === "invalid_url") {
@@ -197,7 +197,7 @@ describe("github import", () => {
   });
 
   it("fetches a real snapshot through the default connection (canned)", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     insertUser(db, {
       id: "u_admin",
       email: "admin@test.dev",
@@ -279,7 +279,7 @@ describe("github import", () => {
   });
 
   it("surfaces per-blob failures instead of a clean success (E5)", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     insertUser(db, {
       id: "u_admin",
       email: "admin@test.dev",
