@@ -13,6 +13,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "seed": "tsx scripts/seed.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
     "rescan": "tsx scripts/rescan.ts"
   },
   "dependencies": {

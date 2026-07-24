@@ -43,28 +43,28 @@ cp .env.example .env
 # 2. Install
 npm ci
 
-# 3. Demo data (migrations auto-apply at boot)
+# 3. Baseline data (migrations auto-apply at boot)
 npm run seed
 
 # 4. Run
 npm run dev        # http://localhost:5173
 ```
 
-Sign in with the seeded demo accounts:
+Sign in as the bootstrap admin: `admin@viberr.dev` / `viberr-dev-2828` by default, or
+set `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` in `.env` before seeding.
+The admin is created only while the users table is EMPTY — after that, manage users
+in-app (Org settings).
 
-| user | email | password | org role |
-|---|---|---|---|
-| Arda Kaya | `arda@viberr.dev` | `viberr-dev-2828` | admin |
-| Elif Demir | `elif@viberr.dev` | `viberr-dev-2828` | member |
-| Murat Yıldız / Selin Aksoy / Deniz Şahin | `…@viberr.dev` | `viberr-dev-2828` | member |
-
-The seed materializes the full demo dataset: the **viberr-core** project with tasks
-VIB-139…VIB-168 (packets, timelines), two stub projects, notifications, agent profiles,
-knowledge bases. It ships no run history — agent runs only ever come from real runs you
-start. `npm run seed -- --reset` restores it to pristine at any time.
+The seed is a **clean sheet** — no demo/mock board data. It ships only the product
+baseline: the built-in agent catalog (Operator, Developer, Reviewer profile templates),
+knowledge bases with real files, skills, and the domain allowlist. Projects, tasks and
+notifications start empty, and no run history is ever fabricated — agent runs only come
+from real runs you start. `npm run seed -- --reset` wipes projects, agent deployments,
+runtime transcripts and all derived state back to that clean sheet at any time
+(users/auth and the runtime credential homes survive).
 
 Without `npm run seed`, an empty instance boots too: when the users table is empty the
-server creates a bootstrap admin at startup — set `VIBERR_SEED_ADMIN_EMAIL` /
+server creates the same bootstrap admin at startup — set `VIBERR_SEED_ADMIN_EMAIL` /
 `VIBERR_SEED_ADMIN_PASSWORD` in `.env`, or take the one-time generated password printed
 to stdout (marked `VIBERR BOOTSTRAP ADMIN`; that account must set a new password at
 first sign-in).
@@ -77,7 +77,8 @@ first sign-in).
 | `npm run build` / `npm run start` | production build / serve it |
 | `npm run typecheck` | route typegen + tsc |
 | `npm test` | vitest unit + integration suite |
-| `npm run seed` | idempotent demo dataset (`-- --reset` wipes derived state first) |
+| `npm run seed` | idempotent baseline seed — agent catalog, KBs, skills, bootstrap admin; no demo data (`-- --reset` wipes board + derived state first) |
+| `npm run seed:demo` | test/dev-only: the mock demo board (arda & co, viberr-core) the e2e + route suites use |
 | `npm run rescan` | reconcile projections with the file store |
 
 ## Enabling real agent backends
@@ -149,7 +150,7 @@ first login).
 ```sh
 cp .env.example .env    # fill in the two required secrets
 docker compose up --build -d
-docker compose exec app npm run seed   # optional: demo dataset
+docker compose exec app npm run seed   # optional: baseline (agent catalog, KBs, skills)
 ```
 
 The app listens on `PORT` (container default 3000; compose maps the same port on the

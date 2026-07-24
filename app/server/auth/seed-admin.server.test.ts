@@ -29,15 +29,15 @@ describe("seedInitialAdmin", () => {
     expect(listAuditEvents(db, { action: "org.user.created" })).toHaveLength(1);
   });
 
-  it("defaults to arda@viberr.dev with a generated one-time password", async () => {
+  it("defaults to admin@viberr.dev with a generated one-time password", async () => {
     const db = ctx.makeDb();
     const result = await seedInitialAdmin(db, {});
     expect(result.created).toBe(true);
-    expect(result.email).toBe("arda@viberr.dev");
+    expect(result.email).toBe("admin@viberr.dev");
     expect(result.generatedPassword).toBeTruthy();
 
-    const user = findUserByEmail(db, "arda@viberr.dev")!;
-    expect(user.name).toBe("Arda Kaya");
+    const user = findUserByEmail(db, "admin@viberr.dev")!;
+    expect(user.name).toBe("Admin");
     expect(user.pwresetRequired).toBe(true); // must change at first login
     await expect(
       verifyPassword(

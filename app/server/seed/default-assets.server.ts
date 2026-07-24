@@ -17,7 +17,7 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
-import { SEED_AGENT_PROFILES } from "./demo-data.server";
+import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
 // F10-30: the built-in specialist PERSONA is the profile's own markdown body —
 // ONE authoring source. Previously the rich persona shipped as a SEPARATE

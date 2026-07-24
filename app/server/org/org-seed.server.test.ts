@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { runDemoSeed } from "~/server/seed/demo-seed.server";
+import { runDemoSeed } from "../../../test-support/demo-seed";
 import { listConnections } from "./connections.server";
 import { listDomains } from "./org-users.server";
 import { seedOrgResources } from "./org-seed.server";

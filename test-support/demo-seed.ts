@@ -1,5 +1,3 @@
-import { existsSync, rmSync } from "node:fs";
-import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import {
@@ -20,7 +18,6 @@ import {
   agentProfileFilePath,
   ensureDataRootDirs,
   projectFilePath,
-  projectsDir,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
@@ -28,40 +25,38 @@ import { serializeTaskFile } from "~/server/files/task-file.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { SEED_AGENT_PROFILES } from "~/server/seed/agent-catalog.server";
+import { resetStore, SEED_DEFAULT_PASSWORD } from "~/server/seed/seed.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
-  SEED_AGENT_PROFILES,
   SEED_PEOPLE,
   seedNotifications,
   seedProjects,
   seedStubTasks,
   seedTasks,
   type SeedUserIds,
-} from "./demo-data.server";
+} from "./demo-data";
 
 /**
- * Demo seed (replaces the phase-1 placeholder): writes the full mock
- * dataset as REAL canonical files + projections + per-user notification
- * rows, so the app boots looking like the mock.
+ * TEST-ONLY demo seed — the former production demo seed, kept verbatim as the
+ * fixture the route-level suites are written against: the mock users
+ * (arda/elif/murat/selin/deniz), viberr-core + the two stub projects, tasks
+ * VIB-139..168 with full timelines, Arda's notification inbox, the VIB-142
+ * scope violation and Arda's Home pins. The PRODUCT seed (seed.server.ts)
+ * ships none of this — a real instance starts with a clean board (owner
+ * ruling, 2026-07-24).
  *
- * The seed ships no run history; runs only appear after a user starts one.
- *
- * Idempotent: users are upserted by email, files are overwritten, the
- * rescan reconciles projections, notification rows use the mock's
- * deterministic ids (INSERT OR REPLACE). `--reset` additionally wipes
- * ${dataRoot}/projects, agents/profiles and all derived tables first.
- *
- * Passwords: every seeded user gets `viberr-dev-2828` (compliant with the
- * min-8 policy; Arda's comes from VIBERR_SEED_ADMIN_PASSWORD when set).
- * Existing users keep their password (only missing users get one).
+ * Idempotent: users are upserted by email, files are overwritten, the rescan
+ * reconciles projections, notification rows use the mock's deterministic ids.
+ * `--reset` wipes via the product seed's resetStore first.
  */
 
-export const SEED_DEFAULT_PASSWORD = "viberr-dev-2828";
+export { SEED_DEFAULT_PASSWORD };
 
 export interface DemoSeedOptions {
   dataRoot: string;
   reset?: boolean;
-  /** Arda's password; defaults to VIBERR_SEED_ADMIN_PASSWORD handling in the CLI. */
+  /** Arda's password; defaults to SEED_DEFAULT_PASSWORD. */
   adminPassword?: string;
 }
 
@@ -74,19 +69,6 @@ export interface DemoSeedSummary {
   agentProfiles: number;
   rescanChanged: number;
 }
-
-const DERIVED_TABLES = [
-  "staged_outcomes",
-  "run_log_lines",
-  "agent_runs",
-  "notifications",
-  "provenance",
-  "diagnostics",
-  "task_events",
-  "task_projections",
-  "project_members",
-  "projects",
-];
 
 async function upsertUsers(
   db: DatabaseSync,
@@ -109,12 +91,8 @@ async function upsertUsers(
         name: person.name,
         passwordHash: null,
       });
-      // Recovery path (P11-01): a credential left in a legacy/foreign format
-      // (e.g. a data root seeded before the better-auth migration) can never be
-      // verified — the account is locked out and `--reset` doesn't help because
-      // it preserves the auth tables. Detect that and re-hash the seed default
-      // so `npm run seed` restores access. A user who legitimately changed their
-      // password has a valid better-auth hash and is left untouched.
+      // P11-01 recovery: re-hash a legacy/unverifiable credential so the
+      // fixture always yields sign-in-able users.
       const currentHash = credentialPasswordHash(db, existing.id);
       if (!isBetterAuthPasswordHash(currentHash)) {
         const recoveryPassword =
@@ -122,7 +100,7 @@ async function upsertUsers(
             ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
             : SEED_DEFAULT_PASSWORD;
         setCredentialPassword(db, existing.id, await hashPassword(recoveryPassword));
-        logger.warn("seed re-hashed a legacy/unverifiable credential", {
+        logger.warn("demo seed re-hashed a legacy/unverifiable credential", {
           email: person.email,
         });
       }
@@ -162,39 +140,9 @@ export async function runDemoSeed(
   const dataRoot = options.dataRoot;
   ensureDataRootDirs(dataRoot);
 
-  if (options.reset) {
-    const projRoot = projectsDir(dataRoot);
-    if (existsSync(projRoot)) {
-      rmSync(projRoot, { recursive: true, force: true });
-    }
-    const profilesRoot = path.join(dataRoot, "agents", "profiles");
-    if (existsSync(profilesRoot)) {
-      rmSync(profilesRoot, { recursive: true, force: true });
-    }
-    // Wipe the raw runtime .jsonl truth too — a reset store starts with no
-    // run history at all (R7-2: the seed never fabricates any). Scope the wipe
-    // to the per-backend TRANSCRIPT dirs (`runtimes/<backend>/<id>.jsonl`,
-    // run-store.server.ts) and NEVER the credential HOMES that also live under
-    // `runtimes/` — `codex-home/auth.json` (Codex subscription auth, which the
-    // deployment points CODEX_HOME at) and `claude-home`. Deleting those logged
-    // the whole instance out (P11-70/pass-11: a `seed --reset` flipped the Codex
-    // backend to unavailable), and a reset must not destroy configured runtime
-    // credentials. Any other `runtimes/*-home` dir is likewise preserved.
-    const runtimesRoot = path.join(dataRoot, "runtimes");
-    for (const backend of ["claude", "codex"] as const) {
-      const transcriptDir = path.join(runtimesRoot, backend);
-      if (existsSync(transcriptDir)) {
-        rmSync(transcriptDir, { recursive: true, force: true });
-      }
-    }
-    for (const table of DERIVED_TABLES) {
-      db.prepare(`DELETE FROM ${table}`).run();
-    }
-    ensureDataRootDirs(dataRoot);
-    logger.info("seed reset complete", { dataRoot });
-  }
+  if (options.reset) resetStore(db, dataRoot);
 
-  // 1. Users (upsert by email — tolerates the phase-2 boot-seeded admin).
+  // 1. Users (upsert by email — tolerates a boot-bootstrapped admin).
   const ids = await upsertUsers(db, options);
 
   // 2. Org-level agent profile templates (two-layer model, layer 1).
@@ -278,19 +226,16 @@ export async function runDemoSeed(
       occurredAt: n.occurredAt,
       readAt: n.unread ? null : seededAt,
       // A fixture inbox — deterministic regardless of any prefs a prior
-      // session left, so `seed --reset` stays pristine.
+      // session left, so a reset stays pristine.
       bypassPrefs: true,
     });
   }
 
   // The demo store starts with empty run history.
 
-  // 7b. The mock's one open scope violation (viberr-core · VIB-142 ·
+  // 7. The mock's one open scope violation (viberr-core · VIB-142 ·
   //    pull_request:write) so the rail Settings badge reads 1 out of the box.
-  //    This used to be seeded by migration 0005; it moved here when the
-  //    migrations were squashed into a schema-only baseline (mock data belongs
-  //    in the demo dataset, never the schema). INSERT OR IGNORE keeps a resolved
-  //    violation resolved across a re-seed (deterministic id).
+  //    INSERT OR IGNORE keeps a resolved violation resolved across a re-seed.
   db.prepare(
     `INSERT OR IGNORE INTO scope_violations
        (id, project_slug, task_key, scope, detail, status, created_at)
@@ -301,8 +246,7 @@ export async function runDemoSeed(
     seededAt,
   );
 
-  // 8. Arda's Home pins — mirrors the mock's seeded `starred` flags
-  //    (viberr-core + deploy-pipeline pinned; phase-4 user_prefs table).
+  // 8. Arda's Home pins — mirrors the mock's seeded `starred` flags.
   //    INSERT OR IGNORE: a user's own pin changes survive re-seeding.
   db.prepare(
     `INSERT OR IGNORE INTO user_prefs (user_id, key, value_json, updated_at)
@@ -336,6 +280,6 @@ export async function runDemoSeed(
     agentProfiles: SEED_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
   };
-  logger.info("demo seed complete", { ...summary });
+  logger.info("demo seed complete (test fixture)", { ...summary });
   return summary;
 }

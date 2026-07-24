@@ -1,29 +1,35 @@
 /**
- * Seeds the full demo dataset (mock parity): users, agent profile
- * templates, project + task files under ${VIBERR_DATA_ROOT}/projects,
- * projections, and Arda's notification inbox.
+ * Seeds the PRODUCT baseline — a clean sheet, no demo/mock board data:
+ * the built-in agent catalog templates (operator, developer, reviewer),
+ * org resources (knowledge bases with real files, skills, the domain
+ * allowlist), and — on an EMPTY users table — the bootstrap admin from
+ * VIBERR_SEED_ADMIN_EMAIL / VIBERR_SEED_ADMIN_PASSWORD (defaults
+ * admin@viberr.dev / the seed default password).
  *
  *   npm run seed             — idempotent upsert/overwrite
- *   npm run seed -- --reset  — wipe projects/, agents/profiles and all
- *                              derived tables first, then seed fresh
+ *   npm run seed -- --reset  — wipe projects/, agents/profiles, runtime
+ *                              transcripts and all derived tables first
+ *                              (users/auth + runtime credential homes survive)
  */
 import { getEnv } from "../app/server/config/env.server";
 import { getDb } from "../app/server/db/sqlite.server";
 import { seedOrgResources } from "../app/server/org/org-seed.server";
-import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/demo-seed.server";
+import { runSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed.server";
 
 const env = getEnv();
 const reset = process.argv.includes("--reset");
 
-const summary = await runDemoSeed(getDb(), {
+const summary = await runSeed(getDb(), {
   dataRoot: env.VIBERR_DATA_ROOT,
   reset,
-  adminPassword: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+  admin: {
+    ...(env.VIBERR_SEED_ADMIN_EMAIL ? { email: env.VIBERR_SEED_ADMIN_EMAIL } : {}),
+    password: env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD,
+  },
 });
 
-// Phase 9B: org resources (KBs with real files, skills, MCP servers,
-// domain allowlist, placeholder GitHub connection). Additive — the demo
-// seed above is untouched.
+// Org resources: KBs with real files, skills, domain allowlist. No MCP
+// servers and no GitHub connection are fabricated (honest empty slate).
 const org = seedOrgResources(getDb(), {
   dataRoot: env.VIBERR_DATA_ROOT,
   reset,
@@ -31,12 +37,7 @@ const org = seedOrgResources(getDb(), {
 
 console.log(
   [
-    "viberr seed complete:",
-    `  users          ${summary.users}`,
-    `  projects       ${summary.projects}`,
-    `  tasks          ${summary.tasks}`,
-    `  timeline events ${summary.events}`,
-    `  notifications  ${summary.notifications}`,
+    "viberr seed complete (clean sheet — no demo board data):",
     `  agent profiles ${summary.agentProfiles}`,
     `  projections changed ${summary.rescanChanged}`,
     `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
@@ -45,7 +46,8 @@ console.log(
     `  org domains    ${org.domains}`,
     `  gh connections ${org.connections}`,
     "",
-    `Sign in: arda@viberr.dev / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`,
-    `Other users (elif|murat|selin|deniz @viberr.dev): ${SEED_DEFAULT_PASSWORD}`,
+    summary.adminCreated
+      ? `Sign in: ${summary.adminEmail} / ${env.VIBERR_SEED_ADMIN_PASSWORD ?? SEED_DEFAULT_PASSWORD}`
+      : `Admin untouched (users already exist) — bootstrap admin only applies to an empty users table.`,
   ].join("\n"),
 );

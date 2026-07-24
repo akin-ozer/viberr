@@ -21,7 +21,7 @@ import {
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
-import { defaultAgentDeployments } from "~/server/seed/demo-data.server";
+import { defaultAgentDeployments } from "~/server/seed/agent-catalog.server";
 import { slugifyProjectName } from "./project-name";
 
 export type PolicyPreset = "strict" | "balanced" | "auto";

@@ -1,18 +1,30 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../../../test-support/demo-seed";
 import { findUserByEmail } from "~/server/auth/user-store.server";
-import {
-  credentialPasswordHash,
-  isBetterAuthPasswordHash,
-  setCredentialPassword,
-} from "~/server/auth/identity.server";
+import { credentialPasswordHash } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
+import {
+  parseTaskFileContent,
+  serializeTaskFile,
+} from "~/server/files/task-file.server";
+import {
+  parseProjectFileContent,
+  serializeProjectFile,
+} from "~/server/files/project-file.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { getBoard, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "./demo-seed.server";
+import { createTask } from "~/server/tasks/task-actions.server";
+
+/**
+ * Shape-pin for the TEST-ONLY demo fixture (test-support/demo-seed.ts) — the
+ * mock dataset the route-level suites are written against. The PRODUCT seed
+ * ships none of this (see seed.server.test.ts); these tests keep the fixture
+ * faithful so the route suites keep meaning what they assert.
+ */
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -24,7 +36,7 @@ async function seed() {
   return { db, dataRoot, summary };
 }
 
-describe("demo seed", () => {
+describe("demo fixture", () => {
   it("produces the expected counts", async () => {
     const { db, summary } = await seed();
     expect(summary).toMatchObject({
@@ -80,44 +92,63 @@ describe("demo seed", () => {
     expect(deniz).not.toBeNull(); // registered, but member of no project
   });
 
-  it("re-hashes an existing user's legacy/unverifiable credential (P11-01 recovery)", async () => {
+  it("DRIFT GUARD: every fixture file has zero unknown frontmatter and round-trips the CURRENT serializers", async () => {
+    // The fixture is HAND-WRITTEN canonical files — a legitimate input class
+    // (the store is human-editable) but one that can silently go stale as the
+    // product's schema evolves: loose parsing tolerates unknown keys without a
+    // diagnostic, so a renamed/removed field would keep every suite green
+    // while the fixture quietly stops representing what the product writes.
+    // This trips that wire: any field the current schema no longer knows lands
+    // in unknownFrontmatter and fails HERE, forcing a conscious fixture
+    // migration in the same change that evolves the schema.
     const { db, dataRoot } = await seed();
-    const arda = findUserByEmail(db, "arda@viberr.dev")!;
-    // Simulate a data root seeded before the better-auth migration: the stored
-    // credential is in the legacy `scrypt$...` format the verifier throws on.
-    setCredentialPassword(
-      db,
-      arda.id,
-      "scrypt$16384$8$1$firuPx6uzlhAacmTd73at1OAoHciD9IbvW83I1VQvO0=$pX5ob5jrx1kC1KRCGKpsYCtiHZNXCQPO9zbo8RsKN9aRNG7aA3uG0plZc9JfpeL/DQk8A+iAx+cvrJmgwaRfdg==",
-    );
-    expect(isBetterAuthPasswordHash(credentialPasswordHash(db, arda.id))).toBe(false);
-    // Re-running the seed restores a working credential the seed default verifies.
-    await runDemoSeed(db, { dataRoot });
-    const repaired = credentialPasswordHash(db, arda.id);
-    expect(isBetterAuthPasswordHash(repaired)).toBe(true);
-    await expect(verifyPassword(SEED_DEFAULT_PASSWORD, repaired)).resolves.toBe(true);
+    const rows = db
+      .prepare(`SELECT project_slug AS slug, task_key AS key FROM task_projections`)
+      .all() as { slug: string; key: string }[];
+    expect(rows).toHaveLength(12);
+    for (const { slug, key } of rows) {
+      const file = readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })!;
+      expect(file.diagnostics, `${key} diagnostics`).toEqual([]);
+      expect(file.parsed.unknownFrontmatter, `${key} unknown frontmatter`).toEqual({});
+      // Round-trip: parse(serialize(parsed)) must reproduce the same shape,
+      // or the serializer and schema have drifted apart.
+      const reparsed = parseTaskFileContent(serializeTaskFile(file.parsed), {
+        fallbackKey: key,
+      });
+      expect(reparsed.diagnostics, `${key} round-trip diagnostics`).toEqual([]);
+      expect(reparsed.parsed.frontmatter, `${key} frontmatter`).toEqual(
+        file.parsed.frontmatter,
+      );
+      expect(reparsed.parsed.packet, `${key} packet`).toEqual(file.parsed.packet);
+      expect(reparsed.parsed.timeline, `${key} timeline`).toEqual(file.parsed.timeline);
+    }
+    for (const slug of ["viberr-core", "deploy-pipeline", "billing-service"]) {
+      const p = readProjectFile({ projectSlug: slug, dataRoot })!;
+      expect(p.diagnostics, `${slug} diagnostics`).toEqual([]);
+      expect(p.parsed.unknownFrontmatter, `${slug} unknown frontmatter`).toEqual({});
+      const rp = parseProjectFileContent(serializeProjectFile(p.parsed), {
+        fallbackSlug: slug,
+      });
+      expect(rp.diagnostics, `${slug} round-trip diagnostics`).toEqual([]);
+      expect(rp.parsed.frontmatter, `${slug} frontmatter`).toEqual(p.parsed.frontmatter);
+    }
   });
 
-  it("--reset preserves runtime credential homes, wipes only transcript dirs (P11-04)", async () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    await runDemoSeed(db, { dataRoot });
-    // A configured Codex credential home + a run transcript dir under runtimes/.
-    const codexAuth = join(dataRoot, "runtimes", "codex-home", "auth.json");
-    const claudeHome = join(dataRoot, "runtimes", "claude-home", "config.json");
-    const transcript = join(dataRoot, "runtimes", "codex", "run_abc.jsonl");
-    mkdirSync(dirname(codexAuth), { recursive: true });
-    mkdirSync(dirname(claudeHome), { recursive: true });
-    mkdirSync(dirname(transcript), { recursive: true });
-    writeFileSync(codexAuth, '{"token":"secret"}');
-    writeFileSync(claudeHome, "{}");
-    writeFileSync(transcript, "{}\n");
-
-    await runDemoSeed(db, { dataRoot, reset: true });
-
-    expect(existsSync(codexAuth)).toBe(true); // credential home preserved
-    expect(existsSync(claudeHome)).toBe(true);
-    expect(existsSync(transcript)).toBe(false); // transcript wiped
+  it("DRIFT GUARD: a task the PRODUCT writes into the fixture store parses just as clean", async () => {
+    // Writer parity: anchor the fixture world and the real write path to the
+    // same schema in one place — if the product's own writer ever produces a
+    // file this store can't cleanly host, it fails here, not in a route suite.
+    const { db, dataRoot } = await seed();
+    const arda = findUserByEmail(db, "arda@viberr.dev")!;
+    const { key } = await createTask(
+      db,
+      { projectSlug: "viberr-core", title: "Writer-parity probe" },
+      { userId: arda.id, label: "arda@viberr.dev" },
+      { dataRoot },
+    );
+    const file = readTaskFile({ projectSlug: "viberr-core", taskKey: key, dataRoot })!;
+    expect(file.diagnostics).toEqual([]);
+    expect(file.parsed.unknownFrontmatter).toEqual({});
   });
 
   it("boards look like the mock: stage buckets + stub projects", async () => {

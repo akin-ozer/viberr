@@ -1,30 +1,28 @@
-import type {
-  AgentDeployment,
-  CapabilityMode,
-  ProjectFrontmatter,
-} from "~/schemas/project-file.schema";
+import type { ProjectFrontmatter } from "~/schemas/project-file.schema";
 import type {
   TaskFileEvent,
   TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
 import {
-  capabilityByLabel,
-  normalizeDeliveryGrants,
-} from "~/shared/capabilities";
-import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
   LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
-import type { AgentProfileFrontmatter } from "~/server/files/agent-profile-file.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
+import {
+  baseAgentDeployments,
+  defaultAgentDeployments,
+} from "~/server/seed/agent-catalog.server";
 
 /**
- * Demo data in the canonical file formats. User-facing copy preserves
+ * TEST-ONLY demo dataset in the canonical file formats — the mock board the
+ * route-level test suites are written against (projects, tasks, timelines,
+ * packets, people, notifications). The PRODUCT seed no longer ships any of
+ * this (clean-sheet ruling): it lives here purely as a test fixture, seeded
+ * via test-support/demo-seed.ts. User-facing copy preserves the mock exactly
  * (curly quotes, U+00B7 middots, U+2212 minus signs, Turkish characters);
- * display timestamps become back-dated local-time ISO instants so Phase 4's
- * formatter reproduces the mock strings exactly (ruling 4).
+ * display timestamps are back-dated local-time ISO instants.
  */
 
 // ------------------------------------------------------------- timestamps
@@ -137,187 +135,11 @@ const CLAUDE_REVIEWER_RENDER: ActorRender = {
   role: "Review & validation",
 };
 
-// ------------------------------------------------------- agent profiles
-
-interface ProfileActionSpec {
-  direct: string[];
-  recommend: string[];
-  forbidden: string[];
-}
-
-/** Maps mock action-label lists onto CAP_CATALOG ids; labels with no exact
- * catalog match stay as display-only extras (contracts §7 #7). */
-export function mapActions(actions: ProfileActionSpec): {
-  capabilities: { capabilityId: string; mode: CapabilityMode }[];
-  extras: { label: string; mode: CapabilityMode }[];
-} {
-  const capabilities: { capabilityId: string; mode: CapabilityMode }[] = [];
-  const extras: { label: string; mode: CapabilityMode }[] = [];
-  const add = (labels: string[], mode: CapabilityMode) => {
-    for (const label of labels) {
-      const def = capabilityByLabel(label);
-      if (def) capabilities.push({ capabilityId: def.id, mode });
-      else extras.push({ label, mode });
-    }
-  };
-  add(actions.direct, "direct");
-  add(actions.recommend, "recommend");
-  add(actions.forbidden, "human");
-  return { capabilities, extras };
-}
-
-export interface SeedAgentProfile {
-  frontmatter: AgentProfileFrontmatter;
-  description: string;
-}
-
-interface ProfileBase {
-  id: string;
-  kind: "operator" | "specialist";
-  name: string;
-  role: string;
-  icon: string;
-  backends: ("codex" | "claude")[];
-  model: string;
-  scope: string;
-  stages: string[];
-  spanAll?: boolean;
-  resources: { skills: string[]; mcps: string[]; kb: string[] };
-}
-
-function profile(
-  base: ProfileBase,
-  actions: ProfileActionSpec,
-  description: string,
-): SeedAgentProfile {
-  const { capabilities, extras } = mapActions(actions);
-  return {
-    frontmatter: {
-      ...base,
-      desc: description,
-      spanAll: base.spanAll ?? false,
-      capabilities,
-      extras,
-    },
-    description,
-  };
-}
-
-export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
-  profile(
-    {
-      id: "operator", kind: "operator", name: "Operator", role: "Task coordinator",
-      icon: "shield", backends: ["claude", "codex"], model: "orchestration runtime",
-      scope: "System role · one per active task",
-      stages: ["triage", "ready", "impl", "review", "done"], spanAll: true,
-      resources: {
-        // Real, non-placeholder resources: the shipped skill, the actual
-        // in-process governance MCP server ("viberr"), and a real KB on disk.
-        skills: ["viberr-app-expertise"],
-        mcps: ["viberr"],
-        kb: ["architecture-notes"],
-      },
-    },
-    {
-      direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events"],
-      recommend: ["Stage transitions", "Completion for human acceptance"],
-      forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
-    },
-    "A dedicated operator is instantiated for every active task. It coordinates specialists, keeps the canonical task file authoritative, and turns agent work into concise decision packets for human review. It never writes code and never closes a task itself.",
-  ),
-  profile(
-    {
-      id: "developer", kind: "specialist", name: "Developer", role: "Implementation",
-      icon: "branch", backends: ["codex", "claude"], model: "gpt-5.6-sol",
-      scope: "Global base · customized for Viberr Core",
-      stages: ["ready", "impl"],
-      resources: {
-        skills: ["developer-expertise"],
-        // No MCP is seeded (honest empty slate — the old "github-mcp" ref
-        // pointed at a non-resolvable, unauthenticated endpoint). An admin
-        // attaches a real MCP server and references it here.
-        mcps: [],
-        // Real KB folders on disk (data/kb/<dir>) so they inject into runs (F6).
-        kb: ["architecture-notes", "api-contracts"],
-      },
-    },
-    {
-      // "Execute code or write to the repo" is the HEADLINE repo-write capability
-      // and the master gate for ALL delivery (specialist-tool-policy.ts): with it
-      // withheld, the fine-grained branch/commit/PR grants below are vetoed and the
-      // developer silently delivers nothing (VIB-1 class). A deliverer MUST hold it.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question"],
-      recommend: ["Move the task to Review"],
-      forbidden: ["Merge a pull request", "Transition a task to Done"],
-    },
-    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary — Viberr pushes it and opens the review PR on the Review transition.",
-  ),
-  profile(
-    {
-      id: "reviewer", kind: "specialist", name: "Reviewer", role: "Review & validation",
-      icon: "check", backends: ["claude"], model: "sonnet",
-      scope: "Global base · customized for Viberr Core",
-      stages: ["impl", "review"],
-      resources: {
-        skills: ["reviewer-expertise"],
-        mcps: [],
-        kb: ["api-contracts"],
-      },
-    },
-    {
-      // The single quality specialist: reviews the diff AND authors/runs the
-      // validation suite (the former Tester role is folded in here).
-      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Post mid-run comments", "Ask the human a question", "Report a validation verdict"],
-      recommend: ["Approve the review", "Request changes"],
-      // The reviewer must NOT push/commit — use the exact catalog label so this
-      // becomes a REAL `commit-push-branch: human` grant (D4) that the tool
-      // policy actually denies (git push + git commit), not a decorative extra.
-      forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
-    },
-    "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary — raising typed quality flags and recommending approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
-  ),
-];
-
 // --------------------------------------------------------------- projects
 
 export interface SeedProject {
   frontmatter: ProjectFrontmatter;
   description: string;
-}
-
-/** The default agent roster deployed into a project — the operator plus the
- *  base specialists, each carrying its capability policy. Used by the demo seed
- *  AND by app-created projects so the operator (and specialists it can assign)
- *  are preinstalled in every project. */
-export function defaultAgentDeployments(): AgentDeployment[] {
-  return deployments();
-}
-
-/** Profile ids of the built-in agents preinstalled on EVERY board: the operator
- *  plus the base specialists a task actually needs (Developer, Reviewer). The
- *  operator absorbs advisory duties (scope clarification, decision packets), and
- *  the Reviewer is the single quality specialist (it reviews AND tests), so there
- *  is no separate Advisor or Tester profile. */
-export const BASE_AGENT_PROFILE_IDS = [
-  "operator",
-  "developer",
-  "reviewer",
-] as const;
-
-/** The built-in agent deployments backfilled into every project so the operator
- *  and its core specialists are usable across all boards (ensureBaseAgentsDeployed). */
-export function baseAgentDeployments(): AgentDeployment[] {
-  const wanted = new Set<string>(BASE_AGENT_PROFILE_IDS);
-  return deployments().filter((d) => wanted.has(d.profileId));
-}
-
-function deployments(): AgentDeployment[] {
-  return SEED_AGENT_PROFILES.map((p) => {
-    // F14: a deliverer must hold the headline repo-write capability (master gate);
-    // repair any seed deliverer that grants scoped delivery without it.
-    const capabilities = normalizeDeliveryGrants(p.frontmatter.capabilities);
-    return { profileId: p.frontmatter.id, capabilities, extras: p.frontmatter.extras };
-  });
 }
 
 export function seedProjects(ids: SeedUserIds): SeedProject[] {
@@ -338,7 +160,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           { userId: ids.murat, role: "maintainer" },
           { userId: ids.selin, role: "contributor" },
         ],
-        agents: deployments(),
+        agents: defaultAgentDeployments(),
         // Honest empty slate: the project declares the scopes it REQUIRES (used
         // by the pre-flight scope check), but no fabricated masked token — a
         // policy is not a credential, and no PAT is bound until an admin adds a
