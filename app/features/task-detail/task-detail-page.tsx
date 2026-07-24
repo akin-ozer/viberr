@@ -25,7 +25,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { prStatePill } from "~/features/github/github-pills";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
-import { formatDayDotTime } from "~/shared/dates/format";
+import { formatDayDotTime, formatRelative } from "~/shared/dates/format";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
@@ -66,6 +66,7 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
 export function GithubTrace({
   task,
   githubHost,
+  reconciledAt = null,
   onCompleteMerge,
   onForceAccept,
   merging,
@@ -73,6 +74,10 @@ export function GithubTrace({
   task: TaskDetail;
   /** GitHub web host for browse links (loader-derived; GHE-safe). */
   githubHost?: string;
+  /** UI-57: ISO of the newest `github.reconcile` for THIS task, or null when it
+   *  has never been synced. Diff/commits/PR below are a CACHE — the GitHub page
+   *  discloses its freshness and this card did not. */
+  reconciledAt?: string | null;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
   /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
@@ -163,6 +168,18 @@ export function GithubTrace({
       </div>
       <div className="gh-body">
         <div className="kv-row">
+          <span className="k">Synced</span>
+          <span className="v sub" title="Branch, diff, commits and PR state below are served from the cached projection; a background poller refreshes it every 5 minutes.">
+            {reconciledAt ? (
+              <time dateTime={reconciledAt} suppressHydrationWarning>
+                {formatRelative(reconciledAt)}
+              </time>
+            ) : (
+              "not yet synced with GitHub"
+            )}
+          </span>
+        </div>
+        <div className="kv-row">
           <span className="k">Branch</span>
           <span className="v">
             <Icon name="branch" />
@@ -237,10 +254,18 @@ export function GithubTrace({
 function PolicyPanel({
   projectSlug,
   myRole,
+  stages,
 }: {
   projectSlug: string;
   myRole: string | null;
+  /** UI-15/UI-49 family: the boundary row names the project's OWN review and
+   *  terminal stages instead of the literals "Review → Done". */
+  stages: TaskDetail["stages"];
 }) {
+  const reviewName =
+    stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
+  const terminalName =
+    stages.length >= 1 ? stages[stages.length - 1]!.name : "the final stage";
   const admin = myRole === "admin";
   const r = (myRole as ProjectRole | null) ?? null;
   const role = myRole || "viewer";
@@ -270,7 +295,11 @@ function PolicyPanel({
       v: roleCan(r, "run-agents") ? "You can run agents" : "Maintainer or admin only",
       icon: "cpu",
     },
-    { k: "Review → Done", v: "Human decision, locked at the review boundary", icon: "lock" },
+    {
+      k: `${reviewName} → ${terminalName}`,
+      v: "Human decision, locked at the review boundary",
+      icon: "lock",
+    },
   ];
   return (
     <div className="panel">
@@ -1107,6 +1136,7 @@ export function TaskDetailPage({
   recommendations,
   schedules,
   githubHost,
+  githubReconciledAt = null,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -1141,6 +1171,8 @@ export function TaskDetailPage({
   schedules: TaskSchedule[];
   /** GitHub web host for browse links (loader-derived; GHE-safe). */
   githubHost?: string;
+  /** UI-57: newest `github.reconcile` for this task (freshness cue). */
+  githubReconciledAt?: string | null;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [releasing, setReleasing] = useState(false);
@@ -1381,6 +1413,7 @@ export function TaskDetailPage({
         <GithubTrace
           task={task}
           {...(githubHost ? { githubHost } : {})}
+          reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           {...(onForceAccept ? { onForceAccept } : {})}
           merging={runBusy}
@@ -1394,7 +1427,11 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
         />
-        <PolicyPanel projectSlug={task.projectSlug} myRole={myRole} />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          stages={task.stages}
+        />
       </div>
 
       {releasing && (

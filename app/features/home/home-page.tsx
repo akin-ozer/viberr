@@ -382,13 +382,18 @@ function NewProjectNameFields({
 
 function NewProjectConnectionField({
   connections,
+  health,
   connOwner,
   setConnOwner,
 }: {
   connections: string[];
+  /** UI-09: per-owner credential health, so an unhealthy connection is not
+   *  offered as if it were fine. */
+  health: Record<string, "valid" | "unvalidated" | "failed">;
   connOwner: string;
   setConnOwner: (owner: string) => void;
 }) {
+  const picked = health[connOwner];
   return (
     <div className="field">
       <span className="flabel">
@@ -396,18 +401,47 @@ function NewProjectConnectionField({
         <span className="fhint">sets the repository root</span>
       </span>
       <div className="pick-chips">
-        {connections.map((owner) => (
-          <button
-            type="button"
-            key={owner}
-            className={"pick-chip" + (connOwner === owner ? " on" : "")}
-            onClick={() => setConnOwner(owner)}
-          >
-            <Icon name="github" />
-            {owner}/
-          </button>
-        ))}
+        {connections.map((owner) => {
+          const state = health[owner] ?? "unvalidated";
+          return (
+            <button
+              type="button"
+              key={owner}
+              className={"pick-chip" + (connOwner === owner ? " on" : "")}
+              title={
+                state === "failed"
+                  ? "This connection's token failed validation — delivery will not be able to push."
+                  : state === "unvalidated"
+                    ? "This connection has not been validated yet."
+                    : undefined
+              }
+              onClick={() => setConnOwner(owner)}
+            >
+              <Icon name="github" />
+              {owner}/
+              {state !== "valid" && (
+                <span style={{ opacity: 0.75 }}>
+                  {" "}
+                  · {state === "failed" ? "token failed" : "unvalidated"}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+      {/* UI-09: the store-import path requires `validationState === "valid"`;
+          this chip list applied no filter at all, so a failed-token connection
+          looked healthy and the failure only appeared at first delivery. */}
+      {connections.length > 0 && picked && picked !== "valid" && (
+        <div className="def-note">
+          <Icon name="alert" />
+          <span>
+            {picked === "failed"
+              ? "This connection's token failed validation. The project will be created, but agents won't be able to push until it's replaced in Viberr settings → GitHub connections."
+              : "This connection hasn't been validated yet — check it in Viberr settings → GitHub connections if delivery fails."}
+          </span>
+        </div>
+      )}
       {connections.length === 0 && (
         <div className="def-note">
           <Icon name="alert" />
@@ -587,11 +621,14 @@ function NewProjectFooter({
 
 function NewProjectModal({
   connections,
+  connectionHealth,
   storeRoot,
   onClose,
 }: {
   /** Connection owners (Phase-4 stand-in — distinct repo owners in use). */
   connections: string[];
+  /** UI-09: per-owner credential health for the chip list. */
+  connectionHealth: Record<string, "valid" | "unvalidated" | "failed">;
   storeRoot: string;
   onClose: () => void;
 }) {
@@ -612,6 +649,7 @@ function NewProjectModal({
     key?: string;
     slug?: string;
     storePath?: string;
+    repoWarning?: string | null;
     error?: string;
   }>();
   const csrf = useCsrfToken();
@@ -680,6 +718,9 @@ function NewProjectModal({
           " initialized — task store created at " +
           fetcher.data.storePath,
       );
+      // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
+      // report unqualified success even for a repo GitHub has never heard of.
+      if (fetcher.data.repoWarning) push(fetcher.data.repoWarning, "error");
       onClose();
     }
   }, [fetcher.data, onClose, push]);
@@ -745,6 +786,7 @@ function NewProjectModal({
         />
         <NewProjectConnectionField
           connections={connections}
+          health={connectionHealth}
           connOwner={connOwner}
           setConnOwner={setConnOwner}
         />
@@ -1534,6 +1576,7 @@ export function HomePage({
       {modal && (
         <NewProjectModal
           connections={org.connectionOwners}
+          connectionHealth={org.connectionHealth}
           storeRoot={data.storeRoot}
           onClose={() => setModal(false)}
         />

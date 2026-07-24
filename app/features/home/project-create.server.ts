@@ -89,14 +89,27 @@ function presetAgents(
 }
 
 /**
- * Best-effort fetch of the repo's real default branch so branch/PR sync
- * targets the right base (e.g. `master`, not a hardcoded `main`). Returns
- * `null` on any failure — creation then falls back to `main`.
+ * Probe the repository with the connection's token.
+ *
+ * UI-09: this used to be a silent best-effort default-branch fetch — a 404 (a
+ * typo'd repo name, or one the token cannot see) was swallowed, the branch fell
+ * back to `main`, and the toast reported plain success. The failure surfaced
+ * much later, when the first agent delivery could not push. The outcome is
+ * REPORTED now so creation can disclose it; creation itself is deliberately not
+ * blocked (creating the Viberr project before the GitHub repo exists is a real
+ * flow), and a 10s timeout keeps the action from hanging on a blackholed
+ * network.
  */
-async function fetchRemoteDefaultBranch(
+type RepoProbe =
+  | { status: "ok"; defaultBranch: string | null }
+  | { status: "not_found" }
+  | { status: "forbidden" }
+  | { status: "unreachable" };
+
+async function probeRemoteRepo(
   token: string,
   repo: string,
-): Promise<string | null> {
+): Promise<RepoProbe> {
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}`, {
       headers: {
@@ -104,12 +117,15 @@ async function fetchRemoteDefaultBranch(
         Accept: "application/vnd.github+json",
         "User-Agent": "viberr",
       },
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (res.status === 404) return { status: "not_found" };
+    if (res.status === 401 || res.status === 403) return { status: "forbidden" };
+    if (!res.ok) return { status: "unreachable" };
     const data = (await res.json()) as { default_branch?: string };
-    return data.default_branch ?? null;
+    return { status: "ok", defaultBranch: data.default_branch ?? null };
   } catch {
-    return null;
+    return { status: "unreachable" };
   }
 }
 
@@ -141,6 +157,13 @@ export interface CreateProjectResult {
   name: string;
   /** Display path for the toast (ruling 3 — real store path). */
   storePath: string;
+  /**
+   * UI-09: what the repository probe found, or null when no token was
+   * available to probe with. A non-`ok` value means the project was created but
+   * agents will not be able to deliver until it's resolved — the caller states
+   * that instead of reporting a plain success.
+   */
+  repoWarning: string | null;
 }
 
 export async function createProject(
@@ -201,11 +224,20 @@ export async function createProject(
     );
   }
   let defaultBranch = "main";
+  let repoWarning: string | null = null;
   {
     const token = getPatToken(db, connection.patId);
     if (token) {
-      const remote = await fetchRemoteDefaultBranch(token, repo);
-      if (remote) defaultBranch = remote;
+      const probe = await probeRemoteRepo(token, repo);
+      if (probe.status === "ok") {
+        if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
+      } else if (probe.status === "not_found") {
+        repoWarning = `GitHub has no repository ${repo} that this connection can see — check the name, or create it before agents start delivering.`;
+      } else if (probe.status === "forbidden") {
+        repoWarning = `The ${owner} connection's token was refused for ${repo} — agents won't be able to deliver until it's replaced.`;
+      } else {
+        repoWarning = `Couldn't reach GitHub to verify ${repo} — the project was created with the default branch "main".`;
+      }
     }
   }
 
@@ -270,5 +302,6 @@ export async function createProject(
     key,
     name,
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
+    repoWarning,
   };
 }

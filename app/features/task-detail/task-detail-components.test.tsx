@@ -833,3 +833,206 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(btn).toBeUndefined();
   });
 })
+
+/* ------------------------------------------------ pass-13 honesty fixes */
+
+describe("UI-36: a rejected PR must not look like an open one", () => {
+  const withPr = (state: string): TaskDetail =>
+    ({
+      ...taskFixture("u-arda", "Arda Kaya"),
+      repo: "akin-ozer/viberr",
+      branch: "vib-151",
+      commits: [],
+      changed: null,
+      pr: { number: 14, state, title: "PR" },
+    }) as unknown as TaskDetail;
+
+  it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
+    const closed = render(<GithubTrace task={withPr("closed")} />);
+    const closedPill = closed.container.querySelector(".gh-bar .pill")!;
+    // Before the fix this branch didn't exist: a rejected PR rendered as the
+    // blue `info` "PR #14", identical to a PR still under review.
+    expect(closedPill.textContent).toContain("closed");
+    expect(closedPill.className).toContain("risk");
+    cleanup();
+
+    const review = render(<GithubTrace task={withPr("review")} />);
+    const reviewPill = review.container.querySelector(".gh-bar .pill")!;
+    expect(reviewPill.textContent).toContain("PR #14");
+    expect(reviewPill.className).toContain("info");
+  });
+
+  it("keeps merged and merge-pending distinct", () => {
+    const merged = render(<GithubTrace task={withPr("merged")} />);
+    expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
+      "merged",
+    );
+    cleanup();
+    const accepted = render(<GithubTrace task={withPr("accepted")} />);
+    expect(
+      accepted.container.querySelector(".gh-bar .pill")!.textContent,
+    ).toContain("merge pending");
+  });
+});
+
+describe("LV-09: pluralization + null-ish packet observations", () => {
+  it("says 'Diff 1 file', not '1 files'", () => {
+    const task = {
+      ...taskFixture("u-arda", "Arda Kaya"),
+      repo: "akin-ozer/viberr",
+      branch: "vib-151",
+      commits: [],
+      pr: null,
+      changed: { files: 1, add: 3, del: 1 },
+    } as unknown as TaskDetail;
+    const { container } = render(<GithubTrace task={task} />);
+    const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
+      r.textContent?.startsWith("Diff"),
+    )!;
+    expect(diff.textContent).toContain("1 file ·");
+    expect(diff.textContent).not.toContain("1 files");
+  });
+
+  it("prints 'unassigned' instead of the operator's literal 'null'", () => {
+    const packet: PacketRender = {
+      ...packet142,
+      observations: [
+        { k: "OWNER", v: "null", code: false },
+        { k: "Signal", v: "", code: false },
+      ],
+    };
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const obs = container.querySelectorAll(".packet-obs .obs");
+    expect(obs[0]!.textContent).toContain("unassigned");
+    expect(obs[0]!.textContent).not.toContain("null");
+    expect(obs[1]!.textContent).toContain("—");
+  });
+});
+
+describe("UI-42/UI-44: the decision packet", () => {
+  const goalPacket: PacketRender = {
+    ...packet142,
+    options: [
+      { kind: "edit_goal", t: "A human refines the goal", d: "Rewrite it.", rec: true },
+      { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
+    ],
+  };
+
+  it("blocks edit_goal for a resolver who cannot edit the goal", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    expect(first.getAttribute("aria-disabled")).toBe("true");
+    expect(first.textContent).toContain("your role can't edit the goal");
+    // The Confirm button refuses too — before the fix an owner-contributor
+    // recorded the decision, got "type the new goal", and found no editor.
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    expect(confirm.disabled).toBe(true);
+  });
+
+  it("offers edit_goal normally to a maintainer", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    expect(first.getAttribute("aria-disabled")).toBeNull();
+    expect(
+      container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("UI-44: uses a roving tabindex so Tab does not walk every option", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = [
+      ...container.querySelectorAll<HTMLButtonElement>(".options .opt"),
+    ];
+    const tabbable = opts.filter((o) => o.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("UI-41: the release dialog only offers members who can OWN a task", () => {
+  it("filters out viewers, which setOwner would reject", () => {
+    const members: TaskMemberView[] = [
+      ...membersFixture,
+      { userId: "u-viewer", role: "viewer", user: { name: "Viewer Person", initials: "VP", tone: "" } },
+    ];
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-arda", "Arda Kaya")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={members}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onOwner={() => {}}
+      />,
+    );
+    const chips = [...container.querySelectorAll(".handoff-chip")];
+    expect(chips.map((c) => c.textContent)).not.toContain(
+      expect.stringContaining("Viewer"),
+    );
+    expect(chips.some((c) => c.textContent?.includes("Viewer"))).toBe(false);
+  });
+
+  it("disables the chips while an owner mutation is in flight", () => {
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-arda", "Arda Kaya")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={membersFixture}
+        busy
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onOwner={() => {}}
+      />,
+    );
+    const chips = [
+      ...container.querySelectorAll<HTMLButtonElement>(".handoff-chip"),
+    ];
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.every((c) => c.disabled)).toBe(true);
+  });
+});

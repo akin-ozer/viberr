@@ -262,6 +262,14 @@ export interface HomeOrgSummary {
   /** GitHub connection owners from the real connections store (Phase 7) — the
    * New-project modal offers these as the repo root. */
   connectionOwners: string[];
+  /**
+   * UI-09: per-owner credential health. The chip list used to be offered with
+   * NO validation filter — unlike the store-import path, which requires
+   * `validationState === "valid"` — so a connection whose token had failed was
+   * presented as a healthy choice, and the failure only surfaced when the first
+   * agent delivery could not push.
+   */
+  connectionHealth: Record<string, "valid" | "unvalidated" | "failed">;
   users: {
     total: number;
     admins: number;
@@ -286,7 +294,15 @@ export function getHomeOrgSummary(
   // freshly-added connection is immediately offered in the New-project modal
   // even before any project references its repo.
   const owners = new Set<string>();
-  for (const c of listConnections(db)) owners.add(c.owner);
+  const connectionHealth: HomeOrgSummary["connectionHealth"] = {};
+  for (const c of listConnections(db)) {
+    owners.add(c.owner);
+    // UI-09: `valid` wins when an owner has several connections — one healthy
+    // credential is enough to create against that root.
+    if (connectionHealth[c.owner] !== "valid") {
+      connectionHealth[c.owner] = c.validationState;
+    }
+  }
 
   // UI-24: count EVERY account, the same population the Users & access panel
   // this tile links to reports. Filtering `!disabled` here meant the number
@@ -313,6 +329,7 @@ export function getHomeOrgSummary(
 
   return {
     connectionOwners: [...owners].sort(),
+    connectionHealth,
     users: {
       total: users.length,
       admins,

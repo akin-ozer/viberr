@@ -169,3 +169,37 @@ Conventions: **UC-##** = live use case, PASS/FAIL with evidence recorded inline.
 - **UC-33 agent reply notification — FAIL (`RT-01`).** The reply opened with `@Arda …`; the
   `notifications` table has **zero** rows of kind `mention`.
 
+## Post-fix re-verification (same live instance, after the implementation)
+
+Each of these re-runs the exact case that failed before, on the running app.
+
+- **UC-34 KB grant identifier — PASS.** Granting `P13 facts` from the ORG editor now writes
+  `kb: [p13-facts]`; opening a profile that still carried the old display-name form and
+  saving it repairs the grant in place.
+- **UC-35 KB rename keeps every grant — PASS.** Renaming `P13 facts` → `P13 facts renamed`
+  moved the folder AND rewrote **7** project-deployment references + the org template; the
+  reverse rename restored all 7. Zero stale references either way.
+- **UC-36 in-app KB authoring — PASS.** "New document" wrote
+  `store://kb/p13-facts/authored-in-app.md` (sentinel `KB-INAPP-P13-5T1V`) from the browser,
+  the watcher re-indexed it, and a live agent run quoted it (below).
+- **UC-37 operator MCP + KB grants reach the run — PASS.** The same operator that previously
+  answered *"MCP servers/tools I can call: none"* now lists all 15 `everything-mcp` tools,
+  returns a real call result (`Echo: operator-mcp-probe-2`), and quotes **both** KB sentinels
+  — including the doc authored in-app minutes earlier, through a rename round-trip.
+- **UC-38 real MCP health — PASS.** `everything-http` went from "reachable · no tool count"
+  to **16 tools · checked just now**; `everything-mcp` (stdio) went from 13 → **16** because
+  the probe now declares the client capabilities a real run declares.
+- **UC-39 @mention by display name — PASS.** `@Docs Writer` started a Documentation run and
+  the agent replied, quoting both KB sentinels and its single skill sentinel.
+- **UC-40 agent reply notifies the human it tags — PASS.** `mention` notifications went from
+  **0 → 4**; the reply that produced them opened with `@Arda`.
+- **UC-41 goal edit is a Note — PASS.** Editing PST-4's goal now renders **Note · Goal
+  updated** with a neutral node (was a coral "Policy violation" shield); the operator's open
+  packet was withdrawn as moot and the task advanced.
+- **UC-42 library adoption — PASS.** "Add from library · 1" copied `Org Docs Writer` into
+  Pass13 Selftest with explicit capability grants (including the new
+  `use-web-search-fetch: direct` and `report-validation-verdict: off`) — the org-level
+  profile is deployable for the first time.
+- **UC-43 second PR-backed run after the changes — PASS.** PST-4 (goal supplied by a human
+  after the clarification packet) delivered docs-only work and opened **PR #100**.
+
