@@ -122,8 +122,12 @@ const envSchema = z.object({
   //  - VIBERR_CLAUDE_MAX_TURNS: runaway turn cap for a Claude run (default 2000).
   //  - VIBERR_CODEX_IDLE_TIMEOUT_MS: idle window before a Codex run is treated as
   //    hung, in ms (default 15 minutes).
+  //  - VIBERR_CLAUDE_IDLE_TIMEOUT_MS: the same guard for a Claude run (P13-RT-11 —
+  //    Claude runs had no hang guard at all, so a stalled run pinned the
+  //    delivering single-flight until the next restart).
   VIBERR_CLAUDE_MAX_TURNS: z.string().optional(),
   VIBERR_CODEX_IDLE_TIMEOUT_MS: z.string().optional(),
+  VIBERR_CLAUDE_IDLE_TIMEOUT_MS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

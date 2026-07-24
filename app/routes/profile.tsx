@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   data,
   useFetcher,
@@ -8,7 +9,7 @@ import {
 import type { Route } from "./+types/profile";
 import type { loader as rootLoader } from "../root";
 import { requireAuth, requireUser } from "~/server/auth/require-user.server";
-import { assertCsrf } from "~/server/auth/csrf.server";
+import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
@@ -29,6 +30,7 @@ import { applyThemePreference } from "~/features/shell/theme-preference";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
  * /profile — URL-addressable PageOverlay route (phase-4 shell decision,
@@ -57,7 +59,13 @@ export async function action({ request }: Route.ActionArgs) {
   const ctx = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
-  await assertCsrf(request, ctx.sessionId, formData);
+  // UI-32: `assertCsrf` used to throw here, OUTSIDE the try below — a thrown
+  // Response renders the nearest boundary, so an expired token replaced the
+  // profile overlay (and everything else) with root's 403 page instead of the
+  // `{ok:false,error}` toast this action's own catch produces for every other
+  // failure.
+  const csrfFailure = await csrfError(request, ctx.sessionId, formData);
+  if (csrfFailure) return csrfFailure;
   const intent = String(formData.get("intent") ?? "");
   const actor = { userId: ctx.user.id, label: ctx.user.email };
 
@@ -135,10 +143,15 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const location = useLocation();
   const csrf = useCsrfToken();
   const push = useToast();
-  const themeFetcher = useFetcher();
+  const themeFetcher = useFetcher<{ ok: boolean; error?: string }>();
 
   const identityFetcher = useFetcher<ProfileActionData>();
   const prefsFetcher = useFetcher<ProfileActionData>();
+  // UI-56: Appearance gets its own fetcher. Sharing `prefsFetcher` meant a
+  // notification flip immediately followed by a motion flip never delivered the
+  // `set-notif` result, stranding that panel's rollback snapshot so a LATER
+  // failure rolled back to stale state.
+  const appearanceFetcher = useFetcher<ProfileActionData>();
   const passwordFetcher = useFetcher<ProfileActionData>();
   const githubFetcher = useFetcher<ProfileActionData>();
 
@@ -155,15 +168,37 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
       fetcher.submit(fd, { method: "post", action: "/profile" });
     };
 
+  // UI-31: the theme toast fired at SUBMIT time and no handler read the result,
+  // so a rejected POST (expired session / stale CSRF) left the page claiming the
+  // theme was saved while the next revalidation reverted it. Settle on the
+  // result and roll the applied preference back on failure.
+  const themePending = useRef<{ toast: string; rollback: ThemePreference } | null>(
+    null,
+  );
+  useFetcherResult(themeFetcher, (result) => {
+    const p = themePending.current;
+    themePending.current = null;
+    if (!p) return;
+    if (result.ok) {
+      push(p.toast);
+    } else {
+      applyThemePreference(p.rollback);
+      push(result.error ?? "Theme not saved — reload and try again", "error");
+    }
+  });
+
   const onTheme = (next: ThemePreference, label: string) => {
     // RU-1: re-selecting the active theme is a no-op — don't re-submit or toast.
     if (next === theme) return;
+    themePending.current = {
+      toast: "Theme · " + label + (next === "system" ? " (follows your OS)" : ""),
+      rollback: theme,
+    };
     applyThemePreference(next);
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("theme", next);
     themeFetcher.submit(fd, { method: "post", action: "/prefs/theme" });
-    push("Theme · " + label + (next === "system" ? " (follows your OS)" : ""));
   };
 
   return (
@@ -176,6 +211,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
         fetchers={{
           identity: identityFetcher,
           prefs: prefsFetcher,
+          appearance: appearanceFetcher,
           password: passwordFetcher,
           github: githubFetcher,
         }}

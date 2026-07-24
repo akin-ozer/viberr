@@ -291,23 +291,29 @@ describe("/profile action", () => {
     expect(findUserById(app.db, ardaId)!.idp).toBe("local");
   });
 
-  it("rejects a forged CSRF token", async () => {
+  // UI-32: REWRITTEN — this test enshrined the bug. `assertCsrf` THREW a raw
+  // Response from outside the action's try, and a thrown response from a
+  // fetcher renders the nearest boundary, so a stale token replaced the whole
+  // UI with root's "403 Forbidden" page and the action's own
+  // `{ok:false,error}` toast path was unreachable. The rejection is now a
+  // 403 RESULT the client's existing error handlers surface as a toast.
+  it("rejects a forged CSRF token as a 403 result (not a thrown boundary)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const { action } = await import("~/routes/profile");
     const body = new URLSearchParams({ _csrf: "forged", intent: "identity" });
-    const thrown = await (
-      action({
-        request: app.request("/profile", {
-          method: "POST",
-          cookie,
-          body,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        }),
-        params: {},
-        context: {},
-      } as never) as Promise<unknown>
-    ).catch((e) => e);
-    expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(403);
+    const result = (await action({
+      request: app.request("/profile", {
+        method: "POST",
+        cookie,
+        body,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+      params: {},
+      context: {},
+    } as never)) as { init?: { status?: number }; data?: { ok: boolean; error: string } };
+    expect(result).not.toBeInstanceOf(Response);
+    expect(result.init?.status).toBe(403);
+    expect(result.data?.ok).toBe(false);
+    expect(result.data?.error).toMatch(/expired|security token/i);
   });
 });

@@ -263,7 +263,9 @@ describe("github import", () => {
     );
     expect(existsSync(path.join(target.rootAbs, "docs", ".hidden.md"))).toBe(false);
 
-    // Name collision → suffixed folder (mock semantics, real dirs).
+    // P13-KM-13: re-importing the SAME source refreshes its folder in place.
+    // It used to suffix (`docs-2`), so every re-import left another full copy
+    // behind and all of them were injected into every run.
     const again = await importGithubSnapshot(
       db,
       target,
@@ -273,7 +275,7 @@ describe("github import", () => {
     );
     expect(again.status).toBe("imported");
     if (again.status === "imported") {
-      expect(again.folder).toBe("docs-2");
+      expect(again.folder).toBe("docs");
       // Clean import → nothing skipped, toast stays clean (E5).
       expect(again.skipped).toBe(0);
       expect(again.toast).not.toContain("skipped");
@@ -428,5 +430,67 @@ describe("writeStoreDoc", () => {
     writeStoreDoc(db, target, ["notes"], "a.md", "hello", ACTOR);
     expect(readStoreDoc(target, ["notes", "a.md"])).toMatchObject({ text: "hello" });
     expect(readStoreDoc(target, ["nope.md"])).toBeNull();
+  });
+});
+
+/* --------------------------- re-import refreshes in place (P13-KM-13) */
+
+describe("importGithubSnapshot re-import", () => {
+  const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64");
+
+  it("refreshes the same source's folder instead of creating a second copy", async () => {
+    const { db, target } = await setupKb();
+    insertUser(db, {
+      id: "u_admin2",
+      email: "admin2@test.dev",
+      name: "Admin Two",
+      role: "admin",
+    });
+    const connectTransport = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "owner" },
+        headers: { "x-oauth-scopes": "repo, workflow" },
+      },
+      "GET /users/owner": { body: { public_repos: 1 } },
+    });
+    await createConnection(
+      db,
+      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin2" },
+      ACTOR,
+      { fetchImpl: connectTransport.fetchImpl },
+    );
+
+    const snapshot = (text: string) =>
+      fakeGithubFetch({
+        "GET /repos/owner/repo/git/trees/main": {
+          body: {
+            truncated: false,
+            tree: [{ path: "docs/a.md", type: "blob", sha: "s1", size: 5 }],
+          },
+        },
+        "GET /repos/owner/repo/git/blobs/s1": {
+          body: { content: b64(text), encoding: "base64" },
+        },
+      });
+
+    const url = "https://github.com/owner/repo/tree/main/docs";
+    const first = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot("first").fetchImpl,
+    });
+    expect(first.status).toBe("imported");
+
+    const second = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot("second").fetchImpl,
+    });
+    // Before this fix the second import landed in `docs-2`, so BOTH copies were
+    // injected into every run and the 24k budget was spent on the stale one.
+    expect(second.status).toBe("imported");
+    if (second.status !== "imported") return;
+    expect(second.folder).toBe("docs");
+    expect(second.toast).toContain("re-imported");
+    expect(scanStoreTree(target.rootAbs).map((n) => n.name)).toEqual(["docs"]);
+    expect(readFileSync(path.join(target.rootAbs, "docs", "a.md"), "utf8")).toBe(
+      "second",
+    );
   });
 });

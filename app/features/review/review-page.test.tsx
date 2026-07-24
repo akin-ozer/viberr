@@ -66,9 +66,14 @@ describe("ReviewQueuePage", () => {
         "2 tasks at the review boundary · 1 waiting on your acceptance",
       ),
     ).toBeTruthy();
-    // Policy chip with its explanatory tooltip (the only pre-click hint).
+    // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
+    // — visually identical to the non-interactive `hero-file` spans elsewhere,
+    // so nothing announced it navigates; it is a real button now. And the
+    // "Review → Done" wording is no longer hardcoded: the page renders the
+    // project's RESOLVED stage names (the default prop keeps this fixture's).
     const chip = getByTitle("Review → Done is locked to humans — see Policy");
-    expect(chip.classList.contains("hero-file")).toBe(true);
+    expect(chip.tagName).toBe("BUTTON");
+    expect(chip.classList.contains("btn")).toBe(true);
     expect(chip.textContent).toContain("Review → Done · human only");
     // Panel heads + "X of Y" count pair.
     expect(getByText("Waiting on your acceptance")).toBeTruthy();

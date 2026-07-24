@@ -1378,7 +1378,7 @@ export function HomePage({
   // silently reverting on the next revalidation.
   useFetcherResult(prefsFetcher, (d) => {
     if (!d.ok) {
-      push(d.error ?? "Couldn't save that preference — please try again");
+      push(d.error ?? "Couldn't save that preference — please try again", "error");
       return;
     }
     if (d.intent === "pin") {
@@ -1392,7 +1392,7 @@ export function HomePage({
   // scan had succeeded. Both outcomes toast now, mirroring the rebuild handler.
   useFetcherResult(rescanFetcher, (d) => {
     if (!d.ok) {
-      push(d.error ?? "Re-scan failed — check the server log");
+      push(d.error ?? "Re-scan failed — check the server log", "error");
       return;
     }
     const drift = (d.changed ?? 0) + (d.removed ?? 0) + (d.errors ?? 0);

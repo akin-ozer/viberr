@@ -38,6 +38,8 @@ function renderProfile(data: ProfileData = BASE) {
       Component: () => {
         const identity = useFetcher();
         const prefs = useFetcher();
+        // UI-56: Appearance has its own fetcher now (one per panel).
+        const appearance = useFetcher();
         const password = useFetcher();
         const github = useFetcher();
         return (
@@ -49,7 +51,7 @@ function renderProfile(data: ProfileData = BASE) {
                 lastTheme = v;
               }}
               fetchers={
-                { identity, prefs, password, github } as never
+                { identity, prefs, appearance, password, github } as never
               }
               submitWith={() => (fields) => {
                 lastSubmit = fields;

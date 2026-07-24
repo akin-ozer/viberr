@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -27,6 +30,7 @@ import {
   removeReviewer,
   resolveDeployedSpecialist,
   startAgentRun,
+  buildSpecialistPersona,
 } from "./specialist-run.server";
 
 /**
@@ -803,5 +807,61 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
     expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
     expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+  });
+});
+
+/* ----------------------- KB + MCP in the persona (P13-KM-04 / KM-10) */
+
+describe("buildSpecialistPersona — attached resources", () => {
+  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-persona-"));
+
+  it("injects a granted KB's docs and marks attached resources trusted", () => {
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "release-facts", "facts.md"),
+      "# Facts\n\nSENTINEL-KB-1",
+    );
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["release-facts"],
+      dataRoot,
+    });
+    // P13-KM-10: specialist KB injection had ZERO tests, which is how the
+    // display-name/dir mismatch (KM-01) and the rename orphan (KM-07) survived.
+    expect(persona).toContain("SENTINEL-KB-1");
+    expect(persona).toContain("release-facts (knowledge base)");
+    expect(persona).toContain("Attached resources (trusted");
+  });
+
+  it("a KB that resolves to nothing injects nothing (and no empty section)", () => {
+    const dataRoot = tempRoot();
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["was-renamed-away"],
+      dataRoot,
+    });
+    expect(persona).not.toContain("was-renamed-away (knowledge base)");
+    expect(persona).not.toContain("Attached resources (trusted");
+  });
+
+  it("states that MCP tools cannot widen authority when servers are mounted", () => {
+    const dataRoot = tempRoot();
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp"],
+      dataRoot,
+    });
+    // P13-KM-04: the tool layer has no `mcp__*` rules, so a read-only reviewer
+    // holding a GitHub MCP could merge a PR past the always-human invariant.
+    expect(persona).toContain("MCP tools are governed too");
+    expect(persona).toContain("github-mcp");
+    expect(persona).toContain("never use an MCP tool to merge a pull request");
+
+    const none = buildSpecialistPersona({ profileId: "scout", skills: [], dataRoot });
+    expect(none).not.toContain("MCP tools are governed too");
   });
 });

@@ -26,8 +26,9 @@ import type { SyncState } from "./github-pills";
  * projected pr.state; `behind_main` from the REAL compare captured by the
  * latest `github.reconcile` provenance row for the task (the reconciler
  * records behindBy there) — never from `validation === "failing"` (the
- * mock's conflation, dropped per spec §7.3). A never-reconciled branch has
- * no compare data and honestly renders `synced`.
+ * mock's conflation, dropped per spec §7.3). UI-05: a never-reconciled branch
+ * has NO compare data and renders `unknown` ("not compared") — the old comment
+ * claimed rendering it `synced` was honest; it was the opposite.
  */
 
 export interface PrRowView {
@@ -126,6 +127,23 @@ const repoAccessCache = new WeakMap<
   Map<string, { result: RepoAccessResult; at: number }>
 >();
 
+/**
+ * LV-05: drop the memoized repo-access result for a project.
+ *
+ * Attaching a credential from the project GitHub page rendered the full scope
+ * list while the Connection row kept the amber "no credential" pill **through a
+ * full reload** — the 30 s memo above is per PROCESS, so a reload re-served the
+ * pre-attach `no_pat_configured` answer, and only "Update status" (which takes
+ * longer than the TTL to click) appeared to fix it. Every credential mutation
+ * invalidates the entry so the next loader re-probes with the new credential.
+ */
+export function invalidateRepoAccess(
+  db: DatabaseSync,
+  projectSlug: string,
+): void {
+  repoAccessCache.get(db)?.delete(projectSlug);
+}
+
 async function checkRepoAccessCached(
   db: DatabaseSync,
   projectSlug: string,
@@ -165,17 +183,26 @@ export async function getGithubViewData(
   // already sorts numerically — spec §7.11 deterministic-order deviation).
   const branches: BranchRowView[] = tasks
     .filter((t): t is typeof t & { branch: string } => t.branch !== null)
-    .map((t) => ({
-      taskKey: t.key,
-      title: t.title,
-      branch: t.branch,
-      pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
-      sync: deriveSyncState({
-        prMerged: t.pr?.state === "merged",
-        behindBy: behindByFor(t.filePath),
-      }),
-      commitCount: t.commits.length,
-    }));
+    .map((t) => {
+      const behindBy = behindByFor(t.filePath);
+      return {
+        taskKey: t.key,
+        title: t.title,
+        branch: t.branch,
+        pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
+        // UI-05: a merged PR is authoritative regardless of compare data;
+        // otherwise a branch with NO compare data reports `unknown`
+        // ("not compared") rather than borrowing `deriveSyncState`'s
+        // "behindBy === 0 → synced" rule for a measurement that never ran.
+        sync:
+          t.pr?.state === "merged"
+            ? deriveSyncState({ prMerged: true, behindBy: 0 })
+            : behindBy === null
+              ? ("unknown" as const)
+              : deriveSyncState({ prMerged: false, behindBy }),
+        commitCount: t.commits.length,
+      };
+    });
 
   // PR list: every task with a PR, newest PR first (spec §7.11).
   const prs: PrRowView[] = tasks
@@ -222,7 +249,13 @@ export async function getGithubViewData(
       repo: project.repo,
       defaultBranch: project.defaultBranch,
     },
-    // GHE-safe web host (WI-17) — the view must never hardcode github.com.
+    // UI-11: this is `https://github.com` today and can be nothing else — no
+    // connection record stores an API base URL, so `githubWebHost()` is always
+    // called with no argument (here and in routes/project.task.tsx) and always
+    // returns the default. The indirection is kept as the ONE place a future
+    // GHE base URL would be threaded through; the previous comment ("GHE-safe
+    // — the view must never hardcode github.com") advertised support that does
+    // not exist. V1 is github.com-only (github-reconciler.server.ts says so).
     githubHost: githubWebHost(),
     connection,
     credential,

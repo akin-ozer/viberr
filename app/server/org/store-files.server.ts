@@ -460,6 +460,30 @@ export const GITHUB_IMPORT_URL_ERROR =
 const IMPORT_MAX_FILES = 100;
 const IMPORT_MAX_BLOB_BYTES = 1024 * 1024;
 
+/** Provenance dotfile written next to an imported snapshot (P13-KM-13). */
+const IMPORT_MARKER = ".viberr-import.json";
+
+function importSourceOf(rootAbs: string, folder: string): string | null {
+  try {
+    const raw = readFileSync(path.join(rootAbs, folder, IMPORT_MARKER), "utf8");
+    const parsed = JSON.parse(raw) as { source?: unknown };
+    return typeof parsed.source === "string" ? parsed.source : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeImportMarker(rootAbs: string, folder: string, source: string): void {
+  try {
+    writeFileSync(
+      path.join(rootAbs, folder, IMPORT_MARKER),
+      JSON.stringify({ source, importedAt: new Date().toISOString() }, null, 2),
+    );
+  } catch {
+    // best effort — a missing marker only costs the next import a suffix
+  }
+}
+
 export type GithubImportResult =
   | {
       status: "imported";
@@ -565,13 +589,26 @@ export async function importGithubSnapshot(
     Boolean(treeRes.data.truncated) || blobs.length > IMPORT_MAX_FILES;
   const selected = blobs.slice(0, IMPORT_MAX_FILES);
 
-  // Collision-suffixed root folder named after the last path segment (or
-  // the repo) — mock semantics, real directory.
+  // Root folder named after the last path segment (or the repo).
+  //
+  // P13-KM-13: this ALWAYS collision-suffixed, so re-importing the same source
+  // produced `docs`, `docs-2`, `docs-3`… — every copy injected into every run,
+  // with the 24k budget spent on the OLDEST copy first. A folder that this same
+  // source produced is now REFRESHED in place; only a genuinely different
+  // source gets a suffix. Provenance lives in a dotfile, which the scanner and
+  // the injector both skip, so it never becomes agent context.
   const baseName =
     (subPath ? subPath.split("/").filter(Boolean).pop() : repo) || repo;
+  const sourceKey = `${owner}/${repo}${subPath ? `/${subPath}` : ""}`;
   let folder = baseName;
+  let refreshed = false;
   let i = 2;
   while (existsSync(path.join(target.rootAbs, folder))) {
+    if (importSourceOf(target.rootAbs, folder) === sourceKey) {
+      refreshed = true;
+      rmSync(path.join(target.rootAbs, folder), { recursive: true, force: true });
+      break;
+    }
     folder = `${baseName}-${i++}`;
   }
 
@@ -608,8 +645,9 @@ export async function importGithubSnapshot(
   // silently into the success toast — count and surface them instead.
   const skipped = selected.length - written;
 
+  writeImportMarker(target.rootAbs, folder, sourceKey);
   touchResource(db, target);
-  const source = `${owner}/${repo}${subPath ? `/${subPath}` : ""}`;
+  const source = sourceKey;
   recordAudit(db, {
     action: "org.store.github_import",
     actor,
@@ -630,6 +668,6 @@ export async function importGithubSnapshot(
     skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} imported from ${source} — snapshot, not a live sync${suffix}`,
+    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} — snapshot, not a live sync${suffix}`,
   };
 }

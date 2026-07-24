@@ -327,7 +327,14 @@ export function GithubViewPage({
   const openTask = (taskKey: string) =>
     navigate(`/projects/${slug}/tasks/${taskKey}`);
 
+  // UI-37: `reconcile-github` is admin|maintainer (enforced at
+  // routes/project.github.tsx). The button used to render for every role and
+  // push "Updating branch and PR status from GitHub…" BEFORE submitting, so a
+  // viewer clicked, watched fake progress, and then got a 403 — while the
+  // sibling grant-scope control in this same file was correctly gated.
+  const canReconcile = roleCan(myRole as ProjectRole | null, "reconcile-github");
   const reconcile = () => {
+    if (!canReconcile) return;
     // First toast on submit, completion toast from the action (spec §4.1).
     push(RECONCILE_START_TOAST);
     reconcileFetcher.submit(
@@ -441,16 +448,18 @@ export function GithubViewPage({
               ? `Updated ${data.reconcile.label}`
               : "Not yet synced"}
           </span>
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={reconcile}
-            disabled={busy}
-            title="Update branch/PR status from GitHub now"
-          >
-            <Icon name="refresh" />
-            Update status
-          </button>
+          {canReconcile && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={reconcile}
+              disabled={busy}
+              title="Update branch/PR status from GitHub now"
+            >
+              <Icon name="refresh" />
+              Update status
+            </button>
+          )}
           {data.project.repo && (
             <a
               className="btn ghost sm"

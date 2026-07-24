@@ -81,11 +81,15 @@ export function ReviewQueuePage({
   ready,
   working,
   total,
+  stageNames = { review: "Review", terminal: "Done" },
 }: {
   projectSlug: string;
   ready: ReviewRowView[];
   working: ReviewRowView[];
   total: number;
+  /** UI-49: the project's RESOLVED review + terminal stage names — stages are
+   *  per-project and renameable, so this page must not name them itself. */
+  stageNames?: { review: string; terminal: string };
 }) {
   const navigate = useNavigate();
   const onOpen = (key: string) =>
@@ -103,15 +107,19 @@ export function ReviewQueuePage({
           </div>
         </div>
         <div className="board-tools">
+          {/* UI-27 residual: this was a <button> wearing `hero-file`, visually
+              identical to the non-interactive `hero-file` spans elsewhere — no
+              affordance that it navigates. It reads as the link it is now. */}
           <button
             type="button"
-            className="hero-file"
-            style={{ cursor: "pointer" }}
+            className="btn ghost sm"
             onClick={onPolicy}
-            title="Review → Done is locked to humans — see Policy"
+            title={`${stageNames.review} → ${stageNames.terminal} is locked to humans — see Policy`}
           >
             <Icon name="lock" />
-            <span>Review → Done · human only</span>
+            <span>
+              {stageNames.review} → {stageNames.terminal} · human only
+            </span>
           </button>
         </div>
       </div>
@@ -147,8 +155,8 @@ export function ReviewQueuePage({
             <Icon name="lock" />
             <span>
               Accepting a completion merges the review PR and moves the task to{" "}
-              <strong>Done</strong> — always a human action, always in the
-              audit log.
+              <strong>{stageNames.terminal}</strong> — always a human action,
+              always in the audit log.
             </span>
           </div>
         </div>

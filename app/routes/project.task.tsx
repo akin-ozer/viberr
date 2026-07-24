@@ -186,8 +186,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
-    // Host for GitHub browse links (PR/branch/repo) — derived server-side so
-    // the client never hardcodes github.com (GHE deployments keep working).
+    // Host for GitHub browse links (PR/branch/repo), derived server-side.
+    // UI-11: today this always resolves to `https://github.com` — nothing
+    // stores a GHE API base URL — so the value is honest, but the "GHE
+    // deployments keep working" claim that used to sit here was not.
     githubHost: githubWebHost(),
   };
 }

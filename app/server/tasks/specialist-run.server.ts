@@ -652,6 +652,7 @@ export async function startAgentRun(
     profileId: engagement.profileId,
     skills,
     kb,
+    mcps: mcpNames,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
   });
@@ -924,6 +925,8 @@ export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
   kb?: string[];
+  /** MCP servers mounted for this run — used for the governance rule below. */
+  mcps?: string[];
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -976,6 +979,25 @@ export function buildSpecialistPersona(input: {
         "repository or task remains untrusted; judge that on its own merits.)",
     );
     parts.push(...resourceParts);
+  }
+
+  // P13-KM-04: MCP tools sit OUTSIDE the capability policy. `CAP_DENY_RULES`
+  // covers Bash and the file tools; there is no `mcp__*` rule, and Viberr
+  // cannot know what an arbitrary third-party tool does — so a read-only
+  // reviewer holding a GitHub MCP could merge a PR straight past the
+  // always-human invariant. The tool layer can't decide this, so the rule is
+  // stated where BOTH backends honour rules: the system prompt. (The remaining
+  // gap is documented in the capability matrix rather than hidden.)
+  if ((input.mcps ?? []).length > 0) {
+    parts.push(
+      "\n\n---\n# MCP tools are governed too\n\n" +
+        `You have tools from these attached MCP servers: ${(input.mcps ?? []).join(", ")}. ` +
+        "They are yours to read with and query with. They do NOT widen your " +
+        "authority: never use an MCP tool to merge a pull request, move a task " +
+        "to Done, change project policy, or perform any action your capability " +
+        "policy withholds. Viberr owns delivery and merging — if a tool would " +
+        "do one of those, stop and report instead.",
+    );
   }
   return parts.join("");
 }
@@ -1168,6 +1190,7 @@ export function resolveResumeConfinement(
       profileId: input.profileId,
       skills: resolved.skills,
       kb: resolved.kb,
+      mcps: resolved.mcps,
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
     });

@@ -121,9 +121,16 @@ export function GithubTrace({
       </div>
     );
   }
-  // Real external link (spec §4.9: the prototype toast goes away): the PR
-  // when one exists, else the branch tree. Host comes from the loader
-  // (connection-derived), never hardcoded — GHE deployments keep working.
+  // Real external link (spec §4.9: the prototype toast goes away): the PR when
+  // one exists, else the branch tree.
+  //
+  // UI-11 honesty note: the comment here used to claim the host is
+  // "connection-derived, never hardcoded — GHE deployments keep working". It is
+  // not. `githubWebHost()` is called with no argument at both of its call sites,
+  // no connection record stores an API base URL, and the reconciler states
+  // outright that V1 is github.com-only. So this literal is the SAME value the
+  // loader sends; it is a default for callers that omit the prop (tests), not a
+  // GHE fallback. Wiring a real base URL is tracked separately.
   const host = githubHost ?? "https://github.com";
   const ghHref = task.repo
     ? task.pr

@@ -159,11 +159,16 @@ describe("loader", () => {
     // Ruling 12: merged wins from the pr cache…
     expect(byKey["VIB-139"]!.sync).toBe("merged");
     expect(byKey["VIB-141"]!.sync).toBe("merged");
-    // …and with no real compare data yet, everything else is honestly
-    // synced — incl. VIB-160 (the mock derived "behind main" from
-    // validation:failing; that conflation is deleted per spec §7.3).
-    expect(byKey["VIB-142"]!.sync).toBe("synced");
-    expect(byKey["VIB-160"]!.sync).toBe("synced");
+    // UI-05: REWRITTEN — this assertion pinned the bug. With NO
+    // `github.reconcile` provenance row the branch was never compared against
+    // main, and the old resolver defaulted behindBy to 0 so the row rendered
+    // the green "synced" pill for a measurement that never ran (directly
+    // contradicting the page's own "Not yet synced" freshness chip). An
+    // unmeasured branch is `unknown` → "not compared". VIB-160 stays here for
+    // the original point too: `validation: failing` must NOT imply "behind
+    // main" (the mock's conflation, deleted per spec §7.3).
+    expect(byKey["VIB-142"]!.sync).toBe("unknown");
+    expect(byKey["VIB-160"]!.sync).toBe("unknown");
     // Commit association from the github cache (VIB-142 seeds 3 commits).
     expect(byKey["VIB-142"]!.commitCount).toBe(3);
     expect(byKey["VIB-142"]!.pr).toEqual({ number: 318, state: "review" });

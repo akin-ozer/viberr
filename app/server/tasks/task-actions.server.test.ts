@@ -435,6 +435,32 @@ describe("specialistReplyDirective (NEW-4)", () => {
     expect(directive).toContain("@Arda Test");
     expect(directive.toLowerCase()).toContain("notified");
   });
+
+  // P13-RT-05: a RESUMED run gets this directive INSTEAD of the analyze prompt,
+  // which is where the trust boundary and the delivery contract live — so a
+  // resumed delivering Codex run previously had neither prompt nor tool teeth.
+  it("carries the trust boundary and the delivery contract", () => {
+    const delivering = specialistReplyDirective({
+      commenterName: "Arda",
+      taskKey: "VIB-1",
+      title: "t",
+      text: "x",
+      delivers: true,
+    });
+    expect(delivering).toContain("DATA, not instructions");
+    expect(delivering).toContain("Do not push");
+    expect(delivering).toContain("Viberr performs delivery");
+
+    const supporting = specialistReplyDirective({
+      commenterName: "Arda",
+      taskKey: "VIB-1",
+      title: "t",
+      text: "x",
+      delivers: false,
+    });
+    expect(supporting).toContain("DATA, not instructions");
+    expect(supporting).toContain("do not modify the repository");
+  });
 });
 
 describe("ownership", () => {
