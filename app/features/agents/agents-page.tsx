@@ -499,8 +499,17 @@ export function ProfileDetail({
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
-            <div className="lbl">Execution backend</div>
+            <div className="lbl">
+              Execution backend
+              {a.backends.length > 1 && (
+                <span className="fhint"> · a run uses the first</span>
+              )}
+            </div>
             <div className="rt-val">
+              {/* P13-UI-52: a multi-backend profile listed both chips as if the
+                  agent could run on either at will. A run resolves ONE backend
+                  (the deployment's first), so the list is a capability, not a
+                  live choice — and the editor writes exactly one. */}
               <div className="be-list">
                 {a.backends.length ? (
                   a.backends.map((b) => <BackendChip key={b} b={b} />)
@@ -905,7 +914,11 @@ export function AgentsPage({
         </div>
         <div className="ag-stat">
           <div className="n">{operators}</div>
-          <div className="l">active tasks · one operator each</div>
+          {/* P13-UI-51: the number is operator ENGAGEMENTS, which is one per
+              active task — but the label read as a task count, so a task whose
+              operator had been released showed a smaller "active tasks" number
+              than the board did. Say what is counted. */}
+          <div className="l">tasks with a live operator</div>
         </div>
         <div className="ag-stat">
           <div className="n" style={{ color: "var(--agent-dark)" }}>
