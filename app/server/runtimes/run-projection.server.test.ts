@@ -161,3 +161,35 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.failedBackendUnavailable).toBeUndefined();
   });
 });
+
+/* ------------- resumed history stays visible (P13-UI-53) ------------- */
+
+describe("projectRunsForTask — resumed history", () => {
+  it("keeps every run's lines, with an explicit resume boundary", () => {
+    insert({ id: "run_1", threadId: "primary-a", kind: "primary", backend: "claude", state: "finished" });
+    insertRunLine(db, {
+      runId: "run_1",
+      seq: 0,
+      occurredAt: "2026-07-11T00:00:00.000Z",
+      raw: "{}",
+      display: { t: "00:00:00", ev: "text", tag: "assistant", text: "first answer" } as never,
+    });
+    insert({ id: "run_2", threadId: "primary-b", kind: "primary", backend: "claude", state: "finished" });
+    insertRunLine(db, {
+      runId: "run_2",
+      seq: 0,
+      occurredAt: "2026-07-11T00:01:00.000Z",
+      raw: "{}",
+      display: { t: "00:01:00", ev: "text", tag: "assistant", text: "second answer" } as never,
+    });
+
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    const texts = view!.lines.map((l) => (l as unknown as { text: string }).text);
+    // Before this fix the console showed ONLY the representative run, so an
+    // agent that had answered twice looked like it had answered once and the
+    // earlier evidence was unreachable from the UI.
+    expect(texts).toContain("first answer");
+    expect(texts).toContain("second answer");
+    expect(texts.some((t) => t.includes("resumed · run 2 of 2"))).toBe(true);
+  });
+});

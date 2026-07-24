@@ -28,7 +28,6 @@ const WHO_NAME: Record<string, string> = {
   codex: "Codex",
 };
 
-const ISO_RE = /^\d{4}-\d{2}-\d{2}T/;
 
 /**
  * Signatures that mean "the BACKEND wasn't available" (quota, rate limit,
@@ -63,9 +62,10 @@ function isBackendUnavailableError(raw: string[]): boolean {
  */
 function finishedLabel(finishedAt: string | null): string | null {
   if (!finishedAt) return null;
-  if (!ISO_RE.test(finishedAt)) return finishedAt; // mock label, verbatim
-  const d = new Date(finishedAt);
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // P13-UI-57: this formatted with `getHours()` on the SERVER, so the console
+  // showed the server's clock, not the reader's. The ISO travels instead and
+  // the panel formats it in the browser (same rule as every other timestamp).
+  return finishedAt;
 }
 
 /**
@@ -233,13 +233,31 @@ export function projectRunsForTask(
   }
 
   return order.map((key) => {
-    const representative = pickRepresentative(groups.get(key)!);
-    const stored = listRunLines(db, representative.id);
-    return projectRow(
-      db,
-      representative,
-      stored.map((l) => l.display),
-      stored.map((l) => l.raw),
-    );
+    const bucket = groups.get(key)!;
+    const representative = pickRepresentative(bucket);
+    // P13-UI-53: the console showed ONLY the representative run's lines, so
+    // every earlier run of a resumed agent silently disappeared — a thread that
+    // had answered three times looked like it had answered once, and the
+    // evidence for the earlier answers was unreachable from the UI. Concatenate
+    // the group's runs in order, with an explicit boundary line, so the console
+    // is the agent's whole history on this task.
+    const display: LogLine[] = [];
+    const raw: string[] = [];
+    bucket.forEach((row, i) => {
+      if (i > 0) {
+        display.push({
+          t: "",
+          ev: "meta",
+          tag: "run·resumed",
+          text: `── resumed · run ${i + 1} of ${bucket.length} ──`,
+        });
+        raw.push("");
+      }
+      for (const line of listRunLines(db, row.id)) {
+        display.push(line.display);
+        raw.push(line.raw);
+      }
+    });
+    return projectRow(db, representative, display, raw);
   });
 }

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
+import { formatClock } from "~/shared/dates/format";
+
+/** P13-UI-57: the projection now ships the ISO so the CLIENT renders the clock
+ *  (it used to be formatted with the SERVER's timezone). A seeded/mock label
+ *  that isn't an ISO is shown verbatim. */
+function finishedClock(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}T/.test(value) ? formatClock(value) : value;
+}
 import { Pill } from "~/ui/pill";
 import {
   fmtClock,
@@ -398,7 +406,9 @@ export function AgentLogsPanel({
         : cur!.lifecycle === "interrupted"
           ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""} — the thread stays resumable`
           : cur!.state === "done"
-            ? "run finished at " + (cur!.finished || "—") + " — thread can be re-engaged"
+            ? "run finished at " +
+              (cur!.finished ? finishedClock(cur!.finished) : "—") +
+              " — thread can be re-engaged"
             : cur!.state === "error"
               ? backendUnavailable
                 ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit)${canRetryBackend ? ` — retry on ${altLabel}` : " — a maintainer can retry it on the other backend"}`
