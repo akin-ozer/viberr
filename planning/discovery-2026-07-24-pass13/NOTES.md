@@ -63,3 +63,39 @@ RBAC / skill isolation / Claude↔Codex parity.
   "upload + import + agents append" the intended ceiling?
 - Should the org-level profile editor own the persona (system prompt), or is persona
   authoring deliberately project-level only?
+
+## Screenshot record (`shots/`, gitignored like pass 12)
+
+Captured with Playwright against the live instance at 1440×900, signed in as the seeded
+admin, AFTER the pass-13 fixes landed — so each one is evidence of the fixed state, not
+the state I found. Light theme (the browser pane only ever showed dark, so this also
+exercised a rendering path I had not looked at).
+
+- `00-login.png`
+- `01-home.png`
+- `02-org-settings-connections.png`
+- `03-org-settings-users.png`
+- `04-org-settings-resources.png`
+- `05-profile.png`
+- `06-notifications.png`
+- `07-board.png`
+- `08-board-list-view.png`
+- `09-review-queue.png`
+- `10-agents.png`
+- `11-agents-live.png`
+- `12-policy.png`
+- `13-github.png`
+- `14-activity.png`
+- `15-project-settings.png`
+- `16-task-done-merged.png`
+- `17-task-blocked-packet.png`
+- `18-task-input-packet.png`
+- `19-task-review-open-pr.png`
+- `20-projects-redirect.png`
+- `21-capability-matrix.png`
+- `22-add-from-library.png`
+- `23-store-browser.png`
+- `24-new-project-modal.png`
+
+Regenerate with a Playwright spec pointed at a running dev server; the capture script is
+disposable (it lived in a temp dir and was deleted after the run).
