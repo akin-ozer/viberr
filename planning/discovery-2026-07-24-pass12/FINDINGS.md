@@ -55,6 +55,20 @@ defense-in-depth — `acceptCompletion` refuses a closed-unmerged-PR task with a
 LIVE-VERIFIED: before/after screenshots (CAP-2 moved to "Still in review"); accepting CAP-2 →
 409 "…PR was closed on GitHub without merging — it can't be accepted. Rework and reopen…".
 
+### NEW-3 (MED · misleading UI) — an explicitly-withheld ("off") capability rendered as "Reserved for humans" — FIXED
+Live-observed in the Capability matrix (and it also affected the profile-detail "Reserved for
+humans" column + the Policy "N human" count): a capability set to mode `off` (withheld/not
+granted) rendered CORAL "Reserved for humans" — a structural always-human lock — while an ABSENT
+capability correctly rendered grey "Not granted". Both mean not-granted, but they read as
+opposite things. Root cause: `capabilitiesToActionLabels` (agents-query.server.ts) collapsed
+BOTH `human` and `off` into the `forbidden` bucket, and every consumer treated `forbidden` as
+human-reserved. **FIX:** give `off` its own bucket (human → forbidden, off → off); the matrix
+`modeOf` now returns "off"→grey for withheld caps, reserving coral for genuine ALWAYS_HUMAN caps
+(merge PR / transition-to-Done / change-policy). The profile-detail "Reserved for humans" column
+and the Policy "N human" count are now correct too. +unit test. LIVE-VERIFIED: the matrix's
+"Report a validation verdict" row now reads Not-granted (grey) for the two new withheld-verdict
+agents (was coral), matching the absent case — screenshot + DOM inspection.
+
 ### NEW-2 (verified correct, no change) — accepting a merged-out-of-band task
 CAP-1 (PR #95 merged out-of-band via gh) → accepting it (reorder→Done) correctly recognizes the
 existing merge: 200 "Accepted CAP-1 — moved to Done", stage=done, pr.state=merged. No double-merge,

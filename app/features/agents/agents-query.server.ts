@@ -89,13 +89,24 @@ export function parseDeploymentDefinition(
 export function capabilitiesToActionLabels(
   capabilities: { capabilityId: string; mode: CapabilityMode }[],
   extras: { label: string; mode: CapabilityMode }[],
-): { direct: string[]; recommend: string[]; forbidden: string[] } {
-  const buckets = { direct: [] as string[], recommend: [] as string[], forbidden: [] as string[] };
-  // `human` (reserved for a human) and `off` (withheld from the operator) both
-  // surface in the forbidden/"can't act" bucket for the read-only policy label
-  // display; the operator runtime distinguishes them when gating tools.
+): { direct: string[]; recommend: string[]; forbidden: string[]; off: string[] } {
+  const buckets = {
+    direct: [] as string[],
+    recommend: [] as string[],
+    forbidden: [] as string[],
+    off: [] as string[],
+  };
+  // `human` = RESERVED for a human (a structural always-human lock) → `forbidden`.
+  // `off` = simply WITHHELD from this agent (not granted) → its own `off` bucket.
+  // These are semantically different (NEW-3): conflating them made an explicitly
+  // withheld capability render as "Reserved for humans" in the matrix / profile
+  // detail / policy "N human" count. The runtime already distinguished them.
   const bucketOf = (mode: CapabilityMode) =>
-    mode === "human" || mode === "off" ? buckets.forbidden : buckets[mode];
+    mode === "human"
+      ? buckets.forbidden
+      : mode === "off"
+        ? buckets.off
+        : buckets[mode];
   for (const grant of capabilities) {
     const def = capabilityById(grant.capabilityId);
     bucketOf(grant.mode).push(def ? def.label : grant.capabilityId);
