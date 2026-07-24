@@ -15,7 +15,7 @@ import {
   agentProfileFilePath,
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
-import { defaultGrantsFor } from "~/shared/capabilities";
+import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 
 /**
@@ -284,9 +284,12 @@ export function saveGlobalAgentProfile(
       spanAll: false,
       // P13-AP-06: an empty grant list means "unspecified", which the tool
       // policy treats as FULL access — a casually created template would carry
-      // silent repo-write power into every project that adopts it. Persist the
-      // catalog's explicit defaults instead.
-      capabilities: defaultGrantsFor("agent"),
+      // silent repo-write power into every project that adopts it. Persist
+      // explicit grants, and because THIS editor has no capability UI, start
+      // delivery withheld rather than granting repo-write to a template nobody
+      // could set permissions on (live: an "Org Docs Writer" described as
+      // "never touches app code" was created holding all four delivery caps).
+      capabilities: conservativeGrantsFor("agent"),
       extras: [],
       resources,
     },

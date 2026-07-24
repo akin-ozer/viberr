@@ -575,6 +575,15 @@ function AgentModal({
           onChange={(e) => setSummary(e.target.value)}
         />
       </div>
+      <div className="def-note">
+        <Icon name="shield" />
+        <span>
+          A template starts with <strong>delivery withheld</strong> — it can read,
+          validate and comment, but not write to the repository. Capability policy is a
+          per-project decision: open the profile in a project&rsquo;s Agents page to grant
+          branch, commit or pull-request rights there.
+        </span>
+      </div>
       <div className="field">
         <label className="flabel" htmlFor="ga-persona">
           Persona / instructions{" "}

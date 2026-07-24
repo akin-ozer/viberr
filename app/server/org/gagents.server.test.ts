@@ -245,6 +245,13 @@ describe("global agent profiles", () => {
     expect(byId.get("merge-pull-request")).toBe("human");
     expect(byId.get("report-validation-verdict")).toBe("off");
     expect(byId.get("use-web-search-fetch")).toBe("direct");
+    // P13: this editor has no capability UI, so a template must NOT start with
+    // repo-write. Live evidence: an "Org Docs Writer" whose own summary said
+    // "never touches app code" was created holding all four delivery grants.
+    expect(byId.get("execute-code-or-write-repo")).toBe("off");
+    expect(byId.get("create-task-branch")).toBe("off");
+    expect(byId.get("commit-push-branch")).toBe("off");
+    expect(byId.get("open-review-pr")).toBe("off");
   });
 
   it("delete is refused while deployed; otherwise removes the file", () => {

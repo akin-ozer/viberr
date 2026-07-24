@@ -88,7 +88,7 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
  * P13-AP-06: `capabilities: []` does NOT mean "no powers" — the tool policy
  * treats an unspecified capability as GRANTED, so a profile persisted with an
  * empty list silently carried full repo-write authority. Every creation path
- * (org template, library copy, project create) persists these defaults instead.
+ * persists explicit grants instead.
  */
 export function defaultGrantsFor(
   kind: CapabilityKind,
@@ -97,6 +97,30 @@ export function defaultGrantsFor(
     capabilityId: c.id,
     mode: c.defaultMode,
   }));
+}
+
+/**
+ * The starting grants for a profile created in a surface that CANNOT set
+ * capability policy — today the org-level template editor, which has no
+ * capability UI because policy is a per-project decision (the two-layer model).
+ *
+ * P13: `defaultGrantsFor("agent")` grants all four delivery capabilities at
+ * `direct`, so a template described as "writes documentation, never touches app
+ * code" was created — and adopted into projects — holding full repo-write. It
+ * was visible rather than silent (an improvement on `capabilities: []`), but a
+ * dangerous default is still a dangerous default. Delivery starts WITHHELD; the
+ * project-level editor, which does have the capability matrix, opens it up.
+ */
+export function conservativeGrantsFor(
+  kind: CapabilityKind,
+): { capabilityId: string; mode: UnifiedCapabilityDef["defaultMode"] }[] {
+  const withheld = new Set<string>([
+    "execute-code-or-write-repo",
+    ...SCOPED_DELIVERY_CAPABILITY_IDS,
+  ]);
+  return defaultGrantsFor(kind).map((g) =>
+    withheld.has(g.capabilityId) ? { ...g, mode: "off" as const } : g,
+  );
 }
 
 /** Flat id+label view — the shape most consumers key on. */
