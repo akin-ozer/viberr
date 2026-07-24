@@ -263,8 +263,15 @@ SQL fixture — low) · #4 DM-1 triaged not-a-bug · #5 pre-prod residuals (by-d
 - **RU-2 (MED · misleading create UI):** create-profile modal offers backends that aren't
   configured/available (P11-41 gap: create-profile-modal.tsx:216-227) → a user can create an
   agent pinned to an unavailable backend. Gate the picker to available backends.
-- **RU-3 (LOW):** last hardcoded role-literal gate at settings-page.tsx:736-737 (should route
-  through `roleCan`/ACTION_ROLES like the others that P11 converted).
+- **RU-3 (LOW) — FIXED (a197043):** the Danger Zone's Archive+Delete controls hid behind a raw
+  `myRole === "admin"` literal while the server gates both through
+  `requireProjectAction(..., "edit-policy", ...)`; they coincided only because `edit-policy` is
+  admin-only today. Routed the gate through `roleCan(myRole, "edit-policy")` (mirrors the exact
+  server action, matches the `canGrant` conversion already in the file) + a regression that drives
+  the per-role expectation off `roleCan`. Behavior-preserving; verified live (admin session →
+  both controls enabled). NB: the *page-level* `isAdmin` (identity/stages/members/repo panels)
+  legitimately spans actions with no single name (`manage-members` ≠ `edit-policy`) and stays a
+  documented explicit check.
 - **RU-4 (LOW):** notifications list caps at 100/200 with nothing paging past 200 — silent
   truncation for a busy instance.
 - **RU-5 (LOW batch):** remaining route residuals from the map's candidate list — triage
