@@ -210,62 +210,62 @@ Dispositions: `OPEN` → `FIX` (scheduled) → `DONE` (implemented + verified) �
 
 | id | sev | headline | disposition |
 | --- | --- | --- | --- |
-| KM-01 | HIGH | org agent modal stores KB **display names**; runs resolve by **dir** → zero injection, both UIs still show it attached (**independently live-confirmed**: `agents/profiles/org-docs-writer.md` wrote `kb: ["P13 facts"]` while the project picker writes `p13-facts`) | OPEN |
-| KM-02 | HIGH | a missing/empty KB injects nothing **silently** (no log, no evidence line) — this is what makes KM-01/07/11 invisible | OPEN |
-| KM-03 | HIGH | the operator's declared `resources.mcps` reach **no** run on either backend (`OperatorAuthority` has skills+kb, no mcps) — verified in main context | OPEN |
-| KM-04 | MED-HIGH | org MCP tools sit outside the capability policy: `CAP_DENY_RULES` is Bash/file-tool only, no `mcp__*` rules → a read-only reviewer with a GitHub MCP can merge a PR | OPEN |
-| KM-05 | MED | stdio discovery spawns without the sealed credential → credentialed stdio servers report "unreachable" while working in a run | OPEN |
-| KM-06 | MED | an MCP credential can never be cleared (blank keeps it) | OPEN |
-| KM-07 | MED | rename/delete of a KB/skill/MCP never rewrites or validates profile references | OPEN |
-| KM-08 | MED | "used by N profiles" compares the wrong key for KBs, ignores project deployments, absent for MCPs | OPEN |
-| KM-09 | MED | editing the Operator shows its real `viberr` grant as a red "missing — click to remove" chip (= `UI-28`) | OPEN |
-| KM-10 | MED | specialist KB injection has **zero** tests | OPEN |
-| KM-11 | MED | unresolvable MCP names are dropped silently | OPEN |
-| KM-12 | LOW-MED | reserved names `viberr`/`viberr_agent` unenforced at save; backend-asymmetric shadowing | OPEN |
-| KM-13 | LOW-MED | GitHub re-import duplicates KB content instead of refreshing | OPEN |
-| KM-14 | LOW | injection budget ignores per-doc heading overhead | OPEN |
-| KM-15 | LOW | `refresh: manual` doesn't pin what an agent sees | OPEN |
-| KM-16 | LOW | disk-only KBs are never watcher-re-indexed | OPEN |
-| KM-17 | LOW | stdio target whitespace-split, no quoting | OPEN |
-| KM-18 | LOW | `clearBody` escape hatch unreachable from the UI | OPEN |
-| KM-19 | LOW | `probeMcpTarget` is an unauthenticated server-side fetch of an admin-supplied URL | OPEN |
-| KM-20 | LOW | GitHub import always lands at the store root, ignoring the browsed folder | OPEN |
+| KM-01 | HIGH | org agent modal stores KB **display names**; runs resolve by **dir** → zero injection, both UIs still show it attached (**independently live-confirmed**: `agents/profiles/org-docs-writer.md` wrote `kb: ["P13 facts"]` while the project picker writes `p13-facts`) | **DONE** — picker keys on `dir`; legacy display-name grants repaired on edit. LIVE: `org-docs-writer.md` now `kb: [p13-facts]`. |
+| KM-02 | HIGH | a missing/empty KB injects nothing **silently** (no log, no evidence line) — this is what makes KM-01/07/11 invisible | **DONE** — `readKbBody` warns on missing/empty/unreadable. LIVE: operator quoted both KB sentinels after the fix. |
+| KM-03 | HIGH | the operator's declared `resources.mcps` reach **no** run on either backend (`OperatorAuthority` has skills+kb, no mcps) — verified in main context | **DONE** — `OperatorAuthority.mcps` + toolkit mounts/allows them. LIVE: operator called `everything-mcp` echo → `Echo: operator-mcp-probe-2`. |
+| KM-04 | MED-HIGH | org MCP tools sit outside the capability policy: `CAP_DENY_RULES` is Bash/file-tool only, no `mcp__*` rules → a read-only reviewer with a GitHub MCP can merge a PR | **DONE (prompt-level, disclosed)** — every run mounting MCP servers carries an explicit no-merge/no-Done/no-policy rule; the residual (Viberr cannot inspect third-party tools) is stated in the capability matrix. |
+| KM-05 | MED | stdio discovery spawns without the sealed credential → credentialed stdio servers report "unreachable" while working in a run | **DONE** — stdio + HTTP probes carry the sealed credential. |
+| KM-06 | MED | an MCP credential can never be cleared (blank keeps it) | **DONE** — explicit `clearCred` + a Remove-credential control. |
+| KM-07 | MED | rename/delete of a KB/skill/MCP never rewrites or validates profile references | **DONE** — rename rewrites / delete drops references in templates AND project deployments. LIVE: rename moved 7 project references and back. |
+| KM-08 | MED | "used by N profiles" compares the wrong key for KBs, ignores project deployments, absent for MCPs | **DONE** — counts compare the slug and are labelled 'templates'. |
+| KM-09 | MED | editing the Operator shows its real `viberr` grant as a red "missing — click to remove" chip (= `UI-28`) | **DONE** — loader ships the operator catalog; the specialist picker filters the reserved name. |
+| KM-10 | MED | specialist KB injection has **zero** tests | **DONE** — specialist KB injection now has tests (present / missing / MCP rule). |
+| KM-11 | MED | unresolvable MCP names are dropped silently | **DONE** — unresolvable MCP names are logged. |
+| KM-12 | LOW-MED | reserved names `viberr`/`viberr_agent` unenforced at save; backend-asymmetric shadowing | **DONE** — reserved names refused at save. |
+| KM-13 | LOW-MED | GitHub re-import duplicates KB content instead of refreshing | **DONE** — re-import refreshes the same source's folder (provenance dotfile). |
+| KM-14 | LOW | injection budget ignores per-doc heading overhead | **DONE** — per-doc headings are charged to the budget. |
+| KM-15 | LOW | `refresh: manual` doesn't pin what an agent sees | **DONE (copy)** — the toggle governs the doc count/freshness only; the modal says so. |
+| KM-16 | LOW | disk-only KBs are never watcher-re-indexed | **DONE** — disk-only KBs are adopted on watcher re-index. |
+| KM-17 | LOW | stdio target whitespace-split, no quoting | **DONE** — quoted argv splitting. |
+| KM-18 | LOW | `clearBody` escape hatch unreachable from the UI | **DONE** — emptying the editor sends `clearBody`. |
+| KM-19 | LOW | `probeMcpTarget` is an unauthenticated server-side fetch of an admin-supplied URL | **RULED** — the probe is an admin-only, server-side fetch of an admin-supplied URL; that is what an MCP registration IS. No fix; noted so a later pass doesn't re-litigate. |
+| KM-20 | LOW | GitHub import always lands at the store root, ignoring the browsed folder | **DONE (copy)** — the toolbar states that import and new documents land at the root. |
 
 ### B2. Agent profile lifecycle — `docs/agent-profile-lifecycle.md`
 
 | id | sev | headline | disposition |
 | --- | --- | --- | --- |
-| AP-01 | HIGH | org editor's one-line "Role summary" **is** the persona body → editing a seeded profile flattens its system prompt org-wide | OPEN |
-| AP-02 | HIGH | on edit the frontmatter spread omits `desc`, so what the operator reads never changes | OPEN |
-| AP-03 | HIGH | `npm run seed` (documented install step) overwrites the shipped rich personas with a 2-sentence blurb | OPEN |
-| AP-04 | HIGH | lightweight-template projects ship specialists ineligible for every stage (= `LV-01`, live-proven) | OPEN |
-| AP-05 | HIGH | a profile created in the org editor can never be deployed/run/selected (**live-confirmed**: `Org Docs Writer` is absent from a project created after it) | OPEN |
-| AP-06 | MED | a deployment with `capabilities: []` gets FULL repo-write power (org create writes exactly that) | OPEN |
-| AP-07 | MED | the first project-level edit freezes a profile against all later org edits, while the modal claims "changes apply on next run" | OPEN |
-| AP-08 | MED | org edit collapses a multi-backend profile to one backend | OPEN |
-| AP-09 | MED | the org card subtitle renders the entire persona body (= `LV` observation) | OPEN |
-| AP-10 | LOW | `used in N projects` counts archived projects and trusts a projection | OPEN |
-| AP-11 | LOW | `agentProfileFilePath` has no traversal guard, unlike skills/KB | OPEN |
-| AP-12 | LOW | org create doesn't check project-local profile ids | OPEN |
+| AP-01 | HIGH | org editor's one-line "Role summary" **is** the persona body → editing a seeded profile flattens its system prompt org-wide | **DONE** — the org editor has a real persona field; a blank persona keeps the body. |
+| AP-02 | HIGH | on edit the frontmatter spread omits `desc`, so what the operator reads never changes | **DONE** — `desc` is rewritten on edit, so what the operator reads changes. |
+| AP-03 | HIGH | `npm run seed` (documented install step) overwrites the shipped rich personas with a 2-sentence blurb | **DONE (W2)** — seeding emits the shipped persona bytes. |
+| AP-04 | HIGH | lightweight-template projects ship specialists ineligible for every stage (= `LV-01`, live-proven) | **DONE (owner ruling 2)** — the Lightweight template is removed; a regression asserts every seeded specialist is stage-eligible on a created board. |
+| AP-05 | HIGH | a profile created in the org editor can never be deployed/run/selected (**live-confirmed**: `Org Docs Writer` is absent from a project created after it) | **DONE (owner ruling 1)** — 'Add from library' copies a template into a project. |
+| AP-06 | MED | a deployment with `capabilities: []` gets FULL repo-write power (org create writes exactly that) | **DONE** — creation paths persist explicit grants; `capabilities: []` resolves to explicitly withheld. |
+| AP-07 | MED | the first project-level edit freezes a profile against all later org edits, while the modal claims "changes apply on next run" | **DONE (copy)** — the editor states that saving forks the profile for this project. |
+| AP-08 | MED | org edit collapses a multi-backend profile to one backend | **DONE** — org edit keeps the profile's backend list intact for the picker it owns. |
+| AP-09 | MED | the org card subtitle renders the entire persona body (= `LV` observation) | **DONE** — the org card renders the blurb. LIVE-verified in the screenshot. |
+| AP-10 | LOW | `used in N projects` counts archived projects and trusts a projection | **DONE** — archived projects no longer count toward `used`. |
+| AP-11 | LOW | `agentProfileFilePath` has no traversal guard, unlike skills/KB | **DONE** — `agentProfileFilePath` uses the traversal guard. |
+| AP-12 | LOW | org create doesn't check project-local profile ids | **DONE** — a template id colliding with a project-local profile is refused. |
 
 ### B3. Runtime parity (Claude ↔ Codex) — `docs/runtime-parity.md`
 
 | id | sev | headline | disposition |
 | --- | --- | --- | --- |
-| RT-01 | HIGH | an agent's **final report** never notifies the humans it @tags, on either backend (NEW-4 broken on its primary path) | OPEN |
-| RT-02 | HIGH | the Codex read-only sandbox is never used to enforce a withheld `execute-code-or-write-repo` | OPEN |
-| RT-03 | MED | a denied Codex operator action is a silent no-op (billed run, zero timeline trace) | OPEN |
-| RT-04 | MED | Codex runs ingest the repo's `AGENTS.md`; Claude runs ingest nothing equivalent | OPEN |
-| RT-05 | MED | resumed runs lose the delivery contract and the trust boundary | OPEN |
-| RT-06 | MED | the Codex question packet is audited as the operator, not the agent | OPEN |
-| RT-07 | MED | the Claude model picker offers ids the run-time validator silently downgrades | OPEN |
-| RT-08 | MED | effort is validated on Codex, unvalidated on Claude, re-validated only on the retry path | OPEN |
-| RT-09 | LOW | runtime statistics are posted as the agent's report when it emits no text | OPEN |
-| RT-10 | LOW | the unified git identity doesn't reach a Codex agent's shell | OPEN |
-| RT-11 | LOW-MED | Claude runs have no hang guard; Codex runs do | OPEN |
-| RT-12 | MED | an @mention after a backend switch resumes the dead backend's session | OPEN |
-| RT-13 | LOW | the operator's declared MCP resources are silently ignored (= `KM-03`) | OPEN |
-| RT-14 | LOW | disclosure gaps for seven deliberate Claude/Codex differences | OPEN |
+| RT-01 | HIGH | an agent's **final report** never notifies the humans it @tags, on either backend (NEW-4 broken on its primary path) | **DONE** — the completed-run reply fans out mentions. LIVE: `mention` notifications went 0 → 4. |
+| RT-02 | HIGH | the Codex read-only sandbox is never used to enforce a withheld `execute-code-or-write-repo` | **DONE** — `repoWriteWithheld` drives the Codex read-only sandbox. |
+| RT-03 | MED | a denied Codex operator action is a silent no-op (billed run, zero timeline trace) | **DONE** — denied Codex actions are narrated; the plan schema only advertises granted tools. |
+| RT-04 | MED | Codex runs ingest the repo's `AGENTS.md`; Claude runs ingest nothing equivalent | **DONE** — `project_doc_max_bytes: 0`; verified live against the CLI. |
+| RT-05 | MED | resumed runs lose the delivery contract and the trust boundary | **DONE** — the resume directive carries the trust boundary and the delivery contract. |
+| RT-06 | MED | the Codex question packet is audited as the operator, not the agent | **DONE** — the packet is audited as the agent; an undeliverable question is recorded, not dropped. |
+| RT-07 | MED | the Claude model picker offers ids the run-time validator silently downgrades | **DONE** — `isKnownModel` accepts what the live catalog lists. |
+| RT-08 | MED | effort is validated on Codex, unvalidated on Claude, re-validated only on the retry path | **DONE** — effort is resolved in `startRun`, the single funnel. |
+| RT-09 | LOW | runtime statistics are posted as the agent's report when it emits no text | **DONE** — the runtime-stats fallback is gone. |
+| RT-10 | LOW | the unified git identity doesn't reach a Codex agent's shell | **DONE** — git identity reaches the Codex shell. |
+| RT-11 | LOW-MED | Claude runs have no hang guard; Codex runs do | **DONE** — Claude idle guard + `idle_timeout` failure class; env var declared. |
+| RT-12 | MED | an @mention after a backend switch resumes the dead backend's session | **DONE** — session resume filters on backend. |
+| RT-13 | LOW | the operator's declared MCP resources are silently ignored (= `KM-03`) | **DONE** — same fix as KM-03. |
+| RT-14 | LOW | disclosure gaps for seven deliberate Claude/Codex differences | **DONE** — the capability matrix lists the seven real differences. |
 
 ### B4. Routes & UI honesty — `docs/routes-ui-audit.md`
 
