@@ -642,7 +642,14 @@ export function DangerZone({
   onDelete: (confirmName: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const isAdmin = myRole === "admin";
+  // RU-3: archive AND delete both gate on the `edit-policy` action server-side
+  // (settings-actions.server.ts → requireProjectAction(..., "edit-policy", ...)).
+  // Mirror that exact ACTION_ROLES entry through `roleCan` instead of a raw
+  // `=== "admin"` literal so the control's visibility can never drift from the
+  // action the server actually checks — the same way `canGrant` already routes
+  // through the shared helper. (`edit-policy` resolves to admin-only today, so
+  // this is behavior-preserving; it stops being a hardcoded assumption.)
+  const canManageLifecycle = roleCan(myRole as ProjectRole | null, "edit-policy");
 
   return (
     <div className="panel danger-panel">
@@ -667,8 +674,8 @@ export function DangerZone({
           // F10-34: destructive project actions are project-admin only. A
           // viewer/maintainer must not see an actionable control; the server
           // still enforces edit-policy.
-          disabled={busy || !isAdmin}
-          title={isAdmin ? undefined : "Only a project admin can archive this project"}
+          disabled={busy || !canManageLifecycle}
+          title={canManageLifecycle ? undefined : "Only a project admin can archive this project"}
           onClick={() => onArchive(!archived)}
         >
           {archived ? "Restore" : "Archive"}
@@ -686,8 +693,8 @@ export function DangerZone({
           className="btn danger sm"
           // F10-34: project-admin only; disabled for everyone else so the
           // typed-confirm dialog can never be opened without authority.
-          disabled={busy || !isAdmin}
-          title={isAdmin ? undefined : "Only a project admin can delete this project"}
+          disabled={busy || !canManageLifecycle}
+          title={canManageLifecycle ? undefined : "Only a project admin can delete this project"}
           onClick={() => setConfirming(true)}
         >
           Delete project

@@ -10,6 +10,7 @@ import {
   RepoPanel,
   StagesPanel,
 } from "./settings-page";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 
 afterEach(cleanup);
 
@@ -479,5 +480,32 @@ describe("DangerZone", () => {
     expect((admin.querySelector(".dz-row .btn.danger") as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+
+  // RU-3: the danger-zone gate must track the SAME ACTION_ROLES entry the server
+  // enforces (`edit-policy`, via requireProjectAction in settings-actions.server),
+  // not a parallel `=== "admin"` literal that can silently drift from it. Driving
+  // the expectation off `roleCan` fails if the gate is ever re-hardcoded or if
+  // `edit-policy`'s role set changes without the control following.
+  it("gates both danger-zone controls on roleCan(edit-policy), the server's action", () => {
+    const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
+    for (const role of roles) {
+      const { container } = render(
+        <DangerZone
+          projectName="Viberr Core"
+          myRole={role}
+          archived={false}
+          busy={false}
+          onArchive={() => {}}
+          onDelete={() => {}}
+        />,
+      );
+      const expectedEnabled = roleCan(role, "edit-policy");
+      const archive = container.querySelector(".dz-row .btn.ghost") as HTMLButtonElement;
+      const del = container.querySelector(".dz-row .btn.danger") as HTMLButtonElement;
+      expect(archive.disabled).toBe(!expectedEnabled);
+      expect(del.disabled).toBe(!expectedEnabled);
+      cleanup();
+    }
   });
 });
