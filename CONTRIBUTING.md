@@ -28,6 +28,7 @@ npm run dev        # http://localhost:5173
 
 See the [README](README.md) for the full quickstart, demo accounts, Docker setup, and
 architecture overview.
+`GET /resources/health` returns backend availability.
 
 ## Branch / PR workflow
 
