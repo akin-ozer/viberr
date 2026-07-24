@@ -166,10 +166,19 @@ export function readKbBody(
         continue; // unreadable doc — skip (not counted as omitted)
       }
       if (!raw) continue;
-      const slice = raw.slice(0, budget);
+      // P13-KM-14: the per-doc heading was free — with many small docs the
+      // headings alone could add thousands of unbudgeted characters, so the
+      // "24k" cap was not the real ceiling. Charge the whole emitted chunk.
+      const heading = `### ${doc.rel}\n\n`;
+      const room = budget - heading.length;
+      if (room <= 0) {
+        omitted += 1;
+        continue;
+      }
+      const slice = raw.slice(0, room);
       if (slice.length < raw.length) truncatedADoc = true;
-      budget -= slice.length;
-      parts.push(`### ${doc.rel}\n\n${slice}`);
+      budget -= heading.length + slice.length;
+      parts.push(`${heading}${slice}`);
     }
     if ((omitted > 0 || truncatedADoc) && parts.length > 0) {
       const kb = Math.round(budgetChars / 1000);

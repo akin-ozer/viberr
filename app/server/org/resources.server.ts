@@ -135,11 +135,17 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 
 // ------------------------------------------------------- knowledge bases
 
-// R-D (P11-60): "on change" is now REAL — the file watcher re-indexes a KB when
-// its store files change, the same mechanism the rest of the store uses. The
-// old "nightly" mode was decorative (nothing ever scheduled it) and is removed;
-// a KB is either watcher-driven ("on change", the default) or pinned to explicit
+// R-D (P11-60): "on change" is REAL — the file watcher re-indexes a KB when its
+// store files change, the same mechanism the rest of the store uses. The old
+// "nightly" mode was decorative (nothing ever scheduled it) and is removed; a KB
+// is either watcher-driven ("on change", the default) or pinned to explicit
 // re-scans only ("manual").
+//
+// P13-KM-15 — what this mode does NOT do: it controls the DOC-COUNT/freshness
+// metadata only. Agents always read the live folder at run time (readKbBody
+// walks the real directory), so "manual" never pins the CONTENT a run sees. The
+// KB modal's copy says exactly this so the toggle can't be mistaken for a
+// content freeze.
 export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
 export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
@@ -390,9 +396,25 @@ export function reindexKnowledgeBaseByDir(
   dir: string,
   ctx: OrgSeedContext = {},
 ): { name: string; docCount: number } | null {
-  const row = db
+  let row = db
     .prepare(`SELECT id, name, refresh FROM org_knowledge_bases WHERE dir = ?`)
     .get(dir) as { id: string; name: string; refresh: string } | undefined;
+  // P13-KM-16: a DISK-ONLY KB (a folder created outside Viberr, which the
+  // listings show as a first-class KB) had no row, so the watcher bailed and
+  // its freshness never advanced — "re-scanned never" forever, while the same
+  // folder re-indexed fine the moment anyone edited it in the UI. Adopt it, the
+  // same adopt-on-touch rule the store mutations already use.
+  if (!row && existsSync(kbDirPath(dir, ctx.dataRoot))) {
+    const now = new Date().toISOString();
+    const id = newId("kb");
+    db.prepare(
+      `INSERT INTO org_knowledge_bases
+         (id, name, dir, refresh, last_indexed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'on change', ?, ?, ?)`,
+    ).run(id, dir, dir, now, now, now);
+    logger.info("adopted disk-only knowledge base on watcher re-index", { dir });
+    row = { id, name: dir, refresh: "on change" };
+  }
   if (!row) return null;
   if (row.refresh === "manual") return null;
   const abs = kbDirPath(dir, ctx.dataRoot);

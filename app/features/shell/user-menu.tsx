@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
@@ -59,6 +59,8 @@ export function UserMenu({
   showSwitchProject?: boolean;
 }) {
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference; error?: string }>();
@@ -78,8 +80,19 @@ export function UserMenu({
   // (expired session/CSRF) reports the failure, not a false success (P11-40).
   useFetcherResult(fetcher, (data) => {
     if (data.ok && data.theme) push(themeToast(data.theme));
-    else if (!data.ok) push(data.error ?? "Theme change failed — try again");
+    else if (!data.ok)
+      push(data.error ?? "Theme change failed — try again", "error");
   });
+
+  // UI-45: the panel is rendered BEFORE its trigger, so without this a keyboard
+  // user who opened the menu and pressed Tab left it entirely. Focus in on open,
+  // restore to the avatar on close.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (menu) menuRef.current?.focus();
+    else if (wasOpen.current) buttonRef.current?.focus();
+    wasOpen.current = menu;
+  }, [menu]);
 
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
 
@@ -105,7 +118,22 @@ export function UserMenu({
             aria-hidden="true"
             onClick={() => setMenu(false)}
           />
-          <div className="user-menu from-top" role="menu">
+          {/*
+            UI-45: this declared `role="menu"` / `role="menuitem"` with NO
+            arrow-key handling — a broken ARIA menu contract, which tells a
+            screen-reader user to expect Up/Down navigation that does not exist.
+            Rather than hand-roll a full menu widget (roving tabindex, typeahead,
+            Home/End) for six links, the roles are DROPPED: this is a small group
+            of buttons and links, and plain Tab order is a contract the code
+            actually honours. Focus moves into the panel on open and returns to
+            the avatar on close (the popover is rendered before its trigger).
+          */}
+          <div
+            className="user-menu from-top"
+            ref={menuRef}
+            tabIndex={-1}
+            aria-label="Account menu"
+          >
             <div className="user-menu-head">
               <Avatar person={person} lg />
               <span>
@@ -116,7 +144,6 @@ export function UserMenu({
             <button
               type="button"
               className="menu-item"
-              role="menuitem"
               onClick={() => {
                 setMenu(false);
                 navigate("/profile", {
@@ -130,7 +157,6 @@ export function UserMenu({
             {showSwitchProject && (
               <Link
                 className="menu-item"
-                role="menuitem"
                 to="/"
                 onClick={() => setMenu(false)}
               >
@@ -141,7 +167,6 @@ export function UserMenu({
             <button
               type="button"
               className="menu-item"
-              role="menuitem"
               onClick={cycleTheme}
             >
               <Icon name="sparkle" />
@@ -151,7 +176,6 @@ export function UserMenu({
             {user.role === "admin" && (
               <Link
                 className="menu-item"
-                role="menuitem"
                 to="/org/settings"
                 onClick={() => setMenu(false)}
               >
@@ -162,7 +186,7 @@ export function UserMenu({
             <div className="menu-sep" />
             <Form method="post" action="/logout">
               <CsrfInput />
-              <button className="menu-item danger" role="menuitem" type="submit">
+              <button className="menu-item danger" type="submit">
                 <Icon name="ext" />
                 Sign out
               </button>
@@ -172,9 +196,10 @@ export function UserMenu({
       )}
       <button
         type="button"
+        ref={buttonRef}
         className={"home-user" + (menu ? " open" : "")}
         onClick={() => setMenu((m) => !m)}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={menu}
         aria-label="Account menu"
       >

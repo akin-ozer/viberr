@@ -126,23 +126,29 @@ describe("ProfilePage", () => {
   });
 
   it("MOUNTS the Appearance panel: theme seg, reduce motion, timeline default", () => {
-    const { getByText, container } = renderProfile();
+    const { getByText, queryByText, container } = renderProfile();
     expect(getByText("Appearance & workspace")).toBeTruthy();
 
     fireEvent.click(getByText("Dark"));
     expect(lastTheme).toBe("dark");
 
+    // UI-31: REWRITTEN — this asserted the bug. The toast fired synchronously at
+    // SUBMIT time, before the server answered, and no handler ever read the
+    // `set-motion` / `set-tl-default` result (the shared handler early-returned
+    // unless the intent was `set-notif`), so a failure produced no error, no
+    // rollback of the toggle and no rollback of `data-motion`. The optimistic
+    // DOM/local flip still happens (it must, for a snappy pref), but the toast
+    // now settles on the result — with this fake `submitWith` nothing ever
+    // resolves, so no toast is the CORRECT observation here.
     const motion = container.querySelector(".tgl[aria-label='Reduce motion']")!;
     fireEvent.click(motion);
     expect(lastSubmit).toEqual({ intent: "set-motion", motion: "reduce" });
     expect(document.documentElement.dataset.motion).toBe("reduce");
-    expect(
-      getByText("Motion reduced — pulses and animation paused"),
-    ).toBeTruthy();
+    expect(queryByText("Motion reduced — pulses and animation paused")).toBeNull();
 
     fireEvent.click(getByText("Important"));
     expect(lastSubmit).toEqual({ intent: "set-tl-default", tlDefault: "typed" });
-    expect(getByText("Timeline opens on “Important”")).toBeTruthy();
+    expect(queryByText("Timeline opens on “Important”")).toBeNull();
   });
 
   it("Your access renders the shared RBAC table for the REAL role", () => {

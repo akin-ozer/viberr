@@ -291,6 +291,7 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             summary: field("summary"),
             body: field("body"),
+            clearBody: field("clearBody") === "1",
           },
           actor,
         );

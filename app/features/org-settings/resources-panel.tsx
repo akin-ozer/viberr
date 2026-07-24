@@ -113,9 +113,10 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
           <Icon name="file" />
           <span>
             Content is plain files inside the folder — inspectable and editable outside
-            Viberr. Agents always read the live folder at run time. <strong>On change</strong>{" "}
-            re-scans the doc count automatically whenever a file in the folder changes;{" "}
-            <strong>manual</strong> only re-scans when you click re-scan.
+            Viberr. This setting controls the <strong>doc count and freshness stamp</strong>{" "}
+            only: <strong>on change</strong> re-scans automatically whenever a file in the
+            folder changes, <strong>manual</strong> only when you click re-scan. It does not
+            pin what an agent reads — every run loads the live folder either way.
           </span>
         </div>
       </div>
@@ -311,6 +312,12 @@ function SkillModal({
           name: slugify(name),
           summary: summary.trim(),
           body,
+          // P13-KM-18: an empty body means "keep what's on disk" (the editor
+          // only round-trips a truncated read for very large files), so
+          // BLANKING a SKILL.md was impossible from the UI — the server's
+          // explicit `clearBody` escape hatch had no caller. Emptying the
+          // editor on an existing skill now says so.
+          ...(initial && body.trim() === "" ? { clearBody: "1" } : {}),
         });
       }}
     >
