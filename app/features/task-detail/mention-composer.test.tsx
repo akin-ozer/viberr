@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { Timeline } from "./timeline";
+import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 
 /**
  * jsdom behavior test for the comment composer's @-mention autocomplete:
@@ -14,7 +15,10 @@ import { Timeline } from "./timeline";
  * hooks have a data router.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const MENTIONABLES: Mentionables = {
   agents: [{ handle: "dev", name: "dev", role: "developer", backend: "claude" }],
@@ -160,5 +164,93 @@ describe("comment composer @-mention autocomplete", () => {
     // aria-activedescendant points at an existing option.
     const activeId = ta.getAttribute("aria-activedescendant")!;
     expect(document.getElementById(activeId)).toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------ UI-40 empty state */
+
+/**
+ * UI-40: `items` is the FILTERED view of an already-bounded slice, but the empty
+ * copy was always "No activity yet — this task hasn't started its operator
+ * loop." Picking the Comments tab on a task whose newest events are all typed
+ * therefore declared the task had never run — with "Show older events · N more"
+ * rendered directly below it.
+ */
+describe("Timeline empty state (UI-40)", () => {
+  function renderTimeline(events: TimelineEventRender[], hasMore = false) {
+    const Stub = createRoutesStub([
+      {
+        path: "/t",
+        Component: () => (
+          <ToastProvider>
+            <Timeline
+              events={events}
+              hasMore={hasMore}
+              remaining={hasMore ? 12 : 0}
+              nextLimit={40}
+              tlDefault="all"
+              ask={0}
+              mentionables={MENTIONABLES}
+            />
+          </ToastProvider>
+        ),
+        action: async () => ({ ok: true }),
+      },
+    ]);
+    return render(<Stub initialEntries={["/t"]} />);
+  }
+
+  const typedEvent: TimelineEventRender = {
+    id: 1,
+    type: "transition",
+    occurredAt: new Date().toISOString(),
+    actor: { kind: "agent", name: "Operator" } as TimelineEventRender["actor"],
+    title: null,
+    text: "Moved to Review",
+    toAgent: false,
+    evidence: null,
+  };
+
+  it("says the task never started only when there are NO events at all", () => {
+    const { getByText } = renderTimeline([]);
+    expect(
+      getByText(/No activity yet — this task hasn't started its operator loop\./),
+    ).toBeTruthy();
+  });
+
+  it("blames the FILTER when the task has history but the tab matched nothing", () => {
+    const { getByText, queryByText } = renderTimeline([typedEvent], true);
+    fireEvent.click(getByText("Comments"));
+    expect(queryByText(/hasn't started its operator loop/)).toBeNull();
+    expect(getByText(/No comments in the loaded history/)).toBeTruthy();
+    // The contradiction the old copy sat next to.
+    expect(getByText(/Show older events/)).toBeTruthy();
+  });
+});
+
+/**
+ * P13-D-39: the composer's send hint was the literal `⌘↵ to send`, the last
+ * user-visible `⌘` in `app/`, even though its own handler accepts
+ * `metaKey || ctrlKey`. UI-55 had already established the rule and the helper
+ * for exactly this — it just was not applied here.
+ */
+describe("comment composer send hint (P13-D-39)", () => {
+  const hint = () =>
+    [...document.querySelectorAll(".composer-foot span")].find((s) =>
+      s.textContent?.includes("to send"),
+    );
+
+  it("shows ⌘↵ on a Mac", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" });
+    renderComposer();
+    expect(hint()!.textContent).toBe("⌘↵ to send");
+  });
+
+  it("shows Ctrl ↵ on a keyboard that has no ⌘ key", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
+    renderComposer();
+    expect(hint()!.textContent).toBe("Ctrl ↵ to send");
+    // No hardcoded Mac glyph survives anywhere in the composer footer.
+    expect(document.querySelector(".composer-foot")!.textContent).not.toContain("⌘");
   });
 });

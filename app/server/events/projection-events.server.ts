@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
  * the SSE broker to this emitter; until then only tests listen.
  *
  * Payloads are compact facts + references — never fat objects
- * (CONVENTIONS SSE rules; the same shapes feed the SSE payloads later).
+ * (docs/architecture/decisions.md SSE rules; the same shapes feed the SSE payloads later).
  */
 
 export type ProjectionEvent =

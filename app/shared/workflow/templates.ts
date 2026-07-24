@@ -1,15 +1,25 @@
 import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
 
 /**
- * Instance-default workflow templates (orchestrator ruling 15).
+ * The instance-default workflow template (orchestrator ruling 15).
  *
- * Stages are per-project (stored in project.md); these templates feed org
- * surfaces (Phase 9 AgentModal instance stage list) and the Phase-4
- * create-project action. Colors accept both hex and var(--*) strings.
+ * Stages are per-project (stored in project.md); this template feeds org
+ * surfaces (the AgentModal instance stage list) and the create-project action.
+ * Colors accept both hex and var(--*) strings.
  *
- * The "Lightweight · 3 stages" template's stage set is undefined in the
- * mock — defined here as todo / doing / done with the review→done boundary
- * collapsed onto doing→done (still human-locked).
+ * `workflow` is a CHAIN over `stages`: one rule per consecutive pair, so every
+ * stage has an in-edge (bar the entry) and an out-edge (bar the terminal) and
+ * Done is always reachable. The stage editor maintains that shape as stages are
+ * added, removed and reordered — app/shared/workflow/transitions.ts (P13-D-1).
+ *
+ * P13-AP-04 / owner ruling 2 (2026-07-24): the "Lightweight · 3 stages" preset
+ * was DELETED. It shipped the built-in Developer/Reviewer, whose eligible
+ * stages are the governed ids (`ready`/`impl`/`review`), onto a `todo`/`doing`/
+ * `done` board — so no specialist was ever stage-eligible and the operator
+ * could not hand work off (LV-01, live-proven: every lightweight project was
+ * dead on arrival for agent work). The Standard 5-stage template is now the
+ * only preset. Custom boards remain fully supported through project settings —
+ * they are just no longer created with a roster that cannot work them.
  */
 
 export interface WorkflowTemplate {
@@ -54,32 +64,6 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
     },
     {
       from: "review",
-      to: "done",
-      boundary: "human",
-      by: "Human acceptance of the completion report",
-      locked: true,
-    },
-  ],
-};
-
-export const LIGHTWEIGHT_TEMPLATE: WorkflowTemplate = {
-  id: "lightweight-3",
-  label: "Lightweight · 3 stages",
-  stages: [
-    { id: "todo", name: "To do", color: "#a5a8b5" },
-    { id: "doing", name: "In progress", color: "#7b61ff" },
-    { id: "done", name: "Done", color: "#00b473" },
-  ],
-  workflow: [
-    {
-      from: "todo",
-      to: "doing",
-      boundary: "auto",
-      by: "Operator, when a primary specialist is assigned",
-      locked: false,
-    },
-    {
-      from: "doing",
       to: "done",
       boundary: "human",
       by: "Human acceptance of the completion report",

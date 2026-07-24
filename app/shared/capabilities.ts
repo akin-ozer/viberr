@@ -37,9 +37,15 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),
   cap("stage-transitions", "Stage transitions", ["operator"], "Permissions", "recommend"),
-  // Never autonomy-promoted to direct: acceptance stays human even under
-  // `full` autonomy (formerly a string special-case in operator gate()).
-  cap("completion-for-acceptance", "Completion for human acceptance", ["operator"], "Permissions", "recommend", false),
+  // P13-D-PRD-3: `promotable: false` means raising a project's autonomy never
+  // silently upgrades this to `direct` — an admin must grant it deliberately.
+  // It does NOT mean acceptance is human-only: with an explicit `direct` grant
+  // AND `full` autonomy the operator moves the task to Done itself
+  // (`operatorAcceptCompletion`, the one deliberate exception to the
+  // human-only-Done invariant, owner ruling Q1). The old comment here claimed
+  // the opposite and the old label ("Completion for human acceptance") read as
+  // a guarantee it does not make.
+  cap("completion-for-acceptance", "Accept completion into Done", ["operator"], "Permissions", "recommend", false),
   // Agent repository/execution toggles (bind via the Claude tool denylist)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
@@ -53,9 +59,23 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // it doesn't read as "silences the agent".
   cap("comment-on-task", "Post mid-run comments", ["agent"], "Collaboration"),
   cap("ask-human", "Ask the human a question", ["agent"], "Collaboration"),
+  // P13-LV-18 (owner ruling): network egress used to be invisible — EVERY run,
+  // including a "read-only" reviewer with all repository capabilities Off, could
+  // WebFetch/WebSearch arbitrary URLs. It is now a real capability: granted by
+  // default (nothing regresses), visible in the matrix, and revocable per
+  // profile. Enforced with tool denial on Claude; prompt-level on Codex, whose
+  // built-in web tools have no denylist channel.
+  cap("use-web-search-fetch", "Search & fetch from the web", ["agent", "operator"], "Collaboration"),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
   cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
+  // P13-D-26: no longer advisory. Wiring the `evidence:` block gave this a real
+  // runtime consumer — it declares the optional `evidence` field on the
+  // `report_outcome` tool and gates the agent's own rows in the completion
+  // pipeline — so it moves out of the matrix-only group below and becomes a
+  // toggle an admin can actually set. Server-derived delivery rows are attached
+  // regardless; this grant governs what the AGENT gets to assert.
+  cap("attach-evidence-references", "Attach evidence references", ["agent"], "Collaboration"),
   // Advisory persona guidance (no runtime consumer — matrix-only, no toggle)
   cap("run-unit-integration-validation", "Run unit & integration validation", ["agent"], null),
   cap("move-task-to-review", "Move the task to Review", ["agent"], null),
@@ -65,7 +85,6 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("approve-review", "Approve the review", ["agent"], null),
   cap("request-changes", "Request changes", ["agent"], null),
   cap("author-test-cases", "Author test cases", ["agent"], null),
-  cap("attach-evidence-references", "Attach evidence references", ["agent"], null),
   cap("read-task-repo", "Read the task & repository", ["agent"], null),
   cap("flag-underspecified-tasks", "Flag underspecified tasks", ["agent"], null),
   // Always-human governed actions (structural locks, shown to agents)
@@ -73,6 +92,48 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("transition-to-done", "Transition a task to Done", ["agent"], "Reserved for humans", "human", false),
   cap("change-project-policy", "Change project policy", ["agent"], "Reserved for humans", "human", false),
 ] as const;
+
+/**
+ * The explicit default grant list for a profile of `kind` — every capability
+ * the catalog offers that kind, at its documented default mode.
+ *
+ * P13-AP-06: `capabilities: []` does NOT mean "no powers" — the tool policy
+ * treats an unspecified capability as GRANTED, so a profile persisted with an
+ * empty list silently carried full repo-write authority. Every creation path
+ * persists explicit grants instead.
+ */
+export function defaultGrantsFor(
+  kind: CapabilityKind,
+): { capabilityId: string; mode: UnifiedCapabilityDef["defaultMode"] }[] {
+  return UNIFIED_CAP_CATALOG.filter((c) => c.kinds.includes(kind)).map((c) => ({
+    capabilityId: c.id,
+    mode: c.defaultMode,
+  }));
+}
+
+/**
+ * The starting grants for a profile created in a surface that CANNOT set
+ * capability policy — today the org-level template editor, which has no
+ * capability UI because policy is a per-project decision (the two-layer model).
+ *
+ * P13: `defaultGrantsFor("agent")` grants all four delivery capabilities at
+ * `direct`, so a template described as "writes documentation, never touches app
+ * code" was created — and adopted into projects — holding full repo-write. It
+ * was visible rather than silent (an improvement on `capabilities: []`), but a
+ * dangerous default is still a dangerous default. Delivery starts WITHHELD; the
+ * project-level editor, which does have the capability matrix, opens it up.
+ */
+export function conservativeGrantsFor(
+  kind: CapabilityKind,
+): { capabilityId: string; mode: UnifiedCapabilityDef["defaultMode"] }[] {
+  const withheld = new Set<string>([
+    "execute-code-or-write-repo",
+    ...SCOPED_DELIVERY_CAPABILITY_IDS,
+  ]);
+  return defaultGrantsFor(kind).map((g) =>
+    withheld.has(g.capabilityId) ? { ...g, mode: "off" as const } : g,
+  );
+}
 
 /** Flat id+label view — the shape most consumers key on. */
 export const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
@@ -111,6 +172,9 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // on these grants server-side, so withholding binds on Claude AND Codex.
   "report-validation-verdict",
   "ask-human",
+  // P13-D-26: the agent's own evidence rows are gated server-side in the
+  // completion pipeline, so withholding this binds on both backends.
+  "attach-evidence-references",
 ]);
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex. */
@@ -123,6 +187,9 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.
   "comment-on-task",
+  // Web egress: real tool denial on Claude (WebFetch/WebSearch removed);
+  // prompt-level only on Codex, which has no per-tool denylist.
+  "use-web-search-fetch",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

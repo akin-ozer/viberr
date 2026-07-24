@@ -14,7 +14,7 @@ import { CapabilityMatrixModal } from "~/features/agents/capability-matrix-modal
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { PolicyViewData, TransitionView } from "./policy-query.server";
 import {
-  ALWAYS_HUMAN_LABELS,
+  ALWAYS_HUMAN_ROWS,
   BCLS,
   BOUNDARIES,
   RBAC_ROWS,
@@ -22,6 +22,7 @@ import {
   ROLE_LABEL,
 } from "./policy-data";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { stageFlowPath } from "~/shared/workflow/transitions";
 
 /**
  * Policy view:
@@ -59,7 +60,12 @@ export function HumanAccess({
     contributor: 0,
     viewer: 0,
   };
-  for (const m of members) counts[m.role] += 1;
+  // LV-04/UI-29: a membership whose org account was deleted is NOT a member for
+  // any counting purpose — the role headers describe who can actually perform
+  // an action, and the ghost can perform none of them.
+  const live = members.filter((m) => !m.missing);
+  const stale = members.filter((m) => m.missing);
+  for (const m of live) counts[m.role] += 1;
 
   const setRole = (m: MembershipView, r: ProjectRole) => {
     if (m.role === r) return;
@@ -77,7 +83,10 @@ export function HumanAccess({
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
         <span className="right sub" style={PANEL_COUNT_STYLE}>
-          {members.length} member{members.length === 1 ? "" : "s"}
+          {live.length} member{live.length === 1 ? "" : "s"}
+          {stale.length > 0
+            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            : ""}
         </span>
       </div>
       <div className="pol-note">
@@ -93,8 +102,33 @@ export function HumanAccess({
           <div className="member-row" key={m.userId}>
             <Avatar person={{ initials: m.initials, tone: m.tone }} />
             <span className="member-main">
-              <div className="nm">{m.name}</div>
-              <div className="em">{m.email}</div>
+              <div className="nm">
+                {m.name}
+                {m.missing && (
+                  <>
+                    {" "}
+                    <Pill kind="blocked" sm>
+                      removed account
+                    </Pill>
+                  </>
+                )}
+                {!m.missing && m.disabled && (
+                  <>
+                    {" "}
+                    <Pill kind="neutral" sm>
+                      disabled
+                    </Pill>
+                  </>
+                )}
+              </div>
+              <div className="em">
+                {/* LV-04: an unresolvable id used to render as the bare
+                    `u_RT7-QeTWOwP4` string with an empty email, indistinguishable
+                    from a real person. */}
+                {m.missing
+                  ? "This account no longer exists — remove it in Settings → Members."
+                  : m.email}
+              </div>
             </span>
             <div className="mini-seg" role="radiogroup" aria-label={"Role for " + m.name}>
               {ROLE_IDS.map((r) => (
@@ -104,7 +138,9 @@ export function HumanAccess({
                   role="radio"
                   aria-checked={m.role === r}
                   className={m.role === r ? "on" : ""}
-                  disabled={!canManage || busy}
+                  // A deleted account cannot hold a role: the control is dead,
+                  // so it no longer pretends to be live (UI-29).
+                  disabled={!canManage || busy || m.missing}
                   onClick={() => setRole(m, r)}
                 >
                   {ROLE_LABEL[r]}
@@ -263,12 +299,17 @@ export function AgentCapability({
         <div className="flabel" style={{ color: "var(--coral-dark)" }}>
           Always reserved for humans
         </div>
-        {ALWAYS_HUMAN_LABELS.map((x) => (
-          <div className="ho-row" key={x}>
+        {ALWAYS_HUMAN_ROWS.map((row) => (
+          <div className="ho-row" key={row.id}>
             <Icon name="lock" />
-            <span>{x}</span>
+            <span>
+              {row.label}
+              {row.exception ? (
+                <em className="ho-exc"> · {row.exception}</em>
+              ) : null}
+            </span>
             <Pill kind="risk" sm>
-              all profiles
+              {row.exception ? "agent profiles" : "all profiles"}
             </Pill>
           </div>
         ))}
@@ -306,6 +347,11 @@ export function WorkflowRules({
   // Defensive stage lookup (policy spec §4.4 — a renamed/removed stage id
   // must never crash the panel).
   const S = (id: string) => stages.find((s) => s.id === id) ?? { name: id, color: undefined };
+  // P13-D-1: the map is walked from the REAL transition rules. It used to draw
+  // an arrow between every consecutive stage *position*, so a stage no rule
+  // reached was still depicted mid-flow — the panel asserted a governed path
+  // the project did not have, while the rule list under it stayed at four.
+  const { chain, offChain } = stageFlowPath(stages, transitions);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -317,20 +363,45 @@ export function WorkflowRules({
       </div>
 
       <div className="flow-map">
-        {stages.map((s, i) => (
-          <Fragment key={s.id}>
-            {i > 0 && (
-              <span className="flow-arr">
-                <Icon name="arrow" />
+        {chain.map((id, i) => {
+          const s = S(id);
+          return (
+            <Fragment key={id}>
+              {i > 0 && (
+                <span className="flow-arr">
+                  <Icon name="arrow" />
+                </span>
+              )}
+              <span className="stage-chip elig">
+                <span className="sdot" style={{ background: s.color }}></span>
+                {s.name}
               </span>
-            )}
-            <span className="stage-chip elig">
+            </Fragment>
+          );
+        })}
+        {offChain.map((id) => {
+          const s = S(id);
+          return (
+            <span className="stage-chip" key={id} title="No transition rule reaches this stage">
               <span className="sdot" style={{ background: s.color }}></span>
               {s.name}
             </span>
-          </Fragment>
-        ))}
+          );
+        })}
       </div>
+
+      {offChain.length > 0 && (
+        <div className="pol-note" style={{ marginBottom: ".85rem" }}>
+          <Icon name="alert" />
+          <span>
+            Off the governed path:{" "}
+            <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
+            transition rule reaches{" "}
+            {offChain.length === 1 ? "that stage" : "those stages"}, so no agent
+            can move a task in or out — only an admin or maintainer can, by hand.
+          </span>
+        </div>
+      )}
 
       <div className="trans-list">
         {transitions.map((t) => {
@@ -390,7 +461,7 @@ export function WorkflowRules({
           By default a human accepts completion: operators request{" "}
           <strong>Review → Done</strong> and a human accepts it. The one
           exception is an operator running at <strong>full autonomy</strong> with{" "}
-          <strong>Completion for human acceptance</strong> set to{" "}
+          <strong>Accept completion into Done</strong> set to{" "}
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
           close a task itself (it still refuses a failing-validation task). The
           per-transition <strong>Human approval / Human only</strong> boundaries

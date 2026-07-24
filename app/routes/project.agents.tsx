@@ -14,9 +14,13 @@ import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 import {
   createAgentProfile,
   deleteAgentProfile,
+  deployAgentProfileFromLibrary,
   updateAgentProfile,
 } from "~/features/agents/agent-profile-actions.server";
-import { assembleAgentRoster } from "~/features/agents/agents-query.server";
+import {
+  assembleAgentRoster,
+  listLibraryProfiles,
+} from "~/features/agents/agents-query.server";
 import { AgentsPage } from "~/features/agents/agents-page";
 
 /**
@@ -40,6 +44,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
   return {
     profiles: assembleAgentRoster(db, params.slug),
+    // The org-level template LIBRARY, minus what this project already runs
+    // (owner ruling 1 / AP-05): the "Add from library" picker's options. Before
+    // this, an org-created profile could never reach a project at all.
+    library: listLibraryProfiles(db, params.slug),
     deployments: listAgentDeployments(db, params.slug),
     stages: project.stages.map((s) => ({
       id: s.id,
@@ -48,12 +56,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     })),
     projectName: project.name,
     // Live store resources for the profile-editor picker (item-2): a skill/MCP/
-    // KB created in org settings is now grantable to an agent, replacing the
-    // hardcoded mock catalog whose items resolved to nothing. Scoped to
-    // `specialist` (F7-RES3): new profiles are specialists, so the reserved
-    // in-process `viberr` operator toolkit is excluded from the attachable set.
+    // KB created in org settings is grantable to an agent, replacing the
+    // hardcoded mock catalog whose items resolved to nothing.
+    //
+    // P13-KM-09/UI-28: this was ALWAYS built as `specialist`, which excludes the
+    // reserved in-process `viberr` toolkit — so opening Edit Operator rendered
+    // the operator's REAL governance-server grant as a red "no longer in the
+    // store — click to remove this grant" chip, i.e. the UI instructed an admin
+    // to break the operator. The editor is one modal for both kinds, so the
+    // catalog now carries the operator set (which is a superset: it merely adds
+    // the reserved name) and the specialist picker filters it out per profile.
     resourceCatalog: buildResourceCatalog(db, undefined, {
-      profileKind: "specialist",
+      profileKind: "operator",
     }),
     // Per-backend credential availability (same cheap SDK-auth check the run
     // service uses). The create/edit modal disables a backend that isn't
@@ -87,6 +101,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       return {
         ok: true as const,
         toast: `Profile "${result.name}" created — available for future assignments`,
+        profileId: result.profileId,
+      };
+    }
+    if (intent === "deploy-profile") {
+      const result = await deployAgentProfileFromLibrary(
+        db,
+        {
+          projectSlug: params.slug,
+          profileId: String(formData.get("profileId") ?? ""),
+        },
+        actor,
+      );
+      return {
+        ok: true as const,
+        toast: `"${result.name}" added from the global library — the operator can assign it now`,
         profileId: result.profileId,
       };
     }
@@ -135,6 +164,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
   return (
     <AgentsPage
       profiles={loaderData.profiles}
+      library={loaderData.library}
       deployments={loaderData.deployments}
       stages={loaderData.stages}
       projectSlug={layout?.board.project.slug ?? ""}

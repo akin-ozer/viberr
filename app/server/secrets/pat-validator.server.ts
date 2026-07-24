@@ -345,7 +345,21 @@ export interface RevalidateContext {
   fetchImpl?: typeof fetch;
   /** Repo to check against; defaults to the project's default repo row. */
   repo?: string | null;
+  /** Injectable clock for the revalidation cooldown (tests). */
+  now?: () => number;
 }
+
+/**
+ * P13-D-33: how long a SUCCESSFUL validation suppresses a repeat network call.
+ *
+ * `last_validated_at` was recorded and then never consulted, so every press of
+ * "Re-check scopes" made a fresh round trip to GitHub even when the credential
+ * had just been confirmed valid. Only a `valid` result is reused: a failing
+ * credential is precisely the one the operator is re-checking after fixing
+ * something on GitHub's side, and a `network_error` never evaluated anything —
+ * both must always re-probe, or the button becomes a lie.
+ */
+export const REVALIDATE_COOLDOWN_MS = 60_000;
 
 /**
  * The real "Grant scope" / "Re-check scopes" backend (settings spec §5.4):
@@ -408,12 +422,33 @@ export async function revalidateProjectCredential(
     }
   }
 
-  const validation = await validatePat(db, credential.id, {
-    repo: ctx.repo !== undefined ? ctx.repo : (projectRow?.repo ?? null),
-    ...(requiredScopes ? { requiredScopes } : {}),
-    knownExpiresAt: credential.validation?.expiresAt ?? null,
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-  });
+  // P13-D-33: reuse a still-fresh SUCCESSFUL validation instead of re-probing
+  // GitHub. The violation sweep below still runs against the cached scopes, so
+  // a suppressed round trip changes nothing an operator can observe except the
+  // wasted API call. See REVALIDATE_COOLDOWN_MS for why only `valid` qualifies.
+  const now = (ctx.now ?? Date.now)();
+  const cached = credential.validation;
+  const cachedAge =
+    credential.lastValidatedAt !== null
+      ? now - Date.parse(credential.lastValidatedAt)
+      : Number.POSITIVE_INFINITY;
+  const reusable =
+    cached !== null &&
+    cached.status === "valid" &&
+    Number.isFinite(cachedAge) &&
+    cachedAge >= 0 &&
+    cachedAge < REVALIDATE_COOLDOWN_MS
+      ? cached
+      : null;
+
+  const validation =
+    reusable ??
+    (await validatePat(db, credential.id, {
+      repo: ctx.repo !== undefined ? ctx.repo : (projectRow?.repo ?? null),
+      ...(requiredScopes ? { requiredScopes } : {}),
+      knownExpiresAt: credential.validation?.expiresAt ?? null,
+      ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+    }));
   if (!validation) {
     auditAttempt("no_pat_configured");
     return { status: "no_pat_configured" };
@@ -442,6 +477,9 @@ export async function revalidateProjectCredential(
   auditAttempt("revalidated", {
     validationStatus: validation.status,
     resolvedViolations: resolvedViolations.length,
+    // P13-D-33: the ATTEMPT is still audited when the cooldown suppressed the
+    // network call — the log says which, so "we re-checked" stays honest.
+    cached: reusable !== null,
   });
   return { status: "revalidated", validation, resolvedViolations };
 }

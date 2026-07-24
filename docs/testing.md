@@ -8,8 +8,15 @@ Run these from the repository root after `npm ci`, using Node.js 26+.
 npm test
 ```
 
-Runs Vitest over `app/`, `db/`, and `scripts/`. Env secrets are seeded
-automatically, so no `.env` file is required.
+Runs Vitest over `app/` and `db/` only (`vitest.config.ts`). Env secrets are
+seeded automatically, so no `.env` file is required.
+
+`scripts/` is deliberately outside the include globs — the dead glob was
+removed in pass 12 — so a `scripts/*.test.ts` file is never collected. Cover
+script behavior by extracting it into `app/` and testing it there, or through
+the e2e suite, which actually executes the CLI entrypoints. This is not a
+theoretical gap: `scripts/` is the one directory whose lack of coverage let the
+pass-13 `npm run seed` regression through.
 
 ## E2E suite
 

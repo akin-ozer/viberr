@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
+import { createRoutesStub } from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import {
   BranchesPanel,
+  GithubViewPage,
   PullRequestsPanel,
   RepositoryPanel,
 } from "./github-view";
@@ -65,6 +68,8 @@ const prs: PrRowView[] = [
     state: "review",
     title: "Attach execution workspace",
     branch: "vib-142-attach-workspace",
+    checks: null,
+    review: null,
   },
   {
     taskKey: "VIB-139",
@@ -72,6 +77,8 @@ const prs: PrRowView[] = [
     state: "merged",
     title: "Policy split",
     branch: "vib-139-policy-split",
+    checks: null,
+    review: null,
   },
   {
     taskKey: "VIB-777",
@@ -79,6 +86,8 @@ const prs: PrRowView[] = [
     state: "closed",
     title: "Abandoned spike",
     branch: "vib-777-spike",
+    checks: null,
+    review: null,
   },
 ];
 
@@ -87,7 +96,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-142",
     title: "Attach execution workspace to task runtime",
     branch: "vib-142-attach-workspace",
-    pr: { number: 318, state: "review" },
+    pr: { number: 318, state: "review", checks: null, review: null },
     sync: "synced",
     commitCount: 3,
   },
@@ -103,7 +112,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-139",
     title: "Separate human RBAC from agent capability policy",
     branch: "vib-139-policy-split",
-    pr: { number: 298, state: "merged" },
+    pr: { number: 298, state: "merged", checks: null, review: null },
     sync: "merged",
     commitCount: 0,
   },
@@ -289,16 +298,16 @@ describe("RepositoryPanel", () => {
       />,
     );
     const rows = container.querySelectorAll(".kv-row");
-    expect(rows.length).toBe(4);
+    expect(rows.length).toBe(3);
     expect(rows[0]!.textContent).toContain("akin-ozer/viberr");
     // Degraded: the pill must NOT claim connected (spec §7.9c).
     expect(rows[1]!.querySelector(".pill")!.textContent).toContain(
       "no credential",
     );
-    expect(rows[2]!.textContent).toContain(
-      "project default · task-level override allowed",
-    );
-    expect(rows[3]!.textContent).toContain("1 · V1 limit");
+    // P13-D-5: this row hardcoded "task-level override allowed" — a capability
+    // nothing implemented, asserted regardless of the (now deleted) toggle.
+    expect(rows[2]!.textContent).toContain("every task uses this repository");
+    expect(container.textContent).not.toContain("override");
   });
 
   it("claims connected only for a connected result", () => {
@@ -422,5 +431,82 @@ describe("BranchesPanel", () => {
     expect(container.querySelector(".empty")!.textContent).toContain(
       "No execution branches yet",
     );
+  });
+});
+
+/* --------------------------------------- UI-05 / UI-37 (pass-13 honesty) */
+
+describe("UI-05: a never-compared branch is not 'synced'", () => {
+  it("renders the neutral 'not compared' pill for unknown sync state", () => {
+    const rows: BranchRowView[] = [
+      {
+        taskKey: "VIB-1",
+        title: "Never reconciled",
+        branch: "vib-1",
+        pr: null,
+        sync: "unknown",
+        commitCount: 0,
+      },
+      {
+        taskKey: "VIB-2",
+        title: "Measured, up to date",
+        branch: "vib-2",
+        pr: null,
+        sync: "synced",
+        commitCount: 1,
+      },
+    ];
+    const { container } = render(
+      <BranchesPanel branches={rows} onOpenTask={() => {}} />,
+    );
+    const pills = [...container.querySelectorAll(".live-row .pill")].map(
+      (p) => p.textContent,
+    );
+    // Before the fix a branch with NO compare data borrowed "behindBy === 0"
+    // and rendered the green "synced" pill, contradicting the page's own
+    // "Not yet synced" freshness chip.
+    expect(pills).toContain("not compared");
+    expect(pills).toContain("synced");
+  });
+});
+
+describe("UI-37: 'Update status' is gated like the action it calls", () => {
+  const data = {
+    project: {
+      slug: "viberr-core",
+      name: "Viberr Core",
+      repo: "akin-ozer/viberr",
+      defaultBranch: "main",
+    },
+    githubHost: "https://github.com",
+    connection: { status: "connected" as const },
+    credential: noneCredential,
+    prs: [],
+    branches: [],
+    reconcile: { at: null, label: null, stale: true },
+  } as unknown as Parameters<typeof GithubViewPage>[0]["data"];
+
+  const renderPage = (myRole: string | null) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage data={data} myRole={myRole} />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+  };
+
+  it("hides it from a viewer (who would get a 403 after fake progress)", () => {
+    const { queryByText } = renderPage("viewer");
+    expect(queryByText("Update status")).toBeNull();
+  });
+
+  it("shows it to a maintainer", () => {
+    const { getByText } = renderPage("maintainer");
+    expect(getByText("Update status")).toBeTruthy();
   });
 });

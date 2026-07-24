@@ -489,7 +489,8 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(file.parsed.frontmatter.pr?.state).toBe("closed");
-    const policy = file.parsed.timeline.find((e) => e.type === "policy");
+    // P13-LV-03: a neutral divergence note, not a policy VIOLATION.
+    const policy = file.parsed.timeline.find((e) => e.type === "note");
     expect(policy?.text).toContain(
       "accepted PR #318 was closed on GitHub without merging",
     );
@@ -550,6 +551,217 @@ describe("reconcileTask", () => {
     // Transient, NOT a permissions failure: skip without a scope violation.
     expect(result.status).toBe("network_unavailable");
     expect(findOpenScopeViolation(store.db, store.slug, "repo", "VIB-301")).toBeNull();
+  });
+});
+
+// ---------------------------------------- P13-D-28 checks + review persistence
+
+describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
+  const REVIEWS = `GET ${REPO_PATH}/pulls/318/reviews`;
+
+  function readPr(store: TestStore) {
+    return readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.pr;
+  }
+
+  it("writes pr.review onto the PR ref and projects it", async () => {
+    const { store, actor } = setup();
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [
+        { user: { login: "ayse" }, state: "APPROVED" },
+        { user: { login: "mert" }, state: "CHANGES_REQUESTED" },
+      ],
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+    expect(readPr(store)).toMatchObject({
+      number: 318,
+      state: "review",
+      review: "changes_requested",
+      checks: { total: 2, passing: 2, failing: 0, pending: 0 },
+    });
+    const row = store.db
+      .prepare(
+        `SELECT pr_json FROM task_projections
+         WHERE project_slug = ? AND task_key = 'VIB-301'`,
+      )
+      .get(store.slug) as { pr_json: string };
+    expect(JSON.parse(row.pr_json)).toMatchObject({ review: "changes_requested" });
+    // The observation row carries the two newly-consumed facts.
+    const prov = store.db
+      .prepare(
+        `SELECT details_json FROM provenance WHERE action = 'github.reconcile'`,
+      )
+      .all() as { details_json: string }[];
+    expect(JSON.parse(prov[0]!.details_json)).toMatchObject({
+      prReview: "changes_requested",
+      prChecks: { total: 2, passing: 2 },
+    });
+  });
+
+  it("a FAILED reviews/check-runs read keeps the last-known values (unknown ≠ none)", async () => {
+    const { store, actor } = setup();
+    const good = happyRoutes();
+    good[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "APPROVED" }] };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
+    );
+    expect(readPr(store)).toMatchObject({
+      review: "approved",
+      checks: { total: 2, passing: 2 },
+    });
+
+    // Second pass: GitHub 500s on BOTH quality endpoints. Blanking the pills on
+    // a transient hiccup would read as "CI never ran" / "nobody reviewed".
+    const flaky = happyRoutes();
+    flaky[REVIEWS] = { status: 500, body: { message: "Server Error" } };
+    flaky[`GET ${REPO_PATH}/commits/headsha318/check-runs`] = {
+      status: 500,
+      body: { message: "Server Error" },
+    };
+    const second = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(flaky).fetchImpl },
+    );
+    expect(second).toMatchObject({ status: "reconciled", changed: false });
+    expect(readPr(store)).toMatchObject({
+      review: "approved",
+      checks: { total: 2, passing: 2 },
+    });
+  });
+
+  it("a real CI/review change overwrites the cache (preservation is not stickiness)", async () => {
+    const { store, actor } = setup();
+    const first = happyRoutes();
+    first[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "CHANGES_REQUESTED" }] };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(first).fetchImpl },
+    );
+    expect(readPr(store)).toMatchObject({ review: "changes_requested" });
+
+    const second = happyRoutes();
+    second[REVIEWS] = {
+      body: [
+        { user: { login: "ayse" }, state: "CHANGES_REQUESTED" },
+        { user: { login: "ayse" }, state: "APPROVED" },
+      ],
+    };
+    second[`GET ${REPO_PATH}/commits/headsha318/check-runs`] = {
+      body: {
+        total_count: 2,
+        check_runs: [
+          { status: "completed", conclusion: "failure" },
+          { status: "in_progress", conclusion: null },
+        ],
+      },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(second).fetchImpl },
+    );
+    expect(readPr(store)).toMatchObject({
+      review: "approved",
+      checks: { total: 2, passing: 0, failing: 1, pending: 1 },
+    });
+  });
+
+  it("a settled PR drops pr.review — a frozen verdict next to 'merged' is a lie", async () => {
+    const { store, actor } = setup();
+    const open = happyRoutes();
+    open[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "APPROVED" }] };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(open).fetchImpl },
+    );
+    expect(readPr(store)).toMatchObject({ review: "approved" });
+
+    const merged = happyRoutes();
+    merged[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "closed",
+        merged: true,
+        merged_at: "2026-07-20T09:00:00Z",
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+    merged[`GET ${REPO_PATH}/branches/vib-301-workspace`] = {
+      body: { commit: { sha: "headsha318" } },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(merged).fetchImpl },
+    );
+    const pr = readPr(store);
+    expect(pr).toMatchObject({ state: "merged" });
+    expect("review" in pr!).toBe(false);
+  });
+
+  it("a task.md `repo:` override is inert — the PROJECT repo is used (P13-D-5)", async () => {
+    const { store, actor } = setup();
+    // The override used to win here. Nothing can write the field any more, so a
+    // leftover line must not redirect reconcile at a repo the project never set.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...baseTaskFrontmatter("VIB-301", {
+          title: "Attach execution workspace",
+          stage: "review",
+          branch: "vib-301-workspace",
+          ownerUserId: store.users.arda.id,
+        }),
+        repo: "akin-ozer/some-other-repo",
+      } as ReturnType<typeof baseTaskFrontmatter>,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!;
+    // The line really is on disk (so the assertion below is not vacuous) — and
+    // it is preserved as an UNKNOWN key, not read back as frontmatter.
+    expect(file.content).toContain("repo: akin-ozer/some-other-repo");
+    expect(file.parsed.unknownFrontmatter).toMatchObject({
+      repo: "akin-ozer/some-other-repo",
+    });
+
+    const gh = fakeGithubFetch(happyRoutes());
+    const result = await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "reconciled", repo: "akin-ozer/viberr" });
+    expect(
+      gh.calls.every((c) => c.url.pathname.startsWith("/repos/akin-ozer/viberr/")),
+    ).toBe(true);
   });
 });
 

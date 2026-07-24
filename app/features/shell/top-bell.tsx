@@ -18,6 +18,14 @@ import {
  *
  * Additions over the mock (sanctioned): Escape closes the popover.
  */
+
+/**
+ * UI-14: the popover list is loaded with `limit: 100` by both callers
+ * (routes/project.tsx, routes/_index.tsx) while the head renders the FULL
+ * unread count, so the header could claim more unread than the list can show.
+ * At the cap the footer says so.
+ */
+export const BELL_LIST_CAP = 100;
 export function TopBell({
   notifications,
   unread,
@@ -31,6 +39,8 @@ export function TopBell({
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
+  const popRef = useRef<HTMLDialogElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -39,6 +49,21 @@ export function TopBell({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // UI-45: the popover is rendered BEFORE its trigger in the DOM and nothing
+  // moved focus into it, so a keyboard user who activated the bell then pressed
+  // Tab landed on the account button — the panel they had just opened was
+  // reachable only by Shift+Tab. Focus the panel on open and restore focus to
+  // the bell on close.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) {
+      popRef.current?.focus();
+    } else if (wasOpen.current) {
+      buttonRef.current?.focus();
+    }
+    wasOpen.current = open;
   }, [open]);
 
   // The mark-all-read toast fires on the server RESULT, not on submit: the
@@ -53,6 +78,7 @@ export function TopBell({
       data.ok
         ? "All notifications marked read"
         : (data.error ?? "Marking notifications read failed — try again"),
+      data.ok ? "success" : "error",
     );
   });
 
@@ -93,6 +119,8 @@ export function TopBell({
               anchored to the bell via .ntf-pop's absolute positioning. */}
           <dialog
             open
+            ref={popRef}
+            tabIndex={-1}
             className="ntf-pop"
             aria-label="Notifications"
             data-screen-label="Notifications popover"
@@ -117,6 +145,15 @@ export function TopBell({
               ))}
             </div>
             <div className="ntf-pop-foot">
+              {/* UI-14: the head can claim "150 unread" while this list holds
+                  the newest 100 (the loaders cap at `limit: 100`). Disclose the
+                  cap instead of letting the count silently disagree with the
+                  rows — the same truncation notice /notifications already got. */}
+              {notifications.length >= BELL_LIST_CAP && (
+                <span className="sub" style={{ marginRight: "auto" }}>
+                  Showing the newest {notifications.length}
+                </span>
+              )}
               <button
                 type="button"
                 className="btn ghost sm"
@@ -136,6 +173,7 @@ export function TopBell({
       )}
       <button
         type="button"
+        ref={buttonRef}
         className="icon-btn bell-btn"
         aria-label={
           "Notifications" + (unread > 0 ? " — " + unread + " unread" : "")

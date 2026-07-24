@@ -5,6 +5,7 @@ import {
   ALLOWED_AUTH_PATHS,
   AUTH_BASE_PATH,
   createAuth,
+  oauthProviderOf,
   type ViberrAuth,
 } from "~/lib/auth.server";
 
@@ -93,5 +94,38 @@ describe("ALLOWED_AUTH_PATHS gate", () => {
       email: "someone@viberr.test",
     });
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * P13-D-22: the OAuth whitelist has to know WHICH provider's callback is
+ * running. `databaseHooks.user.create` receives only the user record, so the
+ * provider is read off the endpoint context — the same resolution Better
+ * Auth's own `lastLoginMethod` plugin performs. If this ever stops matching
+ * Better Auth's declared callback path, `oauthProviderOf` returns null and the
+ * whitelist fails closed (no domain admission), which is the safe direction.
+ */
+describe("oauthProviderOf", () => {
+  it("reads the provider id off the social callback context", () => {
+    expect(
+      oauthProviderOf({ path: "/callback/:id", params: { id: "google" } }),
+    ).toBe("google");
+    expect(
+      oauthProviderOf({ path: "/callback/:id", params: { id: "github" } }),
+    ).toBe("github");
+    expect(
+      oauthProviderOf({ path: "/oauth2/callback/:id", params: { id: "github" } }),
+    ).toBe("github");
+    // Substituted paths (no params) still resolve.
+    expect(oauthProviderOf({ path: "/callback/google" })).toBe("google");
+  });
+
+  it("returns null for non-callback paths, unknown providers and no context", () => {
+    expect(oauthProviderOf({ path: "/sign-in/email" })).toBeNull();
+    expect(
+      oauthProviderOf({ path: "/callback/:id", params: { id: "facebook" } }),
+    ).toBeNull();
+    expect(oauthProviderOf(undefined)).toBeNull();
+    expect(oauthProviderOf({})).toBeNull();
   });
 });

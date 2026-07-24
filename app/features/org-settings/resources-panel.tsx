@@ -9,6 +9,7 @@ import type {
 } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { formatRelative } from "~/shared/dates/format";
+import { isMcpHealthStale } from "~/shared/freshness";
 import { slugify } from "~/shared/ids/slugify";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -31,13 +32,12 @@ function rel(iso: string | null): string {
   return iso ? formatRelative(iso) : "never";
 }
 
-/** A health check older than this reads as STALE — a green "up" dot for an
- * hours-old check over-implies "healthy now" (stdio MCPs are only re-checked on
- * save/test, never on page load). Amber + a "stale" hint keeps it honest. */
-const MCP_HEALTH_STALE_MS = 60 * 60 * 1000;
-function isStaleCheck(iso: string | null): boolean {
-  return !!iso && Date.now() - new Date(iso).getTime() > MCP_HEALTH_STALE_MS;
-}
+/** P13-D-32: the "older than an hour reads as STALE" rule is interpretation,
+ * which `architecture.md` forbids a UI component from owning — it now lives in
+ * the shared freshness policy (server door:
+ * `server/interpretation/freshness-policy.server.ts`) next to the identical
+ * rule the GitHub reconcile chip applies. */
+const isStaleCheck = isMcpHealthStale;
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
 function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {
@@ -113,9 +113,10 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
           <Icon name="file" />
           <span>
             Content is plain files inside the folder — inspectable and editable outside
-            Viberr. Agents always read the live folder at run time. <strong>On change</strong>{" "}
-            re-scans the doc count automatically whenever a file in the folder changes;{" "}
-            <strong>manual</strong> only re-scans when you click re-scan.
+            Viberr. This setting controls the <strong>doc count and freshness stamp</strong>{" "}
+            only: <strong>on change</strong> re-scans automatically whenever a file in the
+            folder changes, <strong>manual</strong> only when you click re-scan. It does not
+            pin what an agent reads — every run loads the live folder either way.
           </span>
         </div>
       </div>
@@ -139,6 +140,9 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
   // (F7-MCP1); the edit field always starts empty. Blank on save keeps the
   // existing sealed value; a non-empty value replaces it.
   const [cred, setCred] = useState("");
+  // P13-KM-06: blank means "keep the stored secret", so removing one needs an
+  // explicit intent — without it a repointed server kept sending the old token.
+  const [clearCred, setClearCred] = useState(false);
   const { action, err, setErr } = useModalAction(() => onClose());
   const canSave = !action.busy && slugify(name).length > 1 && target.trim().length > 3;
   return (
@@ -155,7 +159,11 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
             ? "Save & re-test"
             : "Add & test connection"
       }
-      footHint={transport === "stdio" ? "spawned per run, sandboxed" : "health-checked on save & test"}
+      footHint={
+        transport === "stdio"
+          ? "spawned per run — it runs with the server's own privileges"
+          : "a real MCP handshake runs on save & test"
+      }
       onSave={() => {
         if (!canSave) return;
         setErr(null);
@@ -166,6 +174,7 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           transport,
           target: target.trim(),
           cred: cred.trim(),
+          ...(clearCred ? { clearCred: "1" } : {}),
         });
       }}
     >
@@ -231,9 +240,29 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           type="password"
           className="mono"
           value={cred}
-          placeholder={initial?.hasCred ? "•••••••• (unchanged)" : "paste a token or API key"}
+          disabled={clearCred}
+          placeholder={
+            clearCred
+              ? "will be removed on save"
+              : initial?.hasCred
+                ? "•••••••• (unchanged)"
+                : "paste a token or API key"
+          }
           onChange={(e) => setCred(e.target.value)}
         />
+        {initial?.hasCred && (
+          <button
+            type="button"
+            className="btn sm ghost"
+            style={{ alignSelf: "flex-start" }}
+            onClick={() => {
+              setClearCred((v) => !v);
+              setCred("");
+            }}
+          >
+            {clearCred ? "Keep the stored credential" : "Remove the stored credential"}
+          </button>
+        )}
         <div className="def-note">
           <Icon name="lock" />
           <span>
@@ -283,6 +312,12 @@ function SkillModal({
           name: slugify(name),
           summary: summary.trim(),
           body,
+          // P13-KM-18: an empty body means "keep what's on disk" (the editor
+          // only round-trips a truncated read for very large files), so
+          // BLANKING a SKILL.md was impossible from the UI — the server's
+          // explicit `clearBody` escape hatch had no caller. Emptying the
+          // editor on an existing skill now says so.
+          ...(initial && body.trim() === "" ? { clearBody: "1" } : {}),
         });
       }}
     >
@@ -349,6 +384,29 @@ const unmatched = (list: string[], names: string[]) => {
   const set = new Set(names);
   return list.filter((x) => !set.has(x));
 };
+
+/**
+ * KB grants are stored by store DIR. Older profiles (and anything written by the
+ * pre-P13-KM-01 editor) carry the DISPLAY NAME, which resolves to nothing at run
+ * time. Rewrite what we can recognize, so opening and saving a profile repairs
+ * it instead of preserving an unresolvable string forever.
+ */
+const kbDirsOf = (list: string[], kbs: KbView[]) => {
+  const byDir = new Set(kbs.map((k) => k.dir));
+  const nameToDir = new Map(kbs.map((k) => [k.name, k.dir]));
+  const out: string[] = [];
+  for (const entry of list) {
+    const dir = byDir.has(entry) ? entry : nameToDir.get(entry);
+    if (dir && !out.includes(dir)) out.push(dir);
+  }
+  return out;
+};
+
+/** Grants that match neither a dir nor a display name — preserved untouched. */
+const kbLegacyOf = (list: string[], kbs: KbView[]) => {
+  const known = new Set([...kbs.map((k) => k.dir), ...kbs.map((k) => k.name)]);
+  return list.filter((x) => !known.has(x));
+};
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
@@ -369,13 +427,21 @@ function AgentModal({
 }) {
   const skillNames = skills.map((s) => s.name);
   const mcpNames = mcps.map((m) => m.name);
-  const kbNames = kbs.map((k) => k.name);
+  // P13-KM-01: a KB grant is stored — and resolved at run time — by its store
+  // DIRECTORY (`readKbBody` reads `${DATA_ROOT}/kb/<dir>`). This picker used to
+  // key on the display NAME, so granting "P13 facts" wrote `kb: ["P13 facts"]`
+  // and every run silently got zero bytes while both UIs showed it attached.
+  // `kbDirsOf` also repairs an existing display-name grant on open.
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
     initial ? initial.backend : "codex",
   );
   const [summary, setSummary] = useState(initial ? initial.summary : "");
+  // P13-AP-01: the persona (the agent's system prompt) is edited on its own,
+  // separately from the one-line blurb the operator reads. Editing the blurb no
+  // longer flattens the persona.
+  const [persona, setPersona] = useState(initial ? initial.persona : "");
   // P11-47: default a new profile's eligible stages to a real work stage that
   // exists, not a hardcoded "impl" that silently references nothing if the org
   // stage template renames/removes it. Prefer a stage literally named "impl",
@@ -395,14 +461,14 @@ function AgentModal({
     initial ? match(initial.mcps, mcpNames) : [],
   );
   const [selKbs, setSelKbs] = useState<string[]>(
-    initial ? match(initial.kbs, kbNames) : [],
+    initial ? kbDirsOf(initial.kbs, kbs) : [],
   );
   // Legacy template resource strings that don't match an org resource are
   // preserved untouched on save (documented deviation).
   const legacy = {
     skills: initial ? unmatched(initial.skills, skillNames) : [],
     mcps: initial ? unmatched(initial.mcps, mcpNames) : [],
-    kbs: initial ? unmatched(initial.kbs, kbNames) : [],
+    kbs: initial ? kbLegacyOf(initial.kbs, kbs) : [],
   };
   const { action, err, setErr } = useModalAction(() => onClose());
 
@@ -423,8 +489,12 @@ function AgentModal({
       saveLabel={initial ? "Save changes" : "Create profile"}
       footHint={
         initial && initial.used > 0
-          ? "used in " + initial.used + " project" + (initial.used === 1 ? "" : "s") + " — changes apply on next run"
-          : "not deployed yet"
+          ? "adopted by " +
+            initial.used +
+            " project" +
+            (initial.used === 1 ? "" : "s") +
+            " — each keeps its own copy; re-adopt to pick up this edit"
+          : "a template — add it to a project from Agents → Add from library"
       }
       onSave={() => {
         if (!canSave) return;
@@ -435,6 +505,7 @@ function AgentModal({
           name: name.trim(),
           backend,
           summary: summary.trim(),
+          persona: persona.trim(),
           stages: JSON.stringify(selStages),
           skills: JSON.stringify([...selSkills, ...legacy.skills]),
           mcps: JSON.stringify([...selMcps, ...legacy.mcps]),
@@ -493,7 +564,8 @@ function AgentModal({
       </div>
       <div className="field">
         <label className="flabel" htmlFor="ga-sum">
-          Role summary
+          Role summary{" "}
+          <span className="fhint">the OPERATOR reads this when choosing an agent</span>
         </label>
         <input
           id="ga-sum"
@@ -503,10 +575,41 @@ function AgentModal({
           onChange={(e) => setSummary(e.target.value)}
         />
       </div>
+      <div className="def-note">
+        <Icon name="shield" />
+        <span>
+          A template starts with <strong>delivery withheld</strong> — it can read,
+          validate and comment, but not write to the repository. Capability policy is a
+          per-project decision: open the profile in a project&rsquo;s Agents page to grant
+          branch, commit or pull-request rights there.
+        </span>
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="ga-persona">
+          Persona / instructions{" "}
+          <span className="fhint">
+            the agent's working instructions — its system prompt on every run; markdown ok
+          </span>
+        </label>
+        <textarea
+          id="ga-persona"
+          className="ta"
+          rows={6}
+          value={persona}
+          placeholder="How this agent works: its responsibilities, standards, reporting format…"
+          onChange={(e) => setPersona(e.target.value)}
+        />
+      </div>
       <div className="field">
         <span className="flabel">
           Default eligible stages<span className="req">*</span>{" "}
-          <span className="fhint">Done is human-only, always</span>
+          {/* P13-D-9: "always" was an over-promise. No AGENT profile can ever
+              transition a task to Done — that part holds for everything this
+              org-level editor creates — but a project's operator can, under the
+              auto preset with an explicit grant. This panel is org-scoped and
+              cannot know a project's policy, so it states the guarantee it
+              actually makes rather than one it cannot. */}
+          <span className="fhint">Done is closed by a human, never by an agent</span>
         </span>
         <div className="pick-chips">
           {stageOpts.map((s) => (
@@ -566,8 +669,9 @@ function AgentModal({
                 <button
                   type="button"
                   key={k.id}
-                  className={"pick-chip" + (selKbSet.has(k.name) ? " on" : "")}
-                  onClick={() => toggle(selKbs, setSelKbs, k.name)}
+                  className={"pick-chip" + (selKbSet.has(k.dir) ? " on" : "")}
+                  onClick={() => toggle(selKbs, setSelKbs, k.dir)}
+                  title={k.uri + "/"}
                 >
                   {k.name}
                 </button>
@@ -619,7 +723,7 @@ function KbPanel({
   onDelete,
 }: {
   kbs: KbView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (slug: string) => number;
   reindexing: string | null;
   onNew: () => void;
   onBrowse: (kb: KbView) => void;
@@ -653,8 +757,8 @@ function KbPanel({
               </span>
               <span className="sub">
                 read live · re-scanned {rel(kb.lastIndexedAt)}
-                {usedBy(kb.id, kb.name) > 0
-                  ? " · " + usedBy(kb.id, kb.name) + " profiles"
+                {usedBy(kb.dir) > 0
+                  ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
                   : ""}
               </span>
             </span>
@@ -766,7 +870,9 @@ function McpPanel({
                     (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
-                    : "not health-checked yet"}
+                    : /* P13-UI-16: defensive — every save/test writes `up`, so a
+                         null only appears for a row written outside Viberr. */
+                      "not health-checked yet"}
                 {m.hasCred ? " · auth: configured" : ""}
               </span>
             </span>
@@ -816,7 +922,7 @@ function SkillPanel({
   onDelete,
 }: {
   skills: SkillView[];
-  usedBy: (id: string, name: string) => number;
+  usedBy: (slug: string) => number;
   onNew: () => void;
   onBrowse: (s: SkillView) => void;
   onEdit: (s: SkillView) => void;
@@ -851,8 +957,8 @@ function SkillPanel({
               <span className="sub mono">
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · updated {rel(s.updatedAt)}
-                {usedBy(s.id, s.name) > 0
-                  ? " · " + usedBy(s.id, s.name) + " profiles"
+                {usedBy(s.name) > 0
+                  ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
                   : ""}
               </span>
             </span>
@@ -929,6 +1035,9 @@ function AgentPanel({
               <AgentGlyph backend={a.backend} />
               <span className="rsrc-main">
                 <b>{a.name}</b>
+                {/* P13-AP-09: the row subtitle is the SHORT blurb. It used to
+                    render the markdown body — i.e. the agent's entire persona —
+                    so a seeded profile printed a 600-word system prompt here. */}
                 <span className="sub">{a.summary}</span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
@@ -990,8 +1099,18 @@ export function ResourcesPanel({
   const [reindexing, setReindexing] = useBusyRow(reindexAction);
   const [testing, setTesting] = useBusyRow(testAction);
 
-  const usedBy = (key: "skills" | "mcps" | "kbs", id: string, name: string) =>
-    gagents.filter((a) => a[key].includes(id) || a[key].includes(name)).length;
+  /**
+   * How many GLOBAL TEMPLATES reference this resource.
+   *
+   * P13-KM-08: this compared against the row `id` (a `kb_…`/`sk_…` value that
+   * never appears in a grant) and the display `name`, but a grant stores the
+   * store SLUG — so the KB count was structurally always 0 while the skill
+   * count only worked because a skill's name IS its folder. Callers now pass
+   * the slug. The label says "templates" because project deployments carry
+   * their own copies and are not counted here.
+   */
+  const usedBy = (key: "skills" | "mcps" | "kbs", slug: string) =>
+    gagents.filter((a) => a[key].includes(slug)).length;
 
   const doDelete = () => {
     if (!confirm) return;
@@ -1012,7 +1131,7 @@ export function ResourcesPanel({
       <div className="rsrc-grid">
         <KbPanel
           kbs={kbs}
-          usedBy={(id, name) => usedBy("kbs", id, name)}
+          usedBy={(slug) => usedBy("kbs", slug)}
           reindexing={reindexing}
           onNew={() => setModal({ kind: "kb", item: null })}
           onBrowse={(kb) => setBrowsing({ kind: "kb", id: kb.id })}
@@ -1038,7 +1157,7 @@ export function ResourcesPanel({
 
         <SkillPanel
           skills={skills}
-          usedBy={(id, name) => usedBy("skills", id, name)}
+          usedBy={(slug) => usedBy("skills", slug)}
           onNew={() => setModal({ kind: "skill", item: null })}
           onBrowse={(s) => setBrowsing({ kind: "skill", id: s.id })}
           onEdit={(s) => setModal({ kind: "skill", item: s })}

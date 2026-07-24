@@ -53,6 +53,24 @@ export const BCLS: Record<BoundaryId, string> = {
 };
 
 /** "Always reserved for humans" — rendered from the server invariant list
- * (ruling 2), never hard-coded UI strings. */
-export const ALWAYS_HUMAN_LABELS: readonly string[] =
-  ALWAYS_HUMAN_CAPABILITY_IDS.map((id) => capabilityById(id)?.label ?? id);
+ * (ruling 2), never hard-coded UI strings.
+ *
+ * P13-D-PRD-3: the rows used to be bare labels under an unqualified
+ * "all profiles" pill. Every capability in the list is scoped to `agent`
+ * profiles, and one of them — Transition a task to Done — has a real,
+ * deliberate operator exception (full autonomy + an explicit
+ * `completion-for-acceptance: direct` grant). The page disclosed that
+ * exception 150 lines lower while flatly contradicting it here. */
+export const ALWAYS_HUMAN_ROWS: readonly {
+  id: string;
+  label: string;
+  /** Set when a non-agent profile can reach this action under a named policy. */
+  exception: string | null;
+}[] = ALWAYS_HUMAN_CAPABILITY_IDS.map((id) => ({
+  id,
+  label: capabilityById(id)?.label ?? id,
+  exception:
+    id === "transition-to-done"
+      ? "except an operator at full autonomy with an explicit Accept completion into Done grant — see below"
+      : null,
+}));

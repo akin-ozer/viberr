@@ -112,6 +112,7 @@ describe("global agent profiles", () => {
         name: "Security reviewer",
         backend: "claude",
         summary: "Second pair of eyes on IAM.",
+        persona: "",
         stages: ["review"],
         skills: ["terraform-review"],
         mcps: [],
@@ -120,8 +121,12 @@ describe("global agent profiles", () => {
       ACTOR,
       ctx,
     );
+    // P13-AP-05 (owner ruling 1): a template is ADOPTED by a project from the
+    // Agents → Add from library action; it is never auto-deployed, and the old
+    // toast pointed at a "grant eligibility in a project's policy" surface that
+    // did not exist.
     expect(toast).toBe(
-      "Security reviewer created — grant it eligibility in a project's policy to deploy",
+      "Security reviewer created — add it to a project from Agents → Add from library",
     );
     expect(profile.id).toBe("security-reviewer");
     expect(existsSync(agentProfileFilePath("security-reviewer", dataRoot))).toBe(true);
@@ -133,6 +138,7 @@ describe("global agent profiles", () => {
           name: "Security Reviewer",
           backend: "codex",
           summary: "dup",
+          persona: "",
           stages: ["impl"],
           skills: [],
           mcps: [],
@@ -154,6 +160,7 @@ describe("global agent profiles", () => {
         name: "Developer",
         backend: "claude",
         summary: "New summary.",
+        persona: "",
         stages: ["impl"],
         skills: ["conventional-commits"],
         mcps: ["github-mcp"],
@@ -170,12 +177,81 @@ describe("global agent profiles", () => {
     expect(parsed!.frontmatter.extras).toEqual([
       { label: "Run the validation suite", mode: "direct" },
     ]);
-    // `desc` is another field the modal doesn't own — preserved on edit.
-    expect(parsed!.frontmatter.desc).toBe("Short operator-facing summary.");
+    // P13-AP-02: `desc` IS the summary the operator reads, so an edited summary
+    // must land there. It used to be left untouched while only the body changed,
+    // so what the operator saw never updated. (The old test enshrined that bug.)
+    expect(parsed!.frontmatter.desc).toBe("New summary.");
     expect(parsed!.frontmatter.backends).toEqual(["claude"]);
     expect(parsed!.frontmatter.stages).toEqual(["impl"]);
     expect(parsed!.frontmatter.resources.skills).toEqual(["conventional-commits"]);
-    expect(parsed!.description).toBe("New summary.");
+    // P13-AP-01: a blank persona KEEPS the existing body — editing the one-line
+    // summary must never flatten a profile's system prompt.
+    expect(parsed!.description).toBe("Implements stage work.");
+  });
+
+  it("an edited persona replaces the body while the summary stays the blurb", () => {
+    const { db, dataRoot, ctx } = setup();
+    writeTemplate(dataRoot, "developer", "specialist");
+    saveGlobalAgentProfile(
+      db,
+      {
+        id: "developer",
+        name: "Developer",
+        backend: "claude",
+        summary: "Implements stage work.",
+        persona: "You are the Developer.\n\nShip the smallest correct change.",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    const raw = readFileSync(agentProfileFilePath("developer", dataRoot), "utf8");
+    const { parsed } = parseAgentProfileContent(raw, { fallbackId: "developer" });
+    expect(parsed!.frontmatter.desc).toBe("Implements stage work.");
+    expect(parsed!.description).toBe(
+      "You are the Developer.\n\nShip the smallest correct change.",
+    );
+  });
+
+  it("a created template carries EXPLICIT capability grants, never an empty list", () => {
+    const { db, dataRoot, ctx } = setup();
+    saveGlobalAgentProfile(
+      db,
+      {
+        name: "Doc writer",
+        backend: "claude",
+        summary: "Writes docs.",
+        persona: "You write documentation.",
+        stages: ["impl"],
+        skills: [],
+        mcps: [],
+        kbs: [],
+      },
+      ACTOR,
+      ctx,
+    );
+    const raw = readFileSync(agentProfileFilePath("doc-writer", dataRoot), "utf8");
+    const { parsed } = parseAgentProfileContent(raw, { fallbackId: "doc-writer" });
+    // P13-AP-06: `capabilities: []` means "unspecified", which the tool policy
+    // reads as FULL access — a casually created template would carry silent
+    // repo-write power into every project that adopts it.
+    expect(parsed!.frontmatter.capabilities.length).toBeGreaterThan(0);
+    const byId = new Map(
+      parsed!.frontmatter.capabilities.map((c) => [c.capabilityId, c.mode]),
+    );
+    expect(byId.get("merge-pull-request")).toBe("human");
+    expect(byId.get("report-validation-verdict")).toBe("off");
+    expect(byId.get("use-web-search-fetch")).toBe("direct");
+    // P13: this editor has no capability UI, so a template must NOT start with
+    // repo-write. Live evidence: an "Org Docs Writer" whose own summary said
+    // "never touches app code" was created holding all four delivery grants.
+    expect(byId.get("execute-code-or-write-repo")).toBe("off");
+    expect(byId.get("create-task-branch")).toBe("off");
+    expect(byId.get("commit-push-branch")).toBe("off");
+    expect(byId.get("open-review-pr")).toBe("off");
   });
 
   it("delete is refused while deployed; otherwise removes the file", () => {

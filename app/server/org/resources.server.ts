@@ -33,6 +33,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
+import { updateResourceReferences } from "./resource-references.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -134,11 +135,17 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 
 // ------------------------------------------------------- knowledge bases
 
-// R-D (P11-60): "on change" is now REAL — the file watcher re-indexes a KB when
-// its store files change, the same mechanism the rest of the store uses. The
-// old "nightly" mode was decorative (nothing ever scheduled it) and is removed;
-// a KB is either watcher-driven ("on change", the default) or pinned to explicit
+// R-D (P11-60): "on change" is REAL — the file watcher re-indexes a KB when its
+// store files change, the same mechanism the rest of the store uses. The old
+// "nightly" mode was decorative (nothing ever scheduled it) and is removed; a KB
+// is either watcher-driven ("on change", the default) or pinned to explicit
 // re-scans only ("manual").
+//
+// P13-KM-15 — what this mode does NOT do: it controls the DOC-COUNT/freshness
+// metadata only. Agents always read the live folder at run time (readKbBody
+// walks the real directory), so "manual" never pins the CONTENT a run sees. The
+// KB modal's copy says exactly this so the toggle can't be mistaken for a
+// content freeze.
 export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
 export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
@@ -217,12 +224,12 @@ export function getKnowledgeBase(
   return null;
 }
 
-export function saveKnowledgeBase(
+export async function saveKnowledgeBase(
   db: DatabaseSync,
   input: { id?: string | null; name: string; refresh: string },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { kb: KbView; toast: string } {
+): Promise<{ kb: KbView; toast: string }> {
   const name = input.name.trim();
   const dir = slugify(name);
   if (name.length < 2 || !dir) {
@@ -261,6 +268,10 @@ export function saveKnowledgeBase(
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
     else mkdirSync(newAbs, { recursive: true });
+    // P13-KM-07: a rename used to move the folder and leave every agent grant
+    // pointing at the old dir — silently, on both the template and deployment
+    // side. Rewrite the references with the move.
+    await updateResourceReferences("kb", oldDir, dir, ctx.dataRoot);
   } else {
     mkdirSync(kbDirPath(dir, ctx.dataRoot), { recursive: true });
   }
@@ -309,15 +320,18 @@ export function saveKnowledgeBase(
   };
 }
 
-export function deleteKnowledgeBase(
+export async function deleteKnowledgeBase(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { toast: string } {
+): Promise<{ toast: string }> {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
   rmSync(kbDirPath(kb.dir, ctx.dataRoot), { recursive: true, force: true });
+  // P13-KM-07: drop the now-dangling grants instead of leaving every profile
+  // pointing at a folder that no longer exists.
+  await updateResourceReferences("kb", kb.dir, null, ctx.dataRoot);
   // Key on the folder (dir is UNIQUE) so a disk-only synthetic id also clears
   // any metadata row that happens to exist.
   db.prepare(`DELETE FROM org_knowledge_bases WHERE dir = ?`).run(kb.dir);
@@ -382,9 +396,25 @@ export function reindexKnowledgeBaseByDir(
   dir: string,
   ctx: OrgSeedContext = {},
 ): { name: string; docCount: number } | null {
-  const row = db
+  let row = db
     .prepare(`SELECT id, name, refresh FROM org_knowledge_bases WHERE dir = ?`)
     .get(dir) as { id: string; name: string; refresh: string } | undefined;
+  // P13-KM-16: a DISK-ONLY KB (a folder created outside Viberr, which the
+  // listings show as a first-class KB) had no row, so the watcher bailed and
+  // its freshness never advanced — "re-scanned never" forever, while the same
+  // folder re-indexed fine the moment anyone edited it in the UI. Adopt it, the
+  // same adopt-on-touch rule the store mutations already use.
+  if (!row && existsSync(kbDirPath(dir, ctx.dataRoot))) {
+    const now = new Date().toISOString();
+    const id = newId("kb");
+    db.prepare(
+      `INSERT INTO org_knowledge_bases
+         (id, name, dir, refresh, last_indexed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'on change', ?, ?, ?)`,
+    ).run(id, dir, dir, now, now, now);
+    logger.info("adopted disk-only knowledge base on watcher re-index", { dir });
+    row = { id, name: dir, refresh: "on change" };
+  }
   if (!row) return null;
   if (row.refresh === "manual") return null;
   const abs = kbDirPath(dir, ctx.dataRoot);
@@ -477,6 +507,16 @@ export function getMcpCredential(
   }
 }
 
+/** Open a sealed credential for a PROBE, never throwing (a rotated key just
+ *  means the probe runs unauthenticated, exactly like a run would). */
+function safeOpenSecret(sealed: string): string | null {
+  try {
+    return openSecret(sealed);
+  } catch {
+    return null;
+  }
+}
+
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at FROM org_mcp_servers`;
 
@@ -514,7 +554,11 @@ export interface McpChild {
   kill(signal?: string): void;
 }
 
-export type McpSpawn = (command: string, args: string[]) => McpChild;
+export type McpSpawn = (
+  command: string,
+  args: string[],
+  token?: string | null,
+) => McpChild;
 
 export interface McpProbeOptions {
   fetchImpl?: typeof fetch;
@@ -523,9 +567,12 @@ export interface McpProbeOptions {
   spawnImpl?: McpSpawn;
 }
 
-const defaultSpawn: McpSpawn = (command, args) =>
+const defaultSpawn: McpSpawn = (command, args, token) =>
   spawn(command, args, {
     stdio: ["pipe", "pipe", "ignore"],
+    ...(token
+      ? { env: { ...process.env, MCP_CREDENTIAL: token } }
+      : {}),
   }) as unknown as McpChild;
 
 export type StdioDiscovery =
@@ -542,7 +589,7 @@ export type StdioDiscovery =
  */
 export async function discoverStdioMcpTools(
   command: string,
-  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+  options: { spawnImpl?: McpSpawn; timeoutMs?: number; token?: string | null } = {},
 ): Promise<StdioDiscovery> {
   const parts = command.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
@@ -553,7 +600,11 @@ export async function discoverStdioMcpTools(
   return new Promise<StdioDiscovery>((resolve) => {
     let child: McpChild;
     try {
-      child = spawnImpl(parts[0]!, parts.slice(1));
+      // P13-KM-05: a credentialed stdio server is spawned WITH its credential,
+      // exactly as `resolveSpecialistMcpServers` does at run time. Probing
+      // without it reported "unreachable" in Settings for servers that work
+      // perfectly inside a run.
+      child = spawnImpl(parts[0]!, parts.slice(1), options.token ?? null);
     } catch {
       resolve({ kind: "down", reason: "command not found" });
       return;
@@ -630,18 +681,38 @@ export async function discoverStdioMcpTools(
       id: 1,
       method: "initialize",
       params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "viberr", version: "0" },
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: MCP_CLIENT_CAPABILITIES,
+        clientInfo: MCP_CLIENT_INFO,
       },
     });
   });
 }
 
 /**
- * Honest reachability probe: HTTP targets only; ANY HTTP response counts
- * as reachable (the server exists — tool discovery is a real MCP handshake
- * we don't fake). stdio targets are spawned per run → skipped.
+ * The MCP client capabilities the discovery handshake declares (P13-LV-19).
+ *
+ * The old handshake advertised `capabilities: {}`, and a server that gates
+ * tools on client capabilities then hid them: Viberr's Settings row said
+ * "13 tools discovered" for the Everything server while both live runs
+ * enumerated **15** from the same command. The number shown has to be the
+ * number a run gets, so the probe declares the same capability set the SDK
+ * clients do.
+ */
+const MCP_CLIENT_CAPABILITIES = {
+  roots: { listChanged: true },
+  sampling: {},
+  elicitation: {},
+};
+
+const MCP_PROTOCOL_VERSION = "2025-06-18";
+
+const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
+
+/**
+ * Reachability probe for an HTTP target. Kept for the "is anything listening"
+ * question; the real health signal is {@link discoverHttpMcpTools}, which
+ * proves the endpoint speaks MCP. stdio targets are spawned per run → skipped.
  */
 export async function probeMcpTarget(
   transport: "HTTP" | "stdio",
@@ -678,6 +749,131 @@ export async function probeMcpTarget(
   }
 }
 
+/**
+ * Real tool discovery over Streamable HTTP (P13-LV-10).
+ *
+ * The old HTTP health check treated ANY HTTP response as "reachable": pointing
+ * a server at a URL that answers 400 to a GET — or at any live website —
+ * produced a green dot and the word "reachable", and no tool count was ever
+ * discovered, so an HTTP MCP could never show what it actually offers. This
+ * runs the same JSON-RPC handshake the stdio path does: `initialize` →
+ * `notifications/initialized` → `tools/list`, carrying the session id the
+ * server hands back, and accepting either a JSON or an SSE-framed body.
+ *
+ * A credentialed server is probed WITH its credential (P13-KM-05), so a server
+ * that works in a run doesn't report "unreachable" in Settings.
+ */
+export async function discoverHttpMcpTools(
+  target: string,
+  options: McpProbeOptions & { token?: string | null } = {},
+): Promise<StdioDiscovery> {
+  let url: URL;
+  try {
+    url = new URL(target);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { kind: "down", reason: "endpoint is not an http(s) URL" };
+    }
+  } catch {
+    return { kind: "down", reason: "endpoint is not a valid URL" };
+  }
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const started = Date.now();
+  let sessionId: string | null = null;
+
+  const rpc = async (body: unknown): Promise<Response> => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+    };
+    if (sessionId) headers["mcp-session-id"] = sessionId;
+    if (options.token) headers.authorization = `Bearer ${options.token}`;
+    return fetchImpl(url.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  };
+
+  /** Body → the first JSON-RPC message, whether raw JSON or SSE-framed. */
+  const readMessage = async (res: Response): Promise<Record<string, unknown> | null> => {
+    const text = await res.text();
+    if (!text.trim()) return null;
+    const direct = safeJson(text);
+    if (direct) return direct;
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.startsWith("data:")) continue;
+      const parsed = safeJson(line.slice(5).trim());
+      if (parsed) return parsed;
+    }
+    return null;
+  };
+
+  try {
+    const initRes = await rpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: MCP_CLIENT_CAPABILITIES,
+        clientInfo: MCP_CLIENT_INFO,
+      },
+    });
+    if (!initRes.ok) {
+      return {
+        kind: "down",
+        reason:
+          initRes.status === 401 || initRes.status === 403
+            ? "authentication rejected"
+            : `endpoint answered ${initRes.status} — not an MCP endpoint?`,
+      };
+    }
+    sessionId = initRes.headers.get("mcp-session-id");
+    const initMsg = await readMessage(initRes);
+    if (!initMsg || !("result" in initMsg)) {
+      return { kind: "down", reason: "responded, but not with MCP initialize" };
+    }
+
+    await rpc({ jsonrpc: "2.0", method: "notifications/initialized" });
+
+    const listRes = await rpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    });
+    if (!listRes.ok) {
+      return { kind: "down", reason: `tools/list answered ${listRes.status}` };
+    }
+    const listMsg = await readMessage(listRes);
+    const tools = (listMsg?.result as { tools?: unknown } | undefined)?.tools;
+    if (!Array.isArray(tools)) {
+      return { kind: "down", reason: "no tools in response" };
+    }
+    return { kind: "up", latencyMs: Date.now() - started, tools: tools.length };
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.name === "TimeoutError"
+        ? "connection timed out"
+        : "connection refused";
+    return { kind: "down", reason };
+  }
+}
+
+function safeJson(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function saveMcpServer(
   db: DatabaseSync,
   input: {
@@ -686,6 +882,10 @@ export async function saveMcpServer(
     transport: string;
     target: string;
     cred: string;
+    /** Explicit "remove the stored credential" intent (P13-KM-06). A blank
+     *  `cred` still means "keep what is stored" — the UI never round-trips the
+     *  sealed secret, so blank cannot mean "clear". */
+    clearCred?: boolean;
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
@@ -699,7 +899,12 @@ export async function saveMcpServer(
   // doesn't wipe the credential. A non-empty field replaces it.
   const rawCred = input.cred.trim();
   let cred: string | null;
-  if (rawCred) {
+  if (input.clearCred) {
+    // P13-KM-06: a credential could never be REMOVED — blank meant "keep", so a
+    // server repointed at a different target kept sending the old token forever
+    // and the only way out was deleting and recreating the server.
+    cred = null;
+  } else if (rawCred) {
     cred = isSecretBox(rawCred) ? rawCred : sealSecret(rawCred);
   } else if (input.id) {
     const existing = db
@@ -710,6 +915,15 @@ export async function saveMcpServer(
     cred = null;
   }
   if (name.length < 2) throw AppError.validation("Give the server a name.");
+  // P13-KM-12: `viberr` is the OPERATOR's in-process governance server and
+  // `viberr_agent` is the specialist toolkit. A row under either name is
+  // unusable — the resolvers skip the reserved name — and shadows differently
+  // per backend, so refuse it at save instead of accepting a dead server.
+  if (name === "viberr" || name === "viberr_agent" || name === "viberr-agent") {
+    throw AppError.validation(
+      `"${name}" is reserved for Viberr's built-in agent tools — pick another name.`,
+    );
+  }
   if (target.length < 4) {
     throw AppError.validation(
       transport === "stdio" ? "Enter the command." : "Enter the endpoint.",
@@ -723,57 +937,38 @@ export async function saveMcpServer(
 
   const now = new Date().toISOString();
 
-  // stdio → real tool-count discovery (spawn + handshake); HTTP → reachability
-  // probe only (tool counts over HTTP are never fabricated).
-  let up: number | null;
-  let checkedAt: string | null;
-  let tools: number | null; // value to store; HTTP keeps the existing column
-  let toast: string;
-  if (transport === "stdio") {
-    const disc = await discoverStdioMcpTools(target, options);
-    checkedAt = now;
-    if (disc.kind === "up") {
-      up = 1;
-      tools = disc.tools;
-      toast = `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered · spawned per run`;
-    } else {
-      up = 0;
-      tools = null;
-      toast = `${name} saved — command didn't respond (${disc.reason}); check it`;
-    }
-  } else {
-    const probe = await probeMcpTarget(transport, target, options);
-    up = probe.kind === "up" ? 1 : 0;
-    checkedAt = now;
-    tools = null;
-    toast =
-      probe.kind === "up"
-        ? `${name} saved — endpoint reachable (${(probe as { latencyMs: number }).latencyMs}ms)`
-        : `${name} saved — endpoint unreachable, check the target`;
-  }
+  // BOTH transports now run the real MCP handshake and store a real tool count
+  // (P13-LV-10): an HTTP endpoint used to be "reachable" on any HTTP response —
+  // including a 400 — and never reported tools at all. The probe carries the
+  // server's credential so a credentialed server isn't reported down (P13-KM-05).
+  const plainCred = cred && isSecretBox(cred) ? safeOpenSecret(cred) : null;
+  const disc =
+    transport === "stdio"
+      ? await discoverStdioMcpTools(target, { ...options, token: plainCred })
+      : await discoverHttpMcpTools(target, { ...options, token: plainCred });
+  const checkedAt: string | null = now;
+  const up = disc.kind === "up" ? 1 : 0;
+  const tools = disc.kind === "up" ? disc.tools : null;
+  const spawnNote = transport === "stdio" ? " · spawned per run" : "";
+  const toast =
+    disc.kind === "up"
+      ? `${name} saved — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
+      : transport === "stdio"
+        ? `${name} saved — command didn't respond (${disc.reason}); check it`
+        : `${name} saved — endpoint didn't answer as an MCP server (${disc.reason})`;
 
   let id = input.id ?? null;
   if (id) {
     const existing = getMcpServer(db, id);
     if (!existing) throw AppError.notFound("No such MCP server.");
-    // stdio updates the discovered count; HTTP has no local discovery, so it
-    // CLEARS the count (leaving it would keep a stale stdio tool count showing
-    // after a server is edited from stdio → HTTP).
-    if (transport === "stdio") {
-      db.prepare(
-        `UPDATE org_mcp_servers
-         SET name = ?, transport = ?, target = ?, cred_ref = ?,
-             tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
-    } else {
-      db.prepare(
-        `UPDATE org_mcp_servers
-         SET name = ?, transport = ?, target = ?, cred_ref = ?,
-             tools_count = NULL, up = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(name, transport, target, cred, up, checkedAt, now, id);
-    }
+    // Both transports now carry a REAL discovered count (null when the probe
+    // failed), so there is one write path and no stale count can survive an edit.
+    db.prepare(
+      `UPDATE org_mcp_servers
+       SET name = ?, transport = ?, target = ?, cred_ref = ?,
+           tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
     recordAudit(db, {
       action: "org.mcp.updated",
       actor,
@@ -810,55 +1005,53 @@ export async function testMcpServer(
   if (!existing) throw AppError.notFound("No such MCP server.");
   const now = new Date().toISOString();
 
-  // stdio → real tool-count discovery; HTTP → reachability probe.
-  if (existing.transport === "stdio") {
-    const disc = await discoverStdioMcpTools(existing.target, options);
-    if (disc.kind === "up") {
-      db.prepare(
-        `UPDATE org_mcp_servers
-         SET up = 1, tools_count = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(disc.tools, now, now, id);
-      const fresh = getMcpServer(db, id)!;
-      return {
-        mcp: fresh,
-        toast: `${fresh.name} healthy — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms`,
-      };
-    }
+  // BOTH transports run the real MCP handshake (P13-LV-10) with the server's
+  // credential when it has one (P13-KM-05), so "healthy" means "answered as an
+  // MCP server", not "something replied to a GET".
+  const sealed = db
+    .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE id = ?`)
+    .get(id) as { cred_ref: string | null } | undefined;
+  const token =
+    sealed?.cred_ref && isSecretBox(sealed.cred_ref)
+      ? safeOpenSecret(sealed.cred_ref)
+      : null;
+  const disc =
+    existing.transport === "stdio"
+      ? await discoverStdioMcpTools(existing.target, { ...options, token })
+      : await discoverHttpMcpTools(existing.target, { ...options, token });
+
+  if (disc.kind === "up") {
     db.prepare(
       `UPDATE org_mcp_servers
-       SET up = 0, tools_count = NULL, last_checked_at = ?, updated_at = ?
+       SET up = 1, tools_count = ?, last_checked_at = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(now, now, id);
+    ).run(disc.tools, now, now, id);
     const fresh = getMcpServer(db, id)!;
-    return { mcp: fresh, toast: `${fresh.name} unreachable — ${disc.reason}` };
+    return {
+      mcp: fresh,
+      toast: `${fresh.name} healthy — ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms`,
+    };
   }
-
-  const probe = await probeMcpTarget(existing.transport, existing.target, options);
   db.prepare(
-    `UPDATE org_mcp_servers SET up = ?, last_checked_at = ?, updated_at = ?
+    `UPDATE org_mcp_servers
+     SET up = 0, tools_count = NULL, last_checked_at = ?, updated_at = ?
      WHERE id = ?`,
-  ).run(probe.kind === "up" ? 1 : 0, now, now, id);
+  ).run(now, now, id);
   const fresh = getMcpServer(db, id)!;
-  const toast =
-    probe.kind === "up"
-      ? fresh.tools !== null
-        ? `${fresh.name} healthy — ${fresh.tools} tools · ${probe.latencyMs}ms`
-        : `${fresh.name} reachable — ${probe.latencyMs}ms`
-      : probe.kind === "down"
-        ? `${fresh.name} unreachable — ${probe.reason}`
-        : `${fresh.name} — probe skipped`;
-  return { mcp: fresh, toast };
+  return { mcp: fresh, toast: `${fresh.name} unreachable — ${disc.reason}` };
 }
 
-export function deleteMcpServer(
+export async function deleteMcpServer(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-): { toast: string } {
+  ctx: OrgSeedContext = {},
+): Promise<{ toast: string }> {
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
   db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run(id);
+  // P13-KM-07: an MCP grant is a name reference like a KB/skill one.
+  await updateResourceReferences("mcps", existing.name, null, ctx.dataRoot);
   recordAudit(db, {
     action: "org.mcp.removed",
     actor,
@@ -982,7 +1175,7 @@ export function getSkill(
   return null;
 }
 
-export function saveSkill(
+export async function saveSkill(
   db: DatabaseSync,
   input: {
     id?: string | null;
@@ -996,7 +1189,7 @@ export function saveSkill(
   },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { skill: SkillView; toast: string } {
+): Promise<{ skill: SkillView; toast: string }> {
   const name = slugify(input.name);
   const summary = input.summary.trim();
   if (name.length < 2) throw AppError.validation("Give the skill a name.");
@@ -1053,6 +1246,8 @@ export function saveSkill(
       throw AppError.conflict(`A skill folder ${name}/ already exists.`);
     }
     if (existsSync(oldAbs)) renameSync(oldAbs, newAbs);
+    // P13-KM-07: keep every grant pointing at the renamed skill.
+    await updateResourceReferences("skills", oldName, name, ctx.dataRoot);
   }
 
   const dir = skillDirPath(name, ctx.dataRoot);
@@ -1103,18 +1298,20 @@ export function saveSkill(
   };
 }
 
-export function deleteSkill(
+export async function deleteSkill(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
   ctx: OrgSeedContext = {},
-): { toast: string } {
+): Promise<{ toast: string }> {
   const skill = getSkill(db, id, ctx);
   if (!skill) throw AppError.notFound("No such skill.");
   rmSync(skillDirPath(skill.name, ctx.dataRoot), {
     recursive: true,
     force: true,
   });
+  // P13-KM-07: drop the dangling grants with the folder.
+  await updateResourceReferences("skills", skill.name, null, ctx.dataRoot);
   // Key on the folder (name is UNIQUE) so a disk-only synthetic id also clears
   // any metadata row that happens to exist.
   db.prepare(`DELETE FROM org_skills WHERE name = ?`).run(skill.name);

@@ -26,7 +26,7 @@ afterEach(() => {
   resetSseBrokerForTests();
 });
 
-describe("translateProjectionEvent shapes (CONVENTIONS payload contract)", () => {
+describe("translateProjectionEvent shapes (docs/architecture/decisions.md payload contract)", () => {
   it("task.updated carries compact facts (slug/key/stage/readiness)", () => {
     const out = validated(
       translateProjectionEvent(

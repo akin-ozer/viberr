@@ -65,6 +65,69 @@ export interface LogLine {
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
 }
 
+/**
+ * P13-D-11: the tag of the SYNTHETIC boundary the projection inserts between
+ * the runs of one agent group (UI-53's `── resumed · run N of M ──`). It is not
+ * a stored `run_log_lines` row, so it never counts toward
+ * `logWindow.totalLines` — anything counting "events" must exclude it or the
+ * count drifts above the number of lines that actually exist.
+ *
+ * The server writes the same literal in `run-projection.server.ts`; the client
+ * both recognises it (counting) and re-creates it (backward paging across a run
+ * boundary), so the shape lives here, on the shared wire type.
+ */
+export const RUN_BOUNDARY_TAG = "run·resumed";
+
+/** True for a synthetic run boundary rather than a stored console line. */
+export function isRunBoundary(line: LogLine): boolean {
+  return line.ev === "meta" && line.tag === RUN_BOUNDARY_TAG;
+}
+
+/**
+ * The boundary row shown ABOVE run `runNumber`'s block (1-based, of
+ * `runTotal`). Byte-identical to the projection's own boundary so a block the
+ * console paged in looks exactly like one the loader shipped.
+ */
+export function runBoundaryLine(runNumber: number, runTotal: number): LogLine {
+  return {
+    t: "",
+    ev: "meta",
+    tag: RUN_BOUNDARY_TAG,
+    text: `── resumed · run ${runNumber} of ${runTotal} ──`,
+  };
+}
+
+/**
+ * P13-D-11 / NFR5 ("…without requiring the client to load the full raw
+ * execution history at once"): the task loader ships a BOUNDED window of each
+ * agent group's console — the newest lines within the server's line/byte
+ * budgets — instead of every run-log line of every run. This is the metadata
+ * that makes that PAGING rather than truncation: `oldest` is the cursor the
+ * console walks backwards with (`/resources/run-log?runId=…&before=…`), so
+ * UI-53's whole-history view is still reachable, one page at a time.
+ *
+ * Mirrors `RunLogWindow` in `app/server/runtimes/run-projection.server.ts`
+ * (the server owns the budgets; this is the wire shape both sides agree on).
+ */
+export interface RunLogWindow {
+  /** Total console lines stored across EVERY run in the group. */
+  totalLines: number;
+  /** Older lines exist before the ones this payload carries. */
+  hasMore: boolean;
+  /** The group's run ids, oldest-first — the order to page backwards through. */
+  runIds: string[];
+  /** Cursor for the next backward page. Null iff `hasMore` is false. */
+  oldest: { runId: string; seq: number } | null;
+  /**
+   * Highest seq held for the REPRESENTATIVE run — the live-tail cursor. Seed
+   * `?since=` from THIS, never from `lines.length - 1`: since UI-53 the console
+   * concatenates several runs (plus synthetic boundaries) into one group, so an
+   * array index is not a seq, and with a bounded window it is not even close.
+   * -1 when the representative run has no lines yet.
+   */
+  headSeq: number;
+}
+
 /** Identity chip shape (mock `who`). Operator: no backend, no role. */
 export interface RunWho {
   kind: "agent";
@@ -118,11 +181,18 @@ export interface RunView {
   turns: number;
   /** Cumulative real token usage (input+output). No fabrication. */
   tokens: number;
-  /** The persisted, projected log lines (newest last). */
+  /** The projected log lines for the group's bounded window (newest last),
+   * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
+   * runs. NOT the whole history since P13-D-11 — see `logWindow`. */
   lines: LogLine[];
   /** The exact stored wire envelope per line (index-aligned with `lines`) —
-   * what the `{ } raw` toggle renders verbatim (runs.md §5.4). */
+   * what the `{ } raw` toggle renders verbatim (runs.md §5.4). Boundary rows
+   * carry an empty envelope. */
   raw: string[];
-  /** Total lines available (== lines.length; the loader sends the full tail). */
+  /** P13-D-11: total lines that EXIST across the group (== the window's
+   * `totalLines`), not the number this payload shipped — so the console's
+   * "N events" footer keeps its pre-window meaning. */
   lineCount: number;
+  /** P13-D-11: the bounded-window totals + the backward-paging cursor. */
+  logWindow: RunLogWindow;
 }

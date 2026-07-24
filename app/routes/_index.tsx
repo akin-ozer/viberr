@@ -14,6 +14,12 @@ import {
 } from "~/server/projections/notifications.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
 import { rebuildProjections } from "~/server/projections/rebuild.server";
+import {
+  REBUILD_MIN_INTERVAL_MS,
+  RESCAN_MIN_INTERVAL_MS,
+  runSingleFlight,
+  throttledMessage,
+} from "~/server/projections/single-flight.server";
 import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
 import {
   getHomeOrgSummary,
@@ -61,6 +67,9 @@ export async function action({ request }: Route.ActionArgs) {
   } = await requireFormAction(request);
 
   try {
+    // UI-06: both pref intents echo the intent back so the client can toast
+    // from the SETTLED result instead of at submit time (the star used to
+    // report "Pinned" and then silently revert on a CSRF/session failure).
     if (intent === "pin") {
       const slug = String(formData.get("slug") ?? "");
       const pinned = formData.get("pinned") === "1";
@@ -68,12 +77,12 @@ export async function action({ request }: Route.ActionArgs) {
       patchHomePrefs(db, ctx.user.id, {
         stars: { ...prefs.stars, [slug]: pinned },
       });
-      return { ok: true as const };
+      return { ok: true as const, intent: "pin" as const, pinned };
     }
     if (intent === "view") {
       const view = formData.get("view") === "list" ? "list" : ("grid" as const);
       patchHomePrefs(db, ctx.user.id, { view: view as "grid" | "list" });
-      return { ok: true as const };
+      return { ok: true as const, intent: "view" as const };
     }
     if (intent === "rescan") {
       // A global re-scan reprojects EVERY project from files — an
@@ -89,8 +98,25 @@ export async function action({ request }: Route.ActionArgs) {
           { status: 403 },
         );
       }
-      const summary = rescanProjections(db, { actor });
-      return { ok: true as const, ...summary };
+      // P13-D-33: a whole-store re-scan re-parses every project and task file.
+      // It had no limiter of any kind, so holding the button burned one full
+      // sweep per click. A skipped sweep is always safe here — the file watcher
+      // and the boot rescan converge anyway.
+      const flight = runSingleFlight(
+        "projections:rescan",
+        () => rescanProjections(db, { actor }),
+        { minIntervalMs: RESCAN_MIN_INTERVAL_MS },
+      );
+      if (flight.status === "throttled") {
+        return data(
+          {
+            ok: false as const,
+            error: throttledMessage("The store re-scan", flight.retryAfterMs),
+          },
+          { status: 429 },
+        );
+      }
+      return { ok: true as const, ...flight.result };
     }
     if (intent === "rebuild-projections") {
       // Phase 10 recovery: drop + re-project everything from files.
@@ -104,8 +130,26 @@ export async function action({ request }: Route.ActionArgs) {
           { status: 403 },
         );
       }
-      const summary = rebuildProjections(db, { actor });
-      return { ok: true as const, ...summary };
+      // P13-D-33: heavier than the re-scan (drop + re-project everything), so a
+      // longer cooldown. Same reasoning: a refused rebuild costs nothing.
+      const flight = runSingleFlight(
+        "projections:rebuild",
+        () => rebuildProjections(db, { actor }),
+        { minIntervalMs: REBUILD_MIN_INTERVAL_MS },
+      );
+      if (flight.status === "throttled") {
+        return data(
+          {
+            ok: false as const,
+            error: throttledMessage(
+              "The projection rebuild",
+              flight.retryAfterMs,
+            ),
+          },
+          { status: 429 },
+        );
+      }
+      return { ok: true as const, ...flight.result };
     }
     if (intent === "create-project") {
       // RBAC decision (deliberate, pinned by test): project creation is
@@ -120,7 +164,9 @@ export async function action({ request }: Route.ActionArgs) {
           key: String(formData.get("key") ?? ""),
           owner: String(formData.get("owner") ?? ""),
           repoName: String(formData.get("repoName") ?? ""),
-          template: formData.get("template") === "light" ? "light" : "governed",
+          // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
+          // ruling 2) — the Standard 5-stage board is the only template, so
+          // there is no `template` field to read.
           policy:
             formData.get("policy") === "strict"
               ? "strict"
@@ -147,6 +193,14 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   // (bell) + projection.rebuilt broadcasts; `projects` scope = every
   // project/task change so the landing cards refresh without a manual
   // re-scan (E2 — `[user]` alone never saw task/project events).
-  useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
-  return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
+  const live = useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
+  return (
+    <HomePage
+      data={loaderData}
+      theme={rootData?.theme ?? "system"}
+      // UI-03: surface a dead stream instead of freezing the cards silently.
+      livePaused={live.paused}
+      onReconnect={live.reconnect}
+    />
+  );
 }

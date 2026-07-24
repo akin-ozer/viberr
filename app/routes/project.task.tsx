@@ -40,6 +40,7 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
+import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import {
@@ -102,7 +103,47 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
   // Per-task provider run projection.
-  const runtime = listRunsForTask(db, params.slug, params.key);
+  //
+  // UI-30: the task page is READABLE app-wide by design (anyone may open a task
+  // and comment), but the run projection carries the three most sensitive run
+  // artifacts — the console `lines`, the exact stored wire envelopes (`raw`,
+  // what the `{ } raw` toggle prints) and the provider `sid`. Both routes that
+  // serve the SAME material require project membership
+  // (`/resources/run-log`, `/resources/session-export`), so this loader was
+  // simultaneously MORE permissive than its own data routes and broken: a
+  // non-member saw the full console while the live tail silently 403'd and
+  // Export downloaded a 403 body.
+  //
+  // One policy now: members (and org admins, via the audited D2 override) get
+  // the full projection; everyone else keeps the honest run SUMMARY strip —
+  // who ran, on what backend, when, and how it ended — with no log content.
+  const runsMembership = new Set(
+    listProjectMembers(db, params.slug).map((m) => m.userId),
+  );
+  const runsVisible = runsMembership.has(user.id) || user.role === "admin";
+  //
+  // P13-D-11: the member projection ships a BOUNDED window of each agent
+  // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
+  // raw execution history — NFR5. `logWindow` carries the cursor the console
+  // pages backwards with via `/resources/run-log?before=`. A non-member's
+  // withheld projection reports an empty window so nothing tries to page it.
+  const runtime = runsVisible
+    ? listRunsForTask(db, params.slug, params.key)
+    : listRunsForTask(db, params.slug, params.key).map((r) => ({
+        ...r,
+        sid: null,
+        exportable: false,
+        lines: [],
+        raw: [],
+        lineCount: 0,
+        logWindow: {
+          totalLines: 0,
+          hasMore: false,
+          runIds: [],
+          oldest: null,
+          headSeq: -1,
+        },
+      }));
 
   // Deployed specialists the "Assign specialist" menu offers.
   const deployedSpecialists = listDeployedSpecialists(params.slug);
@@ -156,9 +197,22 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     },
     deliveringActive,
     activeReviewerIds,
+    /** UI-30: false → the console content above was withheld (non-member). */
+    runsVisible,
     mentionables,
-    // Host for GitHub browse links (PR/branch/repo) — derived server-side so
-    // the client never hardcodes github.com (GHE deployments keep working).
+    // UI-57: the task's GitHub card (branch / diff / commits / PR) is served
+    // from the SAME cached projection the GitHub page labels "Updated 3m ago /
+    // Not yet synced" — but here it carried no freshness cue at all, so stale
+    // state looked current. Ship the newest reconcile time for this task.
+    // P13-D-16: this was the only raw `.prepare(` in any page route — a hand-
+    // written provenance query in a loader, against the layering rule in
+    // architecture.md. It now goes through app/server/provenance/, which owns
+    // the table.
+    githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // Host for GitHub browse links (PR/branch/repo), derived server-side.
+    // UI-11: today this always resolves to `https://github.com` — nothing
+    // stores a GHE API base URL — so the value is honest, but the "GHE
+    // deployments keep working" claim that used to sit here was not.
     githubHost: githubWebHost(),
   };
 }
@@ -245,11 +299,24 @@ export async function action({ request, params }: Route.ActionArgs) {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
         const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // UI-43: the "Retrying on X · streaming to agent logs" toast was
+        // computed from the option KIND alone. `resolvePacket` catches a failed
+        // `startAgentRun` and merely appends a timeline note ("The retry could
+        // not start — …"), so the user was told the retry was streaming when
+        // nothing was. Snapshot the run ids and report what actually happened.
+        const runIdsBefore = new Set(
+          listRunsForTask(db, projectSlug, taskKey).map((r) => r.serverRunId),
+        );
         const { option } = await resolvePacket(
           db,
           { projectSlug, taskKey, optionIndex, ...(note.trim() ? { note } : {}) },
           actor,
         );
+        const retryStarted =
+          option.kind === "retry_other_backend" &&
+          listRunsForTask(db, projectSlug, taskKey).some(
+            (r) => !runIdsBefore.has(r.serverRunId),
+          );
         const toast =
           option.kind === "accept_completion"
             ? `Completion accepted · ${taskKey} moved to Done`
@@ -258,7 +325,9 @@ export async function action({ request, params }: Route.ActionArgs) {
               : option.kind === "hold_runtime_debug"
                 ? "Held for runtime debug — the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
-                  ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                  ? retryStarted
+                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude Code"} · streaming to agent logs`
+                    : "Decision recorded, but the retry could NOT start — the reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded — type the new goal; the packet clears when it lands"
                     : `Decision recorded: ${option.t}`;
@@ -629,6 +698,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}
+      runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}
@@ -640,6 +710,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
       githubHost={loaderData.githubHost}
+      githubReconciledAt={loaderData.githubReconciledAt}
     />
   );
 }

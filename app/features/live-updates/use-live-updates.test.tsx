@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { REVALIDATE_DEBOUNCE_MS, useLiveUpdates } from "./use-live-updates";
+import {
+  REVALIDATE_DEBOUNCE_MS,
+  SSE_REOPEN_BACKOFF_MS,
+  useLiveUpdates,
+} from "./use-live-updates";
 
 const revalidate = vi.fn(() => Promise.resolve());
 
@@ -11,9 +15,13 @@ vi.mock("react-router", async (importOriginal) => ({
 }));
 
 class FakeEventSource {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
   static instances: FakeEventSource[] = [];
   url: string;
   closed = false;
+  readyState = 1;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   listeners = new Map<string, ((e: MessageEvent<string>) => void)[]>();
@@ -21,6 +29,12 @@ class FakeEventSource {
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
+  }
+  /** Simulate the browser FAILING the connection (a non-200 response — an
+   *  expired session 401s — never retries per spec). */
+  fail() {
+    this.readyState = FakeEventSource.CLOSED;
+    this.onerror?.();
   }
   addEventListener(name: string, fn: (e: MessageEvent<string>) => void) {
     const list = this.listeners.get(name) ?? [];
@@ -40,8 +54,10 @@ class FakeEventSource {
   }
 }
 
+let lastPaused = false;
 function Probe({ scopes }: { scopes: string[] }) {
-  useLiveUpdates(scopes);
+  const { paused } = useLiveUpdates(scopes);
+  lastPaused = paused;
   return null;
 }
 
@@ -135,6 +151,49 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * UI-03: nothing observed `error`, and per the HTML spec an EventSource that
+   * receives a non-200 response FAILS the connection and never reconnects. A
+   * board tab left open overnight outlived its session, the stream 401'd once,
+   * and from then on the board, rail counts, bell badge and review queue were
+   * frozen with no banner, no toast and no "reconnecting" state — while looking
+   * like live governance state.
+   */
+  it("reports a failed stream as paused and re-opens a FRESH one on backoff", () => {
+    render(<Probe scopes={["user"]} />);
+    const first = FakeEventSource.last();
+    expect(lastPaused).toBe(false);
+
+    act(() => {
+      first.fail();
+    });
+    expect(lastPaused).toBe(true);
+    // Still one connection — the browser does not retry a failed one.
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => {
+      vi.advanceTimersByTime(SSE_REOPEN_BACKOFF_MS[0]!);
+    });
+    // A brand-new EventSource — the only thing that recovers after a re-login.
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(first.closed).toBe(true);
+
+    act(() => {
+      FakeEventSource.last().onopen?.();
+    });
+    expect(lastPaused).toBe(false);
+  });
+
+  it("a transient error while the browser is still retrying does not pause", () => {
+    render(<Probe scopes={["user"]} />);
+    const es = FakeEventSource.last();
+    act(() => {
+      es.readyState = FakeEventSource.CONNECTING;
+      es.onerror?.();
+    });
+    expect(lastPaused).toBe(false);
   });
 
   it("reconnects when the scope set changes", () => {

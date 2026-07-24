@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { PrRef } from "~/schemas/task-file.schema";
+import {
+  EVIDENCE_EMPTY_COLUMN,
+  type PrRef,
+  type TaskFileEvent,
+} from "~/schemas/task-file.schema";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
@@ -53,6 +57,25 @@ export function composePrBody(input: {
     `---\n_Opened by Viberr for task ${input.taskKey}. Review and merge are human-authorized; accepting the completion in Viberr merges this PR when GitHub is reachable — otherwise the acceptance is recorded as merge-pending until a human completes the merge._`,
   );
   return lines.join("\n");
+}
+
+/**
+ * P13-D-26 — the newest event's `evidence:` rows, as PR-body bullet lines
+ * (`<label> · <add> · <del>`, empty columns dropped). Newest-first timeline, so
+ * the first event carrying evidence is the latest outcome. Returns null when
+ * the task has none, which keeps the "## Evidence" section out of the body.
+ * Pure + exported so the formatting is unit-tested.
+ */
+export function latestEvidenceLines(
+  timeline: readonly TaskFileEvent[],
+): string[] | null {
+  const withEvidence = timeline.find((e) => e.evidence && e.evidence.length > 0);
+  if (!withEvidence?.evidence) return null;
+  return withEvidence.evidence.map((row) =>
+    [row.label, row.add, row.del]
+      .filter((part) => part.trim() !== "" && part.trim() !== EVIDENCE_EMPTY_COLUMN)
+      .join(" · "),
+  );
 }
 
 /** Absolute Viberr URL for a task, from BETTER_AUTH_URL when configured. */
@@ -129,8 +152,8 @@ export async function openTaskPr(
   if (!file) return { status: "task_not_found" };
   const fm = file.parsed.frontmatter;
 
+  // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
   const gh = getProjectGithubContext(db, input.projectSlug, {
-    repoOverride: fm.repo,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") return gh;
@@ -211,6 +234,12 @@ export async function openTaskPr(
     changeSummary: fm.github?.changed
       ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
       : null,
+    // P13-D-26: `composePrBody` has always taken `evidence` and its one caller
+    // never passed it, so the "## Evidence" section was unreachable. The task
+    // record now carries real evidence rows on outcome events — hand the newest
+    // set to the PR body so the governed hand-off (FR31/FR32) actually carries
+    // the evidence the PRD promises a GitHub reviewer.
+    evidence: latestEvidenceLines(file.parsed.timeline),
   });
   const created = await gh.client.request<GhPull>("POST", `/repos/${gh.repo}/pulls`, {
     body: {
@@ -293,7 +322,10 @@ async function writePrToTask(
     (existingPr.state === "accepted" || existingPr.state === "merged")
       ? existingPr.state
       : live;
-  // Preserve extra cached fields (e.g. checks) when refreshing the same PR.
+  // Preserve the reconciler-owned facts (`checks`, `review` — P13-D-28) when
+  // refreshing the SAME PR: this path never reads them, so rebuilding the ref
+  // from scratch would blank both pills until the next 5-minute poll. A
+  // DIFFERENT (freshly opened) PR correctly starts with neither.
   const next: PrRef = {
     ...(samePr ? existingPr : {}),
     number: pr.number,

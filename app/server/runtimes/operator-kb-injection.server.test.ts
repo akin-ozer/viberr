@@ -20,6 +20,7 @@ function authorityWith(kb: string[]): OperatorAuthority {
     name: "Operator",
     skills: [],
     kb,
+    mcps: [],
     persona: null,
     deployed: true,
   };

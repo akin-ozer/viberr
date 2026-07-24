@@ -19,6 +19,8 @@ import {
 } from "./resources.server";
 import {
   createStoreFolder,
+  readStoreDoc,
+  writeStoreDoc,
   deleteStoreNode,
   importGithubSnapshot,
   scanStoreTree,
@@ -38,18 +40,18 @@ afterEach(dbCtx.cleanup);
 
 const ACTOR = { userId: "u_t", label: "t@test" };
 
-function setupKb() {
+async function setupKb() {
   const db = dbCtx.makeDb();
   const dataRoot = dbCtx.makeTempDir();
   const ctx = { dataRoot };
-  const { kb } = saveKnowledgeBase(db, { name: "API contracts", refresh: "manual" }, ACTOR, ctx);
+  const { kb } = await saveKnowledgeBase(db, { name: "API contracts", refresh: "manual" }, ACTOR, ctx);
   const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
   return { db, dataRoot, ctx, kb, target };
 }
 
 describe("uploads", () => {
-  it("writes real files, preserves structure, skips dotfiles", () => {
-    const { db, target } = setupKb();
+  it("writes real files, preserves structure, skips dotfiles", async () => {
+    const { db, target } = await setupKb();
     const result = writeStoreFiles(
       db,
       target,
@@ -80,8 +82,8 @@ describe("uploads", () => {
     expect(readFileSync(path.join(target.rootAbs, "versioning.md"), "utf8")).toBe("v2");
   });
 
-  it("refuses traversal and file-over-directory clobbering", () => {
-    const { db, target } = setupKb();
+  it("refuses traversal and file-over-directory clobbering", async () => {
+    const { db, target } = await setupKb();
     expect(() =>
       writeStoreFiles(
         db,
@@ -98,10 +100,10 @@ describe("uploads", () => {
     ).toThrowError(/already exists there/);
   });
 
-  it("flags a root-level SKILL.md landing in a skill folder (capture)", () => {
+  it("flags a root-level SKILL.md landing in a skill folder (capture)", async () => {
     const db = dbCtx.makeDb();
     const ctx = { dataRoot: dbCtx.makeTempDir() };
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "old" },
       ACTOR,
@@ -122,8 +124,8 @@ describe("uploads", () => {
 });
 
 describe("mkdir + delete", () => {
-  it("mkdir -p a/b/c; a FILE occupying a segment refuses with mock copy", () => {
-    const { db, target } = setupKb();
+  it("mkdir -p a/b/c; a FILE occupying a segment refuses with mock copy", async () => {
+    const { db, target } = await setupKb();
     const made = createStoreFolder(db, target, [], "a/b/c", ACTOR);
     expect(made.createdPath).toEqual(["a", "b", "c"]);
     expect(existsSync(path.join(target.rootAbs, "a", "b", "c"))).toBe(true);
@@ -134,8 +136,8 @@ describe("mkdir + delete", () => {
     );
   });
 
-  it("deletes files and folders recursively with real counts", () => {
-    const { db, target } = setupKb();
+  it("deletes files and folders recursively with real counts", async () => {
+    const { db, target } = await setupKb();
     writeStoreFiles(
       db,
       target,
@@ -154,8 +156,8 @@ describe("mkdir + delete", () => {
     );
   });
 
-  it("scan sorts dirs before files and skips dotfiles", () => {
-    const { db, target } = setupKb();
+  it("scan sorts dirs before files and skips dotfiles", async () => {
+    const { db, target } = await setupKb();
     writeStoreFiles(
       db,
       target,
@@ -177,7 +179,7 @@ describe("mkdir + delete", () => {
 
 describe("github import", () => {
   it("returns the honest no-connection state when no validated token exists", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     const result = await importGithubSnapshot(
       db,
       target,
@@ -188,7 +190,7 @@ describe("github import", () => {
   });
 
   it("rejects garbage URLs with the mock copy", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     const result = await importGithubSnapshot(db, target, "not-a-github-link", ACTOR);
     expect(result.status).toBe("invalid_url");
     if (result.status === "invalid_url") {
@@ -197,7 +199,7 @@ describe("github import", () => {
   });
 
   it("fetches a real snapshot through the default connection (canned)", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     insertUser(db, {
       id: "u_admin",
       email: "admin@test.dev",
@@ -261,7 +263,9 @@ describe("github import", () => {
     );
     expect(existsSync(path.join(target.rootAbs, "docs", ".hidden.md"))).toBe(false);
 
-    // Name collision → suffixed folder (mock semantics, real dirs).
+    // P13-KM-13: re-importing the SAME source refreshes its folder in place.
+    // It used to suffix (`docs-2`), so every re-import left another full copy
+    // behind and all of them were injected into every run.
     const again = await importGithubSnapshot(
       db,
       target,
@@ -271,7 +275,7 @@ describe("github import", () => {
     );
     expect(again.status).toBe("imported");
     if (again.status === "imported") {
-      expect(again.folder).toBe("docs-2");
+      expect(again.folder).toBe("docs");
       // Clean import → nothing skipped, toast stays clean (E5).
       expect(again.skipped).toBe(0);
       expect(again.toast).not.toContain("skipped");
@@ -279,7 +283,7 @@ describe("github import", () => {
   });
 
   it("surfaces per-blob failures instead of a clean success (E5)", async () => {
-    const { db, target } = setupKb();
+    const { db, target } = await setupKb();
     insertUser(db, {
       id: "u_admin",
       email: "admin@test.dev",
@@ -392,5 +396,101 @@ describe("disk-only resource freshness (E6)", () => {
     expect(
       listKnowledgeBases(db, ctx).filter((kb) => kb.dir === "runbooks"),
     ).toHaveLength(1);
+  });
+});
+
+/* ------------------------------- in-app document authoring (P13-LV-06) */
+
+describe("writeStoreDoc", () => {
+  it("creates a document inside the KB folder and touches freshness", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const result = writeStoreDoc(db, target, [], "release-facts", "# Facts\n\nSentinel.", ACTOR);
+    expect(result.path).toEqual(["release-facts.md"]);
+    const abs = path.join(kbDirPath(kb.dir, ctx.dataRoot), "release-facts.md");
+    expect(readFileSync(abs, "utf8")).toContain("Sentinel.");
+    // The doc is a normal store file: the tree sees it and the KB re-indexes.
+    expect(scanStoreTree(kbDirPath(kb.dir, ctx.dataRoot)).map((n) => n.name)).toContain(
+      "release-facts.md",
+    );
+  });
+
+  it("refuses a non-text extension and path traversal", async () => {
+    const { db, target } = await setupKb();
+    expect(() => writeStoreDoc(db, target, [], "evil.sh", "rm -rf /", ACTOR)).toThrowError(
+      /only edits text documents/,
+    );
+    expect(() => writeStoreDoc(db, target, ["../.."], "x.md", "x", ACTOR)).toThrowError();
+    expect(() => writeStoreDoc(db, target, [], "  ", "x", ACTOR)).toThrowError(
+      /file name/,
+    );
+  });
+
+  it("reads a document back for the editor", async () => {
+    const { db, target } = await setupKb();
+    writeStoreDoc(db, target, ["notes"], "a.md", "hello", ACTOR);
+    expect(readStoreDoc(target, ["notes", "a.md"])).toMatchObject({ text: "hello" });
+    expect(readStoreDoc(target, ["nope.md"])).toBeNull();
+  });
+});
+
+/* --------------------------- re-import refreshes in place (P13-KM-13) */
+
+describe("importGithubSnapshot re-import", () => {
+  const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64");
+
+  it("refreshes the same source's folder instead of creating a second copy", async () => {
+    const { db, target } = await setupKb();
+    insertUser(db, {
+      id: "u_admin2",
+      email: "admin2@test.dev",
+      name: "Admin Two",
+      role: "admin",
+    });
+    const connectTransport = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "owner" },
+        headers: { "x-oauth-scopes": "repo, workflow" },
+      },
+      "GET /users/owner": { body: { public_repos: 1 } },
+    });
+    await createConnection(
+      db,
+      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin2" },
+      ACTOR,
+      { fetchImpl: connectTransport.fetchImpl },
+    );
+
+    const snapshot = (text: string) =>
+      fakeGithubFetch({
+        "GET /repos/owner/repo/git/trees/main": {
+          body: {
+            truncated: false,
+            tree: [{ path: "docs/a.md", type: "blob", sha: "s1", size: 5 }],
+          },
+        },
+        "GET /repos/owner/repo/git/blobs/s1": {
+          body: { content: b64(text), encoding: "base64" },
+        },
+      });
+
+    const url = "https://github.com/owner/repo/tree/main/docs";
+    const first = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot("first").fetchImpl,
+    });
+    expect(first.status).toBe("imported");
+
+    const second = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot("second").fetchImpl,
+    });
+    // Before this fix the second import landed in `docs-2`, so BOTH copies were
+    // injected into every run and the 24k budget was spent on the stale one.
+    expect(second.status).toBe("imported");
+    if (second.status !== "imported") return;
+    expect(second.folder).toBe("docs");
+    expect(second.toast).toContain("re-imported");
+    expect(scanStoreTree(target.rootAbs).map((n) => n.name)).toEqual(["docs"]);
+    expect(readFileSync(path.join(target.rootAbs, "docs", "a.md"), "utf8")).toBe(
+      "second",
+    );
   });
 });

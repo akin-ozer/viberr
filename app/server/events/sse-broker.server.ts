@@ -1,4 +1,5 @@
 import type { SseEvent } from "~/schemas/sse-event.schema";
+import { shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 
 /**
@@ -23,8 +24,10 @@ import { logger } from "~/server/logging/logger.server";
  *   buffer window (or a restart reset ids) the client gets `stream.resync`
  *   and revalidates once instead.
  * - HMR-safe singleton (global-symbol state, same pattern as getDb()) +
- *   graceful shutdown: SIGINT/SIGTERM closes every connection, then
- *   re-raises the signal for the default handler.
+ *   graceful shutdown: SIGINT/SIGTERM closes every connection, checkpoints and
+ *   closes the database (P13-D-43), then re-raises the signal for the default
+ *   handler. This is the app's only signal handler, so it is the process
+ *   shutdown hook, not just the SSE one.
  *
  * High-frequency streams (Phase 8 `run.log-appended`): publish straight to
  * `publishSseEvent` from the runtime adapter — do NOT route chatty streams
@@ -147,8 +150,15 @@ function getState(): BrokerState {
     // Graceful shutdown: open SSE responses otherwise keep the prod server's
     // sockets alive past the signal. Close everything, then re-raise so the
     // default (or the dev server's own) handler terminates the process.
+    //
+    // P13-D-43: this is the app's ONLY signal handler, so the database close
+    // belongs here too — `closeDb()` had no non-test caller and nothing ever
+    // checkpointed the WAL, leaving `projection.sqlite-wal`/`-shm` (which hold
+    // unrebuildable users/sessions/PATs rows) beside the main file on exit.
+    // Sockets first, then the database, then the re-raise — unchanged.
     const shutdown = (signal: NodeJS.Signals) => {
       closeAllSseConnections();
+      shutdownDatabase();
       process.kill(process.pid, signal);
     };
     process.once("SIGINT", shutdown);

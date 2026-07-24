@@ -148,6 +148,41 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]!.actorUserId).toBe(ardaId);
   });
+
+  /**
+   * P13-D-33: rescan and rebuild each walk the whole store and had no limiter,
+   * lock or min-interval — holding the button ran one full sweep per click.
+   */
+  it("throttles a repeat rebuild and a repeat rescan with a 429", async () => {
+    const { resetSingleFlight } = await import(
+      "~/server/projections/single-flight.server"
+    );
+    resetSingleFlight();
+
+    const first = (await postHome(ardaId, {
+      intent: "rebuild-projections",
+    })) as { ok: boolean };
+    expect(first.ok).toBe(true);
+
+    const second = (await postHome(ardaId, {
+      intent: "rebuild-projections",
+    })) as { data: { ok: boolean; error: string }; init: { status: number } };
+    expect(second.init.status).toBe(429);
+    expect(second.data.ok).toBe(false);
+    expect(second.data.error).toContain("try again in");
+
+    // Independent cooldowns: the rebuild's does not swallow the re-scan.
+    const rescan = (await postHome(ardaId, { intent: "rescan" })) as {
+      ok: boolean;
+    };
+    expect(rescan.ok).toBe(true);
+    const rescanAgain = (await postHome(ardaId, { intent: "rescan" })) as {
+      init: { status: number };
+    };
+    expect(rescanAgain.init.status).toBe(429);
+
+    resetSingleFlight();
+  });
 });
 
 describe("/resources/health (Phase 10 ops probe)", () => {

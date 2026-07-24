@@ -6,6 +6,7 @@ import type {
   RunSpec,
   RuntimeAdapter,
 } from "./adapter.server";
+import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 
 /**
@@ -102,6 +103,55 @@ export function resolveClaudeModel(model?: string): string | undefined {
   if (m.includes("haiku")) return "haiku";
   if (m.includes("sonnet")) return "sonnet";
   return undefined;
+}
+
+/**
+ * Do not cast arbitrary profile strings into the SDK's effort union — the
+ * mirror of `resolveCodexReasoningEffort` (P13-RT-08).
+ *
+ * `options.effort` is typed `'low'|'medium'|'high'|'xhigh'|'max' | number` in
+ * the SDK, but the adapter used to forward `spec.effort` raw. A profile created
+ * on Codex with `effort: "minimal"` and later switched to Claude (the effort
+ * picker only refetches on backend change, so the stored value survives) then
+ * shipped a value that is not in the Claude union — best case the CLI ignores
+ * it, worst case the run 400s and the human sees a generic `run·error·unknown`.
+ * Unknown → dropped, so the SDK applies its own default.
+ */
+export function resolveClaudeEffort(effort?: string): string | undefined {
+  switch (effort) {
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+    case "max":
+      return effort;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Idle (inactivity) timeout for a claude run in ms — the window a single
+ * turn/tool may produce no message before the run is treated as hung.
+ * Overridable via VIBERR_CLAUDE_IDLE_TIMEOUT_MS; defaults to 15 minutes, the
+ * same window the Codex adapter uses (owner ruling A8).
+ *
+ * P13-RT-11: Claude had NO timer of any kind. `maxTurns` bounds turns, not
+ * wall-clock or idle time, and a `for await` over a stalled SDK stream never
+ * settles — so a partitioned network or a hung stdio MCP (`npx …`) left the run
+ * `running` forever, the task `waiting: agent`, the delivering single-flight
+ * refusing every later delivering run on that task, and the board showing an
+ * "agent working" badge until the NEXT process restart ran finalizeOrphanedRuns.
+ *
+ * (Read from the raw process env rather than `getEnv()`: the validated env
+ * schema is owned by another workstream this pass. Behaviour is identical —
+ * `loadEnvFile` has already folded `.env` into process.env.)
+ */
+const DEFAULT_CLAUDE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export function claudeIdleTimeoutMs(): number {
+  const raw = process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLAUDE_IDLE_TIMEOUT_MS;
 }
 
 /**
@@ -261,7 +311,15 @@ function assistantUsage(
  *  auth/quota without re-regexing the deliberately-generic message text (the
  *  auth message says "authentication", which the downstream prose regex misses
  *  — the symmetric bug the codex fix noted). */
-type ClaudeFailureKind = "quota" | "auth" | "unknown";
+type ClaudeFailureKind =
+  | "quota"
+  | "auth"
+  /** P13-D-2: `--resume <id>` against a transcript Claude Code has swept
+   *  ("No conversation found with session ID …"). `resumeRun`'s pre-flight
+   *  probe normally re-anchors before we get here; this covers the SDK finding
+   *  out first. Not an auth class — the credential is fine. */
+  | "session_missing"
+  | "unknown";
 
 /** Turn cap for a claude run — a RUNAWAY guard, not a work budget. The old
  *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live:
@@ -295,6 +353,15 @@ function classifyClaudeError(error: unknown): {
     };
   }
   const raw = error instanceof Error ? error.message : String(error ?? "");
+  // P13-D-2 before the auth branch: a swept transcript must never be narrated
+  // as a rejected credential.
+  if (SESSION_MISSING_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        "The Claude Code session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+    };
+  }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
     return {
       kind: "quota",
@@ -332,7 +399,38 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let resultSubtype: string | null = null;
       let interrupted = false;
       let settled = false;
+      let idleTimedOut = false;
       let queryHandle: ClaudeQuery | null = null;
+
+      // IDLE (inactivity) guard, not a wall-clock cap — the same shape the
+      // codex adapter has used since owner ruling A8 (P13-RT-11). A claude run
+      // may legitimately take hours; but if the SDK stream produces NO message
+      // for this long it is hung, and nothing else would ever settle it.
+      const idleMs = claudeIdleTimeoutMs();
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      const disarmIdle = () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      };
+      const armIdle = () => {
+        disarmIdle();
+        idleTimer = setTimeout(() => {
+          if (settled || interrupted) return;
+          idleTimedOut = true;
+          logger.warn("claude run idle-timeout — no activity within the window", {
+            runId: spec.runId,
+            idleMs,
+          });
+          // Same channel a user interrupt uses; `idleTimedOut` distinguishes
+          // the two so a hung run settles `error` (→ react/stuck packet) while
+          // a human interrupt stays `interrupted`.
+          void queryHandle?.interrupt().catch(() => {
+            // Generator may already have completed.
+          });
+        }, idleMs);
+      };
 
       /** Persist a redaction-safe classified reason line, then settle error. */
       const settleError = (error: unknown) => {
@@ -359,7 +457,34 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
+        disarmIdle();
         cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
+      };
+
+      /** A hung stream: one classified terminal line, then settle `error` so the
+       *  react loop / stuck-loop packet fires and a human is notified. */
+      const settleIdleTimeout = () => {
+        if (settled) return;
+        const now = new Date().toISOString();
+        try {
+          cb.onLine({
+            raw: "",
+            display: {
+              t: now.slice(11, 19),
+              ev: "err",
+              tag: "run·error·idle_timeout",
+              text:
+                `The run produced no output for ${idleMs} ms and was stopped as hung — ` +
+                "not a task failure. Re-prompt the agent to continue from its " +
+                "session, or raise VIBERR_CLAUDE_IDLE_TIMEOUT_MS.",
+            },
+            facts: {},
+            occurredAt: now,
+          });
+        } catch {
+          // Never let the reason line block finalization.
+        }
+        settle("error");
       };
 
       const run = async () => {
@@ -370,9 +495,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // Only set model when we have a real id/alias; otherwise let the SDK
           // (and the subscription) pick its default.
           ...(resolvedModel ? { model: resolvedModel } : {}),
-          // Pass the profile's chosen reasoning effort when present; otherwise
-          // the SDK uses its default (high).
-          ...(spec.effort ? { effort: spec.effort } : {}),
+          // Pass the profile's chosen reasoning effort when it is one the SDK
+          // accepts; otherwise the SDK uses its default (high). Narrowed rather
+          // than forwarded raw so a Codex-only tier ("minimal") never reaches
+          // the Claude union (P13-RT-08).
+          ...((): { effort?: string } => {
+            const effort = resolveClaudeEffort(spec.effort);
+            return effort ? { effort } : {};
+          })(),
           // Fully autonomous: bypass ALL permission prompts so a
           // server-spawned run never blocks waiting for approval (there is no
           // human at the CLI). acceptEdits still gated non-edit tools like
@@ -467,7 +597,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         let liveCached = 0;
 
         try {
+          armIdle();
           for await (const message of q) {
+            armIdle(); // reset the inactivity window on every message
             const occurredAt = new Date().toISOString();
             const { display, facts } = projectEnvelope("claude", message, occurredAt);
             if (facts.sessionId) sessionId = facts.sessionId;
@@ -494,6 +626,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             cb.onLine({ raw: JSON.stringify(message), display, facts, occurredAt });
           }
         } catch (error) {
+          disarmIdle();
+          // The idle guard aborts the same way an interrupt does; distinguish
+          // them so a hung run settles `error` while a user interrupt stays
+          // `interrupted` (P13-RT-11).
+          if (idleTimedOut) return settleIdleTimeout();
           // AbortError from interrupt() is expected; anything else is a fault.
           if (interrupted) return settle("interrupted");
           logger.error("claude query error", {
@@ -502,7 +639,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           });
           return settleError(error);
         }
+        disarmIdle();
 
+        // A stream that ENDS (rather than throwing) after the abort still has
+        // to report the hang, not a plain "no result" error.
+        if (idleTimedOut) return settleIdleTimeout();
         if (interrupted) return settle("interrupted");
         if (sawResult && !resultIsError) return settle("finished");
         // A turn-capped run is CUT OFF, not failed by the task — without this
@@ -544,6 +685,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         interrupt() {
           if (interrupted || settled) return;
           interrupted = true;
+          disarmIdle();
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });

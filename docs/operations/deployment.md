@@ -33,6 +33,44 @@ Optional integrations, enabled only when their vars are present:
 `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in), `VIBERR_SEED_ADMIN_*` (bootstrap
 admin on first boot of an empty DB), and the agent backends below.
 
+## TLS and the reverse proxy
+
+**Viberr must be deployed behind a TLS-terminating reverse proxy.** The container speaks
+plain HTTP — `react-router-serve` on `$PORT`, `EXPOSE 3000`, no certificate handling and
+no proxy in the image or in `compose.yml`. Encryption in transit is the deployment's
+responsibility, not the Node process's. Do not attempt to terminate TLS inside the app.
+
+Put nginx, Caddy, Traefik, or your platform's ingress in front, terminate HTTPS there,
+and forward to the container port. Then set one variable:
+
+```bash
+BETTER_AUTH_URL=https://viberr.example.com   # the PUBLIC https origin, no trailing path
+```
+
+That variable is what makes the proxied topology work. better-auth builds OAuth callback
+URLs and cookie attributes from it; unset behind a proxy, `trustedOrigins` collapses to
+`[]` and the OAuth flow breaks. The boot log warns when OAuth is configured and
+`BETTER_AUTH_URL` is not.
+
+**The failure mode if you skip the proxy.** The image sets `NODE_ENV=production`, and with
+no explicit origin better-auth falls through to its production defaults: it issues
+`__Secure-`-prefixed session cookies with `secure: true`. A browser will not store those
+over plain http. The user submits correct credentials, gets a 200, and lands back on the
+login page — a silent login loop with nothing in the app logs to explain it. This is
+better-auth failing closed, which is the correct behaviour; the fix is to front the app
+with TLS, not to weaken the cookie.
+
+Two proxy details worth getting right:
+
+- Forward `X-Forwarded-For`. It is the container's only view of the client IP. The
+  sign-in throttle keys on `email|ip` and falls back to a literal `local` without it, so
+  the limiter still works per account but stops distinguishing attackers from the
+  legitimate owner of that account.
+- Forward `Accept` and `Cache-Control` untouched and disable response buffering on
+  `/resources/events`. That is the SSE stream; a buffering proxy stalls live updates.
+
+HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
+
 ## Agent backends in the container
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
@@ -73,10 +111,11 @@ before logging in. A `CODEX_API_KEY` / `OPENAI_API_KEY` also works, but uses
 usage-based Platform billing.
 
 If `VIBERR_CODEX_USE_CLI_AUTH=1` is set but `$CODEX_HOME/auth.json` is missing
-(and no access token/API key is configured), Viberr reports Codex **unavailable**
-and routes Codex-assigned work to its degraded engine instead of starting a run
-that would fail with a redacted error. Copy `auth.json` (step 2 above) to enable
-real Codex runs.
+(and no access token/API key is configured), Viberr reports Codex **unavailable**.
+There is no fallback engine: a run started on that backend fails fast with an
+honest error and a blocked recovery packet, rather than starting a run that would
+die with a redacted "Codex execution failed" line. Copy `auth.json` (step 2 above)
+to enable real Codex runs.
 
 **Security boundary:** the dedicated `CODEX_HOME` prevents importing the host's
 full personal Codex configuration; it does not isolate that credential or the
@@ -123,20 +162,39 @@ at `/data`. Both SDKs keep their resumable state under `runtimes/`:
 
 ```
 projects/   canonical project.md + task.md (the source of truth — human/agent editable)
+agents/     agents/profiles/*.md — the seeded and org-edited agent profile templates
 kb/ skills/ knowledge-base and skill files
 runtimes/   raw run logs plus Claude/Codex session homes; Codex may contain auth.json
 state/      projection.sqlite (users, sessions, projections, audit, PATs, notifications)
-auth/ cache/ logs/
 ```
 
-- **Backup** = snapshot the whole `./docker-data` directory. If `runtimes/codex-home/auth.json`
-  exists, the backup contains a live credential and must be encrypted and access
-  controlled like any other secret. Stop the container (or accept a
-  crash-consistent copy — SQLite is WAL, so also copy `*-wal`/`*-shm`) and archive it.
-- **Restore** = drop the directory back and start the container. If only
-  `state/projection.sqlite` is lost but `projects/` survives, you do **not** need a DB
-  backup: the projections are derived — boot runs a reconciling rescan, or run a full
-  rebuild (see the [runbook](./runbook.md)). Files are canonical; the DB is a cache.
+That is the whole set — created at boot from `DATA_ROOT_SUBDIRS` in
+`app/server/files/file-store-root.server.ts`. There is no `auth/`, `cache/` or `logs/`
+directory; application logs are structured JSON on stdout.
+
+- **Backup** = snapshot the whole `./docker-data` directory, **always including the
+  `projection.sqlite-wal` and `-shm` sidecars**. SQLite runs in WAL mode and the app does
+  not currently close the database or checkpoint on shutdown, so committed rows — users,
+  sessions, PATs — routinely live in the `-wal` file even after the container has stopped.
+  Copying `projection.sqlite` alone can silently lose them. Stopping the container first
+  still gives you a quieter, more consistent snapshot; it does not make the sidecars
+  optional. If `runtimes/codex-home/auth.json` exists, the backup contains a live
+  credential and must be encrypted and access controlled like any other secret.
+- **Restore** = drop the directory back — sidecars included — and start the container.
+
+**`state/projection.sqlite` is primary storage, not a cache — back it up.** The
+projection tables inside it are derived and rebuild from `projects/`, but the same file is
+the *only* home of every user row and better-auth credential, every session, every
+AES-sealed GitHub PAT, the whole audit trail, and all notifications. None of that exists
+in the canonical Markdown, so none of it is rebuildable.
+
+Restoring `projects/` without the database does not degrade gracefully. On the next boot
+the users table is empty, so the bootstrap admin is minted with a **fresh** user id, while
+the surviving task and project files still carry the old ids in `members[].userId` and
+`ownerUserId`. Those ids now resolve to nobody: every membership and task owner becomes a
+ghost. Rebuilding projections cannot fix it — the ids in the files are the problem, and
+there is no re-mapping tool. Treat a `projects/`-only restore as a new instance whose
+memberships and owners must be re-established by hand.
 
 ## Upgrades
 

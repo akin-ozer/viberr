@@ -7,10 +7,11 @@ import {
 } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
-import { workspaceViewFromPathname, workspaceViewLabel } from "./nav";
+import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav";
 
 /**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
@@ -29,6 +30,8 @@ export function Topbar({
   theme,
   notifications,
   unread,
+  livePaused = false,
+  onReconnect,
 }: {
   projectSlug: string;
   projectName: string;
@@ -41,16 +44,24 @@ export function Topbar({
   theme: ThemePreference;
   notifications: NotificationView[];
   unread: number;
+  /** UI-03: the SSE stream is down — everything on screen is a stale snapshot. */
+  livePaused?: boolean;
+  onReconnect?: () => void;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const modifierHint = useModifierHint();
   const view = workspaceViewFromPathname(location.pathname);
   const onBoard =
     view === "board" && !openTask && location.pathname.endsWith("/board");
-  const boardPath = `/projects/${projectSlug}/board`;
+  // P13-D-35: the crumbs' board links kept the filter/search only if the URL
+  // carried it — they were bare paths, so clicking the project crumb from a
+  // filtered board silently reset it. `boardHref` carries `?filter/view/q` when
+  // (and only when) we are already on this project's board.
+  const boardPath = boardHref(projectSlug, location);
   const urlQuery = onBoard ? (searchParams.get("q") ?? "") : "";
   const [query, setQuery] = useState(urlQuery);
 
@@ -73,9 +84,13 @@ export function Topbar({
         { replace: true, preventScrollReset: true },
       );
     } else {
-      navigate(
-        value ? `${boardPath}?q=${encodeURIComponent(value)}` : boardPath,
-      );
+      // UI-55: the first keystroke on a non-board view PUSHES (so Back returns
+      // to the view you were on); every keystroke after that REPLACES. Without
+      // it, fast typing pushed `?q=a`, `?q=ab`, `?q=abc` and Back walked the
+      // user backwards through their own partial queries.
+      navigate(value ? `${boardPath}?q=${encodeURIComponent(value)}` : boardPath, {
+        replace: query.length > 0,
+      });
     }
   };
 
@@ -97,7 +112,14 @@ export function Topbar({
         <span className="mark">V</span>
         <b>Viberr</b>
       </Link>
-      <div className="crumbs">
+      {/* P13-D-37: the crumb trail was an anonymous <div> with a <span
+          class="cur"> — no landmark, no current-page signal. <nav> + the label
+          and `aria-current` are pure semantics: `.crumbs` is a flex container
+          styled by class, and <nav> is a block box exactly like the <div> it
+          replaces, so the truncation tiers (app.css:2306-2316) are untouched.
+          (The fuller <ol>/<li> shape would need `display: contents` rules that
+          do not exist yet — reported rather than invented.) */}
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link className="crumb-root" to={boardPath}>
           {projectName}
         </Link>
@@ -112,14 +134,20 @@ export function Topbar({
             <span className="sep sep-mid">
               <Icon name="chevron" />
             </span>
-            <span className="cur" title={openTask.key + " · " + openTask.title}>
+            <span
+              className="cur"
+              aria-current="page"
+              title={openTask.key + " · " + openTask.title}
+            >
               {openTask.key} · {openTask.title}
             </span>
           </>
         ) : (
-          <span className="cur">{workspaceViewLabel(view)}</span>
+          <span className="cur" aria-current="page">
+            {workspaceViewLabel(view)}
+          </span>
         )}
-      </div>
+      </nav>
       {orgAdminOverride && (
         <span
           className="pill risk sm"
@@ -127,6 +155,21 @@ export function Topbar({
         >
           org-admin override
         </span>
+      )}
+      {/* UI-03: an SSE stream that failed never reconnects on its own, so the
+          board, rail counts, bell badge and review queue silently froze. Say so
+          instead of presenting a stale snapshot as live governance state. */}
+      {livePaused && (
+        <button
+          type="button"
+          className="pill risk sm"
+          role="status"
+          style={{ cursor: onReconnect ? "pointer" : "default" }}
+          title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
+          onClick={() => onReconnect?.()}
+        >
+          live updates paused — retry
+        </button>
       )}
       <div className="top-search">
         <Icon name="search" />
@@ -137,7 +180,11 @@ export function Topbar({
           value={query}
           onChange={(e) => onSearch(e.target.value)}
         />
-        <span className="kbd">⌘K</span>
+        {/* UI-55: the handler accepts Ctrl as well; show what the viewer's
+            keyboard actually has. */}
+        <span className="kbd" suppressHydrationWarning>
+          {modifierHint}
+        </span>
       </div>
       <TopBell notifications={notifications} unread={unread} />
       <UserMenu user={user} theme={theme} showSwitchProject />

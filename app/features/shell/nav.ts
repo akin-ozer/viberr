@@ -40,6 +40,30 @@ export function workspaceViewFromPathname(pathname: string): WorkspaceNavItem["i
   return known ? known.id : "board";
 }
 
+/**
+ * P13-D-35 (UX-7): "Filters, queue position, and recent focus should not reset
+ * unnecessarily" (ux-design-specification.md:824-825). The board's filter,
+ * layout and search live ONLY in URL params — there is no sessionStorage — so
+ * every in-app link written as the bare path `/projects/:slug/board` resets them
+ * to `filter=all, view=stage, q=""` (React Router drops `search` for an absolute
+ * path string). That includes the rail's own Board item and the project crumb,
+ * both of which are reachable *while looking at a filtered board*.
+ *
+ * The search string is only meaningful inside that project's board context: a
+ * task route's params (or another project's) describe something else entirely,
+ * so pasting them onto a board URL would invent state the user never chose.
+ * Hence the exact-pathname guard — off the board this returns the bare path.
+ */
+export function boardHref(
+  projectSlug: string,
+  location: { pathname: string; search: string },
+): string {
+  const path = `/projects/${projectSlug}/board`;
+  return location.pathname === path && location.search
+    ? path + location.search
+    : path;
+}
+
 /** Crumb / rail label for the current view. */
 export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
   return WORKSPACE_NAV.find((n) => n.id === view)?.label ?? "Board";

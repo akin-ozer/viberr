@@ -48,7 +48,7 @@ describe("createProject — GitHub connection wiring", () => {
 
     const result = await createProject(
       store.db,
-      { name: "Containerless", key: "CTL", owner: "akin-ozer", repoName: "containerless", template: "governed", policy: "balanced" },
+      { name: "Containerless", key: "CTL", owner: "akin-ozer", repoName: "containerless", policy: "balanced" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -72,7 +72,7 @@ describe("createProject — GitHub connection wiring", () => {
     await expect(
       createProject(
         store.db,
-        { name: "Ghostly", key: "GHO", owner: "nobody", repoName: "ghost", template: "governed", policy: "balanced" },
+        { name: "Ghostly", key: "GHO", owner: "nobody", repoName: "ghost", policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
@@ -99,7 +99,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", template: "governed", policy: "balanced" },
+      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -115,7 +115,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Strict", key: "STR", owner: "akin-ozer", repoName: "s", template: "governed", policy: "strict" },
+      { name: "Strict", key: "STR", owner: "akin-ozer", repoName: "s", policy: "strict" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -134,7 +134,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     vi.stubGlobal("fetch", vi.fn());
     const r = await createProject(
       store.db,
-      { name: "Auto", key: "AUT", owner: "akin-ozer", repoName: "a", template: "governed", policy: "auto" },
+      { name: "Auto", key: "AUT", owner: "akin-ozer", repoName: "a", policy: "auto" },
       ACTOR,
       { dataRoot: store.dataRoot },
     );
@@ -150,6 +150,45 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("direct");
   });
 
+  // P13-AP-04 / LV-01 (owner ruling 2): the "Lightweight · 3 stages" preset was
+  // DELETED because it created a todo/doing/done board while the preinstalled
+  // roster's eligible stages are the governed ids — no specialist was ever
+  // stage-eligible and the operator could not hand work off. The rule this
+  // pins: WHATEVER board creation produces, every preinstalled specialist must
+  // be eligible for at least one stage on it. (The old test passed
+  // `template: "light"`; there is no such input any more.)
+  it("AP-04: every preinstalled specialist is stage-eligible on the board creation produced", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Eligible", key: "ELG", owner: "akin-ozer", repoName: "e", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    const boardStages = f.stages.map((s) => s.id);
+    expect(boardStages).toEqual(["triage", "ready", "impl", "review", "done"]);
+
+    const { effectiveProfileView } = await import(
+      "~/features/agents/agents-query.server"
+    );
+    const { specialistEligibleForStage } = await import(
+      "~/server/tasks/specialist-run.server"
+    );
+    const specialists = f.agents
+      .map((a) => effectiveProfileView(a, store.dataRoot))
+      .filter((v) => v.kind === "specialist");
+    expect(specialists.length).toBeGreaterThan(0);
+    for (const spec of specialists) {
+      const eligible = boardStages.filter((stageId) =>
+        specialistEligibleForStage(spec, stageId),
+      );
+      expect(eligible, `${spec.name} has no eligible stage`).not.toHaveLength(0);
+    }
+  });
+
   // Repo-bound projects only (2026-07-17 ruling, reverses F10): a repository +
   // PAT connection are mandatory — repo-less creation is rejected in every form.
   it("an EMPTY repo field is rejected (repo-less projects were cut)", async () => {
@@ -159,7 +198,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     await expect(
       createProject(
         store.db,
-        { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", template: "governed", policy: "balanced" },
+        { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
@@ -172,7 +211,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     await expect(
       createProject(
         store.db,
-        { name: "First Project", key: "FST", owner: "", repoName: "", template: "governed", policy: "balanced" },
+        { name: "First Project", key: "FST", owner: "", repoName: "", policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
@@ -184,7 +223,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     await expect(
       createProject(
         store.db,
-        { name: "Needs Owner", key: "NDO", owner: "", repoName: "some-repo", template: "governed", policy: "balanced" },
+        { name: "Needs Owner", key: "NDO", owner: "", repoName: "some-repo", policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),

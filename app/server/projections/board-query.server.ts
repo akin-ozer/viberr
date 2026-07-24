@@ -94,6 +94,34 @@ export function listProjectMembers(
   return rows.map(mapProjectMemberRow);
 }
 
+/**
+ * LV-04: honest label for a user id that resolves to no account.
+ *
+ * `createActorResolver` falls back to `nameHint ?? userId`, so a task owned by a
+ * since-deleted account rendered the raw `u_RT7-QeTWOwP4` string verbatim in the
+ * task-detail Owner widget, the "HUMAN OWNER · REVIEWS & ACCEPTS" panel, the
+ * Policy member row and project Settings → Members — indistinguishable from a
+ * person's name. THE canonical wording lives here so every surface agrees.
+ */
+export function removedAccountLabel(userId: string): string {
+  const short = userId.length > 10 ? `${userId.slice(0, 10)}…` : userId;
+  return `Removed account · ${short}`;
+}
+
+/**
+ * LV-04: rewrite an actor render whose "name" is really an unresolved user id.
+ * The resolver has no row and no name hint in that case, so `name === userId`
+ * is the exact signal (both call sites pass `nameHint: null`).
+ */
+export function labelUnresolvedHuman(render: ActorRender): ActorRender {
+  if (render.kind !== "human" || render.name !== render.userId) return render;
+  return {
+    ...render,
+    name: removedAccountLabel(render.userId),
+    initials: "?",
+  };
+}
+
 /** Owner render helper shared by board + task queries. */
 export function resolveTaskOwner(
   db: DatabaseSync,
@@ -102,7 +130,9 @@ export function resolveTaskOwner(
 ): ActorRender | null {
   if (!ownerUserId) return null;
   const resolve = createActorResolver(db, { projectMemberIds: memberIds });
-  return resolve({ kind: "human", userId: ownerUserId, nameHint: null });
+  return labelUnresolvedHuman(
+    resolve({ kind: "human", userId: ownerUserId, nameHint: null }),
+  );
 }
 
 export function listProjectTasks(
@@ -132,11 +162,13 @@ export function listProjectTasks(
     mapTaskProjectionRow(row, {
       stages,
       owner: row.owner_user_id
-        ? resolveActor({
-            kind: "human",
-            userId: row.owner_user_id,
-            nameHint: null,
-          })
+        ? labelUnresolvedHuman(
+            resolveActor({
+              kind: "human",
+              userId: row.owner_user_id,
+              nameHint: null,
+            }),
+          )
         : null,
       accepted: isAcceptedDisplayState({ stage: row.stage, stageIds }),
     }),
@@ -153,7 +185,11 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   const resolve = createActorResolver(db, { projectMemberIds: memberIds });
   const members = memberRecords.map((m) => ({
     ...m,
-    user: resolve({ kind: "human", userId: m.userId, nameHint: null }),
+    // LV-04: a membership left behind by a deleted org account renders as
+    // "Removed account · u_RT7…", never as the raw id.
+    user: labelUnresolvedHuman(
+      resolve({ kind: "human", userId: m.userId, nameHint: null }),
+    ),
   }));
 
   const tasks = listProjectTasks(db, slug);

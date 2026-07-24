@@ -145,8 +145,11 @@ function ConnectionModal({
         <div className="def-note">
           <Icon name="shield" />
           <span>
-            Verified when you apply. If any scope is missing the token is refused
-            and nothing is saved.
+            Verified when you apply: a classic PAT publishes its scopes, so a
+            missing one refuses the token and nothing is saved. A{" "}
+            <strong>fine-grained</strong> PAT publishes none — those scopes are
+            marked <span className="mono">~assumed</span> and only prove
+            themselves on the first real repository call.
           </span>
         </div>
       </div>
@@ -225,12 +228,32 @@ export function ConnectionsPanel({
                   {expiry || "—"}
                 </span>
                 <span className="scope-chips">
-                  {SCOPES.map((s) => (
-                    <span className="scope-chip" key={s}>
-                      {verified && <Icon name="check" />}
-                      {s}
-                    </span>
-                  ))}
+                  {/* P13-UI-01: a ✓ now means the scope was actually OBSERVED.
+                      A fine-grained PAT publishes no scope header, so the
+                      validator marks every scope `assumed` without probing —
+                      painting ✓ there claimed a verification that never ran. */}
+                  {SCOPES.map((s) => {
+                    const ev = (c.scopes ?? []).find((x) => x.id === s);
+                    const observed = verified && ev?.ok && ev.source !== "assumed";
+                    const assumed = verified && ev?.source === "assumed";
+                    return (
+                      <span
+                        className={"scope-chip" + (assumed ? " assumed" : "")}
+                        key={s}
+                        title={
+                          assumed
+                            ? "This token doesn't publish its scopes — Viberr assumes it and finds out on the first refusal."
+                            : observed
+                              ? "Confirmed against the token's scopes."
+                              : undefined
+                        }
+                      >
+                        {observed && <Icon name="check" />}
+                        {assumed && <span aria-hidden>~</span>}
+                        {s}
+                      </span>
+                    );
+                  })}
                 </span>
               </span>
               {c.validationState === "unvalidated" && (

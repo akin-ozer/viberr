@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createNotification } from "~/server/projections/notifications.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
+import { extractMentions } from "~/ui/mention-spans";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -12,14 +13,15 @@ import type { ActorRender } from "~/shared/mapping/actor.server";
  * mid-run agent comments) funnels through this helper so those tags actually
  * reach the person's inbox.
  *
- * Matching is the SAME rule the human path always used: a single-token
- * `@handle` resolves against enabled users by email local-part or first name,
- * case-insensitively. A multi-word display-name mention ("@Arda Kaya") matches
- * via its first token — MENTION_RE captures "Arda", which is the first-name
- * rule. Reserved agent handles never notify a person.
+ * Matching resolves an `@handle` against enabled users by email local-part,
+ * first name, or FULL display name, case-insensitively. Parsing goes through the
+ * shared span-finder with the users' display names as known handles, so
+ * "@Arda Kaya" matches the whole name rather than only its first token
+ * (P13-LV-11). Reserved agent handles never notify a person.
  */
 
-/** All @handles in a comment (single-token grammar — the server routing rule). */
+/** Single-token mention grammar. Kept exported for callers that only need the
+ *  raw token shape; routing itself goes through `extractMentions`. */
 export const MENTION_RE = /@([A-Za-z][\w-]*)/g;
 
 /** Handles that route to agents, never to a person named e.g. "Claude". */
@@ -56,23 +58,27 @@ export function notifyMentionedUsers(
   db: DatabaseSync,
   input: NotifyMentionsInput,
 ): string[] {
-  const handles = new Set<string>();
-  for (const match of input.text.matchAll(MENTION_RE)) {
-    const handle = match[1]!.toLowerCase();
-    if (!RESERVED_HANDLES.has(handle)) handles.add(handle);
-  }
-  if (handles.size === 0) return [];
-
   const users = db
     .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
     .all() as { id: string; email: string; name: string }[];
+
+  // Parse with the users' FULL display names as known handles so "@Arda Kaya"
+  // matches the whole name (P13-LV-11), not just its first token.
+  const handles = new Set(
+    extractMentions(
+      input.text,
+      users.map((u) => u.name),
+    ).filter((h) => !RESERVED_HANDLES.has(h)),
+  );
+  if (handles.size === 0) return [];
 
   const mentioned: string[] = [];
   for (const user of users) {
     if (input.excludeUserId && user.id === input.excludeUserId) continue;
     const local = user.email.split("@")[0]?.toLowerCase() ?? "";
     const first = user.name.split(/\s+/)[0]?.toLowerCase() ?? "";
-    if (!handles.has(local) && !handles.has(first)) continue;
+    const full = user.name.trim().toLowerCase();
+    if (!handles.has(local) && !handles.has(first) && !handles.has(full)) continue;
     mentioned.push(user.id);
     createNotification(db, {
       userId: user.id,

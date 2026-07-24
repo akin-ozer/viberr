@@ -11,7 +11,8 @@ import { publishSseEvent, type SseRoute } from "./sse-broker.server";
 
 /**
  * Event publisher: subscribes the SSE broker to the phase-3 projection
- * emitter and translates every ProjectionEvent into CONVENTIONS-shaped SSE
+ * emitter and translates every ProjectionEvent into the SSE shape
+ * docs/architecture/decisions.md fixes
  * events (`{ type, entityId, occurredAt, data }`, compact facts only).
  *
  * EVERY mutation source already flows through the emitter — verified:
@@ -181,7 +182,8 @@ export function startEventPublisher(): void {
         ctx.taskFacts = readTaskFacts(getDb(), e.projectSlug, e.taskKey);
       }
       for (const publishable of translateProjectionEvent(e, ctx)) {
-        // Parse before publish: the wire shape is a contract (CONVENTIONS);
+        // Parse before publish: the wire shape is a contract
+        // (docs/architecture/decisions.md);
         // a malformed event is a bug we want loud in the log, not on clients.
         publishSseEvent(sseEventSchema.parse(publishable.event), publishable.route);
       }

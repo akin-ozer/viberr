@@ -7,12 +7,25 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import {
+  countLiveAdmins,
+  removedAccountLabel,
+} from "~/features/project-settings/membership.server";
 import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
 
 /**
  * Policy mutations (policy spec §5): member role assignment + workflow
  * boundary changes, both writing project.md through the phase-3 writers,
  * then reproject → audit (SSE `project.updated` rides the rebuild).
+ *
+ * Policy flips the boundary ON an existing rule; it does not author the rule
+ * set. The transition chain itself is maintained by the stage editor
+ * (settings-actions.server.ts → app/shared/workflow/transitions.ts), which
+ * splices a new stage in and re-joins a removed stage's neighbours — P13-D-1,
+ * owner ruling 2026-07-25 (auto-wire, no transitions editor). That is why
+ * `setTransitionBoundary` below can still legitimately report
+ * "No transition rule from X to Y." — it means the caller named a hop the chain
+ * does not have, not that the admin must create one here.
  *
  * Server-side guards (mirrored client-side as UX sugar only):
  *   - actor must hold "Manage members & roles" / "Edit workflow & policy"
@@ -65,7 +78,8 @@ function userName(db: DatabaseSync, userId: string): string {
   const row = db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId) as
     | { name: string }
     | undefined;
-  return row?.name ?? userId;
+  // LV-04: never echo the raw `u_…` id as if it were a display name.
+  return row?.name ?? removedAccountLabel(userId);
 }
 
 // ---------------------------------------------------------------- set role
@@ -111,9 +125,11 @@ export async function setMemberRole(
     previousRole = member.role;
     if (member.role === role) return; // no-op, no event
     if (member.role === "admin" && role !== "admin") {
-      const admins = parsed.frontmatter.members.filter(
-        (m) => m.role === "admin",
-      ).length;
+      // UI-29: count admins with a LIVE, enabled account. Counting project.md
+      // entries let one ghost admin (an org-deleted user project.md still
+      // listed) satisfy the guard, so the only real admin could demote
+      // themselves into a project nobody could govern.
+      const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (admins <= 1) {
         // Last-admin guard — exact mock copy, project name parameterized.
         throw AppError.conflict(

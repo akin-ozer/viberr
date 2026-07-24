@@ -163,15 +163,40 @@ export function defaultEffortFor(backend: RealBackend): string {
 }
 
 /**
- * Is `model` a real, valid model id for `backend`? Checked against the curated
- * catalog (the codex list is authoritative — Codex has no live endpoint; the
- * claude aliases sonnet/opus/haiku are always valid). Display labels from seed
- * profiles ("codex-large · claude-sonnet", "claude-sonnet", "codex-large",
- * "orchestration runtime") are NOT valid ids and return false.
+ * A dated/versioned real Claude model id — `claude-` plus a digit somewhere,
+ * e.g. `claude-sonnet-4-5`. Exactly what `resolveClaudeModel`
+ * (claude-runtime) forwards to the SDK verbatim, and the shape a live
+ * `supportedModels()` row can carry. Deliberately NOT matched by the seed
+ * display labels this guard exists to reject (`claude-sonnet` has no digit).
+ */
+const DATED_CLAUDE_ID_RE = /^claude-.*\d/;
+
+/**
+ * Is `model` a real, valid model id for `backend`?
+ *
+ * Claude: the curated family aliases, PLUS anything the LIVE catalog offered
+ * (see below), PLUS a dated `claude-*` id. Codex: the curated list only —
+ * Codex exposes no list endpoint, so the picker can never offer anything else.
+ * Display labels from seed profiles ("codex-large · claude-sonnet",
+ * "claude-sonnet", "codex-large", "orchestration runtime") are NOT valid ids
+ * and still return false.
+ *
+ * P13-RT-07: `getModelCatalog("claude")` serves the account's LIVE
+ * `supportedModels()` list to the profile modal, which stores the chosen
+ * `value` — but this validator consulted the three curated aliases only, so
+ * `resolveRunModel` silently substituted `sonnet` for a value the picker itself
+ * had offered. Every run then executed on Sonnet while the agents page showed
+ * an "unknown model" badge, which read as a bug in the badge. The picker and
+ * the validator now agree: whatever the live catalog listed is accepted, and a
+ * dated id is accepted even when the live list has since been evicted from the
+ * cache (that cache is a 10-minute in-process TTL, not a source of truth).
  */
 export function isKnownModel(backend: RealBackend, model: string): boolean {
   const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
-  return cat.models.some((m) => m.value === model);
+  if (cat.models.some((m) => m.value === model)) return true;
+  if (backend === "codex") return false;
+  if (DATED_CLAUDE_ID_RE.test(model)) return true;
+  return liveCatalogModelValues("claude").has(model);
 }
 
 /**
@@ -283,6 +308,19 @@ function getCache(): Map<RealBackend, CacheEntry> {
 /** Test-only: clear the in-process live cache. */
 export function resetModelCatalogCache(): void {
   getCache().clear();
+}
+
+/**
+ * The model ids the LIVE catalog last offered for a backend (P13-RT-07).
+ * Deliberately ignores the TTL: the TTL governs when to REFETCH, not whether a
+ * value the picker already offered (and a profile already stored) is real. On a
+ * cold process the cache is empty and validation falls back to the curated
+ * aliases + the dated-id shape, which covers the ids `supportedModels()`
+ * actually returns for Claude.
+ */
+function liveCatalogModelValues(backend: RealBackend): Set<string> {
+  const entry = getCache().get(backend);
+  return new Set(entry?.catalog.models.map((m) => m.value) ?? []);
 }
 
 /** Map a `supportedModels()` row to a catalog model. */

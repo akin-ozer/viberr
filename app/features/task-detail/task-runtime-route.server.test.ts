@@ -21,7 +21,7 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  */
 
 let app: AppTestContext;
-let ids: { arda: string; selin: string };
+let ids: { arda: string; selin: string; deniz: string };
 let finishedRunId: string;
 let runningRunId: string;
 
@@ -36,6 +36,8 @@ beforeAll(async () => {
   ids = {
     arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
     selin: findUserByEmail(app.db, "selin@viberr.dev")!.id,
+    // Registered, but a member of NO project — the UI-30 gate subject.
+    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
   };
 
   const { startRun } = await import("~/server/runtimes/run-service.server");
@@ -156,6 +158,37 @@ describe("loader — runtime projection shape", () => {
   it("VIB-166: no runtime threads (the seed fabricates NO run history — R7-2)", async () => {
     const { runtime } = await runLoader("VIB-166", ids.arda);
     expect(runtime).toEqual([]);
+  });
+
+  /**
+   * UI-30: raw run logs, the `{ } raw` wire envelopes and the provider session
+   * id were served to ANY signed-in user, while `/resources/run-log` and
+   * `/resources/session-export` — which serve the same material — require
+   * project membership. The surface was simultaneously more permissive than its
+   * own data routes AND broken (the live tail silently 403'd, Export downloaded
+   * a 403 body). One policy: members see the console, everyone else keeps the
+   * honest run summary.
+   */
+  it("UI-30: a NON-MEMBER gets the run summary without lines, raw envelopes or sid", async () => {
+    const { runtime, runsVisible } = await runLoader("VIB-142", ids.deniz);
+    expect(runsVisible).toBe(false);
+    const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
+    // The summary strip survives — who ran, on what backend, how it ended.
+    expect(run).toMatchObject({ backend: "codex", state: "done" });
+    // The sensitive material does not.
+    expect(run.lines).toEqual([]);
+    expect(run.raw).toEqual([]);
+    expect(run.lineCount).toBe(0);
+    expect(run.sid).toBeNull();
+    expect(run.exportable).toBe(false);
+  });
+
+  it("UI-30: a project MEMBER still gets the full console", async () => {
+    const { runtime, runsVisible } = await runLoader("VIB-142", ids.selin);
+    expect(runsVisible).toBe(true);
+    const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
+    expect(run.lines.length).toBeGreaterThan(0);
+    expect(run.sid).toBe("sess-142");
   });
 });
 

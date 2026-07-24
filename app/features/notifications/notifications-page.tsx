@@ -30,13 +30,17 @@ function keybtnLabel(n: NotificationPageItem): string {
 
 function NtfNeedsYou({
   items,
+  total,
   onRead,
   onOpen,
 }: {
   items: NotificationPageItem[];
+  /** UI-54: pending decisions regardless of the All/Unread filter. */
+  total: number;
   onRead: (id: string) => void;
   onOpen: (n: NotificationPageItem) => void;
 }) {
+  const hidden = total - items.length;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -46,7 +50,11 @@ function NtfNeedsYou({
           className="right sub"
           style={{ fontSize: ".76rem", color: "var(--faint)" }}
         >
-          {items.length} decision{items.length === 1 ? "" : "s"}
+          {/* UI-54: the count is the TRUE number of pending decisions. It used
+              to be computed after the All/Unread filter, so three already-read
+              decisions under "Unread" reported "0 decisions". */}
+          {total} decision{total === 1 ? "" : "s"}
+          {hidden > 0 ? ` · ${hidden} hidden by the filter` : ""}
         </span>
       </div>
       <div className="rq-list">
@@ -91,7 +99,11 @@ function NtfNeedsYou({
           );
         })}
         {!items.length && (
-          <div className="empty">Nothing is waiting on you.</div>
+          <div className="empty">
+            {total > 0
+              ? `${total} decision${total === 1 ? " is" : "s are"} waiting on you — switch to "All" to see ${total === 1 ? "it" : "them"}.`
+              : "Nothing is waiting on you."}
+          </div>
         )}
       </div>
     </div>
@@ -122,18 +134,18 @@ function NtfStream({
             if (formatDayBucket(n.occurredAt, now) !== day) return [];
             const m = ntfMeta(n);
             return (
+              // UI-54: every stream row used to be `role="button" tabIndex={0}`
+              // whose ONLY effect was `onRead` — and the route early-returns for
+              // rows already read, so a read row was a focusable control that
+              // did nothing. It also nested a real `<button>` (the navigate
+              // keybtn) inside a `role="button"`, which is invalid. The row is a
+              // plain element now; clicking it still marks read (mouse
+              // convenience), and unread rows carry an explicit focusable
+              // "Mark read" control.
               <div
                 className={"pol-ev ntf-ev" + (n.unread ? " unread" : "")}
                 key={n.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => onRead(n.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onRead(n.id);
-                  }
-                }}
+                onClick={n.unread ? () => onRead(n.id) : undefined}
                 title={n.unread ? "Click to mark read" : undefined}
               >
                 <span className={"pev-ico " + m.cls}>
@@ -157,6 +169,19 @@ function NtfStream({
                     {keybtnLabel(n)}
                   </button>
                 </span>
+                {n.unread && (
+                  <button
+                    type="button"
+                    className="keybtn"
+                    aria-label={"Mark “" + n.title + "” read"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRead(n.id);
+                    }}
+                  >
+                    Mark read
+                  </button>
+                )}
                 {n.unread && <span className="unread-dot" />}
                 <span className="pev-t">{formatClock(n.occurredAt)}</span>
               </div>
@@ -190,7 +215,7 @@ export function NotificationsPage({
   onOpen: (n: NotificationPageItem) => void;
 }) {
   const [f, setF] = useState<NotificationFilter>("all");
-  const { needs, rest } = splitNotifications(items, f);
+  const { needs, rest, needsTotal } = splitNotifications(items, f);
 
   return (
     <div className="board-wrap" data-screen-label="Notifications">
@@ -233,7 +258,12 @@ export function NotificationsPage({
         </div>
       </div>
       <div className="policy-wrap">
-        <NtfNeedsYou items={needs} onRead={onRead} onOpen={onOpen} />
+        <NtfNeedsYou
+          items={needs}
+          total={needsTotal}
+          onRead={onRead}
+          onOpen={onOpen}
+        />
         <NtfStream items={rest} onRead={onRead} onOpen={onOpen} />
         {truncated && (
           <p

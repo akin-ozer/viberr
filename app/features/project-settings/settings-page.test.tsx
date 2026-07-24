@@ -33,9 +33,9 @@ const STAGES = [
 ];
 
 const MEMBERS: MembershipView[] = [
-  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
-  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
-  { userId: "u_new", role: "viewer", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal" },
+  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "", missing: false, disabled: false },
+  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose", missing: false, disabled: false },
+  { userId: "u_new", role: "viewer", name: "Yeni Kişi", email: "yeni@viberr.dev", initials: "YK", tone: "teal", missing: false, disabled: false },
 ];
 
 // A REAL bound PAT carrying an open scope violation — the honest case that
@@ -261,21 +261,17 @@ describe("MembersPanel", () => {
 });
 
 describe("RepoPanel", () => {
-  it("renders repo facts, the override toggle and the shared CredentialCard with Grant scope", () => {
-    const onToggle = vi.fn();
+  it("renders repo facts and the shared CredentialCard with Grant scope", () => {
     const onGrant = vi.fn();
     const onSet = vi.fn();
     const onOpenTask = vi.fn();
     const { container, getByText, queryByText } = render(
       <RepoPanel
         repo="akin-ozer/viberr"
-        override
         credential={CREDENTIAL}
-        canOverride
         canGrant
         busy={false}
         credBusy={false}
-        onToggleOverride={onToggle}
         onGrantScope={onGrant}
         onSetCredential={onSet}
         onClearCredential={() => {}}
@@ -283,8 +279,12 @@ describe("RepoPanel", () => {
       />,
     );
     expect(getByText("akin-ozer/viberr")).toBeTruthy();
-    expect(getByText("tasks may attach a different repo")).toBeTruthy();
-    expect(getByText("1 · V1 limit")).toBeTruthy();
+    // P13-D-5: honest copy — the "Task-level override" toggle claiming "tasks
+    // may attach a different repo" is gone along with the feature it advertised
+    // (no writer ever set `task.repo`; the flag gated nothing).
+    expect(getByText("every task uses this repository")).toBeTruthy();
+    expect(queryByText("1 · V1 limit")).toBeNull();
+    expect(container.querySelector('[role="switch"]')).toBeNull();
     // Shared cred-card: 4 chips, one missing, warn banner with keybtn.
     expect(container.querySelectorAll(".scope-chip")).toHaveLength(4);
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(1);
@@ -300,11 +300,6 @@ describe("RepoPanel", () => {
     expect(queryByText("Attach credential")).toBeNull();
     fireEvent.click(getByText("Rotate credential"));
     expect(onSet).toHaveBeenCalled();
-
-    const toggle = container.querySelector('[role="switch"]')!;
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(toggle);
-    expect(onToggle).toHaveBeenCalled();
   });
 
   it("unconfigured project (policy but no bound PAT) → honest connect card, no chips (honest empty slate)", () => {
@@ -312,13 +307,10 @@ describe("RepoPanel", () => {
     const { container, getByText } = render(
       <RepoPanel
         repo="akin-ozer/viberr"
-        override
         credential={NO_CREDENTIAL}
-        canOverride
         canGrant
         busy={false}
         credBusy={false}
-        onToggleOverride={() => {}}
         onGrantScope={() => {}}
         onSetCredential={onSet}
         onClearCredential={() => {}}
@@ -348,13 +340,10 @@ describe("RepoPanel", () => {
     const { container, getByText, queryByText } = render(
       <RepoPanel
         repo="akin-ozer/viberr"
-        override={false}
         credential={bound}
-        canOverride
         canGrant
         busy={false}
         credBusy={false}
-        onToggleOverride={() => {}}
         onGrantScope={() => {}}
         onSetCredential={onSet}
         onClearCredential={onClear}
@@ -381,13 +370,10 @@ describe("RepoPanel", () => {
     const { container, getByText } = render(
       <RepoPanel
         repo="akin-ozer/viberr"
-        override={false}
         credential={allOk}
-        canOverride={false}
         canGrant={false}
         busy={false}
         credBusy={false}
-        onToggleOverride={() => {}}
         onGrantScope={() => {}}
         onSetCredential={() => {}}
         onClearCredential={() => {}}
@@ -395,7 +381,7 @@ describe("RepoPanel", () => {
       />,
     );
     expect(container.querySelector(".cred-ok")).not.toBeNull();
-    expect(getByText("all tasks use the default")).toBeTruthy();
+    expect(getByText("every task uses this repository")).toBeTruthy();
     // canGrant=false → no attach/rotate/remove affordances.
     expect(container.querySelector(".cred-manage")).toBeNull();
   });

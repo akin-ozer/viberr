@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { resetEnvCacheForTests } from "../config/env.server";
 import {
+  SESSION_MISSING_RE,
   buildResumeScript,
   locateTranscript,
+  probeSessionContinuity,
   transcriptExists,
 } from "./session-export.server";
 
@@ -140,6 +142,76 @@ describe("transcriptExists (loader-path probe)", () => {
     expect(transcriptExists("codex", sid)).toBe(true);
     rmSync(file);
     expect(transcriptExists("codex", sid)).toBe(true); // served from the cache
+  });
+});
+
+/* ------------------- resume-time continuity probe (P13-D-2) ------------------ */
+
+describe("probeSessionContinuity", () => {
+  it("claude: unknown with no transcript store, present/missing once there is one", () => {
+    const sid = "bbbb2222-ae14-41da-a8d9-f8c48b800605";
+    // No `<config>/projects` dir at all → absence proves NOTHING. Answering
+    // "missing" here would throw away every live session on any deployment
+    // whose transcripts this process cannot see.
+    expect(probeSessionContinuity("claude", sid)).toBe("unknown");
+
+    writeClaudeSession(sid, "/w/x", [{ type: "queue-operation", sessionId: sid }]);
+    expect(probeSessionContinuity("claude", sid)).toBe("present");
+    // The store exists and does not hold this id → genuinely swept.
+    expect(probeSessionContinuity("claude", "never-existed")).toBe("missing");
+  });
+
+  it("codex: finds a rollout by CONTENT too — a filename miss is not a dead session", () => {
+    const sid = "0199a2c4-7b31-7802-abcd-00000000ff01";
+    expect(probeSessionContinuity("codex", sid)).toBe("unknown"); // no sessions dir
+
+    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "08");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-08T12-00-00-${sid}.jsonl`),
+      JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n",
+    );
+    expect(probeSessionContinuity("codex", sid)).toBe("present");
+    expect(probeSessionContinuity("codex", "0199-nope")).toBe("missing");
+
+    // `transcriptExists` (the loader-path Export probe) matches by FILENAME
+    // only, so a content-only id reads as a conservative miss there. Doing that
+    // here would discard a LIVE session's context, so the resume probe uses the
+    // full locator.
+    const contentOnly = "0199a2c4-7b31-7802-abcd-00000000ff02";
+    writeFileSync(
+      path.join(dir, "rollout-2026-07-08T13-00-00-anon.jsonl"),
+      JSON.stringify({ type: "session_meta", payload: { id: contentOnly } }) + "\n",
+    );
+    expect(transcriptExists("codex", contentOnly)).toBe(false);
+    expect(probeSessionContinuity("codex", contentOnly)).toBe("present");
+  });
+
+  it("is uncached — a transcript deleted after a hit reads as missing at once", () => {
+    const sid = "0199a2c4-7b31-7802-abcd-00000000ff03";
+    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "09");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `rollout-2026-07-09T12-00-00-${sid}.jsonl`);
+    writeFileSync(file, "{}\n");
+    expect(probeSessionContinuity("codex", sid)).toBe("present");
+    rmSync(file);
+    // `transcriptExists` would still say true here (30 s TTL) — a stale `true`
+    // is exactly the dead id this probe exists to catch.
+    expect(probeSessionContinuity("codex", sid)).toBe("missing");
+  });
+
+  it("treats a null/empty session id as unknown, never missing", () => {
+    expect(probeSessionContinuity("claude", null)).toBe("unknown");
+    expect(probeSessionContinuity("codex", "")).toBe("unknown");
+  });
+
+  it("SESSION_MISSING_RE matches what the two CLIs actually print", () => {
+    expect(SESSION_MISSING_RE.test("No conversation found with session ID 8a1f")).toBe(true);
+    expect(SESSION_MISSING_RE.test("Error: session not found: 0199a2c4")).toBe(true);
+    expect(SESSION_MISSING_RE.test("rollout not found for id 0199a2c4")).toBe(true);
+    // Must NOT swallow the auth/quota classes that come first in the classifiers.
+    expect(SESSION_MISSING_RE.test("401 Unauthorized: invalid api key")).toBe(false);
+    expect(SESSION_MISSING_RE.test("You've hit your usage limit")).toBe(false);
   });
 });
 

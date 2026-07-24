@@ -518,7 +518,8 @@ describe("reconcileWorkspaceDelivery", () => {
 
     const parsed = readFm(store);
     expect(parsed.frontmatter.pr).toMatchObject({ number: 9, state: "closed" });
-    const policy = parsed.timeline.find((e) => e.type === "policy");
+    // P13-LV-03: a neutral divergence note, not a policy VIOLATION.
+    const policy = parsed.timeline.find((e) => e.type === "note");
     expect(policy?.text).toContain(
       "accepted PR #9 was closed on GitHub without merging",
     );

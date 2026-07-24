@@ -1,23 +1,59 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-// Bundle the shipped default agent assets INTO the server build (Vite `?raw`),
-// so they are available in every environment (dev, container, tests) without a
-// runtime dependency on the store/`data/` dir. These files under `assets/` are
-// the shipped-by-default SOURCE OF TRUTH (tracked in git; `data/` is generated
-// and gitignored). Editing them updates what ships; the boot step writes them
-// into the store's `skills/` + `agents/definitions/` on first run.
-import viberrSkillMd from "./assets/viberr-app-expertise.skill.md?raw";
-import developerSkillMd from "./assets/developer-expertise.skill.md?raw";
-import reviewerSkillMd from "./assets/reviewer-expertise.skill.md?raw";
-import operatorDefinitionMd from "./assets/operator.definition.md?raw";
-import developerDefinitionMd from "./assets/developer.definition.md?raw";
-import reviewerDefinitionMd from "./assets/reviewer.definition.md?raw";
-import operatorProfileMd from "./assets/operator.profile.md?raw";
+/**
+ * The shipped default agent assets, read from `assets/` at runtime.
+ *
+ * These files are the shipped-by-default SOURCE OF TRUTH (tracked in git;
+ * `data/` is generated and gitignored). Editing them updates what ships; the
+ * boot step writes them into the store's `skills/` + `agents/definitions/` on
+ * first run.
+ *
+ * They used to be pulled in with Vite's `?raw`, which bundles them into the
+ * server build — but that loader only exists under Vite. The moment
+ * `seed.server.ts` began emitting the shipped personas (P13-AP-03) this module
+ * joined the import graph of `tsx scripts/seed.ts`, and the DOCUMENTED INSTALL
+ * STEP `npm run seed` died with `ERR_UNKNOWN_FILE_EXTENSION ".md"`. Vitest and
+ * the Vite build both handled `?raw`, so typecheck, 1663 unit tests and the
+ * build were all green while a fresh install was broken — the e2e job was the
+ * only gate that ran a real CLI entrypoint.
+ *
+ * Reading from disk works under every runtime (Vite SSR output, tsx, node,
+ * vitest). Resolution tries the module's own directory first (correct from
+ * source), then `<cwd>/app/server/seed/assets` (correct for the container,
+ * whose Dockerfile copies `app/` next to the build output), and finally fails
+ * LOUDLY rather than shipping an agent with an empty persona.
+ */
+const ASSET_DIR_CANDIDATES = [
+  path.join(import.meta.dirname, "assets"),
+  path.resolve(process.cwd(), "app/server/seed/assets"),
+];
+
+function readAsset(file: string): string {
+  for (const dir of ASSET_DIR_CANDIDATES) {
+    const abs = path.join(dir, file);
+    if (existsSync(abs)) return readFileSync(abs, "utf8");
+  }
+  throw new Error(
+    `Viberr default asset ${file} was not found. Looked in: ${ASSET_DIR_CANDIDATES.join(", ")}. ` +
+      "These files ship with the app under app/server/seed/assets/.",
+  );
+}
+
+const viberrSkillMd = readAsset("viberr-app-expertise.skill.md");
+const developerSkillMd = readAsset("developer-expertise.skill.md");
+const reviewerSkillMd = readAsset("reviewer-expertise.skill.md");
+const operatorDefinitionMd = readAsset("operator.definition.md");
+const developerDefinitionMd = readAsset("developer.definition.md");
+const reviewerDefinitionMd = readAsset("reviewer.definition.md");
+const operatorProfileMd = readAsset("operator.profile.md");
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
-import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import {
+  SEED_AGENT_PROFILES,
+  type SeedAgentProfile,
+} from "./agent-catalog.server";
 
 // F10-30: the built-in specialist PERSONA is the profile's own markdown body —
 // ONE authoring source. Previously the rich persona shipped as a SEPARATE
@@ -66,6 +102,45 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
 ];
 
 /**
+ * The canonical on-disk bytes for ONE built-in agent profile template.
+ *
+ * P13-AP-03: this is the SINGLE source both template writers use — the boot
+ * backfill below AND `runSeed` (seed.server.ts). They used to disagree: seed
+ * wrote the 2-sentence catalog blurb as the body while only the backfill wrote
+ * the shipped persona, and the backfill skips files that already exist. On the
+ * documented install order (`npm run seed` → `npm run dev`) the rich personas
+ * in `assets/{developer,reviewer}.definition.md` therefore never reached disk
+ * and every built-in agent ran on a blurb system prompt. Both writers now emit
+ * identical bytes.
+ *
+ * `kbGrants` is the ONE deliberate difference between the two callers: the boot
+ * backfill installs on-disk skills but no knowledge bases, so a KB grant there
+ * would dangle in every non-seeded store as the "N of 0" ghost (2026-07-18
+ * owner fix). `npm run seed` also runs `seedOrgResources`, which creates the
+ * backing KBs, so it keeps them.
+ */
+export function builtinAgentProfileTemplate(
+  profile: SeedAgentProfile,
+  opts: { kbGrants?: boolean } = {},
+): string {
+  return serializeAgentProfile({
+    // Non-mutating copy — SEED_AGENT_PROFILES is shared with the demo fixture.
+    // The short scannable `desc` stays in frontmatter (what the operator picks
+    // on); the BODY is the full persona (F10-30).
+    frontmatter: {
+      ...profile.frontmatter,
+      desc: profile.frontmatter.desc || profile.description,
+      resources: {
+        ...profile.frontmatter.resources,
+        kb: opts.kbGrants ? profile.frontmatter.resources.kb : [],
+      },
+    },
+    description:
+      SPECIALIST_PERSONA_BY_ID[profile.frontmatter.id] ?? profile.description,
+  });
+}
+
+/**
  * The base specialist profile templates, generated from SEED_AGENT_PROFILES so
  * a deployment resolves (kind, backends, capabilities, resources) in a store
  * that was never demo-seeded — the counterpart of the operator profile template
@@ -76,20 +151,7 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
     (DEFAULT_SPECIALIST_IDS as readonly string[]).includes(p.frontmatter.id),
   ).map((p) => ({
     rel: path.join("agents", "profiles", `${p.frontmatter.id}.md`),
-    content: serializeAgentProfile({
-      // Drop KB grants for the BASE template only (non-mutating copy — the
-      // shared SEED_AGENT_PROFILES is also the DEMO seed's source, which DOES
-      // create the backing KBs). The base install seeds on-disk skills but no
-      // knowledge bases, so a KB grant here would dangle in every non-demo
-      // store as the "N of 0" ghost (2026-07-18 owner fix). The short scannable
-      // `desc` is kept in frontmatter; the BODY is the full persona (F10-30).
-      frontmatter: {
-        ...p.frontmatter,
-        desc: p.frontmatter.desc || p.description,
-        resources: { ...p.frontmatter.resources, kb: [] },
-      },
-      description: SPECIALIST_PERSONA_BY_ID[p.frontmatter.id] ?? p.description,
-    }),
+    content: builtinAgentProfileTemplate(p),
   }));
 }
 

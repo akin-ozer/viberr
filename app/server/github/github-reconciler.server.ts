@@ -163,8 +163,9 @@ export async function reconcileTask(
   if (!fm.branch) return { status: "no_branch", taskKey: input.taskKey };
   const branch = fm.branch;
 
+  // P13-D-5: this passed `repoOverride: fm.repo` — the task-level repo override,
+  // deleted by owner ruling this pass. One project, one repo.
   const gh = getProjectGithubContext(db, input.projectSlug, {
-    repoOverride: fm.repo,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") return gh;
@@ -234,12 +235,26 @@ export async function reconcileTask(
     fm.pr?.state === "accepted" && pr && pr.state === "review"
       ? "accepted"
       : pr?.state;
+  const prState = liveState ?? pr?.state;
+  // P13-D-28: CI health and review state are now CONSUMED facts (checks fed one
+  // API call per pass into nothing before this). Two rules keep them honest:
+  //  1. a FAILED read is UNKNOWN, not "no checks" / "nobody reviewed" — carry
+  //     the last-known value forward for the SAME PR rather than blanking a pill
+  //     on a transient GitHub hiccup;
+  //  2. a settled PR (merged/closed) drops `review` — "review required" frozen
+  //     on a merged PR is a lie, and the linker deliberately stops paying for
+  //     the reviews call once the PR is terminal.
+  const cachedPr = pr && fm.pr?.number === pr.number ? fm.pr : null;
+  const checks = pr ? (pr.checks ?? cachedPr?.checks ?? null) : null;
+  const reviewLive = pr?.review !== undefined ? pr.review : (cachedPr?.review ?? null);
+  const review = prState === "review" || prState === "accepted" ? reviewLive : null;
   const newPr: PrRef | null = pr
     ? {
         number: pr.number,
-        state: liveState ?? pr.state,
+        state: prState ?? pr.state,
         title: pr.title,
-        ...(pr.checks ? { checks: pr.checks } : {}),
+        ...(checks ? { checks } : {}),
+        ...(review ? { review } : {}),
       }
     : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 
@@ -326,10 +341,11 @@ export async function reconcileTask(
     if (acceptedClosedExternally) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
-        type: "policy",
+        // Neutral divergence note, not a violation (P13-LV-03).
+        type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
-        text: `**Policy note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+        text: `**Note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
         toAgent: false,
         evidence: null,
       });
@@ -343,7 +359,9 @@ export async function reconcileTask(
           : "";
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
-        type: "policy",
+        // A GitHub-side divergence is a neutral note the human must act on, not
+        // a governance violation by an agent (P13-LV-03).
+        type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
         text: divergenceText + supersededNote,
@@ -399,6 +417,9 @@ export async function reconcileTask(
       behindBy: compare?.behindBy ?? null,
       prNumber: pr?.number ?? null,
       prState: pr?.state ?? null,
+      // P13-D-28: the two newly-consumed GitHub facts, on the observation row.
+      prReview: review ?? null,
+      prChecks: checks,
       commits: branchCommits?.length ?? null,
     },
   });
@@ -549,8 +570,8 @@ export async function mergeTaskPr(
   if (!fm.pr) return { status: "no_pr", taskKey: input.taskKey };
   const prNumber = fm.pr.number;
 
+  // P13-D-5: task-level repo override deleted (owner ruling) — project repo only.
   const gh = getProjectGithubContext(db, input.projectSlug, {
-    repoOverride: fm.repo,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") return gh;

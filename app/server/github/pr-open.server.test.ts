@@ -110,6 +110,85 @@ describe("openTaskPr", () => {
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
   });
 
+  // P13-D-26: `composePrBody` has always accepted `evidence` and this — its ONE
+  // caller — never passed it, so the "## Evidence" section was unreachable in
+  // production. The task record now carries real evidence rows on outcome
+  // events; the newest set must reach the PR body.
+  it("carries the task's newest evidence rows into the PR body (P13-D-26)", async () => {
+    const store = setupWithBranch("VIB-202");
+    // A reviewer verdict event carrying evidence, plus an older one that must
+    // NOT win, plus a newer event with no evidence at all.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-202",
+      dataRoot: store.dataRoot,
+    })!;
+    const agent = {
+      kind: "agent" as const,
+      backend: "claude" as const,
+      profileId: "reviewer",
+      roleHint: "Review",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: file.parsed.frontmatter,
+      goal: file.parsed.goal,
+      timeline: [
+        {
+          occurredAt: "2026-07-24T12:00:00.000Z",
+          type: "comment",
+          actor: agent,
+          title: null,
+          text: "Just a note.",
+          toAgent: false,
+          evidence: null,
+        },
+        {
+          occurredAt: "2026-07-24T11:00:00.000Z",
+          type: "quality",
+          actor: agent,
+          title: "Review passed",
+          text: "**Validation:** healthy.",
+          toAgent: false,
+          evidence: [
+            { label: "unit/policy_gate_test", add: "+14", del: "0" },
+            { label: "2 commit(s) delivered", add: "—", del: "—" },
+          ],
+        },
+        {
+          occurredAt: "2026-07-24T10:00:00.000Z",
+          type: "quality",
+          actor: agent,
+          title: "Older",
+          text: "stale",
+          toAgent: false,
+          evidence: [{ label: "stale/suite", add: "+1", del: "0" }],
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-202] x", state: "open" },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-202" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res.status).toBe("ok");
+    const sent = gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body as { body: string };
+    expect(sent.body).toContain("## Evidence");
+    expect(sent.body).toContain("- unit/policy_gate_test · +14 · 0");
+    // The empty-column placeholder is a serialization detail, not PR prose.
+    expect(sent.body).toContain("- 2 commit(s) delivered\n");
+    expect(sent.body).not.toContain("stale/suite");
+  });
+
   it("is idempotent — reuses an existing open PR instead of creating a duplicate", async () => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
@@ -372,6 +451,101 @@ describe("openTaskPr", () => {
     expect(res).toMatchObject({ status: "ok", prNumber: 45, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 45, state: "review" });
+  });
+
+  it("P13-D-28: reusing the SAME PR keeps the reconciler-owned checks + review", async () => {
+    // openTaskPr never reads CI or reviews. Rebuilding the ref from scratch on a
+    // reuse would blank both pills until the next 5-minute poller tick.
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        pr: {
+          number: 42,
+          state: "review",
+          title: "old title",
+          checks: { total: 3, passing: 2, failing: 0, pending: 1 },
+          review: "approved",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/42`]: {
+        body: {
+          number: 42,
+          html_url: "https://github.com/akin-ozer/viberr/pull/42",
+          title: "new title",
+          state: "open",
+          merged: false,
+        },
+      },
+    });
+    const res = await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(res).toMatchObject({ status: "ok", prNumber: 42, created: false });
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr).toEqual({
+      number: 42,
+      state: "review",
+      title: "new title",
+      checks: { total: 3, passing: 2, failing: 0, pending: 1 },
+      review: "approved",
+    });
+  });
+
+  it("P13-D-28: a DIFFERENT (freshly opened) PR starts with no checks and no review", async () => {
+    const store = setupWithBranch();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-201", {
+        title: "Attach execution workspace to task runtime",
+        stage: "review",
+        branch: BRANCH,
+        pr: {
+          number: 42,
+          state: "merged",
+          title: "old merged PR",
+          checks: { total: 3, passing: 3, failing: 0, pending: 0 },
+          review: "approved",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: {
+          number: 51,
+          html_url: "https://github.com/akin-ozer/viberr/pull/51",
+          title: "[VIB-201] Attach execution workspace to task runtime",
+          state: "open",
+        },
+      },
+    });
+    await openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(Object.keys(fm.pr!)).toEqual(["number", "state", "title"]);
+    expect(fm.pr).toMatchObject({ number: 51, state: "review" });
   });
 
   it("degrades cleanly when no repo/PAT is configured (no throw, typed result)", async () => {

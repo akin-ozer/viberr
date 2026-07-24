@@ -46,7 +46,9 @@ export function useOrgAction(options?: {
     if (d.ok) {
       if (d.toast) push(d.toast);
     } else if (d.error) {
-      push(d.error);
+      // P13-D-10: the second shared toast helper — a failure must not render
+      // the success tick (see `ToastKind`, app/ui/toast.tsx).
+      push(d.error, "error");
     }
   }, [fetcher.state, fetcher.data, push]);
 

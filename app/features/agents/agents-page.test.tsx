@@ -16,7 +16,8 @@ import {
   CreateProfileModal,
   type ProfileFormPayload,
 } from "./create-profile-modal";
-import { LiveRoster, ProfileDetail } from "./agents-page";
+import { AgentsPage, LibraryPicker, LiveRoster, ProfileDetail } from "./agents-page";
+import { ToastProvider } from "~/ui/toast";
 
 afterEach(cleanup);
 
@@ -220,6 +221,85 @@ describe("ProfileDetail", () => {
     expect(getByText("1 active task")).toBeTruthy();
     fireEvent.click(getByText("Delete profile"));
     expect(onDelete).toHaveBeenCalledWith("developer");
+  });
+
+  // P13-LV-02 — the eligible-stage panel used to contradict itself: it ignored
+  // `spanAll` (the Operator's header said "active across the whole lifecycle"
+  // while every chip rendered struck through), counted stage ids the board
+  // doesn't have (a profile with stale grants read "5 of 4 stages"), and gave
+  // no clue at all when NONE of a profile's stages exist on this board.
+  it("LV-02: spanAll lights every chip and the counter never exceeds the board", () => {
+    const { container, getByText } = render(
+      <ProfileDetail
+        a={mkProfile({ id: "operator", kind: "operator", spanAll: true })}
+        stages={STAGES}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(getByText("active across the whole lifecycle")).toBeTruthy();
+    // Every board stage is eligible — none struck through.
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(
+      STAGES.length,
+    );
+    expect(container.querySelectorAll(".stage-chip.off")).toHaveLength(0);
+  });
+
+  it("LV-02: stale stage grants are surfaced, counted honestly, and flagged as unassignable", () => {
+    const board = [
+      { id: "todo", name: "To do", color: "#a5a8b5" },
+      { id: "doing", name: "In progress", color: "#7b61ff" },
+      { id: "done", name: "Done", color: "#00b473" },
+    ];
+    const { container, getByText, queryByText } = render(
+      <ProfileDetail
+        // Governed stage ids on a 3-stage board: the old counter said
+        // "2 of 3 stages" with no chip lit.
+        a={mkProfile({ stages: ["ready", "impl"] })}
+        stages={board}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(getByText("0 of 3 stages")).toBeTruthy();
+    expect(queryByText("2 of 3 stages")).toBeNull();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(0);
+    // The two grants that point at stages this board doesn't have are shown.
+    expect(getByText("ready · not on this board")).toBeTruthy();
+    expect(getByText("impl · not on this board")).toBeTruthy();
+    // …and the consequence is stated, not left for the user to infer.
+    expect(
+      getByText(/can't be assigned to any task here/),
+    ).toBeTruthy();
+  });
+
+  it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {
+    const { container, getByText } = render(
+      <ProfileDetail
+        a={mkProfile({ stages: [] })}
+        stages={STAGES}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    // Mirrors specialistEligibleForStage: no declared stages = eligible
+    // everywhere (the guard treats it that way, so the panel must too).
+    expect(getByText("no stage restriction — eligible everywhere")).toBeTruthy();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(
+      STAGES.length,
+    );
   });
 
   it("hides manage affordances for non-admins", () => {
@@ -527,5 +607,153 @@ describe("CreateProfileModal", () => {
       (container.querySelector('select[aria-label="Effort"]') as HTMLSelectElement)
         .value,
     ).toBe("max");
+  });
+});
+
+describe("P13-AP-07 — the edit modal states that saving FORKS a library profile", () => {
+  /**
+   * `updateAgentProfile` writes a COMPLETE definition snapshot onto the
+   * project's deployment, and every field of it wins over the org template
+   * afterwards — so the first project-level edit permanently detaches this
+   * project from later org-level renames, stage changes, resource changes and
+   * persona fixes. The snapshot model is deliberate; the COPY was the lie
+   * ("changes apply on next run" / "changes apply to future assignments"),
+   * so the editor now says what saving actually does.
+   */
+  it("a template-sourced profile is told it forks, in the header and the confirm hint", () => {
+    const { getByText } = renderModal({
+      initial: mkProfile({ source: "template" }),
+    });
+    expect(
+      getByText(
+        "Saving forks this profile for Viberr Core: it keeps its own copy and stops tracking later changes to the global profile.",
+      ),
+    ).toBeTruthy();
+    expect(
+      getByText("Ready to save — this forks Developer for Viberr Core."),
+    ).toBeTruthy();
+  });
+
+  it("a project-created profile has nothing to fork and says so plainly", () => {
+    const { getByText, queryByText } = renderModal({
+      initial: mkProfile({ source: "project", name: "Migrations" }),
+    });
+    expect(
+      getByText("Update this project's copy — changes apply to future assignments."),
+    ).toBeTruthy();
+    expect(queryByText(/forks/)).toBeNull();
+  });
+
+  it("create mode never claims a fork", () => {
+    const { getByText, queryByText } = renderModal({ initial: null });
+    expect(
+      getByText("A reusable agent the operator can assign to tasks."),
+    ).toBeTruthy();
+    expect(queryByText(/forks/)).toBeNull();
+  });
+});
+
+describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
+  const TEMPLATES = [
+    {
+      id: "security-reviewer",
+      name: "Security reviewer",
+      role: "Security",
+      desc: "Reviews IAM, secrets handling and supply-chain risk.",
+      backends: ["claude"] as ("codex" | "claude")[],
+      stages: ["review"],
+      spanAll: false,
+      resources: { skills: [], mcps: [], kb: [] },
+    },
+  ];
+
+  it("lists undeployed templates and adds the picked one by id", () => {
+    const onAdd = vi.fn();
+    const { getByText } = render(
+      <LibraryPicker
+        library={TEMPLATES}
+        projectName="Viberr Core"
+        busy={false}
+        onClose={() => {}}
+        onAdd={onAdd}
+      />,
+    );
+    expect(getByText("Security reviewer")).toBeTruthy();
+    expect(
+      getByText("Reviews IAM, secrets handling and supply-chain risk."),
+    ).toBeTruthy();
+    expect(getByText("1 stage")).toBeTruthy();
+    fireEvent.click(getByText("Security reviewer"));
+    expect(onAdd).toHaveBeenCalledWith("security-reviewer");
+  });
+
+  it("says so when every global profile is already deployed", () => {
+    const { getByText } = render(
+      <LibraryPicker
+        library={[]}
+        projectName="Viberr Core"
+        busy={false}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(getByText(/Every global profile is already deployed here/)).toBeTruthy();
+  });
+});
+
+/**
+ * P13-D-10: the page's hand-rolled result handler pushed the server's error
+ * string with `push`'s default `"success"` kind, so a rejected deploy rendered
+ * under the green tick. (The create/edit modals route their errors inline, so
+ * the toast branch only fires for the non-modal mutations — deploy-from-library
+ * is one.)
+ */
+describe("AgentsPage failure toast kind (P13-D-10)", () => {
+  function renderPage(actionResult: Record<string, unknown>) {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/viberr-core/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              library={[
+                {
+                  id: "reviewer",
+                  name: "Reviewer",
+                  role: "Review",
+                  desc: "Reviews the branch.",
+                  backends: ["claude"],
+                  stages: ["review"],
+                  spanAll: false,
+                  resources: { skills: [], mcps: [], kb: [] },
+                },
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+        action: async () => actionResult,
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+  }
+
+  it("renders the alert glyph, not the success tick, when a deploy fails", async () => {
+    const { getAllByText, getByText } = renderPage({
+      ok: false,
+      error: "That template no longer exists.",
+    });
+    fireEvent.click(getAllByText(/Add from library/)[0]!);
+    fireEvent.click(getByText("Reviewer").closest("button")!);
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    const toast = document.querySelector(".toast")!;
+    expect(toast.textContent).toContain("That template no longer exists.");
+    // `alert` is the triangle path; `check` is the tick.
+    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
   });
 });

@@ -2,9 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   acceptanceBlockedReason,
+  closedPrBlockedReason,
   deliveringEngagement,
   supportingEngagements,
   type PacketOption,
+  type PrState,
   type PacketOptionKind,
   type Recommendation,
   type RecommendationKind,
@@ -79,6 +81,14 @@ export interface OperatorAuthority {
   skills: string[];
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
+  /**
+   * The operator's declared org MCP servers. P13-KM-03: these were parsed by
+   * the resource catalog and shown as granted in the UI, but never reached a
+   * run on EITHER backend — `OperatorAuthority` carried skills and kb only.
+   * Live-proven: an operator granted `everything-mcp` reported "MCP
+   * servers/tools I can call: none".
+   */
+  mcps: string[];
   /** The deployment's persona override (P11-21) — when a project edits the
    *  operator's persona in the UI, the run uses it in place of the shipped
    *  operator definition. `null` falls back to the shipped/baked persona. */
@@ -164,6 +174,7 @@ export function resolveOperatorAuthority(
       skills: [],
       kb: [],
       persona: null,
+      mcps: [],
       deployed: false,
     };
   }
@@ -198,6 +209,7 @@ export function resolveOperatorAuthority(
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
+    mcps: view.resources.mcps ?? [],
     persona:
       isRecord(definition) && typeof definition.persona === "string"
         ? definition.persona.trim() || null
@@ -712,6 +724,12 @@ export interface OperatorTaskSnapshot {
     options: string[];
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
+  /** P13-D-4: the review PR, or null. The operator used to be structurally
+   *  blind to it — no `pr` field anywhere in the snapshot — so it could neither
+   *  see that a human had CLOSED the PR on GitHub (an out-of-band rejection)
+   *  nor reason about it before recommending/accepting completion. `state` is
+   *  the task-file cache vocabulary: review | merged | closed | accepted. */
+  pr: { number: number; state: PrState; title: string } | null;
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
@@ -805,6 +823,12 @@ export function operatorSnapshot(
       text:
         e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
     })),
+    // P13-D-4: expose the review PR. `state: "closed"` means a human closed it
+    // on GitHub WITHOUT merging — an out-of-band rejection the operator must
+    // not paper over by recommending or accepting completion.
+    pr: fm.pr
+      ? { number: fm.pr.number, state: fm.pr.state, title: fm.pr.title }
+      : null,
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),
   };
@@ -880,7 +904,9 @@ export async function operatorSetGoal(
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
-      type: "policy",
+      // A drafted goal is a neutral lifecycle note, not a policy violation
+      // (P13-LV-03 — this rendered as a coral "Policy violation" shield).
+      type: "note",
       actor: { kind: "operator" },
       title: "Goal drafted",
       text: input.reason?.trim()
@@ -1593,6 +1619,21 @@ export async function operatorAcceptCompletion(
     if (blockReason) {
       return { outcome: "noop", message: `${input.taskKey}: ${blockReason}` };
     }
+  }
+
+  // P13-D-4: the closed-PR gate the human `acceptCompletion` path applies. The
+  // operator was structurally blind here — it never read `pr` at all (the
+  // snapshot did not expose it), so under full autonomy it overwrote a PR a
+  // human had closed on GitHub to "accepted" and moved the task to Done. The
+  // reconciler restores `pr.state` on the next poll; `stage = done` is durable.
+  // Checked BEFORE the recommend branch too, so a supervised operator does not
+  // post an "Accept completion" card that acceptance would then refuse.
+  {
+    const closedReason = closedPrBlockedReason(
+      file.parsed.frontmatter,
+      input.taskKey,
+    );
+    if (closedReason) return { outcome: "noop", message: closedReason };
   }
 
   // Never accept a task with an open BLOCKED decision (mirrors the human

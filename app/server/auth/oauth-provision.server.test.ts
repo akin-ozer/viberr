@@ -41,7 +41,12 @@ describe("isOAuthWhitelisted", () => {
     });
 
     expect(
-      isOAuthWhitelisted(db, { id: "x", email: "new@viberr.dev", name: "N" }),
+      isOAuthWhitelisted(db, {
+        id: "x",
+        email: "new@viberr.dev",
+        name: "N",
+        provider: "google",
+      }),
     ).toBe(true); // domain allowlist
     expect(
       isOAuthWhitelisted(db, {
@@ -49,13 +54,24 @@ describe("isOAuthWhitelisted", () => {
         email: "octocat@personal.dev",
         name: "O",
         githubHandle: "octocat",
+        provider: "github",
       }),
     ).toBe(true); // placeholder by handle
     expect(
-      isOAuthWhitelisted(db, { id: "x", email: "known@else.dev", name: "K" }),
+      isOAuthWhitelisted(db, {
+        id: "x",
+        email: "known@else.dev",
+        name: "K",
+        provider: "google",
+      }),
     ).toBe(true); // existing row
     expect(
-      isOAuthWhitelisted(db, { id: "x", email: "stranger@nope.dev", name: "S" }),
+      isOAuthWhitelisted(db, {
+        id: "x",
+        email: "stranger@nope.dev",
+        name: "S",
+        provider: "google",
+      }),
     ).toBe(false);
   });
 
@@ -73,7 +89,12 @@ describe("isOAuthWhitelisted", () => {
     db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(ph.id);
 
     expect(
-      isOAuthWhitelisted(db, { id: "x", email: "off@else.dev", name: "O" }),
+      isOAuthWhitelisted(db, {
+        id: "x",
+        email: "off@else.dev",
+        name: "O",
+        provider: "google",
+      }),
     ).toBe(false);
     expect(
       isOAuthWhitelisted(db, {
@@ -81,8 +102,67 @@ describe("isOAuthWhitelisted", () => {
         email: "ghost@personal.dev",
         name: "G",
         githubHandle: "ghost",
+        provider: "github",
       }),
     ).toBe(false);
+  });
+
+  /**
+   * P13-D-22: the table is `google_domain_allowlist`, the README says "for
+   * Google", the in-app label says "any Google account with this domain". The
+   * gate must not be wider than the label.
+   */
+  describe("domain admission is Google-only (P13-D-22)", () => {
+    it("refuses a GitHub sign-in whose profile email matches an allowlisted domain", () => {
+      const db = ctx.makeDb();
+      allowDomain(db, "@acme.com", "admin");
+
+      expect(
+        isOAuthWhitelisted(db, {
+          id: "x",
+          email: "impostor@acme.com",
+          name: "Impostor",
+          githubHandle: "impostor",
+          provider: "github",
+        }),
+      ).toBe(false);
+      // Same email, same allowlist, Google callback → admitted.
+      expect(
+        isOAuthWhitelisted(db, {
+          id: "x",
+          email: "impostor@acme.com",
+          name: "Impostor",
+          provider: "google",
+        }),
+      ).toBe(true);
+    });
+
+    it("fails closed when the provider cannot be read off the callback", () => {
+      const db = ctx.makeDb();
+      allowDomain(db, "@acme.com", "member");
+      expect(
+        isOAuthWhitelisted(db, {
+          id: "x",
+          email: "someone@acme.com",
+          name: "S",
+          provider: null,
+        }),
+      ).toBe(false);
+    });
+
+    it("still admits a GitHub placeholder claim whatever the email domain", () => {
+      const db = ctx.makeDb();
+      whitelistGithubUser(db, { handle: "octocat", role: "member" }, ACTOR);
+      expect(
+        isOAuthWhitelisted(db, {
+          id: "x",
+          email: "octocat@nowhere.dev",
+          name: "O",
+          githubHandle: "octocat",
+          provider: "github",
+        }),
+      ).toBe(true);
+    });
   });
 });
 
@@ -91,7 +171,12 @@ describe("applyOAuthUser", () => {
     const db = ctx.makeDb();
     allowDomain(db, "@viberr.dev", "admin");
     // better-auth already created user `ba_1`; materialize the legacy row.
-    applyOAuthUser(db, { id: "ba_1", email: "New@Viberr.Dev", name: "New Hire" });
+    applyOAuthUser(db, {
+      id: "ba_1",
+      email: "New@Viberr.Dev",
+      name: "New Hire",
+      provider: "google",
+    });
     const user = findUserByEmail(db, "new@viberr.dev");
     expect(user).toMatchObject({
       id: "ba_1",
@@ -112,6 +197,7 @@ describe("applyOAuthUser", () => {
       email: "octocat@real.dev",
       name: "The Octocat",
       githubHandle: "octocat",
+      provider: "github",
     });
 
     // Placeholder is gone; the claimed identity has the placeholder's role.
@@ -127,6 +213,44 @@ describe("applyOAuthUser", () => {
     expect(
       listAuditEvents(db, { action: "auth.oauth.placeholder_claimed" }),
     ).toHaveLength(1);
+  });
+
+  // P13-D-22: the role branch used to key on "is there a githubHandle", so a
+  // GitHub identity could inherit a Google domain's mapped role, and a GitHub
+  // identity with no placeholder always landed as `member`.
+  it("never gives a GitHub identity a Google domain's mapped role", () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@acme.com", "admin");
+
+    applyOAuthUser(db, {
+      id: "ba_gh2",
+      email: "dev@acme.com",
+      name: "Dev",
+      githubHandle: "devhandle",
+      provider: "github",
+    });
+
+    expect(findUserByEmail(db, "dev@acme.com")).toMatchObject({
+      role: "member",
+      idp: "github",
+    });
+  });
+
+  it("honours the domain-mapped role for a Google sign-in that carries no handle", () => {
+    const db = ctx.makeDb();
+    allowDomain(db, "@acme.com", "admin");
+
+    applyOAuthUser(db, {
+      id: "ba_goog",
+      email: "boss@acme.com",
+      name: "Boss",
+      provider: "google",
+    });
+
+    expect(findUserByEmail(db, "boss@acme.com")).toMatchObject({
+      role: "admin",
+      idp: "google",
+    });
   });
 });
 

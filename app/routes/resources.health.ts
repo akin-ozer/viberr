@@ -6,7 +6,7 @@ import { logger } from "~/server/logging/logger.server";
 import { isBackendAvailable } from "~/server/runtimes/runtime-registry.server";
 
 /**
- * GET /resources/health — ops probe (Phase 10, CONVENTIONS route map).
+ * GET /resources/health — ops probe (Phase 10, docs/architecture/decisions.md route map).
  * Unauthenticated by design (readiness checks run without a session);
  * exposes only aggregate counts, never data.
  *

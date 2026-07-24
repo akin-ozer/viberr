@@ -10,11 +10,22 @@ import {
   getProject,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
+import { isReconcileStale } from "~/server/interpretation/freshness-policy.server";
+import {
+  createReconcileBehindByLookup,
+  latestProjectReconcileAt,
+} from "~/server/provenance/provenance-query.server";
 import {
   getProjectCredentialHealth,
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
 import type { SyncState } from "./github-pills";
+import {
+  mapPrChecks,
+  mapPrReview,
+  type PrChecksRender,
+} from "~/shared/mapping/task.server";
+import type { PrReviewState } from "~/schemas/task-file.schema";
 
 /**
  * Loader assembly for /projects/:slug/github (github-view spec §3.1
@@ -26,8 +37,9 @@ import type { SyncState } from "./github-pills";
  * projected pr.state; `behind_main` from the REAL compare captured by the
  * latest `github.reconcile` provenance row for the task (the reconciler
  * records behindBy there) — never from `validation === "failing"` (the
- * mock's conflation, dropped per spec §7.3). A never-reconciled branch has
- * no compare data and honestly renders `synced`.
+ * mock's conflation, dropped per spec §7.3). UI-05: a never-reconciled branch
+ * has NO compare data and renders `unknown` ("not compared") — the old comment
+ * claimed rendering it `synced` was honest; it was the opposite.
  */
 
 export interface PrRowView {
@@ -38,6 +50,11 @@ export interface PrRowView {
   /** PR title (the row headline in the mock). */
   title: string;
   branch: string | null;
+  /** P13-D-28: CI health + GitHub's review verdict. Both were fetched-and-
+   *  discarded or never read; the narrowing right here to number/state/title
+   *  IS the "every consumer narrows" the finding describes. */
+  checks: PrChecksRender | null;
+  review: PrReviewState | null;
 }
 
 export interface BranchRowView {
@@ -45,7 +62,13 @@ export interface BranchRowView {
   /** Task title (the Task cell). */
   title: string;
   branch: string;
-  pr: { number: number; state: string } | null;
+  pr: {
+    number: number;
+    state: string;
+    /** P13-D-28. */
+    checks: PrChecksRender | null;
+    review: PrReviewState | null;
+  } | null;
   sync: SyncState;
   /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
   commitCount: number;
@@ -78,33 +101,6 @@ export interface GithubViewData {
 }
 
 /**
- * Latest reconciled behindBy per task file, from provenance (or 0). Factory:
- * prepare the provenance statement ONCE and map many branch rows through it,
- * instead of re-preparing + running it per row inside `.map` (pass-4 WI-10 n+1).
- */
-function createBehindByResolver(
-  db: DatabaseSync,
-): (sourcePath: string) => number {
-  const stmt = db.prepare(
-    `SELECT details_json FROM provenance
-     WHERE source_path = ? AND action = 'github.reconcile'
-     ORDER BY id DESC LIMIT 1`,
-  );
-  return (sourcePath: string): number => {
-    const row = stmt.get(sourcePath) as
-      | { details_json: string | null }
-      | undefined;
-    if (!row?.details_json) return 0;
-    try {
-      const details = JSON.parse(row.details_json) as { behindBy?: unknown };
-      return typeof details.behindBy === "number" ? details.behindBy : 0;
-    } catch {
-      return 0;
-    }
-  };
-}
-
-/**
  * Short-lived in-process cache for `checkRepoAccess` (pass-4 WI-10): a live
  * `GET /repos/:repo` runs on every loader call, and project-scope SSE
  * revalidates this loader on every task/project event while the view is open —
@@ -120,6 +116,23 @@ const repoAccessCache = new WeakMap<
   DatabaseSync,
   Map<string, { result: RepoAccessResult; at: number }>
 >();
+
+/**
+ * LV-05: drop the memoized repo-access result for a project.
+ *
+ * Attaching a credential from the project GitHub page rendered the full scope
+ * list while the Connection row kept the amber "no credential" pill **through a
+ * full reload** — the 30 s memo above is per PROCESS, so a reload re-served the
+ * pre-attach `no_pat_configured` answer, and only "Update status" (which takes
+ * longer than the TTL to click) appeared to fix it. Every credential mutation
+ * invalidates the entry so the next loader re-probes with the new credential.
+ */
+export function invalidateRepoAccess(
+  db: DatabaseSync,
+  projectSlug: string,
+): void {
+  repoAccessCache.get(db)?.delete(projectSlug);
+}
 
 async function checkRepoAccessCached(
   db: DatabaseSync,
@@ -154,23 +167,40 @@ export async function getGithubViewData(
   const connection = await checkRepoAccessCached(db, projectSlug, ctx);
 
   const tasks = listProjectTasks(db, projectSlug);
-  const behindByFor = createBehindByResolver(db);
+  // P13-D-16: provenance reads live in server/provenance, not here.
+  const behindByFor = createReconcileBehindByLookup(db);
 
   // Branch table: every task with a branch, in task-key order (the query
   // already sorts numerically — spec §7.11 deterministic-order deviation).
   const branches: BranchRowView[] = tasks
     .filter((t): t is typeof t & { branch: string } => t.branch !== null)
-    .map((t) => ({
-      taskKey: t.key,
-      title: t.title,
-      branch: t.branch,
-      pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
-      sync: deriveSyncState({
-        prMerged: t.pr?.state === "merged",
-        behindBy: behindByFor(t.filePath),
-      }),
-      commitCount: t.commits.length,
-    }));
+    .map((t) => {
+      const behindBy = behindByFor(t.filePath);
+      return {
+        taskKey: t.key,
+        title: t.title,
+        branch: t.branch,
+        pr: t.pr
+          ? {
+              number: t.pr.number,
+              state: t.pr.state,
+              checks: mapPrChecks(t.pr),
+              review: mapPrReview(t.pr),
+            }
+          : null,
+        // UI-05: a merged PR is authoritative regardless of compare data;
+        // otherwise a branch with NO compare data reports `unknown`
+        // ("not compared") rather than borrowing `deriveSyncState`'s
+        // "behindBy === 0 → synced" rule for a measurement that never ran.
+        sync:
+          t.pr?.state === "merged"
+            ? deriveSyncState({ prMerged: true, behindBy: 0 })
+            : behindBy === null
+              ? ("unknown" as const)
+              : deriveSyncState({ prMerged: false, behindBy }),
+        commitCount: t.commits.length,
+      };
+    });
 
   // PR list: every task with a PR, newest PR first (spec §7.11).
   const prs: PrRowView[] = tasks
@@ -181,6 +211,8 @@ export async function getGithubViewData(
       state: t.pr!.state,
       title: t.pr!.title,
       branch: t.branch,
+      checks: mapPrChecks(t.pr),
+      review: mapPrReview(t.pr),
     }))
     .sort((a, b) => b.number - a.number);
 
@@ -188,26 +220,18 @@ export async function getGithubViewData(
   // newest reconcile — the manual "Update status" button OR the 5-min
   // background poller (P11-14). Surface the freshest reconcile time so stale
   // cached PR/branch state can't silently look current. `null` = never
-  // reconciled. Newest `github.reconcile` provenance across the project's tasks.
-  const lastReconcileRow = db
-    .prepare(
-      `SELECT MAX(observed_at) AS latest FROM provenance
-        WHERE action = 'github.reconcile' AND source_path LIKE ?`,
-    )
-    .get(`projects/${projectSlug}/%`) as { latest: string | null } | undefined;
-  const lastReconciledAt = lastReconcileRow?.latest ?? null;
+  // reconciled. P13-D-16/D-32: the provenance read is in server/provenance and
+  // the staleness rule is in server/interpretation — neither belongs here.
+  const lastReconciledAt = latestProjectReconcileAt(db, projectSlug);
   // Computed server-side (SSR-stable, no client clock): the label is as-of page
   // load and refreshes when the loader revalidates on the next GitHub SSE event.
-  const reconciledMs = lastReconciledAt ? Date.parse(lastReconciledAt) : NaN;
   const reconcile = {
     at: lastReconciledAt,
-    label: Number.isFinite(reconciledMs) ? formatRelative(lastReconciledAt!) : null,
-    // Stale = never reconciled, or older than an hour. With the 5-min poller
-    // (P11-14) healthy this only trips when GitHub/config has been broken for
-    // an hour — surfaced honestly by the freshness chip rather than a lie.
-    stale:
-      !Number.isFinite(reconciledMs) ||
-      Date.now() - reconciledMs > 60 * 60_000,
+    label:
+      lastReconciledAt && Number.isFinite(Date.parse(lastReconciledAt))
+        ? formatRelative(lastReconciledAt)
+        : null,
+    stale: isReconcileStale(lastReconciledAt),
   };
 
   return {
@@ -217,7 +241,13 @@ export async function getGithubViewData(
       repo: project.repo,
       defaultBranch: project.defaultBranch,
     },
-    // GHE-safe web host (WI-17) — the view must never hardcode github.com.
+    // UI-11: this is `https://github.com` today and can be nothing else — no
+    // connection record stores an API base URL, so `githubWebHost()` is always
+    // called with no argument (here and in routes/project.task.tsx) and always
+    // returns the default. The indirection is kept as the ONE place a future
+    // GHE base URL would be threaded through; the previous comment ("GHE-safe
+    // — the view must never hardcode github.com") advertised support that does
+    // not exist. V1 is github.com-only (github-reconciler.server.ts says so).
     githubHost: githubWebHost(),
     connection,
     credential,

@@ -129,6 +129,76 @@ describe("workspace layout loader (seeded)", () => {
     expect(vib142.owner?.kind).toBe("human");
     expect((vib142.owner as { name: string }).name).toBe("Arda Kaya");
   });
+
+  /**
+   * UI-48: the board's "Waiting on me" and the review queue's "Waiting on your
+   * acceptance" answered the same question with different predicates. The board
+   * read decision-OBJECT presence (`decisionsRequiring` only scans tasks with a
+   * packet or recommendations); the review queue deliberately does not require
+   * one — a review-stage task waiting on a human can have no packet. So the same
+   * task appeared under "Waiting on your acceptance" in Review while the board
+   * chip excluded it. The layout loader unions both predicates now.
+   */
+  it("waitingOnMe covers acceptance-ready review tasks with no decision object", async () => {
+    const { loader } = await import("~/routes/project");
+    const { baseTaskFrontmatter, writeTask } = await import(
+      "../../../test-support/test-store"
+    );
+    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    const { decisionsRequiring } = await import(
+      "~/server/projections/decisions.server"
+    );
+    const { getReviewQueue } = await import(
+      "~/server/projections/review-queue.server"
+    );
+    // A review-stage task waiting on a human with NO packet and NO
+    // recommendations — exactly the shape the review queue calls "ready" and
+    // `decisionsRequiring` cannot see.
+    writeTask(app.dataRoot, "viberr-core", {
+      frontmatter: baseTaskFrontmatter("VIB-990", {
+        stage: "review",
+        waiting: "human",
+      }),
+    });
+    rebuildAll(app.db, { dataRoot: app.dataRoot });
+
+    const ready = getReviewQueue(app.db, "viberr-core", {
+      viewerUserId: seedIds.arda,
+    }).ready.map((r) => r.key);
+    expect(ready).toContain("VIB-990");
+    const byDecisionObject = decisionsRequiring(app.db, seedIds.arda, {
+      projectSlug: "viberr-core",
+    }).mine.map((d) => d.taskKey);
+    expect(byDecisionObject).not.toContain("VIB-990");
+
+    const { cookie } = await app.cookieFor(seedIds.arda);
+    const result = (await loader(
+      (await loaderArgs(
+        "/projects/viberr-core",
+        { slug: "viberr-core" },
+        cookie,
+      )) as never,
+    )) as {
+      board: { columns: { tasks: { key: string; waitingOnMe?: boolean }[] }[] };
+    };
+    const flagged = new Set(
+      result.board.columns
+        .flatMap((c) => c.tasks)
+        .filter((t) => t.waitingOnMe)
+        .map((t) => t.key),
+    );
+    // Before the fix the board chip excluded it while Review listed it under
+    // "Waiting on your acceptance".
+    expect(flagged.has("VIB-990")).toBe(true);
+
+    // Restore the seeded store — later tests in this file assert seed counts.
+    const { rmSync } = await import("node:fs");
+    rmSync(path.join(app.dataRoot, "projects", "viberr-core", "tasks", "VIB-990"), {
+      recursive: true,
+      force: true,
+    });
+    rebuildAll(app.db, { dataRoot: app.dataRoot });
+  });
 });
 
 describe("home loader (seeded)", () => {
@@ -166,7 +236,7 @@ describe("home loader (seeded)", () => {
     expect(core.dist.review).toBe(2);
     expect(core.dist.done).toBe(2);
     expect(core.members.length).toBe(4);
-    // Lightweight stub project carries its OWN 3-stage list (ruling 15).
+    // Custom 3-stage board fixture carries its OWN stage list (ruling 15).
     const billing = result.projects.find((p) => p.slug === "billing-service")!;
     expect(billing.stages.map((s) => s.id)).toEqual(["todo", "doing", "done"]);
     // Seeded pins mirror the mock's starred flags.
@@ -359,7 +429,9 @@ describe("create-project action (home)", () => {
           key: "PAY",
           owner: "akin-ozer",
           repoName: "payments-gateway",
-          template: "light",
+          // P13-AP-04: no `template` field any more — the "Lightweight ·
+          // 3 stages" preset was deleted (owner ruling 2), so creation always
+          // produces the Standard 5-stage board.
           policy: "strict",
         }),
       }),
@@ -391,10 +463,18 @@ describe("create-project action (home)", () => {
     expect(project.name).toBe("Payments Gateway");
     expect(project.taskPrefix).toBe("PAY");
     expect(project.repo).toBe("akin-ozer/payments-gateway");
-    // Lightweight template stages (ruling 15).
-    expect(project.stages.map((s) => s.id)).toEqual(["todo", "doing", "done"]);
+    // P13-AP-04: the Standard 5-stage board is the ONLY template creation can
+    // produce (this used to assert the deleted Lightweight preset's
+    // todo/doing/done board and its description).
+    expect(project.stages.map((s) => s.id)).toEqual([
+      "triage",
+      "ready",
+      "impl",
+      "review",
+      "done",
+    ]);
     expect(project.description).toBe(
-      "Lightweight 3-stage workflow · strict human-gate policy.",
+      "Standard 5-stage workflow · strict human-gate policy.",
     );
   });
 

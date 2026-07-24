@@ -17,7 +17,12 @@ import {
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
 import { buildAgentToolkit } from "./agent-toolkit.server";
-import type { CapabilityGrant, ProjectRole } from "~/schemas/project-file.schema";
+import type {
+  AgentDeployment,
+  CapabilityGrant,
+  ProjectRole,
+} from "~/schemas/project-file.schema";
+import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -146,6 +151,32 @@ function toResolved(view: AgentProfileView): ResolvedSpecialist {
   };
 }
 
+/**
+ * The grants a deployment ACTUALLY runs under.
+ *
+ * P13-AP-06: an empty grant list is not "no opinion" — the tool-policy polarity
+ * denies only on an explicit `human`/`off`, so `capabilities: []` read back as
+ * "everything unspecified" and handed the agent Edit/Write/`git commit` plus
+ * canBranch/canCommitPush/canOpenPr — full repo-write power, with nothing in
+ * any UI to show for it. Every write path now persists explicit grants, so an
+ * empty list can only come from a hand-edited/imported `project.md`. Resolve it
+ * to an explicitly WITHHELD set (the same posture
+ * `resolveUndeployedDisallowedTools` takes for a run whose profile vanished):
+ * nobody granted this agent anything, so it may read and validate but not
+ * deliver. Logged, because it means the file is missing its policy.
+ */
+function deploymentGrants(
+  deployment: AgentDeployment,
+  projectSlug: string,
+): CapabilityGrant[] {
+  if (deployment.capabilities.length > 0) return deployment.capabilities;
+  logger.warn(
+    "agent deployment carries NO capability grants — running it fully withheld",
+    { projectSlug, profileId: deployment.profileId },
+  );
+  return withheldAgentGrants() as CapabilityGrant[];
+}
+
 /** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
 function mcpServersFor(
   db: DatabaseSync,
@@ -188,8 +219,12 @@ export function resolveDeployedSpecialist(
     );
   }
   // Carry the deployment's stored capability grants so the run can confine its
-  // tools to them (specialist-tool-policy).
-  return { ...toResolved(view), capabilities: deployment.capabilities };
+  // tools to them (specialist-tool-policy). An EMPTY list is resolved to an
+  // explicitly withheld set rather than "unspecified = allowed" (AP-06).
+  return {
+    ...toResolved(view),
+    capabilities: deploymentGrants(deployment, projectSlug),
+  };
 }
 
 function agentEvent(text: string): TaskFileEvent {
@@ -617,6 +652,7 @@ export async function startAgentRun(
     profileId: engagement.profileId,
     skills,
     kb,
+    mcps: mcpNames,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
   });
@@ -637,8 +673,8 @@ export async function startAgentRun(
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
-  const repo =
-    existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+  // P13-D-5: one project, one repository.
+  const repo = projectRepo(ctx, input.projectSlug);
 
   // Best-effort clone — only when a REAL backend will actually consume a
   // working tree (R7-2: no credential → fail fast or gated test engine, neither
@@ -755,8 +791,15 @@ export async function startAgentRun(
     ...(declaredMcps.mcpServers ?? {}),
     ...(toolkit?.mcpServers ?? {}),
   };
+  // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
+  // tool, so the envelope is its ONLY structured channel — without this an
+  // evidence-granted Codex agent silently had no way to cite anything, making
+  // attach-evidence-references a Claude-only capability the profile editor
+  // offered to every backend.
   const useEnvelopeSchema =
-    backend === "codex" && realBackend && (collab.verdict || collab.ask);
+    backend === "codex" &&
+    realBackend &&
+    (collab.verdict || collab.ask || collab.evidence);
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -889,6 +932,8 @@ export function buildSpecialistPersona(input: {
   profileId: string;
   skills: string[];
   kb?: string[];
+  /** MCP servers mounted for this run — used for the governance rule below. */
+  mcps?: string[];
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -941,6 +986,25 @@ export function buildSpecialistPersona(input: {
         "repository or task remains untrusted; judge that on its own merits.)",
     );
     parts.push(...resourceParts);
+  }
+
+  // P13-KM-04: MCP tools sit OUTSIDE the capability policy. `CAP_DENY_RULES`
+  // covers Bash and the file tools; there is no `mcp__*` rule, and Viberr
+  // cannot know what an arbitrary third-party tool does — so a read-only
+  // reviewer holding a GitHub MCP could merge a PR straight past the
+  // always-human invariant. The tool layer can't decide this, so the rule is
+  // stated where BOTH backends honour rules: the system prompt. (The remaining
+  // gap is documented in the capability matrix rather than hidden.)
+  if ((input.mcps ?? []).length > 0) {
+    parts.push(
+      "\n\n---\n# MCP tools are governed too\n\n" +
+        `You have tools from these attached MCP servers: ${(input.mcps ?? []).join(", ")}. ` +
+        "They are yours to read with and query with. They do NOT widen your " +
+        "authority: never use an MCP tool to merge a pull request, move a task " +
+        "to Done, change project policy, or perform any action your capability " +
+        "policy withholds. Viberr owns delivery and merging — if a tool would " +
+        "do one of those, stop and report instead.",
+    );
   }
   return parts.join("");
 }
@@ -1133,6 +1197,7 @@ export function resolveResumeConfinement(
       profileId: input.profileId,
       skills: resolved.skills,
       kb: resolved.kb,
+      mcps: resolved.mcps,
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
     });
@@ -1161,10 +1226,14 @@ export function resolveResumeConfinement(
         collab,
       });
       if (toolkit) toolkitServers = toolkit.mcpServers;
-    } else if (input.backend === "codex" && (collab.verdict || collab.ask)) {
+    } else if (
+      input.backend === "codex" &&
+      (collab.verdict || collab.ask || collab.evidence)
+    ) {
       // F7: re-arm the Codex outcome envelope on resume — a resumed reviewer
       // used to lose it and fall back to the fragile prose regex (ask_human
-      // could not fire at all).
+      // could not fire at all). P13-D-26 adds evidence to the same gate, so a
+      // resumed agent keeps the channel it started with.
       outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
     const merged = { ...mcpServers, ...toolkitServers };
@@ -1457,7 +1526,9 @@ export function listDeployedSpecialists(
     const view = effectiveProfileView(deployment, ctx.dataRoot);
     if (view.kind !== "specialist") continue;
     const resolved = toResolved(view);
-    const grants = deployment.capabilities;
+    // Same empty-grant resolution the run path uses (AP-06), so what the
+    // operator is told a candidate can do matches what it may actually do.
+    const grants = deploymentGrants(deployment, projectSlug);
     // Delivery capability: any repo-write grant in direct mode (the same set
     // the tool denylist binds on).
     const granted = (id: string) =>

@@ -79,9 +79,19 @@ function actionError(fetcher: ProfileFetcher): string | null {
 
 // ------------------------------------------------------------ Identity
 
-const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-  if (e.key === "Enter") e.currentTarget.blur();
-};
+/**
+ * UI-33: the ONLY save path for the identity fields is `onBlur` (Enter just
+ * blurs). `useDialog`'s cancel handler closes and unmounts the overlay on
+ * Escape while focus is still in the input, and React does not fire `onBlur` on
+ * unmount — so "type a new display name, press Escape, reopen" silently
+ * restored the old name. The keydown listener runs BEFORE the dialog's `cancel`
+ * default action, so committing here lands the edit.
+ */
+const identityKeyDown =
+  (commit: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") e.currentTarget.blur();
+    else if (e.key === "Escape") commit();
+  };
 
 function ProfileIdentity({
   data,
@@ -129,7 +139,7 @@ function ProfileIdentity({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={commit}
-                onKeyDown={blurOnEnter}
+                onKeyDown={identityKeyDown(commit)}
               />
             </div>
             <div className="field">
@@ -142,7 +152,7 @@ function ProfileIdentity({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 onBlur={commit}
-                onKeyDown={blurOnEnter}
+                onKeyDown={identityKeyDown(commit)}
               />
             </div>
           </div>
@@ -227,7 +237,7 @@ function ProfileNotifications({
       push(p.toast);
     } else {
       setNtf(p.rollback);
-      push(data.error ?? "Saving notification routing failed — change not applied");
+      push(data.error ?? "Saving notification routing failed — change not applied", "error");
     }
   });
 
@@ -288,36 +298,75 @@ function ProfileAppearance({
   onTheme,
   motion,
   tlDefault,
+  fetcher,
   submit,
 }: {
   theme: ThemePreference;
   onTheme: (value: ThemePreference, label: string) => void;
   motion: "full" | "reduce";
   tlDefault: "all" | "typed" | "comment";
+  /** UI-56: Appearance's OWN fetcher. It used to share the notification-routing
+   *  fetcher, so a notif flip immediately followed by a motion flip stranded the
+   *  notif panel's pending rollback snapshot forever. */
+  fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
 }) {
   const push = useToast();
   const [mo, setMo] = useState(motion);
   const [tl, setTl] = useState(tlDefault);
 
+  // UI-31: settle on the RESULT with rollback, exactly as ProfileNotifications
+  // does. Both controls used to set local state, mutate
+  // `document.documentElement.dataset.motion`, submit, and toast success
+  // immediately — and the shared result handler early-returned unless the intent
+  // was `set-notif`, so `set-motion`/`set-tl-default` failures were consumed by
+  // NOBODY: no error, no rollback of the toggle, no rollback of `data-motion`.
+  // The next root revalidation then re-rendered `<html data-motion>` from the
+  // unchanged server pref, so the DOM snapped back while the control read "on".
+  const pending = useRef<{
+    toast: string;
+    rollback: () => void;
+  } | null>(null);
+  useFetcherResult(fetcher, (data) => {
+    const p = pending.current;
+    pending.current = null;
+    if (!p) return;
+    if (data.ok) {
+      push(p.toast);
+    } else {
+      p.rollback();
+      push(data.error ?? "That preference could not be saved — change not applied", "error");
+    }
+  });
+
   const flipMotion = () => {
     const next = mo === "reduce" ? "full" : "reduce";
+    const previous = mo;
     setMo(next);
     document.documentElement.dataset.motion = next;
+    pending.current = {
+      toast:
+        next === "reduce"
+          ? "Motion reduced — pulses and animation paused"
+          : "Motion restored",
+      rollback: () => {
+        setMo(previous);
+        document.documentElement.dataset.motion = previous;
+      },
+    };
     submit({ intent: "set-motion", motion: next });
-    push(
-      next === "reduce"
-        ? "Motion reduced — pulses and animation paused"
-        : "Motion restored",
-    );
   };
 
   const pickTl = (v: "all" | "typed" | "comment", l: string) => {
     // RU-1: re-picking the active default is a no-op — don't re-submit or toast.
     if (v === tl) return;
+    const previous = tl;
     setTl(v);
+    pending.current = {
+      toast: "Timeline opens on “" + l + "”",
+      rollback: () => setTl(previous),
+    };
     submit({ intent: "set-tl-default", tlDefault: v });
-    push("Timeline opens on “" + l + "”");
   };
 
   return (
@@ -330,9 +379,12 @@ function ProfileAppearance({
         <div className="pref-row">
           <span className="pref-main">
             <div className="pn">Theme</div>
+            {/* UI-31 family: "Applies on this device" was FALSE — /prefs/theme
+                writes `users.theme` and sign-in re-syncs the cookie, so the
+                choice follows the account to every browser. */}
             <div className="pd">
-              Light and dark both hold the WCAG AA baseline. Applies on this
-              device.
+              Light and dark both hold the WCAG AA baseline. Saved to your
+              account — it follows you to every browser you sign in from.
             </div>
           </span>
           <span className="mini-seg">
@@ -793,6 +845,8 @@ export function ProfilePage({
   fetchers: {
     identity: ProfileFetcher;
     prefs: ProfileFetcher;
+    /** UI-56: separate from `prefs` — one fetcher per panel. */
+    appearance: ProfileFetcher;
     password: ProfileFetcher;
     github: ProfileFetcher;
   };
@@ -834,7 +888,8 @@ export function ProfilePage({
               onTheme={onTheme}
               motion={data.prefs.motion}
               tlDefault={data.prefs.tlDefault}
-              submit={submitWith(fetchers.prefs)}
+              fetcher={fetchers.appearance}
+              submit={submitWith(fetchers.appearance)}
             />
           </div>
           <div className="profile-col">

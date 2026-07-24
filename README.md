@@ -76,7 +76,8 @@ first sign-in).
 | `npm run dev` | dev server (port `PORT`, default 5173) |
 | `npm run build` / `npm run start` | production build / serve it |
 | `npm run typecheck` | route typegen + tsc |
-| `npm test` | vitest unit + integration suite |
+| `npm test` | vitest unit + integration suite (`app/` + `db/`) |
+| `npm run e2e` | playwright end-to-end suite — CI's second job, and the only gate that runs a real CLI entrypoint |
 | `npm run seed` | idempotent baseline seed — agent catalog, KBs, skills, bootstrap admin; no demo data (`-- --reset` wipes board + derived state first) |
 | `npm run seed:demo` | test/dev-only: the mock demo board (arda & co, viberr-core) the e2e + route suites use |
 | `npm run rescan` | reconcile projections with the file store |
@@ -131,6 +132,11 @@ Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
 3. Keep `VIBERR_SECRET_ENCRYPTION_KEY` stable — rotating it orphans stored tokens
    (they must be deleted and re-added).
 
+Branch and PR state refresh on their own: a background reconcile poller runs at boot and
+then every 5 minutes over every branched project, so a PR merged or closed out-of-band
+surfaces without anyone clicking. **Update status** on the GitHub view forces a refresh
+now, and the page discloses how stale the cached state is.
+
 Without a token everything degrades honestly (typed "no credential" states, never a crash).
 
 ## Enabling OAuth sign-in
@@ -154,11 +160,15 @@ docker compose exec app npm run seed   # optional: baseline (agent catalog, KBs,
 ```
 
 The app listens on `PORT` (container default 3000; compose maps the same port on the
-host). All state lives in the volume mounted at `/data` (`./docker-data` by default) —
-that directory is the complete backup surface. The compose file wires a healthcheck
-against `/resources/health` and `restart: unless-stopped`. See
+host) and speaks **plain HTTP** — for anything beyond localhost, front it with a
+TLS-terminating reverse proxy and set `BETTER_AUTH_URL` to the public https origin.
+Skipping that gives you a silent login loop, not an insecure-but-working app; the
+deployment guide explains why. All state lives in the volume mounted at `/data`
+(`./docker-data` by default) — that directory is the complete backup surface, database
+file included. The compose file wires a healthcheck against `/resources/health` and
+`restart: unless-stopped`. See
 [docs/operations/deployment.md](docs/operations/deployment.md) for the full single-node
-story (backup/restore, projection rebuild) and
+story (TLS, backup/restore, projection rebuild) and
 [docs/operations/runbook.md](docs/operations/runbook.md) for day-2 operations.
 
 ## Health endpoint
@@ -175,21 +185,33 @@ when the database answers — `watcher` reports whether the file store watcher i
 ```
 app/
   routes/          # thin route modules (loaders/actions), one per surface
-  features/        # per-surface UI: auth, home, board, task-detail, review,
-                   # runtime, github, agents, policy, project-admin, org-admin,
-                   # activity, notifications, profile, kb-browser, live-updates
-  ui/              # reusable primitives (icon, pill, dialog, toast, rich-text…)
-  server/          # server-only: config, db, files, interpretation, projections,
-                   # provenance, auth, secrets, github, runtimes, events, audit
+  features/        # per-surface UI: activity, agents, board, github, home,
+                   # kb-browser, live-updates, notifications, org-settings,
+                   # policy, profile, project-settings, review, runtime, shell,
+                   # task-detail
+  ui/              # reusable primitives (icon, pill, toast, rich-text, dialog hooks…)
+  lib/             # better-auth server instance + its Viberr bridge
+  server/          # server-only: audit, auth, config, db, errors, events, files,
+                   # github, interpretation, logging, org, prefs, projections,
+                   # runtimes, secrets, seed, tasks, theme + boot.server.ts
   schemas/         # shared Zod schemas (task file, project file, SSE events…)
-  shared/          # cross-surface helpers (dates, ids, mapping)
+  shared/          # cross-surface helpers (auth, capabilities, dates, ids,
+                   # mapping, rbac, workflow)
   app.css          # the ported viberr.css design system + marked additions
 db/migrations/     # SQL-first migrations (auto-applied at boot)
-scripts/           # seed / rescan (tsx)
+scripts/           # seed / seed-demo / rescan (tsx)
+e2e/               # playwright specs
 test-support/      # app/db/store/runtime/github fakes for vitest
 data/              # runtime data root (gitignored): projects/<slug>/tasks/<KEY>/task.md,
-                   # agents/, runtimes/, kb/, state/projection.sqlite, logs/
+                   # agents/profiles/, runtimes/, kb/, skills/, state/projection.sqlite
 ```
+
+There is no `features/auth` — sign-in lives in `app/routes/login.tsx` plus
+`app/server/auth/` and `app/lib/auth.server.ts`. The data root's subdirectory set is
+created at boot from `DATA_ROOT_SUBDIRS` in
+[`app/server/files/file-store-root.server.ts`](app/server/files/file-store-root.server.ts);
+nothing writes a `logs/`, `cache/` or `auth/` directory (application logs are structured
+JSON on stdout).
 
 ## Architecture
 
@@ -197,7 +219,9 @@ The authoritative planning artifacts are the [PRD](planning/planning-artifacts/p
 [architecture](planning/planning-artifacts/architecture.md), and
 [UX specification](planning/planning-artifacts/ux-design-specification.md). Canonical
 project/task file formats and timeline grammar live in
-[`docs/architecture/file-formats.md`](docs/architecture/file-formats.md).
+[`docs/architecture/file-formats.md`](docs/architecture/file-formats.md), and the binding
+conventions and numbered rulings that code comments cite are in
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
 ## Known gaps (V1 release notes)
 
@@ -209,14 +233,23 @@ Deliberate scope boundaries, documented rather than half-built:
 - **Org-level audit console.** Org-scoped audit rows (user admin, connections, auth)
   are recorded but only project-scoped audit has a UI (Activity → Audit logs). The mock
   defines no org audit tab.
-- **Provenance/audit tables grow unboundedly** — no retention policy yet; see the
-  runbook for the manual cleanup story.
+- **Audit rows expire at 90 days, with no export.** A retention pass runs on every boot
+  (`applyRetention`): run log lines are deleted after 30 days, audit events after 90, and
+  notifications are trimmed to the newest 500 per user. None of the three windows is
+  env-configurable. Task-scoped history survives indefinitely because it also lives in
+  `task.md`; org- and auth-scoped audit (`auth.login.*`, `org.user.*`,
+  `org.connection.token_replaced`, `github.pat.*`) has no Markdown counterpart and is
+  simply gone at 90 days. Audit export is Phase 2.
+- **`provenance` is the one table with no retention** — it grows unboundedly. See the
+  runbook for pruning it by hand.
+- **No cleartext-transport guard in the app itself.** The Node process serves plain HTTP
+  and ships no proxy; encryption in transit (NFR6) is the deployment's job. Put a
+  TLS-terminating reverse proxy in front and set `BETTER_AUTH_URL` — see
+  [docs/operations/deployment.md](docs/operations/deployment.md#tls-and-the-reverse-proxy).
 - **Notifications page caps at the newest 200 rows** (no pagination).
 - **Fine-grained PAT validation is partly probe-based** — GitHub doesn't expose
   fine-grained permissions in headers, so some scope checks report "assumed" until
   first use (documented in the credential card).
-- **No scheduled GitHub reconcile** — PR/branch state refreshes via the explicit
-  Reconcile action on the GitHub view.
 
 ## Capstone test
 

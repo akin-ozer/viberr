@@ -9,6 +9,7 @@ const base: RunView = {
   backend: "codex", sdk: "Codex SDK", model: "gpt-5.4-codex", sid: "0199", exportable: false,
   state: "running", lifecycle: "running", interruptedBy: null, phase: null, step: null,
   startedAt: null, finished: null, turns: 0, tokens: 0, lines: [], raw: [], lineCount: 0,
+  logWindow: { totalLines: 0, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: -1 },
 };
 
 describe("fmtClock boundaries (runs.md §7)", () => {

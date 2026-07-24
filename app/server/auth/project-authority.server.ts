@@ -25,6 +25,10 @@ import { type RbacAction, ROLE_LABEL, rolesForAction } from "~/shared/rbac";
  *    naming the action and project, so the override is visible, never silent.
  *    An org admin whose own membership suffices is NOT an override (no row).
  *
+ * 3. DENIAL (P13-D-8): every refusal writes a `project.authority.denied` row —
+ *    NFR10's "unauthorized action attempts" category, previously the only one
+ *    of its four with no audit trace anywhere in the app. See the deny branch.
+ *
  * The archived read-only gate (R6-3) also lives here (`requireProjectMutable`)
  * so there is exactly one implementation and one message string.
  */
@@ -58,6 +62,61 @@ export interface ProjectAuthority {
 export type AuthorityDecision =
   | ({ allowed: true } & ProjectAuthority)
   | { allowed: false; memberRole: ProjectRole | null };
+
+/** What the resolver records about the attempt (both the override grant and,
+ *  since P13-D-8, the denial). */
+export interface AuthorityAudit {
+  action: RbacAction | "any-member";
+  /** The guard's own copy fragment, e.g. "start an agent run". */
+  what: string;
+  /**
+   * P13-D-8: skip the denial row. Reserved for probes whose refusal is a
+   * NORMAL, UI-gated state rather than an attempt to exceed a role — today
+   * exactly one: `canRunAgents`, the @mention path where a lower-role
+   * commenter's comment is kept and the run is silently skipped by design.
+   */
+  silentDeny?: boolean;
+}
+
+/**
+ * P13-D-8: NFR10 ("unauthorized action attempts must be recorded") was the one
+ * audited category with NO row anywhere — across every non-test `recordAudit`
+ * site there was no `*.denied` / `*.forbidden` / `*.unauthorized` action, so a
+ * session probing above its role produced a clean log. Every throwing guard in
+ * the app funnels through `resolveProjectAuthority`, so one write here covers
+ * denied task mutations, runtime starts, policy edits and merges.
+ *
+ * Identical (actor, project, action) denials collapse inside this window: the
+ * membership gate also guards POLLED resource routes (run-log, session-export)
+ * and a client that keeps retrying a 403 would otherwise write a row per poll,
+ * burying the single deliberate probe this row exists to make visible. Keyed
+ * per database handle so parallel test DBs never share state.
+ */
+const DENY_AUDIT_DEDUPE_MS = 60_000;
+const MAX_TRACKED_DENIALS = 500;
+const denyAuditSeen = new WeakMap<DatabaseSync, Map<string, number>>();
+
+function shouldRecordDenial(
+  db: DatabaseSync,
+  key: string,
+  now: number,
+): boolean {
+  let seen = denyAuditSeen.get(db);
+  if (!seen) {
+    seen = new Map();
+    denyAuditSeen.set(db, seen);
+  }
+  const last = seen.get(key);
+  if (last !== undefined && now - last < DENY_AUDIT_DEDUPE_MS) return false;
+  if (seen.size >= MAX_TRACKED_DENIALS) {
+    for (const [k, at] of seen) {
+      if (now - at >= DENY_AUDIT_DEDUPE_MS) seen.delete(k);
+    }
+    if (seen.size >= MAX_TRACKED_DENIALS) seen.clear();
+  }
+  seen.set(key, now);
+  return true;
+}
 
 /**
  * Archived projects are read-only (owner ruling R6-3): a project moved to the
@@ -102,14 +161,15 @@ export function isOrgAdmin(db: DatabaseSync, userId: string): boolean {
  *   emergency override, and the grant is audited (`project.org_admin.override`
  *   with details {action, what, projectSlug}) — EVERY use leaves a row.
  * - Everyone else is denied; the caller formats its own 403 copy from
- *   `memberRole` (null = not a member).
+ *   `memberRole` (null = not a member). The denial is audited
+ *   (`project.authority.denied`, P13-D-8) unless the caller sets `silentDeny`.
  */
 export function resolveProjectAuthority(
   db: DatabaseSync,
   project: AuthorityProject,
   actor: AuthorityActor,
   allowed: readonly ProjectRole[] | "any-member",
-  audit: { action: RbacAction | "any-member"; what: string },
+  audit: AuthorityAudit,
 ): AuthorityDecision {
   const memberRole = project.memberRoles.get(actor.userId) ?? null;
   if (
@@ -142,6 +202,31 @@ export function resolveProjectAuthority(
     }
     return { allowed: true, role: "admin", isOrgAdminOverride: true };
   }
+  // P13-D-8: the attempt is refused — record it. `details` carries the
+  // attempted action and the caller's live project role (null = not a member),
+  // which is what "who probed above their role, and at what" needs.
+  if (
+    !audit.silentDeny &&
+    shouldRecordDenial(
+      db,
+      `${actor.userId}|${project.slug}|${audit.action}`,
+      Date.now(),
+    )
+  ) {
+    recordAudit(db, {
+      action: "project.authority.denied",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "project",
+      subjectId: project.slug,
+      projectSlug: project.slug,
+      details: {
+        action: audit.action,
+        what: audit.what,
+        projectSlug: project.slug,
+        memberRole,
+      },
+    });
+  }
   return { allowed: false, memberRole };
 }
 
@@ -155,7 +240,7 @@ export function requireProjectAuthority(
   project: AuthorityProject,
   actor: AuthorityActor,
   allowed: readonly ProjectRole[] | "any-member",
-  audit: { action: RbacAction | "any-member"; what: string },
+  audit: AuthorityAudit,
 ): ProjectAuthority {
   const decision = resolveProjectAuthority(db, project, actor, allowed, audit);
   if (decision.allowed) {
@@ -207,6 +292,10 @@ export function canRunAgents(
   return resolveProjectAuthority(db, project, actor, rolesForAction("run-agents"), {
     action: "run-agents",
     what,
+    // P13-D-8: NOT an unauthorized attempt. The comment carrying the @mention
+    // is a legitimate action for any role; only the run is gated, and the UI
+    // never offered it. Auditing here would write a row per commented mention.
+    silentDeny: true,
   }).allowed;
 }
 

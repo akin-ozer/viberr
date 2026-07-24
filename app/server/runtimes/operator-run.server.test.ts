@@ -20,9 +20,14 @@ import {
 import { insertRunLine } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
+  operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
 } from "./operator-run.server";
+import type {
+  OperatorAuthority,
+  OperatorAutonomy,
+} from "~/server/tasks/operator-actions.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   baseTaskFrontmatter,
@@ -184,6 +189,106 @@ describe("Codex structured operator completion", () => {
     expect(adapter.pending).not.toBeNull();
   }
 
+  it("narrates plan actions its policy refused, instead of a silent no-op (P13-RT-03)", async () => {
+    // The finding's scenario: a project withholds `generate-packets` and
+    // `stage-transitions`. The operator emits open_packet + transition_stage;
+    // both are denied. Because `plan.actions.length !== 0` the reasoning is not
+    // posted either, so a billed run, a taken-and-released lease and a board
+    // flip back to "waiting on you" left NOTHING on the timeline — identical to
+    // the operator deciding to do nothing. executeCodexPlan discarded every
+    // `{outcome, message}` the governed actions returned.
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "append-typed-events", mode: "direct" },
+            { capabilityId: "generate-packets", mode: "off" },
+            { capabilityId: "stage-transitions", mode: "off" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Implementation looks complete; escalate and advance.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Confirm the release note wording",
+            reason: "Needs a human call.",
+            packetOptions: null,
+          },
+          transitionAction(),
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const refusal = task().timeline.find(
+        (e) => e.type === "policy" && e.text.includes("not carried out in full"),
+      );
+      expect(refusal).toBeDefined();
+      expect(refusal!.text).toContain("open_packet");
+      expect(refusal!.text).toContain("transition_stage");
+      // And what it MEANT to do is preserved for the human reading the board.
+      expect(refusal!.text).toContain("escalate and advance");
+    });
+    // Nothing was actually performed.
+    expect(task().packet).toBeNull();
+    expect(task().frontmatter.stage).toBe("impl");
+  });
+
+  it("does not narrate anything when every action succeeded", async () => {
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Narrating the state.",
+        actions: [
+          {
+            tool: "post_comment",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Implementation is complete; moving to review.",
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      expect(
+        task().timeline.some((e) => e.text.includes("Implementation is complete")),
+      ).toBe(true);
+    });
+    expect(task().timeline.some((e) => e.type === "policy")).toBe(false);
+  });
+
   it("does not execute a valid partial plan when the turn fails", async () => {
     await start();
     adapter.finish(
@@ -281,5 +386,66 @@ describe("Codex structured operator completion", () => {
     expect(titles).toContain("Confirm it's intentionally broad");
     // Not the canned default set.
     expect(titles).not.toContain("Send back to the specialist for changes");
+  });
+});
+
+// ------------------------------------------- P13-RT-03: denials must be visible
+
+describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13-RT-03)", () => {
+  function authority(
+    modes: Record<string, CapabilityMode>,
+    autonomy: OperatorAutonomy = "supervised",
+  ): OperatorAuthority {
+    return {
+      policy: new Map(Object.entries(modes)),
+      autonomy,
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      effort: "",
+      name: "Operator",
+      skills: [],
+      kb: [],
+      mcps: [],
+      persona: null,
+      deployed: true,
+    };
+  }
+
+  it("drops the tools whose capability is withheld", () => {
+    // The finding's failure scenario: `generate-packets: off` and
+    // `stage-transitions: off`. On Claude those tools are never BUILT, so the
+    // model can't reach them; the Codex plan schema advertised all nine.
+    const tools = operatorPlanToolsFor(
+      authority({
+        "append-typed-events": "direct",
+        "generate-packets": "off",
+        "stage-transitions": "off",
+        "assign-primary-specialist": "direct",
+        "summon-reviewers": "direct",
+        "completion-for-acceptance": "human",
+      }),
+    );
+    expect(tools).toContain("post_comment");
+    expect(tools).toContain("set_goal");
+    expect(tools).toContain("engage_agent");
+    expect(tools).not.toContain("open_packet");
+    expect(tools).not.toContain("resolve_packet");
+    expect(tools).not.toContain("transition_stage");
+    expect(tools).not.toContain("accept_completion");
+  });
+
+  it("either agent grant admits the engagement tools (mirrors the Claude toolkit)", () => {
+    const tools = operatorPlanToolsFor(
+      authority({ "summon-reviewers": "recommend" }),
+    );
+    expect(tools).toEqual(
+      expect.arrayContaining(["engage_agent", "run_agent", "prompt_agent"]),
+    );
+  });
+
+  it("an all-denied operator falls back to the full list (an enum may not be empty)", () => {
+    // A misconfiguration rather than an expressible run shape — every action it
+    // then proposes is refused VISIBLY by the executor rather than silently.
+    expect(operatorPlanToolsFor(authority({}))).toHaveLength(9);
   });
 });

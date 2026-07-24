@@ -7,8 +7,8 @@ import type {
 import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
-  LIGHTWEIGHT_TEMPLATE,
 } from "~/shared/workflow/templates";
+import { CUSTOM_3_STAGE_BOARD } from "./custom-board";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import {
   baseAgentDeployments,
@@ -210,15 +210,18 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         defaultBranch: "main",
         taskPrefix: "BIL",
         nextTaskNumber: 10,
-        stages: LIGHTWEIGHT_TEMPLATE.stages,
-        workflow: LIGHTWEIGHT_TEMPLATE.workflow,
+        // A CUSTOM 3-stage board (todo/doing/done) — the shipped "Lightweight"
+        // preset was deleted in P13-AP-04, but user-customized boards are still
+        // supported and this fixture keeps them covered.
+        stages: CUSTOM_3_STAGE_BOARD.stages,
+        workflow: CUSTOM_3_STAGE_BOARD.workflow,
         members: [{ userId: ids.arda, role: "admin" }],
         agents: baseAgentDeployments(),
         credentialPolicy: null,
         guardrails: DEFAULT_GUARDRAILS,
       },
       description:
-        "Strict human-gate billing service. A stub project with one live task so cross-project notifications navigate for real (Lightweight · 3 stages template).",
+        "Strict human-gate billing service. A stub project with one live task so cross-project notifications navigate for real (custom 3-stage board).",
     },
   ];
 }
@@ -231,8 +234,6 @@ export interface SeedTask {
   packet: TaskPacket | null;
   timeline: TaskFileEvent[];
 }
-
-const REPO = null; // task-level repo override — null → project default
 
 function fm(input: {
   key: string;
@@ -316,7 +317,6 @@ function fm(input: {
     workRevision,
     verdicts,
     branch: input.branch,
-    repo: REPO,
     pr: input.pr,
     github: input.github ?? null,
     createdAt: input.createdAt,

@@ -191,8 +191,9 @@ export async function ensureTaskBranch(
   const file = readTaskFile(taskRef);
   if (!file) return { status: "task_not_found" };
 
+  // P13-D-5: passed `repoOverride: file.parsed.frontmatter.repo` until the
+  // task-level repo override was deleted (owner ruling) — project repo only.
   const gh = getProjectGithubContext(db, input.projectSlug, {
-    repoOverride: file.parsed.frontmatter.repo,
     ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
   });
   if (gh.status !== "ok") return gh;

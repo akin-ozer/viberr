@@ -1,7 +1,17 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import operatorProfileMd from "./assets/operator.profile.md?raw";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+
+// Read from disk rather than Vite's `?raw`: that loader exists only under Vite,
+// and an import graph that reaches it breaks every tsx/node CLI entrypoint (P13
+// — `npm run seed` died with ERR_UNKNOWN_FILE_EXTENSION while the whole unit
+// suite stayed green). See default-assets.server.test.ts.
+const operatorProfileMd = readFileSync(
+  path.join(import.meta.dirname, "assets/operator.profile.md"),
+  "utf8",
+);
 
 /**
  * The operator profile exists in TWO hand-synced sources (seed #4): the

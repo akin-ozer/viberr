@@ -14,8 +14,10 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
 import {
+  REVALIDATE_COOLDOWN_MS,
   revalidateProjectCredential,
   validatePat,
   validatePatToken,
@@ -348,5 +350,141 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
       dataRoot: store.dataRoot,
     })!.parsed.timeline.filter((e) => e.type === "policy");
     expect(policyEvents).toHaveLength(1);
+  });
+});
+
+/**
+ * P13-D-33: `last_validated_at` was written and never read, so every press of
+ * "Re-check scopes" made a fresh GitHub round trip even on a credential that
+ * had just been confirmed valid. The cooldown must suppress ONLY that case —
+ * a failing credential is exactly the one an operator re-checks after fixing
+ * something on GitHub's side.
+ */
+describe("PAT revalidation cooldown (P13-D-33)", () => {
+  const healthyGithub = () =>
+    fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+      "GET /user/orgs": { body: [] },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+    });
+
+  function bindCredential(store: ReturnType<typeof setupTestStore>, token: string) {
+    const actor = { userId: store.users.arda.id, label: "arda" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token },
+      actor,
+    );
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: pat.id },
+      actor,
+    );
+    return { actor, pat };
+  }
+
+  it("skips the network call when a VALID result is still fresh", async () => {
+    const store = setupTestStore(ctx);
+    const { actor } = bindCredential(store, FINE);
+
+    const first = healthyGithub();
+    await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: first.fetchImpl,
+    });
+    expect(first.calls.length).toBeGreaterThan(0);
+
+    // A second press moments later must not touch GitHub at all.
+    const second = healthyGithub();
+    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: second.fetchImpl,
+    });
+    expect(second.calls).toHaveLength(0);
+    expect(result.status).toBe("revalidated");
+    if (result.status === "revalidated") {
+      expect(result.validation.status).toBe("valid");
+    }
+  });
+
+  it("re-probes once the cooldown has elapsed", async () => {
+    const store = setupTestStore(ctx);
+    const { actor } = bindCredential(store, FINE);
+
+    const first = healthyGithub();
+    await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: first.fetchImpl,
+    });
+
+    const later = healthyGithub();
+    await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: later.fetchImpl,
+      now: () => Date.now() + REVALIDATE_COOLDOWN_MS + 1,
+    });
+    expect(later.calls.length).toBeGreaterThan(0);
+  });
+
+  it("NEVER suppresses a re-check of a failing credential", async () => {
+    const store = setupTestStore(ctx);
+    const { actor } = bindCredential(store, CLASSIC);
+
+    // Classic token missing `workflow` → insufficient_scope, cached as such.
+    const failing = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "repo" },
+      },
+    });
+    const before = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: failing.fetchImpl,
+    });
+    expect(before.status).toBe("revalidated");
+    if (before.status === "revalidated") {
+      expect(before.validation.status).toBe("insufficient_scope");
+    }
+
+    // The operator grants the scope on GitHub and presses re-check immediately:
+    // the cooldown must not stand between them and the fixed answer.
+    const fixed = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "viberr-bot" },
+        headers: { "x-oauth-scopes": "repo, workflow, read:org" },
+      },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: REPO } },
+    });
+    const after = await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fixed.fetchImpl,
+    });
+    expect(fixed.calls.length).toBeGreaterThan(0);
+    if (after.status === "revalidated") {
+      expect(after.validation.status).toBe("valid");
+    }
+  });
+
+  it("records whether the attempt was served from cache", async () => {
+    const store = setupTestStore(ctx);
+    const { actor } = bindCredential(store, FINE);
+
+    await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: healthyGithub().fetchImpl,
+    });
+    await revalidateProjectCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: healthyGithub().fetchImpl,
+    });
+
+    // Both attempts are audited; exactly one of them touched GitHub. (Order is
+    // not asserted — both rows land in the same ISO second.)
+    const cachedFlags = listAuditEvents(store.db, {
+      action: "github.credential.revalidated",
+    }).map((r) => r.details?.cached);
+    expect(cachedFlags).toHaveLength(2);
+    expect([...cachedFlags].sort()).toEqual([false, true]);
   });
 });

@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  getPatValidationRateLimiter,
+  PAT_VALIDATION_RATE_LIMIT,
+} from "~/server/auth/rate-limit.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
   createConnection,
@@ -21,6 +25,13 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@test" };
+
+// P13-D-33: token validation is rate-limited per actor and the limiter is a
+// process-wide singleton, so every case here starts from a full bucket —
+// otherwise a long file would fail on the eleventh save for the wrong reason.
+beforeEach(() => {
+  getPatValidationRateLimiter().reset(ACTOR.userId);
+});
 
 function makeDbWithUser() {
   const db = ctx.makeDb();
@@ -232,5 +243,88 @@ describe("default + remove", () => {
     // Wipe the cached validation → honest null.
     db.prepare(`UPDATE github_pats SET validation_json = NULL`).run();
     expect(getDefaultConnectionToken(db)).toBeNull();
+  });
+});
+
+/**
+ * P13-D-33: `architecture.md` asks for a targeted limit on PAT validation and
+ * there was none. Both save paths call GitHub with a token the CALLER typed,
+ * so the connection form was an unmetered outbound-probe surface that also
+ * spent the org's GitHub rate-limit budget on every retry.
+ */
+describe("PAT-validation rate limit", () => {
+  it("refuses further validations after the bucket empties, without touching GitHub", async () => {
+    const db = makeDbWithUser();
+    const gh = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "x" },
+        headers: { "x-oauth-scopes": "repo" }, // workflow missing → always fails
+      },
+    });
+    for (let i = 0; i < PAT_VALIDATION_RATE_LIMIT.capacity; i++) {
+      const attempt = await createConnection(
+        db,
+        { owner: `owner-${i}`, token: "ghp_x", userId: "u_admin" },
+        ACTOR,
+        { fetchImpl: gh.fetchImpl },
+      );
+      expect(attempt.status).toBe("validation_failed");
+    }
+    const spent = gh.calls.length;
+
+    const blocked = await createConnection(
+      db,
+      { owner: "one-too-many", token: "ghp_x", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(blocked.status).toBe("validation_failed");
+    if (blocked.status === "validation_failed") {
+      expect(blocked.message).toContain("Too many token validations");
+      expect(blocked.message).toContain("Nothing was saved.");
+    }
+    // The refusal happens BEFORE the network call — that is the whole point.
+    expect(gh.calls).toHaveLength(spent);
+  });
+
+  it("throttles the replace path too, and one admin never blocks another", async () => {
+    const db = makeDbWithUser();
+    insertUser(db, {
+      id: "u_other",
+      email: "other@test.dev",
+      name: "Other Admin",
+      role: "admin",
+    });
+    const saved = await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+
+    // Drain the rest of this actor's bucket.
+    for (let i = 1; i < PAT_VALIDATION_RATE_LIMIT.capacity; i++) {
+      getPatValidationRateLimiter().tryConsume(ACTOR.userId);
+    }
+    const throttled = await replaceConnectionToken(
+      db,
+      { connectionId: "akin-ozer", token: "ghp_valid_token_42af" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    expect(throttled.status).toBe("validation_failed");
+    if (throttled.status === "validation_failed") {
+      expect(throttled.message).toContain("Too many token validations");
+    }
+
+    // A different admin's bucket is untouched.
+    const other = await replaceConnectionToken(
+      db,
+      { connectionId: "akin-ozer", token: "ghp_valid_token_42af" },
+      { userId: "u_other", label: "other@test" },
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    expect(other.status).toBe("saved");
   });
 });

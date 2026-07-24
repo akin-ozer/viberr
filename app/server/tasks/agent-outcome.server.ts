@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { UNIFIED_CAP_CATALOG } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
-import type {
-  FileActorRef,
-  PacketOption,
-  TaskPacket,
+import {
+  normalizeEvidenceRows,
+  type EvidenceRow,
+  type FileActorRef,
+  type PacketOption,
+  type TaskPacket,
 } from "~/schemas/task-file.schema";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -39,6 +41,11 @@ export interface AgentOutcome {
   summary?: string;
   verdict?: "approve" | "request_changes";
   question?: AgentOutcomeQuestion;
+  /** P13-D-26: evidence REFERENCES the agent attached (FR21/FR17) — recorded as
+   *  the `evidence:` rows on the outcome event. Gated on the profile's
+   *  `attach-evidence-references` grant at the tool layer; already normalized
+   *  (`normalizeEvidenceRows`) before it is staged. */
+  evidence?: EvidenceRow[];
 }
 
 /**
@@ -54,8 +61,30 @@ export interface AgentOutcome {
 export const AGENT_OUTCOME_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "verdict", "question"],
+  required: ["summary", "verdict", "question", "evidence"],
   properties: {
+    // P13-D-26: Codex's channel for evidence references. The Claude side gets
+    // this through the `report_outcome` toolkit tool, which Codex has no
+    // equivalent of — leaving it out of the envelope would have made
+    // "attach-evidence-references" a Claude-only capability while the profile
+    // editor offered it to every profile regardless of backend. The completion
+    // pipeline already reads `outcome.evidence` for both backends and gates it
+    // on the same grant, so this is the whole gap.
+    evidence: {
+      type: ["array", "null"],
+      description:
+        "ONLY when your role is to cite evidence: short REFERENCES to what you checked (a suite name, a file, a check) with two count columns. Never raw output — that lives in the run logs. null otherwise.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "add", "del"],
+        properties: {
+          label: { type: "string" },
+          add: { type: ["string", "null"] },
+          del: { type: ["string", "null"] },
+        },
+      },
+    },
     summary: {
       type: "string",
       description:
@@ -147,7 +176,20 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
       };
     }
   }
-  // An envelope with NOTHING usable is not an envelope.
+  // P13-D-26: the Codex half of the evidence channel. Sanitized through the
+  // same funnel the toolkit uses, so a hostile envelope cannot forge rows.
+  if (Array.isArray(o.evidence)) {
+    const rows = normalizeEvidenceRows(
+      o.evidence.filter(
+        (row): row is Record<string, unknown> =>
+          typeof row === "object" && row !== null,
+      ),
+    );
+    if (rows) outcome.evidence = rows;
+  }
+  // An envelope with NOTHING usable is not an envelope. Evidence alone does not
+  // qualify — rows with no report are a citation attached to nothing, and
+  // treating them as an envelope would swallow the agent's prose reply.
   if (!outcome.summary && !outcome.verdict && !outcome.question) return null;
   return outcome;
 }
@@ -234,6 +276,10 @@ export interface AgentCollab {
   ask: boolean;
   /** Verdicts recorded + validation gated (report-validation-verdict, G2). */
   verdict: boolean;
+  /** P13-D-26: may attach evidence REFERENCES to its outcome
+   *  (attach-evidence-references). Was a matrix-only capability with no runtime
+   *  consumer; it now declares the `evidence` field on `report_outcome`. */
+  evidence: boolean;
 }
 
 /**
@@ -285,6 +331,8 @@ export function resolveAgentCollab(
     ask: effectiveCollabMode(grants, "ask-human") === "direct",
     verdict:
       effectiveCollabMode(grants, "report-validation-verdict") === "direct",
+    evidence:
+      effectiveCollabMode(grants, "attach-evidence-references") === "direct",
   };
 }
 

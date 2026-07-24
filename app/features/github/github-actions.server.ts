@@ -13,6 +13,7 @@ import {
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
+import { invalidateRepoAccess } from "./github-query.server";
 
 /**
  * The two GitHub-view actions, as thin typed wrappers over the phase-7-core
@@ -66,6 +67,9 @@ export async function runGrantScope(
   ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<GithubActionOutcome> {
   const result = await revalidateProjectCredential(db, projectSlug, actor, ctx);
+  // LV-05: a re-validation can change the credential's health, so the memoized
+  // connection probe must not keep serving the pre-check answer.
+  invalidateRepoAccess(db, projectSlug);
 
   if (result.status !== "revalidated") {
     return {
@@ -112,6 +116,9 @@ export function runSetCredential(
   }
   const wasBound = getProjectCredential(db, projectSlug) !== null;
   setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
+  // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
+  // probe. Without this the row kept saying "no credential" after a full reload.
+  invalidateRepoAccess(db, projectSlug);
   return {
     ok: true,
     toast: wasBound
@@ -132,6 +139,9 @@ export function runClearCredential(
   actor: AuditActor,
 ): GithubActionOutcome {
   const cleared = clearProjectCredential(db, projectSlug, actor);
+  // LV-05: same invalidation on removal — otherwise the pill keeps claiming
+  // "connected" for up to 30 s after the credential is gone.
+  invalidateRepoAccess(db, projectSlug);
   return {
     ok: true,
     toast: cleared

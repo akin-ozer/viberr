@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -10,7 +10,9 @@ import {
   setCredentialPassword,
 } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
+import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
+import { seedDefaultAgentAssets } from "./default-assets.server";
 import { runSeed, SEED_DEFAULT_PASSWORD } from "./seed.server";
 
 /**
@@ -67,6 +69,63 @@ describe("runSeed (clean-sheet product seed)", () => {
     await expect(
       verifyPassword(SEED_DEFAULT_PASSWORD, credentialPasswordHash(db, admin.id)),
     ).resolves.toBe(true);
+  });
+
+  it("AP-03: the seeded specialist templates carry the SHIPPED persona, not the catalog blurb", async () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    await runSeed(db, { dataRoot });
+
+    // The template BODY is the agent's system prompt (agents-query
+    // `effectiveProfileView.definition` → buildSpecialistPersona). Seed used to
+    // write the 2-sentence catalog blurb there, and the boot backfill only
+    // writes files that are MISSING — so on the documented install order
+    // (`npm run seed` then `npm run dev`) the rich personas never reached disk.
+    for (const [id, opening] of [
+      ["developer", "You are the Developer"],
+      ["reviewer", "You are the Reviewer"],
+    ] as const) {
+      const { parsed } = parseAgentProfileContent(
+        readFileSync(agentProfileFilePath(id, dataRoot), "utf8"),
+        { fallbackId: id },
+      );
+      expect(parsed, id).not.toBeNull();
+      expect(parsed!.description, id).toContain(opening);
+      // The blurb still ships — as the short scannable `desc` the operator
+      // selects on — but it is NOT the persona.
+      expect(parsed!.frontmatter.desc.length, id).toBeGreaterThan(0);
+      expect(parsed!.description, id).not.toBe(parsed!.frontmatter.desc);
+    }
+  });
+
+  it("AP-03: the boot backfill leaves the seeded personas alone (install order seed → dev)", async () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    await runSeed(db, { dataRoot });
+    // Step 4 of the README: booting the app backfills default assets. It skips
+    // files that exist, so the seeded bytes must ALREADY be the right ones.
+    seedDefaultAgentAssets(dataRoot);
+
+    const { parsed } = parseAgentProfileContent(
+      readFileSync(agentProfileFilePath("developer", dataRoot), "utf8"),
+      { fallbackId: "developer" },
+    );
+    expect(parsed!.description).toContain("You are the Developer");
+
+    // Both writers agree on everything but the KB grants (`npm run seed` also
+    // seeds the backing KBs via seedOrgResources; the bare backfill does not).
+    const backfillOnly = ctx.makeTempDir();
+    seedDefaultAgentAssets(backfillOnly);
+    const fresh = parseAgentProfileContent(
+      readFileSync(agentProfileFilePath("developer", backfillOnly), "utf8"),
+      { fallbackId: "developer" },
+    ).parsed!;
+    expect(fresh.description).toBe(parsed!.description);
+    expect(fresh.frontmatter.resources.kb).toEqual([]);
+    expect(parsed!.frontmatter.resources.kb).toEqual([
+      "architecture-notes",
+      "api-contracts",
+    ]);
   });
 
   it("honors env-configured admin credentials", async () => {

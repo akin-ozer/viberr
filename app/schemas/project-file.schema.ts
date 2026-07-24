@@ -173,7 +173,9 @@ export const projectFrontmatterSchema = z.object({
    * it stays optional in the frontmatter type; the tolerant parse fills a
    * concrete `false` on read. */
   archived: z.boolean().optional(),
-  /** Project default GitHub repo ("owner/name"); tasks may override. */
+  /** The project's GitHub repo ("owner/name"). One project, one repository —
+   * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
+   * and the admin toggle gated nothing). */
   repo: z.string().nullable(),
   defaultBranch: z.string().min(1),
   /** Task key prefix ("VIB" → VIB-142). */

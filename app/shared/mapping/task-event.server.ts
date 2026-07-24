@@ -35,7 +35,8 @@ export interface TimelineEventRender {
   text: string;
   /** Comments only — renders the `comment-card toagent` tint. */
   toAgent: boolean;
-  /** Completion only; add/del are signed display strings ("+14", "−4"). */
+  /** Outcome events (completion / verdict / an agent's report — P13-D-26);
+   *  add/del are short signed display strings ("+14", "−4") and may be empty. */
   evidence: { label: string; add: string; del: string }[] | null;
 }
 

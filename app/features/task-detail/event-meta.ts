@@ -20,7 +20,12 @@ export const EVENT_META: Record<string, EventMeta> = {
   comment: { node: "", icon: "message", label: "commented" },
   completion: { node: "completion", icon: "check", label: "Completion report" },
   github: { node: "github", icon: "github", label: "GitHub" },
+  // Reserved for genuine governance violations/refusals (a PAT missing a scope,
+  // a directive that asked an agent to do something it was never granted).
   policy: { node: "policy", icon: "shield", label: "Policy violation" },
+  // Neutral governance/lifecycle notes: a goal edit, a divergence note, a
+  // scheduled re-run. Same "note" node styling as a comment row, no shield.
+  note: { node: "note", icon: "message", label: "Note" },
   quality: { node: "quality", icon: "flag", label: "Quality flag" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
@@ -32,14 +37,23 @@ export const EVENT_META: Record<string, EventMeta> = {
   assign: { node: "transition", icon: "user", label: "Ownership" },
 };
 
+/**
+ * UI-57: an UNKNOWN event type used to fall back to the comment meta, but
+ * `timeline.tsx` renders the typed branch whenever `type !== "comment"` — so an
+ * unrecognized type rendered a pill literally labelled "commented". A tolerant
+ * renderer must stay tolerant AND honest: the fallback now names the raw type.
+ */
 export function eventMeta(type: string): EventMeta {
-  return EVENT_META[type] ?? EVENT_META.comment!;
+  const known = EVENT_META[type];
+  if (known) return known;
+  return { node: "", icon: "message", label: type || "event" };
 }
 
 const TYPED_KIND: Record<string, PillKind> = {
   completion: "done",
   github: "neutral",
   policy: "input",
+  note: "neutral",
   quality: "risk",
   transition: "info",
   blocked: "blocked",

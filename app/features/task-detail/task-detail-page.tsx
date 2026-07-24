@@ -22,9 +22,10 @@ import {
 } from "./operator-recommendations";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
-import { formatDayDotTime } from "~/shared/dates/format";
+import { formatDayDotTime, formatRelative } from "~/shared/dates/format";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
@@ -57,7 +58,9 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
     } else if (d.error) {
       // E.g. "This packet was already resolved." — revalidation has already
       // refreshed the panel; surface the reason, never crash (spec §7).
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so every failure on
+      // this page rendered under a green tick.
+      push(d.error, "error");
     }
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
@@ -65,6 +68,7 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
 export function GithubTrace({
   task,
   githubHost,
+  reconciledAt = null,
   onCompleteMerge,
   onForceAccept,
   merging,
@@ -72,6 +76,10 @@ export function GithubTrace({
   task: TaskDetail;
   /** GitHub web host for browse links (loader-derived; GHE-safe). */
   githubHost?: string;
+  /** UI-57: ISO of the newest `github.reconcile` for THIS task, or null when it
+   *  has never been synced. Diff/commits/PR below are a CACHE — the GitHub page
+   *  discloses its freshness and this card did not. */
+  reconciledAt?: string | null;
   /** Run the real merge for an accepted (merge-pending) PR (S2). */
   onCompleteMerge?: () => void;
   /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
@@ -90,6 +98,8 @@ export function GithubTrace({
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div style={{ marginTop: ".8rem" }}>
+        {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
+            rendered as an unstyled <p>; it is a global utility now. */}
         <p className="hint" style={{ margin: "0 0 .4rem" }}>
           Acceptance is blocked: {forceAcceptReason}
         </p>
@@ -120,9 +130,16 @@ export function GithubTrace({
       </div>
     );
   }
-  // Real external link (spec §4.9: the prototype toast goes away): the PR
-  // when one exists, else the branch tree. Host comes from the loader
-  // (connection-derived), never hardcoded — GHE deployments keep working.
+  // Real external link (spec §4.9: the prototype toast goes away): the PR when
+  // one exists, else the branch tree.
+  //
+  // UI-11 honesty note: the comment here used to claim the host is
+  // "connection-derived, never hardcoded — GHE deployments keep working". It is
+  // not. `githubWebHost()` is called with no argument at both of its call sites,
+  // no connection record stores an API base URL, and the reconciler states
+  // outright that V1 is github.com-only. So this literal is the SAME value the
+  // loader sends; it is a default for callers that omit the prop (tests), not a
+  // GHE fallback. Wiring a real base URL is tracked separately.
   const host = githubHost ?? "https://github.com";
   const ghHref = task.repo
     ? task.pr
@@ -137,20 +154,50 @@ export function GithubTrace({
         <Icon name="github" />
         <span className="repo">{task.repo}</span>
         {task.pr ? (
-          <Pill kind={task.pr.state === "merged" ? "done" : "info"} sm>
+          // UI-36: reuse the shared PR-state mapping. This branched only on
+          // `merged`/`accepted`, so a PR CLOSED WITHOUT MERGING (a rejected
+          // one — a first-class state since NEW-1) rendered as a blue "PR #14",
+          // visually identical to a PR still in review. The GitHub page and the
+          // review queue have always rendered it correctly.
+          <Pill kind={prStatePill(task.pr.state).kind} sm>
             {task.pr.state === "merged"
               ? "merged"
-              : task.pr.state === "accepted"
-                ? `PR #${task.pr.number} · merge pending`
-                : "PR #" + task.pr.number}
+              : `PR #${task.pr.number} · ${prStatePill(task.pr.state).label}`}
           </Pill>
         ) : (
           <Pill kind="neutral" sm>
             no PR
           </Pill>
         )}
+        {/* P13-D-28: the two GitHub facts the app fetched (or could have) and
+            never showed. Check-runs were summarized on every reconcile pass and
+            read by nothing; review state was never read at all, so a teammate
+            approving or requesting changes on GitHub was invisible here and a
+            merge blocked by required reviews surfaced only as a late 405. */}
+        {task.prChecks && (
+          <Pill kind={checksPill(task.prChecks).kind} sm>
+            {checksPill(task.prChecks).label}
+          </Pill>
+        )}
+        {task.prReview && (
+          <Pill kind={reviewPill(task.prReview).kind} sm>
+            {reviewPill(task.prReview).label}
+          </Pill>
+        )}
       </div>
       <div className="gh-body">
+        <div className="kv-row">
+          <span className="k">Synced</span>
+          <span className="v sub" title="Branch, diff, commits and PR state below are served from the cached projection; a background poller refreshes it every 5 minutes.">
+            {reconciledAt ? (
+              <time dateTime={reconciledAt} suppressHydrationWarning>
+                {formatRelative(reconciledAt)}
+              </time>
+            ) : (
+              "not yet synced with GitHub"
+            )}
+          </span>
+        </div>
         <div className="kv-row">
           <span className="k">Branch</span>
           <span className="v">
@@ -162,7 +209,8 @@ export function GithubTrace({
           <div className="kv-row">
             <span className="k">Diff</span>
             <span className="v mono">
-              {task.changed.files} files ·{" "}
+              {/* LV-09: "Diff 1 files" */}
+              {task.changed.files} {task.changed.files === 1 ? "file" : "files"} ·{" "}
               <span style={{ color: "var(--teal-dark)" }}>+{task.changed.add}</span>{" "}
               <span style={{ color: "var(--coral-dark)" }}>−{task.changed.del}</span>
             </span>
@@ -225,10 +273,18 @@ export function GithubTrace({
 function PolicyPanel({
   projectSlug,
   myRole,
+  stages,
 }: {
   projectSlug: string;
   myRole: string | null;
+  /** UI-15/UI-49 family: the boundary row names the project's OWN review and
+   *  terminal stages instead of the literals "Review → Done". */
+  stages: TaskDetail["stages"];
 }) {
+  const reviewName =
+    stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
+  const terminalName =
+    stages.length >= 1 ? stages[stages.length - 1]!.name : "the final stage";
   const admin = myRole === "admin";
   const r = (myRole as ProjectRole | null) ?? null;
   const role = myRole || "viewer";
@@ -258,7 +314,11 @@ function PolicyPanel({
       v: roleCan(r, "run-agents") ? "You can run agents" : "Maintainer or admin only",
       icon: "cpu",
     },
-    { k: "Review → Done", v: "Human decision, locked at the review boundary", icon: "lock" },
+    {
+      k: `${reviewName} → ${terminalName}`,
+      v: "Human decision, locked at the review boundary",
+      icon: "lock",
+    },
   ];
   return (
     <div className="panel">
@@ -343,7 +403,7 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 }
 
 /** Hero header — task key, title, stage/readiness/validation meta, goal. */
-function TaskHero({
+export function TaskHero({
   task,
   stage,
   canEditGoal,
@@ -386,9 +446,15 @@ function TaskHero({
   useEffect(() => {
     if (editGoalSignal > 0 && editGoalSignal !== seenEditGoal.current) {
       seenEditGoal.current = editGoalSignal;
-      if (canEditGoal) setEditing(true);
+      if (canEditGoal) {
+        // UI-57: re-seed from the CURRENT goal. `draft` is seeded once at mount
+        // and only the Edit button refreshed it, so a packet-opened editor could
+        // save stale text over another user's edit.
+        setDraft(task.goal);
+        setEditing(true);
+      }
     }
-  }, [editGoalSignal, canEditGoal]);
+  }, [editGoalSignal, canEditGoal, task.goal]);
 
   return (
     <div className="task-hero">
@@ -437,9 +503,12 @@ function TaskHero({
             autoFocus
           />
           <div className="goal-edit-actions">
+            {/* P13-D-19: was `btn btn-primary`, a class no stylesheet defines —
+                it fell back to the plain grey `.btn` and rendered identically to
+                the Cancel button beside it. The vocabulary is `btn primary`. */}
             <button
               type="submit"
-              className="btn btn-primary"
+              className="btn primary"
               disabled={goalFetcher.state !== "idle" || draft.trim().length < 3}
             >
               Save goal
@@ -524,7 +593,7 @@ function RecommendationsSection({
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
  *  entirely for viewers/contributors with nothing scheduled. */
-function ScheduledActions({
+export function ScheduledActions({
   schedules,
   canRunAgents,
   taskClosed,
@@ -552,10 +621,13 @@ function ScheduledActions({
 
   return (
     <section className="panel" data-testid="scheduled-actions">
+      {/* P13-D-38: the icon used to be nested inside the <h2>, the only one of
+          ~48 panel heads that did — `.panel-head` is a flex row whose `.6rem`
+          gap collapsed to a JSX space and baseline-aligned the SVG. Sibling
+          form, as everywhere else. */}
       <div className="panel-head">
-        <h2>
-          <Icon name="clock" /> Scheduled re-runs
-        </h2>
+        <Icon name="clock" />
+        <h2>Scheduled re-runs</h2>
         {schedules.length > 0 ? (
           <span className="right muted">{schedules.length} pending</span>
         ) : null}
@@ -578,10 +650,11 @@ function ScheduledActions({
                 {s.note ? ` — ${s.note}` : ""}
                 {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
               </div>
+              {/* P13-D-19: `btn btn-ghost` -> `btn ghost`. */}
               {canRunAgents ? (
                 <button
                   type="button"
-                  className="btn btn-ghost sched-cancel"
+                  className="btn ghost sched-cancel"
                   disabled={busy}
                   onClick={() => submit({ intent: "cancel-schedule", scheduleId: s.id })}
                 >
@@ -641,7 +714,8 @@ function ScheduledActions({
             placeholder="Why re-run later? (optional)"
             maxLength={140}
           />
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          {/* P13-D-19: `btn btn-primary` -> `btn primary` (see Save goal). */}
+          <button type="submit" className="btn primary" disabled={busy}>
             <Icon name="clock" /> Schedule operator re-run
           </button>
         </fetcher.Form>
@@ -1077,6 +1151,7 @@ export function TaskDetailPage({
   backendAvailable,
   deliveringActive,
   activeReviewerIds,
+  runsVisible = true,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -1088,6 +1163,7 @@ export function TaskDetailPage({
   recommendations,
   schedules,
   githubHost,
+  githubReconciledAt = null,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -1103,6 +1179,10 @@ export function TaskDetailPage({
   deliveringActive: boolean;
   /** Reviewer profile ids with an active run — disables only that reviewer. */
   activeReviewerIds: string[];
+  /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
+   *  were withheld by the loader and the console renders an honest gate notice
+   *  instead of an empty panel. */
+  runsVisible?: boolean;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -1118,6 +1198,8 @@ export function TaskDetailPage({
   schedules: TaskSchedule[];
   /** GitHub web host for browse links (loader-derived; GHE-safe). */
   githubHost?: string;
+  /** UI-57: newest `github.reconcile` for this task (freshness cue). */
+  githubReconciledAt?: string | null;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [releasing, setReleasing] = useState(false);
@@ -1190,16 +1272,23 @@ export function TaskDetailPage({
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
   // live lines via run.log-appended; revalidates on run.state-changed.
-  const { linesByThread } = useRunLogStream({
+  const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
     projectSlug: task.projectSlug,
     taskKey: task.key,
     threads: runtime.map((r) => ({
       threadId: r.id,
       runId: r.serverRunId,
       lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
+      // P13-D-11: the loader ships a BOUNDED window of each agent group's
+      // console (NFR5). The window carries the live-tail seed (`headSeq`) and
+      // the backward cursor the console pages the rest of the history with.
+      window: r.logWindow,
     })),
     // F22: bounds a stale "running" strip if a finalize event is missed.
     hasActiveRun: runtime.some((r) => r.state === "running"),
+    // UI-30: a non-member's tail requests 403 — don't open a stream that can
+    // only fail (it used to 403 silently on every appended line).
+    enabled: runsVisible,
   });
 
   const {
@@ -1272,6 +1361,10 @@ export function TaskDetailPage({
             busy={resolveBusy}
             canResolve={canResolvePacket}
             canResolveCompletion={canRunAgents}
+            // UI-42: `update-goal` is admin|maintainer — the same grant the
+            // hero's Edit button uses. An owner-only resolver must not be
+            // offered a decision they cannot then carry out.
+            canEditGoal={canRunAgents}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
@@ -1305,7 +1398,7 @@ export function TaskDetailPage({
           operatorRunActive={operatorRunActive}
         />
 
-        {runtime.length > 0 ? (
+        {runtime.length > 0 && runsVisible ? (
           <AgentLogsPanel
             runtime={runtime}
             sel={shownLogSel}
@@ -1313,7 +1406,27 @@ export function TaskDetailPage({
             linesByThread={linesByThread}
             {...(onRetryBackend ? { onRetryBackend } : {})}
             retrying={runBusy}
+            streamError={streamError}
+            olderByThread={olderByThread}
+            onLoadOlder={loadOlder}
           />
+        ) : null}
+        {/* UI-30: raw console output, the `{ } raw` wire envelopes and the
+            provider session id are project-member material (the two routes that
+            serve the same data require membership). Say so rather than render an
+            empty console or, as before, hand them to any signed-in user. */}
+        {runtime.length > 0 && !runsVisible ? (
+          <section className="panel" data-comment-anchor="agent-logs">
+            <div className="panel-head">
+              <Icon name="cpu" />
+              <h2>Agent logs</h2>
+            </div>
+            <p className="empty" style={{ padding: "1rem .5rem" }}>
+              Raw agent output, wire envelopes and provider session ids are
+              limited to project members. The run summary above is public to
+              signed-in users.
+            </p>
+          </section>
         ) : null}
 
         <Timeline
@@ -1333,6 +1446,7 @@ export function TaskDetailPage({
         <GithubTrace
           task={task}
           {...(githubHost ? { githubHost } : {})}
+          reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           {...(onForceAccept ? { onForceAccept } : {})}
           merging={runBusy}
@@ -1346,7 +1460,11 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
         />
-        <PolicyPanel projectSlug={task.projectSlug} myRole={myRole} />
+        <PolicyPanel
+          projectSlug={task.projectSlug}
+          myRole={myRole}
+          stages={task.stages}
+        />
       </div>
 
       {releasing && (

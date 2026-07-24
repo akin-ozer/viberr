@@ -10,7 +10,7 @@ import {
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
  * (canonical file format documented in docs/architecture/file-formats.md).
  *
- * Tolerance contract (CONVENTIONS "Behavior rules"):
+ * Tolerance contract (docs/architecture/decisions.md "Behavior rules"):
  * - unknown frontmatter fields are PRESERVED (returned separately, re-written
  *   verbatim by the serializer);
  * - missing/invalid fields produce structured FileDiagnostics + a safe
@@ -36,13 +36,20 @@ export type Waiting = (typeof WAITING_VALUES)[number];
 export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none"] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
-/** The 9 timeline event types (cross-cutting contracts §1.3). Parsers keep
- * unknown strings as-is (renderer falls back to comment meta). */
+/** The 10 timeline event types (cross-cutting contracts §1.3). Parsers keep
+ * unknown strings as-is (renderer falls back to comment meta).
+ *
+ * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a
+ * refused delivery directive, a divergence note, a scheduled re-run note and a
+ * plain goal edit all shared it, so the timeline labelled a human editing a goal
+ * a **"Policy violation"**. `policy` is now reserved for genuine governance
+ * violations/refusals (coral shield); everything neutral is a `note`. */
 export const TIMELINE_EVENT_TYPES = [
   "comment",
   "completion",
   "github",
   "policy",
+  "note",
   "quality",
   "transition",
   "blocked",
@@ -226,6 +233,39 @@ export type TaskSchedule = z.infer<typeof scheduleSchema>;
 export const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
 export type PrState = (typeof PR_STATE_VALUES)[number];
 
+/**
+ * P13-D-28: the canonical `pr.review` vocabulary — GitHub's review-state
+ * awareness the PRD promises (`prd.md:124`), derived by the reconciler from
+ * `GET /pulls/{n}/reviews` + the PR's requested reviewers:
+ *
+ *   changes_requested — a reviewer's LATEST non-comment review asks for changes
+ *                       (outranks approved when both are outstanding)
+ *   approved          — at least one outstanding approval, none outstanding
+ *                       against it
+ *   review_required   — a reviewer/team is requested but nobody has ruled yet
+ *
+ * ABSENT/null means "nothing outstanding, or GitHub was never successfully
+ * read" — never rendered as a verdict. Kept in ONE place, like PR_STATE_VALUES.
+ */
+export const PR_REVIEW_VALUES = [
+  "approved",
+  "changes_requested",
+  "review_required",
+] as const;
+export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
+
+/** P13-D-28: check-runs roll-up for the PR head sha. Fetched since phase 7 and
+ * discarded until this pass — it now feeds the CI pill next to the PR pill. */
+export const prChecksSchema = z
+  .object({
+    total: z.number().int().min(0),
+    passing: z.number().int().min(0),
+    failing: z.number().int().min(0),
+    pending: z.number().int().min(0),
+  })
+  .loose();
+export type PrChecks = z.infer<typeof prChecksSchema>;
+
 export const prRefSchema = z
   .object({
     number: z.number().int().min(1),
@@ -236,6 +276,13 @@ export const prRefSchema = z
     // write persists that loss back to task.md.
     state: z.enum(PR_STATE_VALUES).catch("review"),
     title: z.string(),
+    // P13-D-28: both facts are OPTIONAL keys (`.nullish()`) — an absent key is
+    // "never read", which is not the same as "no checks" / "nobody reviewed",
+    // and writers omit rather than persist a null so a reconcile pass that
+    // learns nothing produces no file churn. `.catch(null)` keeps a hand-edited
+    // garbage value from nulling the WHOLE ref (same reasoning as `state`).
+    checks: prChecksSchema.nullish().catch(null),
+    review: z.enum(PR_REVIEW_VALUES).nullish().catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
@@ -381,8 +428,11 @@ export const taskFrontmatterSchema = z.object({
   /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
   verdicts: z.array(reviewVerdictSchema),
   branch: z.string().nullable(),
-  /** Task-level repo override; null → project default repo. */
-  repo: z.string().nullable(),
+  // P13-D-5: `repo` (the task-level repo override) lived here. The override was
+  // deleted this pass by owner ruling — one project, one repo — and nothing can
+  // write it any more, so the field is gone rather than kept as a permanently
+  // null read path. An existing `repo:` line in a task.md is now an UNKNOWN key:
+  // preserved verbatim on round-trip, ignored by every resolver.
   pr: prRefSchema.nullable(),
   github: githubCacheSchema.nullable(),
   createdAt: z.string().nullable(),
@@ -467,6 +517,30 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
   return null;
 }
 
+/**
+ * P13-D-4 — why a CLOSED-unmerged review PR blocks acceptance, or null.
+ *
+ * A PR a human closed on GitHub without merging is an out-of-band REJECTION:
+ * the work was declined and there is nothing left to merge, so the task can't
+ * be "accepted" into Done. Pass-12 NEW-1 put this check inline in
+ * `acceptCompletion` only — but two other writers land `stage = done` AND stamp
+ * `pr.state`: `resolvePacket`'s inlined `accept_completion` case and
+ * `operatorAcceptCompletion`'s full-autonomy branch. Both overwrote a `closed`
+ * PR to `accepted` and moved the task to Done; `pr.state` self-heals on the
+ * next reconcile poll, but `stage = done` is durable and never reversed.
+ *
+ * ONE guard, three call sites — a fourth writer to Done must call it too.
+ * Shaped like `acceptanceBlockedReason` (reason-or-null) so both gates read the
+ * same way at each site.
+ */
+export function closedPrBlockedReason(
+  fm: { pr: PrRef | null },
+  taskKey: string,
+): string | null {
+  if (fm.pr?.state !== "closed") return null;
+  return `${taskKey}'s review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.`;
+}
+
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT
@@ -518,7 +592,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "workRevision",
   "verdicts",
   "branch",
-  "repo",
+  // P13-D-5: "repo" deliberately NOT listed — it is an unknown key now, so an
+  // existing task.md keeps its line verbatim instead of losing it on rewrite.
   "pr",
   "github",
   "createdAt",
@@ -845,13 +920,7 @@ export function parseTaskFrontmatter(
       taskFrontmatterSchema.shape.branch,
       null,
     ),
-    repo: tolerant(
-      diagnostics,
-      "repo",
-      data.repo,
-      taskFrontmatterSchema.shape.repo,
-      null,
-    ),
+    // P13-D-5: no `repo` read — the task-level override is gone.
     pr: tolerant(diagnostics, "pr", data.pr, taskFrontmatterSchema.shape.pr, null),
     github: tolerant(
       diagnostics,
@@ -969,6 +1038,68 @@ export type FileActorRef =
 
 // -------------------------------------------------- timeline events
 
+/**
+ * P13-D-26 — one `evidence:` row on a completion/verdict event.
+ *
+ * A REFERENCE, never a dump: `label` names what was produced or checked
+ * (a suite, a changed-file summary, a revision), `add`/`del` are short signed
+ * display strings ("+14", "−4"). This deliberately complements the
+ * `evidence-separation` guardrail (comment-guardrails.server.ts), which trims
+ * raw fenced output out of the prose and points at the run logs — the rows
+ * carry the citation the guardrail leaves behind, not the noise it removed.
+ */
+export interface EvidenceRow {
+  label: string;
+  add: string;
+  del: string;
+}
+
+/** Row/field caps. The rows are serialized into task.md and re-read into every
+ *  agent prompt, so they stay small by construction. */
+export const EVIDENCE_MAX_ROWS = 8;
+const EVIDENCE_LABEL_MAX_CHARS = 120;
+const EVIDENCE_COUNT_MAX_CHARS = 16;
+
+/**
+ * Placeholder for a count column with nothing to report. A row serializes as
+ * ONE line, `- <label> · <add> · <del>`, and the parser trims the line before
+ * splitting — so a trailing EMPTY column is not just blank on the way back, it
+ * collapses the row to two segments and the parser drops it as malformed. Every
+ * column therefore carries at least this glyph. (Caught by the round-trip test,
+ * not by inspection.)
+ */
+export const EVIDENCE_EMPTY_COLUMN = "—";
+
+/**
+ * Sanitize agent- or server-supplied evidence into rows that round-trip through
+ * the task.md serializer. Each row is ONE line of the form
+ * `- <label> · <add> · <del>`, so a newline anywhere would forge a row and a
+ * ` · ` inside `add`/`del` would shift the columns (the parser pops the LAST
+ * two segments, so a separator in the label is harmless and is kept).
+ * Returns null when nothing usable survives — the caller writes `evidence: null`.
+ */
+export function normalizeEvidenceRows(
+  rows: readonly { label?: unknown; add?: unknown; del?: unknown }[] | null | undefined,
+): EvidenceRow[] | null {
+  if (!rows || rows.length === 0) return null;
+  const flat = (v: unknown, max: number, stripSeparator: boolean): string => {
+    let s = typeof v === "string" ? v : v == null ? "" : String(v);
+    s = s.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+    if (stripSeparator) s = s.split(" · ").join(" ").replace(/\s+/g, " ").trim();
+    return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  };
+  const out: EvidenceRow[] = [];
+  for (const row of rows) {
+    const label = flat(row.label, EVIDENCE_LABEL_MAX_CHARS, false);
+    if (!label) continue; // an unlabeled row cites nothing
+    const column = (v: unknown) =>
+      flat(v, EVIDENCE_COUNT_MAX_CHARS, true) || EVIDENCE_EMPTY_COLUMN;
+    out.push({ label, add: column(row.add), del: column(row.del) });
+    if (out.length >= EVIDENCE_MAX_ROWS) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
 /** One parsed `###` timeline entry. Newest-first in the file and here. */
 export interface TaskFileEvent {
   /** UTC ISO 8601. */
@@ -982,8 +1113,8 @@ export interface TaskFileEvent {
   text: string;
   /** Comments only — routed to the operator/agent (toagent card tint). */
   toAgent: boolean;
-  /** Completion events only. add/del are signed display strings ("+14"). */
-  evidence: { label: string; add: string; del: string }[] | null;
+  /** Completion/verdict events only. add/del are signed display strings ("+14"). */
+  evidence: EvidenceRow[] | null;
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

@@ -240,13 +240,25 @@ describe("NotificationsPage", () => {
     expect(read.querySelector(".unread-dot")).toBeNull();
   });
 
-  it("Unread filter empties both panels with the exact copy", () => {
+  // UI-54: REWRITTEN — this pinned the bug. `splitNotifications` applied the
+  // All/Unread filter BEFORE the needs-you split, so a set of already-READ
+  // pending decisions rendered "0 decisions · Nothing is waiting on you" under
+  // the Unread filter. The filter is a view of the stream, not a claim about
+  // what still needs a human: the header keeps the true count and the empty
+  // state says the rows are filter-hidden, not absent.
+  it("Unread filter hides read decisions from the list but not from the count", () => {
     const read = ITEMS.map((n) => ({ ...n, unread: false }));
     const { getByText } = renderPage(read, 0);
     fireEvent.click(getByText("Unread"));
-    expect(getByText("Nothing is waiting on you.")).toBeTruthy();
     expect(getByText("You're caught up.")).toBeTruthy();
-    expect(getByText("0 decisions")).toBeTruthy();
+    // ITEMS carries three live pending decisions (two packets + one approval,
+    // each on a distinct task).
+    expect(getByText("3 decisions · 3 hidden by the filter")).toBeTruthy();
+    expect(
+      getByText(
+        '3 decisions are waiting on you — switch to "All" to see them.',
+      ),
+    ).toBeTruthy();
   });
 
   it("Mark all read invokes the shared read-all handler", () => {

@@ -1,6 +1,6 @@
-import { Link, NavLink, useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Icon } from "~/ui/icon";
-import { WORKSPACE_NAV, workspaceViewFromPathname } from "./nav";
+import { boardHref, WORKSPACE_NAV, workspaceViewFromPathname } from "./nav";
 
 /**
  * Left workspace rail (shell spec §4.1). Live counts from the layout
@@ -44,10 +44,27 @@ export function Rail({
 
       <div className="rail-label">Workspace</div>
       {WORKSPACE_NAV.map((n) => (
-        <NavLink
+        <Link
           key={n.id}
-          to={`/projects/${projectSlug}/${n.id}`}
+          // P13-D-35: the Board item is the one nav target that owns URL state
+          // (filter/view/search); a bare path reset it every time it was
+          // clicked from a filtered board. Every other view is stateless.
+          to={
+            n.id === "board"
+              ? boardHref(projectSlug, location)
+              : `/projects/${projectSlug}/${n.id}`
+          }
           className={"nav-item" + (activeView === n.id ? " active" : "")}
+          // P13-D-37 (WCAG 1.3.1): the active item was marked with a
+          // hand-computed class ALONE. This was a `NavLink`, but NavLink only
+          // emits `aria-current` when its own `to` matches the URL — and
+          // `/projects/x/tasks/VIB-1` never matches `to=".../board"`. So on
+          // every task-detail page, the product's deepest surface, Board was
+          // visually highlighted with no programmatic signal, and passing
+          // `aria-current` to NavLink would still have been gated by that same
+          // match. `activeView` (which maps `tasks` → board) is the real source
+          // of truth, so this is a plain Link that states it.
+          aria-current={activeView === n.id ? "page" : undefined}
         >
           <Icon name={n.icon} className="ico" />
           {n.label}
@@ -61,7 +78,7 @@ export function Rail({
               {violations}
             </span>
           )}
-        </NavLink>
+        </Link>
       ))}
 
       <div className="rail-spacer" />

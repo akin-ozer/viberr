@@ -1,10 +1,13 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RuntimeAdapter } from "./adapter.server";
 import { resolveClaudeConfigDir } from "./claude-config.server";
+import {
+  prepareCodexHome,
+  resolveCodexAuthSource,
+} from "./codex-config.server";
 import {
   createClaudeAdapter,
   type ClaudeQueryFn,
@@ -84,14 +87,21 @@ function codexCliAuthUsable(env: NodeJS.ProcessEnv): boolean {
  * lives on the wiped-able volume, so recreating `docker-data` silently drops
  * auth.json while the opt-in flag (from .env) stays set — the error must name
  * the missing FILE, not re-suggest the flag.
+ *
+ * P13-LV-13/LV-14: runs no longer execute in `$CODEX_HOME` — they get an
+ * app-owned run home (`resolveCodexHome`) that `prepareCodexHome` mirrors the
+ * login into. The probe deliberately still asks about the LOGIN dir, not the
+ * mirror: the login is what a human manages, and a probe that also accepted the
+ * mirror would go sticky (a run home keeps a stale copy long after the login was
+ * removed) and lose the self-healing property below. In the container the two
+ * paths are the same dir, so the documented docker recipe is unchanged.
  */
 export function codexCliAuthDiagnostics(env: NodeJS.ProcessEnv = process.env): {
   optIn: boolean;
   authJsonPath: string;
   authJsonExists: boolean;
 } {
-  const home = env.CODEX_HOME || path.join(homedir(), ".codex");
-  const authJsonPath = path.join(home, "auth.json");
+  const authJsonPath = path.join(resolveCodexAuthSource(env), "auth.json");
   let authJsonExists = false;
   try {
     authJsonExists = existsSync(authJsonPath);
@@ -179,7 +189,14 @@ export interface AdapterDeps {
   codexFactory?: CodexFactory;
 }
 
-const CREDENTIAL_ENV_RE =
+/**
+ * Credential-shaped env var NAMES. Exported because the OUTPUT side needs the
+ * same list as the input side: `filteredSpawnEnv` strips these from the agent's
+ * child env, and the run sink redacts the VALUES of the ones the app then
+ * deliberately re-adds (P13-U-1) from every persisted log line. One regex, so
+ * "what counts as a credential" cannot drift between the two.
+ */
+export const CREDENTIAL_ENV_RE =
   /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i;
 const PRIVATE_RUNTIME_ENV_RE =
   /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
@@ -257,8 +274,14 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const codexApiKey = env.CODEX_ACCESS_TOKEN || preferCachedCodexLogin
     ? undefined
     : (env.CODEX_API_KEY ?? env.OPENAI_API_KEY);
+  // P13-LV-13/LV-14: a run gets an APP-OWNED CODEX_HOME, never the operator's
+  // personal `~/.codex`. That home is the only isolation boundary the Codex SDK
+  // offers — `--config` overrides merge into whatever the home declares, so a
+  // host home leaks its `config.toml` MCP servers, `skills/`, `plugins/` and
+  // `AGENTS.md` into every governed run. `prepareCodexHome` mirrors the login's
+  // auth.json in so subscription auth keeps working.
   const codexEnv = codexSpawnEnv(
-    env.CODEX_HOME,
+    prepareCodexHome().home,
     env.CODEX_ACCESS_TOKEN,
     preferCachedCodexLogin,
   );

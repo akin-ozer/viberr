@@ -22,7 +22,11 @@ let runDemoSeed: typeof import("../test-support/demo-seed").runDemoSeed;
 let SEED_DEFAULT_PASSWORD: string;
 try {
   ({ runDemoSeed, SEED_DEFAULT_PASSWORD } = await import("../test-support/demo-seed"));
-} catch {
+} catch (error) {
+  // P13: the guard used to swallow the real reason, so a Vite-only `?raw`
+  // import failing under tsx surfaced as a misleading "not shipped in the
+  // production image" message. Print what actually went wrong.
+  console.error(error);
   console.error(
     "`npm run seed:demo` is a TEST/DEV-only tool and needs the `test-support/` " +
       "fixtures, which are not shipped in the production image. Use `npm run seed` " +

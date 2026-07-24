@@ -15,6 +15,7 @@ import {
   agentProfileFilePath,
   agentProfilesDir,
 } from "~/server/files/file-store-root.server";
+import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 
 /**
@@ -37,7 +38,17 @@ export interface GagentView {
   id: string;
   name: string;
   backend: "codex" | "claude";
+  /**
+   * The SHORT operator-facing blurb (frontmatter `desc`) — one paragraph the
+   * operator reads when picking an agent. P13-AP-01/AP-02: this used to be the
+   * markdown BODY, i.e. the agent's whole persona, so the org card printed a
+   * 600-word system prompt as a row subtitle and a one-line edit flattened the
+   * persona; meanwhile `desc` was never rewritten on edit, so what the operator
+   * actually reads never changed.
+   */
   summary: string;
+  /** The markdown body — the agent's persona / system-prompt material. */
+  persona: string;
   stages: string[];
   skills: string[];
   mcps: string[];
@@ -66,10 +77,19 @@ function readTemplateFile(
   return parsed;
 }
 
-/** Distinct-project deployment counts per profileId (the `used` fact). */
+/**
+ * Distinct-project deployment counts per profileId (the `used` fact).
+ *
+ * P13-AP-10: archived projects were counted, so a template could be
+ * undeletable ("detach it from its N projects first") because of a project
+ * nobody can edit any more. Archived projects are excluded.
+ */
 export function usedByProject(db: DatabaseSync): Record<string, number> {
   const rows = db
-    .prepare(`SELECT slug, agent_policy_json FROM projects`)
+    .prepare(
+      `SELECT slug, agent_policy_json FROM projects
+       WHERE COALESCE(archived, 0) = 0`,
+    )
     .all() as { slug: string; agent_policy_json: string }[];
   const counts: Record<string, number> = {};
   for (const row of rows) {
@@ -104,7 +124,10 @@ function toView(
     id,
     name: fm.name,
     backend: fm.backends[0] === "claude" ? "claude" : "codex",
-    summary: parsed.description,
+    // `desc` is the blurb; the body is the persona. Fall back to the body only
+    // when a legacy template carries no `desc` at all.
+    summary: fm.desc.trim() || parsed.description,
+    persona: parsed.description,
     stages: fm.stages,
     skills: fm.resources.skills,
     mcps: fm.resources.mcps,
@@ -132,11 +155,41 @@ export function listGlobalAgentProfiles(
   return out;
 }
 
+/** Projects whose deployment list already carries `profileId`. */
+function projectsUsingProfileId(db: DatabaseSync, profileId: string): string[] {
+  const rows = db
+    .prepare(`SELECT slug, agent_policy_json FROM projects`)
+    .all() as { slug: string; agent_policy_json: string }[];
+  const out: string[] = [];
+  for (const row of rows) {
+    try {
+      const deployments = JSON.parse(row.agent_policy_json) as unknown;
+      if (!Array.isArray(deployments)) continue;
+      if (
+        deployments.some(
+          (d) =>
+            typeof d === "object" &&
+            d !== null &&
+            (d as { profileId?: unknown }).profileId === profileId,
+        )
+      ) {
+        out.push(row.slug);
+      }
+    } catch {
+      // tolerated — a malformed projection row blocks nothing
+    }
+  }
+  return out;
+}
+
 export interface SaveGagentInput {
   id?: string | null;
   name: string;
   backend: "codex" | "claude";
+  /** Short operator-facing blurb → frontmatter `desc`. */
   summary: string;
+  /** Persona / system-prompt material → the markdown body. */
+  persona: string;
   stages: string[];
   skills: string[];
   mcps: string[];
@@ -167,16 +220,22 @@ export function saveGlobalAgentProfile(
     if (!existing || existing.frontmatter.kind !== "specialist") {
       throw AppError.notFound("No such agent profile.");
     }
+    // P13-AP-01/AP-02: `desc` (what the operator reads) is now rewritten on
+    // edit, and the BODY carries the persona — an edited summary no longer
+    // flattens a profile's system prompt, and a blank persona keeps the one
+    // that is already there.
+    const persona = input.persona.trim();
     const merged: ParsedTemplate = {
       frontmatter: {
         ...existing.frontmatter,
         name,
         role: existing.frontmatter.role || name,
+        desc: input.summary.trim(),
         backends: [backend],
         stages: input.stages,
         resources: { ...existing.frontmatter.resources, ...resources },
       },
-      description: input.summary.trim(),
+      description: persona || existing.description,
     };
     writeFileAtomic(
       agentProfileFilePath(input.id, ctx.dataRoot),
@@ -201,14 +260,21 @@ export function saveGlobalAgentProfile(
   if (existsSync(agentProfileFilePath(id, ctx.dataRoot))) {
     throw AppError.conflict(`A profile named ${name} already exists.`);
   }
+  // P13-AP-12: a project-local profile already owns this id, so a template
+  // under the same id would be ambiguous the moment a project adopts it.
+  const localClash = projectsUsingProfileId(db, id);
+  if (localClash.length > 0) {
+    throw AppError.conflict(
+      `${localClash[0]} already has a project profile with the id ${id} — pick another name.`,
+    );
+  }
   const created: ParsedTemplate = {
     frontmatter: {
       id,
       kind: "specialist",
       name,
       role: name,
-      // Short scannable description for operator selection; the body carries
-      // the same summary until a dedicated persona is written.
+      // Short scannable description for operator selection.
       desc: input.summary.trim(),
       icon: "cpu",
       backends: [backend],
@@ -216,11 +282,18 @@ export function saveGlobalAgentProfile(
       scope: "Global base",
       stages: input.stages,
       spanAll: false,
-      capabilities: [],
+      // P13-AP-06: an empty grant list means "unspecified", which the tool
+      // policy treats as FULL access — a casually created template would carry
+      // silent repo-write power into every project that adopts it. Persist
+      // explicit grants, and because THIS editor has no capability UI, start
+      // delivery withheld rather than granting repo-write to a template nobody
+      // could set permissions on (live: an "Org Docs Writer" described as
+      // "never touches app code" was created holding all four delivery caps).
+      capabilities: conservativeGrantsFor("agent"),
       extras: [],
       resources,
     },
-    description: input.summary.trim(),
+    description: input.persona.trim() || input.summary.trim(),
   };
   writeFileAtomic(
     agentProfileFilePath(id, ctx.dataRoot),
@@ -235,7 +308,7 @@ export function saveGlobalAgentProfile(
   });
   return {
     profile: toView(id, created, 0),
-    toast: `${name} created — grant it eligibility in a project's policy to deploy`,
+    toast: `${name} created — add it to a project from Agents → Add from library`,
   };
 }
 

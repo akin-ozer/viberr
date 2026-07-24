@@ -1,8 +1,7 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { getEnv } from "../config/env.server";
 import { resolveClaudeConfigDir } from "./claude-config.server";
+import { codexSessionRoots } from "./codex-config.server";
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
@@ -12,7 +11,7 @@ import type { RealBackend } from "./runtime-registry.server";
  * its own resumable transcript there, keyed by the session id the UI shows:
  *
  *   Claude Code : $CLAUDE_CONFIG_DIR/projects/<cwd-slashes-as-dashes>/<sid>.jsonl
- *   Codex       : $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
+ *   Codex       : <codex run home>/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl
  *
  * We locate the file by the session id itself (globbing the per-project dirs /
  * dated rollout dirs) so we never depend on reproducing the cwd→folder
@@ -33,10 +32,13 @@ export interface LocatedTranscript {
   bytes: number;
 }
 
-/** Resolve Codex's home dir: explicit CODEX_HOME, else the conventional ~/.codex. */
-function codexHome(): string {
-  const env = getEnv();
-  return env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+/** Every `…/sessions` dir a codex rollout may live in. Runs write into the
+ *  app-owned run home (P13-LV-13); the human's login dir is still searched so a
+ *  transcript recorded before that split stays exportable. */
+function codexSessionDirs(): string[] {
+  return codexSessionRoots()
+    .map((root) => path.join(root, "sessions"))
+    .filter((dir) => existsSync(dir));
 }
 
 /** Read the cwd baked into a Claude/Codex transcript's first line that carries one. */
@@ -88,12 +90,11 @@ function locateClaude(sessionId: string): string | null {
 }
 
 /** Codex: a `rollout-…jsonl` whose filename embeds the session id, found by
- *  recursively walking the dated dirs under `$CODEX_HOME/sessions`.
+ *  recursively walking the dated dirs under each codex `sessions` root.
  *  Filename-only walk — no file reads. */
 function codexTranscriptByFilename(sessionId: string): string | null {
-  const sessionsDir = path.join(codexHome(), "sessions");
-  if (!existsSync(sessionsDir)) return null;
-  const stack: string[] = [sessionsDir];
+  const stack: string[] = codexSessionDirs();
+  if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: Dirent[];
@@ -119,9 +120,8 @@ function codexTranscriptByFilename(sessionId: string): string | null {
 /** Content fallback: the id appears in the session-meta (first line). Reads
  *  every candidate file — export-route only, never on a loader path. */
 function codexTranscriptByContent(sessionId: string): string | null {
-  const sessionsDir = path.join(codexHome(), "sessions");
-  if (!existsSync(sessionsDir)) return null;
-  const stack: string[] = [sessionsDir];
+  const stack: string[] = codexSessionDirs();
+  if (stack.length === 0) return null;
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: Dirent[];
@@ -188,6 +188,60 @@ export function transcriptExists(backend: RealBackend, sessionId: string): boole
   transcriptExistsCache.delete(key);
   transcriptExistsCache.set(key, { ok, at: now });
   return ok;
+}
+
+// --------------------------------------------------- resume-time continuity
+
+/**
+ * P13-D-2: whether a stored session id still has provider-side history.
+ *
+ *   present — the transcript is on disk; a resume will replay it.
+ *   missing — the transcript store EXISTS but holds nothing for this id
+ *             (Claude Code's ~30-day retention swept it, or a `docker-data`
+ *             wipe took `$CODEX_HOME/sessions` with it).
+ *   unknown — there is no transcript store to look in at all, so absence
+ *             proves nothing.
+ *
+ * The three-valued answer is the whole point. A boolean would read "no store"
+ * as "session gone" and force a fresh run on every deployment whose provider
+ * writes transcripts somewhere this process cannot see — degrading continuity
+ * to fix a continuity bug. `unknown` resumes exactly as before.
+ */
+export type SessionContinuity = "present" | "missing" | "unknown";
+
+/**
+ * How the two CLIs report a resume against a session they no longer hold —
+ * Claude's `--resume <id>` prints "No conversation found with session ID …"
+ * (the exact string the export installer warns about at the bottom of
+ * RESUME_SCRIPT_TEMPLATE); Codex's `resume <id>` reports the rollout as not
+ * found. Shared by both adapters' classifiers and by `runFailureReason`, so a
+ * vanished session is never narrated as an authentication problem.
+ */
+export const SESSION_MISSING_RE =
+  /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
+
+/**
+ * The resume-time probe. Deliberately NOT `transcriptExists`, which is the
+ * loader-path Export-button probe: that one caches for 30 s (a stale `true`
+ * would resume the dead id we are trying to detect) and matches Codex rollouts
+ * by FILENAME only (a conservative miss there merely hides an Export link —
+ * here it would throw away a live session's context). This one is uncached and
+ * uses the full locator per backend, minus the file reads `locateTranscript`
+ * does for stats; a resume spawns an agent process, so one directory walk is
+ * noise.
+ */
+export function probeSessionContinuity(
+  backend: RealBackend,
+  sessionId: string | null | undefined,
+): SessionContinuity {
+  if (!sessionId) return "unknown";
+  if (backend === "codex") {
+    if (codexSessionDirs().length === 0) return "unknown";
+    return locateCodex(sessionId) ? "present" : "missing";
+  }
+  const projectsDir = path.join(resolveClaudeConfigDir(), "projects");
+  if (!existsSync(projectsDir)) return "unknown";
+  return locateClaude(sessionId) ? "present" : "missing";
 }
 
 /**

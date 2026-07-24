@@ -189,6 +189,47 @@ export function CapabilityMatrixModal({
               ))}
             </tbody>
           </table>
+          {/* P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are
+              deliberate, but they were undisclosed — a reader could only learn
+              them by running both backends and comparing. */}
+          <div className="mx-notes">
+            <h3>What differs between the two runtimes</h3>
+            <ul>
+              <li>
+                A Claude specialist runs with Claude Code's coding harness underneath
+                its persona; a Codex specialist gets the persona alone.
+              </li>
+              <li>
+                <b>Post mid-run comments</b> has no Codex channel — granting it does
+                nothing there; a Codex agent's report always posts when the run ends.
+              </li>
+              <li>
+                <b>Ask the human a question</b> pauses a Claude run mid-flight; on Codex
+                the question arrives only when the run finishes.
+              </li>
+              <li>
+                Org MCP credentials are sent on <b>Claude</b> runs only — Codex mounts a
+                declared server unauthenticated, because its MCP config travels in argv.
+              </li>
+              <li>
+                Codex renames hyphens to underscores in MCP tool names
+                (<code>mcp__everything-http__echo</code> on Claude is{" "}
+                <code>mcp__everything_http__echo</code> on Codex), so never name an MCP
+                tool literally in a persona or skill.
+              </li>
+              <li>
+                <b>MCP tools are not gated by this matrix.</b> Viberr can't know what a
+                third-party tool does, so the rule is stated in every run's system
+                prompt instead: an MCP tool may never merge, close a task, or change
+                policy. Grant MCP servers deliberately.
+              </li>
+              <li>
+                The Claude operator can reach the web (WebFetch/WebSearch) when
+                <b> Search &amp; fetch from the web</b> is granted; the Codex operator
+                cannot.
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </dialog>

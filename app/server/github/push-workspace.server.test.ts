@@ -25,7 +25,6 @@ beforeEach(() => {
     frontmatter: baseTaskFrontmatter("VIB-1", {
       stage: "review",
       branch: "vib-1-work",
-      repo: "akin-ozer/viberr",
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });

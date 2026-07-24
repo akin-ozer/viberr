@@ -5,7 +5,10 @@ import {
   tool,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { FileActorRef } from "~/schemas/task-file.schema";
+import {
+  normalizeEvidenceRows,
+  type FileActorRef,
+} from "~/schemas/task-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import {
@@ -41,7 +44,9 @@ import {
  *   post_comment   → comment-on-task          (immediate agent-authored comment)
  *   ask_human      → ask-human                (opens a question decision packet)
  *   report_outcome → report-validation-verdict (stages the outcome envelope —
- *                    recorded ATOMICALLY with the reply at completion)
+ *                    recorded ATOMICALLY with the reply at completion); its
+ *                    optional `evidence` field is separately gated on
+ *                    attach-evidence-references (P13-D-26)
  *
  * Codex runs cannot mount these (the codex SDK ignores tool policy and its
  * MCP config leaks credentials into argv) — they get the same envelope through
@@ -300,14 +305,56 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .string()
             .optional()
             .describe("One-paragraph justification (markdown allowed)."),
+          // P13-D-26: the reviewer profile advertises "Attach evidence
+          // references" (agent-catalog.server.ts) and its persona says it keeps
+          // raw validation output OUT of the timeline — but there was no channel
+          // to attach anything, so the `evidence:` block had 42 `null` writers
+          // and zero real ones. Gated exactly like its siblings: the field is
+          // only DECLARED when the profile holds the grant, so an agent without
+          // it cannot see or use it.
+          ...(collab.evidence
+            ? {
+                evidence: z
+                  .array(
+                    z.object({
+                      label: z
+                        .string()
+                        .describe(
+                          "What this cites: a suite, a file, a check — e.g. 'unit/policy_gate_test' or 'app/server/tasks/task-actions.server.ts'.",
+                        ),
+                      add: z
+                        .string()
+                        .optional()
+                        .describe("Short signed count, e.g. '+14' or '3 passed'."),
+                      del: z
+                        .string()
+                        .optional()
+                        .describe("Short signed count, e.g. '−4' or '0 failed'."),
+                    }),
+                  )
+                  .optional()
+                  .describe(
+                    "Up to 8 evidence REFERENCES for what you checked or produced — short citations, never raw output (that stays in the run logs). They render as rows on your outcome event and carry into the review PR body.",
+                  ),
+              }
+            : {}),
         },
         async (args) => {
+          const evidence = collab.evidence
+            ? normalizeEvidenceRows(
+                (args as { evidence?: { label?: string; add?: string; del?: string }[] })
+                  .evidence,
+              )
+            : null;
           stageOutcome(db, outcomeKey, {
             verdict: args.verdict,
             ...(args.summary ? { summary: prose(args.summary) } : {}),
+            ...(evidence ? { evidence } : {}),
           });
           return textResult(
-            `[staged] Verdict '${args.verdict}' will be recorded with your final report. Finish with your full findings.`,
+            `[staged] Verdict '${args.verdict}'${
+              evidence ? ` with ${evidence.length} evidence reference(s)` : ""
+            } will be recorded with your final report. Finish with your full findings.`,
           );
         },
       ),

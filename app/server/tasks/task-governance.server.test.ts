@@ -390,7 +390,8 @@ describe("P3.7 governance & lifecycle fixes", () => {
     );
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.goal).toContain("must contain a test");
-    expect(file.parsed.timeline[0]).toMatchObject({ type: "policy", title: "Goal updated" });
+    // P13-LV-03: a human editing the goal is a neutral note, not a violation.
+    expect(file.parsed.timeline[0]).toMatchObject({ type: "note", title: "Goal updated" });
   });
 
   it("updateTaskGoal is forbidden for a contributor (X11 RBAC)", async () => {

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
-import { SEED_DEFAULT_PASSWORD } from "./app/server/seed/seed.server";
+import { SEED_DEFAULT_PASSWORD } from "./app/server/seed/seed-credentials";
 
 /**
  * E2E golden paths (Phase 11).

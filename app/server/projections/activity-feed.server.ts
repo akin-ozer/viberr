@@ -120,10 +120,13 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "project.stage.removed": "change",
   "project.stage.reordered": "change",
   "project.settings.updated": "change",
-  "project.repo_override.changed": "change",
   "project.agent_profile.created": "change",
   "project.agent_profile.updated": "change",
   "project.agent_profile.deleted": "change",
+  // P13-D-7: the fourth member of the agent-profile family — deploying an org
+  // library profile into the project is the same class of config change as
+  // creating one here, and was the only sibling missing.
+  "project.agent_profile.deployed": "change",
   "project.created": "change",
   "project.archived": "change",
   "project.unarchived": "change",
@@ -136,6 +139,13 @@ const AUDIT_ACTION_KINDS: Record<string, AuditLogKind> = {
   "task.ownership.admin_released": "audit",
   "runtime.run.started": "audit",
   "runtime.run.interrupted": "audit",
+  // P13-D-7: the two governance overrides that were RECORDED but surfaced
+  // nowhere — reconstructing "who bypassed the required reviewer" used to need
+  // raw SQLite access, the exact thing this panel exists to make unnecessary.
+  "task.acceptance.forced": "audit",
+  "project.org_admin.override": "audit",
+  // P13-D-8: NFR10's fourth category — the refused attempt itself.
+  "project.authority.denied": "blockedact",
 };
 
 const BOUNDARY_LABEL: Record<string, string> = {
@@ -203,14 +213,14 @@ function auditText(
       return `${actor} reordered the workflow stages.`;
     case "project.settings.updated":
       return `${actor} updated project settings.`;
-    case "project.repo_override.changed":
-      return `${actor} ${d.enabled ? "enabled" : "disabled"} task-level repo overrides.`;
     case "project.agent_profile.created":
       return `${actor} created agent profile **${str(d.name) ?? "?"}**.`;
     case "project.agent_profile.updated":
       return `${actor} updated agent profile **${str(d.name) ?? "?"}**.`;
     case "project.agent_profile.deleted":
       return `${actor} deleted agent profile **${str(d.name) ?? "?"}**.`;
+    case "project.agent_profile.deployed":
+      return `${actor} deployed agent profile **${str(d.name) ?? "?"}** to the project.`;
     case "project.created":
       return `${actor} created the project.`;
     case "project.archived":
@@ -250,6 +260,32 @@ function auditText(
     }
     case "runtime.run.interrupted":
       return `${actor} interrupted an agent run — recorded per audit policy on`;
+    // P13-D-7: the admin override that bypasses the review gate. `bypassed`
+    // names the gate that was in force (or "no gate (already acceptable)").
+    case "task.acceptance.forced": {
+      const bypassed = str(d.bypassed);
+      return bypassed && !bypassed.startsWith("no gate")
+        ? `${actor} force-accepted the completion, bypassing ${bypassed} — on`
+        : `${actor} force-accepted the completion — on`;
+    }
+    // P13-D-7: the D2 emergency override — an org admin acting above (or
+    // without) their project membership. `what` is the guard's own copy.
+    case "project.org_admin.override": {
+      const what = str(d.what) ?? "act on this project";
+      const memberRole = str(d.memberRole);
+      return `${actor} used the org-admin override to ${what} (project role: ${memberRole ?? "not a member"}).`;
+    }
+    // P13-D-8: a refused attempt. Reads as a blocked action, like the merge
+    // refusal above.
+    case "project.authority.denied": {
+      const what = str(d.what) ?? "act on this project";
+      const memberRole = str(d.memberRole);
+      return `Blocked: ${actor} tried to ${what} — ${
+        memberRole
+          ? `their project role (${memberRole}) is not permitted`
+          : "not a project member"
+      }.`;
+    }
     default:
       // Whitelisted-but-untemplated (future additions): honest fallback.
       return `${actor} — ${row.action.replace(/[._]/g, " ")}.`;

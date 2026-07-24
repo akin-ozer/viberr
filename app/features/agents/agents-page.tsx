@@ -12,6 +12,7 @@ import {
   deploymentStatusKind,
   type AgentDeploymentView,
   type AgentProfileView,
+  type LibraryProfileView,
 } from "./agent-types";
 import { CAP_META, type ResCatalogGroup } from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
@@ -213,6 +214,184 @@ function DeleteConfirm({
   );
 }
 
+// ------------------------------------------------------- stage eligibility
+
+/**
+ * P13-LV-02 — eligible-stage chips that tell the truth.
+ *
+ * Three lies fixed, all live-proven on a 3-stage board:
+ *  1. `spanAll` was ignored. The Operator's header said "active across the
+ *     whole lifecycle" while every chip below it rendered struck through.
+ *  2. The counter was `profile.stages.length + " of " + boardStages.length`,
+ *     which counts stage ids the board doesn't even have — a profile carrying
+ *     stale grants read "5 of 4 stages", and the Developer showed "2 of 3"
+ *     with NO chip highlighted (its 2 ids don't exist on that board).
+ *  3. Stale/unknown grants were invisible. They are now shown as such, which
+ *     is the only on-screen clue that a profile can't be assigned anywhere.
+ *
+ * Eligibility mirrors `specialistEligibleForStage` exactly (spanAll, or no
+ * declared stages = unrestricted, or an explicit match) so the panel and the
+ * assign/run guard can never disagree.
+ */
+export function StageEligibility({
+  a,
+  stages,
+}: {
+  a: AgentProfileView;
+  stages: StageView[];
+}) {
+  const boardIds = new Set(stages.map((s) => s.id));
+  const unrestricted = a.spanAll || a.stages.length === 0;
+  const onBoard = stages.filter((s) => a.stages.includes(s.id)).length;
+  const stale = a.stages.filter((id) => !boardIds.has(id));
+  const summary = a.spanAll
+    ? "active across the whole lifecycle"
+    : a.stages.length === 0
+      ? "no stage restriction — eligible everywhere"
+      : `${onBoard} of ${stages.length} stages`;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="board" />
+        <h2>Eligible stages</h2>
+        <span
+          className="right sub"
+          style={{ fontSize: ".76rem", color: "var(--faint)" }}
+        >
+          {summary}
+        </span>
+      </div>
+      <div className="stage-chips">
+        {stages.map((s) => {
+          const elig = unrestricted || a.stages.includes(s.id);
+          return (
+            <span
+              key={s.id}
+              className={"stage-chip" + (elig ? " elig" : " off")}
+            >
+              <span
+                className="sdot"
+                style={elig ? { background: s.color } : undefined}
+              />
+              {s.name}
+            </span>
+          );
+        })}
+        {stale.map((id) => (
+          <span
+            key={id}
+            className="stage-chip off"
+            title={`This profile grants the stage “${id}”, which no longer exists on this board — the grant does nothing.`}
+          >
+            <span className="sdot" />
+            {id} · not on this board
+          </span>
+        ))}
+      </div>
+      {!unrestricted && onBoard === 0 && (
+        <div className="empty" style={{ padding: ".75rem .5rem" }}>
+          None of this profile's eligible stages exist on this board, so it
+          can't be assigned to any task here. Edit the profile's eligible stages
+          to match the board.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ library picker
+
+/**
+ * "Add from library" — deploy an org-level template into this project
+ * (owner ruling 1 / P13-AP-05). Until this existed, a profile created in
+ * Settings → Global agent profiles could never be deployed, run or selected:
+ * no code path copied a template into a project's roster, so the org editor
+ * offered a lifecycle it could not finish.
+ */
+export function LibraryPicker({
+  library,
+  projectName,
+  busy,
+  onClose,
+  onAdd,
+}: {
+  library: LibraryProfileView[];
+  projectName: string;
+  busy: boolean;
+  onClose: () => void;
+  onAdd: (profileId: string) => void;
+}) {
+  const { ref: dialogRef, close } = useDialog(onClose);
+  return (
+    <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
+      <div className="modal-head">
+        <span className="agent-glyph lg">
+          <Icon name="agents" />
+        </span>
+        <div className="mh-main">
+          <h2>Add from library</h2>
+          <div className="mh-sub">
+            Global agent profiles not yet deployed in {projectName}. Adding one
+            copies its definition and capability grants into this project.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="icon-btn modal-close"
+          onClick={close}
+          aria-label="Close"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="modal-body">
+        {library.length === 0 ? (
+          <div className="empty" style={{ padding: "1rem .5rem" }}>
+            Every global profile is already deployed here. Create more in org
+            settings → Global agent profiles.
+          </div>
+        ) : (
+          <div className="deploy-list">
+            {library.map((t) => (
+              <button
+                type="button"
+                className="deploy-row"
+                key={t.id}
+                disabled={busy}
+                onClick={() => onAdd(t.id)}
+              >
+                <span className="deploy-eng">{t.role || "Specialist"}</span>
+                <span className="deploy-task">
+                  <span className="key mono">{t.name}</span> {t.desc}
+                </span>
+                {t.backends.map((b) => (
+                  <BackendChip key={b} b={b} />
+                ))}
+                <Pill kind="neutral" sm>
+                  {t.spanAll
+                    ? "every stage"
+                    : t.stages.length + " stage" + (t.stages.length === 1 ? "" : "s")}
+                </Pill>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <span className="foot-hint">
+          The global profile stays the source; this project gets its own
+          editable copy.
+        </span>
+        <div className="foot-actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Close
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 // ------------------------------------------------------------------ detail
 
 export function ProfileDetail({
@@ -294,37 +473,7 @@ export function ProfileDetail({
 
       <p className="ag-desc">{a.desc}</p>
 
-      <div className="panel">
-        <div className="panel-head">
-          <Icon name="board" />
-          <h2>Eligible stages</h2>
-          <span
-            className="right sub"
-            style={{ fontSize: ".76rem", color: "var(--faint)" }}
-          >
-            {a.spanAll
-              ? "active across the whole lifecycle"
-              : a.stages.length + " of " + stages.length + " stages"}
-          </span>
-        </div>
-        <div className="stage-chips">
-          {stages.map((s) => {
-            const elig = a.stages.includes(s.id);
-            return (
-              <span
-                key={s.id}
-                className={"stage-chip" + (elig ? " elig" : " off")}
-              >
-                <span
-                  className="sdot"
-                  style={elig ? { background: s.color } : undefined}
-                />
-                {s.name}
-              </span>
-            );
-          })}
-        </div>
-      </div>
+      <StageEligibility a={a} stages={stages} />
 
       <div className="panel">
         <div className="panel-head">
@@ -350,8 +499,17 @@ export function ProfileDetail({
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
-            <div className="lbl">Execution backend</div>
+            <div className="lbl">
+              Execution backend
+              {a.backends.length > 1 && (
+                <span className="fhint"> · a run uses the first</span>
+              )}
+            </div>
             <div className="rt-val">
+              {/* P13-UI-52: a multi-backend profile listed both chips as if the
+                  agent could run on either at will. A run resolves ONE backend
+                  (the deployment's first), so the list is a capability, not a
+                  live choice — and the editor writes exactly one. */}
               <div className="be-list">
                 {a.backends.length ? (
                   a.backends.map((b) => <BackendChip key={b} b={b} />)
@@ -567,6 +725,7 @@ type ProfileActionResult =
 
 export function AgentsPage({
   profiles,
+  library,
   deployments,
   stages,
   projectSlug,
@@ -576,6 +735,8 @@ export function AgentsPage({
   backendAvailable,
 }: {
   profiles: AgentProfileView[];
+  /** Org templates not yet deployed here — the "Add from library" options. */
+  library?: LibraryProfileView[];
   deployments: AgentDeploymentView[];
   stages: StageView[];
   projectSlug: string;
@@ -599,12 +760,14 @@ export function AgentsPage({
   );
   const [tab, setTab] = useState<"profiles" | "live">("profiles");
   const [creating, setCreating] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const operator = profiles.find((p) => p.kind === "operator") ?? null;
   const specialists = profiles.filter((p) => p.kind !== "operator");
+  const libraryProfiles = library ?? [];
   const current = profiles.find((a) => a.id === sel) ?? profiles[0] ?? null;
 
   const counts = useMemo(() => {
@@ -650,13 +813,16 @@ export function AgentsPage({
     if (d.ok) {
       push(d.toast);
       setCreating(false);
+      setLibraryOpen(false);
       setEditing(null);
       setFormError(null);
       if (d.profileId) setSel(d.profileId);
     } else if (creating || editing) {
       setFormError(d.error);
     } else {
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so this failure
+      // rendered under a green tick.
+      push(d.error, "error");
     }
   }, [fetcher.state, fetcher.data, push, creating, editing]);
 
@@ -669,6 +835,13 @@ export function AgentsPage({
         ...(editing ? { profileId: editing.id } : {}),
         payload: JSON.stringify(payload),
       },
+      { method: "post" },
+    );
+  };
+
+  const deployFromLibrary = (profileId: string) => {
+    fetcher.submit(
+      { intent: "deploy-profile", _csrf: csrf, profileId },
       { method: "post" },
     );
   };
@@ -715,6 +888,19 @@ export function AgentsPage({
             Capability matrix
           </button>
           {canManage && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => setLibraryOpen(true)}
+            >
+              <Icon name="agents" />
+              Add from library
+              {libraryProfiles.length > 0 && (
+                <span style={{ opacity: 0.6 }}>· {libraryProfiles.length}</span>
+              )}
+            </button>
+          )}
+          {canManage && (
             <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
               <Icon name="plus" />
               New profile
@@ -730,7 +916,11 @@ export function AgentsPage({
         </div>
         <div className="ag-stat">
           <div className="n">{operators}</div>
-          <div className="l">active tasks · one operator each</div>
+          {/* P13-UI-51: the number is operator ENGAGEMENTS, which is one per
+              active task — but the label read as a task count, so a task whose
+              operator had been released showed a smaller "active tasks" number
+              than the board did. Say what is counted. */}
+          <div className="l">tasks with a live operator</div>
         </div>
         <div className="ag-stat">
           <div className="n" style={{ color: "var(--agent-dark)" }}>
@@ -787,6 +977,16 @@ export function AgentsPage({
                 New specialist profile
               </button>
             )}
+            {canManage && libraryProfiles.length > 0 && (
+              <button
+                type="button"
+                className="ag-newbtn"
+                onClick={() => setLibraryOpen(true)}
+              >
+                <Icon name="agents" />
+                Add from library · {libraryProfiles.length}
+              </button>
+            )}
           </aside>
           {current && (
             <ProfileDetail
@@ -836,6 +1036,15 @@ export function AgentsPage({
             setFormError(null);
           }}
           onSubmit={submitProfile}
+        />
+      )}
+      {libraryOpen && (
+        <LibraryPicker
+          library={libraryProfiles}
+          projectName={projectName}
+          busy={fetcher.state !== "idle"}
+          onClose={() => setLibraryOpen(false)}
+          onAdd={deployFromLibrary}
         />
       )}
       {matrixOpen && (

@@ -8,7 +8,13 @@ import {
 } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
+import {
+  listRunLines,
+  listRunsForTaskRows,
+  runIdsWithMissingSession,
+  type AgentRunRow,
+} from "~/server/runtimes/run-store.server";
+import { SESSION_MISSING_RE } from "~/server/runtimes/session-export.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -17,6 +23,7 @@ import {
 } from "./specialist-run.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
+import { extractMentions } from "~/ui/mention-spans";
 
 /**
  * Agent-mention resolution + reply-text extraction for the
@@ -36,21 +43,28 @@ import type { TaskMutationContext } from "./task-actions.server";
 
 // ------------------------------------------------------------ mention parse
 
-/** All @handles in a comment, lowercased, de-duplicated, order-preserving. */
-const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-
-function mentionHandles(text: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const match of text.matchAll(MENTION_RE)) {
-    const handle = match[1]!.toLowerCase();
-    if (!seen.has(handle)) {
-      seen.add(handle);
-      out.push(handle);
-    }
-  }
-  return out;
+/**
+ * All @handles in a comment, lowercased, de-duplicated, order-preserving.
+ *
+ * P13-LV-11: this used to be a single-token regex, so a mention of an agent
+ * whose display name contains a space ("@Docs Writer" — exactly what the
+ * composer inserts and the timeline highlights) matched NOTHING and the comment
+ * silently routed nowhere. It now uses the shared span-finder with the known
+ * mentionable names, so multi-word names resolve whole and the highlight and the
+ * routing agree.
+ */
+function mentionHandles(text: string, known: string[] = []): string[] {
+  return extractMentions(text, known);
 }
+
+/** Every string a deployed specialist can be tagged by. */
+function specialistHandles(sp: DeployedSpecialistView): string[] {
+  return [sp.name, sp.id, sp.backend];
+}
+
+/** The generic role/backend handles the resolver honours (mirrors
+ *  mention-suggestions' RESERVED and mention-notify's RESERVED_HANDLES). */
+const RESERVED_AGENT_HANDLES = ["operator", "agent", "claude", "codex"];
 
 // ------------------------------------------------------- resolved shape
 
@@ -111,21 +125,49 @@ function handleMatchesSpecialist(
  * backend alone let `@reviewer` resume the dev's most-recent claude session
  * (the dev then answered "as the dev"); this keeps each agent on its own thread.
  *
- * The profile id and engagement kind must both match; sharing a backend is not
- * enough to reuse another agent's session.
+ * The profile id, engagement kind AND backend must all match. A provider
+ * session is not portable across backends: a Claude session id means nothing to
+ * Codex and vice versa.
+ *
+ * P13-RT-12: the backend clause used to be missing while the comment at the
+ * `@agent` branch below already CLAIMED it ("Sessions never match across
+ * backends"). After an admin switched a profile's backend, an @mention resumed
+ * the DEAD backend's session with the new backend's model — `resumeRun` takes
+ * the backend from the prior run row and the model from the caller, so the run
+ * recorded e.g. `backend: claude, model: gpt-5.6-sol`, a pairing that never
+ * existed. `resolveClaudeModel` doesn't recognize it and returns undefined, so
+ * the run silently used the subscription default on the backend the admin had
+ * just moved away from (typically because it was out of quota). Filtering here
+ * makes the first post-switch mention start a FRESH run on the new backend,
+ * which is what the comment always promised.
+ *
+ * P13-D-2: runs whose provider session is PROVEN gone are skipped too. There
+ * used to be no state filter at all, so once a transcript vanished (Claude
+ * Code's ~30-day retention, a wiped `$CODEX_HOME/sessions`) the row holding
+ * that dead id stayed the newest match forever — every later @mention
+ * re-selected it, failed the same way, and the agent became permanently
+ * unreachable on that task. `resumeRun` records a `session_missing` failure on
+ * the run that owned the id, so the next mention falls through to an older live
+ * session, or to a fresh run.
  */
 function latestSessionRun(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  target: { profileId: string; isPrimary: boolean },
+  target: { profileId: string; isPrimary: boolean; backend: RealBackend },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
+  const deadSessions = runIdsWithMissingSession(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
-    if (row.agent_profile_id === target.profileId && row.kind === wantKind) {
+    if (deadSessions.has(row.id)) continue;
+    if (
+      row.agent_profile_id === target.profileId &&
+      row.kind === wantKind &&
+      row.backend === target.backend
+    ) {
       return row;
     }
   }
@@ -149,11 +191,15 @@ export function resolveMentionedAgent(
   taskKey: string,
   text: string,
 ): MentionedAgent | null {
-  const handles = mentionHandles(text);
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  // Known handles must be collected BEFORE parsing so a multi-word agent name
+  // matches whole (P13-LV-11).
+  const handles = mentionHandles(text, [
+    ...specialists.flatMap(specialistHandles),
+    ...RESERVED_AGENT_HANDLES,
+  ]);
   if (handles.length === 0) return null;
   const handleSet = new Set(handles);
-
-  const specialists = listDeployedSpecialists(projectSlug, ctx);
 
   const existing = readTaskFile({
     projectSlug,
@@ -210,6 +256,7 @@ export function resolveMentionedAgent(
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: primaryRef.profileId,
         isPrimary: true,
+        backend,
       }),
     };
   }
@@ -231,6 +278,7 @@ export function resolveMentionedAgent(
       session: latestSessionRun(db, projectSlug, taskKey, {
         profileId: matched.id,
         isPrimary,
+        backend: matched.backend,
       }),
     };
   }
@@ -254,6 +302,7 @@ export function resolveMentionedAgent(
         session: latestSessionRun(db, projectSlug, taskKey, {
           profileId: primaryRef.profileId,
           isPrimary: true,
+          backend,
         }),
       };
     }
@@ -269,13 +318,24 @@ const MAX_REPLY_CHARS = 1200;
 
 /**
  * Extract the FULL (untruncated) reply from a finished run's persisted lines:
- * prefer the LAST substantial `assistant`/`agent_message` text line, else fall
- * back to the final `result`/`turn.completed` text. Whitespace is preserved as
- * the agent wrote it. Returns null when nothing usable was produced.
+ * the LAST substantial `assistant`/`agent_message` text line. Whitespace is
+ * preserved as the agent wrote it. Returns null when the run produced no
+ * report of its own.
  *
  * The verdict classifier and the no-progress guard consume THIS (full) text —
  * a reviewer's verdict frequently lands well past 1200 chars, so classifying on
  * the truncated comment would silently drop the verdict.
+ *
+ * P13-RT-09: there used to be a fallback to the terminal `result` line, whose
+ * text is RUNTIME STATISTICS, not prose — `"success · 3 turns · 12s · $0.02"`
+ * on Claude, `"in 4.1k (cached 2.0k) · out 0.3k tokens"` on Codex
+ * (wire-format). A run that only edited files and exited therefore posted
+ * `success · 7 turns · 214s · $0.31` to the timeline as the agent's report, fed
+ * that string to the prose verdict classifier, and — because two such Codex
+ * runs can produce byte-identical text — tripped the "verbatim repeat"
+ * stuck-loop detector for the wrong reason. A run with no report now honestly
+ * has none: `postAgentReplyComment` logs it and posts nothing, and the stats
+ * stay where they belong, in the run panel.
  */
 export function extractFullReplyText(lines: LogLine[]): string | null {
   const isReplyText = (l: LogLine) =>
@@ -286,12 +346,6 @@ export function extractFullReplyText(lines: LogLine[]): string | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (isReplyText(line)) return normalizeWorkspacePaths(line.text.trim());
-  }
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    if (line.ev === "result" && line.text.trim().length > 0) {
-      return normalizeWorkspacePaths(line.text.trim());
-    }
   }
   return null;
 }
@@ -363,6 +417,17 @@ export type RunFailureKind =
   | "auth"
   | "unavailable"
   | "max_turns"
+  /** The stream produced nothing for the whole idle window — the run was HUNG,
+   *  not failed by the task. Both adapters emit it (P13-RT-11). */
+  | "idle_timeout"
+  /** P13-D-2 (FR22 / NFR17): the provider session this run tried to resume no
+   *  longer exists — Claude Code's ~30-day transcript retention, or a wiped
+   *  `$CODEX_HOME/sessions`. Its own class because it is neither a credential
+   *  problem nor a task failure: the honest recovery is a fresh run
+   *  re-anchored on task.md, which `resumeRun` performs automatically when its
+   *  pre-flight probe catches it. This class is what survives when the SDK
+   *  reports the vanished session first. */
+  | "session_missing"
   | "unknown";
 
 /**
@@ -392,16 +457,24 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  const tagged = /·(quota|auth|unavailable|max_turns|unknown)$/.exec(last.tag ?? "");
+  const tagged =
+    /·(quota|auth|unavailable|max_turns|idle_timeout|session_missing|unknown)$/.exec(
+      last.tag ?? "",
+    );
   if (tagged) return { kind: tagged[1] as RunFailureKind, text };
   const kind: RunFailureKind =
-    /is unavailable|no usable credential/i.test(text)
-      ? "unavailable"
-      : /usage limit|quota|rate limit|too many requests|429/i.test(text)
-        ? "quota"
-        : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
-          ? "auth"
-          : "unknown";
+    // P13-D-2 first: a vanished session is NOT an auth problem, and "no
+    // conversation found" would otherwise fall through to `unknown` and be
+    // narrated as "review its authentication and runtime configuration".
+    SESSION_MISSING_RE.test(text)
+      ? "session_missing"
+      : /is unavailable|no usable credential/i.test(text)
+        ? "unavailable"
+        : /usage limit|quota|rate limit|too many requests|429/i.test(text)
+          ? "quota"
+          : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
+            ? "auth"
+            : "unknown";
   return { kind, text };
 }
 

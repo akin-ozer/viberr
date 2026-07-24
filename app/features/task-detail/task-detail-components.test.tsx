@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
-import { MemoryRouter } from "react-router";
-import { DecisionPacket } from "./decision-packet";
-import { GithubTrace } from "./task-detail-page";
+import { MemoryRouter, createRoutesStub } from "react-router";
+import { ToastProvider } from "~/ui/toast";
+import { DecisionPacket, observationLabel } from "./decision-packet";
+import { GithubTrace, ScheduledActions, TaskHero } from "./task-detail-page";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -67,7 +70,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -96,7 +99,7 @@ describe("DecisionPacket", () => {
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     // F-UI1: the button no longer echoes the (often long, multi-line) option
@@ -119,6 +122,7 @@ describe("DecisionPacket", () => {
         busy={false}
         canResolve
         canResolveCompletion
+        canEditGoal
         onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -141,7 +145,7 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={onAsk} />,
     );
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
@@ -266,12 +270,15 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("all 9 types map to their node class + pill label (contracts §1.3)", () => {
+  it("all 10 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
       ["github", "github", "GitHub"],
       ["policy", "policy", "Policy violation"],
+      // P13-LV-03: neutral lifecycle notes (goal edits, divergence, scheduling)
+      // no longer borrow the coral "Policy violation" shield.
+      ["note", "note", "Note"],
       ["quality", "quality", "Quality flag"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],
@@ -289,11 +296,15 @@ describe("TimelineItem", () => {
     }
   });
 
-  it("unknown event types fall back to comment rendering (tolerant)", () => {
+  // UI-57: REWRITTEN — this test pinned the bug. The tolerant fallback reused
+  // the COMMENT meta, but the renderer takes the typed branch for anything that
+  // is not literally `comment`, so an unknown type rendered a pill labelled
+  // "commented" — a row asserting it was a comment when it was not one. The
+  // fallback now names the raw type instead.
+  it("unknown event types render a neutral pill naming the raw type", () => {
     const { container } = render(<TimelineItem ev={ev({ type: "mystery" })} />);
     expect(container.querySelector(".comment-card")).toBeNull(); // not a comment…
-    // …but gets the neutral typed pill with comment meta's dead label.
-    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("commented");
+    expect(container.querySelector(".tl-meta .pill")!.textContent).toBe("mystery");
   });
 });
 
@@ -825,3 +836,333 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(btn).toBeUndefined();
   });
 })
+
+/* ------------------------------------------------ pass-13 honesty fixes */
+
+describe("UI-36: a rejected PR must not look like an open one", () => {
+  const withPr = (state: string): TaskDetail =>
+    ({
+      ...taskFixture("u-arda", "Arda Kaya"),
+      repo: "akin-ozer/viberr",
+      branch: "vib-151",
+      commits: [],
+      changed: null,
+      pr: { number: 14, state, title: "PR" },
+    }) as unknown as TaskDetail;
+
+  it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
+    const closed = render(<GithubTrace task={withPr("closed")} />);
+    const closedPill = closed.container.querySelector(".gh-bar .pill")!;
+    // Before the fix this branch didn't exist: a rejected PR rendered as the
+    // blue `info` "PR #14", identical to a PR still under review.
+    expect(closedPill.textContent).toContain("closed");
+    expect(closedPill.className).toContain("risk");
+    cleanup();
+
+    const review = render(<GithubTrace task={withPr("review")} />);
+    const reviewPill = review.container.querySelector(".gh-bar .pill")!;
+    expect(reviewPill.textContent).toContain("PR #14");
+    expect(reviewPill.className).toContain("info");
+  });
+
+  it("keeps merged and merge-pending distinct", () => {
+    const merged = render(<GithubTrace task={withPr("merged")} />);
+    expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
+      "merged",
+    );
+    cleanup();
+    const accepted = render(<GithubTrace task={withPr("accepted")} />);
+    expect(
+      accepted.container.querySelector(".gh-bar .pill")!.textContent,
+    ).toContain("merge pending");
+  });
+});
+
+describe("LV-09: pluralization + null-ish packet observations", () => {
+  it("says 'Diff 1 file', not '1 files'", () => {
+    const task = {
+      ...taskFixture("u-arda", "Arda Kaya"),
+      repo: "akin-ozer/viberr",
+      branch: "vib-151",
+      commits: [],
+      pr: null,
+      changed: { files: 1, add: 3, del: 1 },
+    } as unknown as TaskDetail;
+    const { container } = render(<GithubTrace task={task} />);
+    const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
+      r.textContent?.startsWith("Diff"),
+    )!;
+    expect(diff.textContent).toContain("1 file ·");
+    expect(diff.textContent).not.toContain("1 files");
+  });
+
+  it("prints 'unassigned' instead of the operator's literal 'null'", () => {
+    const packet: PacketRender = {
+      ...packet142,
+      observations: [
+        { k: "OWNER", v: "null", code: false },
+        { k: "Signal", v: "", code: false },
+      ],
+    };
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const obs = container.querySelectorAll(".packet-obs .obs");
+    expect(obs[0]!.textContent).toContain("unassigned");
+    expect(obs[0]!.textContent).not.toContain("null");
+    expect(obs[1]!.textContent).toContain("—");
+  });
+});
+
+describe("UI-42/UI-44: the decision packet", () => {
+  const goalPacket: PacketRender = {
+    ...packet142,
+    options: [
+      { kind: "edit_goal", t: "A human refines the goal", d: "Rewrite it.", rec: true },
+      { kind: "request_edit", t: "Request one edit", d: "Ask the developer.", rec: false },
+    ],
+  };
+
+  it("blocks edit_goal for a resolver who cannot edit the goal", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    expect(first.getAttribute("aria-disabled")).toBe("true");
+    expect(first.textContent).toContain("your role can't edit the goal");
+    // The Confirm button refuses too — before the fix an owner-contributor
+    // recorded the decision, got "type the new goal", and found no editor.
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    expect(confirm.disabled).toBe(true);
+  });
+
+  it("offers edit_goal normally to a maintainer", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    expect(first.getAttribute("aria-disabled")).toBeNull();
+    expect(
+      container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("UI-44: uses a roving tabindex so Tab does not walk every option", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = [
+      ...container.querySelectorAll<HTMLButtonElement>(".options .opt"),
+    ];
+    const tabbable = opts.filter((o) => o.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("UI-41: the release dialog only offers members who can OWN a task", () => {
+  it("filters out viewers, which setOwner would reject", () => {
+    const members: TaskMemberView[] = [
+      ...membersFixture,
+      { userId: "u-viewer", role: "viewer", user: { name: "Viewer Person", initials: "VP", tone: "" } },
+    ];
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-arda", "Arda Kaya")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={members}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onOwner={() => {}}
+      />,
+    );
+    const chips = [...container.querySelectorAll(".handoff-chip")];
+    expect(chips.map((c) => c.textContent)).not.toContain(
+      expect.stringContaining("Viewer"),
+    );
+    expect(chips.some((c) => c.textContent?.includes("Viewer"))).toBe(false);
+  });
+
+  it("disables the chips while an owner mutation is in flight", () => {
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-arda", "Arda Kaya")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={membersFixture}
+        busy
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onOwner={() => {}}
+      />,
+    );
+    const chips = [
+      ...container.querySelectorAll<HTMLButtonElement>(".handoff-chip"),
+    ];
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.every((c) => c.disabled)).toBe(true);
+  });
+});
+
+/* ------------- packet observation key humanising (P13) ------------- */
+
+describe("observationLabel", () => {
+  it("turns the operator's machine-ish keys into readable ones", () => {
+    // Live packet rendered "PROMPT_AGENT ERROR" at a human (the row uppercases).
+    expect(observationLabel("prompt_agent error")).toBe("prompt agent error");
+    expect(observationLabel("stage")).toBe("stage");
+  });
+});
+
+/* ------------- panel-head / CTA / toast-kind regressions (pass 13) ------------- */
+
+/** The Scheduled re-runs panel and the goal editor both need a data router
+ *  (`useFetcher`) and the toast context, so they render inside a route stub. */
+function renderWithRouter(
+  ui: ReactNode,
+  action: () => unknown = () => ({ ok: true }),
+) {
+  const Stub = createRoutesStub([
+    {
+      path: "/t",
+      Component: () => <ToastProvider>{ui}</ToastProvider>,
+      action: async () => action(),
+    },
+  ]);
+  return render(<Stub initialEntries={["/t"]} />);
+}
+
+function heroTask(patch: Record<string, unknown> = {}): TaskDetail {
+  return {
+    key: "VIB-151",
+    title: "Compress long-running task timelines",
+    goal: "Bound the timeline payload and add a Show-older affordance.",
+    filePath: "projects/viberr-core/tasks/VIB-151.md",
+    displayReadiness: "ready",
+    validation: "pass",
+    stages: [],
+    ...patch,
+  } as unknown as TaskDetail;
+}
+
+function schedule(patch: Record<string, unknown> = {}): TaskSchedule {
+  return {
+    id: "sch-1",
+    action: "operator-run",
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+    backend: "claude",
+    autonomy: "supervised",
+    note: "",
+    createdBy: "u-arda",
+    createdByLabel: "Arda Kaya",
+    createdAt: new Date().toISOString(),
+    status: "pending",
+    firedAt: null,
+    claimedAt: null,
+    retries: 0,
+    ...patch,
+  } as unknown as TaskSchedule;
+}
+
+describe("ScheduledActions panel head (P13-D-38)", () => {
+  it("renders the icon as a SIBLING of the <h2>, not nested inside it", () => {
+    // `.panel-head` is a flex row with `gap: .6rem` and `.panel-head h2 {flex:1}`.
+    // Nesting collapsed the gap to a JSX space and baseline-aligned the SVG —
+    // this was the only one of ~48 panel heads that did it.
+    const { container } = renderWithRouter(
+      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+    );
+    const head = container.querySelector(
+      '[data-testid="scheduled-actions"] .panel-head',
+    )!;
+    expect(head.querySelector("h2")!.querySelector("svg")).toBeNull();
+    expect(head.querySelector(":scope > svg.ico")).toBeTruthy();
+    expect(head.querySelector("h2")!.textContent!.trim()).toBe("Scheduled re-runs");
+  });
+});
+
+describe("undefined CTA / utility classes (P13-D-19)", () => {
+  it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
+    const { container } = renderWithRouter(
+      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+    );
+    const buttons = [...container.querySelectorAll("button")];
+    // `btn-primary` / `btn-ghost` exist in no stylesheet: both CTAs fell back
+    // to the plain grey `.btn`.
+    for (const b of buttons) {
+      expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
+    }
+    const submit = buttons.find((b) => b.textContent?.includes("Schedule operator re-run"))!;
+    expect(submit.classList.contains("primary")).toBe(true);
+    const cancel = buttons.find((b) => b.textContent?.trim() === "Cancel")!;
+    expect(cancel.classList.contains("ghost")).toBe(true);
+  });
+
+  it("makes Save goal a primary CTA, visually distinct from Cancel", () => {
+    const { container, getByText } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+    );
+    fireEvent.click(getByText("Edit"));
+    const buttons = [...container.querySelectorAll(".goal-edit-actions button")];
+    const save = buttons.find((b) => b.textContent === "Save goal")!;
+    const cancel = buttons.find((b) => b.textContent === "Cancel")!;
+    expect(save.className).not.toMatch(/\bbtn-primary\b/);
+    expect(save.classList.contains("primary")).toBe(true);
+    // The defect: both resolved to identical rules and rendered the same.
+    expect(save.className).not.toBe(cancel.className);
+  });
+});
+
+describe("failure toasts use the error kind (P13-D-10)", () => {
+  it("renders the alert glyph, not the success tick, when an action fails", async () => {
+    const { container, getByText } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+      () => ({ ok: false, error: "Nope." }),
+    );
+    fireEvent.click(getByText("Edit"));
+    const form = container.querySelector("form.goal-edit") as HTMLFormElement;
+    fireEvent.submit(form);
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    const toast = document.querySelector(".toast")!;
+    expect(toast.textContent).toContain("Nope.");
+    // `alert` is the triangle path; `check` is the tick. `push` defaults to
+    // "success", so this failure used to render under a green tick.
+    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+  });
+});

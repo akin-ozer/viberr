@@ -14,7 +14,6 @@ import {
   seedInitialAdmin,
 } from "~/server/auth/seed-admin.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
-import { serializeAgentProfile } from "~/server/files/agent-profile-file.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
   agentProfileFilePath,
@@ -24,6 +23,8 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import { builtinAgentProfileTemplate } from "./default-assets.server";
+import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 /**
  * PRODUCT seed — a clean sheet (owner ruling, 2026-07-24): no demo/mock board
@@ -52,7 +53,10 @@ import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
  * runtime credential homes survive.
  */
 
-export const SEED_DEFAULT_PASSWORD = "viberr-dev-2828";
+// Re-exported so every existing importer keeps working; the constant itself
+// lives in an import-free module so non-Vite consumers (playwright.config.ts)
+// can read it without pulling in the `?raw` asset imports.
+export { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 export interface SeedOptions {
   dataRoot: string;
@@ -166,13 +170,18 @@ export async function runSeed(
   }
 
   // 2. Org-level agent profile templates (the built-in catalog, layer 1).
+  //    P13-AP-03: emitted through the SAME builder the boot backfill uses, so
+  //    the template body is the SHIPPED PERSONA (assets/<id>.definition.md) and
+  //    not the 2-sentence catalog blurb. Seed used to write the blurb, and the
+  //    backfill skips files that already exist — so on the documented install
+  //    order (seed → dev) every built-in agent ran on a blurb system prompt,
+  //    permanently. `kbGrants: true` because `npm run seed` also seeds the
+  //    backing knowledge bases (seedOrgResources); the bare boot backfill
+  //    doesn't, which is the one field the two writers differ on.
   for (const profile of SEED_AGENT_PROFILES) {
     writeFileAtomic(
       agentProfileFilePath(profile.frontmatter.id, dataRoot),
-      serializeAgentProfile({
-        frontmatter: profile.frontmatter,
-        description: profile.description,
-      }),
+      builtinAgentProfileTemplate(profile, { kbGrants: true }),
     );
   }
 

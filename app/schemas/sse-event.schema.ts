@@ -2,7 +2,7 @@ import { z } from "zod";
 import { READINESS_VALUES } from "./task-file.schema";
 
 /**
- * SSE wire contract (CONVENTIONS "SSE" rules): event names are lowercase
+ * SSE wire contract (docs/architecture/decisions.md "SSE" rules): event names are lowercase
  * dot-separated facts; every payload is `{ type, entityId, occurredAt,
  * data }` with compact facts + references only — never fat objects.
  * The server publisher zod-parses every event against this schema before

@@ -12,6 +12,10 @@
  * these fixed values everywhere — identical behavior locally and on CI, no
  * dependence on anyone's real secrets.
  */
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 process.env.VIBERR_SESSION_SECRET ??=
   "viberr-test-session-secret-0123456789abcdef";
 // AES-256-GCM key: base64 of exactly 32 bytes, as the schema enforces.
@@ -23,7 +27,7 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
  * test must NEVER be able to construct a real Claude/Codex adapter from a
  * developer's `.env` or a CI host's environment — the risk is a paid provider
  * call from `npm test`. Blank every variable `hasCredential()` inspects
- * (runtime-registry.server.ts) plus the CLI-auth flags and `CODEX_HOME`, so
+ * (runtime-registry.server.ts) plus the CLI-auth flags, so
  * `isBackendAvailable` reports false under NODE_ENV=test. `""` reads as ABSENT
  * everywhere it matters: `hasCredential` tests `!!env.X` / `isTruthy(env.X)`
  * (which wants "1"/"true"/"yes"), and `parseEnv` drops empty strings before
@@ -45,7 +49,37 @@ for (const key of [
   "CODEX_API_KEY",
   "OPENAI_API_KEY",
   "VIBERR_CODEX_USE_CLI_AUTH",
-  "CODEX_HOME",
 ] as const) {
   process.env[key] = "";
 }
+
+/**
+ * Pin the provider transcript stores to an empty temp directory (P13-D-2).
+ *
+ * The continuity probe added this pass asks the filesystem whether a stored
+ * session id still has a transcript before resuming it. `CLAUDE_CONFIG_DIR`
+ * was never set here, so `resolveClaudeConfigDir()` fell back to the AMBIENT
+ * data root: on a developer machine `./data/runtimes/claude-home/projects`
+ * exists and the suite took the continuity path, while on CI it does not and
+ * the suite took the ordinary resume path. Same code, two behaviours, decided
+ * by whether someone had run the app locally — and it produced a real test that
+ * passed on CI and failed on a laptop.
+ *
+ * An empty real directory (not a missing one) is the deterministic answer: the
+ * store EXISTS and holds no transcripts, so every probe returns `missing`
+ * rather than the `unknown` a nonexistent store would report. A test that wants
+ * a live session materializes one; a test that wants `unknown` points these at
+ * a path that does not exist.
+ *
+ * `CODEX_HOME` is therefore no longer blanked with the credential keys above.
+ * It was in that list because `codexCliAuthUsable()` requires
+ * `$CODEX_HOME/auth.json` to exist — and this directory has no `auth.json`, so
+ * the hermeticity invariant now holds by construction rather than by erasing a
+ * path the continuity probe needs. `VIBERR_CODEX_USE_CLI_AUTH` is blank anyway,
+ * so the flag half of that gate is closed independently.
+ */
+const transcriptRoot = mkdtempSync(path.join(tmpdir(), "viberr-test-transcripts-"));
+process.env.CLAUDE_CONFIG_DIR = path.join(transcriptRoot, "claude-home");
+process.env.CODEX_HOME = path.join(transcriptRoot, "codex-home");
+mkdirSync(path.join(process.env.CLAUDE_CONFIG_DIR, "projects"), { recursive: true });
+mkdirSync(path.join(process.env.CODEX_HOME, "sessions"), { recursive: true });

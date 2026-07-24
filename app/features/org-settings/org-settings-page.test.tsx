@@ -45,13 +45,18 @@ const CONNECTIONS: ConnectionRecord[] = [
   {
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
-    validationState: "unvalidated", lastValidatedAt: null,
+    validationState: "unvalidated", scopes: [], lastValidatedAt: null,
     createdAt: "2026-07-01T09:00:00.000Z",
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
     masked: "····42af", def: false, repos: 12, expiresAt: "2026-07-20T00:00:00.000Z",
-    daysLeft: 15, validationState: "valid", lastValidatedAt: "2026-07-01T09:00:00.000Z",
+    daysLeft: 15, validationState: "valid",
+    scopes: [
+      { id: "repo", ok: true, source: "header" },
+      { id: "workflow", ok: true, source: "header" },
+      { id: "pull_request:write", ok: true, source: "header" },
+    ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
     createdAt: "2026-07-01T09:05:00.000Z",
   },
 ];
@@ -287,10 +292,11 @@ const SKILLS: SkillView[] = [
 ];
 const GAGENTS: GagentView[] = [
   { id: "developer", name: "Developer", backend: "codex",
-    summary: "Primary implementation specialist.", stages: ["ready", "impl"],
+    summary: "Primary implementation specialist.",
+    persona: "", stages: ["ready", "impl"],
     skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 4 },
   { id: "spare", name: "Spare", backend: "claude", summary: "Unused.",
-    stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
+    persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
 const STAGES = [
   { id: "triage", name: "Triage", color: "#a5a8b5" },
@@ -314,7 +320,7 @@ describe("ResourcesPanel", () => {
     expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
-      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 profiles/),
+      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 template/),
     ).toBeTruthy();
     expect(getByText(/Codex · Ready · In Progress · 2 context resources · used in 4 projects/)).toBeTruthy();
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
@@ -357,10 +363,19 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Edit Developer"));
     expect(getByText("Edit agent profile")).toBeTruthy();
-    expect(getByText("Done is human-only, always")).toBeTruthy();
+    // P13-D-9: "always" was an over-promise — a project's operator can close a
+    // task under the auto preset. No AGENT profile ever can, which is the
+    // guarantee this org-scoped editor is actually in a position to make.
+    expect(getByText("Done is closed by a human, never by an agent")).toBeTruthy();
     const chips = [...document.querySelectorAll(".pick-chip")];
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
-    expect(getByText("used in 4 projects — changes apply on next run")).toBeTruthy();
+    // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org
+    // edit does not silently reach an already-adopted project on its next run.
+    expect(
+      getByText(
+        "adopted by 4 projects — each keeps its own copy; re-adopt to pick up this edit",
+      ),
+    ).toBeTruthy();
     // Three ctx groups over the org resources; the selected skill chip is on.
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;
@@ -377,5 +392,31 @@ describe("ResourcesPanel", () => {
     expect(
       getByText(/This is the real folder on disk — files added outside Viberr/),
     ).toBeTruthy();
+  });
+});
+
+/* --------------------- PAT scope evidence (P13-UI-01) --------------------- */
+
+describe("ConnectionsPanel — scope evidence", () => {
+  it("shows a check only for OBSERVED scopes and marks assumed ones", () => {
+    const assumed: ConnectionRecord = {
+      ...CONNECTIONS[1]!,
+      id: "cx_fine",
+      owner: "fine-grained",
+      scopes: [
+        { id: "repo", ok: true, source: "assumed" },
+        { id: "workflow", ok: true, source: "assumed" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+    };
+    const { container } = renderPanel(
+      <ConnectionsPanel connections={[assumed]} />,
+    );
+    const chips = [...container.querySelectorAll(".conn-row .scope-chip")];
+    // The validator never probed anything for a fine-grained PAT, so a ✓ here
+    // would claim a verification that did not happen.
+    expect(chips.every((c) => c.className.includes("assumed"))).toBe(true);
+    expect(chips.length).toBe(3);
+    expect(container.querySelectorAll(".conn-row .scope-chip .ico").length).toBe(0);
   });
 });

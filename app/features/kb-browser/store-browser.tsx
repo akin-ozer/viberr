@@ -87,6 +87,7 @@ function BrowserToolbar({
   onUploadFiles,
   onUploadFolder,
   onNewFolder,
+  onNewDoc,
 }: {
   gh: GhImportState;
   dispatchGh: (action: GhImportAction) => void;
@@ -95,6 +96,7 @@ function BrowserToolbar({
   onUploadFiles: () => void;
   onUploadFolder: () => void;
   onNewFolder: () => void;
+  onNewDoc: () => void;
 }) {
   return (
     <>
@@ -114,6 +116,13 @@ function BrowserToolbar({
         >
           <Icon name="github" />
           Add from GitHub
+        </button>
+        {/* P13-LV-06 (owner ruling 3): a knowledge base used to be fillable
+            only by upload/import, so writing three facts by hand meant leaving
+            the product — while skills had a full in-app editor. */}
+        <button type="button" className="btn sm" onClick={onNewDoc}>
+          <Icon name="file" />
+          New document
         </button>
         <button type="button" className="btn ghost sm" onClick={onNewFolder}>
           <FolderIco />
@@ -248,8 +257,13 @@ function StoreTree({
             onDismissNew();
           }
         }}
-        onBlur={(e) => {
-          if (newIn) onCreateFolder(path, e.target.value);
+        onBlur={() => {
+          // P13-UI-23: committing on BLUR created a folder from a half-typed
+          // name whenever focus moved (clicking another row, the toolbar, or
+          // just tabbing away) — an accidental, real filesystem mutation with
+          // no way to take it back except deleting it. Blur now dismisses;
+          // Enter commits.
+          onDismissNew();
         }}
       />
     </div>
@@ -451,8 +465,11 @@ function useStoreOps(
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<string[]>([]);
+  /** Files in the in-flight upload (P13-UI-08) — 0 when idle. */
+  const [uploading, setUploading] = useState(0);
 
   const importing = ghFetcher.state !== "idle";
+  const uploadBusy = uploading > 0 && opsFetcher.state !== "idle";
 
   // ---- action feedback (toasts ride the server response).
   const handledOps = useRef<unknown>(null);
@@ -466,11 +483,14 @@ function useStoreOps(
       captureToast?: string;
       error?: string;
     };
+    setUploading(0);
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.captureToast) push(d.captureToast);
     } else if (d.error) {
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so this failure
+      // rendered under a green tick.
+      push(d.error, "error");
     }
   }, [opsFetcher.state, opsFetcher.data, push]);
 
@@ -508,6 +528,9 @@ function useStoreOps(
       action,
       encType: "multipart/form-data",
     });
+    // P13-UI-08: an upload had no busy state at all, so a large drop looked
+    // like nothing happened until the toast eventually arrived (or didn't).
+    setUploading(entries.length);
     expand(path);
     for (const e of entries) {
       const top = e.relPath.split("/")[0];
@@ -566,6 +589,8 @@ function useStoreOps(
     gh,
     dispatchGh,
     importing,
+    uploadBusy,
+    uploading,
     ghFetcher,
     fileRef,
     dirRef,
@@ -603,6 +628,8 @@ export function StoreBrowser({
       ),
   );
   const [newIn, setNewIn] = useState<string[] | null>(null);
+  /** The in-app document editor (P13-LV-06): `null` = closed. */
+  const [doc, setDoc] = useState<{ name: string; body: string } | null>(null);
   const [confirm, setConfirm] = useState<{
     path: string[];
     node: StoreNode;
@@ -716,7 +743,50 @@ export function StoreBrowser({
             onUploadFiles={() => ops.startUpload([])}
             onUploadFolder={() => ops.startDirUpload([])}
             onNewFolder={() => setNewIn([])}
+            onNewDoc={() => setDoc({ name: "", body: "" })}
           />
+
+          {doc && (
+            <div className="fm-doc">
+              <input
+                type="text"
+                className="mono"
+                value={doc.name}
+                placeholder="file-name.md"
+                aria-label="Document file name"
+                onChange={(e) => setDoc({ ...doc, name: e.target.value })}
+              />
+              <textarea
+                className="ta mono"
+                rows={10}
+                value={doc.body}
+                placeholder={"# Title\n\nWhat your agents must know."}
+                aria-label="Document contents"
+                onChange={(e) => setDoc({ ...doc, body: e.target.value })}
+              />
+              <div className="fm-doc-acts">
+                <button type="button" className="btn ghost sm" onClick={() => setDoc(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn sm primary"
+                  disabled={!doc.name.trim()}
+                  onClick={() => {
+                    ops.submitFields({
+                      intent: "store-write-doc",
+                      path: JSON.stringify([]),
+                      name: doc.name.trim(),
+                      body: doc.body,
+                    });
+                    setDoc(null);
+                  }}
+                >
+                  Save document
+                </button>
+              </div>
+            </div>
+          )}
 
           <StoreTree
             nodes={nodes}
@@ -733,6 +803,14 @@ export function StoreBrowser({
             onDelete={(path, node) => setConfirm({ path, node })}
             onUploadEntries={ops.submitUpload}
           />
+          {ops.uploadBusy && (
+            <div className="def-note" aria-live="polite">
+              <Icon name="refresh" />
+              <span>
+                Uploading {ops.uploading} file{ops.uploading === 1 ? "" : "s"}…
+              </span>
+            </div>
+          )}
           <div className="def-note">
             <Icon name="file" />
             <span>

@@ -8,6 +8,7 @@ import {
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
+import { getPatValidationRateLimiter } from "~/server/auth/rate-limit.server";
 import { createGithubClient } from "~/server/github/github-client.server";
 import {
   createPat,
@@ -61,6 +62,15 @@ export interface ConnectionRecord {
   /** Whole days until expiry (may be negative); null when no expiry. */
   daysLeft: number | null;
   validationState: ConnectionValidationState;
+  /**
+   * Per-scope evidence (P13-UI-01). A fine-grained PAT publishes no
+   * `x-oauth-scopes` header, so the validator records `{ok:true,
+   * source:"assumed"}` WITHOUT probing anything — and the panel painted a ✓ on
+   * every scope anyway, next to copy promising "if any scope is missing the
+   * token is refused". The first honest signal was a failed agent delivery.
+   * `source` was already persisted and ignored; it now reaches the UI.
+   */
+  scopes: { id: string; ok: boolean; source: string; note?: string }[];
   lastValidatedAt: string | null;
   createdAt: string;
 }
@@ -103,6 +113,12 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
     expiresAt,
     daysLeft,
     validationState: validationState(parsePatValidation(row.validation_json)),
+    scopes: (parsePatValidation(row.validation_json)?.scopes ?? []).map((sc) => ({
+      id: sc.id,
+      ok: sc.ok,
+      source: sc.source,
+      ...(sc.note ? { note: sc.note } : {}),
+    })),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
   };
@@ -184,6 +200,21 @@ interface ValidatedToken {
 }
 
 /**
+ * P13-D-33: `architecture.md` asks for a targeted limit on PAT validation and
+ * there was none. Both save paths below call GitHub with a token the CALLER
+ * typed in, so the connection form is an unmetered outbound-probe surface (and
+ * even honest retries spend the org's GitHub rate-limit budget). One token per
+ * attempt, keyed on the actor. Returns null when allowed, or the typed refusal
+ * message — same `validation_failed` shape the callers already render, so no
+ * new UI branch is needed.
+ */
+function patValidationThrottle(actor: AuditActor): string | null {
+  const key = actor.userId ?? actor.label;
+  if (getPatValidationRateLimiter().tryConsume(key)) return null;
+  return "Too many token validations — wait a few minutes and try again. Nothing was saved.";
+}
+
+/**
  * Full pre-save gate: scope validation + owner existence/repo count.
  * Returns a typed failure message; nothing is persisted here.
  */
@@ -258,6 +289,9 @@ export async function createConnection(
     return { status: "duplicate", message: "That connection already exists." };
   }
 
+  const throttled = patValidationThrottle(actor);
+  if (throttled) return { status: "validation_failed", message: throttled };
+
   const gate = await validateConnectionToken(owner, input.token, options);
   if (!gate.ok) return { status: "validation_failed", message: gate.message };
   const { validation, repos } = gate.result;
@@ -308,6 +342,9 @@ export async function replaceConnectionToken(
   if (!existing) {
     return { status: "not_found", message: "That connection no longer exists." };
   }
+
+  const throttled = patValidationThrottle(actor);
+  if (throttled) return { status: "validation_failed", message: throttled };
 
   const gate = await validateConnectionToken(
     existing.owner,

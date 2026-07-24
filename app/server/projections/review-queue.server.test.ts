@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LIGHTWEIGHT_TEMPLATE } from "~/shared/workflow/templates";
+import { CUSTOM_3_STAGE_BOARD } from "../../../test-support/custom-board";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -158,9 +158,11 @@ describe("getReviewQueue", () => {
     expect(queue).toEqual({ ready: [], working: [], total: 0 });
   });
 
-  // WI-1: on a Lightweight board (todo/doing/done) the review role resolves to
-  // `doing` (the stage with an edge into the terminal). A literal-"review"
+  // WI-1: on a CUSTOM 3-stage board (todo/doing/done) the review role resolves
+  // to `doing` (the stage with an edge into the terminal). A literal-"review"
   // filter left this queue permanently empty while the rail badge counted it.
+  // (The board used to come from the shipped "Lightweight" preset, deleted in
+  // P13-AP-04; custom boards are still supported, so the coverage stays.)
   it("resolves the review stage from workflow roles, not the literal id 'review'", () => {
     const store = setupTestStore(ctx);
     writeProject(store.dataRoot, {
@@ -170,8 +172,8 @@ describe("getReviewQueue", () => {
       defaultBranch: "main",
       taskPrefix: "LP",
       nextTaskNumber: 1,
-      stages: LIGHTWEIGHT_TEMPLATE.stages,
-      workflow: LIGHTWEIGHT_TEMPLATE.workflow,
+      stages: CUSTOM_3_STAGE_BOARD.stages,
+      workflow: CUSTOM_3_STAGE_BOARD.workflow,
       members: [{ userId: store.users.arda.id, role: "admin" }],
       agents: [],
       credentialPolicy: null,

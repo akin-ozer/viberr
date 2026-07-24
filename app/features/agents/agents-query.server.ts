@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentDeployment,
@@ -6,7 +6,10 @@ import type {
   CapabilityMode,
 } from "~/schemas/project-file.schema";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
-import { agentProfileFilePath } from "~/server/files/file-store-root.server";
+import {
+  agentProfileFilePath,
+  agentProfilesDir,
+} from "~/server/files/file-store-root.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
   isKnownModel,
@@ -18,7 +21,7 @@ import {
   capabilityById,
   coerceSpecialistCapabilityMode,
 } from "~/shared/capabilities";
-import type { AgentProfileView } from "./agent-types";
+import type { AgentProfileView, LibraryProfileView } from "./agent-types";
 
 /**
  * Roster assembly for the Agents/Policy surfaces (two-layer agent model,
@@ -163,6 +166,57 @@ function readTemplate(
     desc: fm.desc,
     description: parsed.description,
   };
+}
+
+/** Scannable one-liner for the library picker: the first paragraph, clamped.
+ * A template with no `desc` would otherwise dump its whole ~2,500-char persona
+ * body into a list row (the same defect as the org card subtitle, AP-09). */
+function scannable(text: string, max = 240): string {
+  const para = text.trim().split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim() ?? "";
+  return para.length > max ? para.slice(0, max - 1).trimEnd() + "…" : para;
+}
+
+/**
+ * The org-level specialist TEMPLATES this project has NOT deployed — what the
+ * project Agents page offers under "Add from library".
+ *
+ * P13-AP-05 (owner ruling 1, 2026-07-24): before this, NOTHING ever copied an
+ * org template into a project's `agents:` list. A profile created in org
+ * settings could never be deployed, run, or selected — `used` stayed 0 forever
+ * and the create toast pointed at a project-policy control that did not exist.
+ * The org layer is a real template LIBRARY now: an admin explicitly picks a
+ * template and it is copied into the project (deployAgentProfileFromLibrary).
+ */
+export function listLibraryProfiles(
+  db: DatabaseSync,
+  projectSlug: string,
+  ctx: { dataRoot?: string } = {},
+): LibraryProfileView[] {
+  const project = getProject(db, projectSlug);
+  if (!project) return [];
+  const deployed = new Set(project.agentPolicy.map((d) => d.profileId));
+  const dir = agentProfilesDir(ctx.dataRoot);
+  if (!existsSync(dir)) return [];
+  const out: LibraryProfileView[] = [];
+  for (const entry of readdirSync(dir).sort()) {
+    if (!entry.endsWith(".md")) continue;
+    const id = entry.slice(0, -3);
+    if (deployed.has(id)) continue;
+    const template = readTemplate(id, ctx.dataRoot);
+    // The operator is a system profile — one per project, never library-added.
+    if (!template || template.kind !== "specialist") continue;
+    out.push({
+      id,
+      name: template.name,
+      role: template.role,
+      desc: scannable(template.desc || template.description),
+      backends: template.backends,
+      stages: template.stages,
+      spanAll: template.spanAll,
+      resources: template.resources,
+    });
+  }
+  return out;
 }
 
 /** Effective profile for ONE deployment entry (exported for actions/tests). */

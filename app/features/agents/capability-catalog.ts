@@ -1,4 +1,5 @@
 import {
+  defaultGrantsFor,
   UNIFIED_CAP_CATALOG,
   type CapabilityKind,
 } from "~/shared/capabilities";
@@ -69,6 +70,28 @@ export const CAP_MODAL_DEFAULTS: Readonly<Record<string, CapMode>> =
       (e) => e.kinds.includes("agent") && e.group !== null,
     ).map((e) => [e.id, e.defaultMode]),
   );
+
+/**
+ * P13-AP-06 — every agent capability, EXPLICITLY WITHHELD.
+ *
+ * The grant polarity is "deny only on an explicit `human`/`off`", so an
+ * UNSPECIFIED capability is GRANTED: a deployment carrying `capabilities: []`
+ * gets Edit/Write/`git commit` and canBranch/canCommitPush/canOpenPr all true —
+ * full repo-write power that nobody chose and no UI shows. Creation paths fix
+ * that by persisting `defaultGrantsFor("agent")`; this is the RUN-time
+ * counterpart for a deployment that STILL carries no grants (a hand-edited or
+ * imported `project.md`): nobody granted it anything, so it gets nothing — the
+ * same safe-by-default posture `resolveUndeployedDisallowedTools` takes.
+ *
+ * Derived from the same catalog list as the defaults so the two can't drift;
+ * only the modes differ (always-human ids stay `human`, the rest become `off`).
+ */
+export function withheldAgentGrants(): { capabilityId: string; mode: CapMode }[] {
+  return defaultGrantsFor("agent").map((g) => ({
+    capabilityId: g.capabilityId,
+    mode: (g.mode === "human" ? "human" : "off") as CapMode,
+  }));
+}
 
 /** The OPERATOR editor catalog — derived from the same unified source. */
 export const OPERATOR_CAP_CATALOG: readonly ModalCapGroup[] =

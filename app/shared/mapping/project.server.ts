@@ -9,7 +9,7 @@ import type {
 
 /**
  * Centralized snake_case → camelCase mapping for the `projects` +
- * `project_members` projection tables (CONVENTIONS "Data & naming").
+ * `project_members` projection tables (docs/architecture/decisions.md "Data & naming").
  */
 
 export interface ProjectRow {

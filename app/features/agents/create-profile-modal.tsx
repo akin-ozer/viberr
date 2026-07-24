@@ -124,13 +124,30 @@ function seedCaps(
   return caps;
 }
 
+/**
+ * P13-AP-07 — say what saving actually DOES to a library-sourced profile.
+ *
+ * `updateAgentProfile` writes a COMPLETE definition snapshot onto the project's
+ * deployment (name, role, backend, model, stages, desc, persona, resources),
+ * and every one of those fields wins over the org template from then on. So the
+ * first edit here permanently detaches this project's copy: a later org-level
+ * rename, stage change, resource change or persona fix never reaches it. The
+ * org modal meanwhile promises "used in N projects — changes apply on next
+ * run". The snapshot model is deliberate (owner ruling: a project owns its
+ * copy); the CLAIM was the lie, so the editor now states the fork up front.
+ */
 function ModalHead({
   editing,
   initialName,
+  forksTemplate,
+  projectName,
   onClose,
 }: {
   editing: boolean;
   initialName: string | undefined;
+  /** Editing a profile that still derives from an org template. */
+  forksTemplate: boolean;
+  projectName: string;
   onClose: () => void;
 }) {
   return (
@@ -141,9 +158,11 @@ function ModalHead({
       <div className="mh-main">
         <h2>{editing ? "Edit " + initialName : "New specialist profile"}</h2>
         <div className="mh-sub">
-          {editing
-            ? "Update this profile — changes apply to future assignments."
-            : "A reusable agent the operator can assign to tasks."}
+          {!editing
+            ? "A reusable agent the operator can assign to tasks."
+            : forksTemplate
+              ? `Saving forks this profile for ${projectName}: it keeps its own copy and stops tracking later changes to the global profile.`
+              : "Update this project's copy — changes apply to future assignments."}
         </div>
       </div>
       <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Close">
@@ -785,7 +804,18 @@ export function CreateProfileModal({
   );
   // The live store catalog (buildResourceCatalog) drives the picker; an empty
   // store means an empty picker — never a mock fallback.
-  const resCatalog: readonly ResCatalogGroup[] = resourceCatalog ?? [];
+  //
+  // P13-KM-09/UI-28: the loader ships the OPERATOR catalog (a superset that
+  // includes the reserved in-process `viberr` toolkit) so editing the operator
+  // no longer paints its real grant as "no longer in the store — click to
+  // remove". A specialist can never mount that server, so it is filtered out
+  // here instead of being missing from the data.
+  const resCatalog: readonly ResCatalogGroup[] = (resourceCatalog ?? []).map(
+    (group) =>
+      group.key === "mcps" && !isOperator
+        ? { ...group, items: group.items.filter((i) => i.id !== "viberr") }
+        : group,
+  );
   const [openRes, setOpenRes] = useState<Record<string, boolean>>(() =>
     resCatalog[0] ? { [resCatalog[0].group]: true } : {},
   );
@@ -856,11 +886,17 @@ export function CreateProfileModal({
     });
   };
 
+  // AP-07: a template-sourced profile FORKS on save (the deployment stores a
+  // full definition snapshot that wins over the org template from then on) —
+  // the confirm button says so instead of promising an inheritance that stops.
+  const forksTemplate = editing && initial.source === "template";
   const hint = error
     ? error
     : valid
       ? editing
-        ? "Ready to save changes."
+        ? forksTemplate
+          ? `Ready to save — this forks ${initial.name} for ${projectName}.`
+          : "Ready to save changes."
         : `Ready to add to ${projectName}.`
       : "Name, role, one execution backend, and at least one stage are required.";
 
@@ -872,7 +908,13 @@ export function CreateProfileModal({
       aria-label={editing ? "Edit profile" : "New specialist profile"}
       ref={dialogRef}
     >
-      <ModalHead editing={editing} initialName={initial?.name} onClose={close} />
+      <ModalHead
+        editing={editing}
+        initialName={initial?.name}
+        forksTemplate={forksTemplate}
+        projectName={projectName}
+        onClose={close}
+      />
 
       <div className="modal-body">
         <IdentityFields

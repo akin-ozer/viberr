@@ -11,6 +11,11 @@ import { renderToPipeableStream } from "react-dom/server";
 
 import { bootServer } from "./server/boot.server";
 import { logger } from "./server/logging/logger.server";
+import {
+  correlationFor,
+  currentCorrelation,
+  runWithRequestContext,
+} from "./server/logging/request-context.server";
 
 // One-time startup: validate env (fail fast) + open db and run migrations.
 await bootServer();
@@ -29,12 +34,43 @@ export const streamTimeout = 5_000;
 export const handleError: HandleErrorFunction = (error, { request }) => {
   if (request.signal.aborted) return;
   if (isRouteErrorResponse(error) && error.status === 404) return;
-  logger.error("request handler error", {
+  // P13-D-30: this had `request` in scope and logged neither the URL nor an id,
+  // so a 500 in the log could not be tied to the request that caused it. When a
+  // correlation is already bound (root middleware, or the render below) the
+  // logger merges it automatically; otherwise seed one from the request so the
+  // record is never anonymous.
+  const bound = currentCorrelation();
+  const log = bound ? logger : logger.child(correlationFor(request));
+  log.error("request handler error", {
     err: error instanceof Error ? error : new Error(String(error)),
   });
 };
 
 export default function handleRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  routerContext: EntryContext,
+  loadContext: RouterContextProvider,
+) {
+  // P13-D-30: bind the request correlation for the document render, so the
+  // streaming-render logs below (and anything they reach) carry the same
+  // `requestId` as the rest of the request. Re-uses the id when the root
+  // middleware already bound one; mints one when it did not, so this entry
+  // point is never uncorrelated on its own.
+  const correlation = currentCorrelation() ?? correlationFor(request);
+  return runWithRequestContext(correlation, () =>
+    renderDocument(
+      request,
+      responseStatusCode,
+      responseHeaders,
+      routerContext,
+      loadContext,
+    ),
+  );
+}
+
+function renderDocument(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,

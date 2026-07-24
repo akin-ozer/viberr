@@ -1,11 +1,18 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  runBoundaryLine,
   type LogLine,
+  type RunLogWindow,
   type RunState,
   type RunView,
 } from "~/features/runtime/runtime-types";
 import { findUserById } from "~/server/auth/user-store.server";
-import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "./run-store.server";
+import {
+  listRunLinesTail,
+  listRunsForTaskRows,
+  runLineStats,
+  type AgentRunRow,
+} from "./run-store.server";
 import { transcriptExists } from "./session-export.server";
 
 /**
@@ -28,7 +35,44 @@ const WHO_NAME: Record<string, string> = {
   codex: "Codex",
 };
 
-const ISO_RE = /^\d{4}-\d{2}-\d{2}T/;
+// ------------------------------------------------- bounded log window (D-11)
+
+/**
+ * P13-D-11 / NFR5 ("Timeline rendering for long-lived tasks should remain
+ * usable without requiring the client to load the full raw execution history at
+ * once"): the loader ships the NEWEST slice of each agent group's console, not
+ * all of it. Two budgets, whichever binds first:
+ *
+ *   • 400 lines — the console renders ~25 rows, so 400 is ~16 screens of
+ *     scrollback: comfortably past what anyone scrolls before the first
+ *     backward page arrives, while bounding a chatty run that would otherwise
+ *     grow without limit.
+ *   • 384 KB of `raw_json + display_json` — the real complaint. A measured
+ *     pass-13 task carried 420 lines ≈ 928 KB (~2.2 KB/line, dominated by tool
+ *     output in the raw envelope) and re-shipped ALL of it on every SSE
+ *     revalidation. A line budget alone cannot bound that, because line cost
+ *     varies by two orders of magnitude; a byte budget alone would ship 40k
+ *     tiny lines. Both, and the payload is bounded either way.
+ *
+ * This PAGINATES, it does not truncate: UI-53 deliberately widened the console
+ * to the agent's whole history on the task, and `logWindow` carries the cursor
+ * that walks backwards through it via `/resources/run-log?before=`.
+ */
+export const RUN_LOG_WINDOW_LINES = 400;
+export const RUN_LOG_WINDOW_BYTES = 384 * 1024;
+
+/** Backward-paging cursor + honesty markers for one agent group's console.
+ *
+ * P13-D-11: declared ONCE, in the client module, and re-exported here. The
+ * console pages in older blocks itself and must reproduce the run boundary
+ * byte-identically to the ones this projection ships — two definitions of the
+ * same shape and two copies of the same literal is precisely how that drifts. */
+export type { RunLogWindow };
+
+/** A projected run + its bounded-window metadata (P13-D-11). */
+export interface ProjectedRunView extends RunView {
+  logWindow: RunLogWindow;
+}
 
 /**
  * Signatures that mean "the BACKEND wasn't available" (quota, rate limit,
@@ -63,9 +107,10 @@ function isBackendUnavailableError(raw: string[]): boolean {
  */
 function finishedLabel(finishedAt: string | null): string | null {
   if (!finishedAt) return null;
-  if (!ISO_RE.test(finishedAt)) return finishedAt; // mock label, verbatim
-  const d = new Date(finishedAt);
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // P13-UI-57: this formatted with `getHours()` on the SERVER, so the console
+  // showed the server's clock, not the reader's. The ISO travels instead and
+  // the panel formats it in the browser (same rule as every other timestamp).
+  return finishedAt;
 }
 
 /**
@@ -94,7 +139,8 @@ function projectRow(
   row: AgentRunRow,
   lines: LogLine[],
   raw: string[],
-): RunView {
+  logWindow: RunLogWindow,
+): ProjectedRunView {
   const op = row.kind === "operator";
   const backend = row.backend;
   // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
@@ -166,7 +212,11 @@ function projectRow(
     tokens: row.input_tokens + row.output_tokens,
     lines,
     raw,
-    lineCount: lines.length,
+    // P13-D-11: the count of lines that EXIST, not of the ones this payload
+    // carries (`lines.length`) — the console's "N events" footer must not shrink
+    // just because the loader now ships a window.
+    lineCount: logWindow.totalLines,
+    logWindow,
   };
 }
 
@@ -215,7 +265,7 @@ export function projectRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-): RunView[] {
+): ProjectedRunView[] {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
 
   // Group rows by agent, preserving first-seen (created_at ASC) group order.
@@ -233,13 +283,107 @@ export function projectRunsForTask(
   }
 
   return order.map((key) => {
-    const representative = pickRepresentative(groups.get(key)!);
-    const stored = listRunLines(db, representative.id);
+    const bucket = groups.get(key)!;
+    const representative = pickRepresentative(bucket);
+    const window = windowForGroup(db, bucket, representative);
     return projectRow(
       db,
       representative,
-      stored.map((l) => l.display),
-      stored.map((l) => l.raw),
+      window.display,
+      window.raw,
+      window.meta,
     );
   });
+}
+
+/**
+ * The newest slice of one agent group's console, within the D-11 budgets.
+ *
+ * P13-UI-53: the console showed ONLY the representative run's lines, so every
+ * earlier run of a resumed agent silently disappeared — a thread that had
+ * answered three times looked like it had answered once. It still shows the
+ * agent's whole history on the task; the difference (P13-D-11) is that the
+ * loader ships the newest page of it and hands back a cursor for the rest.
+ *
+ * Fills newest-run-first so the tail — the part anyone is actually reading —
+ * always survives the budget, then re-assembles chronologically with the same
+ * explicit `run N of M` boundary UI-53 introduced.
+ */
+function windowForGroup(
+  db: DatabaseSync,
+  bucket: AgentRunRow[],
+  representative: AgentRunRow,
+): { display: LogLine[]; raw: string[]; meta: RunLogWindow } {
+  const stats = bucket.map((row) => runLineStats(db, row.id));
+  const totalLines = stats.reduce((sum, s) => sum + s.count, 0);
+
+  let lineBudget = RUN_LOG_WINDOW_LINES;
+  let byteBudget = RUN_LOG_WINDOW_BYTES;
+  /** Per bucket index (only for runs that contributed), oldest-first later. */
+  const included = new Map<number, { seq: number; display: LogLine; raw: string }[]>();
+
+  for (let i = bucket.length - 1; i >= 0; i--) {
+    if (lineBudget <= 0 || byteBudget <= 0) break;
+    const tail = listRunLinesTail(db, bucket[i]!.id, lineBudget);
+    // A run with NO lines yet (the freshly-queued newest resume is the common
+    // case) contributes nothing but must not end the walk — otherwise the
+    // console would go blank the instant an agent is re-engaged.
+    if (tail.length === 0) continue;
+    // Drop from the OLDEST end of this run's tail until the byte budget fits —
+    // one 300 KB tool output must not evict the whole rest of the window. While
+    // nothing is in the window yet, keep at least the newest line even if it
+    // busts the budget on its own: an empty console is a worse answer than an
+    // oversized one, and the next run of the walk sees an exhausted budget.
+    const minKeep = included.size === 0 ? 1 : 0;
+    let start = 0;
+    let bytes = tail.reduce((sum, l) => sum + l.bytes, 0);
+    while (start < tail.length - minKeep && bytes > byteBudget) {
+      bytes -= tail[start]!.bytes;
+      start += 1;
+    }
+    // Non-empty tail, nothing kept → the byte budget is spent; older runs are
+    // outside the window by definition.
+    const kept = tail.slice(start);
+    if (kept.length === 0) break;
+    lineBudget -= kept.length;
+    byteBudget -= bytes;
+    included.set(
+      i,
+      kept.map((l) => ({ seq: l.seq, display: l.display, raw: l.raw })),
+    );
+  }
+
+  const display: LogLine[] = [];
+  const raw: string[] = [];
+  let shipped = 0;
+  let oldest: RunLogWindow["oldest"] = null;
+  let first = true;
+  for (let i = 0; i < bucket.length; i++) {
+    const lines = included.get(i);
+    if (!lines || lines.length === 0) continue;
+    if (!oldest) oldest = { runId: bucket[i]!.id, seq: lines[0]!.seq };
+    if (!first) {
+      display.push(runBoundaryLine(i + 1, bucket.length));
+      raw.push("");
+    }
+    first = false;
+    for (const line of lines) {
+      display.push(line.display);
+      raw.push(line.raw);
+      shipped += 1;
+    }
+  }
+
+  const repIndex = bucket.indexOf(representative);
+  return {
+    display,
+    raw,
+    meta: {
+      totalLines,
+      hasMore: shipped < totalLines,
+      runIds: bucket.map((row) => row.id),
+      oldest: shipped < totalLines ? oldest : null,
+      headSeq: repIndex >= 0 ? stats[repIndex]!.maxSeq : -1,
+    },
+  };
 }

@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -27,6 +30,7 @@ import {
   removeReviewer,
   resolveDeployedSpecialist,
   startAgentRun,
+  buildSpecialistPersona,
 } from "./specialist-run.server";
 
 /**
@@ -138,6 +142,51 @@ describe("resolveDeployedSpecialist", () => {
       model: "sonnet",
       effort: "xhigh",
     });
+  });
+});
+
+describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
+  // The test fixture's `dev` deployment carries `capabilities: []` (a
+  // hand-written project.md, or an import). The tool-policy polarity denies
+  // only on an explicit `human`/`off`, so an empty list used to resolve as
+  // "everything unspecified" = Edit/Write/`git commit` granted and
+  // canBranch/canCommitPush/canOpenPr all true — full repo-write power nobody
+  // chose, invisible in every UI. It now resolves to an explicit withheld set.
+  it("resolveDeployedSpecialist materializes explicit withheld grants", async () => {
+    const resolved = resolveDeployedSpecialist(
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "dev",
+    );
+    expect(resolved.capabilities.length).toBeGreaterThan(0);
+    const modeOf = (id: string) =>
+      resolved.capabilities.find((c) => c.capabilityId === id)?.mode;
+    expect(modeOf("execute-code-or-write-repo")).toBe("off");
+    expect(modeOf("commit-push-branch")).toBe("off");
+    // Structural always-human ids stay `human`, not `off`.
+    expect(modeOf("merge-pull-request")).toBe("human");
+
+    const { resolveDeliveryPermissions, resolveSpecialistDisallowedTools } =
+      await import("./specialist-tool-policy");
+    expect(resolveDeliveryPermissions(resolved.capabilities)).toEqual({
+      canBranch: false,
+      canCommitPush: false,
+      canOpenPr: false,
+    });
+    expect(resolveSpecialistDisallowedTools(resolved.capabilities)).toContain(
+      "Write",
+    );
+  });
+
+  it("the operator's candidate view reports the same withheld capabilities", () => {
+    const [dev] = listDeployedSpecialists(store.slug, {
+      dataRoot: store.dataRoot,
+    });
+    // What the operator is told must match what the run may actually do —
+    // an ungranted deployment used to advertise `delivery: false` while the
+    // tool layer let it write anyway.
+    expect(dev!.capabilities.delivery).toBe(false);
+    expect(dev!.capabilities.verdict).toBe(false);
   });
 });
 
@@ -758,5 +807,61 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
     expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
     expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+  });
+});
+
+/* ----------------------- KB + MCP in the persona (P13-KM-04 / KM-10) */
+
+describe("buildSpecialistPersona — attached resources", () => {
+  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-persona-"));
+
+  it("injects a granted KB's docs and marks attached resources trusted", () => {
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "release-facts", "facts.md"),
+      "# Facts\n\nSENTINEL-KB-1",
+    );
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["release-facts"],
+      dataRoot,
+    });
+    // P13-KM-10: specialist KB injection had ZERO tests, which is how the
+    // display-name/dir mismatch (KM-01) and the rename orphan (KM-07) survived.
+    expect(persona).toContain("SENTINEL-KB-1");
+    expect(persona).toContain("release-facts (knowledge base)");
+    expect(persona).toContain("Attached resources (trusted");
+  });
+
+  it("a KB that resolves to nothing injects nothing (and no empty section)", () => {
+    const dataRoot = tempRoot();
+    const persona = buildSpecialistPersona({
+      profileId: "docs-writer",
+      skills: [],
+      kb: ["was-renamed-away"],
+      dataRoot,
+    });
+    expect(persona).not.toContain("was-renamed-away (knowledge base)");
+    expect(persona).not.toContain("Attached resources (trusted");
+  });
+
+  it("states that MCP tools cannot widen authority when servers are mounted", () => {
+    const dataRoot = tempRoot();
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp"],
+      dataRoot,
+    });
+    // P13-KM-04: the tool layer has no `mcp__*` rules, so a read-only reviewer
+    // holding a GitHub MCP could merge a PR past the always-human invariant.
+    expect(persona).toContain("MCP tools are governed too");
+    expect(persona).toContain("github-mcp");
+    expect(persona).toContain("never use an MCP tool to merge a pull request");
+
+    const none = buildSpecialistPersona({ profileId: "scout", skills: [], dataRoot });
+    expect(none).not.toContain("MCP tools are governed too");
   });
 });

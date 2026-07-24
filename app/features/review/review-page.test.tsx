@@ -37,6 +37,7 @@ function renderQueue(
   ready: ReviewRowView[],
   working: ReviewRowView[],
   total = ready.length + working.length,
+  acceptance?: { operatorCanAccept: boolean; operatorName: string },
 ) {
   const Stub = createRoutesStub([
     {
@@ -47,6 +48,7 @@ function renderQueue(
           ready={ready}
           working={working}
           total={total}
+          acceptance={acceptance}
         />
       ),
     },
@@ -66,9 +68,14 @@ describe("ReviewQueuePage", () => {
         "2 tasks at the review boundary · 1 waiting on your acceptance",
       ),
     ).toBeTruthy();
-    // Policy chip with its explanatory tooltip (the only pre-click hint).
+    // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
+    // — visually identical to the non-interactive `hero-file` spans elsewhere,
+    // so nothing announced it navigates; it is a real button now. And the
+    // "Review → Done" wording is no longer hardcoded: the page renders the
+    // project's RESOLVED stage names (the default prop keeps this fixture's).
     const chip = getByTitle("Review → Done is locked to humans — see Policy");
-    expect(chip.classList.contains("hero-file")).toBe(true);
+    expect(chip.tagName).toBe("BUTTON");
+    expect(chip.classList.contains("btn")).toBe(true);
     expect(chip.textContent).toContain("Review → Done · human only");
     // Panel heads + "X of Y" count pair.
     expect(getByText("Waiting on your acceptance")).toBeTruthy();
@@ -146,5 +153,54 @@ describe("ReviewQueuePage", () => {
     expect(
       getByText("1 task at the review boundary · 1 waiting on your acceptance"),
     ).toBeTruthy();
+  });
+});
+
+describe("P13-D-9: the queue stops promising human-only Done unconditionally", () => {
+  it("keeps the absolute claim when no operator holds the direct grant", () => {
+    const { container, getByTitle } = renderQueue([rowHuman], [], 1, {
+      operatorCanAccept: false,
+      operatorName: "Operator",
+    });
+    expect(
+      getByTitle("Review → Done is locked to humans — see Policy").textContent,
+    ).toContain("Review → Done · human only");
+    expect(container.querySelector(".pol-note")!.textContent).toContain(
+      "always a human action, always in the audit log",
+    );
+  });
+
+  it("qualifies the chip and the footer for a direct-authority operator", () => {
+    // Owner ruling Q1: a full-autonomy operator with an explicit
+    // `completion-for-acceptance: direct` grant moves tasks to Done itself
+    // (operator-actions.server.ts:1632). The create modal and the Policy note
+    // were updated to disclose it; the Review queue — where a maintainer forms
+    // the acceptance belief — shipped "always a human action" regardless.
+    const { container, getByText } = renderQueue([rowHuman], [], 1, {
+      operatorCanAccept: true,
+      operatorName: "Atlas",
+    });
+    const chip = getByText("Review → Done · human or operator");
+    expect(chip).toBeTruthy();
+    expect(chip.closest("button")!.getAttribute("title")).toContain(
+      "Atlas runs at full autonomy",
+    );
+
+    const note = container.querySelector(".pol-note")!.textContent!;
+    expect(note).not.toContain("always a human action");
+    expect(note).toContain("Atlas");
+    expect(note).toContain("full autonomy");
+    expect(note).toContain("Completion for human acceptance");
+    expect(note).toContain("Direct");
+    // It stays an exception, not a licence.
+    expect(note).toContain("one exception");
+    expect(note).toContain("always in the audit log");
+  });
+
+  it("defaults to the strict boundary when the caller passes no acceptance data", () => {
+    const { container } = renderQueue([rowHuman], []);
+    expect(container.querySelector(".pol-note")!.textContent).toContain(
+      "always a human action",
+    );
   });
 });

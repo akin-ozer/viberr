@@ -15,6 +15,7 @@ import { Markdown } from "~/ui/markdown";
 import { findMentionSpans } from "~/ui/mention-spans";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -53,7 +54,9 @@ const TL_FILTERS = [
  * height in sync when the draft ends on a newline.
  */
 function highlightDraft(text: string, names: string[]): ReactNode {
-  const spans = findMentionSpans(text, names);
+  // Only KNOWN handles light up, so the chip appearing IS the confirmation that
+  // the tag will route (P13-LV-12).
+  const spans = findMentionSpans(text, names).filter((s) => s.known);
   const parts: ReactNode[] = [];
   let last = 0;
   let key = 0;
@@ -70,11 +73,16 @@ function highlightDraft(text: string, names: string[]): ReactNode {
   return <Fragment>{parts}</Fragment>;
 }
 
-/** All mentionable display strings, for whole-name highlight matching. */
+/**
+ * Every string that ACTUALLY routes, for whole-name highlight matching: agent
+ * display names AND their profile ids/handles, user display names and their
+ * email-local handles, and the reserved role handles. The highlight is only
+ * honest if this list is exactly what the server resolves (P13-LV-12).
+ */
 function mentionNamesOf(m: Mentionables): string[] {
   return [
-    ...m.agents.map((a) => a.name),
-    ...m.users.map((u) => u.name),
+    ...m.agents.flatMap((a) => [a.name, a.handle]),
+    ...m.users.flatMap((u) => [u.name, u.handle]),
     ...m.reserved.map((r) => r.handle),
   ];
 }
@@ -259,6 +267,9 @@ export function Timeline({
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
+  // P13-D-39: the send handler below accepts either modifier, so the hint has to
+  // name the one the viewer's keyboard actually has (UI-55's rule).
+  const sendHint = useModifierHint("↵");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const hlRef = useRef<HTMLDivElement>(null);
   const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
@@ -345,11 +356,13 @@ export function Timeline({
         <Icon name="activity" />
         <h2>Timeline</h2>
         <span className="right tl-filter">
+          {/* UI-57: the filter tabs carried selection by CSS class only. */}
           {TL_FILTERS.map((x) => (
             <button
               type="button"
               key={x.id}
               className={f === x.id ? "on" : ""}
+              aria-pressed={f === x.id}
               onClick={() => setF(x.id)}
             >
               {x.label}
@@ -430,8 +443,9 @@ export function Timeline({
                 color: "var(--placeholder)",
               }}
               className="mono"
+              suppressHydrationWarning
             >
-              ⌘↵ to send
+              {sendHint} to send
             </span>
             <button
               type="button"
@@ -448,9 +462,17 @@ export function Timeline({
       </div>
 
       <div className="timeline" style={{ marginTop: "1.1rem" }}>
+        {/* UI-40: `items` is the FILTERED view of an already-bounded slice, so
+            "this task hasn't started" was printed for a task with plenty of
+            history whenever the active tab matched nothing — with "Show older
+            events · N more" rendered directly beneath it. */}
         {items.length === 0 ? (
           <div className="empty">
-            No activity yet — this task hasn't started its operator loop.
+            {events.length === 0
+              ? "No activity yet — this task hasn't started its operator loop."
+              : f === "comment"
+                ? "No comments in the loaded history — switch to All, or load older events."
+                : "No governance events in the loaded history — switch to All, or load older events."}
           </div>
         ) : (
           items.map((ev) => (

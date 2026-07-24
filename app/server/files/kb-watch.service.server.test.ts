@@ -40,7 +40,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     makeKbDir(dataRoot, "notes", ["a.md"]);
-    const { kb } = saveKnowledgeBase(
+    const { kb } = await saveKnowledgeBase(
       db,
       { name: "Notes", refresh: "on change" },
       { userId: "u", label: "u" },
@@ -61,7 +61,7 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     makeKbDir(dataRoot, "pinned", ["a.md"]);
-    saveKnowledgeBase(
+    await saveKnowledgeBase(
       db,
       { name: "Pinned", refresh: "manual" },
       { userId: "u", label: "u" },
@@ -95,7 +95,7 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     kbFile(dataRoot, "notes", "a.md");
-    saveKnowledgeBase(
+    await saveKnowledgeBase(
       db,
       { name: "Notes", refresh: "on change" },
       { userId: "u", label: "u" },
@@ -114,17 +114,41 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
 
     // Add a doc; the watcher debounces (250ms) then re-indexes. Poll until the
     // sentinel is overwritten (or time out) so the assertion never races.
+    //
+    // The budget is deliberately large, and that is the point. This is the ONLY
+    // test in the suite whose subject is a real OS filesystem event: the path is
+    // FSEvents delivery + a 250 ms debounce + a re-index, and the test controls
+    // none of it. macOS coalesces FSEvents under load, and a full parallel
+    // `npm test` has ~186 files churning temp directories — delivery was
+    // measured past 10 s there while the same test passes in well under a
+    // second alone. Two separate work streams hit this flake independently
+    // before it was bounded properly.
+    //
+    // A tight bound does not make the assertion stronger; it just converts an
+    // uncontrolled OS latency into a red suite, which trains people to re-run
+    // instead of read. The loop exits the instant the value changes, so a
+    // healthy run pays nothing for the headroom.
     kbFile(dataRoot, "notes", "b.md", "more");
+    const deadline = Date.now() + 30_000;
     let after = { last_indexed_at: OLD as string | null };
-    for (let i = 0; i < 40 && after.last_indexed_at === OLD; i++) {
+    while (after.last_indexed_at === OLD && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
       after = db
         .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
         .get() as { last_indexed_at: string | null };
     }
-    expect(after.last_indexed_at).not.toBe(OLD);
+
+    // Distinguish "the OS never delivered the event" from "the wiring is
+    // broken" — otherwise a real regression and a slow machine produce the
+    // identical failure message and the next person guesses.
+    expect(
+      after.last_indexed_at,
+      isKbWatcherAlive()
+        ? "watcher alive but no re-index within 30s — FSEvents never delivered, or the debounce/re-index path is broken"
+        : "the watcher handle died before the change landed",
+    ).not.toBe(OLD);
     expect(after.last_indexed_at).not.toBeNull();
-  });
+  }, 45_000);
 
   it("is a HMR-safe singleton — a second start on the same root reuses the watcher", () => {
     const db = ctx.makeDb();

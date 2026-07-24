@@ -78,11 +78,19 @@ export function agentProfilesDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "agents", "profiles");
 }
 
+/**
+ * One agent-profile template file. P13-AP-11: the profile id arrives from form
+ * fields (`profileId`) and from `readdir`, and this used to `path.join` it
+ * unchecked while the sibling skill/KB helpers refuse traversal — a crafted
+ * `../../projects/x/project` id could read or WRITE outside the store. The id
+ * is a plain file-name segment, so it goes through the same guard.
+ */
 export function agentProfileFilePath(
   profileId: string,
   dataRoot?: string,
 ): string {
-  return path.join(agentProfilesDir(dataRoot), `${profileId}.md`);
+  const dir = agentProfilesDir(dataRoot);
+  return `${resolveStoreSegment(dir, profileId)}.md`;
 }
 
 /**

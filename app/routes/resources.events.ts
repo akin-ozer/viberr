@@ -28,8 +28,16 @@ function memberProjectSlugs(userId: string): string[] {
  *
  * Auth: session cookie, same as every loader — but an unauthenticated
  * EventSource can't render a login page, so this returns plain 401 JSON
- * instead of requireUser's redirect (the client backs off and retries;
- * after a re-login the next retry succeeds).
+ * instead of requireUser's redirect.
+ *
+ * UI-03 correction: this comment used to claim "the client backs off and
+ * retries; after a re-login the next retry succeeds". That is NOT what the
+ * browser does. Per the HTML spec an EventSource that receives a non-200
+ * response **fails the connection** and does not reconnect — so the 401 above
+ * (and the 400/403 scope rejections below) permanently kill the stream. The
+ * client therefore owns recovery: `useLiveUpdates` observes `onerror`, surfaces
+ * a "live updates paused" state and re-opens a FRESH EventSource on a bounded
+ * backoff (a new connection does succeed after a re-login).
  *
  * Streaming: the loader returns a `Response` wrapping a never-ending web
  * `ReadableStream` — the one shape that streams through BOTH the Vite dev

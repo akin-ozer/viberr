@@ -130,7 +130,6 @@ export function baseTaskFrontmatter(
     workRevision: null,
     verdicts: [],
     branch: null,
-    repo: null,
     pr: null,
     github: null,
     createdAt: "2026-07-01T09:00:00.000Z",

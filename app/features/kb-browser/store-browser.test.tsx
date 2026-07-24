@@ -28,7 +28,14 @@ const TREE: StoreNode[] = [
   { type: "file", name: "overview.md", sizeBytes: 9100, mtime: new Date().toISOString() },
 ];
 
-function renderBrowser(overrides: { tree?: StoreNode[]; onClose?: () => void } = {}) {
+function renderBrowser(
+  overrides: {
+    tree?: StoreNode[];
+    onClose?: () => void;
+    /** Make the org-settings action fail, to exercise the failure toast. */
+    actionResult?: Record<string, unknown>;
+  } = {},
+) {
   lastForm = null;
   const Stub = createRoutesStub([
     {
@@ -51,7 +58,7 @@ function renderBrowser(overrides: { tree?: StoreNode[]; onClose?: () => void } =
         for (const [k, v] of fd.entries()) {
           if (typeof v === "string") lastForm[k] = v;
         }
-        return { ok: true, toast: "stub done" };
+        return overrides.actionResult ?? { ok: true, toast: "stub done" };
       },
     },
   ]);
@@ -155,5 +162,26 @@ describe("StoreBrowser", () => {
         url: "https://github.com/owner/repo/tree/main/docs",
       }),
     );
+  });
+});
+
+/**
+ * P13-D-10: `useToast().push(text, kind?)` defaults to `"success"`, so this
+ * hand-rolled handler rendered a failed store operation under the green tick.
+ */
+describe("StoreBrowser failure toast kind (P13-D-10)", () => {
+  it("renders the alert glyph, not the success tick, when the action fails", async () => {
+    const { getByText, getByLabelText } = renderBrowser({
+      actionResult: { ok: false, error: "Folder already exists." },
+    });
+    fireEvent.click(getByText("New folder"));
+    const input = getByLabelText("New folder name") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "uploads" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    const toast = document.querySelector(".toast")!;
+    expect(toast.textContent).toContain("Folder already exists.");
+    // `alert` is the triangle path; `check` is the tick.
+    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
   });
 });

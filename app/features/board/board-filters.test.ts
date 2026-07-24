@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardEmptyCopy,
   matchesBoardFilter,
   matchesSearch,
   shortBranch,
@@ -81,5 +82,33 @@ describe("shortBranch", () => {
     expect(shortBranch("main")).toBe("main");
     expect(shortBranch("1234567890123456")).toBe("1234567890123456");
     expect(shortBranch("vib-142-attach-workspace")).toBe("vib-142-attach-…");
+  });
+});
+
+describe("boardEmptyCopy (P13-D-34)", () => {
+  it("keeps the bare copy when the column really is empty", () => {
+    expect(
+      boardEmptyCopy({ total: 0, filterLabel: "Needs attention", query: "x" }),
+    ).toBe("No tasks");
+  });
+
+  it("names the filter, the search, or both", () => {
+    expect(
+      boardEmptyCopy({ total: 4, filterLabel: "Waiting on me", query: "" }),
+    ).toBe("All 4 tasks here are hidden by the “Waiting on me” filter.");
+    expect(boardEmptyCopy({ total: 1, filterLabel: null, query: "auth" })).toBe(
+      "The 1 task here is hidden by the search “auth”.",
+    );
+    expect(
+      boardEmptyCopy({ total: 2, filterLabel: "Agent working", query: "auth" }),
+    ).toBe(
+      "All 2 tasks here are hidden by the “Agent working” filter and the search “auth”.",
+    );
+  });
+
+  it("treats a whitespace-only query as no search", () => {
+    expect(boardEmptyCopy({ total: 3, filterLabel: null, query: "   " })).toBe(
+      "No tasks",
+    );
   });
 });

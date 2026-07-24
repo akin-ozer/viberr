@@ -30,7 +30,8 @@ const FULL: ParsedTaskFile = {
     workRevision: null,
     verdicts: [],
     branch: "vib-142-attach-workspace",
-    repo: null,
+    // P13-D-5: `repo` was here — the task-level override is deleted, so it is no
+    // longer a known frontmatter field (a leftover line round-trips as unknown).
     pr: { number: 318, state: "review", title: "Attach execution workspace" },
     github: {
       commits: [{ sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" }],

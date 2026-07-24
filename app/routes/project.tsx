@@ -10,10 +10,12 @@ import {
   listNotifications,
 } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
+import { getReviewQueue } from "~/server/projections/review-queue.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { Icon } from "~/ui/icon";
+import { SkipLink } from "~/ui/skip-link";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
 import { Topbar } from "~/features/shell/topbar";
@@ -48,11 +50,22 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // fresh task objects instead of mutating the ones getBoard returned — a
   // future read-model cache in board-query.server must never let one viewer's
   // annotation leak into another's board (RU #11).
-  const myDecisions = new Set(
-    decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
+  // UI-48: the board's "waiting on me" and the review queue's "Waiting on your
+  // acceptance" answered the same question differently — `decisionsRequiring`
+  // only scans tasks that carry a packet or a recommendation, while the review
+  // queue deliberately does NOT require a decision object (a review-stage task
+  // waiting on a human can have no packet). A maintainer therefore saw VIB-142
+  // under "Waiting on your acceptance" while the board's chip excluded it.
+  // Union the two predicates here so both surfaces read one answer; the review
+  // queue's `ready` list is already viewer-scoped by acceptance authority.
+  const myDecisions = new Set([
+    ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
       (d) => d.taskKey,
     ),
-  );
+    ...getReviewQueue(db, params.slug, { viewerUserId: user.id }).ready.map(
+      (r) => r.key,
+    ),
+  ]);
   const annotate = (t: TaskSummary): TaskSummary => ({
     ...t,
     waitingOnMe: myDecisions.has(t.key),
@@ -110,7 +123,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // toast), and the open task adds its own `task:` scope (task-detail
   // brief) — any matching event revalidates layout + child loaders.
   const slug = board.project.slug;
-  useLiveUpdates(
+  // UI-03: `paused` is true once the stream has failed (an expired session 401s
+  // and an EventSource never retries a failed connection) — the topbar says so.
+  const live = useLiveUpdates(
     openTask
       ? [sseScopes.project(slug), sseScopes.task(slug, openTask.key), sseScopes.user()]
       : [sseScopes.project(slug), sseScopes.user()],
@@ -118,6 +133,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="app">
+      {/* UI-12: bypass block — the rail + topbar sit ahead of the content on
+          every workspace navigation and there was no way past them. */}
+      <SkipLink />
       <Rail
         projectSlug={board.project.slug}
         projectName={board.project.name}
@@ -127,7 +145,10 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
         reviewCount={loaderData.reviewCount}
         violations={loaderData.violations}
       />
-      <div className="main">
+      {/* UI-12: a real `main` landmark. The eight workspace routes rendered
+          this as a bare <div>, so screen-reader users had no landmark to jump
+          to (Home and org settings already used <main>). */}
+      <main className="main" id="main-content" tabIndex={-1}>
         <Topbar
           projectSlug={board.project.slug}
           projectName={board.project.name}
@@ -143,6 +164,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           theme={rootData?.theme ?? "system"}
           notifications={loaderData.notifications}
           unread={loaderData.unread}
+          livePaused={live.paused}
+          onReconnect={live.reconnect}
         />
         {board.project.archived ? (
           <div className="archived-banner" role="status">
@@ -155,7 +178,7 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           </div>
         ) : null}
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 }

@@ -25,9 +25,20 @@ import {
  *   email — no user is created, so the create hooks never fire; `linkOAuth`
  *   only stamps the provider.
  * - Otherwise a NEW better-auth user is about to be created. It is allowed only
- *   when the email domain is in `google_domain_allowlist` (provisioned with the
- *   mapped role) or a GitHub-handle placeholder row exists (claimed). Anything
- *   else is rejected.
+ *   when the sign-in is GOOGLE and the email domain is in
+ *   `google_domain_allowlist` (provisioned with the mapped role), or a
+ *   GitHub-handle placeholder row exists (claimed). Anything else is rejected.
+ *
+ * P13-D-22: the domain rule is GOOGLE-ONLY, and the provider is now threaded in
+ * rather than guessed. The table is named `google_domain_allowlist`, the README
+ * says domain allowlisting is "for Google", and the in-app label reads "any
+ * Google account with this domain" next to a "G" glyph — but the predicate took
+ * no provider, ran the domain check first and unconditionally, and the better-
+ * auth hook forwarded only `{id, email, name, githubHandle}`. Adding `@acme.com`
+ * therefore also admitted any GITHUB account whose profile email happened to
+ * end in `@acme.com` — an identity the org's Workspace admin cannot offboard.
+ * Before the better-auth migration the two providers had strictly separate
+ * paths; commit 745e19d collapsed them into one predicate.
  *
  * NOT LIVE-VERIFIED: this instance has no GitHub/Google OAuth credentials, so
  * the provider handshake can't be exercised here. The pure whitelist/provision
@@ -35,11 +46,18 @@ import {
  * itself is better-auth's own (well-tested) code.
  */
 
+/** The social providers the app configures. `null` = the provider could not be
+ *  read off the better-auth callback — treated as NOT Google (fail closed). */
+export type OAuthProvider = "google" | "github";
+
 export interface OAuthUser {
   id: string;
   email: string;
   name: string;
   githubHandle?: string | null;
+  /** Which provider's callback is creating this user. Required: guessing it
+   *  from the presence of `githubHandle` is what produced D-22. */
+  provider: OAuthProvider | null;
 }
 
 function normalizeHandle(handle: string | null | undefined): string | null {
@@ -53,8 +71,14 @@ export function isOAuthWhitelisted(
 ): boolean {
   const email = normalizeEmail(user.email);
   const handle = normalizeHandle(user.githubHandle);
-  if (findDomainAllowlistRole(db, email)) return true;
-  if (handle) {
+  // P13-D-22: domain admission is GOOGLE-ONLY — a Google Workspace domain is a
+  // directory the org actually controls, which is the whole basis for trusting
+  // it. A GitHub profile email is self-asserted and unmanageable, so it never
+  // opens the domain door, whatever it ends in.
+  if (user.provider === "google" && findDomainAllowlistRole(db, email)) {
+    return true;
+  }
+  if (user.provider === "github" && handle) {
     const placeholder = findUserByEmail(db, githubPlaceholderEmail(handle));
     if (placeholder && !placeholder.disabled) return true;
   }
@@ -71,14 +95,24 @@ export function isOAuthWhitelisted(
 export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
   const email = normalizeEmail(user.email);
   const handle = normalizeHandle(user.githubHandle);
-  const provider = handle ? "github" : "google";
+  // P13-D-22: the ROLE branch keys off the real callback provider. It used to
+  // key off "does this profile carry a GitHub handle", so a GitHub sign-in
+  // whose profile exposed no `login` took the Google branch and inherited a
+  // domain-mapped role — and a GitHub sign-in that DID carry a handle but no
+  // placeholder fell through to `member`, never the domain's mapped role.
+  // `idp` still degrades to the old guess when the provider is unreadable, so
+  // the stamped value stays one of local|github|google.
+  const provider = user.provider ?? (handle ? "github" : "google");
 
   let role: UserRole = "member";
 
-  if (handle) {
+  if (user.provider === "github") {
     // Claim a `github.com/<handle>` placeholder by replacement (its role
-    // carries over; the placeholder identity is removed).
-    const placeholder = findUserByEmail(db, githubPlaceholderEmail(handle));
+    // carries over; the placeholder identity is removed). Without a placeholder
+    // a GitHub sign-in has no role source — the domain allowlist is Google's.
+    const placeholder = handle
+      ? findUserByEmail(db, githubPlaceholderEmail(handle))
+      : null;
     if (placeholder) {
       role = placeholder.role;
       deleteIdentity(db, placeholder.id);
@@ -91,7 +125,7 @@ export function applyOAuthUser(db: DatabaseSync, user: OAuthUser): void {
         details: { provider: "github", handle, email },
       });
     }
-  } else {
+  } else if (user.provider === "google") {
     role = findDomainAllowlistRole(db, email) ?? "member";
   }
 

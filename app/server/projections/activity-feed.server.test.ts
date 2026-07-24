@@ -11,7 +11,11 @@ import {
   resolveScopeViolation,
 } from "./policy-violations.server";
 import { rebuildAll } from "./rebuilder.server";
-import { listActivityStream, listAuditLog } from "./activity-feed.server";
+import {
+  countAuditLog,
+  listActivityStream,
+  listAuditLog,
+} from "./activity-feed.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -232,5 +236,76 @@ describe("listAuditLog", () => {
     const times = entries.map((e) => e.occurredAt);
     expect([...times].sort().reverse()).toEqual(times);
     expect(listAuditLog(store.db, store.slug, { limit: 1 })).toHaveLength(1);
+  });
+
+  // P13-D-7: both rows were RECORDED and surfaced nowhere — the whitelist that
+  // drives this panel (and its count) omitted them, so reconstructing "who
+  // bypassed the required reviewer" needed raw SQLite.
+  it("surfaces the two governance overrides (P13-D-7) with readable text", () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, {
+      action: "task.acceptance.forced",
+      actor: { userId: arda.id, label: arda.email },
+      subjectKind: "task",
+      subjectId: "VIB-201",
+      projectSlug: store.slug,
+      taskKey: "VIB-201",
+      details: { bypassed: "the required reviewer verdict" },
+    });
+    recordAudit(store.db, {
+      action: "project.org_admin.override",
+      actor: { userId: arda.id, label: arda.email },
+      subjectKind: "project",
+      subjectId: store.slug,
+      projectSlug: store.slug,
+      details: {
+        action: "edit-policy",
+        what: "change the policy",
+        projectSlug: store.slug,
+        memberRole: null,
+      },
+    });
+
+    const entries = listAuditLog(store.db, store.slug);
+    const forced = entries.find((e) => e.taskKey === "VIB-201")!;
+    expect(forced.kind).toBe("audit");
+    expect(forced.text).toBe(
+      `${arda.name} force-accepted the completion, bypassing the required reviewer verdict — on`,
+    );
+    const override = entries.find((e) => e.text.includes("org-admin override"))!;
+    expect(override.kind).toBe("audit");
+    expect(override.text).toBe(
+      `${arda.name} used the org-admin override to change the policy (project role: not a member).`,
+    );
+    // The count that drives "show older" must agree with the list.
+    expect(countAuditLog(store.db, store.slug)).toBe(entries.length);
+  });
+
+  // P13-D-8: NFR10's fourth category. A recorded denial that never reaches the
+  // panel is the same invisibility D-7 fixes, so assert both ends.
+  it("surfaces a denied authority attempt as a blocked action (P13-D-8)", () => {
+    const store = setupTestStore(ctx);
+    const elif = store.users.elif;
+    recordAudit(store.db, {
+      action: "project.authority.denied",
+      actor: { userId: elif.id, label: elif.email },
+      subjectKind: "project",
+      subjectId: store.slug,
+      projectSlug: store.slug,
+      details: {
+        action: "edit-policy",
+        what: "change the policy",
+        projectSlug: store.slug,
+        memberRole: "viewer",
+      },
+    });
+
+    const entry = listAuditLog(store.db, store.slug)[0]!;
+    expect(entry.kind).toBe("blockedact");
+    expect(entry.text).toBe(
+      `Blocked: ${elif.name} tried to change the policy — their project role (viewer) is not permitted.`,
+    );
+    expect(countAuditLog(store.db, store.slug)).toBe(1);
   });
 });

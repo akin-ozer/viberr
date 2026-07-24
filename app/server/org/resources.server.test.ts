@@ -10,6 +10,7 @@ import {
   deleteMcpServer,
   deleteSkill,
   discoverStdioMcpTools,
+  getMcpServer,
   getKnowledgeBase,
   getSkill,
   listKnowledgeBases,
@@ -96,10 +97,51 @@ function setup() {
 /** An "up" probe transport: any HTTP response counts as reachable. */
 const respondingFetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
 
+/**
+ * A fake Streamable-HTTP MCP endpoint that answers the REAL handshake
+ * (P13-LV-10). `sseFramed` returns the body as an SSE `data:` line, which is
+ * what a real MCP server does when the client accepts text/event-stream.
+ */
+function mcpHttpFetch(
+  toolCount: number,
+  opts: { sseFramed?: boolean; requireAuth?: string } = {},
+): typeof fetch {
+  return (async (_url: string, init?: RequestInit) => {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    if (opts.requireAuth && headers.authorization !== `Bearer ${opts.requireAuth}`) {
+      return new Response("no", { status: 401 });
+    }
+    const body = JSON.parse(String(init?.body ?? "{}")) as { id?: number; method?: string };
+    const reply = (payload: unknown) => {
+      const text = opts.sseFramed
+        ? `event: message\ndata: ${JSON.stringify(payload)}\n\n`
+        : JSON.stringify(payload);
+      return new Response(text, {
+        status: 200,
+        headers: {
+          "content-type": opts.sseFramed ? "text/event-stream" : "application/json",
+          "mcp-session-id": "sess-1",
+        },
+      });
+    };
+    if (body.method === "initialize") {
+      return reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+    }
+    if (body.method === "tools/list") {
+      return reply({
+        jsonrpc: "2.0",
+        id: 2,
+        result: { tools: Array.from({ length: toolCount }, (_, i) => ({ name: `t${i}` })) },
+      });
+    }
+    return new Response("", { status: 202 });
+  }) as unknown as typeof fetch;
+}
+
 describe("knowledge bases", () => {
-  it("create makes the real folder; scan sees files added outside Viberr", () => {
+  it("create makes the real folder; scan sees files added outside Viberr", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { kb, toast } = saveKnowledgeBase(
+    const { kb, toast } = await saveKnowledgeBase(
       db,
       { name: "Architecture notes", refresh: "on change" },
       ACTOR,
@@ -123,13 +165,13 @@ describe("knowledge bases", () => {
     expect(reindexed.toast).toBe("Architecture notes re-scanned — 1 docs");
   });
 
-  it("rename moves the folder; collisions are refused", () => {
+  it("rename moves the folder; collisions are refused", async () => {
     const { db, dataRoot, ctx } = setup();
-    const a = saveKnowledgeBase(db, { name: "Alpha", refresh: "manual" }, ACTOR, ctx);
-    saveKnowledgeBase(db, { name: "Beta", refresh: "manual" }, ACTOR, ctx);
+    const a = await saveKnowledgeBase(db, { name: "Alpha", refresh: "manual" }, ACTOR, ctx);
+    await saveKnowledgeBase(db, { name: "Beta", refresh: "manual" }, ACTOR, ctx);
     writeFileSync(path.join(kbDirPath("alpha", dataRoot), "x.md"), "x");
 
-    const renamed = saveKnowledgeBase(
+    const renamed = await saveKnowledgeBase(
       db,
       { id: a.kb.id, name: "Alpha Two", refresh: "manual" },
       ACTOR,
@@ -139,15 +181,15 @@ describe("knowledge bases", () => {
     expect(existsSync(kbDirPath("alpha", dataRoot))).toBe(false);
     expect(existsSync(path.join(kbDirPath("alpha-two", dataRoot), "x.md"))).toBe(true);
 
-    expect(() =>
+    await expect(
       saveKnowledgeBase(db, { id: a.kb.id, name: "Beta", refresh: "manual" }, ACTOR, ctx),
-    ).toThrowError(/already exists/);
+    ).rejects.toThrowError(/already exists/);
   });
 
-  it("delete removes the folder and the row", () => {
+  it("delete removes the folder and the row", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { kb } = saveKnowledgeBase(db, { name: "Gone Soon", refresh: "manual" }, ACTOR, ctx);
-    const { toast } = deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
+    const { kb } = await saveKnowledgeBase(db, { name: "Gone Soon", refresh: "manual" }, ACTOR, ctx);
+    const { toast } = await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
     expect(toast).toBe("Gone Soon deleted — agents lose it on next context load");
     expect(existsSync(kbDirPath("gone-soon", dataRoot))).toBe(false);
     expect(listKnowledgeBases(db, ctx)).toHaveLength(0);
@@ -155,9 +197,9 @@ describe("knowledge bases", () => {
 });
 
 describe("skills", () => {
-  it("create writes a real SKILL.md; body round-trips from disk", () => {
+  it("create writes a real SKILL.md; body round-trips from disk", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill, toast } = saveSkill(
+    const { skill, toast } = await saveSkill(
       db,
       {
         name: "Terraform Review",
@@ -173,7 +215,7 @@ describe("skills", () => {
     expect(skill.body).toContain("state safety");
     expect(skill.tree.map((n) => n.name)).toContain("SKILL.md");
 
-    const updated = saveSkill(
+    const updated = await saveSkill(
       db,
       { id: skill.id, name: "terraform-review", summary: "Updated.", body: "## New body" },
       ACTOR,
@@ -183,9 +225,9 @@ describe("skills", () => {
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
   });
 
-  it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", () => {
+  it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "# precious content" },
       ACTOR,
@@ -194,7 +236,7 @@ describe("skills", () => {
 
     // Summary-only edit round-trips an empty body (e.g. the modal field was
     // cleared / never loaded) — the on-disk body must survive.
-    const updated = saveSkill(
+    const updated = await saveSkill(
       db,
       { id: skill.id, name: "api-design", summary: "Updated summary.", body: "" },
       ACTOR,
@@ -208,7 +250,7 @@ describe("skills", () => {
     expect(updated.skill.summary).toBe("Updated summary.");
 
     // The explicit clear flag is the ONLY way to blank it.
-    const cleared = saveSkill(
+    const cleared = await saveSkill(
       db,
       {
         id: skill.id,
@@ -224,9 +266,9 @@ describe("skills", () => {
     expect(readFileSync(onDisk, "utf8")).toBe("");
   });
 
-  it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", () => {
+  it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "big-skill", summary: "Huge on disk.", body: "seed" },
       ACTOR,
@@ -237,19 +279,19 @@ describe("skills", () => {
     const onDisk = path.join(skillDirPath("big-skill", dataRoot), "SKILL.md");
     writeFileSync(onDisk, "x".repeat(256 * 1024 + 10));
 
-    expect(() =>
+    await expect(
       saveSkill(
         db,
         { id: skill.id, name: "big-skill", summary: "Huge on disk.", body: "truncated round-trip" },
         ACTOR,
         ctx,
       ),
-    ).toThrowError(/256 KB/);
+    ).rejects.toThrowError(/256 KB/);
     // Nothing was written.
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
 
     // A body-keeping save (empty body, e.g. summary edit) still works.
-    const kept = saveSkill(
+    const kept = await saveSkill(
       db,
       { id: skill.id, name: "big-skill", summary: "New summary here.", body: "" },
       ACTOR,
@@ -259,15 +301,15 @@ describe("skills", () => {
     expect(readFileSync(onDisk, "utf8")).toHaveLength(256 * 1024 + 10);
   });
 
-  it("rename moves the skill folder; delete removes it", () => {
+  it("rename moves the skill folder; delete removes it", async () => {
     const { db, dataRoot, ctx } = setup();
-    const { skill } = saveSkill(
+    const { skill } = await saveSkill(
       db,
       { name: "api-design", summary: "REST rules.", body: "# body" },
       ACTOR,
       ctx,
     );
-    const renamed = saveSkill(
+    const renamed = await saveSkill(
       db,
       { id: skill.id, name: "api-guidelines", summary: "REST rules.", body: "# body" },
       ACTOR,
@@ -276,7 +318,7 @@ describe("skills", () => {
     expect(renamed.skill.name).toBe("api-guidelines");
     expect(existsSync(skillDirPath("api-design", dataRoot))).toBe(false);
 
-    const { toast } = deleteSkill(db, skill.id, ACTOR, ctx);
+    const { toast } = await deleteSkill(db, skill.id, ACTOR, ctx);
     expect(toast).toBe("Skill api-guidelines deleted");
     expect(existsSync(skillDirPath("api-guidelines", dataRoot))).toBe(false);
   });
@@ -302,16 +344,28 @@ describe("mcp servers", () => {
     ).toMatchObject({ kind: "down" });
   });
 
-  it("save probes HTTP targets and never fabricates tool counts", async () => {
+  it("save runs a REAL MCP handshake on HTTP targets and never fabricates counts", async () => {
     const { db } = setup();
+    // P13-LV-10: an HTTP target used to be "reachable" on ANY response — a 404
+    // (or any live website) painted a green dot — and no tool count was ever
+    // discovered. Now the handshake decides, and it stores the real count.
     const up = await saveMcpServer(
       db,
-      { name: "GitHub MCP", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      { name: "GitHub MCP", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(9) },
+    );
+    expect(up.mcp).toMatchObject({ name: "github-mcp", up: true, tools: 9 });
+    expect(up.toast).toContain("9 tools discovered");
+
+    const notMcp = await saveMcpServer(
+      db,
+      { name: "just-a-website", transport: "HTTP", target: "https://x.dev/", cred: "" },
       ACTOR,
       { fetchImpl: respondingFetch },
     );
-    expect(up.mcp).toMatchObject({ name: "github-mcp", up: true, tools: null });
-    expect(up.toast).toContain("endpoint reachable");
+    expect(notMcp.mcp).toMatchObject({ up: false, tools: null });
+    expect(notMcp.toast).toContain("didn't answer as an MCP server");
 
     const down = await saveMcpServer(
       db,
@@ -320,7 +374,7 @@ describe("mcp servers", () => {
       { fetchImpl: unreachableFetch() },
     );
     expect(down.mcp.up).toBe(false);
-    expect(down.toast).toContain("unreachable");
+    expect(down.toast).toContain("didn't answer as an MCP server");
 
     // stdio save runs a REAL best-effort tool-count discovery (fake spawn).
     const stdio = await saveMcpServer(
@@ -355,25 +409,28 @@ describe("mcp servers", () => {
     ).rejects.toThrowError(/already exists/);
   });
 
-  it("test updates health and includes known tool counts in the toast", async () => {
+  it("test re-runs the handshake and reports the count the server actually offers", async () => {
     const { db } = setup();
     const { mcp } = await saveMcpServer(
       db,
-      { name: "github-mcp", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      { name: "github-mcp", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
       ACTOR,
-      { fetchImpl: respondingFetch },
+      { fetchImpl: mcpHttpFetch(14) },
     );
-    // Seeded rows carry demo tool counts — emulate one.
-    db.prepare(`UPDATE org_mcp_servers SET tools_count = 14 WHERE id = ?`).run(mcp.id);
+    expect(mcp.tools).toBe(14);
 
-    const healthy = await testMcpServer(db, mcp.id, { fetchImpl: respondingFetch });
-    expect(healthy.toast).toMatch(/^github-mcp healthy — 14 tools · \d+ms$/);
+    // P13-LV-19: the count is whatever the live handshake enumerates, not a
+    // stale column — Settings said "13 tools" for a server both live runs saw
+    // as 15 because the old probe advertised no client capabilities.
+    const healthy = await testMcpServer(db, mcp.id, { fetchImpl: mcpHttpFetch(15) });
+    expect(healthy.toast).toMatch(/^github-mcp healthy — 15 tools · \d+ms$/);
+    expect(getMcpServer(db, mcp.id)!.tools).toBe(15);
 
     const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
     expect(dead.toast).toContain("github-mcp unreachable");
 
-    const { toast } = deleteMcpServer(db, mcp.id, ACTOR);
+    const { toast } = await deleteMcpServer(db, mcp.id, ACTOR);
     expect(toast).toBe("github-mcp removed");
   });
 
@@ -438,14 +495,14 @@ describe("disk is truth (finding #7)", () => {
     expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
   });
 
-  it("editing a disk-only skill adopts it into a real metadata row", () => {
+  it("editing a disk-only skill adopts it into a real metadata row", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("reviewer-expertise", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# original");
 
     const before = getSkill(db, "disk:reviewer-expertise", ctx)!;
-    const { skill, toast } = saveSkill(
+    const { skill, toast } = await saveSkill(
       db,
       { id: before.id, name: "reviewer-expertise", summary: "Review verdicts.", body: "# edited" },
       ACTOR,
@@ -458,13 +515,13 @@ describe("disk is truth (finding #7)", () => {
     expect(listSkills(db, ctx).filter((s) => s.name === "reviewer-expertise")).toHaveLength(1);
   });
 
-  it("delete removes a disk-only skill folder even with no row", () => {
+  it("delete removes a disk-only skill folder even with no row", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("orphan-expertise", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# body");
 
-    const { toast } = deleteSkill(db, "disk:orphan-expertise", ACTOR, ctx);
+    const { toast } = await deleteSkill(db, "disk:orphan-expertise", ACTOR, ctx);
     expect(toast).toBe("Skill orphan-expertise deleted");
     expect(existsSync(dir)).toBe(false);
     expect(listSkills(db, ctx)).toHaveLength(0);
@@ -486,25 +543,25 @@ describe("disk is truth (finding #7)", () => {
     expect(after.lastIndexedAt).not.toBeNull();
   });
 
-  it("a fresh create refuses to clobber an existing on-disk skill folder", () => {
+  it("a fresh create refuses to clobber an existing on-disk skill folder", async () => {
     const { db, dataRoot, ctx } = setup();
     const dir = skillDirPath("api-design", dataRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# keep me");
 
-    expect(() =>
+    await expect(
       saveSkill(
         db,
         { name: "api-design", summary: "New skill.", body: "" },
         ACTOR,
         ctx,
       ),
-    ).toThrowError(/already exists/);
+    ).rejects.toThrowError(/already exists/);
     // Original content untouched.
     expect(getSkill(db, "disk:api-design", ctx)!.body).toContain("# keep me");
   });
 
-  it("rejects a path-traversal disk id instead of escaping the store root", () => {
+  it("rejects a path-traversal disk id instead of escaping the store root", async () => {
     const { db, ctx } = setup();
     // A crafted synthetic id must NOT resolve to a path outside the store.
     for (const evil of [
@@ -513,10 +570,239 @@ describe("disk is truth (finding #7)", () => {
       "disk:a/b",
       "disk:a\\b",
     ]) {
-      expect(() => deleteSkill(db, evil, ACTOR, ctx)).toThrowError(/No such skill/);
-      expect(() => deleteKnowledgeBase(db, evil, ACTOR, ctx)).toThrowError(
-        /No such knowledge base/,
+      await expect(deleteSkill(db, evil, ACTOR, ctx)).rejects.toThrowError(
+        /No such skill/,
       );
+      await expect(
+        deleteKnowledgeBase(db, evil, ACTOR, ctx),
+      ).rejects.toThrowError(/No such knowledge base/);
     }
+  });
+});
+
+/* --------------------------------- resource reference integrity (P13-KM-07) */
+
+describe("resource reference integrity", () => {
+  function writeProfileTemplate(dataRoot: string, id: string, kb: string[]) {
+    mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "agents", "profiles", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: specialist",
+        `name: ${id}`,
+        `role: ${id}`,
+        'desc: "t"',
+        "icon: cpu",
+        "backends:",
+        "  - claude",
+        'model: ""',
+        "scope: Global base",
+        "stages:",
+        "  - impl",
+        "spanAll: false",
+        "capabilities: []",
+        "extras: []",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb:",
+        ...kb.map((k) => `    - ${k}`),
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  function grantsOf(dataRoot: string, id: string): string {
+    return readFileSync(path.join(dataRoot, "agents", "profiles", `${id}.md`), "utf8");
+  }
+
+  it("renaming a KB rewrites every profile grant instead of orphaning it", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "P13 facts", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    expect(kb.dir).toBe("p13-facts");
+    writeProfileTemplate(dataRoot, "scout", ["p13-facts"]);
+
+    await saveKnowledgeBase(
+      db,
+      { id: kb.id, name: "P13 facts v2", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+
+    // Live-proven failure before this fix: the folder moved, the row moved, and
+    // seven profiles kept pointing at `p13-facts` with no warning anywhere — a
+    // fresh run then reported "there is no p13-facts knowledge base reaching
+    // this run" while the UI still showed the grant attached.
+    expect(existsSync(kbDirPath("p13-facts-v2", dataRoot))).toBe(true);
+    expect(grantsOf(dataRoot, "scout")).toContain("p13-facts-v2");
+    expect(grantsOf(dataRoot, "scout")).not.toMatch(/- p13-facts$/m);
+  });
+
+  it("deleting a KB drops the grant rather than leaving it dangling", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Throwaway", refresh: "manual" },
+      ACTOR,
+      ctx,
+    );
+    writeProfileTemplate(dataRoot, "scout", [kb.dir, "keep-me"]);
+
+    await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
+
+    const raw = grantsOf(dataRoot, "scout");
+    expect(raw).not.toContain("throwaway");
+    expect(raw).toContain("keep-me");
+  });
+
+  it("renaming a skill rewrites its grants too", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill } = await saveSkill(
+      db,
+      { name: "old-craft", summary: "Old craft.", body: "# old" },
+      ACTOR,
+      ctx,
+    );
+    mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "agents", "profiles", "scout.md"),
+      [
+        "---",
+        "id: scout",
+        "kind: specialist",
+        "name: scout",
+        "role: scout",
+        'desc: "t"',
+        "icon: cpu",
+        "backends:",
+        "  - claude",
+        'model: ""',
+        "scope: Global base",
+        "stages:",
+        "  - impl",
+        "spanAll: false",
+        "capabilities: []",
+        "extras: []",
+        "resources:",
+        "  skills:",
+        "    - old-craft",
+        "  mcps: []",
+        "  kb: []",
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+
+    await saveSkill(
+      db,
+      { id: skill.id, name: "new-craft", summary: "New craft.", body: "" },
+      ACTOR,
+      ctx,
+    );
+
+    expect(grantsOf(dataRoot, "scout")).toContain("new-craft");
+    expect(grantsOf(dataRoot, "scout")).not.toContain("old-craft");
+  });
+});
+
+/* ---------------------- MCP credentials + SSE framing (P13-KM-05/KM-06/LV-10) */
+
+describe("MCP credentials and transports", () => {
+  it("discovers over an SSE-framed body, not just raw JSON", async () => {
+    const { db } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "sse-server", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(4, { sseFramed: true }) },
+    );
+    expect(saved.mcp).toMatchObject({ up: true, tools: 4 });
+  });
+
+  it("probes a credentialed HTTP server WITH its credential", async () => {
+    const { db } = setup();
+    // P13-KM-05: the probe used to run unauthenticated, so a server that works
+    // inside a run reported "unreachable" in Settings.
+    const saved = await saveMcpServer(
+      db,
+      {
+        name: "secured",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "s3cret-token",
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(2, { requireAuth: "s3cret-token" }) },
+    );
+    expect(saved.mcp).toMatchObject({ up: true, tools: 2, hasCred: true });
+
+    const retest = await testMcpServer(db, saved.mcp.id, {
+      fetchImpl: mcpHttpFetch(2, { requireAuth: "s3cret-token" }),
+    });
+    expect(retest.mcp.up).toBe(true);
+  });
+
+  it("passes the credential to a stdio server's environment", async () => {
+    const { db } = setup();
+    let sawToken: string | null | undefined;
+    const spawnImpl = (cmd: string, args: string[], token?: string | null) => {
+      sawToken = token;
+      return fakeMcpSpawn(3)(cmd, args);
+    };
+    await saveMcpServer(
+      db,
+      { name: "stdio-secured", transport: "stdio", target: "npx -y @mcp/x", cred: "tok-1" },
+      ACTOR,
+      { spawnImpl },
+    );
+    expect(sawToken).toBe("tok-1");
+  });
+
+  it("a blank credential KEEPS the stored one; clearCred REMOVES it", async () => {
+    const { db } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "tok" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(saved.mcp.hasCred).toBe(true);
+
+    const kept = await saveMcpServer(
+      db,
+      { id: saved.mcp.id, name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(kept.mcp.hasCred).toBe(true);
+
+    // P13-KM-06: without an explicit intent there was NO way to remove a
+    // credential — a repointed server kept sending the old token forever.
+    const cleared = await saveMcpServer(
+      db,
+      {
+        id: saved.mcp.id,
+        name: "keeper",
+        transport: "HTTP",
+        target: "https://other.dev/mcp",
+        cred: "",
+        clearCred: true,
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(cleared.mcp.hasCred).toBe(false);
   });
 });

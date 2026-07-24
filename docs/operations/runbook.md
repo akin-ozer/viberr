@@ -54,14 +54,34 @@ readiness downgrade (tolerant parsing):
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces as
   an open scope violation with a Grant-scope action (re-validate the PAT) rather than a
   silent failure.
-- PR/branch state refreshes on the explicit **Reconcile** action (no scheduled poll in V1).
+- PR/branch state refreshes on a background poller: once at boot, then every 5 minutes
+  over every project with branched tasks. It emits divergence events, notifications,
+  recommendation withdrawals and merge-pending nudges with no human in the loop. The
+  **Update status** button on the GitHub view forces an immediate reconcile; the page
+  shows how old the cached state is.
 
 ## Agent runtimes
 
-- With no `ANTHROPIC_API_KEY` / `CODEX_API_KEY`, the backend is **unavailable**: a run
-  started on it fails fast with an honest "backend unavailable" error and a blocked
-  recovery packet. Add a key and restart to enable the real
-  Claude Agent SDK / Codex SDK backends.
+- A backend with **no** credential is **unavailable**: a run started on it fails fast with
+  an honest "backend unavailable" error and a blocked recovery packet. Detection is
+  presence-only (no paid call) and happens at process start, so set the variable and
+  restart. Six credential paths count, and the triage is "which of these is set?":
+
+  | backend | any one of these makes it available |
+  |---|---|
+  | Claude | `ANTHROPIC_API_KEY` · `CLAUDE_CODE_OAUTH_TOKEN` · `VIBERR_CLAUDE_USE_CLI_AUTH=1` (the host `claude` CLI is already logged in) |
+  | Codex | `CODEX_ACCESS_TOKEN` · `CODEX_API_KEY` · `OPENAI_API_KEY` · `VIBERR_CODEX_USE_CLI_AUTH=1` **and** `$CODEX_HOME/auth.json` present on disk |
+
+- **Codex's CLI-auth path has a second condition, and it is the recurring docker trap.**
+  The flag alone is not enough — the file must exist. `CODEX_HOME` defaults to
+  `/data/runtimes/codex-home` under Compose, which lives on the `./docker-data` volume,
+  so recreating that directory silently drops `auth.json` while `VIBERR_CODEX_USE_CLI_AUTH=1`
+  stays set in `.env`. Codex then reports **unavailable** with a correct, actionable
+  message naming the missing file. Fix it by copying the credential back, not by
+  re-setting the flag:
+  `docker compose cp ~/.codex/auth.json app:/data/runtimes/codex-home/auth.json`
+  (readable/writable by uid 1000). Full matrix:
+  [deployment.md](./deployment.md#agent-backends-in-the-container).
 - Raw run logs are append-only under `$VIBERR_DATA_ROOT/runtimes/<backend>/`; the log
   panel projects them. Interrupt is admin/maintainer-gated and audited.
 
@@ -73,16 +93,51 @@ readiness downgrade (tolerant parsing):
   bootstrap admin comes from `VIBERR_SEED_ADMIN_*` on first boot of an empty DB.
 - OAuth sign-in only succeeds for a whitelisted account/domain (no self-signup).
 
-## Growth / cleanup (known follow-up)
+## Retention & growth
 
-`audit_events`, `provenance`, and `run_log_lines` grow without an automated retention
-policy in V1. If the DB gets large, with the app stopped you can prune old rows by date
-via SQLite (e.g. `DELETE FROM provenance WHERE observed_at < …;` then `VACUUM;`) — audit
-rows are the compliance record, so prune those conservatively. Projections rebuild from
-files regardless, so pruning derived/log tables is safe.
+A retention pass (`applyRetention`) runs on **every boot**, best-effort, before the first
+request. It is not optional and none of its windows is env-configurable:
+
+| table | policy |
+|---|---|
+| `run_log_lines` | deleted after **30 days** |
+| `audit_events` | deleted after **90 days** |
+| `notifications` | trimmed to the **newest 500 per user** |
+
+Two consequences worth internalising:
+
+- **Audit is not kept forever.** Do not plan a compliance process around "the audit table
+  has it". Task-scoped history also lives in the canonical `task.md` and survives
+  indefinitely, but org- and auth-scoped rows (`auth.login.*`, `org.user.*`,
+  `org.connection.token_replaced`, `github.pat.*`) have no file counterpart and are gone
+  at 90 days. There is no export path in V1 — if you need a longer window, snapshot the
+  data root (which contains the SQLite file) on a schedule.
+- **`provenance` is the one table with no retention** and is the one that actually grows
+  without bound. It is derived observational state, so pruning it is safe: with the app
+  stopped, `DELETE FROM provenance WHERE observed_at < …;` then `VACUUM;`.
+
+### Task workspaces (disk, not SQLite)
+
+Every task that has run a specialist holds a full git clone at
+`projects/<slug>/tasks/<KEY>/workspace/<repo>` — 11-16 MB each on a real repository. These
+are **not** covered by `applyRetention`, which only compacts SQLite tables.
+
+A separate pass on every boot removes the workspace of any task sitting in its project's
+**terminal stage**, and logs `reclaimed finished task workspaces` with the count and MB when
+it removes anything. It runs after run recovery, so nothing in flight is touched.
+
+The clone is a cache, never canonical: the record is `task.md` and delivered work is on the
+remote branch. Reopening a finished task simply re-clones on its next run. If disk is tight
+before a restart, removing a finished task's `workspace/` directory by hand is safe —
+removing one for a task still in progress only forces a re-clone, but will interrupt a
+running agent.
+
+Canonical Markdown files are never touched by retention.
 
 ## Backup / restore
 
 See [deployment.md](./deployment.md#persistence-backup--restore). Short version: back up
-the whole data-root directory; to restore, put it back and start. If only the SQLite file
-is lost, rebuild projections from the surviving `projects/` files.
+the whole data-root directory — **including `state/projection.sqlite`** — and to restore,
+put it back and start. Rebuilding projections from `projects/` recovers the derived tables
+only; users, sessions, PATs, audit and notifications live nowhere else and cannot be
+reconstructed from files.

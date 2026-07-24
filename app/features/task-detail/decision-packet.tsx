@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -34,11 +34,38 @@ function renderInlineCode(text: string): ReactNode[] {
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
+/**
+ * LV-09: packet observations are written by the operator, which serializes an
+ * absent value as the literal string "null" — a blocked packet printed
+ * `OWNER null` at the human it was asking for a decision. Render the empty
+ * cases as English; anything else passes through verbatim.
+ */
+/**
+ * P13: the operator authors observation KEYS itself, and it writes machine-ish
+ * ones (`prompt_agent error`, `open packet`). The row uppercases them, so a
+ * live packet rendered "PROMPT_AGENT ERROR" at a human. Underscores become
+ * spaces; the CSS still does the uppercasing.
+ */
+export function observationLabel(key: string): string {
+  return key.replace(/_/g, " ").trim();
+}
+
+export function observationValue(key: string, value: string): string {
+  const empty =
+    value.trim() === "" ||
+    value.trim().toLowerCase() === "null" ||
+    value.trim().toLowerCase() === "undefined" ||
+    value.trim().toLowerCase() === "none";
+  if (!empty) return value;
+  return /owner|assignee/i.test(key) ? "unassigned" : "—";
+}
+
 export function DecisionPacket({
   packet,
   busy,
   canResolve,
   canResolveCompletion,
+  canEditGoal,
   onResolve,
   onAsk,
 }: {
@@ -53,6 +80,12 @@ export function DecisionPacket({
    *  viewer has canResolve but not this, so the button is blocked while that
    *  option is selected rather than 403ing on click (adversarial-review #15). */
   canResolveCompletion: boolean;
+  /** UI-42: whether the viewer may actually EDIT the goal. `edit_goal` is
+   *  offered to any packet resolver (which includes the task owner), but
+   *  `update-goal` is admin|maintainer — so a contributor-owner picked "a human
+   *  refines the task goal", got "type the new goal", and found no editor and no
+   *  Edit button, with the packet open forever. */
+  canEditGoal: boolean;
   onResolve: (optionIndex: number, note: string) => void;
   onAsk: () => void;
 }) {
@@ -60,15 +93,25 @@ export function DecisionPacket({
   const [sel, setSel] = useState(() =>
     Math.max(0, p.options.findIndex((o) => o.rec)),
   );
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // P11-71: optional free-text so a human can supply the input an option asks
   // for (e.g. "specify the expected behavior") instead of resolving with an
   // unstated reading. Recorded on the decision event.
   const [note, setNote] = useState("");
   const isBlocked = p.type === "blocked";
 
+  // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
+  // stay tabbable and the arrow handler only changed `sel`, so DOM focus stayed
+  // on the previously focused radio while `aria-checked` moved elsewhere — a
+  // screen-reader user got no feedback from the app's highest-stakes control,
+  // and Tab walked every option.
   const move = (delta: number) => {
     if (p.options.length === 0) return;
-    setSel((s) => (s + delta + p.options.length) % p.options.length);
+    setSel((s) => {
+      const next = (s + delta + p.options.length) % p.options.length;
+      requestAnimationFrame(() => optionRefs.current[next]?.focus());
+      return next;
+    });
   };
 
   return (
@@ -99,12 +142,15 @@ export function DecisionPacket({
         </p>
 
         <div className="packet-obs">
-          {p.observations.map((o, i) => (
-            <div className="obs" key={i}>
-              <span className="k">{o.k}</span>
-              <span>{o.code ? <code>{o.v}</code> : o.v}</span>
-            </div>
-          ))}
+          {p.observations.map((o, i) => {
+            const value = observationValue(o.k, o.v);
+            return (
+              <div className="obs" key={i}>
+                <span className="k">{observationLabel(o.k)}</span>
+                <span>{o.code ? <code>{value}</code> : value}</span>
+              </div>
+            );
+          })}
         </div>
 
         <div
@@ -121,31 +167,55 @@ export function DecisionPacket({
             }
           }}
         >
-          {p.options.map((o, i) => (
-            <button
-              key={i}
-              type="button"
-              role="radio"
-              aria-checked={sel === i}
-              className={
-                "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
-              }
-              onClick={() => setSel(i)}
-            >
-              <span className="radio" />
-              <span>
-                <div className="ot">{o.t}</div>
-                <div className="od">{o.d}</div>
-              </span>
-              {o.rec && (
-                <span className="rec-tag">
-                  <Pill kind="info" sm>
-                    operator pick
-                  </Pill>
+          {p.options.map((o, i) => {
+            // UI-42: an option the viewer cannot carry out is disabled and says
+            // why, instead of recording a decision that dead-ends.
+            const goalBlocked = o.kind === "edit_goal" && !canEditGoal;
+            return (
+              <button
+                key={i}
+                type="button"
+                role="radio"
+                ref={(el) => {
+                  optionRefs.current[i] = el;
+                }}
+                aria-checked={sel === i}
+                aria-disabled={goalBlocked || undefined}
+                tabIndex={sel === i ? 0 : -1}
+                className={
+                  "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
+                }
+                style={goalBlocked ? { opacity: 0.55 } : undefined}
+                title={
+                  goalBlocked
+                    ? "Editing the goal is reserved for maintainers — ask one to refine it"
+                    : undefined
+                }
+                onClick={() => {
+                  if (goalBlocked) return;
+                  setSel(i);
+                }}
+              >
+                <span className="radio" />
+                <span>
+                  <div className="ot">{o.t}</div>
+                  <div className="od">
+                    {o.d}
+                    {goalBlocked
+                      ? " · your role can't edit the goal — a maintainer must"
+                      : ""}
+                  </div>
                 </span>
-              )}
-            </button>
-          ))}
+                {o.rec && (
+                  <span className="rec-tag">
+                    <Pill kind="info" sm>
+                      operator pick
+                    </Pill>
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {canResolve && (
@@ -166,17 +236,28 @@ export function DecisionPacket({
             // button while it's selected rather than let them click into a 403.
             const completionBlocked =
               selected?.kind === "accept_completion" && !canResolveCompletion;
+            // UI-42: same treatment for `edit_goal` — `update-goal` is
+            // admin|maintainer, so resolving it without that grant leaves the
+            // packet open with no way to type the new goal.
+            const goalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
             if (!canResolve) return null;
             return (
               <button
                 type="button"
                 className="btn primary"
-                disabled={busy || p.options.length === 0 || completionBlocked}
+                disabled={
+                  busy ||
+                  p.options.length === 0 ||
+                  completionBlocked ||
+                  goalBlocked
+                }
                 aria-busy={busy}
                 title={
                   completionBlocked
                     ? "Accepting completion is reserved for maintainers"
-                    : undefined
+                    : goalBlocked
+                      ? "Editing the goal is reserved for maintainers"
+                      : undefined
                 }
                 onClick={() => onResolve(sel, note)}
               >

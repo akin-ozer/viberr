@@ -26,16 +26,20 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
   it("carries only runtime-consulted agent toggles (ruling 7 prune + generic-agents Collaboration)", () => {
     // The toggleable catalog holds ONLY ids whose mode is consulted at runtime:
     // 4 repo-enforced (create-task-branch, commit-push-branch,
-    // execute-code-or-write-repo, open-review-pr) + 3 Collaboration gates
+    // execute-code-or-write-repo, open-review-pr) + 4 Collaboration gates
     // (comment-on-task, ask-human, report-validation-verdict — promoted from
-    // decorative to real agent-toolkit gates by the generic-agents plan, D10)
-    // + 3 always-human. The remaining advisory ids (read-task-repo,
-    // run-validation-suites, approve-review, request-changes, …) still have no
-    // runtime effect and stay matrix-only.
-    expect(MODAL_CAP_IDS.size).toBe(10);
+    // decorative to real agent-toolkit gates by the generic-agents plan, D10 —
+    // and attach-evidence-references, promoted the same way by P13-D-26 when
+    // the `evidence:` block was wired) + 1 web-egress gate
+    // (use-web-search-fetch, P13-LV-18) + 3 always-human.
+    // The remaining advisory ids (read-task-repo, run-validation-suites,
+    // approve-review, request-changes, …) still have no runtime effect and stay
+    // matrix-only.
+    expect(MODAL_CAP_IDS.size).toBe(12);
     expect([...MODAL_CAP_IDS].sort()).toEqual(
       [
         "ask-human",
+        "attach-evidence-references",
         "change-project-policy",
         "comment-on-task",
         "commit-push-branch",
@@ -43,6 +47,7 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
         "execute-code-or-write-repo",
         "merge-pull-request",
         "open-review-pr",
+        "use-web-search-fetch",
         "report-validation-verdict",
         "transition-to-done",
       ].sort(),

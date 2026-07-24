@@ -14,16 +14,26 @@ import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
+import {
+  realignChainToStages,
+  rejoinChainAroundStage,
+  spliceStageIntoChain,
+} from "~/shared/workflow/transitions";
+import { countLiveAdmins, removedAccountLabel } from "./membership.server";
 
 /**
  * Project-settings mutations (project-settings spec §5): identity, the
- * workflow-stages editor, membership CRUD, the repo-override policy flag,
- * and the danger-zone delete. Every mutation follows the canonical order
- * file write → incremental reproject → audit (SSE `project.updated` rides
- * the rebuild — open Boards re-render columns via the shell's project
- * scope).
+ * workflow-stages editor, membership CRUD, and the danger-zone delete. Every
+ * mutation follows the canonical order file write → incremental reproject →
+ * audit (SSE `project.updated` rides the rebuild — open Boards re-render
+ * columns via the shell's project scope).
  *
- * RBAC (contracts §3.2, enforced HERE): identity/stages/override/delete =
+ * The stage editor also OWNS the transition chain (P13-D-1): every stage
+ * mutation leaves `frontmatter.workflow` wired to the new stage order, because
+ * a stage no rule reaches is a board column no governed flow can enter or
+ * leave. See app/shared/workflow/transitions.ts for the splice/re-join rules.
+ *
+ * RBAC (contracts §3.2, enforced HERE): identity/stages/delete =
  * `edit-policy` ("Edit workflow & policy") → admin; membership CRUD =
  * `manage-members` ("Manage members & roles") → admin — each mutation names
  * its honest action id (pass-7 seam 4). (Grant-scope stays admin|maintainer
@@ -145,6 +155,10 @@ export async function renameStage(
   requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
   const name = input.name.trim();
   if (!name) throw AppError.validation("Stage name is required.");
+  // P13-D-1: renaming touches the DISPLAY name only — `frontmatter.workflow`
+  // references stage ids, which are immutable once minted, so no rule can
+  // dangle here. (Auto-wired rules carry no stage names in their `by` copy for
+  // the same reason — see defaultTransitionBy.)
 
   let changed = false;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
@@ -190,6 +204,17 @@ export async function addStage(
     // whatever its id.
     const insertIdx = stages.length > 0 ? stages.length - 1 : 0;
     stages.splice(insertIdx, 0, stage);
+    // P13-D-1: splice the stage into the transition chain too. Without this the
+    // new column was unreachable — `transitionStage` refused it except as a
+    // manual admin/maintainer move and the operator's `nextStages` (built purely
+    // from `workflow`) was empty for it, so no agent could enter or leave it.
+    // prev→next becomes prev→new + new→next, both inheriting the replaced
+    // edge's boundary so the gate that guarded the hop is not loosened.
+    parsed.frontmatter.workflow = spliceStageIntoChain(
+      stages,
+      parsed.frontmatter.workflow,
+      stageId,
+    );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -237,14 +262,36 @@ export async function removeStage(
         `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
       );
     }
+    // P13-D-1: rules referencing the removed stage still go (spec §7.4 — nothing
+    // may point at a stage that no longer exists), but the neighbours are now
+    // RE-JOINED instead of left with a hole in the chain: prev→next takes their
+    // place, carrying the stricter of the two boundaries it replaces so a
+    // column edit cannot delete an approval gate as a side effect. Computed
+    // against the pre-removal stage list, which still knows who the neighbours
+    // were.
+    parsed.frontmatter.workflow = rejoinChainAroundStage(
+      parsed.frontmatter.stages,
+      parsed.frontmatter.workflow,
+      input.stageId,
+    );
     parsed.frontmatter.stages = parsed.frontmatter.stages.filter(
       (s) => s.id !== input.stageId,
     );
-    // Transition rules referencing a removed stage are dropped with it
-    // (spec §7.4 decision — documented in the phase report).
-    parsed.frontmatter.workflow = parsed.frontmatter.workflow.filter(
-      (w) => w.from !== input.stageId && w.to !== input.stageId,
-    );
+    // UI-50: agent-profile stage grants referencing the removed stage go too.
+    // They used to survive, so the Agents page counted a stage the project no
+    // longer has — "Eligible stages · 5 of 4", with an invisible chip that could
+    // not be unchecked, and the stale id was re-persisted on every profile save.
+    parsed.frontmatter.agents = parsed.frontmatter.agents.map((deployment) => {
+      const stages = deployment.definition?.stages;
+      if (!stages || !stages.includes(input.stageId)) return deployment;
+      return {
+        ...deployment,
+        definition: {
+          ...deployment.definition,
+          stages: stages.filter((id) => id !== input.stageId),
+        },
+      };
+    });
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -291,6 +338,16 @@ export async function reorderStages(
       ...middle,
       byId.get(terminalId)!,
     ];
+    // P13-D-1: the chain follows the columns. Leaving `workflow` describing the
+    // OLD order would (a) make Policy's flow map disagree with the board and
+    // (b) break the next addStage, which looks up the rule between the new
+    // stage's positional neighbours. Each stage keeps the boundary that guarded
+    // ENTRY into it, so re-ordering columns never hands a human-gated stage an
+    // auto hop.
+    parsed.frontmatter.workflow = realignChainToStages(
+      parsed.frontmatter.stages,
+      parsed.frontmatter.workflow,
+    );
   });
 
   reprojectProject(db, ctx, input.projectSlug);
@@ -389,7 +446,9 @@ export async function removeMember(
   const userRow = db
     .prepare(`SELECT name, email FROM users WHERE id = ?`)
     .get(input.targetUserId) as { name: string; email: string } | undefined;
-  const displayName = userRow?.name ?? input.targetUserId;
+  // LV-04: an org-deleted member is named honestly in the toast instead of
+  // echoing the raw `u_…` id back at the admin removing it.
+  const displayName = userRow?.name ?? removedAccountLabel(input.targetUserId);
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     const member = parsed.frontmatter.members.find(
@@ -399,9 +458,8 @@ export async function removeMember(
       throw AppError.notFound("That user is not a member of this project.");
     }
     if (member.role === "admin") {
-      const admins = parsed.frontmatter.members.filter(
-        (m) => m.role === "admin",
-      ).length;
+      // UI-29: only LIVE, enabled accounts count — see countLiveAdmins.
+      const admins = countLiveAdmins(db, parsed.frontmatter.members);
       if (admins <= 1) {
         throw AppError.conflict(
           `${displayName} is the only admin — assign another admin in Policy first`,
@@ -427,35 +485,12 @@ export async function removeMember(
   };
 }
 
-// ----------------------------------------------------------------- override
-
-export async function setRepoOverride(
-  db: DatabaseSync,
-  input: { projectSlug: string; enabled: boolean },
-  actor: SettingsActor,
-  ctx: SettingsMutationContext = {},
-): Promise<{ toast: string }> {
-  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project settings");
-
-  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
-    parsed.unknownFrontmatter.taskRepoOverride = input.enabled;
-  });
-
-  reprojectProject(db, ctx, input.projectSlug);
-  recordAudit(db, {
-    action: "project.repo_override.changed",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "project",
-    subjectId: input.projectSlug,
-    projectSlug: input.projectSlug,
-    details: { enabled: input.enabled },
-  });
-  return {
-    toast: input.enabled
-      ? "Task-level repo override enabled"
-      : "Task-level repo override disabled",
-  };
-}
+// P13-D-5 (owner ruling 2026-07-25): `setRepoOverride` lived here. It persisted
+// a `taskRepoOverride` flag and audited `project.repo_override.changed`, and
+// NOTHING consulted either — no writer ever set `task.repo`, so the admin
+// flipped a governance switch, got a toast and an audit row, and nothing
+// changed in either direction. The feature is deleted, not finished: one
+// project, one repository.
 
 // -------------------------------------------------------------- danger zone
 

@@ -8,10 +8,10 @@ import { AgentCapability, HumanAccess, WorkflowRules, type PcapProfile } from ".
 afterEach(cleanup);
 
 const MEMBERS: MembershipView[] = [
-  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose" },
-  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "" },
-  { userId: "u_murat", role: "maintainer", name: "Murat Yıldız", email: "murat@viberr.dev", initials: "MY", tone: "teal" },
-  { userId: "u_selin", role: "contributor", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet" },
+  { userId: "u_elif", role: "admin", name: "Elif Demir", email: "elif@viberr.dev", initials: "ED", tone: "rose", missing: false, disabled: false },
+  { userId: "u_arda", role: "admin", name: "Arda Kaya", email: "arda@viberr.dev", initials: "AK", tone: "", missing: false, disabled: false },
+  { userId: "u_murat", role: "maintainer", name: "Murat Yıldız", email: "murat@viberr.dev", initials: "MY", tone: "teal", missing: false, disabled: false },
+  { userId: "u_selin", role: "contributor", name: "Selin Aksoy", email: "selin@viberr.dev", initials: "SA", tone: "violet", missing: false, disabled: false },
 ];
 
 const STAGES = [
@@ -186,6 +186,58 @@ describe("WorkflowRules", () => {
       )!,
     );
     expect(onSetBoundary).toHaveBeenCalledTimes(1);
+  });
+
+  // P13-D-1: the flow map used to draw an arrow between every consecutive stage
+  // POSITION, so it depicted a governed path the project did not have.
+  it("draws the flow map from the transition rules, not the column order", () => {
+    const { container } = render(
+      <WorkflowRules
+        // Columns reordered; the rules still describe the governed path.
+        stages={[STAGES[0]!, STAGES[3]!, STAGES[2]!, STAGES[1]!, STAGES[4]!]}
+        transitions={TRANSITIONS}
+        canManage={false}
+        busy={false}
+        onSetBoundary={() => {}}
+      />,
+    );
+    expect(
+      Array.from(container.querySelectorAll(".flow-map .stage-chip")).map((c) =>
+        c.textContent?.trim(),
+      ),
+    ).toEqual(["Triage", "Ready", "In Progress", "Review", "Done"]);
+  });
+
+  it("marks a stage no rule reaches as off the governed path instead of drawing it mid-flow", () => {
+    const { container, getByText } = render(
+      <WorkflowRules
+        stages={[
+          ...STAGES.slice(0, 4),
+          { id: "qa", name: "QA", color: "#7b61ff" },
+          STAGES[4]!,
+        ]}
+        transitions={TRANSITIONS}
+        canManage={false}
+        busy={false}
+        onSetBoundary={() => {}}
+      />,
+    );
+    expect(getByText("6 stages · 4 transition rules")).toBeTruthy();
+    // 5 on-chain chips (.elig) + 1 off-chain chip, and the arrows only span the
+    // real chain (4 hops), never the orphan.
+    expect(container.querySelectorAll(".flow-map .stage-chip")).toHaveLength(6);
+    expect(container.querySelectorAll(".flow-map .stage-chip.elig")).toHaveLength(5);
+    expect(container.querySelectorAll(".flow-map .flow-arr")).toHaveLength(4);
+    const orphan = container.querySelector(
+      ".flow-map .stage-chip:not(.elig)",
+    )!;
+    expect(orphan.textContent?.trim()).toBe("QA");
+    expect(orphan.getAttribute("title")).toBe(
+      "No transition rule reaches this stage",
+    );
+    // …and the panel says so in words, naming the stage.
+    expect(container.textContent).toContain("Off the governed path:");
+    expect(container.querySelector(".pol-note strong")!.textContent).toBe("QA");
   });
 
   it("survives a transition referencing an unknown stage id (defensive lookup)", () => {

@@ -3,6 +3,7 @@ import { Avatar } from "~/ui/avatar";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 
 /**
@@ -43,8 +44,14 @@ export function ReleaseConfirm({
   };
   const mine = o.userId === me.id;
   const packet = task.packet;
+  // UI-41: only members who can actually HOLD the seat are offered. `setOwner`
+  // rejects viewers (`own-task` is contributor+), and `OwnerControl` already
+  // applies this filter — so clicking a viewer's chip here closed the dialog and
+  // produced a toast saying ownership can only go to someone who can own tasks.
   const candidates = members
-    .filter((m) => m.userId !== o.userId)
+    .filter(
+      (m) => m.userId !== o.userId && roleCan(m.role as ProjectRole, "own-task"),
+    )
     .sort(
       (a, b) => (b.userId === me.id ? 1 : 0) - (a.userId === me.id ? 1 : 0),
     );
@@ -135,6 +142,9 @@ export function ReleaseConfirm({
                     type="button"
                     className="handoff-chip"
                     key={m.userId}
+                    // UI-41: chips stayed clickable while a hand-off was in
+                    // flight, so a double-click fired two owner mutations.
+                    disabled={busy}
                     onClick={() => {
                       onCancel();
                       onOwner(isMe ? "take" : "assign", m);

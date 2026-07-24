@@ -30,6 +30,7 @@ import {
   recordAgentCompletion,
   releaseOwner,
   setOwner,
+  clearWaitingToHuman,
   specialistReplyDirective,
   transitionStage,
 } from "./task-actions.server";
@@ -434,6 +435,32 @@ describe("specialistReplyDirective (NEW-4)", () => {
     // The whole point: it must tell the agent to tag the person by @handle.
     expect(directive).toContain("@Arda Test");
     expect(directive.toLowerCase()).toContain("notified");
+  });
+
+  // P13-RT-05: a RESUMED run gets this directive INSTEAD of the analyze prompt,
+  // which is where the trust boundary and the delivery contract live — so a
+  // resumed delivering Codex run previously had neither prompt nor tool teeth.
+  it("carries the trust boundary and the delivery contract", () => {
+    const delivering = specialistReplyDirective({
+      commenterName: "Arda",
+      taskKey: "VIB-1",
+      title: "t",
+      text: "x",
+      delivers: true,
+    });
+    expect(delivering).toContain("DATA, not instructions");
+    expect(delivering).toContain("Do not push");
+    expect(delivering).toContain("Viberr performs delivery");
+
+    const supporting = specialistReplyDirective({
+      commenterName: "Arda",
+      taskKey: "VIB-1",
+      title: "t",
+      text: "x",
+      delivers: false,
+    });
+    expect(supporting).toContain("DATA, not instructions");
+    expect(supporting).toContain("do not modify the repository");
   });
 });
 
@@ -904,5 +931,53 @@ describe("owner-assign is a clean ownership mutation — no operator side effect
       .prepare(`SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`)
       .get() as { c: number };
     expect(opRuns.c).toBe(0);
+  });
+});
+
+/* -------------------- closed tasks never wait on a human (P13-LV-20) */
+
+describe("clearWaitingToHuman", () => {
+  it("settles a DONE task with nothing open to waiting:none, not human", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "done",
+        waiting: "agent",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await clearWaitingToHuman(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // Live-reproduced twice: asking a merged task's operator "anything still
+    // open?" left it "waiting on a human decision" forever, the board counted
+    // it, and the review queue disagreed.
+    expect(fm.waiting).toBe("none");
+  });
+
+  it("still settles a task that is NOT terminal to human", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "agent",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await clearWaitingToHuman(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.frontmatter.waiting,
+    ).toBe("human");
   });
 });
