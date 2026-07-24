@@ -116,6 +116,22 @@ Two consequences worth internalising:
   without bound. It is derived observational state, so pruning it is safe: with the app
   stopped, `DELETE FROM provenance WHERE observed_at < …;` then `VACUUM;`.
 
+### Task workspaces (disk, not SQLite)
+
+Every task that has run a specialist holds a full git clone at
+`projects/<slug>/tasks/<KEY>/workspace/<repo>` — 11-16 MB each on a real repository. These
+are **not** covered by `applyRetention`, which only compacts SQLite tables.
+
+A separate pass on every boot removes the workspace of any task sitting in its project's
+**terminal stage**, and logs `reclaimed finished task workspaces` with the count and MB when
+it removes anything. It runs after run recovery, so nothing in flight is touched.
+
+The clone is a cache, never canonical: the record is `task.md` and delivered work is on the
+remote branch. Reopening a finished task simply re-clones on its next run. If disk is tight
+before a restart, removing a finished task's `workspace/` directory by hand is safe —
+removing one for a task still in progress only forces a re-clone, but will interrupt a
+running agent.
+
 Canonical Markdown files are never touched by retention.
 
 ## Backup / restore

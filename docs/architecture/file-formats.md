@@ -14,7 +14,9 @@ ${VIBERR_DATA_ROOT}/
   projects/<slug>/project.md              ← project truth
   projects/<slug>/tasks/<KEY>/task.md     ← task truth (+ attachments/ later)
   projects/<slug>/tasks/<KEY>/workspace/  ← the agent's git clone; NOT canonical,
-                                             not watched, not projected
+                                             not watched, not projected. 11-16 MB per
+                                             task; reclaimed at boot once the task
+                                             reaches its terminal stage
   agents/profiles/<id>.md                 ← org-level agent profile templates
   runtimes/claude-home/ runtimes/codex-home/
                                           ← NDJSON run logs + SDK session homes

@@ -7,7 +7,7 @@ import {
 
 /**
  * THE readiness derivation — the only place readiness is derived
- * (CONVENTIONS: "Derivation lives ONLY in
+ * (docs/architecture/decisions.md: "Derivation lives ONLY in
  * app/server/interpretation/readiness-policy.server.ts").
  *
  * Rules (orchestrator ruling 1 + phase brief):

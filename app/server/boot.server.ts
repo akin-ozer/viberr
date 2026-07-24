@@ -23,6 +23,7 @@ import {
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
+import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -178,6 +179,26 @@ export async function bootServer(): Promise<void> {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   });
+
+  // Reclaim the git clone under every FINISHED task (P13, ARCH-6 audit). Each
+  // task that ever ran a specialist holds an 11-16 MB working tree and nothing
+  // had ever removed one — a one-project test instance was already carrying
+  // 101 MB. The clone is a cache (canonical state is task.md, delivered work is
+  // on the remote), and a reopened task simply re-clones. Runs after the
+  // recovery pass above so nothing in flight is touched; never blocks boot.
+  try {
+    const reclaimed = reclaimTerminalTaskWorkspaces(db);
+    if (reclaimed.removed > 0) {
+      logger.info("reclaimed finished task workspaces", {
+        workspaces: reclaimed.removed,
+        mb: Math.round((reclaimed.bytes / (1024 * 1024)) * 10) / 10,
+      });
+    }
+  } catch (error) {
+    logger.error("task workspace reclamation failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 
   // Start the server-side schedule runner (O-3): fire due scheduled operator
   // re-runs once at boot (catching any that came due while down), then on an

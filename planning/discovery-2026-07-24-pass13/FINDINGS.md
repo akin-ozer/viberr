@@ -433,3 +433,27 @@ pinned to an empty temp directory — a store that EXISTS and holds nothing, so 
 `missing` deterministically rather than `unknown`. `CODEX_HOME` left the credential-blanking
 list as a result, and `harness-hermeticity.server.test.ts` now asserts the invariant that
 actually matters (the directory holds no `auth.json`) instead of that the path is empty.
+
+### AU-4 (MED · unbounded disk) — task workspaces were never reclaimed
+Surfaced by the audit's ARCH-6 row as an un-ruled aside. Every task that has run a
+specialist holds a full git clone at `<taskDir>/workspace/<repo>`, and no `rmSync` anywhere
+in the tree targeted that path — measured **101 MB across seven tasks** on the one-project
+pass-13 test instance. **FIX:** `app/server/tasks/workspace-retention.server.ts`, a boot
+sweep that reclaims the workspace of any task in its project's terminal stage. Kept out of
+`db/retention.server.ts` on purpose — that module's docstring promises it only compacts
+SQLite tables, and deleting directories from there would make it false. Runs after run
+recovery, keys off the project's LAST stage rather than a literal `done` id (the stage
+editor can rename it, and D-1 now splices stages in ahead of it), and is idempotent.
+The clone is a cache — `task.md` is canonical and delivered work is on the remote — so a
+reopened task re-clones. Documented in the runbook and `file-formats.md`.
+
+### AU-5 (MED · flaky gate) — one test failed roughly one full run in three
+`kb-watch.service.server.test.ts`'s live-watcher case waits on a real OS filesystem event.
+`CLAUDE_CONFIG_DIR` aside (AU-3), this one is pure FSEvents latency: macOS coalesces events
+under load, and a full parallel `npm test` has ~186 files churning temp directories, where
+delivery was measured past 10 s against sub-second in isolation. Two independent work
+streams hit it and both wrote it off as unrelated noise, which is exactly the failure mode
+— a red suite nobody reads. **FIX:** the poll is now deadline-based with real headroom, and
+the assertion message distinguishes "the OS never delivered" from "the wiring is broken" by
+checking `isKbWatcherAlive()`, so a genuine regression no longer looks identical to a busy
+machine. Three consecutive full runs green.

@@ -100,5 +100,16 @@ workspaces exist at `<taskDir>/workspace/`), `PRD-12` (scheduled re-runs need an
 
 Plus one un-ruled item ARCH-6 surfaced: **task workspaces are never garbage-collected** —
 no `rmSync` path removes `<taskDir>/workspace/<repo>`, so every task that ever ran an agent
-holds an 11-16 MB clone forever. Disposition: **CODE** — reclaim the clone when a task
-reaches a terminal stage, plus a boot sweep for tasks already there.
+holds an 11-16 MB clone forever. Measured on the pass-13 test instance: **101 MB across
+seven tasks** in one project.
+
+Disposition: **CODE** — shipped as `app/server/tasks/workspace-retention.server.ts`, a boot
+sweep that reclaims the workspace of any task in its project's terminal stage. Deliberately
+NOT folded into `db/retention.server.ts`, whose own docstring promises it "only compacts the
+rebuildable SQLite projection/log tables" — deleting directories from there would make that
+false. It runs after run recovery so nothing in flight is touched, keys off the project's
+last stage rather than a literal `done` id (the stage editor can rename it, and D-1 now
+splices stages in ahead of it), and is idempotent because it runs on every boot. The clone
+is a cache — canonical state is `task.md`, delivered work is on the remote — so a reopened
+task simply re-clones. Documented in `docs/operations/runbook.md` and
+`docs/architecture/file-formats.md`.

@@ -40,7 +40,7 @@ export function Pill({
   );
 }
 
-/** Canonical readiness values (CONVENTIONS) — derivation happens server-side. */
+/** Canonical readiness values (docs/architecture/decisions.md) — derivation happens server-side. */
 export type ReadinessValue =
   | "ready"
   | "input_required"

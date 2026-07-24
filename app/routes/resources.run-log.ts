@@ -12,7 +12,7 @@ import { getRun } from "~/server/runtimes/run-store.server";
  *                           all). The dedicated logs consumer calls this after
  *                           a `run.log-appended` SSE event, so the payload
  *                           stays a compact reference on the wire and content
- *                           is fetched on demand (CONVENTIONS forbids fat SSE
+ *                           is fetched on demand (docs/architecture/decisions.md forbids fat SSE
  *                           objects).
  *   ?before=<seq>&limit=<n> backward page (P13-D-11): the newest `n` lines
  *                           OLDER than `seq`. The task loader now ships a
