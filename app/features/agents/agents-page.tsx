@@ -214,6 +214,91 @@ function DeleteConfirm({
   );
 }
 
+// ------------------------------------------------------- stage eligibility
+
+/**
+ * P13-LV-02 — eligible-stage chips that tell the truth.
+ *
+ * Three lies fixed, all live-proven on a 3-stage board:
+ *  1. `spanAll` was ignored. The Operator's header said "active across the
+ *     whole lifecycle" while every chip below it rendered struck through.
+ *  2. The counter was `profile.stages.length + " of " + boardStages.length`,
+ *     which counts stage ids the board doesn't even have — a profile carrying
+ *     stale grants read "5 of 4 stages", and the Developer showed "2 of 3"
+ *     with NO chip highlighted (its 2 ids don't exist on that board).
+ *  3. Stale/unknown grants were invisible. They are now shown as such, which
+ *     is the only on-screen clue that a profile can't be assigned anywhere.
+ *
+ * Eligibility mirrors `specialistEligibleForStage` exactly (spanAll, or no
+ * declared stages = unrestricted, or an explicit match) so the panel and the
+ * assign/run guard can never disagree.
+ */
+export function StageEligibility({
+  a,
+  stages,
+}: {
+  a: AgentProfileView;
+  stages: StageView[];
+}) {
+  const boardIds = new Set(stages.map((s) => s.id));
+  const unrestricted = a.spanAll || a.stages.length === 0;
+  const onBoard = stages.filter((s) => a.stages.includes(s.id)).length;
+  const stale = a.stages.filter((id) => !boardIds.has(id));
+  const summary = a.spanAll
+    ? "active across the whole lifecycle"
+    : a.stages.length === 0
+      ? "no stage restriction — eligible everywhere"
+      : `${onBoard} of ${stages.length} stages`;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="board" />
+        <h2>Eligible stages</h2>
+        <span
+          className="right sub"
+          style={{ fontSize: ".76rem", color: "var(--faint)" }}
+        >
+          {summary}
+        </span>
+      </div>
+      <div className="stage-chips">
+        {stages.map((s) => {
+          const elig = unrestricted || a.stages.includes(s.id);
+          return (
+            <span
+              key={s.id}
+              className={"stage-chip" + (elig ? " elig" : " off")}
+            >
+              <span
+                className="sdot"
+                style={elig ? { background: s.color } : undefined}
+              />
+              {s.name}
+            </span>
+          );
+        })}
+        {stale.map((id) => (
+          <span
+            key={id}
+            className="stage-chip off"
+            title={`This profile grants the stage “${id}”, which no longer exists on this board — the grant does nothing.`}
+          >
+            <span className="sdot" />
+            {id} · not on this board
+          </span>
+        ))}
+      </div>
+      {!unrestricted && onBoard === 0 && (
+        <div className="empty" style={{ padding: ".75rem .5rem" }}>
+          None of this profile's eligible stages exist on this board, so it
+          can't be assigned to any task here. Edit the profile's eligible stages
+          to match the board.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------ library picker
 
 /**
@@ -388,37 +473,7 @@ export function ProfileDetail({
 
       <p className="ag-desc">{a.desc}</p>
 
-      <div className="panel">
-        <div className="panel-head">
-          <Icon name="board" />
-          <h2>Eligible stages</h2>
-          <span
-            className="right sub"
-            style={{ fontSize: ".76rem", color: "var(--faint)" }}
-          >
-            {a.spanAll
-              ? "active across the whole lifecycle"
-              : a.stages.length + " of " + stages.length + " stages"}
-          </span>
-        </div>
-        <div className="stage-chips">
-          {stages.map((s) => {
-            const elig = a.stages.includes(s.id);
-            return (
-              <span
-                key={s.id}
-                className={"stage-chip" + (elig ? " elig" : " off")}
-              >
-                <span
-                  className="sdot"
-                  style={elig ? { background: s.color } : undefined}
-                />
-                {s.name}
-              </span>
-            );
-          })}
-        </div>
-      </div>
+      <StageEligibility a={a} stages={stages} />
 
       <div className="panel">
         <div className="panel-head">

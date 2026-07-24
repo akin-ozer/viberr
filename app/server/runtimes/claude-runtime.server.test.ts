@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   createClaudeAdapter,
+  resolveClaudeEffort,
   resolveClaudeModel,
   type ClaudeQuery,
 } from "./claude-runtime.server";
@@ -319,5 +320,98 @@ describe("claude adapter (SDK, injected fake query)", () => {
     await drain();
     expect(wasInterrupted()).toBe(true);
     expect(exit).toMatchObject({ outcome: "interrupted" });
+  });
+});
+
+describe("resolveClaudeEffort (P13-RT-08)", () => {
+  it("accepts only the tiers the Claude SDK's effort union allows", () => {
+    expect(resolveClaudeEffort("low")).toBe("low");
+    expect(resolveClaudeEffort("max")).toBe("max");
+    expect(resolveClaudeEffort("xhigh")).toBe("xhigh");
+    // "minimal" is a CODEX tier. A profile created on Codex and later switched
+    // to Claude keeps its stored effort (the modal only refetches the catalog on
+    // backend change), so this value really does reach the adapter.
+    expect(resolveClaudeEffort("minimal")).toBeUndefined();
+    expect(resolveClaudeEffort("")).toBeUndefined();
+    expect(resolveClaudeEffort(undefined)).toBeUndefined();
+  });
+
+  it("drops an out-of-union effort instead of forwarding it to the SDK", async () => {
+    const seen: { effort?: string }[] = [];
+    const adapter = createClaudeAdapter({
+      queryFn: ({ options }) => {
+        seen.push({ ...(options?.effort ? { effort: options.effort } : {}) });
+        return fakeQuery([{ type: "result", subtype: "success", is_error: false }]).q;
+      },
+    });
+    adapter.start({ ...SPEC, effort: "minimal" }, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    expect(seen.at(-1)?.effort).toBeUndefined();
+
+    adapter.start({ ...SPEC, effort: "xhigh" }, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    expect(seen.at(-1)?.effort).toBe("xhigh");
+  });
+});
+
+describe("claude idle hang guard (P13-RT-11)", () => {
+  /**
+   * BEFORE: the Claude adapter had NO timer of any kind. `maxTurns` bounds
+   * turns, not wall-clock or idle time, and a `for await` over a stalled SDK
+   * stream never settles — so a hung stdio MCP or a mid-tool-call network
+   * partition left the run `running` forever, the task `waiting: agent`, the
+   * delivering single-flight refusing every later delivering run on that task,
+   * and the board showing "agent working" until the next process restart.
+   */
+  it("settles a stalled stream as `error` with a classified reason line", async () => {
+    process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "10";
+    let interrupted = false;
+    const stalled = (async function* () {
+      yield { type: "system", subtype: "init", session_id: "s-1" };
+      // Never yields again; only interrupt() ends it.
+      await new Promise<void>((resolve) => {
+        const timer = setInterval(() => {
+          if (interrupted) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 1);
+      });
+    })() as unknown as ClaudeQuery;
+    (stalled as { interrupt: () => Promise<void> }).interrupt = async () => {
+      interrupted = true;
+    };
+
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createClaudeAdapter({ queryFn: () => stalled }).start(SPEC, {
+      onLine: (l) => lines.push(l),
+      onExit: (e) => (exit = e),
+    });
+    for (let i = 0; i < 60; i++) await new Promise((r) => setTimeout(r, 2));
+
+    expect(interrupted).toBe(true);
+    expect(exit).toMatchObject({ outcome: "error", effectiveBackend: "claude" });
+    // Distinct from a task failure: the copy has to say "hung", and the tag has
+    // to carry a class `runFailureReason` can route on.
+    expect(lines.at(-1)?.display?.tag).toBe("run·error·idle_timeout");
+    expect(lines.at(-1)?.display?.text).toContain("no output");
+    delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+  });
+
+  it("a normal run never trips the guard", async () => {
+    process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "200";
+    const { q } = fakeQuery([
+      { type: "system", subtype: "init", session_id: "s-2" },
+      { type: "result", subtype: "success", is_error: false },
+    ]);
+    let exit: RunExit | null = null;
+    createClaudeAdapter({ queryFn: () => q }).start(SPEC, {
+      onLine: () => {},
+      onExit: (e) => (exit = e),
+    });
+    await drain();
+    expect(exit).toMatchObject({ outcome: "finished" });
+    delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
   });
 });

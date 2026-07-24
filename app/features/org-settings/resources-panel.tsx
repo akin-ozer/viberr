@@ -139,6 +139,9 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
   // (F7-MCP1); the edit field always starts empty. Blank on save keeps the
   // existing sealed value; a non-empty value replaces it.
   const [cred, setCred] = useState("");
+  // P13-KM-06: blank means "keep the stored secret", so removing one needs an
+  // explicit intent — without it a repointed server kept sending the old token.
+  const [clearCred, setClearCred] = useState(false);
   const { action, err, setErr } = useModalAction(() => onClose());
   const canSave = !action.busy && slugify(name).length > 1 && target.trim().length > 3;
   return (
@@ -155,7 +158,11 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
             ? "Save & re-test"
             : "Add & test connection"
       }
-      footHint={transport === "stdio" ? "spawned per run, sandboxed" : "health-checked on save & test"}
+      footHint={
+        transport === "stdio"
+          ? "spawned per run — it runs with the server's own privileges"
+          : "a real MCP handshake runs on save & test"
+      }
       onSave={() => {
         if (!canSave) return;
         setErr(null);
@@ -166,6 +173,7 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           transport,
           target: target.trim(),
           cred: cred.trim(),
+          ...(clearCred ? { clearCred: "1" } : {}),
         });
       }}
     >
@@ -231,9 +239,29 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           type="password"
           className="mono"
           value={cred}
-          placeholder={initial?.hasCred ? "•••••••• (unchanged)" : "paste a token or API key"}
+          disabled={clearCred}
+          placeholder={
+            clearCred
+              ? "will be removed on save"
+              : initial?.hasCred
+                ? "•••••••• (unchanged)"
+                : "paste a token or API key"
+          }
           onChange={(e) => setCred(e.target.value)}
         />
+        {initial?.hasCred && (
+          <button
+            type="button"
+            className="btn sm ghost"
+            style={{ alignSelf: "flex-start" }}
+            onClick={() => {
+              setClearCred((v) => !v);
+              setCred("");
+            }}
+          >
+            {clearCred ? "Keep the stored credential" : "Remove the stored credential"}
+          </button>
+        )}
         <div className="def-note">
           <Icon name="lock" />
           <span>

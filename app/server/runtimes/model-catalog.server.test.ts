@@ -243,3 +243,52 @@ function fakeQueryObject(models: SdkModelInfo[]): ClaudeQuery {
 function makeFakeQuery(models: SdkModelInfo[]): ClaudeQueryFn {
   return (() => fakeQueryObject(models)) as unknown as ClaudeQueryFn;
 }
+
+describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
+  afterEach(() => resetModelCatalogCache());
+
+  it("accepts a dated claude id the picker can serve from the live list", () => {
+    // `getModelCatalog("claude")` serves the account's LIVE supportedModels()
+    // list to the profile modal, which stores the chosen `value`. The validator
+    // used to accept only the three curated aliases, so `resolveRunModel`
+    // silently substituted `sonnet` for a value the picker itself had offered —
+    // every run then executed on Sonnet while the agents page showed an
+    // "unknown model" badge that read as a bug in the badge.
+    expect(isKnownModel("claude", "claude-sonnet-4-5")).toBe(true);
+    expect(resolveRunModel("claude", "claude-sonnet-4-5")).toBe("claude-sonnet-4-5");
+  });
+
+  it("still rejects the seed display placeholders it exists to catch", () => {
+    for (const junk of [
+      "claude-sonnet",
+      "codex-large",
+      "codex-large · claude-sonnet",
+      "orchestration runtime",
+      "",
+    ]) {
+      expect(isKnownModel("claude", junk)).toBe(false);
+    }
+    expect(resolveRunModel("claude", "claude-sonnet")).toBe("sonnet");
+  });
+
+  it("accepts a non-dated value the live catalog actually listed", async () => {
+    const catalog = await getModelCatalog("claude", {
+      isAvailable: () => true,
+      claudeQueryFn: makeFakeQuery([
+        {
+          value: "opus-next",
+          displayName: "Claude Opus Next",
+          description: "",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+      ]),
+    });
+    expect(catalog.models.map((m) => m.value)).toContain("opus-next");
+    // The picker offered it → the run-time validator must not downgrade it.
+    expect(isKnownModel("claude", "opus-next")).toBe(true);
+    expect(resolveRunModel("claude", "opus-next")).toBe("opus-next");
+    // Codex has no live endpoint, so its curated list stays authoritative.
+    expect(isKnownModel("codex", "opus-next")).toBe(false);
+  });
+});

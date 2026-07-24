@@ -26,6 +26,13 @@ export interface StreamedLine {
 export interface RunLogState {
   /** threadId → its current log lines (seeded from the loader, tailed live). */
   linesByThread: Record<string, StreamedLine[]>;
+  /**
+   * UI-03/UI-30: why the live tail is not running, or null while it is healthy.
+   * The stream used to fail silently — a 403 from `/resources/run-log` (or a
+   * dropped EventSource after the session expired) left the console frozen with
+   * no indication it had stopped following.
+   */
+  streamError: string | null;
 }
 
 interface RunLogAppendedData {
@@ -61,8 +68,13 @@ export function useRunLogStream(input: {
    *  an SSE drop (rapid reaction chains) self-heals instead of leaving a
    *  phantom "1 agent running" strip until a manual reload (F22). */
   hasActiveRun?: boolean;
+  /** UI-30: false for a NON-MEMBER, whose `/resources/run-log` requests 403.
+   *  Opening a stream that can only fail is worse than not opening one. */
+  enabled?: boolean;
 }): RunLogState {
   const { projectSlug, taskKey } = input;
+  const enabled = input.enabled !== false;
+  const [streamError, setStreamError] = useState<string | null>(null);
   const revalidator = useRevalidator();
   const revalidateRef = useRef(revalidator.revalidate);
   useEffect(() => {
@@ -107,18 +119,36 @@ export function useRunLogStream(input: {
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
+    if (!enabled) return;
 
     // Aborts in-flight tail fetches on unmount / task change — a bare
     // `cancelled` flag would still let the response land and be parsed.
     const abort = new AbortController();
+    // UI-35: at most ONE tail fetch per run in flight. `headSeq` only advanced
+    // after a fetch resolved, and the sink publishes one event per console
+    // line, so a chatty run fired several overlapping fetches that each
+    // returned the same window and were concatenated blindly — every line
+    // appeared 2–3× and the "N events" counter over-counted.
+    const inFlight = new Set<string>();
 
     const fetchTail = async (runId: string, sinceSeq: number) => {
+      if (inFlight.has(runId)) return;
+      inFlight.add(runId);
       try {
         const res = await fetch(
           `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
           { headers: { Accept: "application/json" }, signal: abort.signal },
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          // UI-30: a 403 here means the viewer is not a project member. It used
+          // to be swallowed, leaving a console that silently stopped following.
+          setStreamError(
+            res.status === 403
+              ? "Live tail stopped — raw run logs are project-member only."
+              : `Live tail stopped — the log endpoint returned ${res.status}.`,
+          );
+          return;
+        }
         const body = (await res.json()) as {
           data?: {
             threadId: string;
@@ -129,20 +159,39 @@ export function useRunLogStream(input: {
         const data = body.data;
         if (!data || abort.signal.aborted || data.lines.length === 0) return;
         const cursor = cursorsRef.current.get(runId);
-        if (cursor) cursor.headSeq = data.headSeq;
+        // UI-35: drop anything at or below the seq we already hold, so an
+        // overlapping window can never duplicate a line.
+        const head = cursor ? cursor.headSeq : sinceSeq;
+        const fresh = data.lines.filter((l) => l.seq > head);
+        if (cursor) cursor.headSeq = Math.max(cursor.headSeq, data.headSeq);
+        if (fresh.length === 0) return;
+        setStreamError(null);
         setLinesByThread((prev) => {
           const existing = prev[data.threadId] ?? [];
-          const appended = data.lines.map((l) => ({ display: l.display, raw: l.raw }));
+          const appended = fresh.map((l) => ({ display: l.display, raw: l.raw }));
           return { ...prev, [data.threadId]: [...existing, ...appended] };
         });
       } catch {
         // Network hiccup — the next append or a revalidation recovers state.
+      } finally {
+        inFlight.delete(runId);
       }
     };
 
     const source = new EventSource(
       buildEventsUrl([sseScopes.task(projectSlug, taskKey)]),
     );
+    // UI-03: an EventSource that receives a non-200 (an expired session 401s)
+    // FAILS the connection per spec — it never reconnects. Nothing observed
+    // that, so the console silently froze. Report it instead.
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED) {
+        setStreamError(
+          "Live tail disconnected — reload the page to resume following.",
+        );
+      }
+    };
+    source.onopen = () => setStreamError(null);
     source.addEventListener("run.log-appended", (event) => {
       try {
         const parsed = JSON.parse(event.data) as { data: RunLogAppendedData };
@@ -176,7 +225,7 @@ export function useRunLogStream(input: {
       source.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectSlug, taskKey]);
+  }, [projectSlug, taskKey, enabled]);
 
-  return { linesByThread };
+  return { linesByThread, streamError };
 }

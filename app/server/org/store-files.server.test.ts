@@ -19,6 +19,8 @@ import {
 } from "./resources.server";
 import {
   createStoreFolder,
+  readStoreDoc,
+  writeStoreDoc,
   deleteStoreNode,
   importGithubSnapshot,
   scanStoreTree,
@@ -392,5 +394,39 @@ describe("disk-only resource freshness (E6)", () => {
     expect(
       listKnowledgeBases(db, ctx).filter((kb) => kb.dir === "runbooks"),
     ).toHaveLength(1);
+  });
+});
+
+/* ------------------------------- in-app document authoring (P13-LV-06) */
+
+describe("writeStoreDoc", () => {
+  it("creates a document inside the KB folder and touches freshness", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const result = writeStoreDoc(db, target, [], "release-facts", "# Facts\n\nSentinel.", ACTOR);
+    expect(result.path).toEqual(["release-facts.md"]);
+    const abs = path.join(kbDirPath(kb.dir, ctx.dataRoot), "release-facts.md");
+    expect(readFileSync(abs, "utf8")).toContain("Sentinel.");
+    // The doc is a normal store file: the tree sees it and the KB re-indexes.
+    expect(scanStoreTree(kbDirPath(kb.dir, ctx.dataRoot)).map((n) => n.name)).toContain(
+      "release-facts.md",
+    );
+  });
+
+  it("refuses a non-text extension and path traversal", async () => {
+    const { db, target } = await setupKb();
+    expect(() => writeStoreDoc(db, target, [], "evil.sh", "rm -rf /", ACTOR)).toThrowError(
+      /only edits text documents/,
+    );
+    expect(() => writeStoreDoc(db, target, ["../.."], "x.md", "x", ACTOR)).toThrowError();
+    expect(() => writeStoreDoc(db, target, [], "  ", "x", ACTOR)).toThrowError(
+      /file name/,
+    );
+  });
+
+  it("reads a document back for the editor", async () => {
+    const { db, target } = await setupKb();
+    writeStoreDoc(db, target, ["notes"], "a.md", "hello", ACTOR);
+    expect(readStoreDoc(target, ["notes", "a.md"])).toMatchObject({ text: "hello" });
+    expect(readStoreDoc(target, ["nope.md"])).toBeNull();
   });
 });

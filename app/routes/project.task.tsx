@@ -102,7 +102,34 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
   // Per-task provider run projection.
-  const runtime = listRunsForTask(db, params.slug, params.key);
+  //
+  // UI-30: the task page is READABLE app-wide by design (anyone may open a task
+  // and comment), but the run projection carries the three most sensitive run
+  // artifacts — the console `lines`, the exact stored wire envelopes (`raw`,
+  // what the `{ } raw` toggle prints) and the provider `sid`. Both routes that
+  // serve the SAME material require project membership
+  // (`/resources/run-log`, `/resources/session-export`), so this loader was
+  // simultaneously MORE permissive than its own data routes and broken: a
+  // non-member saw the full console while the live tail silently 403'd and
+  // Export downloaded a 403 body.
+  //
+  // One policy now: members (and org admins, via the audited D2 override) get
+  // the full projection; everyone else keeps the honest run SUMMARY strip —
+  // who ran, on what backend, when, and how it ended — with no log content.
+  const runsMembership = new Set(
+    listProjectMembers(db, params.slug).map((m) => m.userId),
+  );
+  const runsVisible = runsMembership.has(user.id) || user.role === "admin";
+  const runtime = runsVisible
+    ? listRunsForTask(db, params.slug, params.key)
+    : listRunsForTask(db, params.slug, params.key).map((r) => ({
+        ...r,
+        sid: null,
+        exportable: false,
+        lines: [],
+        raw: [],
+        lineCount: 0,
+      }));
 
   // Deployed specialists the "Assign specialist" menu offers.
   const deployedSpecialists = listDeployedSpecialists(params.slug);
@@ -156,6 +183,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     },
     deliveringActive,
     activeReviewerIds,
+    /** UI-30: false → the console content above was withheld (non-member). */
+    runsVisible,
     mentionables,
     // Host for GitHub browse links (PR/branch/repo) — derived server-side so
     // the client never hardcodes github.com (GHE deployments keep working).
@@ -629,6 +658,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}
+      runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}

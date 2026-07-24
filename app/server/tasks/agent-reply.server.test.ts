@@ -225,6 +225,54 @@ describe("resolveMentionedAgent", () => {
     expect(target!.session).toBeNull();
   });
 
+  it("never resumes the DEAD backend's session after a backend switch (P13-RT-12)", () => {
+    // The `dev` profile ran on Claude and has a live Claude session…
+    upsertRun(store.db, {
+      id: "run_claude_old",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "claude-session-1",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    expect(call("@dev please continue")!.session?.session_id).toBe("claude-session-1");
+
+    // …then an admin switches the profile to Codex (quota exhausted, say).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const fm = file.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          ...fm.agents[0]!,
+          definition: {
+            ...(fm.agents[0]! as { definition: Record<string, unknown> }).definition,
+            backends: ["codex"],
+            model: "gpt-5.6-sol",
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // BEFORE: latestSessionRun matched on profile + kind only, so this resumed
+    // the DEAD Claude session with `model: gpt-5.6-sol` — a (backend, model)
+    // pairing that never existed; resolveClaudeModel doesn't recognize it, so
+    // the run silently used the subscription default on the backend the admin
+    // had just moved away from. The in-code comment already CLAIMED sessions
+    // never match across backends; now they don't.
+    const switched = call("@dev please continue");
+    expect(switched).toMatchObject({ backend: "codex", profileId: "dev" });
+    expect(switched!.session).toBeNull();
+  });
+
   it("returns the most-recent run WITH a session_id once one exists", async () => {
     await startAgentRun(
       store.db,
@@ -263,12 +311,37 @@ describe("extractReplyText", () => {
     expect(extractReplyText(lines)).toBe("the actual reply");
   });
 
-  it("falls back to the result text when no assistant text exists", () => {
-    const lines = [
+  it("does NOT fall back to the result line — those are runtime STATS (P13-RT-09)", () => {
+    // REWRITTEN: this test used to assert the `result`-line fallback, which
+    // enshrined the bug. The terminal result line's text is statistics, not
+    // prose — "success · 3 turns · 12s · $0.02" on Claude, "in 4.1k (cached
+    // 2.0k) · out 0.3k tokens" on Codex (wire-format). A run that only edited
+    // files and exited therefore posted `success · 7 turns · 214s · $0.31` to
+    // the timeline as the agent's REPORT, fed that string to the prose verdict
+    // classifier, and — two such Codex runs can produce byte-identical text —
+    // tripped the "verbatim repeat" stuck-loop detector for the wrong reason.
+    // A run with no report of its own now honestly has none; the stats stay in
+    // the run panel where they belong.
+    const claudeStats = [
       line({ ev: "init", tag: "system·init", text: "boot" }),
-      line({ ev: "result", tag: "result", text: "final result summary" }),
+      line({ ev: "result", tag: "result", text: "success · 3 turns · 12s · $0.02" }),
     ];
-    expect(extractReplyText(lines)).toBe("final result summary");
+    expect(extractReplyText(claudeStats)).toBeNull();
+
+    const codexStats = [
+      line({ ev: "init", tag: "thread.started", text: "boot" }),
+      line({ ev: "result", tag: "turn.completed", text: "in 4.1k (cached 2.0k) · out 0.3k tokens" }),
+    ];
+    expect(extractReplyText(codexStats)).toBeNull();
+
+    // A real report still wins, even with a stats line after it.
+    const withReport = [
+      line({ tag: "agent_message", text: "Split the CLI docs into their own page." }),
+      line({ ev: "result", tag: "turn.completed", text: "in 4.1k · out 0.3k tokens" }),
+    ];
+    expect(extractReplyText(withReport)).toBe(
+      "Split the CLI docs into their own page.",
+    );
   });
 
   it("returns null when nothing usable was produced", () => {

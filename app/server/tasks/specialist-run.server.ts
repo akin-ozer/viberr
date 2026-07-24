@@ -22,7 +22,7 @@ import type {
   CapabilityGrant,
   ProjectRole,
 } from "~/schemas/project-file.schema";
-import { explicitAgentGrants } from "~/features/agents/capability-catalog";
+import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -174,7 +174,7 @@ function deploymentGrants(
     "agent deployment carries NO capability grants — running it fully withheld",
     { projectSlug, profileId: deployment.profileId },
   );
-  return explicitAgentGrants("withheld") as CapabilityGrant[];
+  return withheldAgentGrants() as CapabilityGrant[];
 }
 
 /** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */

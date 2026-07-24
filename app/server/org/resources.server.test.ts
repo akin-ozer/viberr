@@ -10,6 +10,7 @@ import {
   deleteMcpServer,
   deleteSkill,
   discoverStdioMcpTools,
+  getMcpServer,
   getKnowledgeBase,
   getSkill,
   listKnowledgeBases,
@@ -95,6 +96,47 @@ function setup() {
 
 /** An "up" probe transport: any HTTP response counts as reachable. */
 const respondingFetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
+
+/**
+ * A fake Streamable-HTTP MCP endpoint that answers the REAL handshake
+ * (P13-LV-10). `sseFramed` returns the body as an SSE `data:` line, which is
+ * what a real MCP server does when the client accepts text/event-stream.
+ */
+function mcpHttpFetch(
+  toolCount: number,
+  opts: { sseFramed?: boolean; requireAuth?: string } = {},
+): typeof fetch {
+  return (async (_url: string, init?: RequestInit) => {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    if (opts.requireAuth && headers.authorization !== `Bearer ${opts.requireAuth}`) {
+      return new Response("no", { status: 401 });
+    }
+    const body = JSON.parse(String(init?.body ?? "{}")) as { id?: number; method?: string };
+    const reply = (payload: unknown) => {
+      const text = opts.sseFramed
+        ? `event: message\ndata: ${JSON.stringify(payload)}\n\n`
+        : JSON.stringify(payload);
+      return new Response(text, {
+        status: 200,
+        headers: {
+          "content-type": opts.sseFramed ? "text/event-stream" : "application/json",
+          "mcp-session-id": "sess-1",
+        },
+      });
+    };
+    if (body.method === "initialize") {
+      return reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+    }
+    if (body.method === "tools/list") {
+      return reply({
+        jsonrpc: "2.0",
+        id: 2,
+        result: { tools: Array.from({ length: toolCount }, (_, i) => ({ name: `t${i}` })) },
+      });
+    }
+    return new Response("", { status: 202 });
+  }) as unknown as typeof fetch;
+}
 
 describe("knowledge bases", () => {
   it("create makes the real folder; scan sees files added outside Viberr", async () => {
@@ -302,16 +344,28 @@ describe("mcp servers", () => {
     ).toMatchObject({ kind: "down" });
   });
 
-  it("save probes HTTP targets and never fabricates tool counts", async () => {
+  it("save runs a REAL MCP handshake on HTTP targets and never fabricates counts", async () => {
     const { db } = setup();
+    // P13-LV-10: an HTTP target used to be "reachable" on ANY response — a 404
+    // (or any live website) painted a green dot — and no tool count was ever
+    // discovered. Now the handshake decides, and it stores the real count.
     const up = await saveMcpServer(
       db,
-      { name: "GitHub MCP", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      { name: "GitHub MCP", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(9) },
+    );
+    expect(up.mcp).toMatchObject({ name: "github-mcp", up: true, tools: 9 });
+    expect(up.toast).toContain("9 tools discovered");
+
+    const notMcp = await saveMcpServer(
+      db,
+      { name: "just-a-website", transport: "HTTP", target: "https://x.dev/", cred: "" },
       ACTOR,
       { fetchImpl: respondingFetch },
     );
-    expect(up.mcp).toMatchObject({ name: "github-mcp", up: true, tools: null });
-    expect(up.toast).toContain("endpoint reachable");
+    expect(notMcp.mcp).toMatchObject({ up: false, tools: null });
+    expect(notMcp.toast).toContain("didn't answer as an MCP server");
 
     const down = await saveMcpServer(
       db,
@@ -320,7 +374,7 @@ describe("mcp servers", () => {
       { fetchImpl: unreachableFetch() },
     );
     expect(down.mcp.up).toBe(false);
-    expect(down.toast).toContain("unreachable");
+    expect(down.toast).toContain("didn't answer as an MCP server");
 
     // stdio save runs a REAL best-effort tool-count discovery (fake spawn).
     const stdio = await saveMcpServer(
@@ -355,19 +409,22 @@ describe("mcp servers", () => {
     ).rejects.toThrowError(/already exists/);
   });
 
-  it("test updates health and includes known tool counts in the toast", async () => {
+  it("test re-runs the handshake and reports the count the server actually offers", async () => {
     const { db } = setup();
     const { mcp } = await saveMcpServer(
       db,
-      { name: "github-mcp", transport: "HTTP", target: "https://x.dev/sse", cred: "" },
+      { name: "github-mcp", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
       ACTOR,
-      { fetchImpl: respondingFetch },
+      { fetchImpl: mcpHttpFetch(14) },
     );
-    // Seeded rows carry demo tool counts — emulate one.
-    db.prepare(`UPDATE org_mcp_servers SET tools_count = 14 WHERE id = ?`).run(mcp.id);
+    expect(mcp.tools).toBe(14);
 
-    const healthy = await testMcpServer(db, mcp.id, { fetchImpl: respondingFetch });
-    expect(healthy.toast).toMatch(/^github-mcp healthy — 14 tools · \d+ms$/);
+    // P13-LV-19: the count is whatever the live handshake enumerates, not a
+    // stale column — Settings said "13 tools" for a server both live runs saw
+    // as 15 because the old probe advertised no client capabilities.
+    const healthy = await testMcpServer(db, mcp.id, { fetchImpl: mcpHttpFetch(15) });
+    expect(healthy.toast).toMatch(/^github-mcp healthy — 15 tools · \d+ms$/);
+    expect(getMcpServer(db, mcp.id)!.tools).toBe(15);
 
     const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
@@ -657,5 +714,95 @@ describe("resource reference integrity", () => {
 
     expect(grantsOf(dataRoot, "scout")).toContain("new-craft");
     expect(grantsOf(dataRoot, "scout")).not.toContain("old-craft");
+  });
+});
+
+/* ---------------------- MCP credentials + SSE framing (P13-KM-05/KM-06/LV-10) */
+
+describe("MCP credentials and transports", () => {
+  it("discovers over an SSE-framed body, not just raw JSON", async () => {
+    const { db } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "sse-server", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(4, { sseFramed: true }) },
+    );
+    expect(saved.mcp).toMatchObject({ up: true, tools: 4 });
+  });
+
+  it("probes a credentialed HTTP server WITH its credential", async () => {
+    const { db } = setup();
+    // P13-KM-05: the probe used to run unauthenticated, so a server that works
+    // inside a run reported "unreachable" in Settings.
+    const saved = await saveMcpServer(
+      db,
+      {
+        name: "secured",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "s3cret-token",
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(2, { requireAuth: "s3cret-token" }) },
+    );
+    expect(saved.mcp).toMatchObject({ up: true, tools: 2, hasCred: true });
+
+    const retest = await testMcpServer(db, saved.mcp.id, {
+      fetchImpl: mcpHttpFetch(2, { requireAuth: "s3cret-token" }),
+    });
+    expect(retest.mcp.up).toBe(true);
+  });
+
+  it("passes the credential to a stdio server's environment", async () => {
+    const { db } = setup();
+    let sawToken: string | null | undefined;
+    const spawnImpl = (cmd: string, args: string[], token?: string | null) => {
+      sawToken = token;
+      return fakeMcpSpawn(3)(cmd, args);
+    };
+    await saveMcpServer(
+      db,
+      { name: "stdio-secured", transport: "stdio", target: "npx -y @mcp/x", cred: "tok-1" },
+      ACTOR,
+      { spawnImpl },
+    );
+    expect(sawToken).toBe("tok-1");
+  });
+
+  it("a blank credential KEEPS the stored one; clearCred REMOVES it", async () => {
+    const { db } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "tok" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(saved.mcp.hasCred).toBe(true);
+
+    const kept = await saveMcpServer(
+      db,
+      { id: saved.mcp.id, name: "keeper", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(kept.mcp.hasCred).toBe(true);
+
+    // P13-KM-06: without an explicit intent there was NO way to remove a
+    // credential — a repointed server kept sending the old token forever.
+    const cleared = await saveMcpServer(
+      db,
+      {
+        id: saved.mcp.id,
+        name: "keeper",
+        transport: "HTTP",
+        target: "https://other.dev/mcp",
+        cred: "",
+        clearCred: true,
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(1) },
+    );
+    expect(cleared.mcp.hasCred).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import { Avatar } from "~/ui/avatar";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { SkipLink } from "~/ui/skip-link";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -801,6 +802,8 @@ function HomeTopBar({
   unread,
   user,
   theme,
+  livePaused = false,
+  onReconnect,
 }: {
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
@@ -809,7 +812,11 @@ function HomeTopBar({
   unread: number;
   user: SessionUser;
   theme: ThemePreference;
+  /** UI-03: the SSE stream is down — the cards are a stale snapshot. */
+  livePaused?: boolean;
+  onReconnect?: () => void;
 }) {
+  const modifierHint = useModifierHint();
   return (
     <header className="home-top">
       <div className="home-top-in">
@@ -822,7 +829,22 @@ function HomeTopBar({
           <span className="mark">V</span>
           <b>Viberr</b>
         </button>
-        <div className="top-search" style={{ marginLeft: "auto" }}>
+        {livePaused && (
+          <button
+            type="button"
+            className="pill risk sm"
+            role="status"
+            style={{ marginLeft: "auto", cursor: "pointer" }}
+            title="The live update stream dropped (often an expired session). These cards may be out of date."
+            onClick={() => onReconnect?.()}
+          >
+            live updates paused — retry
+          </button>
+        )}
+        <div
+          className="top-search"
+          style={livePaused ? undefined : { marginLeft: "auto" }}
+        >
           <Icon name="search" />
           <input
             ref={searchRef}
@@ -831,7 +853,10 @@ function HomeTopBar({
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
-          <span className="kbd">⌘K</span>
+          {/* UI-55: platform-aware — the handler accepts Ctrl too. */}
+          <span className="kbd" suppressHydrationWarning>
+            {modifierHint}
+          </span>
         </div>
         <TopBell notifications={notifications} unread={unread} />
         <UserMenu
@@ -1274,9 +1299,14 @@ function StoreStrip({
 export function HomePage({
   data,
   theme,
+  livePaused = false,
+  onReconnect,
 }: {
   data: HomePageData;
   theme: ThemePreference;
+  /** UI-03: SSE stream state, surfaced in the header. */
+  livePaused?: boolean;
+  onReconnect?: () => void;
 }) {
   const { user, projects, org } = data;
   const [query, setQuery] = useState("");
@@ -1451,6 +1481,8 @@ export function HomePage({
         unread={data.unread}
         user={user}
         theme={theme}
+        livePaused={livePaused}
+        {...(onReconnect ? { onReconnect } : {})}
       />
 
       <main className="home-shell" id="main-content" tabIndex={-1}>

@@ -3002,3 +3002,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .rail { background: var(--surface); }
   .home-top { background: var(--bg); }
 }
+
+/* In-app store document editor (P13-LV-06) — knowledge bases are authorable
+   in the product, not only fillable by upload/import. */
+.fm-doc {
+  display: flex; flex-direction: column; gap: .5rem;
+  margin: .6rem 0 .2rem;
+  padding: .7rem;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-2, var(--surface));
+}
+.fm-doc .ta { min-height: 8rem; resize: vertical; }
+.fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }

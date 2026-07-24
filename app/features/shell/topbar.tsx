@@ -7,6 +7,7 @@ import {
 } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
@@ -29,6 +30,8 @@ export function Topbar({
   theme,
   notifications,
   unread,
+  livePaused = false,
+  onReconnect,
 }: {
   projectSlug: string;
   projectName: string;
@@ -41,12 +44,16 @@ export function Topbar({
   theme: ThemePreference;
   notifications: NotificationView[];
   unread: number;
+  /** UI-03: the SSE stream is down — everything on screen is a stale snapshot. */
+  livePaused?: boolean;
+  onReconnect?: () => void;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const modifierHint = useModifierHint();
   const view = workspaceViewFromPathname(location.pathname);
   const onBoard =
     view === "board" && !openTask && location.pathname.endsWith("/board");
@@ -73,9 +80,13 @@ export function Topbar({
         { replace: true, preventScrollReset: true },
       );
     } else {
-      navigate(
-        value ? `${boardPath}?q=${encodeURIComponent(value)}` : boardPath,
-      );
+      // UI-55: the first keystroke on a non-board view PUSHES (so Back returns
+      // to the view you were on); every keystroke after that REPLACES. Without
+      // it, fast typing pushed `?q=a`, `?q=ab`, `?q=abc` and Back walked the
+      // user backwards through their own partial queries.
+      navigate(value ? `${boardPath}?q=${encodeURIComponent(value)}` : boardPath, {
+        replace: query.length > 0,
+      });
     }
   };
 
@@ -128,6 +139,21 @@ export function Topbar({
           org-admin override
         </span>
       )}
+      {/* UI-03: an SSE stream that failed never reconnects on its own, so the
+          board, rail counts, bell badge and review queue silently froze. Say so
+          instead of presenting a stale snapshot as live governance state. */}
+      {livePaused && (
+        <button
+          type="button"
+          className="pill risk sm"
+          role="status"
+          style={{ cursor: onReconnect ? "pointer" : "default" }}
+          title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
+          onClick={() => onReconnect?.()}
+        >
+          live updates paused — retry
+        </button>
+      )}
       <div className="top-search">
         <Icon name="search" />
         <input
@@ -137,7 +163,11 @@ export function Topbar({
           value={query}
           onChange={(e) => onSearch(e.target.value)}
         />
-        <span className="kbd">⌘K</span>
+        {/* UI-55: the handler accepts Ctrl as well; show what the viewer's
+            keyboard actually has. */}
+        <span className="kbd" suppressHydrationWarning>
+          {modifierHint}
+        </span>
       </div>
       <TopBell notifications={notifications} unread={unread} />
       <UserMenu user={user} theme={theme} showSwitchProject />

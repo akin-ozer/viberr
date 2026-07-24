@@ -4,13 +4,19 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
+  defaultGrantsFor,
   normalizeDeliveryGrants,
 } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { agentProfileFilePath, projectFilePath } from "~/server/files/file-store-root.server";
+import {
+  agentProfileFilePath,
+  agentProfilesDir,
+  projectFilePath,
+  resolveStoreSegment,
+} from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -25,7 +31,6 @@ import {
 } from "./agents-query.server";
 import {
   CAP_MODAL_DEFAULTS,
-  explicitAgentGrants,
   MODAL_CAP_IDS,
   OPERATOR_CAP_DEFAULTS,
   OPERATOR_CAP_IDS,
@@ -324,6 +329,15 @@ export async function deployAgentProfileFromLibrary(
   const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const profileId = input.profileId.trim();
   if (!profileId) throw AppError.validation("Pick a profile to add.");
+  // P13-AP-11 (sibling): `agentProfileFilePath` path.joins its argument
+  // straight into the store — unlike skills/KB, which got an explicit
+  // containment guard (F10-18). `profileId` here comes from a form field, so
+  // this new path validates the segment itself rather than inheriting the gap.
+  try {
+    resolveStoreSegment(agentProfilesDir(ctx.dataRoot), profileId);
+  } catch {
+    throw AppError.validation(`\`${profileId}\` is not a valid profile id.`);
+  }
 
   const absPath = agentProfileFilePath(profileId, ctx.dataRoot);
   if (!existsSync(absPath)) {
@@ -369,11 +383,13 @@ export async function deployAgentProfileFromLibrary(
       };
       const deployment: AgentDeployment = {
         profileId,
-        // AP-06: explicit grants, never an empty list.
+        // AP-06: explicit grants, never an empty list — the template's own
+        // grants when it has them, else the catalog defaults (the same list
+        // org-level create now persists).
         capabilities: normalizeDeliveryGrants(
           (fm.capabilities.length
             ? fm.capabilities
-            : explicitAgentGrants("catalog")
+            : defaultGrantsFor("agent")
           ).map((g) => ({
             capabilityId: g.capabilityId,
             mode: (ALWAYS_HUMAN.has(g.capabilityId)

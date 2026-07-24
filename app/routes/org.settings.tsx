@@ -46,6 +46,7 @@ import {
   createStoreFolder,
   deleteStoreNode,
   importGithubSnapshot,
+  writeStoreDoc,
   writeStoreFiles,
   type UploadFileInput,
 } from "~/server/org/store-files.server";
@@ -272,6 +273,7 @@ export async function action({ request }: Route.ActionArgs) {
             transport: field("transport"),
             target: field("target"),
             cred: field("cred"),
+            clearCred: field("clearCred") === "1",
           },
           actor,
         );
@@ -350,6 +352,19 @@ export async function action({ request }: Route.ActionArgs) {
               }
             : {}),
         });
+      }
+      case "store-write-doc": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const result = writeStoreDoc(
+          db,
+          target,
+          parseJsonStringArray(field("path")),
+          field("name"),
+          field("body"),
+          actor,
+        );
+        return ok(`${result.path.join("/")} saved — ${result.bytes} bytes`);
       }
       case "store-mkdir": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));

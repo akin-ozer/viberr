@@ -168,10 +168,11 @@ function readTemplate(
   };
 }
 
-/** First paragraph of a persona body, clamped — a template with no `desc` is
- * still scannable in the picker instead of dumping ~2,500 chars of persona. */
-function firstParagraph(body: string, max = 240): string {
-  const para = body.trim().split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim() ?? "";
+/** Scannable one-liner for the library picker: the first paragraph, clamped.
+ * A template with no `desc` would otherwise dump its whole ~2,500-char persona
+ * body into a list row (the same defect as the org card subtitle, AP-09). */
+function scannable(text: string, max = 240): string {
+  const para = text.trim().split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim() ?? "";
   return para.length > max ? para.slice(0, max - 1).trimEnd() + "…" : para;
 }
 
@@ -208,7 +209,7 @@ export function listLibraryProfiles(
       id,
       name: template.name,
       role: template.role,
-      desc: template.desc || firstParagraph(template.description),
+      desc: scannable(template.desc || template.description),
       backends: template.backends,
       stages: template.stages,
       spanAll: template.spanAll,

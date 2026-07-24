@@ -12,6 +12,7 @@ import {
   interruptRun,
   listRunsForTask,
   registerRunCompletion,
+  repoWriteWithheldFromDenylist,
   resumeRun,
   startRun,
 } from "./run-service.server";
@@ -536,5 +537,114 @@ describe("backendUnavailableMessage — state-aware codex copy", () => {
     const msg = backendUnavailableMessage("codex");
     expect(msg).toContain("no usable credential");
     expect(msg).toContain("opt in with VIBERR_CODEX_USE_CLI_AUTH=1");
+  });
+});
+
+describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
+  it("recognises exactly the denylist a withheld repo-write grant produces", () => {
+    // The rule set is specialist-tool-policy's `execute-code-or-write-repo`
+    // entry. It is computed for EVERY run backend-agnostically — it just had no
+    // effect on Codex, which has no denylist channel.
+    expect(
+      repoWriteWithheldFromDenylist([
+        "Edit",
+        "MultiEdit",
+        "Write",
+        "NotebookEdit",
+        "Bash(git commit:*)",
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not fire for the narrower delivery capabilities", () => {
+    // Withholding branch/push/PR must NOT make the whole workspace read-only:
+    // the agent still has to be able to edit files and run its validation.
+    expect(
+      repoWriteWithheldFromDenylist([
+        "Bash(git push:*)",
+        "Bash(git commit:*)",
+        "Bash(gh pr create:*)",
+        "Bash(git checkout -b:*)",
+      ]),
+    ).toBe(false);
+    expect(repoWriteWithheldFromDenylist([])).toBe(false);
+    expect(repoWriteWithheldFromDenylist(undefined)).toBe(false);
+  });
+});
+
+describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
+  function captureSpecs(): { specs: RunSpec[] } {
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: spec.backend, sessionId: null });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    return { specs };
+  }
+
+  it("marks repoWriteWithheld from the capability denylist so Codex can enforce it", async () => {
+    const { specs } = captureSpecs();
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
+      disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
+    });
+    await settle();
+    expect(specs[0]?.repoWriteWithheld).toBe(true);
+
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-granted", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
+      disallowedTools: ["Bash(gh pr merge:*)"],
+    });
+    await settle();
+    expect(specs[1]?.repoWriteWithheld).toBeUndefined();
+  });
+
+  it("an explicit caller value wins over the derivation", async () => {
+    const { specs } = captureSpecs();
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
+      repoWriteWithheld: true,
+    });
+    await settle();
+    expect(specs[0]?.repoWriteWithheld).toBe(true);
+  });
+
+  it("normalizes a stored effort from the OTHER backend's tier scale", async () => {
+    const { specs } = captureSpecs();
+    // "minimal" is a Codex tier; a profile switched to Claude keeps it stored.
+    // Before, this shipped verbatim into an SDK union that has no such value.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", effort: "minimal", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[0]?.effort).toBe("low");
+
+    // "max" is a Claude-only tier; a Codex run gets the nearest Codex tier.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-codex", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", effort: "max", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[1]?.effort).toBe("xhigh");
+
+    // A valid same-backend tier is untouched; an unset one stays unset.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-ok", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", effort: "xhigh", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[2]?.effort).toBe("xhigh");
   });
 });

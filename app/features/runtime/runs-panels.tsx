@@ -322,6 +322,7 @@ export function AgentLogsPanel({
   linesByThread,
   onRetryBackend,
   retrying,
+  streamError = null,
 }: {
   runtime: RunView[];
   sel: string | null;
@@ -332,6 +333,9 @@ export function AgentLogsPanel({
    *  right intent (run-specialist vs run-reviewer + profileId). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
   retrying?: boolean;
+  /** UI-03/UI-30: the live tail stopped (403 / dropped stream). Rendered in the
+   *  footer so a frozen console never looks like a quiet one. */
+  streamError?: string | null;
 }) {
   const [follow, setFollow] = useState(true);
   const [raw, setRaw] = useState(false);
@@ -369,27 +373,37 @@ export function AgentLogsPanel({
   }
 
   const st = runStatePill(cur!);
-  // A backend-availability/quota failure is recoverable on the other engine —
-  // offer the retry inline instead of a dead "continuity error" (D4).
-  const canRetryBackend =
-    !!onRetryBackend &&
+  // UI-38: the FAILURE EXPLANATION describes the RUN, not the viewer.
+  // `backendUnavailable` is a property of the run (the projection carries it);
+  // `canRetryBackend` additionally requires an `onRetryBackend` handler, which
+  // the page withholds from anyone without `run-agents` AND while any run is
+  // streaming — so a contributor (and everyone during a concurrent run) was told
+  // a quota failure was a "continuity error — see the blocked packet", pointing
+  // at a packet that need not exist. Only the BUTTON is grant-gated now.
+  const backendUnavailable =
     (cur!.kind === "primary" || cur!.kind === "reviewer") &&
     cur!.state === "error" &&
     !!cur!.failedBackendUnavailable &&
     !!cur!.altBackend;
+  const canRetryBackend = backendUnavailable && !!onRetryBackend;
   const altLabel = cur!.altBackend === "codex" ? "Codex" : "Claude Code";
   const footer =
     cur!.state === "running"
       ? "streaming — raw output stays here as evidence, never in the task record"
-      : cur!.lifecycle === "interrupted"
-        ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""} — the thread stays resumable`
-        : cur!.state === "done"
-          ? "run finished at " + (cur!.finished || "—") + " — thread can be re-engaged"
-          : cur!.state === "error"
-            ? canRetryBackend
-              ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit) — retry on ${altLabel}`
-              : "stream ended on a continuity error — see the blocked packet"
-            : "thread alive — no run executing";
+      : cur!.lifecycle === "queued"
+        ? // UI-57: a QUEUED run is not an idle thread. The strip renders only for
+          // `running`, so a queued run used to show a "queued" pill next to the
+          // footer "thread alive — no run executing", which contradicted it.
+          "queued — waiting for a runtime slot; output appears once it starts"
+        : cur!.lifecycle === "interrupted"
+          ? `interrupted${cur!.interruptedBy ? " by " + cur!.interruptedBy.label.split(" ")[0] : ""} — the thread stays resumable`
+          : cur!.state === "done"
+            ? "run finished at " + (cur!.finished || "—") + " — thread can be re-engaged"
+            : cur!.state === "error"
+              ? backendUnavailable
+                ? `${cur!.backend === "codex" ? "Codex" : "Claude Code"} was unavailable (quota / rate limit)${canRetryBackend ? ` — retry on ${altLabel}` : " — a maintainer can retry it on the other backend"}`
+                : "stream ended on a continuity error — see the blocked packet"
+              : "thread alive — no run executing";
 
   return (
     <div className="panel" data-comment-anchor="agent-logs">
@@ -426,9 +440,12 @@ export function AgentLogsPanel({
             Retry on {altLabel}
           </button>
         )}
+        {/* UI-57: both toggles carry their state for assistive tech, not just
+            via the `on` class. */}
         <button
           type="button"
           className={"fchip" + (raw ? " on" : "")}
+          aria-pressed={raw}
           onClick={() => setRaw(!raw)}
           title="Show raw stream events"
         >
@@ -437,6 +454,7 @@ export function AgentLogsPanel({
         <button
           type="button"
           className={"fchip" + (follow ? " on" : "")}
+          aria-pressed={follow}
           onClick={() => {
             const n = !follow;
             setFollow(n);
@@ -487,8 +505,12 @@ export function AgentLogsPanel({
       </div>
 
       <div className="logs-foot">
-        <span>{footer}</span>
-        <span className="mono">{shown.length} events</span>
+        {/* UI-03/UI-30: a stopped tail is stated, never left to look like
+            silence from the agent. */}
+        <span>{streamError ?? footer}</span>
+        <span className="mono">
+          {shown.length} event{shown.length === 1 ? "" : "s"}
+        </span>
       </div>
     </div>
   );

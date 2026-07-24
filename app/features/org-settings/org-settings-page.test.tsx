@@ -361,7 +361,13 @@ describe("ResourcesPanel", () => {
     expect(getByText("Done is human-only, always")).toBeTruthy();
     const chips = [...document.querySelectorAll(".pick-chip")];
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
-    expect(getByText("used in 4 projects — changes apply on next run")).toBeTruthy();
+    // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org
+    // edit does not silently reach an already-adopted project on its next run.
+    expect(
+      getByText(
+        "adopted by 4 projects — each keeps its own copy; re-adopt to pick up this edit",
+      ),
+    ).toBeTruthy();
     // Three ctx groups over the org resources; the selected skill chip is on.
     expect(document.querySelectorAll(".ctx-group")).toHaveLength(3);
     const skillChip = chips.find((c) => c.textContent === "terraform-review")!;

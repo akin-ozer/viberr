@@ -152,6 +152,14 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   // (bell) + projection.rebuilt broadcasts; `projects` scope = every
   // project/task change so the landing cards refresh without a manual
   // re-scan (E2 — `[user]` alone never saw task/project events).
-  useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
-  return <HomePage data={loaderData} theme={rootData?.theme ?? "system"} />;
+  const live = useLiveUpdates([sseScopes.user(), sseScopes.allProjects()]);
+  return (
+    <HomePage
+      data={loaderData}
+      theme={rootData?.theme ?? "system"}
+      // UI-03: surface a dead stream instead of freezing the cards silently.
+      livePaused={live.paused}
+      onReconnect={live.reconnect}
+    />
+  );
 }

@@ -1,12 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { AgentProfileView, AgentDeploymentView } from "./agent-types";
+import type {
+  AgentProfileView,
+  AgentDeploymentView,
+  LibraryProfileView,
+} from "./agent-types";
 
 /**
  * Route-level tests for /projects/:slug/agents: roster assembly from the
@@ -24,6 +28,7 @@ let ids: { arda: string; selin: string; deniz: string };
 
 type LoaderData = {
   profiles: AgentProfileView[];
+  library: LibraryProfileView[];
   deployments: AgentDeploymentView[];
   stages: { id: string; name: string; color: string }[];
   projectName: string;
@@ -643,5 +648,215 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       "utf8",
     );
     expect(template).toContain("name: Reviewer");
+  });
+});
+
+describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
+  /**
+   * Before this, NO code path added an org template to a project's `agents:`
+   * list: a profile created in Settings → Global agent profiles could never be
+   * deployed, run or selected (live-confirmed — "Org Docs Writer" was absent
+   * from a project created after it). The project Agents page now has an
+   * explicit "Add from library" action that copies one in.
+   *
+   * NB: the previous describe block deletes `reviewer`'s DEPLOYMENT while its
+   * template file survives — exactly the state the library picker is for.
+   */
+  it("offers the undeployed org templates, and hides the ones already deployed", async () => {
+    const data = await runLoader(ids.arda);
+    const libraryIds = data.library.map((t) => t.id);
+    // `reviewer` was un-deployed above; its template is still on disk.
+    expect(libraryIds).toContain("reviewer");
+    // Still-deployed templates and the system operator are never offered.
+    expect(libraryIds).not.toContain("developer");
+    expect(libraryIds).not.toContain("operator");
+
+    const reviewer = data.library.find((t) => t.id === "reviewer")!;
+    expect(reviewer.name).toBe("Reviewer");
+    // Scannable copy, not the whole persona body.
+    expect(reviewer.desc.length).toBeGreaterThan(0);
+    expect(reviewer.desc.length).toBeLessThanOrEqual(241);
+    expect(reviewer.stages).toEqual(["impl", "review"]);
+  });
+
+  it("deploy-profile copies the template into project.md with a full definition + EXPLICIT grants", async () => {
+    const result = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: "reviewer",
+    })) as { ok: boolean; toast: string; profileId: string };
+    expect(result.ok).toBe(true);
+    expect(result.profileId).toBe("reviewer");
+    expect(result.toast).toContain("added from the global library");
+
+    const data = await runLoader(ids.arda);
+    const deployed = data.profiles.find((p) => p.id === "reviewer")!;
+    expect(deployed.kind).toBe("specialist");
+    expect(deployed.name).toBe("Reviewer");
+    expect(deployed.stages).toEqual(["impl", "review"]);
+    // AP-06: never `capabilities: []` — an empty grant list is "unspecified",
+    // and unspecified means FULL repo-write power at the tool layer.
+    expect(deployed.capabilities.length).toBeGreaterThan(0);
+    expect(
+      deployed.capabilities.find((c) => c.capabilityId === "merge-pull-request")
+        ?.mode,
+    ).toBe("human");
+    // The template's own grants win over the catalog defaults where present:
+    // the seeded Reviewer must NOT commit/push.
+    expect(
+      deployed.capabilities.find((c) => c.capabilityId === "commit-push-branch")
+        ?.mode,
+    ).toBe("human");
+
+    // It is gone from the library now that it is deployed.
+    expect(data.library.map((t) => t.id)).not.toContain("reviewer");
+
+    const file = readFileSync(
+      path.join(app.dataRoot, "projects/viberr-core/project.md"),
+      "utf8",
+    );
+    expect(file).toContain("profileId: reviewer");
+
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.deployed",
+    });
+    expect(audit[0]).toMatchObject({
+      subjectId: "reviewer",
+      projectSlug: "viberr-core",
+      actorUserId: ids.arda,
+    });
+  });
+
+  it("refuses a duplicate deploy, an unknown id, and a non-admin", async () => {
+    const dup = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: "reviewer",
+    })) as { init?: { status?: number }; data?: { error?: string } };
+    expect(dup.init?.status).toBe(409);
+    expect(dup.data?.error).toContain("already deployed");
+
+    const unknown = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: "no-such-template",
+    })) as { init?: { status?: number } };
+    expect(unknown.init?.status).toBe(404);
+
+    // The operator template is a system profile — never library material,
+    // rejected on its kind before any duplicate check.
+    const operator = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: "operator",
+    })) as { init?: { status?: number }; data?: { error?: string } };
+    expect(operator.init?.status).toBe(400);
+    expect(operator.data?.error).toContain("not a specialist template");
+
+    const denied = (await postAction(ids.selin, {
+      intent: "deploy-profile",
+      profileId: "reviewer",
+    })) as { init?: { status?: number } };
+    expect(denied.init?.status).toBe(403);
+  });
+
+  it("AP-11 sibling: a traversing profileId is rejected, not path.join'd into the store", async () => {
+    // `agentProfileFilePath` joins its argument straight into the store (the
+    // containment guard skills/KB got in F10-18 was never added to it), and
+    // this id arrives from a form field — so the segment is validated here.
+    for (const evil of ["../../project", "..", "a/b", "with\\sep"]) {
+      const result = (await postAction(ids.arda, {
+        intent: "deploy-profile",
+        profileId: evil,
+      })) as { init?: { status?: number }; data?: { error?: string } };
+      expect(result.init?.status, evil).toBe(400);
+      expect(result.data?.error, evil).toContain("not a valid profile id");
+    }
+  });
+});
+
+describe("AP-07 — a project-level edit FORKS the profile (the modal now says so)", () => {
+  /**
+   * `updateAgentProfile` always writes a COMPLETE definition snapshot onto the
+   * deployment, and every field of it wins over the org template in
+   * `effectiveProfileView`. So the first edit detaches this project: later
+   * org-level edits never reach it. That is the deliberate model (a project
+   * owns its copy); what was wrong was the COPY — the org modal promised
+   * "used in N projects — changes apply on next run" and the project modal
+   * "changes apply to future assignments". This pins the BEHAVIOUR half of the
+   * pair; the copy half is asserted in agents-page.test.tsx (AP-07).
+   */
+  const templateId = "fork-probe";
+  const templatePath = () =>
+    path.join(app.dataRoot, "agents", "profiles", `${templateId}.md`);
+
+  async function writeTemplate(name: string, desc: string, stages: string[]) {
+    const { serializeAgentProfile } = await import(
+      "~/server/files/agent-profile-file.server"
+    );
+    writeFileSync(
+      templatePath(),
+      serializeAgentProfile({
+        frontmatter: {
+          id: templateId,
+          kind: "specialist",
+          name,
+          role: "Probe",
+          desc,
+          icon: "cpu",
+          backends: ["claude"],
+          model: "",
+          scope: "Global base",
+          stages,
+          spanAll: false,
+          capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+          extras: [],
+          resources: { skills: [], mcps: [], kb: [] },
+        },
+        description: "Original persona.",
+      }),
+      "utf8",
+    );
+  }
+
+  it("after an edit here, later org-template changes no longer reach this project", async () => {
+    await writeTemplate("Fork Probe", "Original desc.", ["impl"]);
+
+    // Deploy it, then confirm it still tracks the template.
+    expect(
+      ((await postAction(ids.arda, {
+        intent: "deploy-profile",
+        profileId: templateId,
+      })) as { ok: boolean }).ok,
+    ).toBe(true);
+
+    // Edit the project's copy — this is the fork point.
+    await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: templateId,
+      payload: JSON.stringify({
+        name: "Fork Probe",
+        role: "Probe",
+        backend: "claude",
+        stages: ["impl"],
+        definition: "Project-owned desc.",
+        caps: { "comment-on-task": "direct" },
+        resources: { skills: [], mcps: [], kb: [] },
+      }),
+    });
+
+    // The org template changes underneath it.
+    await writeTemplate("Renamed Globally", "Changed globally.", ["review"]);
+
+    const forked = (await runLoader(ids.arda)).profiles.find(
+      (p) => p.id === templateId,
+    )!;
+    // None of the org-level changes reach the project — the snapshot wins.
+    expect(forked.name).toBe("Fork Probe");
+    expect(forked.desc).toBe("Project-owned desc.");
+    expect(forked.stages).toEqual(["impl"]);
+
+    // Cleanup: drop the deployment and the probe template.
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: templateId,
+    });
+    rmSync(templatePath(), { force: true });
   });
 });

@@ -1,4 +1,5 @@
 import {
+  readFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -325,6 +326,88 @@ export function createStoreFolder(
     details: { path: [...base, ...segs].join("/") },
   });
   return { createdPath: [...base, ...segs] };
+}
+
+// ------------------------------------------------------------ author a doc
+
+/** Extensions the in-app editor will create/read (text docs only). */
+const EDITABLE_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".mdx",
+  ".txt",
+  ".rst",
+  ".text",
+  ".json",
+  ".yaml",
+  ".yml",
+]);
+
+export interface StoreDocResult {
+  path: string[];
+  bytes: number;
+}
+
+/** Read one store text doc for the editor (`null` when absent/too large). */
+export function readStoreDoc(
+  target: StoreTarget,
+  nodePath: string[],
+  maxBytes = 256 * 1024,
+): { text: string; truncated: boolean } | null {
+  const parts = sanitizeDirPath(nodePath);
+  if (parts.length === 0) return null;
+  const abs = path.join(target.rootAbs, ...parts);
+  assertInsideRoot(target.rootAbs, abs);
+  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
+  const size = statSync(abs).size;
+  const text = readFileSync(abs, "utf8").slice(0, maxBytes);
+  return { text, truncated: size > maxBytes };
+}
+
+/**
+ * Create or overwrite one text document inside a store folder (P13-LV-06,
+ * owner ruling 3).
+ *
+ * Knowledge bases could only be filled by upload / folder-drop / "Add from
+ * GitHub", even though skills have a full in-app SKILL.md editor and the KB
+ * modal's own copy says "drop docs in, or let agents append". Writing the three
+ * facts your agents must know meant leaving the product. This is the same write
+ * path uploads use, so the watcher re-index and doc counts behave identically.
+ */
+export function writeStoreDoc(
+  db: DatabaseSync,
+  target: StoreTarget,
+  dirPath: string[],
+  name: string,
+  body: string,
+  actor: AuditActor,
+): StoreDocResult {
+  const base = sanitizeDirPath(dirPath);
+  const cleaned = name.trim().replace(/[\\/]/g, "-");
+  if (!cleaned || cleaned.includes("..")) {
+    throw AppError.validation("Give the document a file name.");
+  }
+  const withExt = path.extname(cleaned) ? cleaned : `${cleaned}.md`;
+  if (!EDITABLE_EXTENSIONS.has(path.extname(withExt).toLowerCase())) {
+    throw AppError.validation(
+      `Viberr only edits text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+    );
+  }
+  const dirAbs = path.join(target.rootAbs, ...base);
+  assertInsideRoot(target.rootAbs, dirAbs);
+  const abs = path.join(dirAbs, withExt.slice(0, 200));
+  assertInsideRoot(target.rootAbs, abs);
+  mkdirSync(dirAbs, { recursive: true });
+  writeFileSync(abs, body);
+  touchResource(db, target);
+  recordAudit(db, {
+    action: "org.store.doc_written",
+    actor,
+    subjectKind: `org_${target.kind}`,
+    subjectId: target.id,
+    details: { path: [...base, withExt].join("/"), bytes: body.length },
+  });
+  return { path: [...base, withExt], bytes: body.length };
 }
 
 // ---------------------------------------------------------------- delete

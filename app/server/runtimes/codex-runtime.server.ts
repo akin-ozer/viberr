@@ -65,7 +65,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Translate only the portable external-server subset shared by both SDKs.
  * Claude's in-process `{ type: "sdk" }` server has no Codex equivalent and is
- * intentionally skipped rather than serialized into invalid CLI config. */
+ * intentionally skipped rather than serialized into invalid CLI config.
+ *
+ * NAMING (P13-LV-15, vendor behavior, disclosed not normalized): the two CLIs
+ * derive a different tool prefix from the SAME declared server name — Claude
+ * mounts `mcp__everything-http__echo`, the Codex CLI lowercases hyphens to
+ * underscores and mounts `mcp__everything_http__echo`. Viberr passes the
+ * declared name through unchanged on both, so a persona/skill/directive that
+ * names a tool LITERALLY works on one backend and not the other. Nothing here
+ * can fix that (the transform is inside the codex binary); the honest fix is a
+ * caveat on the MCP admin surface — see the pass-13 report.
+ *
+ * NOTE also that this config does not REMOVE servers the run home declares —
+ * the CLI merges `--config` per dotted leaf key. That is why runs get an
+ * app-owned CODEX_HOME (`codex-config.server.ts`) instead of the host's. */
 function codexMcpServers(servers?: Record<string, unknown>): CodexConfig {
   const translated: CodexConfig = {};
   for (const [name, value] of Object.entries(servers ?? {})) {

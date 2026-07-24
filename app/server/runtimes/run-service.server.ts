@@ -11,6 +11,7 @@ import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import type { RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
+import { resolveRunEffort } from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
 import { projectRunsForTask } from "./run-projection.server";
 import { createRunSink } from "./run-sink.server";
@@ -342,7 +343,15 @@ export async function startRun(
     kind: input.kind,
     backend: input.backend,
     model: input.model,
-    ...(input.effort ? { effort: input.effort } : {}),
+    // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
+    // funnel every path goes through (specialist, operator, resume). It used to
+    // run only on the D4 cross-backend retry, so a profile whose stored effort
+    // came from the other backend's scale ("minimal" from Codex, "max" from
+    // Claude) shipped a tier the target SDK does not accept. An unset effort
+    // stays unset — the SDK default applies, as before.
+    ...(input.effort?.trim()
+      ? { effort: resolveRunEffort(input.backend, input.effort) }
+      : {}),
     prompt: input.prompt,
     workdir,
     resumeSessionId: input.resumeSessionId ?? null,

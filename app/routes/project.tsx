@@ -123,7 +123,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // toast), and the open task adds its own `task:` scope (task-detail
   // brief) — any matching event revalidates layout + child loaders.
   const slug = board.project.slug;
-  useLiveUpdates(
+  // UI-03: `paused` is true once the stream has failed (an expired session 401s
+  // and an EventSource never retries a failed connection) — the topbar says so.
+  const live = useLiveUpdates(
     openTask
       ? [sseScopes.project(slug), sseScopes.task(slug, openTask.key), sseScopes.user()]
       : [sseScopes.project(slug), sseScopes.user()],
@@ -162,6 +164,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           theme={rootData?.theme ?? "system"}
           notifications={loaderData.notifications}
           unread={loaderData.unread}
+          livePaused={live.paused}
+          onReconnect={live.reconnect}
         />
         {board.project.archived ? (
           <div className="archived-banner" role="status">

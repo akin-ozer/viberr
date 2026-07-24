@@ -87,6 +87,7 @@ function BrowserToolbar({
   onUploadFiles,
   onUploadFolder,
   onNewFolder,
+  onNewDoc,
 }: {
   gh: GhImportState;
   dispatchGh: (action: GhImportAction) => void;
@@ -95,6 +96,7 @@ function BrowserToolbar({
   onUploadFiles: () => void;
   onUploadFolder: () => void;
   onNewFolder: () => void;
+  onNewDoc: () => void;
 }) {
   return (
     <>
@@ -114,6 +116,13 @@ function BrowserToolbar({
         >
           <Icon name="github" />
           Add from GitHub
+        </button>
+        {/* P13-LV-06 (owner ruling 3): a knowledge base used to be fillable
+            only by upload/import, so writing three facts by hand meant leaving
+            the product — while skills had a full in-app editor. */}
+        <button type="button" className="btn sm" onClick={onNewDoc}>
+          <Icon name="file" />
+          New document
         </button>
         <button type="button" className="btn ghost sm" onClick={onNewFolder}>
           <FolderIco />
@@ -603,6 +612,8 @@ export function StoreBrowser({
       ),
   );
   const [newIn, setNewIn] = useState<string[] | null>(null);
+  /** The in-app document editor (P13-LV-06): `null` = closed. */
+  const [doc, setDoc] = useState<{ name: string; body: string } | null>(null);
   const [confirm, setConfirm] = useState<{
     path: string[];
     node: StoreNode;
@@ -716,7 +727,50 @@ export function StoreBrowser({
             onUploadFiles={() => ops.startUpload([])}
             onUploadFolder={() => ops.startDirUpload([])}
             onNewFolder={() => setNewIn([])}
+            onNewDoc={() => setDoc({ name: "", body: "" })}
           />
+
+          {doc && (
+            <div className="fm-doc">
+              <input
+                type="text"
+                className="mono"
+                value={doc.name}
+                placeholder="file-name.md"
+                aria-label="Document file name"
+                onChange={(e) => setDoc({ ...doc, name: e.target.value })}
+              />
+              <textarea
+                className="ta mono"
+                rows={10}
+                value={doc.body}
+                placeholder={"# Title\n\nWhat your agents must know."}
+                aria-label="Document contents"
+                onChange={(e) => setDoc({ ...doc, body: e.target.value })}
+              />
+              <div className="fm-doc-acts">
+                <button type="button" className="btn ghost sm" onClick={() => setDoc(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn sm primary"
+                  disabled={!doc.name.trim()}
+                  onClick={() => {
+                    ops.submitFields({
+                      intent: "store-write-doc",
+                      path: JSON.stringify([]),
+                      name: doc.name.trim(),
+                      body: doc.body,
+                    });
+                    setDoc(null);
+                  }}
+                >
+                  Save document
+                </button>
+              </div>
+            </div>
+          )}
 
           <StoreTree
             nodes={nodes}

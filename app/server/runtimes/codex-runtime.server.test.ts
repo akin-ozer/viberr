@@ -8,6 +8,7 @@ import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
 import {
   createCodexAdapter,
   resolveCodexReasoningEffort,
+  resolveCodexSandboxMode,
   type CodexClient,
   type CodexThread,
 } from "./codex-runtime.server";
@@ -717,5 +718,201 @@ describe("codex failure classification survives redaction into runFailureReason 
     // but the projected display tag carries the safe-to-persist class.
     expect(lines.at(-1)?.display).toMatchObject({ ev: "err", tag: "error·quota" });
     expect(lines.at(-1)?.raw).not.toContain("secret-sentinel");
+  });
+});
+
+// ---------------------------------------------- P13: run isolation + sandbox
+
+describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
+  /**
+   * Live-proven 2026-07-24: a Codex scout whose profile granted exactly ONE
+   * skill reported 20+ host skills (`imagegen`, `skill-installer`,
+   * `github:yeet`, `openai-developers:*`, …) and a host MCP server
+   * (`openai_api_key_local_confirmation`) Viberr never granted. Root cause
+   * verified against codex-cli 0.144.6: the CLI merges `--config` per dotted
+   * leaf key into `$CODEX_HOME/config.toml` (so `mcp_servers` overrides ADD to
+   * the host's table rather than replacing it), and re-installs its five
+   * bundled `.system` skills into every home on startup.
+   */
+  async function configFor(spec: Partial<RunSpec>): Promise<CodexOptions["config"]> {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      { ...SPEC, ...spec },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    return run.factoryOptions()?.config;
+  }
+
+  it("closes the CLI's own skills channel (bundled + user-installed)", async () => {
+    const config = await configFor({});
+    expect(config?.skills).toEqual({
+      include_instructions: false,
+      bundled: false,
+    });
+  });
+
+  it("refuses the checked-out repo's AGENTS.md (RT-04 — Claude loads no CLAUDE.md)", async () => {
+    const config = await configFor({});
+    expect(config?.project_doc_max_bytes).toBe(0);
+  });
+
+  it("disables the plugin + hook channels that carry host skills and MCP servers", async () => {
+    const config = await configFor({});
+    expect(config?.features).toMatchObject({
+      apps: false,
+      plugins: false,
+      hooks: false,
+    });
+  });
+
+  it("cannot be re-opened by a deployment's base config override", async () => {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({
+      codexFactory: run.factory,
+      config: {
+        project_doc_max_bytes: 32_000,
+        skills: { include_instructions: true, bundled: true },
+        features: { apps: true, plugins: true, hooks: true },
+      },
+    }).start(SPEC, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    const config = run.factoryOptions()?.config;
+    expect(config?.project_doc_max_bytes).toBe(0);
+    expect(config?.skills).toEqual({
+      include_instructions: false,
+      bundled: false,
+    });
+    expect(config?.features).toMatchObject({
+      apps: false,
+      plugins: false,
+      hooks: false,
+    });
+  });
+});
+
+describe("codex sandbox enforces the withheld repo-write grant (P13-RT-02)", () => {
+  it("a delivering run whose repo-write grant is withheld is read-only", () => {
+    // `autonomous` stays TRUE — it also drives Claude's permissionMode, and
+    // flipping it would hang a server run on an unanswerable approval.
+    expect(
+      resolveCodexSandboxMode({
+        ...SPEC,
+        kind: "primary",
+        autonomous: true,
+        repoWriteWithheld: true,
+      }),
+    ).toBe("read-only");
+  });
+
+  it("a fully-granted delivering run still gets full access", () => {
+    expect(
+      resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: true }),
+    ).toBe("danger-full-access");
+    expect(
+      resolveCodexSandboxMode({
+        ...SPEC,
+        kind: "primary",
+        autonomous: true,
+        repoWriteWithheld: false,
+      }),
+    ).toBe("danger-full-access");
+  });
+
+  it("operators and supporting runs stay read-only regardless", () => {
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "operator" })).toBe("read-only");
+    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer" })).toBe("read-only");
+  });
+
+  it("reaches the SDK thread options", async () => {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      { ...SPEC, repoWriteWithheld: true },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(run.startOptions()?.sandboxMode).toBe("read-only");
+  });
+});
+
+describe("git identity reaches the model's shell (P13-RT-10)", () => {
+  it("exports GIT_AUTHOR_*/GIT_COMMITTER_* alongside the git ceiling", async () => {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      {
+        ...SPEC,
+        env: {
+          GIT_CEILING_DIRECTORIES: "/safe/task",
+          GIT_AUTHOR_NAME: "Docs Writer",
+          GIT_AUTHOR_EMAIL: "docs-writer@agents.viberr.local",
+          GIT_COMMITTER_NAME: "Docs Writer",
+          GIT_COMMITTER_EMAIL: "docs-writer@agents.viberr.local",
+          UNRELATED_SECRETISH: "must-not-cross",
+        },
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const policy = run.factoryOptions()?.config?.shell_environment_policy as {
+      set?: Record<string, string>;
+    };
+    expect(policy.set).toEqual({
+      GIT_CEILING_DIRECTORIES: "/safe/task",
+      GIT_AUTHOR_NAME: "Docs Writer",
+      GIT_AUTHOR_EMAIL: "docs-writer@agents.viberr.local",
+      GIT_COMMITTER_NAME: "Docs Writer",
+      GIT_COMMITTER_EMAIL: "docs-writer@agents.viberr.local",
+    });
+    // Only the named keys cross the boundary — everything else stays in the
+    // CLI's own process env (where the subscription credential lives).
+    expect(policy.set?.UNRELATED_SECRETISH).toBeUndefined();
+  });
+});
+
+describe("codex idle timeout classifies as a hang, not a generic failure (P13-RT-11)", () => {
+  it("tags the terminal line `error·idle_timeout`", async () => {
+    process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS = "5";
+    resetEnvCacheForTests();
+    const thread: CodexThread = {
+      id: "t",
+      async runStreamed(_input, turnOptions) {
+        const signal = turnOptions?.signal;
+        return {
+          events: asSdkEvents(
+            (async function* () {
+              // Never yields — the idle guard is the only thing that settles it.
+              await new Promise((resolve, reject) => {
+                signal?.addEventListener("abort", () =>
+                  reject(new DOMException("aborted", "AbortError")),
+                );
+              });
+            })(),
+          ),
+        };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
+      onLine: (l) => lines.push(l),
+      onExit: (e) => (exit = e),
+    });
+    await drain();
+    expect(exit).toMatchObject({ outcome: "error" });
+    expect(lines.at(-1)?.display?.tag).toBe("error·idle_timeout");
+    delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+    resetEnvCacheForTests();
   });
 });

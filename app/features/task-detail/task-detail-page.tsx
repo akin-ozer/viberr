@@ -22,6 +22,7 @@ import {
 } from "./operator-recommendations";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import { prStatePill } from "~/features/github/github-pills";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { formatDayDotTime } from "~/shared/dates/format";
@@ -137,12 +138,15 @@ export function GithubTrace({
         <Icon name="github" />
         <span className="repo">{task.repo}</span>
         {task.pr ? (
-          <Pill kind={task.pr.state === "merged" ? "done" : "info"} sm>
+          // UI-36: reuse the shared PR-state mapping. This branched only on
+          // `merged`/`accepted`, so a PR CLOSED WITHOUT MERGING (a rejected
+          // one — a first-class state since NEW-1) rendered as a blue "PR #14",
+          // visually identical to a PR still in review. The GitHub page and the
+          // review queue have always rendered it correctly.
+          <Pill kind={prStatePill(task.pr.state).kind} sm>
             {task.pr.state === "merged"
               ? "merged"
-              : task.pr.state === "accepted"
-                ? `PR #${task.pr.number} · merge pending`
-                : "PR #" + task.pr.number}
+              : `PR #${task.pr.number} · ${prStatePill(task.pr.state).label}`}
           </Pill>
         ) : (
           <Pill kind="neutral" sm>
@@ -162,7 +166,8 @@ export function GithubTrace({
           <div className="kv-row">
             <span className="k">Diff</span>
             <span className="v mono">
-              {task.changed.files} files ·{" "}
+              {/* LV-09: "Diff 1 files" */}
+              {task.changed.files} {task.changed.files === 1 ? "file" : "files"} ·{" "}
               <span style={{ color: "var(--teal-dark)" }}>+{task.changed.add}</span>{" "}
               <span style={{ color: "var(--coral-dark)" }}>−{task.changed.del}</span>
             </span>
@@ -386,9 +391,15 @@ function TaskHero({
   useEffect(() => {
     if (editGoalSignal > 0 && editGoalSignal !== seenEditGoal.current) {
       seenEditGoal.current = editGoalSignal;
-      if (canEditGoal) setEditing(true);
+      if (canEditGoal) {
+        // UI-57: re-seed from the CURRENT goal. `draft` is seeded once at mount
+        // and only the Edit button refreshed it, so a packet-opened editor could
+        // save stale text over another user's edit.
+        setDraft(task.goal);
+        setEditing(true);
+      }
     }
-  }, [editGoalSignal, canEditGoal]);
+  }, [editGoalSignal, canEditGoal, task.goal]);
 
   return (
     <div className="task-hero">
@@ -1077,6 +1088,7 @@ export function TaskDetailPage({
   backendAvailable,
   deliveringActive,
   activeReviewerIds,
+  runsVisible = true,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -1103,6 +1115,10 @@ export function TaskDetailPage({
   deliveringActive: boolean;
   /** Reviewer profile ids with an active run — disables only that reviewer. */
   activeReviewerIds: string[];
+  /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
+   *  were withheld by the loader and the console renders an honest gate notice
+   *  instead of an empty panel. */
+  runsVisible?: boolean;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -1190,7 +1206,7 @@ export function TaskDetailPage({
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
   // live lines via run.log-appended; revalidates on run.state-changed.
-  const { linesByThread } = useRunLogStream({
+  const { linesByThread, streamError } = useRunLogStream({
     projectSlug: task.projectSlug,
     taskKey: task.key,
     threads: runtime.map((r) => ({
@@ -1200,6 +1216,9 @@ export function TaskDetailPage({
     })),
     // F22: bounds a stale "running" strip if a finalize event is missed.
     hasActiveRun: runtime.some((r) => r.state === "running"),
+    // UI-30: a non-member's tail requests 403 — don't open a stream that can
+    // only fail (it used to 403 silently on every appended line).
+    enabled: runsVisible,
   });
 
   const {
@@ -1272,6 +1291,10 @@ export function TaskDetailPage({
             busy={resolveBusy}
             canResolve={canResolvePacket}
             canResolveCompletion={canRunAgents}
+            // UI-42: `update-goal` is admin|maintainer — the same grant the
+            // hero's Edit button uses. An owner-only resolver must not be
+            // offered a decision they cannot then carry out.
+            canEditGoal={canRunAgents}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />
@@ -1305,7 +1328,7 @@ export function TaskDetailPage({
           operatorRunActive={operatorRunActive}
         />
 
-        {runtime.length > 0 ? (
+        {runtime.length > 0 && runsVisible ? (
           <AgentLogsPanel
             runtime={runtime}
             sel={shownLogSel}
@@ -1313,7 +1336,25 @@ export function TaskDetailPage({
             linesByThread={linesByThread}
             {...(onRetryBackend ? { onRetryBackend } : {})}
             retrying={runBusy}
+            streamError={streamError}
           />
+        ) : null}
+        {/* UI-30: raw console output, the `{ } raw` wire envelopes and the
+            provider session id are project-member material (the two routes that
+            serve the same data require membership). Say so rather than render an
+            empty console or, as before, hand them to any signed-in user. */}
+        {runtime.length > 0 && !runsVisible ? (
+          <section className="panel" data-comment-anchor="agent-logs">
+            <div className="panel-head">
+              <Icon name="cpu" />
+              <h2>Agent logs</h2>
+            </div>
+            <p className="empty" style={{ padding: "1rem .5rem" }}>
+              Raw agent output, wire envelopes and provider session ids are
+              limited to project members. The run summary above is public to
+              signed-in users.
+            </p>
+          </section>
         ) : null}
 
         <Timeline
