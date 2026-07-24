@@ -327,6 +327,20 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect((forced[0]!.details as { bypassed?: string }).bypassed).toContain("request");
   });
 
+  it("forceAcceptCompletion on an already-Done task is a no-op — no misleading audit (DG-2)", async () => {
+    const store = prepared();
+    withTask(store, { stage: "done", ownerUserId: store.users.arda.id, validation: "healthy" });
+    const res = await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(res.task.stage).toBe("done");
+    // Overrode nothing → no forced-acceptance audit row.
+    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
+  });
+
   it("forceAcceptCompletion denies a NON-admin (maintainer) — admin-only override (DG-2)", async () => {
     const store = prepared();
     withTask(

@@ -84,6 +84,19 @@ irreversible merge, human finishes the merge), or should autonomous completion b
 a human merges (so Done always ⇒ merged), or should the reconcile poller surface the dangling PR
 as needing a human merge? Currently nothing nudges the human to finish the merge.
 
+## Adversarial self-review of the fix PR (2 subagents, diff main...pass12) — all real findings fixed
+- **RBAC/UI reviewer:** no hard bugs. Finding 1 (force-accept only surfaced the reviewer-gate
+  wedge, not the blocked-packet/no-branch case the docstring claimed) → FIXED: GithubTrace now
+  computes `forceAcceptReason` = blockReason ?? (blocked-packet) and renders the button in both
+  the branch and no-branch paths; +component test. Finding 2 (audit written even if accept
+  no-ops on an already-Done task) → FIXED: early-return before audit if already Done; +test.
+- **Delivery/runtime reviewer:** no high/critical bugs; AO-2 independently confirmed correct
+  (queued trigger never lost — the successor's `releaseOperatorLease` drains pending). LOW edges
+  addressed: dropped the terminal-PR reconcile-write that recorded a spurious `github.pr.opened`
+  audit (#3); F12-05 dedup now keys on project_slug+task_key+title (#4) and the comment is honest
+  about retention eviction re-nudging (#2). Edge #1 (accepted-then-merged-out-of-band opens a
+  fresh PR) left as the intended DG-1 behavior ("a reworked branch gets a new PR").
+
 ## Bugs the LIVE re-validation caught in my OWN pass-12 fixes (both fixed + now tested)
 
 - **SELF-1 (task-detail 500):** the DG-2 UI referenced `onForceAccept` in JSX but never

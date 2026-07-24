@@ -30,9 +30,10 @@ const POLICY_ENGINE_NOTIFY_FROM = {
  * "merge pending" state (F12-05). An Autonomous-preset operator can self-accept
  * a task (Done), but `merge-pull-request` is always-human, so nothing actually
  * merges the PR: without a nudge, a Done task's PR dangles unmerged forever.
- * Fires ONCE per (task, PR) — deduped by the notification's distinctive title
- * (rows are never deleted and read is monotonic, so "exists" means "already
- * nudged"). A human still completes the merge (Complete-merge / gh).
+ * Deduped by the notification's distinctive per-(project, task, PR) title so a
+ * steady poll doesn't re-notify. (Notification retention can eventually evict an
+ * old nudge row, after which the poller re-reminds — benign, since the merge is
+ * genuinely still pending.) A human completes the merge (Complete-merge / gh).
  */
 async function nudgeMergePendingTasks(
   db: DatabaseSync,
@@ -58,9 +59,10 @@ async function nudgeMergePendingTasks(
     const title = `PR #${pr.number} accepted — merge to finish ${row.key}`;
     const exists = db
       .prepare(
-        `SELECT 1 FROM notifications WHERE task_key = ? AND kind = 'policy' AND title = ? LIMIT 1`,
+        `SELECT 1 FROM notifications
+          WHERE project_slug = ? AND task_key = ? AND kind = 'policy' AND title = ? LIMIT 1`,
       )
-      .get(row.key, title);
+      .get(row.slug, row.key, title);
     if (exists) continue;
     const { notifyTaskWatchers } = await import(
       "~/server/tasks/task-actions.server"

@@ -3441,6 +3441,15 @@ export async function forceAcceptCompletion(
   );
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  // Already Done → acceptCompletion is a no-op; don't record a misleading
+  // "forced" audit for an override that overrode nothing.
+  const doneStageId =
+    terminalStageIdOf(project) ??
+    project.stages[project.stages.length - 1]?.id ??
+    "done";
+  if (existing.parsed.frontmatter.stage === doneStageId) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+  }
   const bypassed =
     acceptanceBlockedReason(existing.parsed.frontmatter) ??
     (existing.parsed.frontmatter.readiness === "blocked"

@@ -152,13 +152,16 @@ export async function openTaskPr(
     if (live.ok) {
       // Even a cached "review"/"accepted" PR may have been merged or closed
       // out-of-band on GitHub since we last reconciled. Reuse ONLY a PR that is
-      // still genuinely open; otherwise reconcile the cache to reality and fall
-      // through to open a FRESH PR, so a reworked branch is never stapled to a
-      // dead (merged/closed) PR (DG-1).
+      // still genuinely open; otherwise fall through to open a FRESH PR so a
+      // reworked branch is never stapled to a dead (merged/closed) PR (DG-1). We
+      // do NOT reconcile the terminal PR into the cache here — that would record
+      // a misleading `github.pr.opened` audit for a PR being discarded; the
+      // reconcile poller keeps the cache honest, and the create path below
+      // overwrites it with the fresh PR on success.
       const liveIsOpen =
         live.data.state === "open" && live.data.merged !== true;
-      await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
       if (liveIsOpen) {
+        await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
         return {
           status: "ok",
           prNumber: live.data.number,

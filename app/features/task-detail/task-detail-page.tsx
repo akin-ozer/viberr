@@ -78,6 +78,34 @@ export function GithubTrace({
   onForceAccept?: () => void;
   merging?: boolean;
 }) {
+  // Admin escape hatch (DG-2): acceptance is wedged either by the required-reviewer
+  // gate (task.blockReason) OR by an open blocked decision packet a crashed run left
+  // behind. Surfaced for admins (onForceAccept present) regardless of branch/PR, so a
+  // no-branch pre-work wedge is still escapable.
+  const forceAcceptReason =
+    task.blockReason ??
+    (task.packet?.type === "blocked"
+      ? "An open blocked decision is holding this task."
+      : null);
+  const forceAcceptRow =
+    forceAcceptReason && onForceAccept ? (
+      <div style={{ marginTop: ".8rem" }}>
+        <p className="hint" style={{ margin: "0 0 .4rem" }}>
+          Acceptance is blocked: {forceAcceptReason}
+        </p>
+        <button
+          type="button"
+          className="btn ghost sm"
+          style={{ width: "100%" }}
+          disabled={merging}
+          onClick={onForceAccept}
+          title="Admin override: accept this task into Done past the review gate. Audited."
+        >
+          <Icon name="shield" />
+          Force accept (override review gate)
+        </button>
+      </div>
+    ) : null;
   if (!task.branch && !task.pr) {
     return (
       <div className="panel">
@@ -88,6 +116,7 @@ export function GithubTrace({
         <div className="empty" style={{ padding: "1rem .5rem" }}>
           No branch yet. A task-key branch is created when execution starts.
         </div>
+        {forceAcceptRow}
       </div>
     );
   }
@@ -175,24 +204,7 @@ export function GithubTrace({
             Complete merge
           </button>
         )}
-        {task.blockReason && onForceAccept && (
-          <div style={{ marginTop: ".8rem" }}>
-            <p className="hint" style={{ margin: "0 0 .4rem" }}>
-              Acceptance is blocked: {task.blockReason}
-            </p>
-            <button
-              type="button"
-              className="btn ghost sm"
-              style={{ width: "100%" }}
-              disabled={merging}
-              onClick={onForceAccept}
-              title="Admin override: accept this task into Done past the review gate. Audited."
-            >
-              <Icon name="shield" />
-              Force accept (override review gate)
-            </button>
-          </div>
-        )}
+        {forceAcceptRow}
         {ghHref && (
           <a
             className="btn ghost sm"

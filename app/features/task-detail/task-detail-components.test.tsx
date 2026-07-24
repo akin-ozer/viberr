@@ -782,6 +782,32 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(onForceAccept).toHaveBeenCalled();
   });
 
+  it("surfaces force-accept for a blocked-packet wedge (null blockReason) even with no branch/PR", () => {
+    const onForceAccept = vi.fn();
+    const { container, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          task={traceTask({
+            branch: null,
+            pr: null,
+            blockReason: null,
+            packet: { type: "blocked" },
+          })}
+          onForceAccept={onForceAccept}
+        />
+      </MemoryRouter>,
+    );
+    // No branch → the GitHub panel shows the empty state, but the admin escape
+    // hatch is still rendered (a crashed pre-work wedge must be escapable).
+    expect(getByText(/No branch yet/)).toBeTruthy();
+    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Force accept"),
+    ) as HTMLButtonElement;
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+    expect(onForceAccept).toHaveBeenCalled();
+  });
+
   it("shows NO force-accept control for a non-admin (onForceAccept undefined), even when blocked", () => {
     const { container } = render(
       <MemoryRouter>
