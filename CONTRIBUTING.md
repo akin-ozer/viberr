@@ -29,6 +29,10 @@ npm run dev        # http://localhost:5173
 See the [README](README.md) for the full quickstart, demo accounts, Docker setup, and
 architecture overview.
 
+## Health & scripts
+
+`npm run dev` serves the app. `GET /resources/health` is the readiness probe.
+
 ## Branch / PR workflow
 
 - Branch off `main`, using a short descriptive branch name (e.g. `fix-board-filter`,
