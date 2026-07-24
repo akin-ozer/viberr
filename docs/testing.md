@@ -60,4 +60,14 @@ VIBERR_DATA_ROOT=$(mktemp -d) npm test
 Useful if you're iterating locally and don't want a run to seed, mutate,
 or delete files under your real `./data`.
 
+## Operator-brevity guardrail
+
+Tests that exercise operator comments should expect narration to be hard-capped
+at `OPERATOR_BREVITY_MAX_CHARS` (1000 chars), with overflow trimmed and a
+marker appended; this is enforced in
+`app/server/tasks/comment-guardrails.server.ts` (`enforceOperatorBrevity`), is
+ON by default for every project via `DEFAULT_GUARDRAILS` in
+`app/shared/workflow/templates.ts`, and can be toggled per project through the
+`guardrails` array in that project's canonical frontmatter.
+
 See also: [testing-quickstart.md](./testing-quickstart.md).
