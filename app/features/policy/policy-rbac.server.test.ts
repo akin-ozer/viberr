@@ -17,6 +17,7 @@ import {
   reorderTask,
   dismissRecommendation,
   applyRecommendation,
+  forceAcceptCompletion,
 } from "~/server/tasks/task-actions.server";
 import {
   assignSpecialist,
@@ -26,7 +27,8 @@ import { updateProjectIdentity, inviteMember } from "~/features/project-settings
 import { setMemberRole } from "~/features/policy/policy-actions.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError } from "~/server/errors/app-error.server";
-import { ROLE_RANK, rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
+import { ROLE_RANK, RBAC_DEFINITIONS,
+  rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
 import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
@@ -172,12 +174,13 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
 
   it("every ACTION_ROLES set is monotonic (if a role holds it, every higher role does)", () => {
     // The whole design assumes a tier; a non-monotonic set would be a bug.
-    const actions: RbacAction[] = [
-      "create-task", "own-task", "reconcile-github", "approve-transition",
-      "resolve-packet", "accept-completion", "run-agents", "reorder-board",
-      "update-goal", "grant-github-scope", "rescan-project",
-      "release-any-ownership", "manage-members", "manage-agents", "edit-policy",
-    ];
+    //
+    // P13: this list used to be hand-maintained, so it silently stopped covering
+    // the matrix the moment an action was added — `force-accept-completion`
+    // (pass 12) was never checked here. Derive it from RBAC_DEFINITIONS so a new
+    // action is covered the day it lands.
+    const actions: RbacAction[] = RBAC_DEFINITIONS.map((d) => d.id);
+    expect(actions.length).toBe(RBAC_DEFINITIONS.length);
     for (const a of actions) {
       const roles = rolesForAction(a).map((r) => ROLE_RANK[r]).sort((x, y) => x - y);
       const floor = roles[0]!;
@@ -187,6 +190,19 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
         new Set(holders),
       );
     }
+  });
+
+  it("force-accept-completion → admin ONLY (the audited escape hatch)", async () => {
+    // P13: the narrowest grant in the matrix had no enforcement test at all,
+    // even though it deliberately bypasses the review gate (DG-2).
+    await assertMatchesMatrix("force-accept-completion", (actor) =>
+      forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor,
+        { dataRoot: store.dataRoot },
+      ),
+    );
   });
 
   it("create-task → contributor+ (viewer + non-member denied)", async () => {
