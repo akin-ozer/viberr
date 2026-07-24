@@ -257,8 +257,13 @@ function StoreTree({
             onDismissNew();
           }
         }}
-        onBlur={(e) => {
-          if (newIn) onCreateFolder(path, e.target.value);
+        onBlur={() => {
+          // P13-UI-23: committing on BLUR created a folder from a half-typed
+          // name whenever focus moved (clicking another row, the toolbar, or
+          // just tabbing away) — an accidental, real filesystem mutation with
+          // no way to take it back except deleting it. Blur now dismisses;
+          // Enter commits.
+          onDismissNew();
         }}
       />
     </div>
@@ -460,8 +465,11 @@ function useStoreOps(
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<string[]>([]);
+  /** Files in the in-flight upload (P13-UI-08) — 0 when idle. */
+  const [uploading, setUploading] = useState(0);
 
   const importing = ghFetcher.state !== "idle";
+  const uploadBusy = uploading > 0 && opsFetcher.state !== "idle";
 
   // ---- action feedback (toasts ride the server response).
   const handledOps = useRef<unknown>(null);
@@ -475,6 +483,7 @@ function useStoreOps(
       captureToast?: string;
       error?: string;
     };
+    setUploading(0);
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.captureToast) push(d.captureToast);
@@ -517,6 +526,9 @@ function useStoreOps(
       action,
       encType: "multipart/form-data",
     });
+    // P13-UI-08: an upload had no busy state at all, so a large drop looked
+    // like nothing happened until the toast eventually arrived (or didn't).
+    setUploading(entries.length);
     expand(path);
     for (const e of entries) {
       const top = e.relPath.split("/")[0];
@@ -575,6 +587,8 @@ function useStoreOps(
     gh,
     dispatchGh,
     importing,
+    uploadBusy,
+    uploading,
     ghFetcher,
     fileRef,
     dirRef,
@@ -787,6 +801,14 @@ export function StoreBrowser({
             onDelete={(path, node) => setConfirm({ path, node })}
             onUploadEntries={ops.submitUpload}
           />
+          {ops.uploadBusy && (
+            <div className="def-note" aria-live="polite">
+              <Icon name="refresh" />
+              <span>
+                Uploading {ops.uploading} file{ops.uploading === 1 ? "" : "s"}…
+              </span>
+            </div>
+          )}
           <div className="def-note">
             <Icon name="file" />
             <span>

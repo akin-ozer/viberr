@@ -67,6 +67,8 @@ export interface GithubRequestOptions {
   /** JSON body for POST/PUT/PATCH. */
   body?: unknown;
   searchParams?: Record<string, string | number>;
+  /** Override the per-request timeout (P13-UI-04). */
+  timeoutMs?: number;
 }
 
 export interface GithubClient {
@@ -103,6 +105,10 @@ function messageFrom(data: unknown, statusText: string): string {
   return statusText || "GitHub request failed";
 }
 
+/** Per-request budget for a GitHub API call (P13-UI-04). Generous enough for a
+ *  slow tree/blob fetch, short enough that a hung endpoint surfaces. */
+export const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
+
 export function createGithubClient(options: GithubClientOptions): GithubClient {
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl ?? GITHUB_API_BASE;
@@ -120,7 +126,16 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       "x-github-api-version": API_VERSION,
     };
     if (requestOptions.etag) headers["if-none-match"] = requestOptions.etag;
-    const init: RequestInit = { method, headers };
+    // P13-UI-04: every GitHub call was unbounded, so an unreachable or hanging
+    // api.github.com left a click looking dead (and, on a delivery path, held a
+    // run's single-flight) until the socket eventually gave up. A request that
+    // exceeds the budget now fails as a normal network error, which the callers
+    // already surface honestly.
+    const init: RequestInit = {
+      method,
+      headers,
+      signal: AbortSignal.timeout(requestOptions.timeoutMs ?? GITHUB_REQUEST_TIMEOUT_MS),
+    };
     if (requestOptions.body !== undefined) {
       headers["content-type"] = "application/json";
       init.body = JSON.stringify(requestOptions.body);

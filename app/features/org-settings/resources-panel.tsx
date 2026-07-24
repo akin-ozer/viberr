@@ -855,7 +855,9 @@ function McpPanel({
                     (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
-                    : "not health-checked yet"}
+                    : /* P13-UI-16: defensive — every save/test writes `up`, so a
+                         null only appears for a row written outside Viberr. */
+                      "not health-checked yet"}
                 {m.hasCred ? " · auth: configured" : ""}
               </span>
             </span>

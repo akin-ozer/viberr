@@ -45,13 +45,18 @@ const CONNECTIONS: ConnectionRecord[] = [
   {
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
     masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
-    validationState: "unvalidated", lastValidatedAt: null,
+    validationState: "unvalidated", scopes: [], lastValidatedAt: null,
     createdAt: "2026-07-01T09:00:00.000Z",
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
     masked: "····42af", def: false, repos: 12, expiresAt: "2026-07-20T00:00:00.000Z",
-    daysLeft: 15, validationState: "valid", lastValidatedAt: "2026-07-01T09:00:00.000Z",
+    daysLeft: 15, validationState: "valid",
+    scopes: [
+      { id: "repo", ok: true, source: "header" },
+      { id: "workflow", ok: true, source: "header" },
+      { id: "pull_request:write", ok: true, source: "header" },
+    ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
     createdAt: "2026-07-01T09:05:00.000Z",
   },
 ];
@@ -384,5 +389,31 @@ describe("ResourcesPanel", () => {
     expect(
       getByText(/This is the real folder on disk — files added outside Viberr/),
     ).toBeTruthy();
+  });
+});
+
+/* --------------------- PAT scope evidence (P13-UI-01) --------------------- */
+
+describe("ConnectionsPanel — scope evidence", () => {
+  it("shows a check only for OBSERVED scopes and marks assumed ones", () => {
+    const assumed: ConnectionRecord = {
+      ...CONNECTIONS[1]!,
+      id: "cx_fine",
+      owner: "fine-grained",
+      scopes: [
+        { id: "repo", ok: true, source: "assumed" },
+        { id: "workflow", ok: true, source: "assumed" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+    };
+    const { container } = renderPanel(
+      <ConnectionsPanel connections={[assumed]} />,
+    );
+    const chips = [...container.querySelectorAll(".conn-row .scope-chip")];
+    // The validator never probed anything for a fine-grained PAT, so a ✓ here
+    // would claim a verification that did not happen.
+    expect(chips.every((c) => c.className.includes("assumed"))).toBe(true);
+    expect(chips.length).toBe(3);
+    expect(container.querySelectorAll(".conn-row .scope-chip .ico").length).toBe(0);
   });
 });

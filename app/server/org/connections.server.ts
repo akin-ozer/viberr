@@ -61,6 +61,15 @@ export interface ConnectionRecord {
   /** Whole days until expiry (may be negative); null when no expiry. */
   daysLeft: number | null;
   validationState: ConnectionValidationState;
+  /**
+   * Per-scope evidence (P13-UI-01). A fine-grained PAT publishes no
+   * `x-oauth-scopes` header, so the validator records `{ok:true,
+   * source:"assumed"}` WITHOUT probing anything — and the panel painted a ✓ on
+   * every scope anyway, next to copy promising "if any scope is missing the
+   * token is refused". The first honest signal was a failed agent delivery.
+   * `source` was already persisted and ignored; it now reaches the UI.
+   */
+  scopes: { id: string; ok: boolean; source: string; note?: string }[];
   lastValidatedAt: string | null;
   createdAt: string;
 }
@@ -103,6 +112,12 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
     expiresAt,
     daysLeft,
     validationState: validationState(parsePatValidation(row.validation_json)),
+    scopes: (parsePatValidation(row.validation_json)?.scopes ?? []).map((sc) => ({
+      id: sc.id,
+      ok: sc.ok,
+      source: sc.source,
+      ...(sc.note ? { note: sc.note } : {}),
+    })),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
   };
