@@ -57,6 +57,15 @@ const CAP_DENY_RULES: readonly {
     capabilityId: "execute-code-or-write-repo",
     deny: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
   },
+  // P13-LV-18: network egress is a capability now. Withholding it removes the
+  // built-in web tools AND the MCP resource-fetch helpers that reach the same
+  // network surface. (`curl`/`wget` through Bash stay reachable for the same
+  // reason shell writes do — the specialist needs Bash to run validation; that
+  // tension is documented rather than papered over.)
+  {
+    capabilityId: "use-web-search-fetch",
+    deny: ["WebFetch", "WebSearch"],
+  },
   // NOTE (F11, 2026-07-12): the former `edit-other-task-branch` rule denied the
   // broad `Bash(git checkout:*)` / `Bash(git switch:*)`. Because deny wins under
   // bypassPermissions, that ALSO blocked a specialist's own `git checkout -B

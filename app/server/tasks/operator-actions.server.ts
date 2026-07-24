@@ -880,7 +880,9 @@ export async function operatorSetGoal(
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
-      type: "policy",
+      // A drafted goal is a neutral lifecycle note, not a policy violation
+      // (P13-LV-03 — this rendered as a coral "Policy violation" shield).
+      type: "note",
       actor: { kind: "operator" },
       title: "Goal drafted",
       text: input.reason?.trim()

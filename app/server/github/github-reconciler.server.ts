@@ -326,10 +326,11 @@ export async function reconcileTask(
     if (acceptedClosedExternally) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
-        type: "policy",
+        // Neutral divergence note, not a violation (P13-LV-03).
+        type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
-        text: `**Policy note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+        text: `**Note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
         toAgent: false,
         evidence: null,
       });
@@ -343,7 +344,9 @@ export async function reconcileTask(
           : "";
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
-        type: "policy",
+        // A GitHub-side divergence is a neutral note the human must act on, not
+        // a governance violation by an agent (P13-LV-03).
+        type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
         text: divergenceText + supersededNote,

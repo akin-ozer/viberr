@@ -266,12 +266,15 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("all 9 types map to their node class + pill label (contracts §1.3)", () => {
+  it("all 10 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
       ["github", "github", "GitHub"],
       ["policy", "policy", "Policy violation"],
+      // P13-LV-03: neutral lifecycle notes (goal edits, divergence, scheduling)
+      // no longer borrow the coral "Policy violation" shield.
+      ["note", "note", "Note"],
       ["quality", "quality", "Quality flag"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],

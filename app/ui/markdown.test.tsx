@@ -103,8 +103,10 @@ describe("Markdown", () => {
 
   it("re-chips @mentions inside comment text as .mention spans", () => {
     // Regression: switching comments from RichText to GFM dropped the chip.
+    // P13-LV-12: only handles that actually route chip, so the agent's name is
+    // passed in; `@operator` is a reserved handle and always routes.
     const { container } = render(
-      <Markdown text={"thanks @dev — please loop in @operator"} />,
+      <Markdown text={"thanks @dev — please loop in @operator"} mentionNames={["dev"]} />,
     );
     const chips = [...container.querySelectorAll("span.mention")].map(
       (n) => n.textContent,
@@ -116,7 +118,10 @@ describe("Markdown", () => {
 
   it("chips mentions inside list items and table cells too", () => {
     const { container } = render(
-      <Markdown text={"- assigned to @dev\n\n| who |\n| --- |\n| @codex |"} />,
+      <Markdown
+        text={"- assigned to @dev\n\n| who |\n| --- |\n| @codex |"}
+        mentionNames={["dev"]}
+      />,
     );
     const chips = [...container.querySelectorAll("span.mention")].map(
       (n) => n.textContent,

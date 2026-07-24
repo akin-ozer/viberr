@@ -13,8 +13,9 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * `resolveMentionedAgent`):
  *
  *   - agents   : the task/project's deployed specialists. The composer's
- *                handle is the specialist's `name` lowercased — the same value
- *                `handleMatchesSpecialist` matches on (name / id / backend).
+ *                handle is the specialist's `id` (space-free and stable); the
+ *                resolver matches on name / id / backend, and multi-word names
+ *                now resolve whole (P13-LV-11).
  *   - users    : project members + every registered app user, keyed by the
  *                handle the fan-out resolves on: the email local-part (before
  *                `@`) OR the first name, both lowercased. We surface the email
@@ -82,12 +83,14 @@ export function getMentionables(
 ): Mentionables {
   const ctx = { dataRoot: opts.dataRoot };
 
-  // Agents: the project's deployed specialists. Handle = name lowercased,
-  // de-duped (two deployments could share a display name).
+  // Agents: the project's deployed specialists. The handle is the PROFILE ID —
+  // a stable, space-free token that the resolver has always matched. The
+  // composer inserts the display NAME (which now also resolves, P13-LV-11), and
+  // the menu shows the id so a human can type it directly.
   const agentSeen = new Set<string>();
   const agents: MentionableAgent[] = [];
   for (const sp of listDeployedSpecialists(projectSlug, ctx)) {
-    const handle = sp.name.toLowerCase();
+    const handle = sp.id.toLowerCase();
     if (agentSeen.has(handle)) continue;
     agentSeen.add(handle);
     agents.push({

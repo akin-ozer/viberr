@@ -64,7 +64,8 @@ function scheduleEvent(
 ): TaskFileEvent {
   return {
     occurredAt: new Date().toISOString(),
-    type: "policy",
+    // Scheduling notes are neutral lifecycle events (P13-LV-03).
+    type: "note",
     actor,
     title: null,
     text,

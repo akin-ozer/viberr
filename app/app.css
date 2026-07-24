@@ -929,6 +929,9 @@ h1, h2, h3, h4 {
 .tl-node.blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .tl-node.completion { background: color-mix(in srgb, var(--success), var(--surface) 76%); color: #0a6a47; border-color: color-mix(in srgb, var(--success), transparent 70%); }
 .tl-node.policy { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+/* neutral lifecycle note (goal edits, divergence, scheduling) — deliberately
+   quiet: the alarming orange stays reserved for real policy violations. */
+.tl-node.note { background: var(--surface); color: var(--muted); border-color: var(--hairline); }
 .tl-node.github { background: var(--fg); color: #fff; border-color: var(--fg); }
 .tl-node.agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 

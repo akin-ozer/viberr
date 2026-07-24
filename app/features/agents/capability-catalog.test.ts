@@ -29,10 +29,11 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
     // execute-code-or-write-repo, open-review-pr) + 3 Collaboration gates
     // (comment-on-task, ask-human, report-validation-verdict — promoted from
     // decorative to real agent-toolkit gates by the generic-agents plan, D10)
-    // + 3 always-human. The remaining advisory ids (read-task-repo,
-    // run-validation-suites, approve-review, request-changes, …) still have no
-    // runtime effect and stay matrix-only.
-    expect(MODAL_CAP_IDS.size).toBe(10);
+    // + 1 web-egress gate (use-web-search-fetch, P13-LV-18) + 3 always-human.
+    // The remaining advisory ids (read-task-repo, run-validation-suites,
+    // approve-review, request-changes, …) still have no runtime effect and stay
+    // matrix-only.
+    expect(MODAL_CAP_IDS.size).toBe(11);
     expect([...MODAL_CAP_IDS].sort()).toEqual(
       [
         "ask-human",
@@ -43,6 +44,7 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
         "execute-code-or-write-repo",
         "merge-pull-request",
         "open-review-pr",
+        "use-web-search-fetch",
         "report-validation-verdict",
         "transition-to-done",
       ].sort(),

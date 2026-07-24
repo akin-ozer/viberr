@@ -53,7 +53,9 @@ const TL_FILTERS = [
  * height in sync when the draft ends on a newline.
  */
 function highlightDraft(text: string, names: string[]): ReactNode {
-  const spans = findMentionSpans(text, names);
+  // Only KNOWN handles light up, so the chip appearing IS the confirmation that
+  // the tag will route (P13-LV-12).
+  const spans = findMentionSpans(text, names).filter((s) => s.known);
   const parts: ReactNode[] = [];
   let last = 0;
   let key = 0;
@@ -70,11 +72,16 @@ function highlightDraft(text: string, names: string[]): ReactNode {
   return <Fragment>{parts}</Fragment>;
 }
 
-/** All mentionable display strings, for whole-name highlight matching. */
+/**
+ * Every string that ACTUALLY routes, for whole-name highlight matching: agent
+ * display names AND their profile ids/handles, user display names and their
+ * email-local handles, and the reserved role handles. The highlight is only
+ * honest if this list is exactly what the server resolves (P13-LV-12).
+ */
 function mentionNamesOf(m: Mentionables): string[] {
   return [
-    ...m.agents.map((a) => a.name),
-    ...m.users.map((u) => u.name),
+    ...m.agents.flatMap((a) => [a.name, a.handle]),
+    ...m.users.flatMap((u) => [u.name, u.handle]),
     ...m.reserved.map((r) => r.handle),
   ];
 }

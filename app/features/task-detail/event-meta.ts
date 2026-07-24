@@ -20,7 +20,12 @@ export const EVENT_META: Record<string, EventMeta> = {
   comment: { node: "", icon: "message", label: "commented" },
   completion: { node: "completion", icon: "check", label: "Completion report" },
   github: { node: "github", icon: "github", label: "GitHub" },
+  // Reserved for genuine governance violations/refusals (a PAT missing a scope,
+  // a directive that asked an agent to do something it was never granted).
   policy: { node: "policy", icon: "shield", label: "Policy violation" },
+  // Neutral governance/lifecycle notes: a goal edit, a divergence note, a
+  // scheduled re-run. Same "note" node styling as a comment row, no shield.
+  note: { node: "note", icon: "message", label: "Note" },
   quality: { node: "quality", icon: "flag", label: "Quality flag" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
@@ -40,6 +45,7 @@ const TYPED_KIND: Record<string, PillKind> = {
   completion: "done",
   github: "neutral",
   policy: "input",
+  note: "neutral",
   quality: "risk",
   transition: "info",
   blocked: "blocked",

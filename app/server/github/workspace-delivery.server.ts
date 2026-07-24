@@ -493,10 +493,11 @@ export async function reconcileWorkspaceDelivery(
             if (samePr && cur.state === "accepted" && detected.state === "closed") {
               await appendTimelineEvent(ref, {
                 occurredAt: new Date().toISOString(),
-                type: "policy",
+                // Neutral divergence note, not a violation (P13-LV-03).
+                type: "note",
                 actor: POLICY_ENGINE_ACTOR,
                 title: null,
-                text: `**Policy note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+                text: `**Note:** accepted PR #${detected.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
                 toAgent: false,
                 evidence: null,
               });

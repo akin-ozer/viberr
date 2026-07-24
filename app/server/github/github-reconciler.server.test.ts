@@ -489,7 +489,8 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!;
     expect(file.parsed.frontmatter.pr?.state).toBe("closed");
-    const policy = file.parsed.timeline.find((e) => e.type === "policy");
+    // P13-LV-03: a neutral divergence note, not a policy VIOLATION.
+    const policy = file.parsed.timeline.find((e) => e.type === "note");
     expect(policy?.text).toContain(
       "accepted PR #318 was closed on GitHub without merging",
     );

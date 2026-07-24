@@ -186,3 +186,26 @@ describe("resolveDeliveryPermissions", () => {
     ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
   });
 });
+
+/* --------------------------------------------- web egress (P13-LV-18) */
+
+describe("web egress capability", () => {
+  it("an ABSENT grant keeps the web tools — nothing regresses for existing profiles", () => {
+    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebFetch");
+    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebSearch");
+  });
+
+  it("withholding use-web-search-fetch denies WebFetch + WebSearch", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("use-web-search-fetch", "off"),
+    ]);
+    expect(denied).toContain("WebFetch");
+    expect(denied).toContain("WebSearch");
+  });
+
+  it("human-only mode withholds it from the agent too", () => {
+    expect(
+      resolveSpecialistDisallowedTools([grant("use-web-search-fetch", "human")]),
+    ).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+  });
+});

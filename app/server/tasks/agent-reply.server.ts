@@ -17,6 +17,7 @@ import {
 } from "./specialist-run.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
+import { extractMentions } from "~/ui/mention-spans";
 
 /**
  * Agent-mention resolution + reply-text extraction for the
@@ -36,21 +37,28 @@ import type { TaskMutationContext } from "./task-actions.server";
 
 // ------------------------------------------------------------ mention parse
 
-/** All @handles in a comment, lowercased, de-duplicated, order-preserving. */
-const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-
-function mentionHandles(text: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const match of text.matchAll(MENTION_RE)) {
-    const handle = match[1]!.toLowerCase();
-    if (!seen.has(handle)) {
-      seen.add(handle);
-      out.push(handle);
-    }
-  }
-  return out;
+/**
+ * All @handles in a comment, lowercased, de-duplicated, order-preserving.
+ *
+ * P13-LV-11: this used to be a single-token regex, so a mention of an agent
+ * whose display name contains a space ("@Docs Writer" — exactly what the
+ * composer inserts and the timeline highlights) matched NOTHING and the comment
+ * silently routed nowhere. It now uses the shared span-finder with the known
+ * mentionable names, so multi-word names resolve whole and the highlight and the
+ * routing agree.
+ */
+function mentionHandles(text: string, known: string[] = []): string[] {
+  return extractMentions(text, known);
 }
+
+/** Every string a deployed specialist can be tagged by. */
+function specialistHandles(sp: DeployedSpecialistView): string[] {
+  return [sp.name, sp.id, sp.backend];
+}
+
+/** The generic role/backend handles the resolver honours (mirrors
+ *  mention-suggestions' RESERVED and mention-notify's RESERVED_HANDLES). */
+const RESERVED_AGENT_HANDLES = ["operator", "agent", "claude", "codex"];
 
 // ------------------------------------------------------- resolved shape
 
@@ -149,11 +157,15 @@ export function resolveMentionedAgent(
   taskKey: string,
   text: string,
 ): MentionedAgent | null {
-  const handles = mentionHandles(text);
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  // Known handles must be collected BEFORE parsing so a multi-word agent name
+  // matches whole (P13-LV-11).
+  const handles = mentionHandles(text, [
+    ...specialists.flatMap(specialistHandles),
+    ...RESERVED_AGENT_HANDLES,
+  ]);
   if (handles.length === 0) return null;
   const handleSet = new Set(handles);
-
-  const specialists = listDeployedSpecialists(projectSlug, ctx);
 
   const existing = readTaskFile({
     projectSlug,

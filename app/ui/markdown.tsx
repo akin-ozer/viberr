@@ -53,7 +53,9 @@ type HastNode = HastText | HastElement | { type: string; children?: HastNode[] }
  * single span.)
  */
 function chipMentions(value: string, names: string[]): HastNode[] | null {
-  const spans = findMentionSpans(value, names);
+  // Only KNOWN handles chip. An unknown `@handle` routes to nobody, so chipping
+  // it told the author their tag had landed when it hadn't (P13-LV-12).
+  const spans = findMentionSpans(value, names).filter((s) => s.known);
   if (spans.length === 0) return null;
   const out: HastNode[] = [];
   let last = 0;

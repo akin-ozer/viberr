@@ -533,7 +533,9 @@ export async function updateTaskGoal(
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
-      type: "policy",
+      // Neutral lifecycle note — a human editing the goal is not a policy
+      // violation (P13-LV-03).
+      type: "note",
       actor: humanActorRef(db, actor),
       title: "Goal updated",
       text: "The task goal / acceptance criteria were edited — downstream agents re-anchor on the new goal.",

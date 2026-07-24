@@ -53,6 +53,13 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // it doesn't read as "silences the agent".
   cap("comment-on-task", "Post mid-run comments", ["agent"], "Collaboration"),
   cap("ask-human", "Ask the human a question", ["agent"], "Collaboration"),
+  // P13-LV-18 (owner ruling): network egress used to be invisible — EVERY run,
+  // including a "read-only" reviewer with all repository capabilities Off, could
+  // WebFetch/WebSearch arbitrary URLs. It is now a real capability: granted by
+  // default (nothing regresses), visible in the matrix, and revocable per
+  // profile. Enforced with tool denial on Claude; prompt-level on Codex, whose
+  // built-in web tools have no denylist channel.
+  cap("use-web-search-fetch", "Search & fetch from the web", ["agent", "operator"], "Collaboration"),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
   cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
@@ -123,6 +130,9 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.
   "comment-on-task",
+  // Web egress: real tool denial on Claude (WebFetch/WebSearch removed);
+  // prompt-level only on Codex, which has no per-tool denylist.
+  "use-web-search-fetch",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

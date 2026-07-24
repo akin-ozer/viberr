@@ -36,13 +36,20 @@ export type Waiting = (typeof WAITING_VALUES)[number];
 export const VALIDATION_VALUES = ["healthy", "changed", "failing", "none"] as const;
 export type Validation = (typeof VALIDATION_VALUES)[number];
 
-/** The 9 timeline event types (cross-cutting contracts §1.3). Parsers keep
- * unknown strings as-is (renderer falls back to comment meta). */
+/** The 10 timeline event types (cross-cutting contracts §1.3). Parsers keep
+ * unknown strings as-is (renderer falls back to comment meta).
+ *
+ * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a
+ * refused delivery directive, a divergence note, a scheduled re-run note and a
+ * plain goal edit all shared it, so the timeline labelled a human editing a goal
+ * a **"Policy violation"**. `policy` is now reserved for genuine governance
+ * violations/refusals (coral shield); everything neutral is a `note`. */
 export const TIMELINE_EVENT_TYPES = [
   "comment",
   "completion",
   "github",
   "policy",
+  "note",
   "quality",
   "transition",
   "blocked",

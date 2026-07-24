@@ -158,6 +158,40 @@ describe("resolveMentionedAgent", () => {
     expect(call("@agent status?")).toMatchObject({ profileId: "dev", backend: "claude", isOperator: false });
   });
 
+  // P13-LV-11: the composer inserts the DISPLAY name and the timeline chips it,
+  // but the resolver used to parse a single token — so every agent whose name
+  // contains a space ("Docs Writer") silently routed nowhere.
+  it("resolves a multi-word display name (@Docs Writer)", () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "docs-writer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Docs Writer",
+            role: "Documentation",
+            backends: ["claude"],
+            model: "claude-sonnet",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect(call("@Docs Writer can you take another look?")).toMatchObject({
+      profileId: "docs-writer",
+      name: "Docs Writer",
+    });
+    // The profile id keeps working, and an unknown handle still resolves to
+    // nothing rather than to the wrong agent.
+    expect(call("@docs-writer ping")).toMatchObject({ profileId: "docs-writer" });
+    expect(call("@Docs Reader ping")).toBeNull();
+  });
+
   it("resolves @operator to the OPERATOR (not the primary specialist) when one is deployed", () => {
     // No operator deployed in the base setup → @operator resolves to nothing.
     expect(call("@operator can you summarize")).toBeNull();
