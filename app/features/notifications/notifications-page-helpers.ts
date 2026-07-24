@@ -17,7 +17,13 @@ export type NotificationFilter = "all" | "unread";
 export function splitNotifications(
   items: NotificationPageItem[],
   f: NotificationFilter,
-): { needs: NotificationPageItem[]; rest: NotificationPageItem[] } {
+): {
+  needs: NotificationPageItem[];
+  rest: NotificationPageItem[];
+  /** UI-54: pending decisions IGNORING the All/Unread filter — what the panel
+   *  header must count. */
+  needsTotal: number;
+} {
   const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
   const needsYou = (n: NotificationPageItem) =>
     (n.kind === "packet" || n.kind === "approval") && n.waitingOnYou;
@@ -26,21 +32,30 @@ export function splitNotifications(
   // beside a newer packet) must NOT show as a second pending decision. Items are
   // newest-first, so the first waiting row per task wins; the rest fall to the
   // ordinary stream (never deleted, never auto-read).
+  //
+  // UI-54: the split now runs over EVERY item and the All/Unread filter is
+  // applied afterwards. Filtering first meant three READ pending decisions under
+  // the Unread filter rendered "0 decisions · Nothing is waiting on you" — the
+  // filter is a view of the stream, not a statement about what still needs a
+  // human. (It also made the per-task dedupe depend on the filter.)
   const seenTasks = new Set<string>();
-  const needs: NotificationPageItem[] = [];
-  const rest: NotificationPageItem[] = [];
+  const needsAll: NotificationPageItem[] = [];
+  const restAll: NotificationPageItem[] = [];
   for (const n of items) {
-    if (!match(n)) continue;
     const taskKey =
       n.projectSlug && n.taskKey ? `${n.projectSlug}::${n.taskKey}` : null;
     if (needsYou(n) && (!taskKey || !seenTasks.has(taskKey))) {
       if (taskKey) seenTasks.add(taskKey);
-      needs.push(n);
+      needsAll.push(n);
     } else {
-      rest.push(n);
+      restAll.push(n);
     }
   }
-  return { needs, rest };
+  return {
+    needs: needsAll.filter(match),
+    rest: restAll.filter(match),
+    needsTotal: needsAll.length,
+  };
 }
 
 /** Needs-you card time: today → "10:31", else lowercased day + time

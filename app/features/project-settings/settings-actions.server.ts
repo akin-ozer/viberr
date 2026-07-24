@@ -246,6 +246,21 @@ export async function removeStage(
     parsed.frontmatter.workflow = parsed.frontmatter.workflow.filter(
       (w) => w.from !== input.stageId && w.to !== input.stageId,
     );
+    // UI-50: agent-profile stage grants referencing the removed stage go too.
+    // They used to survive, so the Agents page counted a stage the project no
+    // longer has — "Eligible stages · 5 of 4", with an invisible chip that could
+    // not be unchecked, and the stale id was re-persisted on every profile save.
+    parsed.frontmatter.agents = parsed.frontmatter.agents.map((deployment) => {
+      const stages = deployment.definition?.stages;
+      if (!stages || !stages.includes(input.stageId)) return deployment;
+      return {
+        ...deployment,
+        definition: {
+          ...deployment.definition,
+          stages: stages.filter((id) => id !== input.stageId),
+        },
+      };
+    });
   });
 
   reprojectProject(db, ctx, input.projectSlug);

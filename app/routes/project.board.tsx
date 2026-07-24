@@ -92,8 +92,14 @@ export default function Board() {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
   const canCreate = layout.myRole !== null && layout.myRole !== "viewer";
-  const canTransition =
-    layout.myRole === "admin" || layout.myRole === "maintainer";
+  // UI-58: drag/move visibility must consult the SAME action id the server
+  // enforces (`reorder-board`), not the `admin|maintainer` literal it happened
+  // to equal — this file already uses `roleCan` for `rescan-project` for exactly
+  // that reason, and the literal was a standing drift hazard.
+  const canTransition = roleCan(
+    layout.myRole as ProjectRole | null,
+    "reorder-board",
+  );
   // Re-scan visibility must track the server's `rescan-project` gate — not the
   // approve-transition gate — so display and enforcement can't drift (P11-45).
   const canRescan = roleCan(layout.myRole as ProjectRole | null, "rescan-project");

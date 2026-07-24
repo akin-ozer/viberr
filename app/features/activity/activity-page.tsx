@@ -106,7 +106,13 @@ function AuditLogs({
   onOpen: (key: string) => void;
   onShowOlder: () => void;
 }) {
-  const remaining = Math.max(0, total - entries.length);
+  // UI-47: bound "remaining" by the ceiling `onShowOlder` can actually reach —
+  // at AUDIT_MAX the button was a no-op that still promised N more.
+  const remaining = Math.max(
+    0,
+    Math.min(total, AUDIT_MAX) - entries.length,
+  );
+  const capped = entries.length >= AUDIT_MAX && total > AUDIT_MAX;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -116,7 +122,10 @@ function AuditLogs({
           className="right sub"
           style={{ fontSize: ".76rem", color: "var(--faint)" }}
         >
-          policy &amp; access
+          {/* UI-46: this panel is deliberately UNFILTERED — say so, now that the
+              actor filter sits inside the Stream panel and no longer looks
+              page-level. */}
+          policy &amp; access · all actors
         </span>
       </div>
       <div className="pev-list">
@@ -189,6 +198,17 @@ function AuditLogs({
             Show older entries · {remaining} more
           </button>
         )}
+        {capped && (
+          <div
+            style={{
+              fontSize: ".78rem",
+              color: "var(--faint)",
+              padding: ".6rem 0 0",
+            }}
+          >
+            Showing the newest {AUDIT_MAX} entries.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -239,7 +259,14 @@ export function ActivityPage({
     stream.filter((r) => matchesActorFilter(r, f)),
   );
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
-  const streamRemaining = Math.max(0, streamTotal - stream.length);
+  // UI-47: "Show older" submits `min(loaded + STEP, STREAM_MAX)`, so once the
+  // loaded slice hits the ceiling the click is a NO-OP — while the button still
+  // promised "N more". Compute what can actually still be loaded.
+  const streamRemaining = Math.max(
+    0,
+    Math.min(streamTotal, STREAM_MAX) - stream.length,
+  );
+  const streamCapped = stream.length >= STREAM_MAX && streamTotal > STREAM_MAX;
 
   return (
     <div className="board-wrap" data-screen-label="Activity">
@@ -251,20 +278,6 @@ export function ActivityPage({
             {projectName}
           </div>
         </div>
-        <div className="board-tools">
-          <div className="mini-seg" role="radiogroup" aria-label="Filter activity">
-            {FILTERS.map(([id, l]) => (
-              <button
-                type="button"
-                key={id}
-                className={f === id ? "on" : ""}
-                onClick={() => setF(id)}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       <div className="policy-wrap">
@@ -273,11 +286,38 @@ export function ActivityPage({
             <div className="panel-head">
               <Icon name="activity" />
               <h2>Stream</h2>
-              <span
-                className="right sub"
-                style={{ fontSize: ".76rem", color: "var(--faint)" }}
-              >
-                {total} events
+              {/* UI-46: the actor filter lived in the PAGE header, above both
+                  panels and labelled "Filter activity", but only the Stream ever
+                  consumed it — the audit panel kept showing agent and system
+                  rows after picking "Humans", so the filter looked broken (or
+                  those rows looked human). It sits inside the panel it filters
+                  now, and says so.
+                  UI-58: `role="radiogroup"` with plain buttons is a broken ARIA
+                  contract; `aria-pressed` on each toggle is what the markup
+                  actually implements. */}
+              <span className="right" style={{ display: "flex", gap: ".5rem", alignItems: "center" }}>
+                <span className="mini-seg" role="group" aria-label="Filter the stream by actor">
+                  {FILTERS.map(([id, l]) => (
+                    <button
+                      type="button"
+                      key={id}
+                      className={f === id ? "on" : ""}
+                      aria-pressed={f === id}
+                      onClick={() => setF(id)}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </span>
+                <span
+                  className="sub"
+                  style={{ fontSize: ".76rem", color: "var(--faint)" }}
+                >
+                  {/* UI-47: `total` counts the FILTERED, already-bounded loaded
+                      slice — it never described the project. Say what it is. */}
+                  {total} of {streamTotal} events
+                  {f !== "all" ? " (filtered)" : ""}
+                </span>
               </span>
             </div>
             {shown.map((g) => (
@@ -335,6 +375,19 @@ export function ActivityPage({
                 <Icon name="chevron" />
                 Show older events · {streamRemaining} more
               </button>
+            )}
+            {streamCapped && (
+              <div
+                className="sub"
+                style={{
+                  fontSize: ".78rem",
+                  color: "var(--faint)",
+                  padding: ".6rem 0 0",
+                }}
+              >
+                Showing the newest {STREAM_MAX} events — older activity stays in
+                the task timelines.
+              </div>
             )}
           </div>
 

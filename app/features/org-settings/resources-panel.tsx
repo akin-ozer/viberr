@@ -384,6 +384,29 @@ const unmatched = (list: string[], names: string[]) => {
   const set = new Set(names);
   return list.filter((x) => !set.has(x));
 };
+
+/**
+ * KB grants are stored by store DIR. Older profiles (and anything written by the
+ * pre-P13-KM-01 editor) carry the DISPLAY NAME, which resolves to nothing at run
+ * time. Rewrite what we can recognize, so opening and saving a profile repairs
+ * it instead of preserving an unresolvable string forever.
+ */
+const kbDirsOf = (list: string[], kbs: KbView[]) => {
+  const byDir = new Set(kbs.map((k) => k.dir));
+  const nameToDir = new Map(kbs.map((k) => [k.name, k.dir]));
+  const out: string[] = [];
+  for (const entry of list) {
+    const dir = byDir.has(entry) ? entry : nameToDir.get(entry);
+    if (dir && !out.includes(dir)) out.push(dir);
+  }
+  return out;
+};
+
+/** Grants that match neither a dir nor a display name — preserved untouched. */
+const kbLegacyOf = (list: string[], kbs: KbView[]) => {
+  const known = new Set([...kbs.map((k) => k.dir), ...kbs.map((k) => k.name)]);
+  return list.filter((x) => !known.has(x));
+};
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
@@ -408,7 +431,7 @@ function AgentModal({
   // DIRECTORY (`readKbBody` reads `${DATA_ROOT}/kb/<dir>`). This picker used to
   // key on the display NAME, so granting "P13 facts" wrote `kb: ["P13 facts"]`
   // and every run silently got zero bytes while both UIs showed it attached.
-  const kbIds = kbs.map((k) => k.dir);
+  // `kbDirsOf` also repairs an existing display-name grant on open.
 
   const [name, setName] = useState(initial ? initial.name : "");
   const [backend, setBackend] = useState<"codex" | "claude">(
@@ -438,14 +461,14 @@ function AgentModal({
     initial ? match(initial.mcps, mcpNames) : [],
   );
   const [selKbs, setSelKbs] = useState<string[]>(
-    initial ? match(initial.kbs, kbIds) : [],
+    initial ? kbDirsOf(initial.kbs, kbs) : [],
   );
   // Legacy template resource strings that don't match an org resource are
   // preserved untouched on save (documented deviation).
   const legacy = {
     skills: initial ? unmatched(initial.skills, skillNames) : [],
     mcps: initial ? unmatched(initial.mcps, mcpNames) : [],
-    kbs: initial ? unmatched(initial.kbs, kbIds) : [],
+    kbs: initial ? kbLegacyOf(initial.kbs, kbs) : [],
   };
   const { action, err, setErr } = useModalAction(() => onClose());
 

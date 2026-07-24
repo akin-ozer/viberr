@@ -338,9 +338,16 @@ function Column({
 function ListView({
   tasks,
   stages,
+  canTransition,
+  onMoveTask,
 }: {
   tasks: TaskSummary[];
   stages: BoardStage[];
+  /** UI-58: the list view rendered NO move control at all, so drag-and-drop had
+   *  no keyboard equivalent here — the StageMenu (the board's accessible move
+   *  affordance) only existed on cards. */
+  canTransition: boolean;
+  onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   return (
@@ -363,17 +370,34 @@ function ListView({
       >
         {tasks.length === 0 && <div className="empty">No tasks</div>}
         {tasks.map((t) => (
-          <Link
+          <div
             key={t.key}
             className="card"
             style={{ flexDirection: "row", alignItems: "center", gap: "1rem" }}
-            to={`/projects/${t.projectSlug}/tasks/${t.key}`}
           >
-            <span className="key" style={{ width: 64 }}>
+            <Link
+              className="key"
+              style={{ width: 64 }}
+              to={`/projects/${t.projectSlug}/tasks/${t.key}`}
+            >
               {t.key}
-            </span>
-            <h3 style={{ flex: 1 }}>{t.title}</h3>
-            <span className="pill neutral sm">{stageName(t.stage)}</span>
+            </Link>
+            <h3 style={{ flex: 1 }}>
+              <Link to={`/projects/${t.projectSlug}/tasks/${t.key}`}>
+                {t.title}
+              </Link>
+            </h3>
+            {/* UI-58: the same StageMenu the cards use — the list view's
+                keyboard equivalent for drag-and-drop. */}
+            {canTransition ? (
+              <StageMenu
+                stages={stages}
+                currentStageId={t.stage}
+                onSelect={(stageId) => onMoveTask(t.key, stageId)}
+              />
+            ) : (
+              <span className="pill neutral sm">{stageName(t.stage)}</span>
+            )}
             <OwnerLine task={t} />
             <ReviewerStack task={t} label />
             {t.waiting === "agent" &&
@@ -385,7 +409,7 @@ function ListView({
               <ReadinessPill value={t.displayReadiness} sm />
             )}
             <WaitTag task={t} />
-          </Link>
+          </div>
         ))}
       </div>
     </div>
@@ -603,10 +627,14 @@ function BoardHeader({
         </div>
       </div>
       <div className="board-tools">
-        <div className="seg">
+        {/* UI-58: selection was carried by the `on` class alone — the board's
+            own filter chips already use `aria-pressed`, so this was an
+            omission, not a convention. */}
+        <div className="seg" role="group" aria-label="Board layout">
           <button
             type="button"
             className={group === "stage" ? "on" : ""}
+            aria-pressed={group === "stage"}
             onClick={() => setParam("view", null)}
           >
             <Icon name="board" />
@@ -615,6 +643,7 @@ function BoardHeader({
           <button
             type="button"
             className={group === "list" ? "on" : ""}
+            aria-pressed={group === "list"}
             onClick={() => setParam("view", "list")}
           >
             <Icon name="review" />
@@ -1002,7 +1031,13 @@ export function BoardPage({
         canRescan={canRescan}
         setParam={setParam}
         onRescan={rescan}
-        onNew={() => setCreating(stages[0]?.id ?? "triage")}
+        // UI-58: `?? "triage"` was a magic literal for a project with no stages
+        // — a create that could only fail server-side. With no stages there is
+        // nothing to create INTO, so the header hides the control instead.
+        onNew={() => {
+          const entry = stages[0]?.id;
+          if (entry) setCreating(entry);
+        }}
       />
 
       <FilterBar
@@ -1034,7 +1069,12 @@ export function BoardPage({
           onMoveTask={onMoveTask}
         />
       ) : (
-        <ListView tasks={visible(allTasks)} stages={stages} />
+        <ListView
+          tasks={visible(allTasks)}
+          stages={stages}
+          canTransition={canTransition}
+          onMoveTask={onMoveTask}
+        />
       )}
 
       {creating && (

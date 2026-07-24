@@ -124,7 +124,10 @@ describe("ActivityPage", () => {
         "Human decisions, agent events, and policy changes across Viberr Core",
       ),
     ).toBeTruthy();
-    expect(getByText("3 events")).toBeTruthy();
+    // UI-47: the count says what it IS — the loaded (and possibly filtered)
+    // slice against the project total, not a bare "N events" that read as a
+    // project-wide tally.
+    expect(getByText("3 of 3 events")).toBeTruthy();
     expect(container.querySelectorAll(".act-day")).toHaveLength(2);
 
     const rows = container.querySelectorAll(".panel:first-child .pol-ev");
@@ -144,7 +147,7 @@ describe("ActivityPage", () => {
   it("actor filter narrows the stream, drops empty day groups, leaves audit alone", () => {
     const { container, getByText } = renderActivity();
     fireEvent.click(getByText("System"));
-    expect(getByText("1 events")).toBeTruthy();
+    expect(getByText("1 of 3 events (filtered)")).toBeTruthy();
     // Today's group vanished (no system events today).
     expect(container.querySelectorAll(".act-day")).toHaveLength(1);
     expect(container.querySelectorAll(".panel:first-child .pol-ev")).toHaveLength(1);
@@ -152,7 +155,7 @@ describe("ActivityPage", () => {
     expect(container.querySelectorAll(".pev-list .pol-ev")).toHaveLength(2);
 
     fireEvent.click(getByText("Humans"));
-    expect(getByText("1 events")).toBeTruthy();
+    expect(getByText("1 of 3 events (filtered)")).toBeTruthy();
   });
 
   it("shows the exact filter-empty and no-activity copy", () => {
