@@ -3358,6 +3358,17 @@ async function acceptCompletion(
     );
   }
 
+  // NEW-1 (defense-in-depth): a task whose review PR was CLOSED on GitHub without
+  // merging was REJECTED — its work was declined, so it can't be "accepted" into
+  // Done (there's nothing to merge). The human reworks + reopens or archives it.
+  // The review queue already hides such tasks from the acceptance panel; this
+  // guards the direct action path (and the operator's accept_completion rec).
+  if (!input.force && existing.parsed.frontmatter.pr?.state === "closed") {
+    throw AppError.conflict(
+      `${input.taskKey}'s review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.`,
+    );
+  }
+
   const doneStageId =
     terminalStageIdOf(project) ??
     project.stages[project.stages.length - 1]?.id ??

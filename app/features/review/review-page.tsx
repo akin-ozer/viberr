@@ -38,8 +38,18 @@ function RQRow({
       </span>
       <span className="rq-meta">
         {t.pr && (
-          <Pill kind={t.pr.state === "merged" ? "done" : "info"} sm>
+          <Pill
+            kind={
+              t.pr.state === "merged"
+                ? "done"
+                : t.pr.state === "closed"
+                  ? "neutral"
+                  : "info"
+            }
+            sm
+          >
             PR #{t.pr.number}
+            {t.pr.state === "closed" ? " · closed" : ""}
           </Pill>
         )}
         <ValidationPill value={t.validation} sm />

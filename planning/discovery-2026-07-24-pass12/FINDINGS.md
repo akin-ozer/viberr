@@ -39,6 +39,27 @@ DG-6 stale comments, RU-1 (profile toast-on-no-op — subagent may cover), RU-5.
 
 ---
 
+## NEW findings from a fresh live-inspection micro-pass (2026-07-24, post-implementation)
+
+### NEW-1 (MED · logic/UX) — a REJECTED-PR task showed as "ready for acceptance" — FIXED
+Live-observed in the Review queue: CAP-2, whose PR #96 was CLOSED (rejected via `gh pr close`),
+appeared under "Waiting on your acceptance" with a "validation healthy" badge. Root cause:
+`review-queue.server.ts` mapped a `closed` PR state to `"review"` (the row type couldn't even
+represent `closed`), and `isReady` never checked PR state — so a rejected-PR task with no
+required-reviewer block passed as acceptance-ready. Accepting it would target a dead PR.
+**FIX (3 layers):** (1) read model preserves `closed` + `isReady` excludes `pr.state==="closed"`
+so a rejected task lands in "Still in review" (a rework/archive decision), not the acceptance
+panel; (2) the review-page pill renders a closed PR distinctly ("PR #N · closed", neutral); (3)
+defense-in-depth — `acceptCompletion` refuses a closed-unmerged-PR task with a clear message
+(guards the direct reorder-to-Done + the operator's accept_completion rec). +unit test.
+LIVE-VERIFIED: before/after screenshots (CAP-2 moved to "Still in review"); accepting CAP-2 →
+409 "…PR was closed on GitHub without merging — it can't be accepted. Rework and reopen…".
+
+### NEW-2 (verified correct, no change) — accepting a merged-out-of-band task
+CAP-1 (PR #95 merged out-of-band via gh) → accepting it (reorder→Done) correctly recognizes the
+existing merge: 200 "Accepted CAP-1 — moved to Done", stage=done, pr.state=merged. No double-merge,
+no error. Behavior was already correct; verified live.
+
 ## CONFIRMED in main context
 
 ### F12-01 (MED · test-integrity) — kb-watch live-watcher test is timing-flaky

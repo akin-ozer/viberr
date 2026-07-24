@@ -38,7 +38,7 @@ export interface ReviewQueueRow {
   packet: { kind: string; title: string } | null;
   /** Newest timeline event's text (position 0) — the subline fallback. */
   latestEventText: string | null;
-  pr: { number: number; state: "review" | "merged" } | null;
+  pr: { number: number; state: "review" | "merged" | "closed" } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
    *  required reviewers approved it, none requesting changes). A non-null reason
@@ -94,7 +94,14 @@ export function getReviewQueue(
     pr: t.pr
       ? {
           number: t.pr.number,
-          state: t.pr.state === "merged" ? ("merged" as const) : ("review" as const),
+          // Preserve a CLOSED (rejected) PR so the acceptance filter can exclude
+          // it — coercing it to "review" hid that the work was rejected (NEW-1).
+          state:
+            t.pr.state === "merged"
+              ? ("merged" as const)
+              : t.pr.state === "closed"
+                ? ("closed" as const)
+                : ("review" as const),
         }
       : null,
     validation: t.validation,
@@ -132,12 +139,16 @@ export function getReviewQueue(
     const owner = ownerByKey.get(key) ?? null;
     return owner !== null && owner === opts.viewerUserId && viewerCanOwn;
   };
-  // Ready-for-acceptance requires BOTH acceptance authority AND that the current
-  // revision is actually acceptable (F10-11): a failing/awaiting/no-revision task
-  // is still human-waiting but belongs in "Still in review", not the acceptance
-  // panel that promises a valid, actionable decision.
+  // Ready-for-acceptance requires acceptance authority, an acceptable current
+  // revision (F10-11: no failing/awaiting/no-revision block), AND that the review
+  // PR was not REJECTED (closed unmerged) — a rejected-PR task can't be accepted
+  // (its work was declined); it needs a rework/reopen/archive decision, so it
+  // belongs in "Still in review", not the acceptance panel (NEW-1).
   const isReady = (r: ReviewQueueRow): boolean =>
-    r.waiting === "human" && canAccept(r.key) && r.blockReason === null;
+    r.waiting === "human" &&
+    canAccept(r.key) &&
+    r.blockReason === null &&
+    r.pr?.state !== "closed";
   return {
     ready: rows.filter(isReady),
     working: rows.filter((r) => !isReady(r)),
