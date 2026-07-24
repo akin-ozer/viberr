@@ -161,6 +161,15 @@ against `/resources/health` and `restart: unless-stopped`. See
 story (backup/restore, projection rebuild) and
 [docs/operations/runbook.md](docs/operations/runbook.md) for day-2 operations.
 
+## Health endpoint
+
+`GET /resources/health` is an unauthenticated ops probe (used by the Docker healthcheck
+above). It returns `200` with `{ ok, projections: { projects, tasks }, watcher, backends }`
+when the database answers — `watcher` reports whether the file store watcher is alive, and
+`backends: { claude, codex }` reports `real`/`unavailable` per runtime (see
+[Enabling real agent backends](#enabling-real-agent-backends)). It returns `503` with
+`{ ok: false }` if the database cannot be read.
+
 ## Project layout
 
 ```
