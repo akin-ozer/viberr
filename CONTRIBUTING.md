@@ -30,6 +30,7 @@ See the [README](README.md) for the full quickstart, demo accounts, Docker setup
 architecture overview.
 
 ## Branch / PR workflow
+Viberr agents deliver on a task-key branch; Viberr opens the review PR.
 
 - Branch off `main`, using a short descriptive branch name (e.g. `fix-board-filter`,
   `generic-agents`).
