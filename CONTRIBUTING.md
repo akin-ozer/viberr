@@ -67,6 +67,7 @@ See [docs/testing-quickstart.md](docs/testing-quickstart.md) for the short test 
   PR).
 - A PR is accepted once it has passing CI and reviewer approval; the author or reviewer
   merges it into `main`.
+- Documentation-only changes still require a review PR — no direct pushes to `main`.
 
 ## Where to look next
 
