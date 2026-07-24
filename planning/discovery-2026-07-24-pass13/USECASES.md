@@ -203,3 +203,23 @@ Each of these re-runs the exact case that failed before, on the running app.
 - **UC-43 second PR-backed run after the changes — PASS.** PST-4 (goal supplied by a human
   after the clarification packet) delivered docs-only work and opened **PR #100**.
 
+
+
+## Post-implementation regression sweep
+
+- **UC-44 shipped-asset loading across runtimes — PASS (after a real break).** `npm run seed`
+  on a clean data root, `npm run e2e` (9/9), and a booted production build all load the
+  shipped agent assets. Before the fix the first two failed while typecheck, the unit suite
+  and the build were green — see `LV-21`.
+- **UC-45 conservative template default — PASS.** A template created in the org editor writes
+  `execute-code-or-write-repo: off` plus the three scoped delivery grants off, while keeping
+  collaboration (`comment-on-task: direct`). Verified by creating one live and reading the
+  file.
+- **UC-46 full context regression after the refactor — PASS.** A fresh MCP Scout run reports
+  exactly one skill (`SKILL-ISO-P13-4M8K`), the `p13-facts` KB, both org MCP servers plus the
+  in-process `viberr_agent`, and a real `echo` round-trip. Verified independently at the
+  injection layer that both KB docs (including the one authored in-app) and both sentinels
+  reach a run — 493 chars, two headings.
+- **UC-47 web-egress capability at run time — PASS.** The same run confirms `WebFetch` and
+  `WebSearch` remain callable for a profile that predates the capability (absent grant =
+  granted), which is the owner's "on by default, nothing regresses" ruling.

@@ -338,3 +338,47 @@ server IS) and `UI-17` (the audit's premise was wrong; `validation: "changed"` i
 on real write paths). Three are **defensive-by-design** and documented in place: `UI-16`,
 `UI-57`'s empty state, and `UI-18` (`data-screen-label` spans surfaces outside this pass's
 scope and wants one repo-wide sweep).
+
+
+---
+
+## F. Found AFTER the implementation landed (post-fix sweep)
+
+Three more, all caught by artifacts the earlier phases had not produced: the CI e2e job,
+and the light-theme screenshot sweep. Each is fixed and verified.
+
+### LV-21 (HIGH · install broken) — the shipped agent assets could not load outside Vite
+`npm run seed` — the documented install step — died with `ERR_UNKNOWN_FILE_EXTENSION ".md"`.
+Emitting the shipped personas from the seed (`AP-03`) pulled `default-assets.server.ts` into
+the import graph of `tsx scripts/seed.ts`, and that module read its markdown through Vite's
+`?raw`. tsx has no such loader. `npm run seed:demo` failed the same way but its catch-all
+guard reported the misleading "not shipped in the production image" message, and
+`playwright.config.ts` (which imports the seed password so the e2e admin cannot drift)
+failed to parse, taking the entire e2e suite with it.
+**Why nothing caught it:** typecheck, 1667 unit tests and the production build were green —
+vitest and vite both understand `?raw`. Only a real CLI entrypoint exercises that path. Same
+family as pass 12's "build ≠ typecheck".
+**FIX:** assets read from disk (module dir, then `<cwd>/app/server/seed/assets`; the image
+already copies `app/`), so they load under Vite SSR output, tsx, node and vitest alike;
+`SEED_DEFAULT_PASSWORD` moved to an import-free module; `seed:demo` prints the real error.
+**Verified three ways:** `npm run seed` on a clean root, `npm run e2e` 9/9, and a booted
+production build serving `/resources/health`. New `default-assets.server.test.ts` asserts
+every shipped asset has content, BANS `?raw` anywhere the CLI can reach, and runs
+`npm run seed` end to end asserting the real persona lands.
+
+### LV-22 (MED · dangerous default) — an org template started with full delivery power
+**Spotted in the light-theme Policy screenshot:** the library-adopted `Org Docs Writer` —
+whose own summary reads "never touches app code" — showed **18 direct** capabilities
+including all four delivery grants, where every seeded specialist shows 2-10. Cause: my own
+`AP-06` fix. Replacing `capabilities: []` (silently full access) with `defaultGrantsFor` made
+the power *visible* but not *absent*, and the org editor has no capability UI at all, so
+nobody could have narrowed it there.
+**FIX:** `conservativeGrantsFor` — a template created in a surface that cannot set policy
+starts with `execute-code-or-write-repo`, `create-task-branch`, `commit-push-branch` and
+`open-review-pr` withheld; the modal says so; the project editor (which has the matrix) is
+where delivery is granted. LIVE-VERIFIED: a freshly created template writes `mode: off` for
+all four.
+
+### LV-23 (LOW · copy) — packet observation keys rendered machine-ish
+A live blocked packet rendered **`PROMPT_AGENT ERROR`** at a human: the operator authors the
+observation keys and the row CSS uppercases them. Underscores are now spaces.
