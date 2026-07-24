@@ -4,9 +4,20 @@ import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../../../test-support/demo-s
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { credentialPasswordHash } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
+import {
+  parseTaskFileContent,
+  serializeTaskFile,
+} from "~/server/files/task-file.server";
+import {
+  parseProjectFileContent,
+  serializeProjectFile,
+} from "~/server/files/project-file.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { getBoard, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
+import { createTask } from "~/server/tasks/task-actions.server";
 
 /**
  * Shape-pin for the TEST-ONLY demo fixture (test-support/demo-seed.ts) — the
@@ -79,6 +90,65 @@ describe("demo fixture", () => {
     expect(murat?.role).toBe("member");
     const deniz = findUserByEmail(db, "deniz@viberr.dev");
     expect(deniz).not.toBeNull(); // registered, but member of no project
+  });
+
+  it("DRIFT GUARD: every fixture file has zero unknown frontmatter and round-trips the CURRENT serializers", async () => {
+    // The fixture is HAND-WRITTEN canonical files — a legitimate input class
+    // (the store is human-editable) but one that can silently go stale as the
+    // product's schema evolves: loose parsing tolerates unknown keys without a
+    // diagnostic, so a renamed/removed field would keep every suite green
+    // while the fixture quietly stops representing what the product writes.
+    // This trips that wire: any field the current schema no longer knows lands
+    // in unknownFrontmatter and fails HERE, forcing a conscious fixture
+    // migration in the same change that evolves the schema.
+    const { db, dataRoot } = await seed();
+    const rows = db
+      .prepare(`SELECT project_slug AS slug, task_key AS key FROM task_projections`)
+      .all() as { slug: string; key: string }[];
+    expect(rows).toHaveLength(12);
+    for (const { slug, key } of rows) {
+      const file = readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })!;
+      expect(file.diagnostics, `${key} diagnostics`).toEqual([]);
+      expect(file.parsed.unknownFrontmatter, `${key} unknown frontmatter`).toEqual({});
+      // Round-trip: parse(serialize(parsed)) must reproduce the same shape,
+      // or the serializer and schema have drifted apart.
+      const reparsed = parseTaskFileContent(serializeTaskFile(file.parsed), {
+        fallbackKey: key,
+      });
+      expect(reparsed.diagnostics, `${key} round-trip diagnostics`).toEqual([]);
+      expect(reparsed.parsed.frontmatter, `${key} frontmatter`).toEqual(
+        file.parsed.frontmatter,
+      );
+      expect(reparsed.parsed.packet, `${key} packet`).toEqual(file.parsed.packet);
+      expect(reparsed.parsed.timeline, `${key} timeline`).toEqual(file.parsed.timeline);
+    }
+    for (const slug of ["viberr-core", "deploy-pipeline", "billing-service"]) {
+      const p = readProjectFile({ projectSlug: slug, dataRoot })!;
+      expect(p.diagnostics, `${slug} diagnostics`).toEqual([]);
+      expect(p.parsed.unknownFrontmatter, `${slug} unknown frontmatter`).toEqual({});
+      const rp = parseProjectFileContent(serializeProjectFile(p.parsed), {
+        fallbackSlug: slug,
+      });
+      expect(rp.diagnostics, `${slug} round-trip diagnostics`).toEqual([]);
+      expect(rp.parsed.frontmatter, `${slug} frontmatter`).toEqual(p.parsed.frontmatter);
+    }
+  });
+
+  it("DRIFT GUARD: a task the PRODUCT writes into the fixture store parses just as clean", async () => {
+    // Writer parity: anchor the fixture world and the real write path to the
+    // same schema in one place — if the product's own writer ever produces a
+    // file this store can't cleanly host, it fails here, not in a route suite.
+    const { db, dataRoot } = await seed();
+    const arda = findUserByEmail(db, "arda@viberr.dev")!;
+    const { key } = await createTask(
+      db,
+      { projectSlug: "viberr-core", title: "Writer-parity probe" },
+      { userId: arda.id, label: "arda@viberr.dev" },
+      { dataRoot },
+    );
+    const file = readTaskFile({ projectSlug: "viberr-core", taskKey: key, dataRoot })!;
+    expect(file.diagnostics).toEqual([]);
+    expect(file.parsed.unknownFrontmatter).toEqual({});
   });
 
   it("boards look like the mock: stage buckets + stub projects", async () => {

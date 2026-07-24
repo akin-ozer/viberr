@@ -78,6 +78,7 @@ first sign-in).
 | `npm run typecheck` | route typegen + tsc |
 | `npm test` | vitest unit + integration suite |
 | `npm run seed` | idempotent baseline seed — agent catalog, KBs, skills, bootstrap admin; no demo data (`-- --reset` wipes board + derived state first) |
+| `npm run seed:demo` | test/dev-only: the mock demo board (arda & co, viberr-core) the e2e + route suites use |
 | `npm run rescan` | reconcile projections with the file store |
 
 ## Enabling real agent backends

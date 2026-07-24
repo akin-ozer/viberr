@@ -70,8 +70,11 @@ export default defineConfig({
   ],
 
   webServer: {
-    // Fresh store every run: wipe → seed demo dataset → dev server.
-    command: "rm -rf e2e/.tmp-data && npm run seed && npm run dev",
+    // Fresh store every run: wipe → seed the DEMO FIXTURE → dev server. The
+    // specs are written against the mock dataset, which the product seed no
+    // longer ships (clean-sheet ruling) — seed:demo is the test/dev-only
+    // fixture seeder (scripts/seed-demo.ts → test-support/demo-seed.ts).
+    command: "rm -rf e2e/.tmp-data && npm run seed:demo && npm run dev",
     url: `http://localhost:${E2E_PORT}/resources/health`,
     reuseExistingServer: false,
     timeout: 120_000,
