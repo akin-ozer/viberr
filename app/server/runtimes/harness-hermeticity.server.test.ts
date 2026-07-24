@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
@@ -31,7 +31,6 @@ const CREDENTIAL_KEYS = [
   "CODEX_API_KEY",
   "OPENAI_API_KEY",
   "VIBERR_CODEX_USE_CLI_AUTH",
-  "CODEX_HOME",
 ] as const;
 
 describe("test-harness hermeticity", () => {
@@ -50,6 +49,19 @@ describe("test-harness hermeticity", () => {
   it("reports both backends unavailable with no override set", () => {
     expect(isBackendAvailable("claude")).toBe(false);
     expect(isBackendAvailable("codex")).toBe(false);
+  });
+
+  it("points CODEX_HOME at a real directory that holds no auth.json", () => {
+    // P13-D-2: CODEX_HOME used to be blanked with the credentials above. The
+    // continuity probe needs a real transcript store to answer
+    // present/missing/unknown deterministically, so the harness now pins it to
+    // an empty temp dir instead. That keeps `codexCliAuthUsable()` false for the
+    // reason that actually matters — no auth.json — rather than by erasing the
+    // path, which is the stronger invariant to assert.
+    const home = process.env.CODEX_HOME;
+    expect(home).toBeTruthy();
+    expect(existsSync(home!)).toBe(true);
+    expect(existsSync(path.join(home!, "auth.json"))).toBe(false);
   });
 
   it("a .env credential cannot be reloaded into the process", () => {

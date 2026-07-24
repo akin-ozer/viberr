@@ -52,6 +52,48 @@ export function prStatePill(state: string): PillView {
 }
 
 /**
+ * CI health pill (P13-D-28). The check-runs summary had been fetched on every
+ * reconcile pass since the PR linker was written and read by nothing — one API
+ * call per pass spent for zero output. `failing > pending > passing` matches
+ * the sync column's precedence: the worst true statement wins.
+ *
+ * A repo with no CI reports `total: 0`, and the mapper returns null for that
+ * rather than a green "0 checks passing" — absence of CI is not a pass.
+ */
+export function checksPill(checks: {
+  total: number;
+  passing: number;
+  failing: number;
+  pending: number;
+  state: "passing" | "failing" | "pending";
+}): PillView {
+  if (checks.state === "failing") {
+    return { kind: "blocked", label: `${checks.failing}/${checks.total} checks failing` };
+  }
+  if (checks.state === "pending") {
+    return { kind: "input", label: `${checks.pending}/${checks.total} checks running` };
+  }
+  return { kind: "ready", label: `${checks.total} checks passing` };
+}
+
+/**
+ * GitHub review-state pill (P13-D-28). Before this, a teammate approving or
+ * requesting changes in GitHub's own UI changed nothing Viberr could see, so a
+ * merge blocked by required reviews surfaced only as a late 405.
+ *
+ * `changes_requested` is `risk`, not `blocked` — it is a real signal but it is
+ * GitHub's opinion, not this app's gate. In-product rejection (a reviewer's
+ * `request_changes` verdict) is what actually blocks acceptance.
+ */
+export function reviewPill(
+  review: "approved" | "changes_requested" | "review_required",
+): PillView {
+  if (review === "changes_requested") return { kind: "risk", label: "changes requested" };
+  if (review === "approved") return { kind: "ready", label: "approved" };
+  return { kind: "input", label: "review required" };
+}
+
+/**
  * Connection pill from the typed `checkRepoAccess` result (spec §7.9c: the
  * pill must not claim `connected` in any degraded state — no design exists
  * for these, so the labels below are the authored V1 vocabulary, documented

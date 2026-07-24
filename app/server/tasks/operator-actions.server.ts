@@ -2,9 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   acceptanceBlockedReason,
+  closedPrBlockedReason,
   deliveringEngagement,
   supportingEngagements,
   type PacketOption,
+  type PrState,
   type PacketOptionKind,
   type Recommendation,
   type RecommendationKind,
@@ -722,6 +724,12 @@ export interface OperatorTaskSnapshot {
     options: string[];
   } | null;
   recentTimeline: { type: string; actor: string; text: string }[];
+  /** P13-D-4: the review PR, or null. The operator used to be structurally
+   *  blind to it — no `pr` field anywhere in the snapshot — so it could neither
+   *  see that a human had CLOSED the PR on GitHub (an out-of-band rejection)
+   *  nor reason about it before recommending/accepting completion. `state` is
+   *  the task-file cache vocabulary: review | merged | closed | accepted. */
+  pr: { number: number; state: PrState; title: string } | null;
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
@@ -815,6 +823,12 @@ export function operatorSnapshot(
       text:
         e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
     })),
+    // P13-D-4: expose the review PR. `state: "closed"` means a human closed it
+    // on GitHub WITHOUT merging — an out-of-band rejection the operator must
+    // not paper over by recommending or accepting completion.
+    pr: fm.pr
+      ? { number: fm.pr.number, state: fm.pr.state, title: fm.pr.title }
+      : null,
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),
   };
@@ -1605,6 +1619,21 @@ export async function operatorAcceptCompletion(
     if (blockReason) {
       return { outcome: "noop", message: `${input.taskKey}: ${blockReason}` };
     }
+  }
+
+  // P13-D-4: the closed-PR gate the human `acceptCompletion` path applies. The
+  // operator was structurally blind here — it never read `pr` at all (the
+  // snapshot did not expose it), so under full autonomy it overwrote a PR a
+  // human had closed on GitHub to "accepted" and moved the task to Done. The
+  // reconciler restores `pr.state` on the next poll; `stage = done` is durable.
+  // Checked BEFORE the recommend branch too, so a supervised operator does not
+  // post an "Accept completion" card that acceptance would then refuse.
+  {
+    const closedReason = closedPrBlockedReason(
+      file.parsed.frontmatter,
+      input.taskKey,
+    );
+    if (closedReason) return { outcome: "noop", message: closedReason };
   }
 
   // Never accept a task with an open BLOCKED decision (mirrors the human

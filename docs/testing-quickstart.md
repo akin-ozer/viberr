@@ -25,3 +25,12 @@ Build the same artifact CI validates:
 ```sh
 npm run build
 ```
+
+## End-to-end
+
+CI's second job. It is the only gate that runs a real CLI entrypoint, so run it
+before opening a PR even when the three above are green:
+
+```sh
+npm run e2e
+```

@@ -132,15 +132,18 @@ export async function pushWorkspaceBranch(
       taskKey,
       dataRoot,
     };
-    const file = readTaskFile(ref);
-    if (!file) return { status: "task_not_found", reason: "task file missing" };
-    const fm = file.parsed.frontmatter;
+    // The task file is still read as the existence check — a push against a
+    // task that has no canonical record must not proceed.
+    if (!readTaskFile(ref)) {
+      return { status: "task_not_found", reason: "task file missing" };
+    }
 
     const projectFile = readProjectFile({
       projectSlug,
       dataRoot,
     });
-    const repo = fm.repo ?? projectFile?.parsed.frontmatter.repo ?? null;
+    // P13-D-5: one project, one repository — the task-level override is gone.
+    const repo = projectFile?.parsed.frontmatter.repo ?? null;
     if (!repo) return { status: "no_repo", reason: "project has no repo" };
     const defaultBranch =
       projectFile?.parsed.frontmatter.defaultBranch || "main";

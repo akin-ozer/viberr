@@ -15,6 +15,7 @@ import { Markdown } from "~/ui/markdown";
 import { findMentionSpans } from "~/ui/mention-spans";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -266,6 +267,9 @@ export function Timeline({
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   const [draft, setDraft] = useState("");
+  // P13-D-39: the send handler below accepts either modifier, so the hint has to
+  // name the one the viewer's keyboard actually has (UI-55's rule).
+  const sendHint = useModifierHint("↵");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const hlRef = useRef<HTMLDivElement>(null);
   const mentions = useMentionAutocomplete(mentionables, taRef, draft, setDraft);
@@ -439,8 +443,9 @@ export function Timeline({
                 color: "var(--placeholder)",
               }}
               className="mono"
+              suppressHydrationWarning
             >
-              ⌘↵ to send
+              {sendHint} to send
             </span>
             <button
               type="button"

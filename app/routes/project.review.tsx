@@ -5,6 +5,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { ReviewQueuePage } from "~/features/review/review-page";
 
 /**
@@ -38,6 +39,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const roles = resolveStageRoles(project.stages, project.workflow);
   const nameOf = (id: string | null) =>
     project.stages.find((s) => s.id === id)?.name ?? null;
+  // P13-D-9: the page used to promise "always a human action" unconditionally
+  // while an `auto`-preset operator with an explicit
+  // `completion-for-acceptance: direct` grant closes tasks itself. No policy or
+  // autonomy signal reached the page at all — now it does.
+  const acceptance = resolveAcceptanceAuthority(params.slug);
   return {
     slug: params.slug,
     ...queue,
@@ -45,11 +51,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       review: nameOf(roles.reviewId) ?? "the review stage",
       terminal: nameOf(roles.terminalId) ?? "the final stage",
     },
+    acceptance,
   };
 }
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
-  const { slug, ready, working, total, stageNames } = loaderData;
+  const { slug, ready, working, total, stageNames, acceptance } = loaderData;
   return (
     <ReviewQueuePage
       projectSlug={slug}
@@ -57,6 +64,7 @@ export default function ReviewView({ loaderData }: Route.ComponentProps) {
       working={working}
       total={total}
       stageNames={stageNames}
+      acceptance={acceptance}
     />
   );
 }

@@ -120,8 +120,15 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
       role="status"
       aria-live="polite"
     >
+      {/* P13-D-10: `data-kind` makes the success/failure distinction assertable
+          (and stylable) — the icon is the only other carrier, and an inline
+          <svg> is not something a test can name. */}
       {toasts.map((t) => (
-        <div className={"toast" + (t.leaving ? " leaving" : "")} key={t.id}>
+        <div
+          className={"toast" + (t.leaving ? " leaving" : "")}
+          data-kind={t.kind}
+          key={t.id}
+        >
           {/* Inventory #33: error strings pushed by the bell / user menu /
               pref rollbacks used to render with a green success tick. */}
           <Icon name={t.kind === "error" ? "alert" : "check"} />

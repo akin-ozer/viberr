@@ -363,7 +363,10 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Edit Developer"));
     expect(getByText("Edit agent profile")).toBeTruthy();
-    expect(getByText("Done is human-only, always")).toBeTruthy();
+    // P13-D-9: "always" was an over-promise — a project's operator can close a
+    // task under the auto preset. No AGENT profile ever can, which is the
+    // guarantee this org-scoped editor is actually in a position to make.
+    expect(getByText("Done is closed by a human, never by an agent")).toBeTruthy();
     const chips = [...document.querySelectorAll(".pick-chip")];
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
     // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org

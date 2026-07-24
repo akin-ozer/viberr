@@ -16,6 +16,7 @@ import {
   storeRelativePath,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
+import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
@@ -86,28 +87,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-// ------------------------------------------------------------ provenance
-
-function recordProvenance(
-  db: DatabaseSync,
-  input: {
-    sourcePath: string;
-    contentHash: string | null;
-    action: string;
-    details?: Record<string, unknown>;
-  },
-): void {
-  db.prepare(
-    `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(
-    input.sourcePath,
-    input.contentHash,
-    nowIso(),
-    input.action,
-    input.details ? JSON.stringify(input.details) : null,
-  );
-}
+// P13-D-16: the provenance INSERT used to be copied verbatim here and in
+// github-reconciler.server.ts. The table now has one owner —
+// app/server/provenance/ — which is also where the reads live.
 
 function replaceDiagnostics(
   db: DatabaseSync,
@@ -444,7 +426,7 @@ export function rebuildTaskFile(
     JSON.stringify(supportingEngagements(fm)),
     fm.operator ? JSON.stringify(fm.operator) : null,
     fm.branch,
-    fm.repo ?? project?.repo ?? null,
+    project?.repo ?? null, // P13-D-5: no task-level repo override
     fm.pr ? JSON.stringify(fm.pr) : null,
     fm.github ? JSON.stringify(fm.github) : null,
     parsed.goal,

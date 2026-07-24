@@ -1,6 +1,14 @@
-import { existsSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -92,7 +100,30 @@ function deployDevSpecialist(): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
+/**
+ * P13-D-2: `resumeRun` now probes for the provider transcript behind a stored
+ * session id, and the fake runtime mints session ids (`fake-<runId>`) that were
+ * never written to disk. Pin CLAUDE_CONFIG_DIR at an EMPTY dir so the probe is
+ * inconclusive ("unknown" → resume exactly as before) on every machine: without
+ * it, `resolveClaudeConfigDir()` falls back to the ambient data root, whose
+ * `claude-home/projects` exists on a developer's machine but not on CI — so the
+ * suite would take a different path locally than it does in CI. Tests that
+ * WANT a live session materialize its transcript here (see `writeTranscript`).
+ */
+let claudeHome: string;
+const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+
+/** Materialize a provider transcript so the continuity probe reports present. */
+function writeTranscript(sessionId: string): void {
+  const dir = path.join(claudeHome, "projects", "-fake-cwd");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, `${sessionId}.jsonl`), "{}\n");
+}
+
 beforeEach(() => {
+  claudeHome = mkdtempSync(path.join(tmpdir(), "viberr-agent-reply-"));
+  process.env.CLAUDE_CONFIG_DIR = claudeHome;
+  resetEnvCacheForTests();
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   deployDevSpecialist();
@@ -129,6 +160,10 @@ afterEach(() => {
   }
   resetSseBrokerForTests();
   ctx.cleanup();
+  rmSync(claudeHome, { recursive: true, force: true });
+  if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir;
+  resetEnvCacheForTests();
 });
 
 /* ---------------------------------------------------- resolveMentionedAgent */
@@ -271,6 +306,107 @@ describe("resolveMentionedAgent", () => {
     const switched = call("@dev please continue");
     expect(switched).toMatchObject({ backend: "codex", profileId: "dev" });
     expect(switched!.session).toBeNull();
+  });
+
+  it("skips a run whose provider session is PROVEN gone (P13-D-2 stranding)", () => {
+    // Two Claude sessions for `dev`: an older live one and the newest, whose
+    // transcript the provider has since swept.
+    const row = (id: string, threadId: string, sessionId: string) => ({
+      id,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId,
+      role: "developer",
+      kind: "primary" as const,
+      backend: "claude" as const,
+      model: "sonnet",
+      sdk: "claude",
+      sessionId,
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished" as const,
+    });
+    upsertRun(store.db, row("run_live", "primary", "claude-session-live"));
+    upsertRun(store.db, row("run_dead", "primary-r1", "claude-session-dead"));
+    // Newest wins while nothing is known to be dead.
+    expect(call("@dev continue")!.session!.id).toBe("run_dead");
+
+    // The continuity probe proved the newest session gone and stamped the run.
+    insertRunLine(store.db, {
+      runId: "run_dead",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: {
+        t: "00:00:00",
+        ev: "err",
+        tag: "run·session_missing",
+        text: "The Claude Code session claude-session-dead no longer exists on this machine.",
+      },
+    });
+
+    // BEFORE: `latestSessionRun` had no state filter, so this kept returning
+    // run_dead forever — every later @mention resumed the same dead id and the
+    // agent was permanently unreachable on this task.
+    expect(call("@dev continue")!.session!.id).toBe("run_live");
+  });
+
+  it("falls back to a FRESH run when every session of the agent is gone", () => {
+    upsertRun(store.db, {
+      id: "run_only",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "claude-session-gone",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    insertRunLine(store.db, {
+      runId: "run_only",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: { t: "00:00:00", ev: "err", tag: "run·session_missing", text: "gone" },
+    });
+    expect(call("@dev continue")!.session).toBeNull();
+  });
+
+  it("an agent merely PRINTING the marker cannot strand its own session", () => {
+    upsertRun(store.db, {
+      id: "run_chatty",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "claude-session-fine",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    insertRunLine(store.db, {
+      runId: "run_chatty",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      // The tag is the channel; the TEXT is agent output and carries no weight.
+      display: {
+        t: "00:00:00",
+        ev: "text",
+        tag: "assistant",
+        text: "I added a `session_missing` failure kind — see run·session_missing.",
+      },
+    });
+    expect(call("@dev continue")!.session!.id).toBe("run_chatty");
   });
 
   it("returns the most-recent run WITH a session_id once one exists", async () => {
@@ -484,6 +620,41 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "unavailable" });
   });
 
+  it("classifies a vanished provider session as session_missing, never auth (P13-D-2)", () => {
+    // The tagged channel (the adapter classified it in memory before redaction).
+    expect(
+      classify([
+        errLine({
+          tag: "run·error·session_missing",
+          text: "The Claude Code session could not be resumed — its transcript no longer exists (provider retention).",
+        }),
+      ]),
+    ).toMatchObject({ kind: "session_missing" });
+
+    // The marker `resumeRun` stamps on the dead run when its probe catches it.
+    expect(
+      classify([
+        errLine({
+          tag: "run·session_missing",
+          text: "The Codex session 019a no longer exists on this machine — its provider transcript is gone.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "session_missing" });
+
+    // Untagged prose: BEFORE, "No conversation found with session ID …" hit no
+    // regex and landed as `unknown`, which the escalation narrates as "review
+    // its authentication and runtime configuration" — pointing the human at the
+    // one thing that is definitely fine.
+    expect(
+      classify([
+        errLine({
+          tag: "run·error",
+          text: "No conversation found with session ID 8a1f-…",
+        }),
+      ]),
+    ).toMatchObject({ kind: "session_missing" });
+  });
+
   it("returns the last err line and null when no failure line exists", () => {
     expect(
       classify([
@@ -636,6 +807,10 @@ describe("commentToAgent", () => {
     );
     const priorSessionId = priorRuns[priorRuns.length - 1]!.session_id!;
     const priorCount = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
+    // P13-D-2: this test's precondition is a LIVE session — give it a real
+    // transcript so the resume-time continuity probe reports `present` and the
+    // resume happens for the reason the test claims.
+    writeTranscript(priorSessionId);
 
     const result = await commentToAgent(
       store.db,

@@ -68,6 +68,8 @@ const prs: PrRowView[] = [
     state: "review",
     title: "Attach execution workspace",
     branch: "vib-142-attach-workspace",
+    checks: null,
+    review: null,
   },
   {
     taskKey: "VIB-139",
@@ -75,6 +77,8 @@ const prs: PrRowView[] = [
     state: "merged",
     title: "Policy split",
     branch: "vib-139-policy-split",
+    checks: null,
+    review: null,
   },
   {
     taskKey: "VIB-777",
@@ -82,6 +86,8 @@ const prs: PrRowView[] = [
     state: "closed",
     title: "Abandoned spike",
     branch: "vib-777-spike",
+    checks: null,
+    review: null,
   },
 ];
 
@@ -90,7 +96,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-142",
     title: "Attach execution workspace to task runtime",
     branch: "vib-142-attach-workspace",
-    pr: { number: 318, state: "review" },
+    pr: { number: 318, state: "review", checks: null, review: null },
     sync: "synced",
     commitCount: 3,
   },
@@ -106,7 +112,7 @@ const branches: BranchRowView[] = [
     taskKey: "VIB-139",
     title: "Separate human RBAC from agent capability policy",
     branch: "vib-139-policy-split",
-    pr: { number: 298, state: "merged" },
+    pr: { number: 298, state: "merged", checks: null, review: null },
     sync: "merged",
     commitCount: 0,
   },
@@ -292,16 +298,16 @@ describe("RepositoryPanel", () => {
       />,
     );
     const rows = container.querySelectorAll(".kv-row");
-    expect(rows.length).toBe(4);
+    expect(rows.length).toBe(3);
     expect(rows[0]!.textContent).toContain("akin-ozer/viberr");
     // Degraded: the pill must NOT claim connected (spec §7.9c).
     expect(rows[1]!.querySelector(".pill")!.textContent).toContain(
       "no credential",
     );
-    expect(rows[2]!.textContent).toContain(
-      "project default · task-level override allowed",
-    );
-    expect(rows[3]!.textContent).toContain("1 · V1 limit");
+    // P13-D-5: this row hardcoded "task-level override allowed" — a capability
+    // nothing implemented, asserted regardless of the (now deleted) toggle.
+    expect(rows[2]!.textContent).toContain("every task uses this repository");
+    expect(container.textContent).not.toContain("override");
   });
 
   it("claims connected only for a connected result", () => {

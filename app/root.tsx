@@ -24,8 +24,10 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { RoutePendingBar } from "./features/shell/route-pending-bar";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
+import { requestContextMiddleware } from "./server/logging/request-context.server";
 import { authenticateWithHeaders } from "./server/auth/require-user.server";
 import { getDb } from "./server/db/sqlite.server";
 import { getPref } from "./server/prefs/user-prefs.server";
@@ -37,6 +39,20 @@ import {
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
 ];
+
+/**
+ * P13-D-30: binds one correlation id for the whole request, so every
+ * `logger.*` call from any loader, action or nested route carries it with no
+ * call-site work. `entry.server.tsx` reuses the id bound here rather than
+ * minting a second one, so the render and the data phase share it.
+ *
+ * The architecture doc promised "structured JSON logs with request/job
+ * correlation identifiers" from the start. The affordance shipped once as an
+ * opt-in `logger.child({ requestId })`, was never called by anything, and was
+ * deleted as dead code — which is what happens to an opt-in nobody opts into.
+ * This one is not optional.
+ */
+export const middleware = [requestContextMiddleware];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
@@ -151,6 +167,9 @@ export default function App() {
 
   return (
     <ToastProvider>
+      {/* P13-D-36: one app-wide route pending indicator, mounted above the
+          Outlet so it survives every route change. */}
+      <RoutePendingBar />
       <Outlet />
     </ToastProvider>
   );

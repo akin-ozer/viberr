@@ -507,6 +507,200 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   });
 });
 
+/* ---------------- runtime continuity recovery (P13-D-2 / FR22) ------------- */
+
+describe("resumeRun — continuity recovery", () => {
+  const savedConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  let claudeHome: string;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = (await import("node:path")).default;
+    claudeHome = mkdtempSync(path.join(tmpdir(), "viberr-continuity-"));
+    process.env.CLAUDE_CONFIG_DIR = claudeHome;
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    resetEnvCacheForTests();
+  });
+
+  afterEach(async () => {
+    const { rmSync } = await import("node:fs");
+    rmSync(claudeHome, { recursive: true, force: true });
+    if (savedConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    resetEnvCacheForTests();
+  });
+
+  /** Make `<CLAUDE_CONFIG_DIR>/projects` exist so absence is CONCLUSIVE. */
+  async function withTranscriptStore(sid?: string): Promise<void> {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = (await import("node:path")).default;
+    const projects = path.join(claudeHome, "projects", "-w-x");
+    mkdirSync(projects, { recursive: true });
+    if (sid) writeFileSync(path.join(projects, `${sid}.jsonl`), "{}\n");
+  }
+
+  /** Start a run, then resume it, capturing every RunSpec the adapter saw. */
+  async function startThenResume(): Promise<{
+    specs: RunSpec[];
+    firstRunId: string;
+    resume: () => Promise<{ runId: string; continuityReset?: true }>;
+  }> {
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({
+          outcome: "finished",
+          effectiveBackend: "claude",
+          sessionId: "sess-gone",
+        });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
+      kind: "primary", backend: "claude", model: "m", agentName: "dev",
+      agentProfileId: "dev", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    return {
+      specs,
+      firstRunId: runId,
+      resume: () =>
+        resumeRun(store.db, {
+          runId,
+          prompt: "follow up",
+          dataRoot: store.dataRoot,
+        }),
+    };
+  }
+
+  it("retries the turn as a FRESH canonical-anchored run when the transcript is gone", async () => {
+    const { specs, firstRunId, resume } = await startThenResume();
+    expect(getRun(store.db, firstRunId)!.session_id).toBe("sess-gone");
+    await withTranscriptStore(); // store exists, this session is NOT in it
+
+    const resumed = await resume();
+    await settle();
+
+    // BEFORE: the dead id went straight to the SDK (`resumeSessionId:
+    // prev.session_id`), the run failed as a generic "review its authentication
+    // and runtime configuration", and the packet offered no recovery.
+    expect(resumed.continuityReset).toBe(true);
+    const spec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBeNull();
+    // …and the turn is re-anchored on the canonical artifact (PRD-1).
+    expect(spec.prompt).toContain("[continuity notice]");
+    expect(spec.prompt).toContain("task.md");
+    expect(spec.prompt).toContain("follow up"); // the human's actual request
+
+    // The DEAD run is stamped so it is never selected again (the stranding half).
+    const marker = listRunLines(store.db, firstRunId).find(
+      (l) => l.display.tag === "run·session_missing",
+    );
+    expect(marker).toBeDefined();
+    expect(marker!.display.text).not.toMatch(/authentication|credential/i);
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    expect(runFailureReason(store.db, firstRunId)?.kind).toBe("session_missing");
+
+    // …and the timeline says what happened, in plain words.
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const timeline = readTaskFile({
+      projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const note = timeline.find((e) => e.text.includes("continuity was lost"));
+    expect(note).toBeDefined();
+    expect(note!.type).toBe("note");
+    expect(note!.text).toContain("task.md");
+  });
+
+  it("resumes normally when the transcript is still there", async () => {
+    const { specs, resume } = await startThenResume();
+    await withTranscriptStore("sess-gone"); // …it is not gone after all
+    const resumed = await resume();
+    await settle();
+    expect(resumed.continuityReset).toBeUndefined();
+    const spec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBe("sess-gone");
+    expect(spec.prompt).toBe("follow up");
+  });
+
+  it("resumes normally when there is NO transcript store to look in (unknown)", async () => {
+    // No `<config>/projects` dir at all. Absence proves nothing here, and
+    // treating it as "gone" would throw away every live session on any
+    // deployment whose transcripts this process cannot see.
+    const { specs, firstRunId, resume } = await startThenResume();
+    const resumed = await resume();
+    await settle();
+    expect(resumed.continuityReset).toBeUndefined();
+    expect(specs.find((s) => s.runId === resumed.runId)!.resumeSessionId).toBe(
+      "sess-gone",
+    );
+    expect(
+      listRunLines(store.db, firstRunId).some(
+        (l) => l.display.tag === "run·session_missing",
+      ),
+    ).toBe(false);
+  });
+});
+
+/* -------------- backward paging for the console (P13-D-11) ---------------- */
+
+describe("getRunLog paging", () => {
+  async function runWithLines(count: number): Promise<string> {
+    queueFakeRun(
+      instantScript(
+        Array.from({ length: count }, (_, i) => ({
+          t: String(i),
+          ev: "text" as const,
+          tag: "assistant",
+          text: `l${i}`,
+        })),
+      ),
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    return runId;
+  }
+
+  it("pages BACKWARDS from a cursor, newest-first, oldest-first within the page", async () => {
+    const runId = await runWithLines(10);
+    // The loader shipped the tail; the console asks for what came before seq 7.
+    const page = getRunLog(store.db, runId, { before: 7, limit: 3 })!;
+    expect(page.lines.map((l) => l.display.text)).toEqual(["l4", "l5", "l6"]);
+    expect(page.oldestSeq).toBe(4);
+    expect(page.hasMore).toBe(true); // seq 0..3 are still older
+
+    const older = getRunLog(store.db, runId, { before: page.oldestSeq, limit: 10 })!;
+    expect(older.lines.map((l) => l.display.text)).toEqual(["l0", "l1", "l2", "l3"]);
+    // Reached the start of this run — the console steps to the PREVIOUS run id
+    // in the group's logWindow.runIds from here.
+    expect(older.hasMore).toBe(false);
+  });
+
+  it("a bare `limit` pages a run's newest lines (how the console enters an older run)", async () => {
+    const runId = await runWithLines(10);
+    const page = getRunLog(store.db, runId, { limit: 2 })!;
+    expect(page.lines.map((l) => l.display.text)).toEqual(["l8", "l9"]);
+    expect(page.hasMore).toBe(true);
+  });
+
+  it("keeps the forward `since` tail working unchanged", async () => {
+    const runId = await runWithLines(4);
+    const tail = getRunLog(store.db, runId, 1)!;
+    expect(tail.lines.map((l) => l.display.text)).toEqual(["l2", "l3"]);
+    expect(tail.headSeq).toBe(3);
+    expect(tail.hasMore).toBe(true); // seq 0..1 exist below this page
+  });
+});
+
 describe("backendUnavailableMessage — state-aware codex copy", () => {
   const cleanupDirs: string[] = [];
   afterEach(async () => {

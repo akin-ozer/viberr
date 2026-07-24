@@ -62,3 +62,45 @@ export function closeDb(): void {
   if (db?.isOpen) db.close();
   cache[DB_CACHE_KEY] = undefined;
 }
+
+/**
+ * Graceful-shutdown close: checkpoint the WAL into the main file, then close
+ * (P13-D-43).
+ *
+ * Until this existed, `closeDb()` had no non-test caller and nothing in the app
+ * ever checkpointed — the only signal handler closed SSE connections and
+ * re-raised. An exited container was observed leaving a 4.1 MB
+ * `projection.sqlite-wal` and a `-shm` beside a stale `projection.sqlite`;
+ * SQLite unlinks both on a clean close, so their survival is proof the close
+ * never happened. That matters because this database is PRIMARY storage for
+ * users, sessions, PATs, audit and notifications — rows that no rescan can
+ * rebuild — and the backup instructions offer "stop the container" as the clean
+ * alternative to copying the sidecars.
+ *
+ * TRUNCATE (not PASSIVE) so the `-wal` is emptied rather than merely folded in:
+ * the visible, on-disk difference is the whole point. Total by construction —
+ * a shutdown path must never throw and abort the rest of the shutdown.
+ */
+export function shutdownDatabase(): void {
+  const cache = globalThis as unknown as Record<
+    symbol,
+    DatabaseSync | undefined
+  >;
+  const db = cache[DB_CACHE_KEY];
+  if (!db?.isOpen) return;
+  try {
+    db.exec(`PRAGMA wal_checkpoint(TRUNCATE);`);
+  } catch (error) {
+    logger.warn("wal checkpoint failed during shutdown", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  try {
+    closeDb();
+    logger.info("sqlite closed");
+  } catch (error) {
+    logger.error("sqlite close failed during shutdown", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}

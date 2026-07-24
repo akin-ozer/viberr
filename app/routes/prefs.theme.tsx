@@ -12,7 +12,7 @@ import {
 /**
  * POST /prefs/theme — theme cycling from the user menu / profile panel.
  * Persists to the user row (users.theme) AND the viberr_theme cookie so the
- * next SSR paints correctly (CONVENTIONS theme rule). The client applies
+ * next SSR paints correctly (docs/architecture/decisions.md theme rule). The client applies
  * data-theme optimistically before this returns (personal UI state).
  */
 

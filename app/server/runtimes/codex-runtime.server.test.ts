@@ -680,6 +680,22 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.text).not.toContain("sk-secret-sentinel");
   });
 
+  it("a vanished rollout classifies as 'session_missing', not 'auth' (P13-D-2)", async () => {
+    const reason = await classifyThrownFailure(
+      "session not found: 0199a2c4-7b31-7802 (no rollout under /data/codex/sessions)",
+    );
+    // BEFORE: this fell through to `unknown` and the escalation told the human
+    // to "review its authentication and runtime configuration" — the one thing
+    // that is definitely fine when a transcript has been swept.
+    expect(reason?.kind).toBe("session_missing");
+    expect(reason?.text).toContain("rollout no longer exists");
+    // It must not send the human at the credential — it says the opposite.
+    expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+    expect(reason?.text).toContain("Nothing is wrong with the credential");
+    // Redaction invariant holds: the path from the raw error never surfaces.
+    expect(reason?.text).not.toContain("/data/codex/sessions");
+  });
+
   it("an unclassifiable failure classifies as 'unknown'", async () => {
     const reason = await classifyThrownFailure(
       "segmentation fault in /opt/codex/bin during run",

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createGithubClient } from "./github-client.server";
-import { findPrForBranch, mapPrToCacheState } from "./pr-linker.server";
+import {
+  deriveReviewState,
+  findPrForBranch,
+  mapPrToCacheState,
+} from "./pr-linker.server";
 
 const REPO = "akin-ozer/viberr";
 const REPO_PATH = `/repos/${REPO}`;
@@ -224,5 +228,158 @@ describe("findPrForBranch", () => {
     expect((await findPrForBranch(offline, REPO, "b")).status).toBe(
       "network_unavailable",
     );
+  });
+});
+
+// ------------------------------------------------------- P13-D-28 review state
+
+describe("deriveReviewState (P13-D-28)", () => {
+  const by = (login: string, state: string) => ({ user: { login }, state });
+
+  it("uses each reviewer's LATEST verdict, not every review event", () => {
+    // `/pulls/{n}/reviews` is an append-only EVENT log, oldest first. Ayse asked
+    // for changes and then approved the fix — counting events would leave the PR
+    // permanently "changes_requested".
+    expect(
+      deriveReviewState(
+        [by("ayse", "CHANGES_REQUESTED"), by("ayse", "APPROVED")],
+        0,
+      ),
+    ).toBe("approved");
+  });
+
+  it("changes_requested OUTRANKS approved when both are outstanding", () => {
+    expect(
+      deriveReviewState([by("ayse", "APPROVED"), by("mert", "CHANGES_REQUESTED")], 0),
+    ).toBe("changes_requested");
+    // Order-independent.
+    expect(
+      deriveReviewState([by("mert", "CHANGES_REQUESTED"), by("ayse", "APPROVED")], 0),
+    ).toBe("changes_requested");
+  });
+
+  it("COMMENTED / PENDING are not verdicts and never displace a standing one", () => {
+    expect(
+      deriveReviewState(
+        [by("ayse", "APPROVED"), by("ayse", "COMMENTED"), by("mert", "PENDING")],
+        0,
+      ),
+    ).toBe("approved");
+    // Comments alone say nothing about the review verdict.
+    expect(deriveReviewState([by("ayse", "COMMENTED")], 0)).toBeNull();
+  });
+
+  it("a DISMISSED review withdraws that reviewer's verdict", () => {
+    expect(
+      deriveReviewState([by("ayse", "APPROVED"), by("ayse", "DISMISSED")], 0),
+    ).toBeNull();
+    expect(
+      deriveReviewState([by("ayse", "APPROVED"), by("ayse", "DISMISSED")], 1),
+    ).toBe("review_required");
+  });
+
+  it("no verdict + a requested reviewer → review_required; nobody asked → null", () => {
+    expect(deriveReviewState([], 2)).toBe("review_required");
+    expect(deriveReviewState([], 0)).toBeNull();
+  });
+});
+
+describe("findPrForBranch review-state fetch (P13-D-28)", () => {
+  const openRoutes = (
+    extra: Parameters<typeof fakeGithubFetch>[0] = {},
+  ): Parameters<typeof fakeGithubFetch>[0] => ({
+    [`GET ${REPO_PATH}/pulls`]: {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "open",
+          merged_at: null,
+          head: { sha: "headsha318" },
+        },
+      ],
+    },
+    [`GET ${REPO_PATH}/pulls/318`]: {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "open",
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        requested_reviewers: [{ login: "mert" }],
+      },
+    },
+    ...extra,
+  });
+
+  it("reads reviews for an OPEN PR and reports the derived state", async () => {
+    const { gh, client: c } = client(
+      openRoutes({
+        [`GET ${REPO_PATH}/pulls/318/reviews`]: {
+          body: [
+            { user: { login: "ayse" }, state: "COMMENTED" },
+            { user: { login: "ayse" }, state: "CHANGES_REQUESTED" },
+          ],
+        },
+      }),
+    );
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
+    if (result.status === "found") expect(result.pr.review).toBe("changes_requested");
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/318/reviews`)).toHaveLength(1);
+  });
+
+  it("requested reviewers come free off the detail fetch → review_required", async () => {
+    const { client: c } = client(
+      openRoutes({ [`GET ${REPO_PATH}/pulls/318/reviews`]: { body: [] } }),
+    );
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    if (result.status === "found") expect(result.pr.review).toBe("review_required");
+  });
+
+  it("a FAILED reviews read leaves `review` ABSENT (unknown), not null", async () => {
+    // The route is missing → 404. "We could not read it" must be distinguishable
+    // from "we read it and nobody has reviewed", or the caller blanks the pill.
+    const { client: c } = client(openRoutes());
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect("review" in result.pr).toBe(false);
+    }
+  });
+
+  it("spends NO reviews call on a settled (merged) PR — the whole point of D-28", async () => {
+    const { gh, client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 298,
+            title: "Store scan hardening",
+            state: "closed",
+            merged_at: "2026-07-01T10:00:00Z",
+            head: { sha: "sha298" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/298`]: {
+        body: {
+          number: 298,
+          title: "Store scan hardening",
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-01T10:00:00Z",
+          head: { sha: "sha298" },
+        },
+      },
+      [`GET ${REPO_PATH}/branches/vib-139-store-scan`]: {
+        body: { commit: { sha: "sha298" } },
+      },
+      [`GET ${REPO_PATH}/pulls/298/reviews`]: { body: [{ user: { login: "a" }, state: "APPROVED" }] },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-139-store-scan");
+    expect(result.status).toBe("found");
+    if (result.status === "found") expect("review" in result.pr).toBe(false);
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/298/reviews`)).toHaveLength(0);
   });
 });

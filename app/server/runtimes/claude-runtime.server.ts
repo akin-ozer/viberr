@@ -6,6 +6,7 @@ import type {
   RunSpec,
   RuntimeAdapter,
 } from "./adapter.server";
+import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 
 /**
@@ -310,7 +311,15 @@ function assistantUsage(
  *  auth/quota without re-regexing the deliberately-generic message text (the
  *  auth message says "authentication", which the downstream prose regex misses
  *  — the symmetric bug the codex fix noted). */
-type ClaudeFailureKind = "quota" | "auth" | "unknown";
+type ClaudeFailureKind =
+  | "quota"
+  | "auth"
+  /** P13-D-2: `--resume <id>` against a transcript Claude Code has swept
+   *  ("No conversation found with session ID …"). `resumeRun`'s pre-flight
+   *  probe normally re-anchors before we get here; this covers the SDK finding
+   *  out first. Not an auth class — the credential is fine. */
+  | "session_missing"
+  | "unknown";
 
 /** Turn cap for a claude run — a RUNAWAY guard, not a work budget. The old
  *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live:
@@ -344,6 +353,15 @@ function classifyClaudeError(error: unknown): {
     };
   }
   const raw = error instanceof Error ? error.message : String(error ?? "");
+  // P13-D-2 before the auth branch: a swept transcript must never be narrated
+  // as a rejected credential.
+  if (SESSION_MISSING_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        "The Claude Code session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+    };
+  }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
     return {
       kind: "quota",

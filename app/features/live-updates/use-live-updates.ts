@@ -10,7 +10,7 @@ import {
  * Live updates (Phase 6): subscribe the current surface to its SSE scopes
  * and revalidate the active React Router loaders when anything relevant
  * changes. No optimistic state, no client caches — revalidation IS the
- * update mechanism (CONVENTIONS "no optimistic UI for governed state").
+ * update mechanism (docs/architecture/decisions.md "no optimistic UI for governed state").
  *
  * Revalidations are debounced 300 ms (trailing) so event bursts — a rescan
  * projecting ten tasks, a mutation emitting task + project + notification —

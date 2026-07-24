@@ -488,7 +488,9 @@ function useStoreOps(
       if (d.toast) push(d.toast);
       if (d.captureToast) push(d.captureToast);
     } else if (d.error) {
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so this failure
+      // rendered under a green tick.
+      push(d.error, "error");
     }
   }, [opsFetcher.state, opsFetcher.data, push]);
 

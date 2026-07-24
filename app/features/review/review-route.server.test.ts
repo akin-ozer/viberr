@@ -80,6 +80,30 @@ describe("/projects/:slug/review", () => {
     expect(sub).not.toContain("`");
   });
 
+  it("ships the acceptance-authority signal the queue copy needs (P13-D-9)", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const result = (await runLoader("viberr-core", cookie)) as {
+      acceptance: { operatorCanAccept: boolean; operatorName: string };
+    };
+    // The loader used to pass `stageNames` and nothing else, so the page's
+    // "always a human action" claim could not be qualified at all. The seeded
+    // operator holds `completion-for-acceptance: recommend`, so the strict
+    // boundary is the honest answer here — but it is now a computed one.
+    expect(result.acceptance).toEqual({
+      operatorCanAccept: false,
+      operatorName: "Operator",
+    });
+  });
+
+  it("falls back to the strict boundary for a store with no such project", async () => {
+    const { resolveAcceptanceAuthority } = await import(
+      "./review-acceptance-authority.server"
+    );
+    expect(
+      resolveAcceptanceAuthority("no-such-project", { dataRoot: app.dataRoot }),
+    ).toEqual({ operatorCanAccept: false, operatorName: "the operator" });
+  });
+
   it("falls back to the boundary placeholder when a row has neither packet nor events", () => {
     const bare: ReviewRowView = {
       key: "VIB-999",

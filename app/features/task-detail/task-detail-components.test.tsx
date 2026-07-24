@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, createRoutesStub } from "react-router";
+import { ToastProvider } from "~/ui/toast";
 import { DecisionPacket, observationLabel } from "./decision-packet";
-import { GithubTrace } from "./task-detail-page";
+import { GithubTrace, ScheduledActions, TaskHero } from "./task-detail-page";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
 import {
@@ -1044,5 +1047,122 @@ describe("observationLabel", () => {
     // Live packet rendered "PROMPT_AGENT ERROR" at a human (the row uppercases).
     expect(observationLabel("prompt_agent error")).toBe("prompt agent error");
     expect(observationLabel("stage")).toBe("stage");
+  });
+});
+
+/* ------------- panel-head / CTA / toast-kind regressions (pass 13) ------------- */
+
+/** The Scheduled re-runs panel and the goal editor both need a data router
+ *  (`useFetcher`) and the toast context, so they render inside a route stub. */
+function renderWithRouter(
+  ui: ReactNode,
+  action: () => unknown = () => ({ ok: true }),
+) {
+  const Stub = createRoutesStub([
+    {
+      path: "/t",
+      Component: () => <ToastProvider>{ui}</ToastProvider>,
+      action: async () => action(),
+    },
+  ]);
+  return render(<Stub initialEntries={["/t"]} />);
+}
+
+function heroTask(patch: Record<string, unknown> = {}): TaskDetail {
+  return {
+    key: "VIB-151",
+    title: "Compress long-running task timelines",
+    goal: "Bound the timeline payload and add a Show-older affordance.",
+    filePath: "projects/viberr-core/tasks/VIB-151.md",
+    displayReadiness: "ready",
+    validation: "pass",
+    stages: [],
+    ...patch,
+  } as unknown as TaskDetail;
+}
+
+function schedule(patch: Record<string, unknown> = {}): TaskSchedule {
+  return {
+    id: "sch-1",
+    action: "operator-run",
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+    backend: "claude",
+    autonomy: "supervised",
+    note: "",
+    createdBy: "u-arda",
+    createdByLabel: "Arda Kaya",
+    createdAt: new Date().toISOString(),
+    status: "pending",
+    firedAt: null,
+    claimedAt: null,
+    retries: 0,
+    ...patch,
+  } as unknown as TaskSchedule;
+}
+
+describe("ScheduledActions panel head (P13-D-38)", () => {
+  it("renders the icon as a SIBLING of the <h2>, not nested inside it", () => {
+    // `.panel-head` is a flex row with `gap: .6rem` and `.panel-head h2 {flex:1}`.
+    // Nesting collapsed the gap to a JSX space and baseline-aligned the SVG —
+    // this was the only one of ~48 panel heads that did it.
+    const { container } = renderWithRouter(
+      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+    );
+    const head = container.querySelector(
+      '[data-testid="scheduled-actions"] .panel-head',
+    )!;
+    expect(head.querySelector("h2")!.querySelector("svg")).toBeNull();
+    expect(head.querySelector(":scope > svg.ico")).toBeTruthy();
+    expect(head.querySelector("h2")!.textContent!.trim()).toBe("Scheduled re-runs");
+  });
+});
+
+describe("undefined CTA / utility classes (P13-D-19)", () => {
+  it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
+    const { container } = renderWithRouter(
+      <ScheduledActions schedules={[schedule()]} canRunAgents taskClosed={false} />,
+    );
+    const buttons = [...container.querySelectorAll("button")];
+    // `btn-primary` / `btn-ghost` exist in no stylesheet: both CTAs fell back
+    // to the plain grey `.btn`.
+    for (const b of buttons) {
+      expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
+    }
+    const submit = buttons.find((b) => b.textContent?.includes("Schedule operator re-run"))!;
+    expect(submit.classList.contains("primary")).toBe(true);
+    const cancel = buttons.find((b) => b.textContent?.trim() === "Cancel")!;
+    expect(cancel.classList.contains("ghost")).toBe(true);
+  });
+
+  it("makes Save goal a primary CTA, visually distinct from Cancel", () => {
+    const { container, getByText } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+    );
+    fireEvent.click(getByText("Edit"));
+    const buttons = [...container.querySelectorAll(".goal-edit-actions button")];
+    const save = buttons.find((b) => b.textContent === "Save goal")!;
+    const cancel = buttons.find((b) => b.textContent === "Cancel")!;
+    expect(save.className).not.toMatch(/\bbtn-primary\b/);
+    expect(save.classList.contains("primary")).toBe(true);
+    // The defect: both resolved to identical rules and rendered the same.
+    expect(save.className).not.toBe(cancel.className);
+  });
+});
+
+describe("failure toasts use the error kind (P13-D-10)", () => {
+  it("renders the alert glyph, not the success tick, when an action fails", async () => {
+    const { container, getByText } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+      () => ({ ok: false, error: "Nope." }),
+    );
+    fireEvent.click(getByText("Edit"));
+    const form = container.querySelector("form.goal-edit") as HTMLFormElement;
+    fireEvent.submit(form);
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    const toast = document.querySelector(".toast")!;
+    expect(toast.textContent).toContain("Nope.");
+    // `alert` is the triangle path; `check` is the tick. `push` defaults to
+    // "success", so this failure used to render under a green tick.
+    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
   });
 });

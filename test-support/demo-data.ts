@@ -235,8 +235,6 @@ export interface SeedTask {
   timeline: TaskFileEvent[];
 }
 
-const REPO = null; // task-level repo override — null → project default
-
 function fm(input: {
   key: string;
   title: string;
@@ -319,7 +317,6 @@ function fm(input: {
     workRevision,
     verdicts,
     branch: input.branch,
-    repo: REPO,
     pr: input.pr,
     github: input.github ?? null,
     createdAt: input.createdAt,

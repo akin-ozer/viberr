@@ -17,6 +17,9 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
  * The wait-tag copy is deliberately different from the board ("your
  * acceptance" vs "waiting on you") — do not unify. The subline builder
  * lives in review-helpers.ts (Fast Refresh: components-only module).
+ *
+ * P13-D-9: the "human only" chip and the acceptance footer are conditional on
+ * the project's operator authority (see review-acceptance-authority.server.ts).
  */
 
 function RQRow({
@@ -82,6 +85,7 @@ export function ReviewQueuePage({
   working,
   total,
   stageNames = { review: "Review", terminal: "Done" },
+  acceptance = { operatorCanAccept: false, operatorName: "the operator" },
 }: {
   projectSlug: string;
   ready: ReviewRowView[];
@@ -90,11 +94,18 @@ export function ReviewQueuePage({
   /** UI-49: the project's RESOLVED review + terminal stage names — stages are
    *  per-project and renameable, so this page must not name them itself. */
   stageNames?: { review: string; terminal: string };
+  /** P13-D-9: whether this project's operator holds the ONE audited exception
+   *  to the human-only terminal boundary (full autonomy +
+   *  `completion-for-acceptance: direct`, owner ruling Q1). Defaults to the
+   *  strict boundary so a caller that cannot resolve it never over-promises
+   *  the other way. */
+  acceptance?: { operatorCanAccept: boolean; operatorName: string };
 }) {
   const navigate = useNavigate();
   const onOpen = (key: string) =>
     navigate(`/projects/${projectSlug}/tasks/${key}`);
   const onPolicy = () => navigate(`/projects/${projectSlug}/policy`);
+  const { operatorCanAccept, operatorName } = acceptance;
 
   return (
     <div className="board-wrap" data-screen-label="Review queue">
@@ -110,15 +121,25 @@ export function ReviewQueuePage({
           {/* UI-27 residual: this was a <button> wearing `hero-file`, visually
               identical to the non-interactive `hero-file` spans elsewhere — no
               affordance that it navigates. It reads as the link it is now. */}
+          {/* P13-D-9: the chip claimed "human only" on EVERY project. On an
+              Autonomous-preset project the operator holds an explicit
+              `completion-for-acceptance: direct` grant and closes tasks itself,
+              so the chip has to say so — the same exception Policy and the
+              create modal already disclose. */}
           <button
             type="button"
             className="btn ghost sm"
             onClick={onPolicy}
-            title={`${stageNames.review} → ${stageNames.terminal} is locked to humans — see Policy`}
+            title={
+              operatorCanAccept
+                ? `${operatorName} runs at full autonomy with Completion for human acceptance set to Direct, so it can move a task to ${stageNames.terminal} itself — every other actor at this boundary is a human. See Policy.`
+                : `${stageNames.review} → ${stageNames.terminal} is locked to humans — see Policy`
+            }
           >
-            <Icon name="lock" />
+            <Icon name={operatorCanAccept ? "bolt" : "lock"} />
             <span>
-              {stageNames.review} → {stageNames.terminal} · human only
+              {stageNames.review} → {stageNames.terminal} ·{" "}
+              {operatorCanAccept ? "human or operator" : "human only"}
             </span>
           </button>
         </div>
@@ -152,12 +173,28 @@ export function ReviewQueuePage({
             className="pol-note"
             style={{ marginBottom: 0, marginTop: ".9rem" }}
           >
-            <Icon name="lock" />
-            <span>
-              Accepting a completion merges the review PR and moves the task to{" "}
-              <strong>{stageNames.terminal}</strong> — always a human action,
-              always in the audit log.
-            </span>
+            <Icon name={operatorCanAccept ? "bolt" : "lock"} />
+            {/* P13-D-9: wording tracks the Policy note (policy-page.tsx) — one
+                exception, explicitly granted and audited, never a general
+                "agents can close tasks". */}
+            {operatorCanAccept ? (
+              <span>
+                Accepting a completion merges the review PR and moves the task
+                to <strong>{stageNames.terminal}</strong> — always in the audit
+                log. Normally a human action, with one exception on this
+                project: <strong>{operatorName}</strong> runs at{" "}
+                <strong>full autonomy</strong> with{" "}
+                <strong>Completion for human acceptance</strong> set to{" "}
+                <em>Direct</em>, an explicit opt-in that lets it accept a
+                completion itself (it still refuses a failing-validation task).
+              </span>
+            ) : (
+              <span>
+                Accepting a completion merges the review PR and moves the task
+                to <strong>{stageNames.terminal}</strong> — always a human
+                action, always in the audit log.
+              </span>
+            )}
           </div>
         </div>
 

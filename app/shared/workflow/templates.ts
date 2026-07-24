@@ -7,6 +7,11 @@ import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-fi
  * surfaces (the AgentModal instance stage list) and the create-project action.
  * Colors accept both hex and var(--*) strings.
  *
+ * `workflow` is a CHAIN over `stages`: one rule per consecutive pair, so every
+ * stage has an in-edge (bar the entry) and an out-edge (bar the terminal) and
+ * Done is always reachable. The stage editor maintains that shape as stages are
+ * added, removed and reordered — app/shared/workflow/transitions.ts (P13-D-1).
+ *
  * P13-AP-04 / owner ruling 2 (2026-07-24): the "Lightweight · 3 stages" preset
  * was DELETED. It shipped the built-in Developer/Reviewer, whose eligible
  * stages are the governed ids (`ready`/`impl`/`review`), onto a `todo`/`doing`/

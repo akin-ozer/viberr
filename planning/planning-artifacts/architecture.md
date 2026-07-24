@@ -226,8 +226,8 @@ This keeps scaffold convenience separate from actual product architecture.
 - File system is the only authoritative business state.
 - Production projection and interpretation store: SQLite 3.52.0.
 - Validation boundary: Zod 4 schema validation with tolerant parsing and explicit diagnostics.
-- Human authentication: OAuth-first with Google and GitHub.
-- App sessions: cookie-only sessions.
+- Human authentication: email + password is the shipped default and a first-class path; Google and GitHub OAuth are optional and off unless configured.
+- App sessions: server-side session rows keyed by an opaque cookie.
 - GitHub execution access: fine-grained PATs only, separate from login identity.
 - Primary app interface: React Router loaders/actions.
 - Live update channel: Server-Sent Events (SSE).
@@ -296,14 +296,17 @@ This keeps scaffold convenience separate from actual product architecture.
 
 **Authentication method:**
 
-- OAuth-first human login.
-- Initial providers: Google and GitHub.
+*Revised 2026-07-25 — this section originally specified OAuth-first login, which is not what shipped and would mislead anyone extending auth.*
+
+- **Local credentials (email + password) are the shipped default and a first-class path**, not a fallback. A self-hosted instance must be usable with no external identity provider configured, so the bootstrap admin and every user created in-app authenticate this way. Password policy is shared client/server from one module.
+- OAuth with Google and GitHub is **optional and disabled unless its environment variables are present** — the login buttons stay inert without them. Sign-in through either provider is whitelist-based: it succeeds only for an email that already has a non-disabled user row, plus (for Google) domains on the org allowlist, which provision on first login. There is no self-signup on any path.
+- Auth is implemented on `better-auth` behind a Viberr bridge; do not hand-roll a second credential or session path beside it.
 
 **Session model:**
 
-- Cookie-only sessions.
-- Session payload must remain intentionally small because cookie size is constrained.
-- Only stable, compact claims should live in the cookie. Dynamic authorization or execution metadata should not.
+- Sessions are **server-side rows in SQLite**; the cookie carries only an opaque token. This is not a divergence from the original intent — the data architecture below already contemplated a session table, and an opaque token satisfies the "no dynamic authorization or execution metadata in the cookie" rule absolutely rather than by discipline.
+- Nothing but the token belongs in the cookie. Authorization is resolved per request from the session row and project membership, never read from a client-held claim.
+- Expired sessions are swept at boot and daily.
 
 **Authorization patterns:**
 
@@ -367,9 +370,13 @@ This keeps scaffold convenience separate from actual product architecture.
 - Organize code by product surface:
   - board supervision
   - task detail
-  - project policy/admin
-  - org admin
-  - auth/session
+  - review queue
+  - project settings & policy
+  - org settings
+  - agents & context resources
+  - GitHub delivery
+  - runtime/run inspection
+  - app shell (rail, topbar, notifications)
 - Shared design-system primitives remain thin and reusable.
 
 **Routing strategy:**
@@ -397,7 +404,8 @@ This keeps scaffold convenience separate from actual product architecture.
 **CI/CD pipeline approach:**
 
 - GitHub Actions for CI/CD.
-- CI should cover typecheck, lint, tests, migration checks, and build integrity.
+- CI covers typecheck, tests, build integrity, and an end-to-end suite. Migration integrity is covered transitively: the migration-runner test applies the real baseline and asserts idempotency and constraints, and the unit suite runs in CI.
+- **There is no linter or formatter, and adding one is a deliberate non-goal** *(recorded 2026-07-25)*. None has ever existed in this repository. Introducing one now would produce a mechanical diff across the whole tree for no behavioral gain, in a codebase where every such wave has cost more than it returned. The anti-drift rules in this document are enforced by typecheck, tests, and review instead — see Pattern Enforcement.
 
 **Environment configuration:**
 
@@ -427,7 +435,7 @@ This keeps scaffold convenience separate from actual product architecture.
 7. Build loader/action-based board and task surfaces against projections.
 8. Add SSE-based live update propagation.
 9. Add GitHub sync/execution integration.
-10. Add structured logging, provenance views, and operational diagnostics.
+10. Add structured logging, provenance recording, and operational diagnostics. (Provenance is internal — it backs GitHub freshness and rebuild diagnostics. No user-facing provenance view ships in V1.)
 
 **Cross-Component Dependencies:**
 
@@ -475,12 +483,7 @@ This keeps scaffold convenience separate from actual product architecture.
 **Project Organization:**
 
 - Organize product code by surface/feature, not by generic type buckets
-- Primary top-level app surfaces:
-  - board supervision
-  - task detail
-  - project policy/admin
-  - org admin
-  - auth/session
+- Primary top-level app surfaces: board supervision, task detail, review queue, project settings & policy, org settings, agents & context resources, GitHub delivery, runtime inspection, activity/audit, notifications, profile, and the app shell. Sign-in is a route, not a feature folder — see the directory structure.
 - Shared utilities go in purpose-specific shared modules, not scattered feature folders
 - Server-only logic for files, projections, GitHub, auth, diagnostics, and interpretation policy must stay out of UI modules
 - Do not create generic dumping-ground modules such as `utils.ts` or `helpers.ts` at feature roots
@@ -579,7 +582,7 @@ This keeps scaffold convenience separate from actual product architecture.
 
 **Pattern Enforcement:**
 
-- Enforce through linting, typechecking, tests, and review against this architecture document
+- Enforce through typechecking, tests, and review against this architecture document. There is no linter (see CI/CD above), so none of the naming, module-boundary or dumping-ground rules is machine-checked — a reviewer is the only gate, and pattern violations must actually be called out
 - Pattern violations should be called out in task history and code review notes
 - Shared conventions should be updated in one place first, then applied in code
 
@@ -610,214 +613,163 @@ This keeps scaffold convenience separate from actual product architecture.
 
 ### Complete Project Directory Structure
 
+This tree is **descriptive, regenerated from the filesystem** (last resynced 2026-07-25).
+It is not a wish list: a directory that is not here does not exist, and a directory here
+that you cannot find is a bug in this document, not a gap to fill. Tests are co-located
+with their modules and elided below except where the file count matters.
+
 ```text
 viberr/
 ├── README.md
+├── CONTRIBUTING.md
 ├── package.json
 ├── tsconfig.json
 ├── react-router.config.ts
 ├── vite.config.ts
-├── tailwind.config.ts          # compatibility file; Tailwind v4 uses the Vite plugin baseline
-├── postcss.config.mjs          # compatibility file; retained for project convention visibility
-├── eslint.config.js
-├── prettier.config.cjs
+├── vitest.config.ts            # unit suite: app/ + db/ only (scripts/ deliberately excluded)
+├── playwright.config.ts
+├── doctor.config.ts            # react-doctor ignore list; manually invoked, not a gate
 ├── .env.example
 ├── .gitignore
 ├── Dockerfile
 ├── compose.yml
 ├── .github/
 │   └── workflows/
-│       └── ci.yml
+│       └── ci.yml              # two jobs: verify (typecheck/test/build) + e2e
 ├── docs/
 │   ├── architecture/
-│   │   └── decisions.md
-│   └── operations/
-│       ├── deployment.md
-│       └── pat-management.md
+│   │   ├── decisions.md        # binding conventions + the numbered orchestrator rulings
+│   │   └── file-formats.md     # canonical project.md / task.md / agent-profile format
+│   ├── operations/
+│   │   ├── deployment.md
+│   │   └── runbook.md
+│   ├── testing.md
+│   ├── testing-quickstart.md
+│   └── contributing-quickstart.md
 ├── db/
 │   └── migrations/
-│       ├── 0001_projection_schema.sql
-│       ├── 0002_auth_metadata.sql
-│       └── 0003_provenance_and_diagnostics.sql
+│       └── 0001_baseline.sql   # squashed while pre-production; forward-only after first deploy
 ├── scripts/
-│   ├── seed.ts
+│   ├── seed.ts                 # product baseline — clean sheet, no demo board data
+│   ├── seed-demo.ts            # the mock dataset the route + e2e suites are written against
 │   └── rescan.ts
 ├── public/
-│   ├── favicon.ico
-│   └── assets/
-│       └── logos/
-├── test-support/
-│   ├── factories/
-│   │   ├── project-file.factory.ts
-│   │   ├── task-file.factory.ts
-│   │   └── projection.factory.ts
-│   ├── fixtures/
-│   │   ├── sample-project/
-│   │   └── sample-task/
-│   └── helpers/
-│       ├── sqlite-test-db.ts
-│       └── file-store-test-root.ts
+│   └── favicon.svg
+├── e2e/                        # Playwright specs + auth setup / teardown
+├── test-support/               # app/db/store/runtime/github fakes + the demo fixture
 └── app/
-    ├── app.css
+    ├── app.css                 # the ported viberr.css design system + marked additions
     ├── root.tsx
     ├── routes.ts
-    ├── entry.client.tsx        # explicit compatibility entry file
-    ├── entry.server.tsx        # explicit compatibility entry file
-    ├── routes/
-    │   ├── _index.tsx
-    │   ├── login.tsx
-    │   ├── auth.callback.google.tsx
-    │   ├── auth.callback.github.tsx
-    │   ├── logout.tsx
-    │   ├── projects.$projectId.board.tsx
-    │   ├── projects.$projectId.queue.tsx
-    │   ├── projects.$projectId.settings.tsx
-    │   ├── projects.$projectId.tasks.$taskId.tsx
-    │   ├── projects.$projectId.tasks.$taskId.activity.tsx
-    │   ├── projects.$projectId.tasks.$taskId.files.tsx
-    │   ├── admin.org.users.tsx
-    │   ├── admin.org.agents.tsx
-    │   ├── admin.org.policies.tsx
-    │   ├── resources.events.ts
-    │   ├── resources.health.ts
-    │   └── api.tasks.$taskId.comment.ts
-    ├── ui/
-    │   ├── button.tsx
-    │   ├── badge.tsx
-    │   ├── dialog.tsx
-    │   ├── input.tsx
-    │   ├── panel.tsx
-    │   └── table.tsx
-    ├── features/
-    │   ├── auth/
-    │   │   ├── login-view.tsx
-    │   │   ├── oauth-provider-buttons.tsx
-    │   │   ├── session-banner.tsx
-    │   │   ├── auth.shared.ts
-    │   │   └── auth.shared.test.ts
-    │   ├── board/
-    │   │   ├── board-page.tsx
-    │   │   ├── board-filters.tsx
-    │   │   ├── task-card.tsx
-    │   │   ├── board.loader.server.ts
-    │   │   └── board.loader.server.test.ts
-    │   ├── task-detail/
-    │   │   ├── task-detail-page.tsx
-    │   │   ├── task-readiness-badge.tsx
-    │   │   ├── decision-panel.tsx
-    │   │   ├── activity-timeline.tsx
-    │   │   ├── execution-truth-strip.tsx
-    │   │   ├── task-detail.loader.server.ts
-    │   │   └── task-detail.loader.server.test.ts
-    │   ├── project-admin/
-    │   │   ├── project-settings-page.tsx
-    │   │   ├── workflow-rules-editor.tsx
-    │   │   ├── agent-policy-editor.tsx
-    │   │   ├── project-admin.loader.server.ts
-    │   │   └── project-admin.loader.server.test.ts
-    │   ├── org-admin/
-    │   │   ├── user-management-page.tsx
-    │   │   ├── agent-catalog-page.tsx
-    │   │   ├── org-policy-page.tsx
-    │   │   ├── org-admin.loader.server.ts
-    │   │   └── org-admin.loader.server.test.ts
-    │   └── live-updates/
-    │       ├── sse-client.ts
-    │       ├── sse-hooks.ts
-    │       ├── event-types.ts
-    │       └── sse-client.test.ts
+    ├── entry.client.tsx
+    ├── entry.server.tsx
+    ├── routes/                 # 25 thin route modules
+    │   ├── _index.tsx          # home (project list)
+    │   ├── login.tsx  logout.tsx  api.auth.$.ts     # api.auth.$ is better-auth's splat
+    │   ├── projects.tsx  project.tsx  project._index.tsx
+    │   ├── project.board.tsx  project.review.tsx  project.agents.tsx
+    │   ├── project.policy.tsx  project.github.tsx  project.activity.tsx
+    │   ├── project.settings.tsx  project.task.tsx
+    │   ├── org.settings.tsx  profile.tsx  notifications.tsx  notifications.read.tsx
+    │   ├── prefs.theme.tsx
+    │   └── resources.{events,health,run-log,session-export,model-catalog}.ts
+    ├── ui/                     # reusable primitives + shared hooks
+    │   ├── icon.tsx  pill.tsx  avatar.tsx  identity.tsx  toggle.tsx
+    │   ├── rich-text.tsx  markdown.tsx  mention-spans.ts  initials.ts
+    │   ├── toast.tsx  page-overlay.tsx  stage-menu.tsx  skip-link.tsx  csrf-input.tsx
+    │   └── use-{dialog,action-toast,fetcher-result,relative-time,shortcut-hint}.ts
+    ├── lib/
+    │   └── auth.server.ts      # the better-auth instance + its Viberr bridge
+    ├── features/               # 16 product surfaces; no auth/ — login is a route
+    │   ├── activity/           # audit + activity feed
+    │   ├── agents/             # profiles, capability matrix, deployment
+    │   ├── board/              # board-page + pure filter predicates
+    │   ├── github/             # repo/PR view, credential card, pills, actions
+    │   ├── home/               # project list + project creation
+    │   ├── kb-browser/         # knowledge-base / skill store browser
+    │   ├── live-updates/       # SSE client hook + event types
+    │   ├── notifications/
+    │   ├── org-settings/       # users, connections, org resources
+    │   ├── policy/             # workflow boundaries + RBAC/capability display
+    │   ├── profile/
+    │   ├── project-settings/   # stages, repo, membership
+    │   ├── review/             # the review queue
+    │   ├── runtime/            # run panels, log stream, run state mapping
+    │   ├── shell/              # rail, topbar, bell, user menu, nav mapping
+    │   └── task-detail/        # the deepest surface: packet, timeline, execution profile
     ├── schemas/
-    │   ├── task-file.schema.ts
+    │   ├── task-file.schema.ts       # the largest contract: frontmatter, packets, events
     │   ├── project-file.schema.ts
-    │   ├── api-error.schema.ts
     │   ├── sse-event.schema.ts
-    │   ├── auth.schema.ts
-    │   └── github-pat.schema.ts
+    │   ├── github-pat.schema.ts
+    │   └── file-diagnostics.ts
     ├── server/
-    │   ├── config/
-    │   │   ├── env.server.ts
-    │   │   └── env.server.test.ts
-    │   ├── db/
-    │   │   ├── sqlite.server.ts
-    │   │   ├── query-runner.server.ts
-    │   │   └── migration-runner.server.ts
-    │   ├── files/
-    │   │   ├── file-store-root.server.ts
-    │   │   ├── file-watch.service.server.ts
-    │   │   ├── project-file-reader.server.ts
-    │   │   ├── task-file-reader.server.ts
-    │   │   ├── project-file-reader.server.test.ts
-    │   │   └── task-file-reader.server.test.ts
-    │   ├── interpretation/
-    │   │   ├── readiness-policy.server.ts
-    │   │   ├── diagnostics-policy.server.ts
-    │   │   ├── pat-diagnostics-policy.server.ts
-    │   │   ├── projection-freshness-policy.server.ts
-    │   │   ├── readiness-policy.server.test.ts
-    │   │   └── diagnostics-policy.server.test.ts
-    │   ├── projections/
-    │   │   ├── projection-rebuilder.server.ts
-    │   │   ├── task-projection-repository.server.ts
-    │   │   ├── board-query.server.ts
-    │   │   ├── task-query.server.ts
-    │   │   ├── projection-rebuilder.server.test.ts
-    │   │   └── task-query.server.test.ts
-    │   ├── provenance/
-    │   │   ├── provenance-recorder.server.ts
-    │   │   ├── provenance-query.server.ts
-    │   │   └── provenance-recorder.server.test.ts
-    │   ├── auth/
-    │   │   ├── session-cookie.server.ts
-    │   │   ├── oauth-google.server.ts
-    │   │   ├── oauth-github.server.ts
-    │   │   ├── csrf.server.ts
-    │   │   ├── session-cookie.server.test.ts
-    │   │   └── oauth-github.server.test.ts
-    │   ├── secrets/
-    │   │   ├── secret-box.server.ts
-    │   │   ├── pat-store.server.ts
-    │   │   ├── pat-validator.server.ts
-    │   │   ├── pat-store.server.test.ts
-    │   │   └── pat-validator.server.test.ts
-    │   ├── github/
-    │   │   ├── github-client.server.ts
-    │   │   ├── repo-access-check.server.ts
-    │   │   ├── branch-sync.server.ts
-    │   │   ├── pr-linker.server.ts
-    │   │   └── branch-sync.server.test.ts
-    │   ├── runtimes/
-    │   │   ├── codex-runtime.server.ts
-    │   │   ├── claude-runtime.server.ts
-    │   │   ├── runtime-registry.server.ts
-    │   │   └── runtime-registry.server.test.ts
-    │   ├── events/
-    │   │   ├── sse-broker.server.ts
-    │   │   ├── event-publisher.server.ts
-    │   │   └── event-publisher.server.test.ts
-    │   ├── errors/
-    │   │   ├── app-error.server.ts
-    │   │   ├── error-codes.ts
-    │   │   └── error-response.server.ts
-    │   └── logging/
-    │       ├── logger.server.ts
-    │       ├── request-context.server.ts
-    │       └── logger.server.test.ts
-    └── shared/
-        ├── dates/
-        │   ├── iso-date.ts
-        │   └── iso-date.test.ts
-        ├── ids/
-        │   ├── task-key.ts
-        │   └── task-key.test.ts
-        └── mapping/
-            ├── db-to-api.ts
-            ├── file-to-projection.ts
-            └── file-to-projection.test.ts
+    │   ├── boot.server.ts      # the one startup sequence (dirs, migrations, seed admin,
+    │   │                       # recovery, retention, schedule runner, reconcile poller)
+    │   ├── audit/              # audit-recorder
+    │   ├── auth/               # csrf, login, identity, password, oauth provisioning,
+    │   │                       # project authority, route guards, user store/admin
+    │   ├── config/             # env.server.ts — the ONLY place env is parsed
+    │   ├── db/                 # sqlite, migration runner, transaction, retention
+    │   ├── errors/             # AppError + stable machine codes
+    │   ├── events/             # sse-broker, event-publisher, projection-events
+    │   ├── files/              # store root, watchers, atomic writes, per-file mutex,
+    │   │                       # frontmatter, task/project/agent-profile readers+writers,
+    │   │                       # KB + skill body injection
+    │   ├── github/             # client, repo access, branch sync, PR linker/open,
+    │   │                       # reconciler, reconcile poller, workspace delivery, scope flags
+    │   ├── interpretation/     # readiness-policy, diagnostics-policy, freshness-policy
+    │   ├── logging/            # logger.server.ts
+    │   ├── provenance/         # the ONLY writer/reader of the provenance table
+    │   ├── org/                # org users, connections, resources (KB/skills/MCP),
+    │   │                       # global agents, store files, org seed
+    │   ├── prefs/  theme/      # user preferences; theme cookie
+    │   ├── projections/        # rebuilder, rescan, rebuild, board/task queries,
+    │   │                       # activity feed, decisions, notifications, review queue,
+    │   │                       # policy violations, agent deployments
+    │   ├── runtimes/           # Claude + Codex adapters, registry, run service/store/
+    │   │                       # sink/events/projection/recovery, wire format,
+    │   │                       # session export, model catalog
+    │   ├── secrets/            # secret-box (AES-256-GCM), PAT store + validator
+    │   ├── seed/               # product seed, agent catalog, shipped agent assets
+    │   └── tasks/              # the governed-mutation core (largest server module):
+    │                           # task actions, operator actions + toolkit, agent toolkit,
+    │                           # specialist run + MCP + tool policy, agent reply/outcome,
+    │                           # comment guardrails, mentions, schedules, compaction,
+    │                           # git clone auth
+    └── shared/                 # client-safe cross-surface code
+        ├── rbac.ts             # THE project-role grant table (guards + Policy page)
+        ├── capabilities.ts     # THE agent capability catalog + always-human invariants
+        ├── freshness.ts        # THE staleness thresholds (server door: interpretation/)
+        ├── auth/  dates/  ids/  mapping/  workflow/
 ```
+
+**Notes on shape, so the next change stays inside it:**
+
+- There is no `app/features/auth/`. Sign-in is one route (`app/routes/login.tsx`) over
+  `app/server/auth/` and `app/lib/auth.server.ts`. Do not create one.
+- `app/server/tasks/` is where governed task mutation lives, and `task-actions.server.ts`
+  inside it is by far the largest module in the tree. It is a known concentration, not a
+  precedent: new governed behavior belongs in a sibling module in the same directory.
+- `app/server/provenance/` is a recorder plus a query module and nothing else. Every write
+  to and read from the `provenance` table goes through it — the table previously had two
+  duplicated writers and three ad hoc readers, one of them a raw prepared statement inside
+  a route loader. There is no user-facing provenance view and none is planned for V1; the
+  data backs GitHub freshness and rebuild diagnostics.
+- There is no `eslint.config.js`, `prettier.config.cjs`, `tailwind.config.ts` or
+  `postcss.config.mjs`. None has ever existed here (see the CI/CD decision).
+- `docs/operations/pat-management.md` was prescribed and never written. PAT setup lives in
+  the README's GitHub section and PAT triage in the runbook, so it was dropped from this
+  tree rather than left as a phantom.
+- Migrations are squashed into a single baseline while the product is pre-production. That
+  is deliberate and time-boxed: after the first real deployment, migrations become additive
+  and forward-only.
 
 ### Runtime Data Root
 
 The file-authoritative management plane should not live inside the source repository. It should be a mounted writable data root, for example:
+
+The shipped layout, created at boot from `DATA_ROOT_SUBDIRS`:
 
 ```text
 /var/lib/viberr/
@@ -827,33 +779,25 @@ The file-authoritative management plane should not live inside the source reposi
 │       └── tasks/
 │           └── VIB-142/
 │               ├── task.md
-│               └── attachments/
+│               └── workspace/        # the agent's git clone — NOT canonical
 ├── agents/                  # system-managed
-│   ├── profiles/
-│   └── assignments/
+│   └── profiles/            # org-level agent profile templates (*.md)
 ├── runtimes/                # system-managed
-│   ├── codex/
-│   └── claude/
-├── state/                   # durable-derived
-│   └── projection.sqlite
-├── cache/                   # disposable
-│   ├── parsed-files/
-│   └── search/
-├── auth/                    # secret
-│   └── encrypted-secrets/
-└── logs/                    # diagnostic
-    ├── app/
-    └── audit/
+│   ├── claude-home/         # SDK session home + raw NDJSON run logs
+│   └── codex-home/          # ditto; may hold auth.json (a live credential)
+├── kb/<dir>/                # knowledge-base folders (granted BY DIRECTORY)
+├── skills/<slug>/           # skill folders
+└── state/
+    └── projection.sqlite
 ```
 
 Operational ownership rules:
 
-- `projects/` is the only authoritative shared business state writable by humans and agents.
-- `agents/` and `runtimes/` are system-managed working state and should not be used as ad hoc communication buses.
-- `state/projection.sqlite` is app-owned durable interpretation state and must never be treated as canonical truth or hand-edited by agents.
-- `cache/` is disposable and fully rebuildable.
-- `auth/` contains encrypted secrets only.
-- `logs/` is diagnostic output only and must not be used as workflow state.
+- `projects/` is the only authoritative shared business state writable by humans and agents. `attachments/` was specified here and never implemented; do not write to it.
+- **`<taskDir>/workspace/<repo>` is a full git clone**, created the first time an agent runs on that task. It is deliberately inside the task directory — the agent's `GIT_CEILING` confinement depends on that placement — and it is deliberately excluded from the file watcher and from projection. It is disposable working state, never a communication channel, and never read as truth. Sizing note: this is 11–16 MB per task that has ever run an agent.
+- `agents/` and `runtimes/` are system-managed working state and should not be used as ad hoc communication buses. `runtimes/codex-home/auth.json`, when present, is a live credential — any backup of the data root must be treated as a secret.
+- **`state/projection.sqlite` must never be treated as canonical truth *for tasks and projects*, and must never be hand-edited — but it is not a cache.** It is the *only* home of every non-rebuildable app-management row: users and their credentials, sessions, the audit trail, notifications, AES-sealed PATs, org resources, agent run history and staged outcomes. None of that exists in the Markdown. The projection tables inside the same file *are* derived and rebuild from `projects/`; the distinction is per-table, not per-file. Restoring `projects/` without this database re-mints user ids that the surviving files still reference, orphaning every membership and task owner. *(Corrected 2026-07-25; the original text called the whole file non-canonical, which read as "disposable".)*
+- There is **no `cache/`, `auth/` or `logs/` directory** — all three were prescribed and then removed on purpose (P11-56). Application logs are structured JSON on stdout; encrypted secrets live in SQLite; there is no disk cache layer.
 
 ### Architectural Boundaries
 
@@ -878,40 +822,51 @@ Operational ownership rules:
 
 - `server/files/` owns direct file-system reads/watch roots.
 - File watchers target authoritative project/task files and relevant managed state roots, not the entire data root indiscriminately.
-- `server/interpretation/` owns shared policy logic for readiness, diagnostics, PAT validity, and freshness.
+- `server/interpretation/` owns shared policy logic for readiness, diagnostics, and freshness. **PAT validity is the documented exception** and belongs to `server/secrets/pat-validator.server.ts` — see the cross-cutting map below, which the build followed. (A staleness rule the *client* also evaluates keeps its threshold in `app/shared/freshness.ts`, because a `.server.ts` module cannot enter the client bundle; `interpretation/` is the server-side door onto the same definitions. One definition, two importers — never a second constant.)
 - `server/projections/` owns SQLite materialization and query paths.
 - `server/github/` owns GitHub API operations only.
 - `server/runtimes/` owns Codex/Claude execution adapters only.
+- `server/tasks/` owns governed task mutation — every write to `task.md` that carries authorization, audit and typed-event consequences.
 - `server/events/` owns SSE publication only.
 
 **Data Boundaries:**
 
-- Files in `/var/lib/viberr/projects` are canonical truth.
-- SQLite in `/var/lib/viberr/state/projection.sqlite` is durable interpretation/projection state.
-- `db/migrations/` applies only to projection/interpreter schema, never to primary business truth.
-- PATs and encrypted secrets remain in `/var/lib/viberr/auth`, never in task files or logs.
-- Caches under `/var/lib/viberr/cache` are disposable.
+- Files under `<data root>/projects/` are canonical truth for projects and tasks.
+- `state/projection.sqlite` holds two different kinds of table and they must not be conflated: derived projections, which rebuild from files, and primary app-management state (users, sessions, audit, notifications, encrypted PATs, org resources, run history), which exists nowhere else. Rebuild operations touch only the first kind.
+- `db/migrations/` applies only to that database, never to primary business truth in files.
+- PATs and encrypted secrets are AES-256-GCM sealed **in SQLite**, with the key from the environment. They never appear in task or project files, in logs, in SSE payloads, or in error messages. *(The prescribed on-disk `auth/` secret directory does not exist and was removed on purpose; the security rule it carried is unchanged and is enforced.)*
 
 ### Requirements to Structure Mapping
 
-**FR Category Mapping:**
+**FR Category Mapping** *(resynced 2026-07-25 to the shipped module names)***:**
 
-- Workspace access & collaboration → `app/features/auth`, `app/features/org-admin`, `app/server/auth`
-- Project governance & policy → `app/features/project-admin`, `app/server/interpretation`, `app/server/projections`
-- Task records & lifecycle → `app/server/files`, `app/server/interpretation`, `app/features/task-detail`
-- Agent orchestration & continuity → `app/server/runtimes`, `app/server/events`, `app/server/provenance`
-- Oversight views & human governance → `app/features/board`, `app/features/task-detail`, `app/features/live-updates`
-- GitHub delivery & traceability → `app/server/github`, `app/server/secrets`, `app/features/task-detail`
-- Integrity, audit & recovery → `app/server/provenance`, `app/server/logging`, `app/server/errors`, `app/server/interpretation`
+- Workspace access & collaboration → `app/routes/login.tsx`, `app/lib/auth.server.ts`, `app/server/auth`, `app/features/org-settings`
+- Project governance & policy → `app/features/project-settings`, `app/features/policy`, `app/shared/rbac.ts`, `app/shared/capabilities.ts`, `app/server/interpretation`, `app/server/projections`
+- Task records & lifecycle → `app/server/files`, `app/server/tasks`, `app/server/interpretation`, `app/features/task-detail`
+- Agent orchestration & continuity → `app/server/runtimes`, `app/server/tasks`, `app/server/events`
+- Oversight views & human governance → `app/features/board`, `app/features/review`, `app/features/task-detail`, `app/features/live-updates`
+- GitHub delivery & traceability → `app/server/github`, `app/server/secrets`, `app/features/github`, `app/features/task-detail`
+- Integrity, audit & recovery → `app/server/audit`, `app/server/logging`, `app/server/errors`, `app/server/projections`, `app/server/interpretation`
+
+**Subsystem Mapping.** Four subsystems the PRD mandates were absent from this document
+entirely, which is how they ended up with no named home. They are:
+
+- **Decision & blocking packets** (FR26, FR27) — the packet shape is in `app/schemas/task-file.schema.ts` (stable option `kind`s, never English titles); generation and resolution are in `app/server/tasks/`; the surfaces are `app/features/task-detail/decision-packet.tsx` and `app/features/review/`.
+- **The operator agent** (FR18, FR20, FR26) — `app/server/tasks/operator-actions.server.ts` plus `operator-toolkit.server.ts` (the tool surface it is allowed to act through) and `app/server/runtimes/operator-run.server.ts`. The operator re-anchors on a fresh task snapshot every turn; it does not rely on provider-side history.
+- **Specialist execution** (FR19, FR21, FR22) — `app/server/tasks/specialist-run.server.ts`, `agent-toolkit.server.ts`, `agent-reply.server.ts`, `specialist-tool-policy.ts`, over the adapters in `app/server/runtimes/`.
+- **Context resources: knowledge bases, skills, and MCP servers** (FR9) — the org-level catalog and store are `app/server/org/`, injection into a run is `app/server/files/kb-injection.server.ts` and `skill-body.server.ts`, MCP wiring is `app/server/tasks/specialist-mcp.server.ts`, and the browsing surface is `app/features/kb-browser/`. A grant resolves **by store directory**, never by display name.
 
 **Cross-Cutting Concerns:**
 
 - Readiness-state derivation → `app/server/interpretation/readiness-policy.server.ts`
 - Diagnostics severity → `app/server/interpretation/diagnostics-policy.server.ts`
+- Staleness/freshness thresholds → `app/shared/freshness.ts` (server door: `app/server/interpretation/freshness-policy.server.ts`)
 - PAT validation → `app/server/secrets/pat-validator.server.ts`
-- File/projection mapping → `app/shared/mapping/file-to-projection.ts`
+- Project-role authorization → `app/shared/rbac.ts` (one table, rendered by the Policy page and consulted by the guards)
+- Agent capability policy → `app/shared/capabilities.ts` (catalog + always-human invariants)
+- File/projection mapping → `app/shared/mapping/*`
 - Structured errors → `app/server/errors/*`
-- Correlated logs → `app/server/logging/*`
+- Logging → `app/server/logging/*`
 
 ### Integration Points
 
@@ -974,7 +929,7 @@ Operational ownership rules:
 
 **Build Process Structure:**
 
-- CI runs env verification, typecheck, lint, tests, migrations, and production build.
+- CI runs two jobs: `verify` (typecheck → unit/integration tests → production build) and `e2e` (Playwright against a real dev server). Env validation and migration integrity are exercised inside the test suite; there is no lint step, by decision.
 - Docker image packages the app source; runtime state mounts in externally.
 
 **Deployment Structure:**
@@ -992,7 +947,7 @@ The core decisions work together without contradiction:
 
 - React Router framework mode, Node runtime, Docker deployment, and SSE form a coherent single-node operational model.
 - File-authoritative business state aligns with SQLite as durable interpretation/projection state rather than primary truth.
-- Cookie-only sessions align with OAuth-first login so long as session payloads remain intentionally small.
+- Server-side sessions behind an opaque cookie align with both login paths (local credentials and optional OAuth) and keep authorization off the client entirely.
 - Fine-grained PATs fit the GitHub integration model while preserving a clean separation between login identity and execution credentials.
 - The no-distributed-cache decision is consistent with SQLite-in-production, single-node deployment, and rebuildable local caches.
 - Zod-based tolerant parsing, readiness-state derivation, and explicit diagnostics reinforce the file-authoritative model rather than competing with it.
@@ -1031,13 +986,13 @@ No epics were loaded as separate artifacts, but the FR categories and user journ
 **Functional Requirements Coverage:**
 All FR categories are architecturally covered:
 
-- Workspace access & collaboration: covered by auth, session, org admin, and role boundaries
-- Project governance & policy: covered by project-admin modules and interpretation/policy services
-- Task records & lifecycle: covered by file readers, schemas, projections, and task-detail surfaces
-- Agent orchestration & continuity: covered by runtime adapters, provenance, SSE, and readiness/diagnostic policy
-- Oversight & human governance: covered by board, queue, task detail, and decision-panel structures
-- GitHub delivery & traceability: covered by GitHub client, PAT store/validator, branch sync, PR linkage, and execution truth surfaces
-- Integrity, audit & recovery: covered by provenance, structured logging, typed errors, diagnostics, and explicit runtime-data boundaries
+- Workspace access & collaboration: covered by auth, session, org settings, and role boundaries
+- Project governance & policy: covered by project-settings and policy surfaces over the single RBAC and capability tables, plus interpretation/policy services
+- Task records & lifecycle: covered by file readers/writers, schemas, projections, the governed-mutation core in `server/tasks`, and task-detail surfaces
+- Agent orchestration & continuity: covered by runtime adapters, the operator and specialist run paths, SSE, and readiness/diagnostic policy
+- Oversight & human governance: covered by board, review queue, task detail, and decision-packet structures
+- GitHub delivery & traceability: covered by GitHub client, PAT store/validator, branch sync, PR linkage, the reconcile poller, and execution truth surfaces
+- Integrity, audit & recovery: covered by the audit recorder, structured logging, typed errors, diagnostics, retention, and explicit runtime-data boundaries
 
 **Non-Functional Requirements Coverage:**
 
@@ -1065,15 +1020,20 @@ The architecture now documents all implementation-blocking decisions:
 - anti-drift implementation patterns
 
 **Structure Completeness:**
-The structure is specific enough for implementation:
+The structure section is **descriptive of the built system**, resynced from the filesystem
+on 2026-07-25. It was originally a pre-implementation prescription and drifted badly — it
+prescribed a `features/auth/` that was never created and omitted six server modules
+including the largest one — so it is now maintained the other way round: the tree is
+generated from what exists, and a divergence is a doc bug to fix, not scope to build.
 
-- root config/build files defined
-- app route and feature surfaces defined
-- server module boundaries defined
+- root config/build files: listed as they exist, including the ones deliberately absent
+- app route and feature surfaces: all 25 routes and 16 feature folders named
+- server module boundaries: all 18 server directories named, with what each owns
 - SQLite migration location defined
 - test organization defined
-- runtime data root defined
-- integration points mapped
+- runtime data root: matches `DATA_ROOT_SUBDIRS`
+- integration points mapped, including the four subsystems this document previously
+  omitted (packets, operator, specialist execution, context resources)
 
 **Pattern Completeness:**
 The highest-risk drift areas are covered:
@@ -1108,7 +1068,7 @@ The highest-risk drift areas are covered:
 ### Validation Issues Addressed
 
 - Clarified SQLite as durable interpretation/projection state, not primary business truth
-- Clarified cookie-only sessions must remain compact
+- Clarified that the session cookie carries an opaque token only, with authorization resolved server-side per request
 - Clarified PAT failure diagnostics as first-class architecture behavior
 - Clarified SSE as reconnect-safe and revalidation-oriented
 - Clarified runtime-data ownership boundaries

@@ -1,6 +1,6 @@
 /**
  * Centralized snake_case DB row → camelCase mapping for `users`
- * (see CONVENTIONS "Data & naming"). Booleans are 0/1 in SQLite.
+ * (see docs/architecture/decisions.md "Data & naming"). Booleans are 0/1 in SQLite.
  */
 
 /** Org roles are a two-rung ladder: `admin` runs the instance, `member` is

@@ -14,6 +14,12 @@ import {
 } from "~/server/projections/notifications.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
 import { rebuildProjections } from "~/server/projections/rebuild.server";
+import {
+  REBUILD_MIN_INTERVAL_MS,
+  RESCAN_MIN_INTERVAL_MS,
+  runSingleFlight,
+  throttledMessage,
+} from "~/server/projections/single-flight.server";
 import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
 import {
   getHomeOrgSummary,
@@ -92,8 +98,25 @@ export async function action({ request }: Route.ActionArgs) {
           { status: 403 },
         );
       }
-      const summary = rescanProjections(db, { actor });
-      return { ok: true as const, ...summary };
+      // P13-D-33: a whole-store re-scan re-parses every project and task file.
+      // It had no limiter of any kind, so holding the button burned one full
+      // sweep per click. A skipped sweep is always safe here — the file watcher
+      // and the boot rescan converge anyway.
+      const flight = runSingleFlight(
+        "projections:rescan",
+        () => rescanProjections(db, { actor }),
+        { minIntervalMs: RESCAN_MIN_INTERVAL_MS },
+      );
+      if (flight.status === "throttled") {
+        return data(
+          {
+            ok: false as const,
+            error: throttledMessage("The store re-scan", flight.retryAfterMs),
+          },
+          { status: 429 },
+        );
+      }
+      return { ok: true as const, ...flight.result };
     }
     if (intent === "rebuild-projections") {
       // Phase 10 recovery: drop + re-project everything from files.
@@ -107,8 +130,26 @@ export async function action({ request }: Route.ActionArgs) {
           { status: 403 },
         );
       }
-      const summary = rebuildProjections(db, { actor });
-      return { ok: true as const, ...summary };
+      // P13-D-33: heavier than the re-scan (drop + re-project everything), so a
+      // longer cooldown. Same reasoning: a refused rebuild costs nothing.
+      const flight = runSingleFlight(
+        "projections:rebuild",
+        () => rebuildProjections(db, { actor }),
+        { minIntervalMs: REBUILD_MIN_INTERVAL_MS },
+      );
+      if (flight.status === "throttled") {
+        return data(
+          {
+            ok: false as const,
+            error: throttledMessage(
+              "The projection rebuild",
+              flight.retryAfterMs,
+            ),
+          },
+          { status: 429 },
+        );
+      }
+      return { ok: true as const, ...flight.result };
     }
     if (intent === "create-project") {
       // RBAC decision (deliberate, pinned by test): project creation is

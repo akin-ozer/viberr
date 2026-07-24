@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import {
   getProjectCredentialHealth,
@@ -11,9 +10,10 @@ import { listMembershipViews, type MembershipView } from "./membership.server";
  * Settings view read model (project-settings spec §3): project identity +
  * stages from the projection, per-stage task counts from task_projections
  * (never the whole task list — spec §3.2), membership with invite status
- * (canonical file), credential health (the ruling-5 single fact, phase 7),
- * and the task-level repo-override policy flag (project.md loose
- * frontmatter key `taskRepoOverride`, default true per the mock).
+ * (canonical file), and credential health (the ruling-5 single fact, phase 7).
+ *
+ * P13-D-5: the task-level repo-override flag (`taskRepoOverride`) used to be
+ * read here for a toggle that gated nothing. One project, one repository.
  */
 
 export interface SettingsViewData {
@@ -31,7 +31,6 @@ export interface SettingsViewData {
   stageCounts: Record<string, number>;
   members: MembershipView[];
   credential: ProjectCredentialHealth;
-  repoOverride: boolean;
 }
 
 export function getSettingsViewData(
@@ -48,12 +47,6 @@ export function getSettingsViewData(
         WHERE project_slug = ? GROUP BY stage`,
     )
     .all(projectSlug) as { stage: string; n: number }[];
-
-  const file = readProjectFile({
-    projectSlug,
-    dataRoot: ctx.dataRoot,
-  });
-  const overrideRaw = file?.parsed.unknownFrontmatter.taskRepoOverride;
 
   return {
     project: {
@@ -73,6 +66,5 @@ export function getSettingsViewData(
     stageCounts: Object.fromEntries(counts.map((c) => [c.stage, c.n])),
     members: listMembershipViews(db, projectSlug, ctx),
     credential: getProjectCredentialHealth(db, projectSlug),
-    repoOverride: overrideRaw === false ? false : true,
   };
 }

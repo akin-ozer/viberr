@@ -11,7 +11,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
-import { workspaceViewFromPathname, workspaceViewLabel } from "./nav";
+import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav";
 
 /**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
@@ -57,7 +57,11 @@ export function Topbar({
   const view = workspaceViewFromPathname(location.pathname);
   const onBoard =
     view === "board" && !openTask && location.pathname.endsWith("/board");
-  const boardPath = `/projects/${projectSlug}/board`;
+  // P13-D-35: the crumbs' board links kept the filter/search only if the URL
+  // carried it — they were bare paths, so clicking the project crumb from a
+  // filtered board silently reset it. `boardHref` carries `?filter/view/q` when
+  // (and only when) we are already on this project's board.
+  const boardPath = boardHref(projectSlug, location);
   const urlQuery = onBoard ? (searchParams.get("q") ?? "") : "";
   const [query, setQuery] = useState(urlQuery);
 
@@ -108,7 +112,14 @@ export function Topbar({
         <span className="mark">V</span>
         <b>Viberr</b>
       </Link>
-      <div className="crumbs">
+      {/* P13-D-37: the crumb trail was an anonymous <div> with a <span
+          class="cur"> — no landmark, no current-page signal. <nav> + the label
+          and `aria-current` are pure semantics: `.crumbs` is a flex container
+          styled by class, and <nav> is a block box exactly like the <div> it
+          replaces, so the truncation tiers (app.css:2306-2316) are untouched.
+          (The fuller <ol>/<li> shape would need `display: contents` rules that
+          do not exist yet — reported rather than invented.) */}
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link className="crumb-root" to={boardPath}>
           {projectName}
         </Link>
@@ -123,14 +134,20 @@ export function Topbar({
             <span className="sep sep-mid">
               <Icon name="chevron" />
             </span>
-            <span className="cur" title={openTask.key + " · " + openTask.title}>
+            <span
+              className="cur"
+              aria-current="page"
+              title={openTask.key + " · " + openTask.title}
+            >
               {openTask.key} · {openTask.title}
             </span>
           </>
         ) : (
-          <span className="cur">{workspaceViewLabel(view)}</span>
+          <span className="cur" aria-current="page">
+            {workspaceViewLabel(view)}
+          </span>
         )}
-      </div>
+      </nav>
       {orgAdminOverride && (
         <span
           className="pill risk sm"

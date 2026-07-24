@@ -13,15 +13,29 @@ import { requireRunAgents } from "~/server/auth/project-authority.server";
 import type { RunHandle, RunSpec, RuntimeAdapter } from "./adapter.server";
 import { resolveRunEffort } from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
-import { projectRunsForTask } from "./run-projection.server";
+import {
+  projectRunsForTask,
+  type ProjectedRunView,
+} from "./run-projection.server";
 import { createRunSink } from "./run-sink.server";
 import {
+  appendRawLine,
   getRun,
+  insertRunLine,
   listRunLines,
+  listRunLinesTail,
+  nextSeq,
   patchRun,
+  runLineStats,
   upsertRun,
   type AgentRunRow,
 } from "./run-store.server";
+import { probeSessionContinuity } from "./session-export.server";
+import {
+  resolveTaskFilePath,
+  updateTaskFile,
+} from "~/server/files/task-writer.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   codexCliAuthDiagnostics,
   createAdapters,
@@ -427,10 +441,128 @@ export function backendUnavailableMessage(backend: RealBackend): string {
   return "Codex is unavailable — no usable credential is configured. Set CODEX_ACCESS_TOKEN, CODEX_API_KEY or OPENAI_API_KEY (or opt in with VIBERR_CODEX_USE_CLI_AUTH=1), or run this agent on another backend. No agent process was started.";
 }
 
+// ------------------------------------------- continuity recovery (P13-D-2)
+
+/**
+ * The `err` tag that marks a run whose provider session was PROVEN gone. Two
+ * readers depend on the `·session_missing` SUFFIX: `runFailureReason`
+ * classifies the failure kind off it, and `runIdsWithMissingSession` uses it to
+ * stop `latestSessionRun` re-selecting a dead session id forever. Both adapters
+ * end their own tags with the same suffix (`run·error·session_missing`,
+ * `error·session_missing`) when the SDK reports the vanished session first.
+ */
+const SESSION_MISSING_TAG = "run·session_missing";
+
+/** What the user is told when provider-side history is gone. Never "review your
+ *  authentication" — the credential is fine; the transcript is not. */
+function sessionMissingMessage(backend: RealBackend, sessionId: string): string {
+  const label = backend === "claude" ? "Claude Code" : "Codex";
+  return `The ${label} session ${sessionId} no longer exists on this machine — its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
+}
+
+/**
+ * Stamp the dead run with the continuity failure: one classified `err` line on
+ * the run that owned the session id, in both the DB projection and the raw
+ * .jsonl. This is the durable record — no column, no migration — that
+ * `latestSessionRun` reads to skip the row, and the console shows it exactly
+ * where the thread stopped.
+ */
+function recordSessionMissing(db: DatabaseSync, run: AgentRunRow): void {
+  const now = new Date().toISOString();
+  const text = sessionMissingMessage(run.backend, run.session_id ?? "");
+  const raw = JSON.stringify({
+    type: "error",
+    source: "viberr",
+    reason: "session_missing",
+    session_id: run.session_id,
+    message: text,
+  });
+  try {
+    appendRawLine(run.backend, run.id, raw);
+    insertRunLine(db, {
+      runId: run.id,
+      seq: nextSeq(db, run.id),
+      occurredAt: now,
+      raw,
+      display: { t: now.slice(11, 19), ev: "err", tag: SESSION_MISSING_TAG, text },
+    });
+  } catch (error) {
+    logger.error("session-missing marker persist failed", {
+      runId: run.id,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * The canonical-anchor preamble a re-anchored turn carries. PRD-1: "If
+ * provider-side history is unavailable or corrupted, the system degrades
+ * gracefully from the canonical task file and current execution context."
+ * The follow-up prompt alone assumes a conversation the agent no longer has, so
+ * it is prefixed with what happened and where the truth lives.
+ */
+function continuityResetPreamble(backend: RealBackend): string {
+  const label = backend === "claude" ? "Claude Code" : "Codex";
+  return [
+    `[continuity notice] Your previous ${label} session for this task is gone — the provider transcript no longer exists, so none of that conversation is in your context.`,
+    `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
+  ].join(" ");
+}
+
+/**
+ * Note the continuity break on the task timeline. `note` (not `policy` or
+ * `blocked`): nothing was violated and nothing is stuck — the turn ran, on a
+ * fresh session. Best-effort: a task file we cannot write must never block the
+ * run that is the actual recovery.
+ */
+async function noteContinuityReset(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  dataRoot?: string,
+): Promise<void> {
+  const ref = {
+    projectSlug: run.project_slug,
+    taskKey: run.task_key,
+    ...(dataRoot ? { dataRoot } : {}),
+  };
+  const label = run.backend === "claude" ? "Claude Code" : "Codex";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "runtime-continuity" },
+        title: null,
+        text: `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("continuity-reset timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 /**
  * Resume an existing run's provider session with a follow-up prompt. Creates
  * a NEW run row (a fresh stream) that shares the session id, matching how
  * both CLIs emit a fresh full stream on resume (research §1.4 / §2.4).
+ *
+ * P13-D-2 (FR22 / NFR17): the stored session id is PROBED first. Provider
+ * history is not durable — Claude Code sweeps transcripts after ~30 days, and
+ * recreating `docker-data` takes `$CODEX_HOME/sessions` with it. Handing a dead
+ * id to the SDK produced a generic "review its authentication and runtime
+ * configuration" error, a blocked packet with no recovery option, and — because
+ * `latestSessionRun` had no state filter — every later @mention re-selected the
+ * same dead id, stranding that agent on that task forever. When the probe says
+ * the transcript is gone the turn is NOT failed: it runs once as a fresh,
+ * canonical-anchored run, the dead run is stamped `session_missing`, and the
+ * timeline says continuity was lost. Only that fresh run failing is a failure.
  *
  * `workdir` lets the resumed run keep the ORIGINAL run's working directory
  * (the specialist-run clone at `<taskDir>/workspace/<repo>`) so the agent
@@ -475,7 +607,7 @@ export async function resumeRun(
      *  its envelope, a fresh-vs-resume parity break (F7). */
     outputSchema?: unknown;
   },
-): Promise<{ runId: string }> {
+): Promise<{ runId: string; continuityReset?: true }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
   const backend: RealBackend = prev.backend;
@@ -485,6 +617,46 @@ export async function resumeRun(
   // thread id from the original so the picker still groups it recognizably.
   const resumeThreadId =
     prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
+
+  // P13-D-2: probe before handing the id to the SDK. `unknown` (no transcript
+  // store to look in) resumes exactly as before — absence proves nothing there.
+  const continuity = probeSessionContinuity(backend, prev.session_id);
+  if (continuity === "missing") {
+    logger.warn("runtime continuity lost — re-anchoring on task.md", {
+      runId: prev.id,
+      taskKey: prev.task_key,
+      backend,
+      sessionId: prev.session_id,
+    });
+    recordSessionMissing(db, prev);
+    await noteContinuityReset(db, prev, input.dataRoot);
+    const fresh = await startRun(db, {
+      projectSlug: prev.project_slug,
+      taskKey: prev.task_key,
+      threadId: resumeThreadId,
+      role: prev.role,
+      kind: prev.kind,
+      backend,
+      model: input.model ?? prev.model,
+      ...(input.effort ? { effort: input.effort } : {}),
+      agentName: input.agentName ?? prev.agent_name,
+      agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
+      prompt: `${continuityResetPreamble(backend)}\n\n${input.prompt}`,
+      // The whole point: no resumeSessionId. A fresh provider session.
+      resumeSessionId: null,
+      ...(input.workdir ? { workdir: input.workdir } : {}),
+      ...(input.autonomous !== undefined ? { autonomous: input.autonomous } : {}),
+      ...(input.dataRoot ? { dataRoot: input.dataRoot } : {}),
+      ...(input.actor ? { actor: input.actor } : {}),
+      ...(input.disallowedTools ? { disallowedTools: input.disallowedTools } : {}),
+      ...(input.env ? { env: input.env } : {}),
+      ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+      ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+    });
+    return { runId: fresh.runId, continuityReset: true };
+  }
+
   return startRun(db, {
     projectSlug: prev.project_slug,
     taskKey: prev.task_key,
@@ -677,12 +849,12 @@ export function interruptRun(
 
 // ---------------------------------------------- reads
 
-/** All runs for a task as RunView[] (task-detail loader). */
+/** All runs for a task as RunView[] + their D-11 log windows (task loader). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-): RunView[] {
+): ProjectedRunView[] {
   return projectRunsForTask(db, projectSlug, taskKey);
 }
 
@@ -692,19 +864,66 @@ export interface RunLog {
   state: AgentRunRow["state"];
   lines: { seq: number; occurredAt: string; raw: string; display: LogLine }[];
   headSeq: number;
+  /** P13-D-11: the oldest seq in THIS page (-1 when the page is empty). */
+  oldestSeq: number;
+  /** P13-D-11: lines older than `oldestSeq` exist for this run. */
+  hasMore: boolean;
 }
 
-/** Tail of a run's log lines since `sinceSeq` (for the dedicated consumer). */
+/** Backward page size when the caller names none (P13-D-11). */
+const RUN_LOG_PAGE_LINES = 200;
+
+export interface RunLogQuery {
+  /** Forward tail: lines with `seq > since` (the live-tail consumer). */
+  since?: number;
+  /** Backward page: the newest `limit` lines with `seq < before`. */
+  before?: number;
+  /** Page size. Selects backward mode on its own (`limit` with no `before` =
+   *  this run's newest page — how the console steps to a PREVIOUS run in the
+   *  group). A forward tail ignores it: it is already bounded by how far behind
+   *  the consumer is. */
+  limit?: number;
+}
+
+/**
+ * A page of a run's log lines.
+ *
+ * Two modes, because D-11 made the console a paginated view of a bounded
+ * loader window rather than the whole history:
+ *   - forward  (`since`)  — the live tail after a `run.log-appended` event;
+ *   - backward (`before`) — the newest `limit` lines older than a cursor, which
+ *     is how the console walks back through history the loader did not ship.
+ */
 export function getRunLog(
   db: DatabaseSync,
   runId: string,
-  sinceSeq = -1,
+  query: number | RunLogQuery = -1,
 ): RunLog | null {
   const run = getRun(db, runId);
   if (!run) return null;
-  const lines = listRunLines(db, runId, sinceSeq);
+  const q: RunLogQuery = typeof query === "number" ? { since: query } : query;
+  const backward = typeof q.before === "number" || typeof q.limit === "number";
+  const lines: RunLog["lines"] = backward
+    ? listRunLinesTail(db, runId, q.limit ?? RUN_LOG_PAGE_LINES, q.before).map(
+        ({ seq, occurredAt, raw, display }) => ({ seq, occurredAt, raw, display }),
+      )
+    : listRunLines(db, runId, q.since ?? -1);
+  const sinceSeq = q.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
-  return { runId, threadId: run.thread_id, state: run.state, lines, headSeq: head };
+  const oldestSeq = lines.length ? lines[0]!.seq : -1;
+  const stats = runLineStats(db, runId);
+  return {
+    runId,
+    threadId: run.thread_id,
+    state: run.state,
+    lines,
+    headSeq: head,
+    oldestSeq,
+    // Older lines exist below this page. An EMPTY backward page means we
+    // reached the start of this run (the console then steps to the previous
+    // run id in the group's `logWindow.runIds`).
+    hasMore: lines.length > 0 && oldestSeq > stats.minSeq,
+  };
 }
 
 function projectOne(db: DatabaseSync, run: AgentRunRow): RunView {

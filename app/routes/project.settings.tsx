@@ -22,7 +22,6 @@ import {
   removeStage,
   renameStage,
   reorderStages,
-  setRepoOverride,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
@@ -32,8 +31,8 @@ import { SettingsPage } from "~/features/project-settings/settings-page";
  * /projects/:slug/settings — the project-admin surface (project-settings
  * spec), replacing the phase-4 placeholder. Loader: identity + stages +
  * per-stage counts + membership (with invite status) + credential health
- * (ruling-5 single fact) + the repo-override flag. Actions (POST + CSRF):
- * identity save, stage editor mutations, membership CRUD, override toggle,
+ * (ruling-5 single fact). Actions (POST + CSRF):
+ * identity save, stage editor mutations, membership CRUD,
  * grant-scope (phase-7 revalidateProjectCredential — resolves the seeded
  * VIB-142 violation and drops the rail badge), and the danger-zone delete.
  * Toast copy is computed server-side (phase-5 pattern); mutations write
@@ -122,14 +121,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      case "override": {
-        const result = await setRepoOverride(
-          db,
-          { projectSlug: slug, enabled: field("enabled") === "true" },
-          actor,
-        );
-        return { ok: true as const, toast: result.toast };
-      }
+      // P13-D-5: the "override" intent (task-level repo override) is gone. It
+      // persisted a flag and audited a change that no enforcement path ever
+      // consulted, next to copy on three surfaces promising a capability
+      // nothing could write. One project, one repository.
       case "grant-scope": {
         // The single guard path consulting the ACTION_ROLES source:
         // `grant-github-scope` (maintainer+), same as the GitHub view's action

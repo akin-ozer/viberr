@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
 import { formatClock } from "~/shared/dates/format";
@@ -19,8 +19,8 @@ import {
   runStatePill,
   useElapsed,
 } from "./runs-helpers";
-import type { RunView } from "./runtime-types";
-import type { StreamedLine } from "./use-run-log-stream";
+import { isRunBoundary, type RunView } from "./runtime-types";
+import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 /**
  * Port of runs.jsx: LiveRunPanel (run strip) + AgentLogsPanel (dark console)
@@ -331,6 +331,8 @@ export function AgentLogsPanel({
   onRetryBackend,
   retrying,
   streamError = null,
+  olderByThread,
+  onLoadOlder,
 }: {
   runtime: RunView[];
   sel: string | null;
@@ -344,10 +346,24 @@ export function AgentLogsPanel({
   /** UI-03/UI-30: the live tail stopped (403 / dropped stream). Rendered in the
    *  footer so a frozen console never looks like a quiet one. */
   streamError?: string | null;
+  /** P13-D-11: per-thread backward-paging state (how much history the loader's
+   *  bounded window withheld, and whether a page is in flight). */
+  olderByThread?: Record<string, OlderLogState>;
+  /** P13-D-11: load one page of OLDER lines for a thread. Omitted → the "load
+   *  older" affordance is not rendered at all. */
+  onLoadOlder?: (threadId: string) => void;
 }) {
   const [follow, setFollow] = useState(true);
   const [raw, setRaw] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  /**
+   * P13-D-11: the console's scroll geometry captured at the moment "load older"
+   * was pressed. Prepending content pushes everything the reader was looking at
+   * DOWN by exactly the height of the new block, so the scroll offset is
+   * re-anchored by that delta before paint — the jump-to-somewhere-else is the
+   * classic failure of upward paging.
+   */
+  const anchorRef = useRef<{ threadId: string; height: number; top: number } | null>(null);
 
   const cur =
     runtime.find((r) => r.id === sel) ||
@@ -360,6 +376,16 @@ export function AgentLogsPanel({
   const shown: StreamedLine[] = cur
     ? (streamed ?? cur.lines.map((display, i) => ({ display, raw: cur.raw[i] ?? "" })))
     : [];
+  const older = cur ? olderByThread?.[cur.id] : undefined;
+
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    const anchor = anchorRef.current;
+    if (!el || !anchor || anchor.threadId !== cur?.id) return;
+    if (el.scrollHeight === anchor.height) return; // nothing prepended yet
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+    anchorRef.current = null;
+  }, [shown.length, cur?.id]);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -381,6 +407,17 @@ export function AgentLogsPanel({
   }
 
   const st = runStatePill(cur!);
+  // P13-D-11: the footer counts EVENTS — stored console lines. Two traps now
+  // that the loader ships a window:
+  //   • `shown` also carries UI-53's synthetic `── resumed ──` boundaries,
+  //     which are not stored lines and are not in `lineCount` — counting the
+  //     array double-counts them into the total;
+  //   • `lineCount` means "lines that EXIST", a loader snapshot, so a live tail
+  //     can already be ahead of it.
+  // Take the larger of the two honest numbers, so the count keeps its
+  // pre-window meaning instead of shrinking to "lines currently loaded".
+  const storedShown = shown.reduce((n, l) => (isRunBoundary(l.display) ? n : n + 1), 0);
+  const eventCount = Math.max(cur!.lineCount, storedShown);
   // UI-38: the FAILURE EXPLANATION describes the RUN, not the viewer.
   // `backendUnavailable` is a property of the run (the projection carries it);
   // `canRetryBackend` additionally requires an `onRetryBackend` handler, which
@@ -487,6 +524,45 @@ export function AgentLogsPanel({
           setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
         }}
       >
+        {/* P13-D-11: the loader ships a bounded window (NFR5), so the console
+            starts mid-history on a long-lived task. This is how the reader
+            reaches the oldest line — deliberately a BUTTON, not scroll-linked:
+            an agent log is scanned, and auto-loading upward fights the live
+            tail at the bottom. */}
+        {older?.hasMore && onLoadOlder && cur ? (
+          <div className="log-line meta">
+            <span className="lt" />
+            <span className="ltag">history</span>
+            <span className="lx">
+              <button
+                type="button"
+                className="log-more"
+                disabled={older.loading}
+                onClick={() => {
+                  const el = boxRef.current;
+                  if (el) {
+                    anchorRef.current = {
+                      threadId: cur.id,
+                      height: el.scrollHeight,
+                      top: el.scrollTop,
+                    };
+                  }
+                  // Going backwards means the tail must stop yanking the view
+                  // to the bottom; the reader re-arms `follow` when done.
+                  setFollow(false);
+                  onLoadOlder(cur.id);
+                }}
+              >
+                {older.loading ? "loading older lines…" : "load older lines"}
+              </button>
+              <span className="log-more-note">
+                {older.error
+                  ? " · " + older.error
+                  : ` · ${older.withheld} earlier line${older.withheld === 1 ? "" : "s"} not loaded`}
+              </span>
+            </span>
+          </div>
+        ) : null}
         {shown.map((l, i) => (
           <div className={"log-line " + l.display.ev} key={i}>
             <span className="lt">{l.display.t}</span>
@@ -519,7 +595,7 @@ export function AgentLogsPanel({
             silence from the agent. */}
         <span>{streamError ?? footer}</span>
         <span className="mono">
-          {shown.length} event{shown.length === 1 ? "" : "s"}
+          {eventCount} event{eventCount === 1 ? "" : "s"}
         </span>
       </div>
     </div>

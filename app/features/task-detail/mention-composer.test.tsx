@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -15,7 +15,10 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
  * hooks have a data router.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const MENTIONABLES: Mentionables = {
   agents: [{ handle: "dev", name: "dev", role: "developer", backend: "claude" }],
@@ -222,5 +225,32 @@ describe("Timeline empty state (UI-40)", () => {
     expect(getByText(/No comments in the loaded history/)).toBeTruthy();
     // The contradiction the old copy sat next to.
     expect(getByText(/Show older events/)).toBeTruthy();
+  });
+});
+
+/**
+ * P13-D-39: the composer's send hint was the literal `⌘↵ to send`, the last
+ * user-visible `⌘` in `app/`, even though its own handler accepts
+ * `metaKey || ctrlKey`. UI-55 had already established the rule and the helper
+ * for exactly this — it just was not applied here.
+ */
+describe("comment composer send hint (P13-D-39)", () => {
+  const hint = () =>
+    [...document.querySelectorAll(".composer-foot span")].find((s) =>
+      s.textContent?.includes("to send"),
+    );
+
+  it("shows ⌘↵ on a Mac", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" });
+    renderComposer();
+    expect(hint()!.textContent).toBe("⌘↵ to send");
+  });
+
+  it("shows Ctrl ↵ on a keyboard that has no ⌘ key", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
+    renderComposer();
+    expect(hint()!.textContent).toBe("Ctrl ↵ to send");
+    // No hardcoded Mac glyph survives anywhere in the composer footer.
+    expect(document.querySelector(".composer-foot")!.textContent).not.toContain("⌘");
   });
 });

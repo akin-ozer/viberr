@@ -474,9 +474,11 @@ function NewProjectRepoField({
     <div className="field">
       <label className="flabel" htmlFor="np-repo">
         GitHub repository<span className="req">*</span>{" "}
+        {/* P13-D-5: "task-level override later" promised a feature that was
+            never built and is now deleted — one project, one repository. */}
         <span className="fhint">
           {effOwner
-            ? "project default · task-level override later"
+            ? "every task in this project uses it"
             : "requires a GitHub connection"}
         </span>
       </label>

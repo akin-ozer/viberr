@@ -137,6 +137,11 @@ describe("loader", () => {
       state: "review",
       title: "Attach execution workspace",
       branch: "vib-142-attach-workspace",
+      // P13-D-28: null because the demo fixture's PR ref carries no reconciled
+      // check-runs or reviews — the row now CARRIES the facts instead of
+      // narrowing them away, which is what the finding was about.
+      checks: null,
+      review: null,
     });
     expect(view.prs.map((p) => p.state)).toEqual([
       "review",
@@ -171,7 +176,12 @@ describe("loader", () => {
     expect(byKey["VIB-160"]!.sync).toBe("unknown");
     // Commit association from the github cache (VIB-142 seeds 3 commits).
     expect(byKey["VIB-142"]!.commitCount).toBe(3);
-    expect(byKey["VIB-142"]!.pr).toEqual({ number: 318, state: "review" });
+    expect(byKey["VIB-142"]!.pr).toEqual({
+      number: 318,
+      state: "review",
+      checks: null, // P13-D-28: carried, not narrowed away
+      review: null,
+    });
     expect(byKey["VIB-151"]!.pr).toBeNull();
   });
 
@@ -362,6 +372,15 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
 
   it("grant-scope while offline → network_unavailable copy, violation state untouched", async () => {
     const { runGrantScope } = await import("./github-actions.server");
+    // P13-D-33: a SUCCESSFUL validation younger than REVALIDATE_COOLDOWN_MS is
+    // reused instead of re-probing GitHub — and the case above just made one.
+    // Drop the cached result so this case exercises the offline path it is
+    // about, rather than the cooldown.
+    app.db
+      .prepare(
+        `UPDATE github_pats SET validation_json = NULL, last_validated_at = NULL`,
+      )
+      .run();
     const offline: typeof fetch = async () => {
       throw new TypeError("fetch failed");
     };

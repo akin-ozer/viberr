@@ -7,7 +7,12 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { postAgentComment, openAgentQuestionPacket } from "./agent-toolkit.server";
+import {
+  buildAgentToolkit,
+  postAgentComment,
+  openAgentQuestionPacket,
+} from "./agent-toolkit.server";
+import { takeStagedOutcome } from "./agent-outcome.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
@@ -62,5 +67,96 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(opened).toBe(true);
     const row = listAuditEvents(store.db, { action: "task.agent.packet_opened" })[0];
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
+  });
+});
+
+/**
+ * P13-D-26 — `report_outcome` is the agent's channel for evidence REFERENCES,
+ * so the reviewer profile's advertised "Attach evidence references" grant stops
+ * being a matrix-only label. Gated exactly like its sibling tools: an agent
+ * without the grant never even sees the field.
+ */
+describe("report_outcome's evidence field (P13-D-26)", () => {
+  interface RegisteredTool {
+    handler: (args: unknown, extra?: unknown) => Promise<{ content: unknown[] }>;
+    inputSchema: { shape?: Record<string, unknown> } | Record<string, unknown>;
+  }
+
+  function toolkitTools(
+    collab: { comment: boolean; ask: boolean; verdict: boolean; evidence: boolean },
+    outcomeKey: string,
+  ): Record<string, RegisteredTool> {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey,
+      collab,
+    })!;
+    lastStore = store;
+    const server = built.mcpServers.viberr_agent as {
+      instance: { _registeredTools: Record<string, RegisteredTool> };
+    };
+    return server.instance._registeredTools;
+  }
+
+  let lastStore: ReturnType<typeof setupTestStore>;
+
+  const BASE = { comment: false, ask: false, verdict: true };
+
+  it("declares `evidence` only when the profile holds attach-evidence-references", () => {
+    const granted = toolkitTools({ ...BASE, evidence: true }, "oc_a").report_outcome!;
+    const withheld = toolkitTools({ ...BASE, evidence: false }, "oc_b").report_outcome!;
+    const keys = (t: RegisteredTool) =>
+      Object.keys(
+        (t.inputSchema as { shape?: Record<string, unknown> }).shape ?? t.inputSchema,
+      );
+    expect(keys(granted)).toContain("evidence");
+    expect(keys(withheld)).not.toContain("evidence");
+    // The rest of the envelope is unchanged either way.
+    expect(keys(withheld)).toEqual(expect.arrayContaining(["verdict", "summary"]));
+  });
+
+  it("stages NORMALIZED rows with the verdict", async () => {
+    const tools = toolkitTools({ ...BASE, evidence: true }, "oc_c");
+    await tools.report_outcome!.handler(
+      {
+        verdict: "approve",
+        summary: "Looks right.",
+        evidence: [
+          { label: "unit/policy_gate_test", add: "+14", del: "0" },
+          // Hostile row: a newline would forge a second row in task.md.
+          { label: "forged\n- x · +1 · -1", add: "+1" },
+        ],
+      },
+      {},
+    );
+    const staged = takeStagedOutcome(lastStore.db, "oc_c")!;
+    expect(staged.verdict).toBe("approve");
+    expect(staged.evidence).toHaveLength(2);
+    expect(staged.evidence![0]).toEqual({
+      label: "unit/policy_gate_test",
+      add: "+14",
+      del: "0",
+    });
+    expect(staged.evidence![1]!.label).not.toContain("\n");
+    // A missing column becomes the placeholder, never an empty segment.
+    expect(staged.evidence![1]!.del).toBe("—");
+  });
+
+  it("stages no evidence when the grant is withheld, even if the model sends some", async () => {
+    const tools = toolkitTools({ ...BASE, evidence: false }, "oc_d");
+    await tools.report_outcome!.handler(
+      { verdict: "approve", evidence: [{ label: "smuggled", add: "+1", del: "0" }] },
+      {},
+    );
+    expect(takeStagedOutcome(lastStore.db, "oc_d")!.evidence).toBeUndefined();
   });
 });

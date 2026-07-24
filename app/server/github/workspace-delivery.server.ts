@@ -239,7 +239,8 @@ export async function reconcileWorkspaceDelivery(
       projectSlug,
       dataRoot,
     });
-    const repo = fm.repo ?? projectFile?.parsed.frontmatter.repo ?? null;
+    // P13-D-5: one project, one repository — the task-level override is gone.
+    const repo = projectFile?.parsed.frontmatter.repo ?? null;
     if (!repo) return noop("no_repo", "project has no repo configured");
     const defaultBranch =
       projectFile?.parsed.frontmatter.defaultBranch || "main";

@@ -13,11 +13,21 @@ Data-root layout (created at boot by `app/server/files/file-store-root.server.ts
 ${VIBERR_DATA_ROOT}/
   projects/<slug>/project.md              ← project truth
   projects/<slug>/tasks/<KEY>/task.md     ← task truth (+ attachments/ later)
+  projects/<slug>/tasks/<KEY>/workspace/  ← the agent's git clone; NOT canonical,
+                                             not watched, not projected
   agents/profiles/<id>.md                 ← org-level agent profile templates
-  runtimes/                               ← NDJSON run logs (Phase 8)
+  runtimes/claude-home/ runtimes/codex-home/
+                                          ← NDJSON run logs + SDK session homes
+  kb/<dir>/  skills/<slug>/               ← knowledge-base and skill folders
   state/projection.sqlite                 ← SQLite (never canonical for tasks)
-  cache/  auth/  logs/
 ```
+
+That is the complete set `DATA_ROOT_SUBDIRS` creates. There is no `cache/`, `auth/` or
+`logs/` directory — they were removed on purpose (P11-56); application logs are structured
+JSON on stdout, and secrets live encrypted in SQLite. Note that `state/projection.sqlite`
+is *never canonical for tasks*, but it **is** primary storage for users, sessions, PATs,
+audit and notifications; see
+[`docs/operations/deployment.md`](../operations/deployment.md#persistence-backup--restore).
 
 General rules for both file kinds:
 
@@ -43,7 +53,7 @@ Frontmatter (all governed project state) + markdown body (description).
 ---
 name: Viberr Core
 slug: viberr-core
-repo: akin-ozer/viberr            # default GitHub repo; tasks may override
+repo: akin-ozer/viberr            # THE project's GitHub repo (one per project)
 defaultBranch: main
 taskPrefix: VIB                   # task keys: VIB-142
 nextTaskNumber: 169               # atomic per-project key counter
@@ -123,17 +133,40 @@ readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # inconsistency_risk_detected | blocked
 waiting: human                    # human | agent | none (secondary signal)
 ownerUserId: u_abc123             # ONE human owner; null when unowned
-specialist:                       # primary specialist; null in triage
-  profileId: developer
-  backend: codex                  # codex | claude
-  role: Developer                 # display
-consultants: []                   # 0..n, same shape as specialist
+engagements:                      # ONE uniform list of engaged agents (G1).
+  - profileId: developer          # At most one entry has delivers: true — that
+    backend: codex                # is the workspace/branch/PR owner.
+    role: Developer               # display snapshot, taken at engage time
+    delivers: true
+    verdictCapable: false
+  - profileId: reviewer           # a supporting engagement; verdictCapable is
+    backend: claude               # snapshotted from an EXPLICIT
+    role: Review & validation     # report-validation-verdict:direct grant, and
+    delivers: false               # makes this a REQUIRED reviewer
+    verdictCapable: true
 operator:                         # null in triage (ruling 16: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
+recommendations: []               # pending operator recommendation cards
+schedules: []                     # pending/fired scheduled operator re-runs (O-3)
 urgent: true                      # optional; absent ≡ false
-validation: changed               # healthy | changed | failing | none
+validation: changed               # healthy | changed | failing | none — DERIVED
+                                  # cache, recomputed on every write
+workRevision:                     # the immutable revision under review, or null
+  id: rev_9f2c
+  headSha: a91f7c2e…              # full SHA
+  treeSha: 4d81b0a…               # null when git could not resolve it
+  branch: vib-142-attach-workspace
+  createdAt: 2026-07-04T06:41:00.000Z
+  sourceProfileId: developer
+verdicts:                         # per-engagement, each bound to a revision
+  - profileId: reviewer
+    revisionId: rev_9f2c
+    headSha: a91f7c2e…
+    result: approve               # approve | request_changes
+    reason: Scope matches the goal.
+    at: 2026-07-04T06:52:00.000Z
 branch: vib-142-attach-workspace  # task-key branch; null before creation
-repo: null                        # per-task override; null → project default
+repo: null                        # always null — see the note below
 pr:                               # GitHub projection mirrored into the file
   number: 318                     # (Phase 7 reconciler owns sync)
   state: review
@@ -143,6 +176,8 @@ github:                           # more GitHub cache: commits + change stats
   changed: { files: 9, add: 412, del: 87 }
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:00.000Z
+boardRank: 300                    # sparse rank for drag-to-reorder; null falls
+                                  # back to the task-key number
 ---
 
 ## Goal
@@ -162,11 +197,12 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7):
+  - kind: accept_completion       # STABLE kind (ruling 7). The 8 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
-    rec: true                     #   redirect | custom
-    accept: true                  # acceptance path marker (human-only)
+    rec: true                     #   redirect | retry_other_backend |
+    accept: true                  #   edit_goal | custom
+                                  # (acceptance path marker — human-only)
   - kind: request_edit
     t: Request one edit
     d: …
@@ -191,6 +227,33 @@ evidence:
 - integration/pr_sync_test · +38 · −4
 ````
 
+Notes:
+
+- **`engagements` replaced `specialist:` / `reviewers:` / `consultants:`** in the
+  generic-agents pass (2026-07-19). There is now one uniform list; the delivering
+  engagement is the entry with `delivers: true`, not a separate slot. The parser still
+  absorbs the legacy keys — a file carrying `specialist:` + `consultants:` migrates on the
+  next write, and the legacy keys are dropped rather than preserved as unknown fields. An
+  explicit `engagements:` always wins over them.
+  **Watch the migration cost:** a legacy entry migrates with `verdictCapable: false`,
+  because verdict capability is a snapshot of an explicit
+  `report-validation-verdict: direct` grant, and the legacy shape never carried one. A
+  hand-written `consultants:` reviewer therefore comes across as a supporting engagement
+  that is *not* a required reviewer — acceptance will not wait for it, silently. Write
+  `engagements` directly if you mean a required reviewer.
+- `validation`, `workRevision` and `verdicts` are a set. `validation` is a derived cache
+  recomputed from the other two plus the required-reviewer set on every write; do not
+  hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new
+  revision automatically staleness-expires every prior verdict.
+- **`repo` is vestigial and always `null`.** The task-level repository override was
+  struck by owner ruling on 2026-07-25: one project, one repository. The read path still
+  honours a non-null value, but nothing in the product ever writes one and no UI offers
+  it. Do not hand-set it — a task pointing at a different repository still authenticates
+  with the *project's* credential, so a cross-owner value fails authentication with no
+  useful diagnosis, and such a task is never reconciled by the background poller.
+- Unknown top-level frontmatter keys are preserved verbatim on write (the legacy
+  engagement keys above are the deliberate exception).
+
 ### Timeline entry grammar (append contract for agents)
 
 - Entries are NEWEST FIRST. To append an event, prepend a block directly
@@ -198,9 +261,14 @@ evidence:
   the bottom are tolerated — display sorts by timestamp and an
   `timeline.out_of_order` info diagnostic is recorded).
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
-  `<space>·<space>` (U+00B7). `type` is one of the 9 contract types
-  (`comment completion github policy quality transition blocked agent
+  `<space>·<space>` (U+00B7). `type` is one of the 10 contract types
+  (`comment completion github policy note quality transition blocked agent
   assign`); unknown types are kept and render as plain comments.
+  `note` was split out of `policy` in pass 13 (P13-LV-03): `policy` is now
+  reserved for genuine governance violations and refusals, which render with a
+  coral shield, and every neutral system remark — a goal edit, a divergence
+  note, a scheduled re-run — is a `note`. Do not emit `policy` for anything a
+  human would not read as a violation.
 - Optional metadata lines immediately after the heading (before the first
   blank line): `title: <text>` (completion events) and `to: agent`
   (comments routed to the operator — `comment-card toagent` tint).
@@ -248,6 +316,10 @@ id: developer
 kind: specialist                  # operator | specialist
 name: Developer
 role: Implementation
+desc: Implements the change on the task branch and reports what it did.
+                                  # one scannable paragraph — what the OPERATOR
+                                  # reads when picking a profile. Distinct from
+                                  # the markdown body (the long persona).
 icon: branch                      # ui.jsx Icon name
 backends: [codex, claude]
 model: codex-large · claude-sonnet
@@ -260,11 +332,20 @@ extras: []
 resources:
   skills: [repo-write, test-runner, lint-autofix]
   mcps: [github, filesystem]
-  kb: [Viberr Core architecture, Coding standards]
+  kb: [viberr-core-architecture, coding-standards]
 ---
 
 Profile description (markdown body).
 ```
+
+Every value in `resources:` is a **store folder name, never a display name**. For
+`skills:` and `mcps:` the slug *is* the folder, so the two coincide. For `kb:` they do
+not: a knowledge base has a display name and a directory as separate columns, and the
+grant resolves against `${VIBERR_DATA_ROOT}/kb/<dir>`. A `kb:` entry written as the
+display name resolves to nothing — `readKbBody` returns an empty string with only a
+`logger.warn`, so the run proceeds *without* the knowledge base while every UI still shows
+it attached. Use the directory. (Renaming a KB's directory orphans existing grants for the
+same reason; re-attach them.)
 
 ## 5. What is deliberately NOT in files
 

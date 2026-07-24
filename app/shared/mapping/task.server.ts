@@ -4,7 +4,9 @@ import type {
   OperatorRef,
   PacketObservation,
   PacketOption,
+  PrChecks,
   PrRef,
+  PrReviewState,
   Readiness,
   TaskPacket,
   Validation,
@@ -119,6 +121,12 @@ export interface TaskSummary {
   branch: string | null;
   repo: string | null;
   pr: PrRef | null;
+  /** P13-D-28: CI health for the PR head commit — feeds the checks pill next to
+   *  the PR pill. Null = no PR / never read / no CI on the commit. */
+  prChecks: PrChecksRender | null;
+  /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
+   *  Null = no PR / settled PR / never read / nothing outstanding. */
+  prReview: PrReviewState | null;
   commits: { sha: string; msg: string }[];
   changed: { files: number; add: number; del: number } | null;
   goal: string;
@@ -132,6 +140,48 @@ export interface TaskSummary {
   boardRank: number | null;
   /** Store-relative path — the UI renders this real path (ruling 3). */
   filePath: string;
+}
+
+/**
+ * P13-D-28 — the rolled-up CI verdict for the PR head commit. Deliberately a
+ * DATA rollup (no pill kind, no label): the pill vocabulary lives client-side in
+ * `app/features/github/github-pills.ts`, and a second server-side mapping is the
+ * duplicate that module's header records as already removed once.
+ *
+ *   failing — at least one check-run concluded failure/timed_out/cancelled/
+ *             action_required
+ *   pending — nothing failed but at least one run has no conclusion yet
+ *   passing — every run concluded success/neutral/skipped
+ */
+export type PrChecksState = "passing" | "failing" | "pending";
+
+export interface PrChecksRender extends PrChecks {
+  state: PrChecksState;
+}
+
+/**
+ * Null when there is nothing honest to draw: no PR, GitHub never read (the
+ * `checks` key is absent — see the schema), or the head commit genuinely ran no
+ * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
+ * a green passing pill.
+ */
+export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
+  const checks = pr?.checks;
+  if (!checks || checks.total <= 0) return null;
+  const state: PrChecksState =
+    checks.failing > 0 ? "failing" : checks.pending > 0 ? "pending" : "passing";
+  return { ...checks, state };
+}
+
+/**
+ * P13-D-28 — GitHub's review verdict, surfaced ONLY while the PR is still open
+ * (`review`) or accepted-with-merge-pending. A verdict frozen next to a
+ * "merged"/"closed" PR pill is stale by construction; the reconciler already
+ * clears it, this is the second belt.
+ */
+export function mapPrReview(pr: PrRef | null): PrReviewState | null {
+  if (!pr?.review) return null;
+  return pr.state === "review" || pr.state === "accepted" ? pr.review : null;
 }
 
 function agentBackendName(backend: "codex" | "claude"): string {
@@ -246,6 +296,8 @@ export function mapTaskProjectionRow(
     branch: row.branch,
     repo: row.repo,
     pr,
+    prChecks: mapPrChecks(pr),
+    prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     changed: github?.changed ?? null,
     goal: row.goal,

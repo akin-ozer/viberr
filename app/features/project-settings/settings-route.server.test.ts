@@ -12,7 +12,7 @@ import type { SettingsViewData } from "./settings-query.server";
  * Route-level tests for /projects/:slug/settings: loader read model,
  * identity save, stage-editor mutations (add/remove/reorder/rename →
  * project.md → projection), membership CRUD with the self/last-admin
- * guards, the override toggle, grant-scope RBAC + degraded no-PAT result,
+ * guards, grant-scope RBAC + degraded no-PAT result,
  * and the danger-zone delete (typed-name confirmation, run against a stub
  * project).
  */
@@ -80,7 +80,7 @@ function projectMd(): string {
 }
 
 describe("loader", () => {
-  it("returns identity, stages + counts, members, credential health, override", async () => {
+  it("returns identity, stages + counts, members, credential health", async () => {
     const { view } = await runLoader(ids.arda);
     expect(view.project).toMatchObject({
       slug: "viberr-core",
@@ -107,7 +107,6 @@ describe("loader", () => {
       id: "pull_request:write",
       flaggedTaskKey: "VIB-142",
     });
-    expect(view.repoOverride).toBe(true); // default when the key is absent
   });
 });
 
@@ -351,23 +350,11 @@ describe("members", () => {
   });
 });
 
-describe("override + grant-scope", () => {
-  it("persists the repo-override flag in project.md", async () => {
-    const off = (await postAction(ids.arda, {
-      intent: "override",
-      enabled: "false",
-    })) as { ok: boolean; toast: string };
-    expect(off.toast).toBe("Task-level repo override disabled");
-    expect((await runLoader(ids.arda)).view.repoOverride).toBe(false);
-    expect(projectMd()).toContain("taskRepoOverride: false");
-
-    const on = (await postAction(ids.arda, {
-      intent: "override",
-      enabled: "true",
-    })) as { ok: boolean; toast: string };
-    expect(on.toast).toBe("Task-level repo override enabled");
-    expect((await runLoader(ids.arda)).view.repoOverride).toBe(true);
-  });
+describe("grant-scope", () => {
+  // P13-D-5: the "persists the repo-override flag" test lived here. The toggle,
+  // the `taskRepoOverride` key and the `project.repo_override.changed` audit
+  // action are deleted — nothing ever wrote `task.repo`, so the flag gated
+  // nothing in either direction. One project, one repository.
 
   it("grant-scope: reviewer refused; admin with no PAT gets the typed copy", async () => {
     const denied = (await postAction(ids.selin, {

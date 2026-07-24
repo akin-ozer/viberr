@@ -14,7 +14,7 @@ import { CapabilityMatrixModal } from "~/features/agents/capability-matrix-modal
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { PolicyViewData, TransitionView } from "./policy-query.server";
 import {
-  ALWAYS_HUMAN_LABELS,
+  ALWAYS_HUMAN_ROWS,
   BCLS,
   BOUNDARIES,
   RBAC_ROWS,
@@ -22,6 +22,7 @@ import {
   ROLE_LABEL,
 } from "./policy-data";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { stageFlowPath } from "~/shared/workflow/transitions";
 
 /**
  * Policy view:
@@ -298,12 +299,17 @@ export function AgentCapability({
         <div className="flabel" style={{ color: "var(--coral-dark)" }}>
           Always reserved for humans
         </div>
-        {ALWAYS_HUMAN_LABELS.map((x) => (
-          <div className="ho-row" key={x}>
+        {ALWAYS_HUMAN_ROWS.map((row) => (
+          <div className="ho-row" key={row.id}>
             <Icon name="lock" />
-            <span>{x}</span>
+            <span>
+              {row.label}
+              {row.exception ? (
+                <em className="ho-exc"> · {row.exception}</em>
+              ) : null}
+            </span>
             <Pill kind="risk" sm>
-              all profiles
+              {row.exception ? "agent profiles" : "all profiles"}
             </Pill>
           </div>
         ))}
@@ -341,6 +347,11 @@ export function WorkflowRules({
   // Defensive stage lookup (policy spec §4.4 — a renamed/removed stage id
   // must never crash the panel).
   const S = (id: string) => stages.find((s) => s.id === id) ?? { name: id, color: undefined };
+  // P13-D-1: the map is walked from the REAL transition rules. It used to draw
+  // an arrow between every consecutive stage *position*, so a stage no rule
+  // reached was still depicted mid-flow — the panel asserted a governed path
+  // the project did not have, while the rule list under it stayed at four.
+  const { chain, offChain } = stageFlowPath(stages, transitions);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -352,20 +363,45 @@ export function WorkflowRules({
       </div>
 
       <div className="flow-map">
-        {stages.map((s, i) => (
-          <Fragment key={s.id}>
-            {i > 0 && (
-              <span className="flow-arr">
-                <Icon name="arrow" />
+        {chain.map((id, i) => {
+          const s = S(id);
+          return (
+            <Fragment key={id}>
+              {i > 0 && (
+                <span className="flow-arr">
+                  <Icon name="arrow" />
+                </span>
+              )}
+              <span className="stage-chip elig">
+                <span className="sdot" style={{ background: s.color }}></span>
+                {s.name}
               </span>
-            )}
-            <span className="stage-chip elig">
+            </Fragment>
+          );
+        })}
+        {offChain.map((id) => {
+          const s = S(id);
+          return (
+            <span className="stage-chip" key={id} title="No transition rule reaches this stage">
               <span className="sdot" style={{ background: s.color }}></span>
               {s.name}
             </span>
-          </Fragment>
-        ))}
+          );
+        })}
       </div>
+
+      {offChain.length > 0 && (
+        <div className="pol-note" style={{ marginBottom: ".85rem" }}>
+          <Icon name="alert" />
+          <span>
+            Off the governed path:{" "}
+            <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
+            transition rule reaches{" "}
+            {offChain.length === 1 ? "that stage" : "those stages"}, so no agent
+            can move a task in or out — only an admin or maintainer can, by hand.
+          </span>
+        </div>
+      )}
 
       <div className="trans-list">
         {transitions.map((t) => {
@@ -425,7 +461,7 @@ export function WorkflowRules({
           By default a human accepts completion: operators request{" "}
           <strong>Review → Done</strong> and a human accepts it. The one
           exception is an operator running at <strong>full autonomy</strong> with{" "}
-          <strong>Completion for human acceptance</strong> set to{" "}
+          <strong>Accept completion into Done</strong> set to{" "}
           <em>Direct</em> — an explicit, audited opt-in that lets that operator
           close a task itself (it still refuses a failing-validation task). The
           per-transition <strong>Human approval / Human only</strong> boundaries

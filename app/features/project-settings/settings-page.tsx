@@ -5,7 +5,6 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { TglP } from "~/ui/toggle";
 import { useDialog } from "~/ui/use-dialog";
 import { useActionToast } from "~/ui/use-action-toast";
 import {
@@ -309,11 +308,16 @@ export function StagesPanel({
           Add stage
         </button>
       )}
+      {/* P13-D-1: this used to point at Policy for "who may move tasks between
+          stages" as if transitions were authored there — Policy only flips the
+          boundary ON an existing rule. The chain itself is maintained HERE, by
+          these controls, so the note says what each surface actually does. */}
       <div className="pol-note" style={POL_NOTE_STYLE}>
         <Icon name="shield" />
         <span>
-          Drag to reorder · click a name to rename. Who may move tasks between
-          stages is set in{" "}
+          Drag to reorder · click a name to rename. Adding or removing a stage
+          re-wires the transition chain around it — the new hop inherits the
+          boundary it replaced. Loosen or tighten a boundary in{" "}
           <button type="button" className="keybtn" onClick={onNavPolicy}>
             Policy → Workflow rules
           </button>
@@ -490,26 +494,20 @@ export function MembersPanel({
 
 export function RepoPanel({
   repo,
-  override,
   credential,
-  canOverride,
   canGrant,
   busy,
   credBusy,
-  onToggleOverride,
   onGrantScope,
   onSetCredential,
   onClearCredential,
   onOpenTask,
 }: {
   repo: string | null;
-  override: boolean;
   credential: SettingsViewData["credential"];
-  canOverride: boolean;
   canGrant: boolean;
   busy: boolean;
   credBusy: boolean;
-  onToggleOverride: () => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
   onClearCredential: () => void;
@@ -535,37 +533,23 @@ export function RepoPanel({
             )}
           </span>
         </div>
+        {/* P13-D-5: a "Task-level override" toggle sat here, claiming "tasks may
+            attach a different repo". Nothing ever wrote `task.repo` and no
+            enforcement path read the flag, so the switch changed nothing in
+            either direction. One project, one repository — stated plainly. */}
         <div className="kv-row">
-          <span className="k">Task-level override</span>
-          <span className="v" style={{ gap: ".6rem" }}>
-            <span
-              style={{
-                fontSize: ".78rem",
-                color: "var(--faint)",
-                fontFamily: "var(--font-body)",
-                fontWeight: 400,
-              }}
-            >
-              {override
-                ? "tasks may attach a different repo"
-                : "all tasks use the default"}
-            </span>
-            {canOverride ? (
-              <TglP
-                on={override}
-                onChange={onToggleOverride}
-                label="Task-level repository override"
-              />
-            ) : (
-              <span style={{ fontSize: ".78rem", color: "var(--faint)" }}>
-                {override ? "on" : "off"}
-              </span>
-            )}
+          <span className="k">Task attachment</span>
+          <span
+            className="v"
+            style={{
+              fontWeight: 400,
+              fontFamily: "var(--font-body)",
+              fontSize: ".8rem",
+              color: "var(--faint)",
+            }}
+          >
+            every task uses this repository
           </span>
-        </div>
-        <div className="kv-row">
-          <span className="k">Repos per task</span>
-          <span className="v">1 · V1 limit</span>
         </div>
       </div>
 
@@ -778,10 +762,10 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
 
-  // `isAdmin` is a generic admin-only flag reused across four structurally
-  // distinct panels (project identity, stages/policy, members, repo override)
-  // that map to different admin-tier RbacActions — no single action names all
-  // four — so it stays an explicit role check. `canGrant` gates ONLY the
+  // `isAdmin` is a generic admin-only flag reused across three structurally
+  // distinct panels (project identity, stages/policy, members) that map to
+  // different admin-tier RbacActions — no single action names all three — so it
+  // stays an explicit role check. `canGrant` gates ONLY the
   // GitHub-scope grant, whose exact role set (admin+maintainer) is the
   // `grant-github-scope` action, so it routes through the shared helper.
   const isAdmin = myRole === "admin";
@@ -888,22 +872,10 @@ export function SettingsPage({
           />
           <RepoPanel
             repo={data.project.repo}
-            override={data.repoOverride}
             credential={data.credential}
-            canOverride={isAdmin}
             canGrant={canGrant}
             busy={repoFetcher.state !== "idle"}
             credBusy={credFetcher.state !== "idle"}
-            onToggleOverride={() =>
-              repoFetcher.submit(
-                {
-                  intent: "override",
-                  _csrf: csrf,
-                  enabled: String(!data.repoOverride),
-                },
-                { method: "post" },
-              )
-            }
             onGrantScope={() =>
               repoFetcher.submit(
                 { intent: "grant-scope", _csrf: csrf },

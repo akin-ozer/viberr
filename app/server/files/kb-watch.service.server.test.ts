@@ -114,9 +114,18 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
 
     // Add a doc; the watcher debounces (250ms) then re-indexes. Poll until the
     // sentinel is overwritten (or time out) so the assertion never races.
+    //
+    // The budget is deliberately generous. This is the one test in the suite
+    // that waits on a real OS filesystem event, and the path is
+    // fsevents-latency + 250 ms debounce + a re-index — none of which the test
+    // controls. Under a full parallel `npm test` it overran the old 2 s cap and
+    // failed, while passing every time in isolation. A tight bound on an
+    // uncontrolled latency does not test anything extra; it just fails on a
+    // loaded machine. The loop still exits the instant the value changes, so
+    // the common case stays sub-second.
     kbFile(dataRoot, "notes", "b.md", "more");
     let after = { last_indexed_at: OLD as string | null };
-    for (let i = 0; i < 40 && after.last_indexed_at === OLD; i++) {
+    for (let i = 0; i < 200 && after.last_indexed_at === OLD; i++) {
       await new Promise((r) => setTimeout(r, 50));
       after = db
         .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE dir='notes'`)
@@ -124,7 +133,9 @@ describe("startKbWatcher — live watcher (R-D/P11-60)", () => {
     }
     expect(after.last_indexed_at).not.toBe(OLD);
     expect(after.last_indexed_at).not.toBeNull();
-  });
+    // Vitest's default 5 s per-test timeout would cut the poll budget short and
+    // report a timeout instead of the real assertion.
+  }, 15_000);
 
   it("is a HMR-safe singleton — a second start on the same root reuses the watcher", () => {
     const db = ctx.makeDb();

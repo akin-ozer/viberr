@@ -75,3 +75,36 @@ export function isBoardFilterId(value: string | null): value is BoardFilterId {
 export function shortBranch(branch: string): string {
   return branch.length > 16 ? branch.slice(0, 15) + "…" : branch;
 }
+
+/**
+ * P13-D-34 (UX-4): every column printed the bare string "No tasks" for a
+ * filter+search result, so a board hiding 12 tasks behind "Needs attention"
+ * read as an empty project. The UX spec asks an empty state to say what is
+ * absent, why, and what to do next (ux-design-specification.md:846-847) — the
+ * same three-way shape pass 13 shipped on the home grid (UI-21) and the task
+ * timeline (UI-40). The clear affordance is the single `Clear` chip in the
+ * filter bar (one per board, not one per empty column).
+ */
+export function boardEmptyCopy({
+  total,
+  filterLabel,
+  query,
+}: {
+  /** Tasks in this column (or list) BEFORE the filter and search ran. */
+  total: number;
+  /** Label of the active filter, or null when it is "all". */
+  filterLabel: string | null;
+  query: string;
+}): string {
+  if (total === 0) return "No tasks";
+  const subject = total === 1 ? "The 1 task here is" : `All ${total} tasks here are`;
+  const q = query.trim();
+  if (filterLabel && q) {
+    return `${subject} hidden by the “${filterLabel}” filter and the search “${q}”.`;
+  }
+  if (filterLabel) return `${subject} hidden by the “${filterLabel}” filter.`;
+  if (q) return `${subject} hidden by the search “${q}”.`;
+  // Filter and search both off yet nothing is visible — unreachable, but the
+  // honest fallback beats claiming a filter that is not on.
+  return "No tasks";
+}

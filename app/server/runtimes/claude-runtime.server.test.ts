@@ -140,6 +140,33 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(display.text).toContain("VIBERR_CLAUDE_MAX_TURNS");
   });
 
+  it("classifies a swept transcript as run·error·session_missing, not auth (P13-D-2)", async () => {
+    // What `claude --resume <id>` prints once the provider has swept the
+    // transcript (~30-day retention) — the exact string the export installer
+    // warns about. BEFORE it hit no regex and landed as `unknown`, which the
+    // escalation narrates as "review the runtime configuration".
+    const q = (async function* () {
+      throw new Error("No conversation found with session ID 8a1f-dead-beef");
+    })() as unknown as ClaudeQuery;
+    (q as { interrupt: () => Promise<void> }).interrupt = async () => {};
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createClaudeAdapter({ queryFn: () => q }).start(
+      { ...SPEC, resumeSessionId: "8a1f-dead-beef" },
+      { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) },
+    );
+    await drain();
+    expect(exit).toMatchObject({ outcome: "error" });
+    const reason = lines.find(
+      (l) => l.display?.tag === "run·error·session_missing",
+    );
+    expect(reason).toBeTruthy();
+    expect(reason!.display!.text).toContain("transcript no longer exists");
+    expect(reason!.display!.text).not.toMatch(/credential was rejected/i);
+    // Redaction invariant: the raw error text never reaches the console.
+    expect(reason!.display!.text).not.toContain("8a1f-dead-beef");
+  });
+
   it("errors when the stream ends with no result envelope (aborted)", async () => {
     const { q } = fakeQuery([{ type: "assistant", message: { content: [{ type: "text", text: "partial" }] } }]);
     const adapter = createClaudeAdapter({ queryFn: () => q });

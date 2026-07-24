@@ -40,6 +40,7 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
+import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
 import {
@@ -120,6 +121,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     listProjectMembers(db, params.slug).map((m) => m.userId),
   );
   const runsVisible = runsMembership.has(user.id) || user.role === "admin";
+  //
+  // P13-D-11: the member projection ships a BOUNDED window of each agent
+  // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
+  // raw execution history — NFR5. `logWindow` carries the cursor the console
+  // pages backwards with via `/resources/run-log?before=`. A non-member's
+  // withheld projection reports an empty window so nothing tries to page it.
   const runtime = runsVisible
     ? listRunsForTask(db, params.slug, params.key)
     : listRunsForTask(db, params.slug, params.key).map((r) => ({
@@ -129,6 +136,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         lines: [],
         raw: [],
         lineCount: 0,
+        logWindow: {
+          totalLines: 0,
+          hasMore: false,
+          runIds: [],
+          oldest: null,
+          headSeq: -1,
+        },
       }));
 
   // Deployed specialists the "Assign specialist" menu offers.
@@ -190,17 +204,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // from the SAME cached projection the GitHub page labels "Updated 3m ago /
     // Not yet synced" — but here it carried no freshness cue at all, so stale
     // state looked current. Ship the newest reconcile time for this task.
-    githubReconciledAt:
-      (
-        db
-          .prepare(
-            `SELECT MAX(observed_at) AS latest FROM provenance
-              WHERE action = 'github.reconcile' AND source_path = ?`,
-          )
-          .get(`projects/${params.slug}/tasks/${params.key}/task.md`) as
-          | { latest: string | null }
-          | undefined
-      )?.latest ?? null,
+    // P13-D-16: this was the only raw `.prepare(` in any page route — a hand-
+    // written provenance query in a loader, against the layering rule in
+    // architecture.md. It now goes through app/server/provenance/, which owns
+    // the table.
+    githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
     // UI-11: today this always resolves to `https://github.com` — nothing
     // stores a GHE API base URL — so the value is honest, but the "GHE

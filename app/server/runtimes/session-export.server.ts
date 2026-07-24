@@ -190,6 +190,60 @@ export function transcriptExists(backend: RealBackend, sessionId: string): boole
   return ok;
 }
 
+// --------------------------------------------------- resume-time continuity
+
+/**
+ * P13-D-2: whether a stored session id still has provider-side history.
+ *
+ *   present — the transcript is on disk; a resume will replay it.
+ *   missing — the transcript store EXISTS but holds nothing for this id
+ *             (Claude Code's ~30-day retention swept it, or a `docker-data`
+ *             wipe took `$CODEX_HOME/sessions` with it).
+ *   unknown — there is no transcript store to look in at all, so absence
+ *             proves nothing.
+ *
+ * The three-valued answer is the whole point. A boolean would read "no store"
+ * as "session gone" and force a fresh run on every deployment whose provider
+ * writes transcripts somewhere this process cannot see — degrading continuity
+ * to fix a continuity bug. `unknown` resumes exactly as before.
+ */
+export type SessionContinuity = "present" | "missing" | "unknown";
+
+/**
+ * How the two CLIs report a resume against a session they no longer hold —
+ * Claude's `--resume <id>` prints "No conversation found with session ID …"
+ * (the exact string the export installer warns about at the bottom of
+ * RESUME_SCRIPT_TEMPLATE); Codex's `resume <id>` reports the rollout as not
+ * found. Shared by both adapters' classifiers and by `runFailureReason`, so a
+ * vanished session is never narrated as an authentication problem.
+ */
+export const SESSION_MISSING_RE =
+  /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
+
+/**
+ * The resume-time probe. Deliberately NOT `transcriptExists`, which is the
+ * loader-path Export-button probe: that one caches for 30 s (a stale `true`
+ * would resume the dead id we are trying to detect) and matches Codex rollouts
+ * by FILENAME only (a conservative miss there merely hides an Export link —
+ * here it would throw away a live session's context). This one is uncached and
+ * uses the full locator per backend, minus the file reads `locateTranscript`
+ * does for stats; a resume spawns an agent process, so one directory walk is
+ * noise.
+ */
+export function probeSessionContinuity(
+  backend: RealBackend,
+  sessionId: string | null | undefined,
+): SessionContinuity {
+  if (!sessionId) return "unknown";
+  if (backend === "codex") {
+    if (codexSessionDirs().length === 0) return "unknown";
+    return locateCodex(sessionId) ? "present" : "missing";
+  }
+  const projectsDir = path.join(resolveClaudeConfigDir(), "projects");
+  if (!existsSync(projectsDir)) return "unknown";
+  return locateClaude(sessionId) ? "present" : "missing";
+}
+
 /**
  * Locate the resumable transcript for a session id + backend, or null when the
  * provider kept no on-disk session.

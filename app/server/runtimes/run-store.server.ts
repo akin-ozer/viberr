@@ -226,11 +226,18 @@ export function nextSeq(db: DatabaseSync, runId: string): number {
   return (row?.m ?? -1) + 1;
 }
 
+export interface RunLogLine {
+  seq: number;
+  occurredAt: string;
+  raw: string;
+  display: LogLine;
+}
+
 export function listRunLines(
   db: DatabaseSync,
   runId: string,
   sinceSeq = -1,
-): { seq: number; occurredAt: string; raw: string; display: LogLine }[] {
+): RunLogLine[] {
   const rows = db
     .prepare(
       `SELECT seq, occurred_at, raw_json, display_json FROM run_log_lines
@@ -248,6 +255,99 @@ export function listRunLines(
     raw: r.raw_json,
     display: JSON.parse(r.display_json) as LogLine,
   }));
+}
+
+/** One windowed line + the wire cost of shipping it (P13-D-11 byte budget). */
+export interface SizedRunLogLine extends RunLogLine {
+  /** `raw_json` + `display_json` byte length — what this line costs a payload. */
+  bytes: number;
+}
+
+/**
+ * P13-D-11: the NEWEST `limit` lines of a run (optionally strictly before
+ * `beforeSeq`), returned OLDEST-first so callers can concatenate them straight
+ * into a console.
+ *
+ * `listRunLines` has no LIMIT, which is exactly why the task loader shipped a
+ * task's entire raw execution history on every SSE revalidation (NFR5). This is
+ * the bounded read both the loader window and the backward-paging endpoint use.
+ */
+export function listRunLinesTail(
+  db: DatabaseSync,
+  runId: string,
+  limit: number,
+  beforeSeq?: number,
+): SizedRunLogLine[] {
+  if (limit <= 0) return [];
+  const before = beforeSeq ?? Number.MAX_SAFE_INTEGER;
+  const rows = db
+    .prepare(
+      `SELECT seq, occurred_at, raw_json, display_json,
+              length(raw_json) + length(display_json) AS bytes
+         FROM run_log_lines
+        WHERE run_id = ? AND seq < ?
+        ORDER BY seq DESC LIMIT ?`,
+    )
+    .all(runId, before, limit) as {
+    seq: number;
+    occurred_at: string;
+    raw_json: string;
+    display_json: string;
+    bytes: number;
+  }[];
+  return rows.reverse().map((r) => ({
+    seq: r.seq,
+    occurredAt: r.occurred_at,
+    raw: r.raw_json,
+    display: JSON.parse(r.display_json) as LogLine,
+    bytes: r.bytes,
+  }));
+}
+
+/** Line count + seq bounds for a run — one query, no row bodies (P13-D-11). */
+export function runLineStats(
+  db: DatabaseSync,
+  runId: string,
+): { count: number; minSeq: number; maxSeq: number } {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS c, MIN(seq) AS lo, MAX(seq) AS hi
+         FROM run_log_lines WHERE run_id = ?`,
+    )
+    .get(runId) as { c: number; lo: number | null; hi: number | null } | undefined;
+  return {
+    count: row?.c ?? 0,
+    minSeq: row?.lo ?? -1,
+    maxSeq: row?.hi ?? -1,
+  };
+}
+
+/**
+ * P13-D-2: the run ids on a task whose stream recorded a `session_missing`
+ * failure — i.e. the provider transcript behind that run's session id is
+ * PROVEN gone. The classified kind rides the err line's tag as a `·<kind>`
+ * suffix (the same channel quota/auth use), so the fact is durable without a
+ * schema change and visible in the console that showed the failure.
+ *
+ * `latestSessionRun` (agent-reply) subtracts these so a run row holding a dead
+ * session id is not re-selected forever — the permanent-stranding half of D-2.
+ * Matched with `json_extract` on the tag, never a LIKE over the whole row, so
+ * an agent that merely PRINTS the word cannot mark its own run.
+ */
+export function runIdsWithMissingSession(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT l.run_id AS id FROM run_log_lines l
+         JOIN agent_runs r ON r.id = l.run_id
+        WHERE r.project_slug = ? AND r.task_key = ?
+          AND json_extract(l.display_json, '$.tag') LIKE '%session_missing'`,
+    )
+    .all(projectSlug, taskKey) as { id: string }[];
+  return new Set(rows.map((r) => r.id));
 }
 
 // -------------------------------------------------- raw .jsonl truth

@@ -37,9 +37,15 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("generate-packets", "Generate decision & blocking packets", ["operator"], "Coordination"),
   cap("append-typed-events", "Append typed important events", ["operator"], "Coordination"),
   cap("stage-transitions", "Stage transitions", ["operator"], "Permissions", "recommend"),
-  // Never autonomy-promoted to direct: acceptance stays human even under
-  // `full` autonomy (formerly a string special-case in operator gate()).
-  cap("completion-for-acceptance", "Completion for human acceptance", ["operator"], "Permissions", "recommend", false),
+  // P13-D-PRD-3: `promotable: false` means raising a project's autonomy never
+  // silently upgrades this to `direct` — an admin must grant it deliberately.
+  // It does NOT mean acceptance is human-only: with an explicit `direct` grant
+  // AND `full` autonomy the operator moves the task to Done itself
+  // (`operatorAcceptCompletion`, the one deliberate exception to the
+  // human-only-Done invariant, owner ruling Q1). The old comment here claimed
+  // the opposite and the old label ("Completion for human acceptance") read as
+  // a guarantee it does not make.
+  cap("completion-for-acceptance", "Accept completion into Done", ["operator"], "Permissions", "recommend", false),
   // Agent repository/execution toggles (bind via the Claude tool denylist)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
@@ -63,6 +69,13 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
   cap("report-validation-verdict", "Report a validation verdict", ["agent"], "Collaboration", "off"),
+  // P13-D-26: no longer advisory. Wiring the `evidence:` block gave this a real
+  // runtime consumer — it declares the optional `evidence` field on the
+  // `report_outcome` tool and gates the agent's own rows in the completion
+  // pipeline — so it moves out of the matrix-only group below and becomes a
+  // toggle an admin can actually set. Server-derived delivery rows are attached
+  // regardless; this grant governs what the AGENT gets to assert.
+  cap("attach-evidence-references", "Attach evidence references", ["agent"], "Collaboration"),
   // Advisory persona guidance (no runtime consumer — matrix-only, no toggle)
   cap("run-unit-integration-validation", "Run unit & integration validation", ["agent"], null),
   cap("move-task-to-review", "Move the task to Review", ["agent"], null),
@@ -72,7 +85,6 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("approve-review", "Approve the review", ["agent"], null),
   cap("request-changes", "Request changes", ["agent"], null),
   cap("author-test-cases", "Author test cases", ["agent"], null),
-  cap("attach-evidence-references", "Attach evidence references", ["agent"], null),
   cap("read-task-repo", "Read the task & repository", ["agent"], null),
   cap("flag-underspecified-tasks", "Flag underspecified tasks", ["agent"], null),
   // Always-human governed actions (structural locks, shown to agents)
@@ -160,6 +172,9 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // on these grants server-side, so withholding binds on Claude AND Codex.
   "report-validation-verdict",
   "ask-human",
+  // P13-D-26: the agent's own evidence rows are gated server-side in the
+  // completion pipeline, so withholding this binds on both backends.
+  "attach-evidence-references",
 ]);
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex. */

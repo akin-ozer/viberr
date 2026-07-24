@@ -1,11 +1,11 @@
-import type { PrState } from "~/schemas/task-file.schema";
+import type { PrChecks, PrReviewState, PrState } from "~/schemas/task-file.schema";
 import type { GithubClient } from "./github-client.server";
 
 /**
  * PR linker (Phase 7): finds the pull request for a task's execution
- * branch, fetches state/draft/merged + a checks summary, and maps real
- * GitHub PR states to the task-file cache vocabulary (orchestrator ruling
- * 12):
+ * branch, fetches state/draft/merged + a checks summary + (P13-D-28) the
+ * review state, and maps real GitHub PR states to the task-file cache
+ * vocabulary (orchestrator ruling 12):
  *
  *   merged            → cache "merged"
  *   open (incl draft) → cache "review"
@@ -35,12 +35,8 @@ export function mapPrToCacheState(pr: {
   return "review"; // open + draft both read "in review" (ruling 12)
 }
 
-export interface PrChecksSummary {
-  total: number;
-  passing: number;
-  failing: number;
-  pending: number;
-}
+/** One source of truth for the shape — the persisted `pr.checks` schema. */
+export type PrChecksSummary = PrChecks;
 
 export interface PrFacts {
   number: number;
@@ -51,8 +47,14 @@ export interface PrFacts {
   headSha: string | null;
   /** Change stats from the PR (null when the detail fetch failed). */
   changed: { files: number; add: number; del: number } | null;
-  /** Check-runs summary for the head sha (null when unavailable). */
+  /** Check-runs summary for the head sha. `null` = NOT READ (no head sha, or
+   * the check-runs call failed) — UNKNOWN, so callers keep the cached value.
+   * A repo with no CI reads as `{ total: 0, … }`, which is a real answer. */
   checks: PrChecksSummary | null;
+  /** P13-D-28: GitHub review state. The key is ABSENT when the reviews were not
+   * read this pass (terminal PR, or the call failed) — UNKNOWN, so callers keep
+   * the cached value; `null` means read-and-nothing-outstanding. */
+  review?: PrReviewState | null;
 }
 
 export type PrLinkResult =
@@ -76,6 +78,10 @@ interface GhPullDetail extends GhPullListItem {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  /** P13-D-28: who has been ASKED to review (free — the detail fetch already
+   *  happens). Distinguishes "review required" from "nobody is expected". */
+  requested_reviewers?: { login?: string }[];
+  requested_teams?: { slug?: string }[];
 }
 
 interface GhCheckRuns {
@@ -83,8 +89,56 @@ interface GhCheckRuns {
   check_runs: { status: string; conclusion: string | null }[];
 }
 
+/** One entry of `GET /pulls/{n}/reviews` — an EVENT log, not a per-reviewer
+ *  state: the same person appears once per submitted review. */
+export interface GhReview {
+  state?: string;
+  user?: { login?: string } | null;
+}
+
 const PASSING = new Set(["success", "neutral", "skipped"]);
 const FAILING = new Set(["failure", "timed_out", "cancelled", "action_required"]);
+
+/**
+ * P13-D-28 — the PR's CURRENT review state from GitHub's review EVENT log.
+ *
+ * `/pulls/{n}/reviews` returns every review ever submitted, oldest first, so
+ * the per-reviewer state is that reviewer's LATEST entry. Rules:
+ *  - `COMMENTED` / `PENDING` entries are not verdicts and never replace a
+ *    reviewer's standing APPROVED / CHANGES_REQUESTED;
+ *  - `DISMISSED` IS the reviewer's latest state and withdraws their verdict
+ *    (it lands in the map and counts as neither);
+ *  - `changes_requested` OUTRANKS `approved` when both are outstanding — one
+ *    blocking reviewer is the state that matters;
+ *  - with no outstanding verdict, a requested reviewer/team means the PR is
+ *    waiting on review; otherwise there is nothing to say (null).
+ *
+ * KNOWN APPROXIMATION: GitHub removes a reviewer from `requested_reviewers` the
+ * moment they rule, so "1 approval + 1 still-requested" reports `approved` here
+ * while GitHub's own `reviewDecision` would say REVIEW_REQUIRED if the branch
+ * rule demands two. Resolving that needs the branch-protection API (another call
+ * per pass); this is a status pill, not the merge gate — the real gate is
+ * `mergeTaskPr`'s 405 → `not_mergeable`, which carries GitHub's own message.
+ *
+ * Exported for direct unit coverage of the ranking matrix.
+ */
+export function deriveReviewState(
+  reviews: readonly GhReview[],
+  requestedReviewers: number,
+): PrReviewState | null {
+  const latestByReviewer = new Map<string, string>();
+  for (const review of reviews) {
+    const state = (review.state ?? "").toUpperCase();
+    if (state === "COMMENTED" || state === "PENDING" || state === "") continue;
+    const login = review.user?.login;
+    if (!login) continue;
+    latestByReviewer.set(login, state);
+  }
+  const states = [...latestByReviewer.values()];
+  if (states.includes("CHANGES_REQUESTED")) return "changes_requested";
+  if (states.includes("APPROVED")) return "approved";
+  return requestedReviewers > 0 ? "review_required" : null;
+}
 
 /**
  * Finds the newest PR whose head is `branch` (any state), then fetches the
@@ -183,6 +237,27 @@ export async function findPrForBranch(
     }
   }
 
+  // P13-D-28: review-state awareness (prd.md:124) — ONE extra GET, on the same
+  // client/timeout/error plumbing, and only for a PR that is still OPEN. A
+  // merged/closed PR's review state is settled history, so paying an API call
+  // for it on every 5-minute reconcile pass would be exactly the waste this
+  // finding was filed about. A failed read leaves `review` ABSENT (unknown) so
+  // the caller keeps the cached value instead of blanking the pill.
+  let review: PrReviewState | null | undefined;
+  if (state === "review") {
+    const reviews = await client.request<GhReview[]>(
+      "GET",
+      `/repos/${repo}/pulls/${head.number}/reviews`,
+      { searchParams: { per_page: 100 } },
+    );
+    if (reviews.ok) {
+      review = deriveReviewState(
+        Array.isArray(reviews.data) ? reviews.data : [],
+        (pr.requested_reviewers?.length ?? 0) + (pr.requested_teams?.length ?? 0),
+      );
+    }
+  }
+
   return {
     status: "found",
     pr: {
@@ -191,6 +266,7 @@ export async function findPrForBranch(
       state,
       draft: pr.draft ?? false,
       headSha,
+      ...(review !== undefined ? { review } : {}),
       changed:
         detail.ok &&
         typeof pr.changed_files === "number" &&

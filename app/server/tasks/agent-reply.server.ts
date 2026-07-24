@@ -8,7 +8,13 @@ import {
 } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "~/server/runtimes/run-store.server";
+import {
+  listRunLines,
+  listRunsForTaskRows,
+  runIdsWithMissingSession,
+  type AgentRunRow,
+} from "~/server/runtimes/run-store.server";
+import { SESSION_MISSING_RE } from "~/server/runtimes/session-export.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -134,6 +140,15 @@ function handleMatchesSpecialist(
  * just moved away from (typically because it was out of quota). Filtering here
  * makes the first post-switch mention start a FRESH run on the new backend,
  * which is what the comment always promised.
+ *
+ * P13-D-2: runs whose provider session is PROVEN gone are skipped too. There
+ * used to be no state filter at all, so once a transcript vanished (Claude
+ * Code's ~30-day retention, a wiped `$CODEX_HOME/sessions`) the row holding
+ * that dead id stayed the newest match forever — every later @mention
+ * re-selected it, failed the same way, and the agent became permanently
+ * unreachable on that task. `resumeRun` records a `session_missing` failure on
+ * the run that owned the id, so the next mention falls through to an older live
+ * session, or to a fresh run.
  */
 function latestSessionRun(
   db: DatabaseSync,
@@ -142,10 +157,12 @@ function latestSessionRun(
   target: { profileId: string; isPrimary: boolean; backend: RealBackend },
 ): AgentRunRow | null {
   const rows = listRunsForTaskRows(db, projectSlug, taskKey);
+  const deadSessions = runIdsWithMissingSession(db, projectSlug, taskKey);
   const wantKind = target.isPrimary ? "primary" : "reviewer";
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!;
     if (!row.session_id) continue;
+    if (deadSessions.has(row.id)) continue;
     if (
       row.agent_profile_id === target.profileId &&
       row.kind === wantKind &&
@@ -403,6 +420,14 @@ export type RunFailureKind =
   /** The stream produced nothing for the whole idle window — the run was HUNG,
    *  not failed by the task. Both adapters emit it (P13-RT-11). */
   | "idle_timeout"
+  /** P13-D-2 (FR22 / NFR17): the provider session this run tried to resume no
+   *  longer exists — Claude Code's ~30-day transcript retention, or a wiped
+   *  `$CODEX_HOME/sessions`. Its own class because it is neither a credential
+   *  problem nor a task failure: the honest recovery is a fresh run
+   *  re-anchored on task.md, which `resumeRun` performs automatically when its
+   *  pre-flight probe catches it. This class is what survives when the SDK
+   *  reports the vanished session first. */
+  | "session_missing"
   | "unknown";
 
 /**
@@ -432,18 +457,24 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  const tagged = /·(quota|auth|unavailable|max_turns|idle_timeout|unknown)$/.exec(
-    last.tag ?? "",
-  );
+  const tagged =
+    /·(quota|auth|unavailable|max_turns|idle_timeout|session_missing|unknown)$/.exec(
+      last.tag ?? "",
+    );
   if (tagged) return { kind: tagged[1] as RunFailureKind, text };
   const kind: RunFailureKind =
-    /is unavailable|no usable credential/i.test(text)
-      ? "unavailable"
-      : /usage limit|quota|rate limit|too many requests|429/i.test(text)
-        ? "quota"
-        : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
-          ? "auth"
-          : "unknown";
+    // P13-D-2 first: a vanished session is NOT an auth problem, and "no
+    // conversation found" would otherwise fall through to `unknown` and be
+    // narrated as "review its authentication and runtime configuration".
+    SESSION_MISSING_RE.test(text)
+      ? "session_missing"
+      : /is unavailable|no usable credential/i.test(text)
+        ? "unavailable"
+        : /usage limit|quota|rate limit|too many requests|429/i.test(text)
+          ? "quota"
+          : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
+            ? "auth"
+            : "unknown";
   return { kind, text };
 }
 

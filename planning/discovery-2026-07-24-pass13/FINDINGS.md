@@ -382,3 +382,54 @@ all four.
 ### LV-23 (LOW · copy) — packet observation keys rendered machine-ish
 A live blocked packet rendered **`PROMPT_AGENT ERROR`** at a human: the operator authors the
 observation keys and the row CSS uppercases them. Underscores are now spaces.
+
+---
+
+## Part 3 — the intent audit (2026-07-25)
+
+After the fix cycle above, the built app was audited against the four documents it was
+built from — `planning-artifacts/prd.md`, `architecture.md`, `ux-design-specification.md`
+and the HTML mock — to separate *deliberate* divergence from drift nobody decided.
+100 agents, 92 claims, 72 confirmed after adversarial verification, 20 refuted.
+
+Full report: [INTENT-VS-IMPLEMENTATION.md](INTENT-VS-IMPLEMENTATION.md).
+Dispositions for all 48 DRIFT items + 3 unclear: [DRIFT-TRIAGE.md](DRIFT-TRIAGE.md).
+
+**Owner rulings (2026-07-25)** — D-1 auto-wire transitions on stage add/remove rather than
+build an editor · D-5 delete the task-level repo override · D-26 wire the `evidence:` block
+rather than delete it · U-2 leave the guardrails invisible.
+
+Everything else was decided and implemented in the same pass — 27 code fixes, 17 document
+reconciliations, nothing deferred. Three findings raised by the implementation itself and
+also fixed:
+
+### AU-1 (MED · backend parity) — evidence was a Claude-only channel
+Wiring D-26 gave Claude an `evidence` field on the `report_outcome` toolkit tool. Codex has
+no in-process toolkit at all — its only structured channel is the `outputSchema` envelope —
+so `attach-evidence-references` would have been a capability the profile editor offered to
+every profile while working on one backend. The envelope now declares `evidence` (strict
+structured-output conformant), the parser sanitizes it through the same funnel, and the
+envelope gate includes `collab.evidence` on both the fresh and resume paths.
+Also: the capability moved out of the catalog's "no runtime consumer — matrix-only" group,
+because it now has one.
+
+### AU-2 (MED · a11y) — every primary CTA in the app failed AA
+D-12's axe gate would have failed on `.btn.primary`: white on the brand blue is **3.84:1**
+light and **3.19:1** dark, at 14px/700 — below the large-text threshold, so 4.5:1 applies.
+There is no on-token fix (`--blue-pressed` is 8.30:1 light but 1.76:1 dark). The accent is
+correct on borders, washes and focus rings; it simply cannot carry text. A CTA token pair
+now exists: light `--cta-bg: #3f5efd` (same hue 230°, same saturation, lower lightness) at
+**4.96:1**, dark inverts to a near-black label on the exact brand blue at **5.77:1**.
+Locked by unit test in both themes, including the 3:1 non-text contrast of the button
+against its own surface — the constraint that rules out "just darken it more".
+
+### AU-3 (HIGH for the suite) — test results depended on whose machine ran them
+The D-2 continuity probe reads the provider transcript store. `test-support/setup-env.ts`
+never pinned `CLAUDE_CONFIG_DIR`, so it resolved to the **ambient** data root: on a machine
+that had run the app, `./data/runtimes/claude-home/projects` exists and the suite took the
+continuity path; on CI it does not and the suite took the ordinary resume path. It already
+produced one test that passed on CI and failed on a laptop. Both transcript roots are now
+pinned to an empty temp directory — a store that EXISTS and holds nothing, so probes answer
+`missing` deterministically rather than `unknown`. `CODEX_HOME` left the credential-blanking
+list as a result, and `harness-hermeticity.server.test.ts` now asserts the invariant that
+actually matters (the directory holds no `auth.json`) instead of that the path is empty.

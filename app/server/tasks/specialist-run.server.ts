@@ -673,8 +673,8 @@ export async function startAgentRun(
 
   const title = existing.parsed.frontmatter.title;
   const goal = existing.parsed.goal;
-  const repo =
-    existing.parsed.frontmatter.repo ?? projectRepo(ctx, input.projectSlug);
+  // P13-D-5: one project, one repository.
+  const repo = projectRepo(ctx, input.projectSlug);
 
   // Best-effort clone — only when a REAL backend will actually consume a
   // working tree (R7-2: no credential → fail fast or gated test engine, neither
@@ -791,8 +791,15 @@ export async function startAgentRun(
     ...(declaredMcps.mcpServers ?? {}),
     ...(toolkit?.mcpServers ?? {}),
   };
+  // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
+  // tool, so the envelope is its ONLY structured channel — without this an
+  // evidence-granted Codex agent silently had no way to cite anything, making
+  // attach-evidence-references a Claude-only capability the profile editor
+  // offered to every backend.
   const useEnvelopeSchema =
-    backend === "codex" && realBackend && (collab.verdict || collab.ask);
+    backend === "codex" &&
+    realBackend &&
+    (collab.verdict || collab.ask || collab.evidence);
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -1219,10 +1226,14 @@ export function resolveResumeConfinement(
         collab,
       });
       if (toolkit) toolkitServers = toolkit.mcpServers;
-    } else if (input.backend === "codex" && (collab.verdict || collab.ask)) {
+    } else if (
+      input.backend === "codex" &&
+      (collab.verdict || collab.ask || collab.evidence)
+    ) {
       // F7: re-arm the Codex outcome envelope on resume — a resumed reviewer
       // used to lose it and fall back to the fragile prose regex (ask_human
-      // could not fire at all).
+      // could not fire at all). P13-D-26 adds evidence to the same gate, so a
+      // resumed agent keeps the channel it started with.
       outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
     }
     const merged = { ...mcpServers, ...toolkitServers };

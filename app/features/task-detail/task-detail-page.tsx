@@ -22,7 +22,7 @@ import {
 } from "./operator-recommendations";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
-import { prStatePill } from "~/features/github/github-pills";
+import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { formatDayDotTime, formatRelative } from "~/shared/dates/format";
@@ -58,7 +58,9 @@ function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
     } else if (d.error) {
       // E.g. "This packet was already resolved." — revalidation has already
       // refreshed the panel; surface the reason, never crash (spec §7).
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so every failure on
+      // this page rendered under a green tick.
+      push(d.error, "error");
     }
   }, [fetcher.state, fetcher.data, push, navigate]);
 }
@@ -96,6 +98,8 @@ export function GithubTrace({
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
       <div style={{ marginTop: ".8rem" }}>
+        {/* P13-D-19: `.hint` used to exist only as `.pj-new .hint`, so this line
+            rendered as an unstyled <p>; it is a global utility now. */}
         <p className="hint" style={{ margin: "0 0 .4rem" }}>
           Acceptance is blocked: {forceAcceptReason}
         </p>
@@ -163,6 +167,21 @@ export function GithubTrace({
         ) : (
           <Pill kind="neutral" sm>
             no PR
+          </Pill>
+        )}
+        {/* P13-D-28: the two GitHub facts the app fetched (or could have) and
+            never showed. Check-runs were summarized on every reconcile pass and
+            read by nothing; review state was never read at all, so a teammate
+            approving or requesting changes on GitHub was invisible here and a
+            merge blocked by required reviews surfaced only as a late 405. */}
+        {task.prChecks && (
+          <Pill kind={checksPill(task.prChecks).kind} sm>
+            {checksPill(task.prChecks).label}
+          </Pill>
+        )}
+        {task.prReview && (
+          <Pill kind={reviewPill(task.prReview).kind} sm>
+            {reviewPill(task.prReview).label}
           </Pill>
         )}
       </div>
@@ -384,7 +403,7 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: DiagnosticRecord[] }) 
 }
 
 /** Hero header — task key, title, stage/readiness/validation meta, goal. */
-function TaskHero({
+export function TaskHero({
   task,
   stage,
   canEditGoal,
@@ -484,9 +503,12 @@ function TaskHero({
             autoFocus
           />
           <div className="goal-edit-actions">
+            {/* P13-D-19: was `btn btn-primary`, a class no stylesheet defines —
+                it fell back to the plain grey `.btn` and rendered identically to
+                the Cancel button beside it. The vocabulary is `btn primary`. */}
             <button
               type="submit"
-              className="btn btn-primary"
+              className="btn primary"
               disabled={goalFetcher.state !== "idle" || draft.trim().length < 3}
             >
               Save goal
@@ -571,7 +593,7 @@ function RecommendationsSection({
 /** O-3: pending scheduled operator re-runs + a form to schedule one. Scheduling
  *  and cancelling are `run-agents` (maintainer+); the server re-checks. Hidden
  *  entirely for viewers/contributors with nothing scheduled. */
-function ScheduledActions({
+export function ScheduledActions({
   schedules,
   canRunAgents,
   taskClosed,
@@ -599,10 +621,13 @@ function ScheduledActions({
 
   return (
     <section className="panel" data-testid="scheduled-actions">
+      {/* P13-D-38: the icon used to be nested inside the <h2>, the only one of
+          ~48 panel heads that did — `.panel-head` is a flex row whose `.6rem`
+          gap collapsed to a JSX space and baseline-aligned the SVG. Sibling
+          form, as everywhere else. */}
       <div className="panel-head">
-        <h2>
-          <Icon name="clock" /> Scheduled re-runs
-        </h2>
+        <Icon name="clock" />
+        <h2>Scheduled re-runs</h2>
         {schedules.length > 0 ? (
           <span className="right muted">{schedules.length} pending</span>
         ) : null}
@@ -625,10 +650,11 @@ function ScheduledActions({
                 {s.note ? ` — ${s.note}` : ""}
                 {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
               </div>
+              {/* P13-D-19: `btn btn-ghost` -> `btn ghost`. */}
               {canRunAgents ? (
                 <button
                   type="button"
-                  className="btn btn-ghost sched-cancel"
+                  className="btn ghost sched-cancel"
                   disabled={busy}
                   onClick={() => submit({ intent: "cancel-schedule", scheduleId: s.id })}
                 >
@@ -688,7 +714,8 @@ function ScheduledActions({
             placeholder="Why re-run later? (optional)"
             maxLength={140}
           />
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          {/* P13-D-19: `btn btn-primary` -> `btn primary` (see Save goal). */}
+          <button type="submit" className="btn primary" disabled={busy}>
             <Icon name="clock" /> Schedule operator re-run
           </button>
         </fetcher.Form>
@@ -1245,13 +1272,17 @@ export function TaskDetailPage({
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
   // live lines via run.log-appended; revalidates on run.state-changed.
-  const { linesByThread, streamError } = useRunLogStream({
+  const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
     projectSlug: task.projectSlug,
     taskKey: task.key,
     threads: runtime.map((r) => ({
       threadId: r.id,
       runId: r.serverRunId,
       lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
+      // P13-D-11: the loader ships a BOUNDED window of each agent group's
+      // console (NFR5). The window carries the live-tail seed (`headSeq`) and
+      // the backward cursor the console pages the rest of the history with.
+      window: r.logWindow,
     })),
     // F22: bounds a stale "running" strip if a finalize event is missed.
     hasActiveRun: runtime.some((r) => r.state === "running"),
@@ -1376,6 +1407,8 @@ export function TaskDetailPage({
             {...(onRetryBackend ? { onRetryBackend } : {})}
             retrying={runBusy}
             streamError={streamError}
+            olderByThread={olderByThread}
+            onLoadOlder={loadOlder}
           />
         ) : null}
         {/* UI-30: raw console output, the `{ } raw` wire envelopes and the

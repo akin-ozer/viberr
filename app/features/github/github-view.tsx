@@ -7,7 +7,13 @@ import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
-import { connectionPill, prStatePill, syncPill } from "./github-pills";
+import {
+  checksPill,
+  connectionPill,
+  prStatePill,
+  reviewPill,
+  syncPill,
+} from "./github-pills";
 import type {
   BranchRowView,
   GithubViewData,
@@ -106,6 +112,10 @@ export function RepositoryPanel({
             )}
           </span>
         </div>
+        {/* P13-D-5: this row hardcoded "project default · task-level override
+            allowed" — a capability nothing implemented (no writer ever set
+            `task.repo`) and which the Settings toggle could not turn off either,
+            since it was hardcoded. One project, one repository. */}
         <div className="kv-row">
           <span className="k">Task attachment</span>
           <span
@@ -117,12 +127,8 @@ export function RepositoryPanel({
               color: "var(--faint)",
             }}
           >
-            project default · task-level override allowed
+            every task uses this repository
           </span>
-        </div>
-        <div className="kv-row">
-          <span className="k">Repos per task</span>
-          <span className="v">1 · V1 limit</span>
         </div>
       </div>
 
@@ -188,6 +194,20 @@ export function PullRequestsPanel({
                 </div>
               </span>
               <span className="rq-meta">
+                {/* P13-D-28: this page is where someone comes to answer "is
+                    this PR safe to accept". CI health was fetched on every
+                    reconcile pass and discarded, and GitHub's review verdict
+                    was never read at all. */}
+                {row.checks && (
+                  <Pill kind={checksPill(row.checks).kind} sm>
+                    {checksPill(row.checks).label}
+                  </Pill>
+                )}
+                {row.review && (
+                  <Pill kind={reviewPill(row.review).kind} sm>
+                    {reviewPill(row.review).label}
+                  </Pill>
+                )}
                 <Pill kind={pill.kind} sm dot>
                   {pill.label}
                 </Pill>
@@ -274,9 +294,24 @@ export function BranchesPanel({
                 </span>
                 <span>
                   {row.pr && prPill ? (
-                    <Pill kind={prPill.kind} sm>
-                      #{row.pr.number}
-                    </Pill>
+                    <>
+                      <Pill kind={prPill.kind} sm>
+                        #{row.pr.number}
+                      </Pill>
+                      {/* P13-D-28: only the actionable state here — this is a
+                          single narrow column, and the PR list above carries
+                          the full CI/review detail. */}
+                      {row.pr.checks?.state === "failing" && (
+                        <Pill kind={checksPill(row.pr.checks).kind} sm>
+                          {checksPill(row.pr.checks).label}
+                        </Pill>
+                      )}
+                      {row.pr.review === "changes_requested" && (
+                        <Pill kind={reviewPill(row.pr.review).kind} sm>
+                          {reviewPill(row.pr.review).label}
+                        </Pill>
+                      )}
+                    </>
                   ) : (
                     <span
                       style={{ color: "var(--placeholder)", fontSize: ".8rem" }}

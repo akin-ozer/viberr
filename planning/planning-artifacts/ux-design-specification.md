@@ -345,6 +345,8 @@ A practical palette direction is:
 
 Both light and dark themes should be supported, but semantic meaning must remain consistent across modes. Core workflow views should avoid decorative gradients, glow effects, or ornamental color treatments. If atmospheric visual treatments are used at all, they should stay outside the main operational surfaces.
 
+> **Superseded — the concrete palette above is advisory and the build did not take it.** The shipped palette is `design/design-system.html` (a bright Miro-inspired canvas): a `#5b76fe` blue accent rather than steel blue, pastel semantic surfaces, a violet agent-identity tint distinct from human blue, and two heavily transparent radial gradients washing the page background behind opaque surfaces. `app/app.css`'s `:root` block is the single source of the real tokens; use those names, never a literal hex. The *principles* in this section still hold and are enforced — color never operates alone, semantic meaning stays consistent across light and dark, and the light theme's secondary text ladder is contrast-constrained rather than free.
+
 ### Typography System
 
 The typography system should reinforce precision, calmness, and rapid scanning. Viberr is a scan-first interface, not a read-first editorial product, so the hierarchy should prioritize status labels, ownership, waiting state, packet headings, and operational summaries before longer narrative content.
@@ -368,11 +370,15 @@ A practical type strategy:
 - moderate body line-height
 - tighter spacing for labels, metadata, and compact operational blocks
 
+> **Superseded — the named typefaces are advisory and the build did not take them.** The shipped stack comes from `design/design-system.html`: Roobert PRO Medium for display, Noto Sans for body, JetBrains Mono for the technical/reference role. The mono-used-intentionally rule and the scan-first hierarchy above are honoured; only the family names changed.
+
 ### Spacing & Layout Foundation
 
 Viberr should use a disciplined spacing system that balances information density with calmness. The product needs to present substantial workflow state, but it should never feel stuffed or chaotic. The layout must help users parse urgency without making urgent states noisier.
 
 The foundation should use an 8px base spacing system with 4px sub-steps for tighter internal component structure. This provides enough precision for compact board cards, dense metadata zones, and layered task views while preserving consistency across components.
+
+> **Superseded — the ported design system defines no spacing tokens and no 12-column grid.** `app/app.css` uses rem values chosen per component and CSS grid/flex layouts sized to their content. Match the surrounding component's rhythm rather than introducing a spacing scale now; a retrofit would touch every surface for no user-visible gain. The intent below — spacing reinforces hierarchy, urgent states get clearer rather than louder — is what actually binds.
 
 The layout should be optimized for browser-based desktop workflows and screen sizes:
 - 12-column grid for major page structures
@@ -861,33 +867,24 @@ Loading patterns should preserve layout stability. Skeletons or placeholder stru
 
 Viberr should use a desktop-first responsive strategy because its primary workflows depend on dense task supervision, side-by-side context, and deliberate keyboard-friendly interaction. The most important experience to optimize is a browser-based desktop workflow where users scan the board, open tasks, review packets, and steer work with minimal friction.
 
-The responsive model should be defined by capability mode as well as screen size:
+**One surface, reflowed** *(amended 2026-07-25 — this section previously specified three capability modes; that model was never built and has been retired rather than left standing as an instruction).* Viberr ships a single capability mode. Mobile and legacy browsers are not V1 targets, the browser matrix is desktop, and narrowing the window reflows the same interface rather than switching it into a reduced one. Every action — including destructive and governance actions — renders at every width; nothing is gated on viewport size, and nothing should be. A user on a narrow window is a supervisor with less room, not a different kind of user with fewer rights.
 
 **Full supervision mode**
-This is the primary experience and should be used on desktop layouts. It supports compact board density, persistent navigation, operator-first task views, multi-column structure, and visible execution truth. Larger screens should improve task clarity, not just add whitespace.
+This is the experience at every width. It supports compact board density, persistent navigation, operator-first task views, multi-column structure, and visible execution truth. Larger screens should improve task clarity, not just add whitespace.
 
-**Reduced supervision mode**
-This is the target for tablet and smaller desktop widths. The supervision model should remain intact, but density should reduce and side-by-side regions may stack or collapse. Current state, latest packet, and next action must remain in top reading order even as the layout compresses.
-
-**Review-first mode**
-This is the target for mobile and other narrow layouts. Mobile should be safe for review and lightweight action, but not optimized for full supervision. Users should be able to check task state, read the latest packet, confirm ownership and waiting status, and perform simple comments or approvals when safe. Deep governance configuration, dense board scanning, and evidence-heavy investigation should be reduced on small screens.
+If a genuine mobile-review product is ever wanted, it is new work with its own design, not a matter of hiding controls below a breakpoint. Hiding a governance control on a small screen would make the surface dishonest about what the user may do; keeping it and letting the layout stack is the safer failure.
 
 ### Breakpoint Strategy
 
-Viberr should use a desktop-first breakpoint model with a clear mapping between width and capability mode.
-
-**Recommended breakpoints**
-- compact mobile: 320px - 479px
-- large mobile / small tablet: 480px - 767px
-- tablet: 768px - 1023px
-- desktop: 1024px - 1439px
-- wide desktop: 1440px and above
+Viberr uses a desktop-first breakpoint model whose breakpoints are **layout reflow points, not capability boundaries**. They exist where a specific layout stops fitting, so they follow the content rather than a device taxonomy — the shipped set clusters around 1400, 1300, 1100, 1080, 1000, 900 and 760 pixels, each attached to the one grid or panel it rescues.
 
 **Breakpoint behavior**
-- below 768px: review-first mode, with collapsed layouts and strong priority on current state, latest packet or current intervention context, and next action
-- 768px to 1023px: reduced supervision mode, with simplified two-region layouts and preserved reading order
-- 1024px to 1439px: full supervision mode, with compact board density and operator-first task layouts
-- 1440px and above: full supervision mode with preserved context, not multiplied complexity
+- multi-column page grids (settings, policy, activity, profile) collapse to a single column
+- the task detail's side-by-side regions stack, preserving reading order: current state, latest packet, next action, then the timeline
+- board columns narrow before they wrap
+- the topbar drops a breadcrumb segment and the search box
+- the navigation rail keeps its fixed width at every viewport
+- no control is hidden or disabled, and no behavior is gated on `matchMedia`
 
 Wide screens should use extra space to keep related context visible, reduce unnecessary navigation, and improve stability. Extra width should not justify more simultaneous panels unless they directly preserve task clarity.
 

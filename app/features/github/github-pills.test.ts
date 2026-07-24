@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { connectionPill, prStatePill, syncPill } from "./github-pills";
+import {
+  checksPill,
+  connectionPill,
+  prStatePill,
+  reviewPill,
+  syncPill,
+} from "./github-pills";
 
 describe("syncPill (ruling 12 vocabulary)", () => {
   it("maps the three sync states to the mock pill kinds", () => {
@@ -66,5 +72,52 @@ describe("connectionPill (spec §7.9c: never claim connected when degraded)", ()
     expect(connectionPill({ status: "network_unavailable" }).label).toBe(
       "offline",
     );
+  });
+});
+
+describe("checksPill / reviewPill (P13-D-28)", () => {
+  const checks = (o: Partial<{ total: number; passing: number; failing: number; pending: number }>) => {
+    const total = o.total ?? 3;
+    const failing = o.failing ?? 0;
+    const pending = o.pending ?? 0;
+    return {
+      total,
+      failing,
+      pending,
+      passing: o.passing ?? total - failing - pending,
+      state: (failing > 0 ? "failing" : pending > 0 ? "pending" : "passing") as
+        | "passing"
+        | "failing"
+        | "pending",
+    };
+  };
+
+  it("ranks failing over pending over passing", () => {
+    // The worst TRUE statement wins, matching the sync column's precedence —
+    // a run with one red check is not "2 running".
+    expect(checksPill(checks({ total: 3, failing: 1, pending: 1 })).kind).toBe("blocked");
+    expect(checksPill(checks({ total: 3, pending: 2 })).kind).toBe("input");
+    expect(checksPill(checks({ total: 3 })).kind).toBe("ready");
+  });
+
+  it("counts the relevant checks, not the total, when something is wrong", () => {
+    expect(checksPill(checks({ total: 9, failing: 2 })).label).toBe("2/9 checks failing");
+    expect(checksPill(checks({ total: 9, pending: 4 })).label).toBe("4/9 checks running");
+    expect(checksPill(checks({ total: 9 })).label).toBe("9 checks passing");
+  });
+
+  it("never claims a green build from GitHub's opinion alone", () => {
+    // changes_requested is `risk`, not `blocked`: GitHub's review state is a
+    // real signal but it is not this app's acceptance gate — an in-product
+    // request_changes verdict is what actually blocks.
+    expect(reviewPill("changes_requested")).toEqual({
+      kind: "risk",
+      label: "changes requested",
+    });
+    expect(reviewPill("approved")).toEqual({ kind: "ready", label: "approved" });
+    expect(reviewPill("review_required")).toEqual({
+      kind: "input",
+      label: "review required",
+    });
   });
 });

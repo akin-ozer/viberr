@@ -18,6 +18,15 @@ import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
  * boundary changes, both writing project.md through the phase-3 writers,
  * then reproject → audit (SSE `project.updated` rides the rebuild).
  *
+ * Policy flips the boundary ON an existing rule; it does not author the rule
+ * set. The transition chain itself is maintained by the stage editor
+ * (settings-actions.server.ts → app/shared/workflow/transitions.ts), which
+ * splices a new stage in and re-joins a removed stage's neighbours — P13-D-1,
+ * owner ruling 2026-07-25 (auto-wire, no transitions editor). That is why
+ * `setTransitionBoundary` below can still legitimately report
+ * "No transition rule from X to Y." — it means the caller named a hop the chain
+ * does not have, not that the admin must create one here.
+ *
  * Server-side guards (mirrored client-side as UX sugar only):
  *   - actor must hold "Manage members & roles" / "Edit workflow & policy"
  *     → project admin (contracts §3.2)

@@ -16,7 +16,8 @@ import {
   CreateProfileModal,
   type ProfileFormPayload,
 } from "./create-profile-modal";
-import { LibraryPicker, LiveRoster, ProfileDetail } from "./agents-page";
+import { AgentsPage, LibraryPicker, LiveRoster, ProfileDetail } from "./agents-page";
+import { ToastProvider } from "~/ui/toast";
 
 afterEach(cleanup);
 
@@ -697,5 +698,62 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
       />,
     );
     expect(getByText(/Every global profile is already deployed here/)).toBeTruthy();
+  });
+});
+
+/**
+ * P13-D-10: the page's hand-rolled result handler pushed the server's error
+ * string with `push`'s default `"success"` kind, so a rejected deploy rendered
+ * under the green tick. (The create/edit modals route their errors inline, so
+ * the toast branch only fires for the non-modal mutations — deploy-from-library
+ * is one.)
+ */
+describe("AgentsPage failure toast kind (P13-D-10)", () => {
+  function renderPage(actionResult: Record<string, unknown>) {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/viberr-core/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              library={[
+                {
+                  id: "reviewer",
+                  name: "Reviewer",
+                  role: "Review",
+                  desc: "Reviews the branch.",
+                  backends: ["claude"],
+                  stages: ["review"],
+                  spanAll: false,
+                  resources: { skills: [], mcps: [], kb: [] },
+                },
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+        action: async () => actionResult,
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+  }
+
+  it("renders the alert glyph, not the success tick, when a deploy fails", async () => {
+    const { getAllByText, getByText } = renderPage({
+      ok: false,
+      error: "That template no longer exists.",
+    });
+    fireEvent.click(getAllByText(/Add from library/)[0]!);
+    fireEvent.click(getByText("Reviewer").closest("button")!);
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    const toast = document.querySelector(".toast")!;
+    expect(toast.textContent).toContain("That template no longer exists.");
+    // `alert` is the triangle path; `check` is the tick.
+    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
   });
 });

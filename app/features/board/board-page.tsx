@@ -16,11 +16,13 @@ import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { Pill, ReadinessPill } from "~/ui/pill";
+import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
+import { checksPill, reviewPill } from "~/features/github/github-pills";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import {
+  boardEmptyCopy,
   isBoardFilterId,
   matchesBoardFilter,
   matchesSearch,
@@ -36,7 +38,12 @@ import {
  *   - re-scan toasts fire on real action completion, ".viberr" wording
  *     aligned to the real store (contracts §7.3);
  *   - create modal gets Escape/focus-trap/aria-modal and shows server
- *     errors in `foot-hint err` instead of closing.
+ *     errors in `foot-hint err` instead of closing;
+ *   - P13-D-6: the card and the list row draw validation status (FR24) — the
+ *     board used to filter on a signal it refused to render;
+ *   - P13-D-34: empty states name the filter/search that is hiding tasks, the
+ *     header count agrees with the columns, and one `Clear` chip resets both;
+ *   - P13-D-10: failure toasts carry `kind: "error"`.
  */
 
 export interface BoardStage {
@@ -204,6 +211,32 @@ function TaskCard({
               <Icon name="pr" />#{task.pr.number}
             </span>
           )}
+          {/* P13-D-28: CI health, but only when it is ACTIONABLE. The card is
+              already dense and "N checks passing" is not news; a failing build
+              on a task sitting in Review is. The full passing/running/failing
+              set renders on the task page and the GitHub view. */}
+          {task.prChecks?.state === "failing" && (
+            <Pill kind={checksPill(task.prChecks).kind} sm>
+              {checksPill(task.prChecks).label}
+            </Pill>
+          )}
+          {/* Same rule for GitHub's own review state — a teammate asking for
+              changes on the PR is the case a supervisor needs off the board. */}
+          {task.prReview === "changes_requested" && (
+            <Pill kind={reviewPill(task.prReview).kind} sm>
+              {reviewPill(task.prReview).label}
+            </Pill>
+          )}
+          {/* P13-D-6 (FR24): the card drew stage, agent and waiting state but
+              NOT validation — while the "Needs attention" filter matched on it.
+              A reviewer's request_changes sets validation:"failing" and the card
+              was pixel-identical to a healthy one. Deliberate departure from the
+              HTML mock (design/html-app/app/board.jsx), which omits it too.
+              "none" stays silent so the card keeps its density; placement
+              mirrors the review queue's `.rq-meta` (PR → validation → wait). */}
+          {task.validation !== "none" && (
+            <ValidationPill value={task.validation} sm />
+          )}
           <WaitTag task={task} />
         </div>
       </Link>
@@ -257,11 +290,14 @@ function Column({
   onColumnDrop,
   allStages,
   onMoveTask,
+  emptyCopy,
 }: {
   stage: BoardStage;
   tasks: TaskSummary[];
   /** Header count — optimistically adjusted during a cross-column drag. */
   count: number;
+  /** P13-D-34: filter/search-aware empty copy for this column. */
+  emptyCopy: string;
   isDone: boolean;
   canCreate: boolean;
   canTransition: boolean;
@@ -307,7 +343,7 @@ function Column({
       </header>
       <div className="col-body">
         {tasks.length === 0 ? (
-          showPreview ? preview : <div className="empty">No tasks</div>
+          showPreview ? preview : <div className="empty">{emptyCopy}</div>
         ) : (
           <>
             {tasks.map((t, i) => (
@@ -340,9 +376,12 @@ function ListView({
   stages,
   canTransition,
   onMoveTask,
+  emptyCopy,
 }: {
   tasks: TaskSummary[];
   stages: BoardStage[];
+  /** P13-D-34: filter/search-aware empty copy (the list has ONE empty state). */
+  emptyCopy: string;
   /** UI-58: the list view rendered NO move control at all, so drag-and-drop had
    *  no keyboard equivalent here — the StageMenu (the board's accessible move
    *  affordance) only existed on cards. */
@@ -368,7 +407,7 @@ function ListView({
           maxWidth: 920,
         }}
       >
-        {tasks.length === 0 && <div className="empty">No tasks</div>}
+        {tasks.length === 0 && <div className="empty">{emptyCopy}</div>}
         {tasks.map((t) => (
           <div
             key={t.key}
@@ -407,6 +446,12 @@ function ListView({
               </Pill>
             ) : (
               <ReadinessPill value={t.displayReadiness} sm />
+            )}
+            {/* P13-D-6: same omission in the list row — readiness cannot stand
+                in for validation (deriveReadiness folds only parse
+                diagnostics). Ordered readiness → validation, as task detail. */}
+            {t.validation !== "none" && (
+              <ValidationPill value={t.validation} sm />
             )}
             <WaitTag task={t} />
           </div>
@@ -599,6 +644,7 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
 ];
 
 function BoardHeader({
+  shownCount,
   taskCount,
   waitingHuman,
   group,
@@ -608,6 +654,8 @@ function BoardHeader({
   onRescan,
   onNew,
 }: {
+  /** P13-D-34: tasks the columns actually draw (filter + search applied). */
+  shownCount: number;
   taskCount: number;
   waitingHuman: number;
   group: "stage" | "list";
@@ -617,13 +665,22 @@ function BoardHeader({
   onRescan: () => void;
   onNew: () => void;
 }) {
+  // P13-D-34: this count was the UNFILTERED total while the column heads were
+  // filtered, so the page could read "12 tasks · 3 waiting on a human decision"
+  // above five columns all saying "No tasks". Filtered → "N of M"; the total
+  // stays on screen so the filter never looks like data loss. The
+  // "waiting on a human decision" stat stays project-wide and unscoped
+  // (deliberate — see the `waitingHuman` comment below).
+  const countLine =
+    shownCount === taskCount
+      ? `${taskCount} task${taskCount === 1 ? "" : "s"}`
+      : `${shownCount} of ${taskCount} task${taskCount === 1 ? "" : "s"}`;
   return (
     <div className="board-head">
       <div>
         <h1>Board</h1>
         <div className="sub">
-          {taskCount} task{taskCount === 1 ? "" : "s"} · {waitingHuman} waiting
-          on a human decision
+          {countLine} · {waitingHuman} waiting on a human decision
         </div>
       </div>
       <div className="board-tools">
@@ -674,13 +731,18 @@ function BoardHeader({
 
 function FilterBar({
   filter,
+  query,
   waitingOnMe,
   setParam,
+  onClear,
 }: {
   filter: BoardFilterId;
+  /** Topbar search term (`?q=`) — it hides cards exactly like the filter does. */
+  query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
   setParam: (key: string, value: string | null) => void;
+  onClear: () => void;
 }) {
   return (
     <div className="filter-bar">
@@ -699,6 +761,21 @@ function FilterBar({
           )}
         </button>
       ))}
+      {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
+          filter but NOT `?q=` — the search input lives in the topbar, so a
+          board hidden by a stale query had no recovery on this screen at all.
+          One chip per board, not one per empty column. */}
+      {(filter !== "all" || query.trim() !== "") && (
+        <button
+          type="button"
+          className="fchip"
+          onClick={onClear}
+          title="Show every task again — clears the board filter and the search"
+        >
+          <Icon name="x" />
+          Clear
+        </button>
+      )}
     </div>
   );
 }
@@ -746,9 +823,12 @@ function StageBoard({
   onColumnDragOver,
   onColumnDrop,
   onMoveTask,
+  emptyCopyFor,
 }: {
   columns: BoardColumnData[];
   visible: (tasks: TaskSummary[]) => TaskSummary[];
+  /** P13-D-34: per-column empty copy, given that column's UNFILTERED total. */
+  emptyCopyFor: (total: number) => string;
   doneStageId: string | undefined;
   canCreate: boolean;
   canTransition: boolean;
@@ -786,6 +866,7 @@ function StageBoard({
             stage={c.stage}
             tasks={base}
             count={count}
+            emptyCopy={emptyCopyFor(c.tasks.length)}
             isDone={c.stage.id === doneStageId}
             canCreate={canCreate}
             canTransition={canTransition}
@@ -954,7 +1035,9 @@ export function BoardPage({
     const d = transitionFetcher.data;
     if (d.ok && d.toast) push(d.toast);
     else if (!d.ok && d.error) {
-      push(d.error);
+      // P13-D-10: a REJECTED stage transition is the worst place to render a
+      // success tick — the card snaps back and the toast said "done".
+      push(d.error, "error");
       setArrivedKey(null);
     }
   }, [transitionFetcher.state, transitionFetcher.data, push]);
@@ -986,12 +1069,34 @@ export function BoardPage({
       (t) => matchesBoardFilter(t, filter) && matchesSearch(t, query),
     );
 
+  // P13-D-34: what the board actually draws, and why anything is missing.
+  const shownCount = visible(allTasks).length;
+  const filterLabel =
+    filter === "all"
+      ? null
+      : (FILTERS.find((f) => f.id === filter)?.label ?? null);
+  const emptyCopyFor = (total: number) =>
+    boardEmptyCopy({ total, filterLabel, query });
+
   const setParam = (key: string, value: string | null) => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         if (value === null) next.delete(key);
         else next.set(key, value);
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
+
+  // P13-D-34: reset BOTH hiding mechanisms in one history entry.
+  const clearFilters = () => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("filter");
+        next.delete("q");
         return next;
       },
       { replace: true, preventScrollReset: true },
@@ -1017,6 +1122,9 @@ export function BoardPage({
         rescanFetcher.data.ok
           ? "Re-scan complete — board matches the file-native store"
           : (rescanFetcher.data.error ?? "Re-scan failed."),
+        // P13-D-10: same handler, both outcomes — the failure branch used to
+        // borrow the success glyph.
+        rescanFetcher.data.ok ? "success" : "error",
       );
     }
   }, [rescanFetcher.state, rescanFetcher.data, push]);
@@ -1024,6 +1132,7 @@ export function BoardPage({
   return (
     <div className="board-wrap" data-screen-label="Board">
       <BoardHeader
+        shownCount={shownCount}
         taskCount={allTasks.length}
         waitingHuman={waitingHuman}
         group={group}
@@ -1042,8 +1151,10 @@ export function BoardPage({
 
       <FilterBar
         filter={filter}
+        query={query}
         waitingOnMe={waitingOnMe}
         setParam={setParam}
+        onClear={clearFilters}
       />
 
       {orphanTasks.length > 0 && <OrphanBanner orphanTasks={orphanTasks} />}
@@ -1052,6 +1163,7 @@ export function BoardPage({
         <StageBoard
           columns={columns}
           visible={visible}
+          emptyCopyFor={emptyCopyFor}
           doneStageId={doneStageId}
           canCreate={canCreate}
           canTransition={canTransition}
@@ -1074,6 +1186,7 @@ export function BoardPage({
           stages={stages}
           canTransition={canTransition}
           onMoveTask={onMoveTask}
+          emptyCopy={emptyCopyFor(allTasks.length)}
         />
       )}
 

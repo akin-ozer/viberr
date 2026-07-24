@@ -95,8 +95,24 @@ export const SOCIAL_START_RATE_LIMIT = {
   refillIntervalMs: 60 * 1000,
 } as const;
 
+/**
+ * PAT-validation policy (P13-D-33): 10 per user per 5 minutes.
+ * `architecture.md` asks for targeted limits on "PAT validation" and there were
+ * none. Saving or replacing a connection token makes the app call GitHub with a
+ * token the CALLER supplied — an authenticated org admin could otherwise use
+ * the connection form as an unmetered GitHub-probe proxy, and even honest
+ * retries burn the org's rate-limit budget. Keyed on the user id (always known
+ * here, unlike the login path's ip), so one admin's retries never block
+ * another's.
+ */
+export const PAT_VALIDATION_RATE_LIMIT = {
+  capacity: 10,
+  refillIntervalMs: 5 * 60 * 1000,
+} as const;
+
 const LIMITER_KEY = Symbol.for("viberr.loginRateLimiter");
 const SOCIAL_LIMITER_KEY = Symbol.for("viberr.socialStartRateLimiter");
+const PAT_LIMITER_KEY = Symbol.for("viberr.patValidationRateLimiter");
 
 function cachedLimiter(
   key: symbol,
@@ -122,6 +138,11 @@ export function getLoginRateLimiter(): TokenBucketLimiter {
 /** Process-wide `/sign-in/social` start limiter (survives HMR). */
 export function getSocialStartRateLimiter(): TokenBucketLimiter {
   return cachedLimiter(SOCIAL_LIMITER_KEY, SOCIAL_START_RATE_LIMIT);
+}
+
+/** Process-wide PAT-validation limiter (P13-D-33). Key: the actor's user id. */
+export function getPatValidationRateLimiter(): TokenBucketLimiter {
+  return cachedLimiter(PAT_LIMITER_KEY, PAT_VALIDATION_RATE_LIMIT);
 }
 
 /**

@@ -7,6 +7,7 @@ import type { NotificationView } from "~/features/notifications/notification-ite
 import { BELL_LIST_CAP, TopBell } from "./top-bell";
 import { UserMenu } from "./user-menu";
 import { Topbar } from "./topbar";
+import { Rail } from "./rail";
 
 /**
  * UI-26: `features/shell/*` had NO component tests. These cover the pass-13
@@ -134,5 +135,139 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     // jsdom's userAgent is not a mac, so the client effect corrects the SSR
     // ⌘K to the Ctrl form — the point of UI-55.
     expect(container.querySelector(".top-search .kbd")!.textContent).toBe("Ctrl K");
+  });
+});
+
+/**
+ * P13-D-35 / P13-D-37 — the shell's own navigation surfaces: returning to the
+ * board must not silently reset the filter and search, and the current
+ * location must be programmatic, not just visual.
+ */
+
+function renderAt(node: React.ReactNode, entry: string) {
+  const Stub = createRoutesStub([
+    { path: "/projects/:slug/board", Component: () => <ToastProvider>{node}</ToastProvider> },
+    { path: "/projects/:slug/review", Component: () => <ToastProvider>{node}</ToastProvider> },
+    {
+      path: "/projects/:slug/tasks/:key",
+      Component: () => <ToastProvider>{node}</ToastProvider>,
+    },
+  ]);
+  return render(<Stub initialEntries={[entry]} />);
+}
+
+const USER = {
+  id: "u",
+  name: "Arda Kaya",
+  email: "arda@viberr.dev",
+  role: "admin",
+  avatarTone: "",
+};
+
+function topbarAt(entry: string, openTask: { key: string; title: string } | null = null) {
+  return renderAt(
+    <Topbar
+      projectSlug="viberr-core"
+      projectName="Viberr Core"
+      openTask={openTask}
+      user={USER}
+      theme="system"
+      notifications={[]}
+      unread={0}
+    />,
+    entry,
+  );
+}
+
+function railAt(entry: string) {
+  return renderAt(
+    <Rail
+      projectSlug="viberr-core"
+      projectName="Viberr Core"
+      projectRepo="akin-ozer/viberr"
+      membersCount={3}
+      boardCount={12}
+      reviewCount={2}
+      violations={0}
+    />,
+    entry,
+  );
+}
+
+describe("P13-D-35: in-app paths back to the board keep filter and search", () => {
+  it("keeps the project crumb pointed at the filtered board", () => {
+    const { container } = topbarAt(
+      "/projects/viberr-core/board?filter=risk&q=auth",
+    );
+    expect(container.querySelector(".crumb-root")!.getAttribute("href")).toBe(
+      "/projects/viberr-core/board?filter=risk&q=auth",
+    );
+  });
+
+  it("keeps the rail's Board item pointed at the filtered board", () => {
+    const { getByText } = railAt("/projects/viberr-core/board?filter=human");
+    expect(getByText("Board").closest("a")!.getAttribute("href")).toBe(
+      "/projects/viberr-core/board?filter=human",
+    );
+    // Only the Board item owns URL state — the rest stay bare.
+    expect(getByText("Review queue").closest("a")!.getAttribute("href")).toBe(
+      "/projects/viberr-core/review",
+    );
+  });
+
+  it("does not paste a task route's query onto the Board crumb or rail item", () => {
+    const { container, getByText } = topbarAt(
+      "/projects/viberr-core/tasks/VIB-1?tab=runs",
+      { key: "VIB-1", title: "Attach a project credential" },
+    );
+    expect(container.querySelector(".crumb-mid")!.getAttribute("href")).toBe(
+      "/projects/viberr-core/board",
+    );
+    expect(getByText("Viberr Core").getAttribute("href")).toBe(
+      "/projects/viberr-core/board",
+    );
+  });
+});
+
+describe("P13-D-37: current location is programmatic, not just visual", () => {
+  it("marks the rail's Board item aria-current on a task page", () => {
+    // The product's deepest surface: `/projects/x/tasks/VIB-1` never matches
+    // `to=".../board"`, so NavLink emitted no aria-current while the item was
+    // visually highlighted — a WCAG 1.3.1 visual/programmatic mismatch.
+    const { getByText } = railAt("/projects/viberr-core/tasks/VIB-1");
+    const board = getByText("Board").closest("a")!;
+    expect(board.classList.contains("active")).toBe(true);
+    expect(board.getAttribute("aria-current")).toBe("page");
+    expect(
+      getByText("Review queue").closest("a")!.getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  it("marks the rail's Review item on the review route", () => {
+    const { getByText } = railAt("/projects/viberr-core/review");
+    expect(
+      getByText("Review queue").closest("a")!.getAttribute("aria-current"),
+    ).toBe("page");
+    expect(getByText("Board").closest("a")!.getAttribute("aria-current")).toBeNull();
+  });
+
+  it("gives the crumb trail a landmark and a current-page marker", () => {
+    const { container } = topbarAt("/projects/viberr-core/review");
+    const crumbs = container.querySelector(".crumbs")!;
+    expect(crumbs.tagName).toBe("NAV");
+    expect(crumbs.getAttribute("aria-label")).toBe("Breadcrumb");
+    const cur = crumbs.querySelector(".cur")!;
+    expect(cur.getAttribute("aria-current")).toBe("page");
+    expect(cur.textContent).toBe("Review queue");
+  });
+
+  it("marks the open task as the current crumb", () => {
+    const { container } = topbarAt("/projects/viberr-core/tasks/VIB-1", {
+      key: "VIB-1",
+      title: "Attach a project credential",
+    });
+    const cur = container.querySelector(".crumbs .cur")!;
+    expect(cur.getAttribute("aria-current")).toBe("page");
+    expect(cur.textContent).toContain("VIB-1");
   });
 });

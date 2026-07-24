@@ -195,7 +195,6 @@ describe("parseTaskFrontmatter (tolerant)", () => {
     urgent: true,
     validation: "changed",
     branch: "vib-142-attach-workspace",
-    repo: null,
     pr: { number: 318, state: "review", title: "Attach execution workspace" },
     github: null,
     createdAt: "2026-07-03T06:00:00.000Z",
@@ -249,6 +248,64 @@ describe("parseTaskFrontmatter (tolerant)", () => {
       title: "x",
     });
     expect(legacy.diagnostics).toEqual([]);
+  });
+
+  it("P13-D-28: pr.checks and pr.review are typed, optional, and round-trip", () => {
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        pr: {
+          number: 318,
+          state: "review",
+          title: "x",
+          checks: { total: 4, passing: 3, failing: 0, pending: 1 },
+          review: "changes_requested",
+        },
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.pr).toEqual({
+      number: 318,
+      state: "review",
+      title: "x",
+      checks: { total: 4, passing: 3, failing: 0, pending: 1 },
+      review: "changes_requested",
+    });
+    // Neither key is invented when absent: a PR ref that has never been
+    // reconciled must serialize back byte-identically (no `checks: null` churn
+    // on every write, and "absent" stays distinguishable from "read: nothing").
+    const bare = parseTaskFrontmatter(valid, { fallbackKey: "VIB-142" });
+    expect(Object.keys(bare.frontmatter.pr!)).toEqual(["number", "state", "title"]);
+  });
+
+  it("P13-D-28: a garbage pr.review/pr.checks nulls the FIELD, never the whole ref", () => {
+    // Same reasoning as `state`: `pr` is read through tolerant(…, null), so an
+    // un-caught enum failure would drop number + title + link from task.md.
+    const result = parseTaskFrontmatter(
+      {
+        ...valid,
+        pr: { number: 318, state: "review", title: "x", review: "lgtm", checks: 7 },
+      },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.frontmatter.pr).toMatchObject({ number: 318, title: "x" });
+    expect(result.frontmatter.pr?.review).toBeNull();
+    expect(result.frontmatter.pr?.checks).toBeNull();
+  });
+
+  it("P13-D-5: `repo` is no longer a known field — preserved verbatim, never resolved", () => {
+    const result = parseTaskFrontmatter(
+      { ...valid, repo: "akin-ozer/other-repo" },
+      { fallbackKey: "VIB-142" },
+    );
+    expect(result.diagnostics).toEqual([]);
+    // Not dropped (an existing task.md keeps its line)…
+    expect(result.unknown).toEqual({ repo: "akin-ozer/other-repo" });
+    // …and not readable as frontmatter — the override is deleted, so no
+    // resolver can pick it up again.
+    expect("repo" in result.frontmatter).toBe(false);
   });
 
   it("absorbs legacy `specialist`/`reviewers` keys into engagements (G1 back-compat)", () => {

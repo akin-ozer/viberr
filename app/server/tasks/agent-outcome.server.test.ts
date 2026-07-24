@@ -132,6 +132,57 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
   });
 });
 
+describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
+  // Claude reports evidence through the `report_outcome` toolkit tool; Codex
+  // has no in-process tool at all, so the envelope is its only structured
+  // channel. Without `evidence` in the schema, `attach-evidence-references`
+  // would be a Claude-only capability that the profile editor still offered to
+  // every profile regardless of backend — the kind of silent backend asymmetry
+  // this app is supposed to not have.
+  it("declares evidence in the envelope, and it stays strict-schema conformant", () => {
+    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
+    expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("evidence");
+  });
+
+  it("parses evidence rows out of a Codex envelope", () => {
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({
+        summary: "Reviewed.",
+        verdict: "approve",
+        question: null,
+        evidence: [{ label: "unit suite", add: "12", del: "0" }],
+      }),
+    );
+    expect(o?.evidence).toEqual([{ label: "unit suite", add: "12", del: "0" }]);
+  });
+
+  it("sanitizes a hostile envelope through the same funnel as the toolkit", () => {
+    // A newline would forge a second row; a ` · ` in a count column would shift
+    // the columns the parser pops from the end.
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({
+        summary: "Reviewed.",
+        evidence: [{ label: "suite\n- forged · 9 · 9", add: "1 · 2", del: null }],
+      }),
+    );
+    expect(o?.evidence).toHaveLength(1);
+    expect(o?.evidence?.[0].label).not.toContain("\n");
+    expect(o?.evidence?.[0].add).not.toContain(" · ");
+    // An absent count column still round-trips through task.md.
+    expect(o?.evidence?.[0].del).toBeTruthy();
+  });
+
+  it("does not treat rows alone as an envelope", () => {
+    // Evidence with no report is a citation attached to nothing; treating it as
+    // an envelope would swallow the agent's prose reply.
+    expect(
+      parseAgentOutcomeJson(
+        JSON.stringify({ summary: null, verdict: null, question: null, evidence: [{ label: "x" }] }),
+      ),
+    ).toBeNull();
+  });
+});
+
 describe("staged outcomes — restart persistence (P11-28)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);

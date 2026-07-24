@@ -820,7 +820,9 @@ export function AgentsPage({
     } else if (creating || editing) {
       setFormError(d.error);
     } else {
-      push(d.error);
+      // P13-D-10: `push` defaults to the "success" kind, so this failure
+      // rendered under a green tick.
+      push(d.error, "error");
     }
   }, [fetcher.state, fetcher.data, push, creating, editing]);
 

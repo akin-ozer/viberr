@@ -33,8 +33,9 @@ import {
  *                    to: agent         (optional metadata, comments only)
  *                    <blank line>
  *                    <text — RichText micro-format>
- *                    evidence:                      (optional, completion only)
- *                    - <label> · <add> · <del>
+ *                    evidence:            (optional, outcome events — P13-D-26:
+ *                    - <label> · <add> · <del>   a completion, a reviewer's
+ *                                                verdict, or an agent's report)
  *
  * Unknown `## Sections` are preserved verbatim (round-trip safe); malformed
  * timeline entries are skipped with a diagnostic — never a crash, never a

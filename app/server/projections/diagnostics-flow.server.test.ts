@@ -22,7 +22,7 @@ import {
  * surface as (a) a readiness downgrade the board pill renders, (b) a
  * readable diagnostic row the task DiagnosticsPanel renders, and (c) it
  * must all CLEAR on file fix + rescan. Never a crash, never a silent drop
- * (tolerant-parsing contract, CONVENTIONS "Behavior rules").
+ * (tolerant-parsing contract, docs/architecture/decisions.md "Behavior rules").
  */
 
 let ctx: TestDbContext;

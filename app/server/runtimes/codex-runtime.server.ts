@@ -15,6 +15,7 @@ import type {
   RunSpec,
   RuntimeAdapter,
 } from "./adapter.server";
+import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 
 /**
@@ -293,7 +294,16 @@ function safeCodexError(error: unknown): Error {
  * stderr. Mirrors the routing classes `runFailureReason` (agent-reply) returns;
  * "unavailable" is the fail-fast (no credential) class handled upstream, never
  * here — the codex process only reaches this classifier once it has started. */
-export type CodexFailureKind = "quota" | "auth" | "idle_timeout" | "unknown";
+export type CodexFailureKind =
+  | "quota"
+  | "auth"
+  | "idle_timeout"
+  /** P13-D-2: the rollout behind the resumed session id is gone from
+   *  `$CODEX_HOME/sessions`. `resumeRun`'s pre-flight probe normally catches
+   *  this and re-anchors before spawning; this covers the case where the SDK
+   *  finds out first (a transcript swept between the probe and the spawn). */
+  | "session_missing"
+  | "unknown";
 
 /** Classify a provider failure IN MEMORY before its raw text is redacted, and
  * pair the class with a redaction-safe canonical message. The raw error can
@@ -318,6 +328,16 @@ function classifyCodexFailure(
     }
   }
   const raw = parts.join("\n");
+  // P13-D-2 before the auth branch: a missing rollout is not a credential
+  // problem, and telling a human to "review the configured subscription
+  // credential" for it sends them to the one place that is definitely fine.
+  if (SESSION_MISSING_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        "The Codex session could not be resumed — its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+    };
+  }
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
     return {
       kind: "quota",

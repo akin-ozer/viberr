@@ -10,8 +10,18 @@
   --fg: #1c1c1e;
   --muted: #555a6a;
   --pin-star: #e8a800; /* pinned-project star accent (TD-2) */
-  --faint: #828798;
-  --placeholder: #a5a8b5;
+  /* P13-D-12: the secondary text ladder is AA-constrained, not free. Both of
+     these carry real small text on --surface (#ffffff) — .opt .od (decision
+     packet option descriptions), .obs .k, .card-top .key, .tl-time, .live-head,
+     every .flabel — so both must clear 4.5:1 there, and with margin over the
+     3–5% --fg surface tints those labels sometimes sit on.
+       old --faint       #828798 = 3.58:1  ->  #616575 = 5.79:1 (5.36:1 on a 4% tint)
+       old --placeholder #a5a8b5 = 2.37:1  ->  #6a6e81 = 5.05:1 (4.67:1 on a 4% tint)
+     Hue and saturation are unchanged; only HSL lightness moves (55→42, 68→46),
+     which keeps the --muted > --faint > --placeholder ordering. AA compresses
+     the ladder — 6.87 / 5.79 / 5.05 — but the steps stay perceptible. */
+  --faint: #616575;
+  --placeholder: #6a6e81;
   --border: #c7cad5;
   --ring: #e0e2e8;
   --hairline: color-mix(in srgb, var(--border), transparent 55%);
@@ -19,6 +29,18 @@
   --blue: #5b76fe;
   --blue-pressed: #2a41b6;
   --blue-soft: #e7ebff;
+  /* P13-D-12: the brand blue is an ACCENT token — it is correct on borders,
+     focus rings, washes and text-on-light. It is NOT a text background: white
+     on #5b76fe is 3.58:1 (dark theme's #6f87ff is 3.19:1), and .btn.primary is
+     every primary CTA in the app, at 14px/700 — not WCAG "large text", so 4.5:1
+     applies. Filling every CTA is the one place the accent has to carry text,
+     so the CTA pair is its own token: same hue (230°) and saturation, lower
+     lightness. Dark inverts instead of darkening further — a deeper blue would
+     sink into --surface, and the light-blue-with-dark-text pattern keeps the
+     brand colour exactly. Ratios: light #fff/#3f5efd = 4.96:1, hover
+     #fff/--blue-pressed = 8.30:1; dark --bg/#6f87ff = 5.77:1, hover 10.42:1. */
+  --cta-bg: #3f5efd;
+  --cta-fg: #ffffff;
   --success: #00b473;
   --coral-light: #ffc6c6;
   --coral-dark: #600000;
@@ -84,6 +106,20 @@ svg.ico { width: 16px; height: 16px; flex: none; }
   font-variant-numeric: tabular-nums;
   font-size: .76rem;
   letter-spacing: -.01em;
+}
+
+/* P13-D-19: `muted` and `hint` were used as utility classes in TSX but existed
+   only as a variable (--muted) and as one scoped rule (`.pj-new .hint`, whose
+   own markup had since gone), so both rendered at full weight and full size.
+   Promoted to the general utilities the markup already assumed — `.hint` keeps
+   the declarations the scoped rule had, including the font-family reset that
+   lets it sit inside a display-font ancestor. */
+.muted { color: var(--muted); }
+.hint {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: .74rem;
+  color: var(--placeholder);
 }
 
 h1, h2, h3, h4 {
@@ -317,8 +353,8 @@ h1, h2, h3, h4 {
 }
 .btn:hover { transform: translateY(-1px); border-color: var(--fg); }
 .btn:active { transform: translateY(0) scale(.97); }
-.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
-.btn.primary:hover { background: var(--blue-pressed); border-color: var(--blue-pressed); }
+.btn.primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-fg); }
+.btn.primary:hover { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
 .btn.ghost { background: transparent; border-color: var(--hairline); color: var(--muted); }
 .btn.ghost:hover { color: var(--fg); border-color: var(--border); }
 .btn.danger { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); background: color-mix(in srgb, var(--coral-light), var(--surface) 55%); }
@@ -505,7 +541,9 @@ h1, h2, h3, h4 {
 .board-orphans-label { font-size: .84rem; color: var(--fg); flex: 1; min-width: 12rem; }
 .board-orphans-keys { display: flex; gap: .4rem; flex-wrap: wrap; }
 .board-orphan-key {
-  font-family: var(--mono); font-size: .76rem;
+  /* P13-D-18: was var(--mono), which is defined nowhere — the key rendered in
+     the body font. The token is --font-mono. */
+  font-family: var(--font-mono); font-size: .76rem;
   padding: .12rem .45rem; border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--coral-dark) 45%, transparent);
   color: var(--coral-dark); text-decoration: none;
@@ -859,7 +897,10 @@ h1, h2, h3, h4 {
   width: 26px; height: 26px; border: 0; border-radius: 7px;
   background: transparent; color: var(--placeholder); cursor: pointer;
 }
-.rev-x:hover { background: color-mix(in srgb, var(--coral), transparent 85%); color: var(--coral-dark); }
+/* P13-D-18: was var(--coral) — undefined, so the hover background never
+   rendered. Matched to .stg-x:hover, the same small remove-X control, which
+   inverts correctly in dark (--coral-light is the pastel in both themes). */
+.rev-x:hover { background: color-mix(in srgb, var(--coral-light), var(--surface) 40%); color: var(--coral-dark); }
 .rev-x:disabled { opacity: .5; cursor: default; }
 .rev-x svg { width: 14px; height: 14px; }
 
@@ -1022,18 +1063,24 @@ h1, h2, h3, h4 {
 }
 .composer-foot { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
 
-/* O-3 — scheduled operator re-runs */
+/* O-3 — scheduled operator re-runs
+   P13-D-18: this whole panel referenced var(--line) and var(--panel), neither of
+   which exists, so every declaration below was dropped and the rows, the form
+   divider, the three selects and the note input rendered with no border and no
+   background in both themes. --line -> --hairline for the row/divider (the
+   app's divider token, cf. .kv-row/.stg-row) and --border + --surface for the
+   form controls, matching `.field input`. */
 .sched-list { list-style: none; margin: 0 0 .6rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .7rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; }
+.sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .7rem; padding: .5rem .6rem; border: 1px solid var(--hairline); border-radius: 8px; }
 .sched-when { display: inline-flex; align-items: center; gap: .35rem; font-family: var(--font-mono); font-size: .78rem; font-weight: 700; }
 .sched-when .ico, .sched-when svg { width: 13px; height: 13px; color: var(--agent-dark); }
 .sched-meta { grid-column: 1 / -1; font-size: .76rem; color: var(--placeholder); }
 .sched-cancel { grid-row: 1; grid-column: 3; }
-.sched-form { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.sched-form { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--hairline); padding-top: .6rem; }
 .sched-controls { display: flex; flex-wrap: wrap; gap: .6rem; }
 .sched-controls .flabel { display: inline-flex; flex-direction: column; gap: .2rem; }
-.sched-controls select { padding: .3rem .4rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
-.sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
+.sched-controls select { padding: .3rem .4rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: inherit; }
+.sched-note { padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: inherit; }
 .sched-note::placeholder { color: var(--placeholder); }
 .mention { color: var(--agent-dark); font-weight: 700; background: var(--agent-soft); padding: .02rem .26rem; border-radius: 5px; }
 
@@ -1229,7 +1276,9 @@ h1, h2, h3, h4 {
 .model-val { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
 .model-sub {
   display: inline-flex; align-items: center; gap: .25rem;
-  font-family: var(--font-sans);
+  /* P13-D-18: was var(--font-sans) — undefined, so the badge inherited the
+     mono face from its `.model-val.mono` parent. The token is --font-body. */
+  font-family: var(--font-body);
   font-size: .66rem; font-weight: 700; letter-spacing: .02em;
   text-transform: uppercase;
   color: var(--yellow-dark);
@@ -1712,8 +1761,6 @@ dialog[data-closing]::backdrop {
 }
 .keybtn:hover { background: color-mix(in srgb, var(--blue), transparent 74%); }
 
-/* guardrails */
-
 /* policy activity */
 .pev-list { display: flex; flex-direction: column; }
 .pol-ev {
@@ -1737,7 +1784,9 @@ dialog[data-closing]::backdrop {
 /* F10-19: collapsed long activity report — one-line preview + Show more. */
 .act-collapsible { display: inline; }
 .act-preview { color: var(--muted); }
-.act-toggle { font-size: .78rem; font-weight: 600; color: var(--link, var(--teal-dark)); }
+/* P13-D-18: was var(--link, …); --link is defined nowhere, so only the fallback
+   ever rendered. Resolved to the token that was already doing the work. */
+.act-toggle { font-size: .78rem; font-weight: 600; color: var(--teal-dark); }
 .pev-t { font-family: var(--font-mono); font-size: .7rem; color: var(--placeholder); flex: none; padding-top: .3rem; white-space: nowrap; }
 
 @media (max-width: 1100px) {
@@ -1933,7 +1982,8 @@ dialog[data-closing]::backdrop {
   min-width: 17px; height: 17px; padding: 0 4px;
   border-radius: 999px;
   display: grid; place-items: center;
-  background: var(--blue); color: #fff;
+  /* P13-D-12: same reason as .btn.primary — .64rem digits on the accent blue. */
+  background: var(--cta-bg); color: var(--cta-fg);
   font-family: var(--font-mono); font-size: .64rem; font-weight: 700; line-height: 1;
   border: 2px solid var(--bg);
   /* Passive state change (SSE) — the pulse is the only signal something
@@ -1960,8 +2010,13 @@ dialog[data-closing]::backdrop {
   --surface: #1b1d25;
   --fg: #eceef4;
   --muted: #b9bdcb;
-  --faint: #878da0;
-  --placeholder: #5f6577;
+  /* P13-D-12: dark mirrors the light ladder. --placeholder was the theme's real
+     failure (the audit only measured the four --faint selectors):
+       old --faint       #878da0 = 5.08:1  ->  #969bac = 6.07:1 on --surface
+       old --placeholder #5f6577 = 2.89:1  ->  #868d9f = 5.06:1 on --surface
+     (6.64:1 / 5.54:1 on --bg; 5.52:1 / 4.60:1 on a 4% --fg tint). */
+  --faint: #969bac;
+  --placeholder: #868d9f;
   --border: #3d4152;
   --ring: #2b2e3a;
   --pin-star: #f2b616; /* a touch brighter on dark (TD-2) */
@@ -1969,6 +2024,10 @@ dialog[data-closing]::backdrop {
   --blue: #6f87ff;
   --blue-pressed: #b3c0ff;
   --blue-soft: #252e5c;
+  /* Dark inverts the CTA rather than darkening it (see the light --cta-bg
+     note): the brand blue stays exact and the label goes near-black. */
+  --cta-bg: #6f87ff;
+  --cta-fg: #131419;
   --success: #2fd394;
   --coral-light: #4d2222;
   --coral-dark: #ff9e9e;
@@ -2320,21 +2379,26 @@ dialog[data-closing]::backdrop {
 
 /* Runtime and page styles. */
 
-/* Copyable / expandable provider session id in the Agent logs meta line. */
+/* Copyable / expandable provider session id in the Agent logs meta line.
+   P13-D-18: this control was written against --ink / --teal / --panel-2, none of
+   which exist in the token set, so neither hover treatment rendered. Mapped to
+   the real tokens: --ink -> --fg, --teal -> --teal-dark (the app's teal *text*
+   token, which inverts with the theme), --panel-2 -> the standard subtle hover
+   wash used by .nav-item / .menu-item. */
 .session-id { display: inline-flex; align-items: center; gap: .25rem; }
 .session-id-val {
   background: none; border: none; padding: 0; margin: 0;
-  color: var(--ink); font: inherit; cursor: pointer;
+  color: var(--fg); font: inherit; cursor: pointer;
   text-decoration: underline dotted var(--faint); text-underline-offset: 2px;
   word-break: break-all; text-align: left;
 }
-.session-id-val:hover { color: var(--teal); }
+.session-id-val:hover { color: var(--teal-dark); }
 .session-id-copy {
   display: inline-flex; align-items: center; justify-content: center;
   background: none; border: none; padding: 1px; margin: 0; cursor: pointer;
   color: var(--faint); border-radius: 5px;
 }
-.session-id-copy:hover { color: var(--ink); background: var(--panel-2, rgba(127,127,127,.12)); }
+.session-id-copy:hover { color: var(--fg); background: color-mix(in srgb, var(--fg), transparent 94%); }
 .session-id-copy .ico { width: 13px; height: 13px; }
 .session-id-export {
   display: inline-flex; align-items: center; gap: .18rem;
@@ -2343,7 +2407,7 @@ dialog[data-closing]::backdrop {
   padding: .05rem .3rem; margin-left: .1rem; border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--faint), transparent 55%);
 }
-.session-id-export:hover { color: var(--teal); border-color: var(--teal); }
+.session-id-export:hover { color: var(--teal-dark); border-color: var(--teal-dark); }
 .session-id-export .ico { width: 11px; height: 11px; }
 
 /* Markdown comment bodies (agent replies + user comments) rendered by
@@ -2478,14 +2542,16 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .login-aside-mark {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: 12px;
-    background: var(--accent, var(--teal-dark)); color: #fff;
+    /* P13-D-18: was var(--accent, …) — --accent is defined nowhere, so only the
+       fallback ever painted. Resolved to that token. */
+    background: var(--teal-dark); color: #fff;
     font-weight: 800; font-size: 1.3rem; font-family: var(--font-mono);
   }
   .login-aside h2 { font-size: 1.5rem; line-height: 1.2; color: var(--fg); margin: 0; }
   .login-aside p { font-size: .92rem; line-height: 1.6; color: var(--muted); margin: 0; }
   .login-aside-points { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
   .login-aside-points li { position: relative; padding-left: 1.4rem; font-size: .86rem; color: var(--muted); line-height: 1.4; }
-  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--accent, var(--teal-dark)); font-weight: 700; }
+  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--teal-dark); font-weight: 700; }
 }
 .login-card {
   width: min(430px, 100%);
@@ -2726,7 +2792,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   background: color-mix(in srgb, var(--fg), transparent 95%);
 }
 .pj-new:hover .plus { background: color-mix(in srgb, var(--blue-soft), transparent 20%); }
-.pj-new .hint { font-family: var(--font-body); font-weight: 400; font-size: .74rem; color: var(--placeholder); }
+/* P13-D-19: `.hint` is now a global utility (declared next to `.mono`); the
+   `.pj-new`-scoped copy that used to be its only definition — and which no
+   markup under `.pj-new` still used — is gone. */
 
 /* ---------- List view ---------- */
 .pj-list { display: flex; flex-direction: column; gap: .5rem; }
@@ -3030,7 +3098,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   padding: .7rem;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: var(--surface-2, var(--surface));
+  /* P13-D-18: was var(--surface-2, …); --surface-2 does not exist, so only the
+     fallback ever applied. Resolved to that token. */
+  background: var(--surface);
 }
 .fm-doc .ta { min-height: 8rem; resize: vertical; }
 .fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }
@@ -3048,3 +3118,53 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Assumed (unverifiable) PAT scope — P13-UI-01. A fine-grained token publishes
    no scope header, so it must not wear the same ✓ as an observed scope. */
 .scope-chip.assumed { color: var(--muted); border-style: dashed; }
+
+/* P13-D-36 (UX-8 / F13-04): the app's one route-level pending indicator.
+   Fixed to the top edge, painted only while a NAVIGATION is in flight and only
+   after RoutePendingBar's 220 ms delay, so fast client navigations never flash
+   it. Above the sticky headers (z-index 30/50) and popovers (60), below the
+   toast host (100). */
+.route-pending {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  z-index: 90;
+  overflow: hidden;
+  background: var(--hairline);
+  pointer-events: none;
+}
+.route-pending .rp-fill {
+  display: block;
+  height: 100%;
+  width: 34%;
+  border-radius: 0 2px 2px 0;
+  background: var(--blue);
+  animation: route-pending-slide 1.05s var(--ease-out) infinite;
+}
+@keyframes route-pending-slide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(320%); }
+}
+/* The global [data-motion="reduce"] kill-switch clamps animations to ~0 ms,
+   which would leave a static 34% stub — give reduced motion a full-width bar
+   so the indicator still reads. */
+[data-motion="reduce"] .route-pending .rp-fill { width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .route-pending .rp-fill { width: 100%; }
+}
+
+/* P13-D-11: the "load older" affordance at the top of the run console. The
+   console is a fixed dark surface in BOTH themes, so this follows the same
+   literal ladder as the surrounding `.log-line` rules rather than the theme
+   tokens — matching them would make the control invert against a background
+   that never does. */
+.log-more {
+  font: inherit; font-weight: 600;
+  border: 0; background: none; padding: 0;
+  color: #8fb2ff; cursor: pointer;
+  transition: color .14s ease;
+}
+.log-more:hover:not(:disabled) { color: #c9d1e3; text-decoration: underline; }
+.log-more:disabled { color: #6b7590; cursor: default; }
+.log-more:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.log-more-note { color: #5f6a85; }

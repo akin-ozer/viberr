@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
-import type { RunView } from "./runtime-types";
+import { runBoundaryLine, type RunView } from "./runtime-types";
+import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 afterEach(cleanup);
 
@@ -16,6 +17,7 @@ function mkRun(patch: Partial<RunView>): RunView {
     finished: null, turns: 0, tokens: 0,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
     raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
+    logWindow: { totalLines: 1, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
     ...patch,
     profileId: patch.profileId ?? "developer",
   };
@@ -204,5 +206,165 @@ describe("AgentLogsPanel", () => {
       <AgentLogsPanel runtime={[exportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(queryByTitle(/Export this session/)).toBeTruthy();
+  });
+});
+
+/**
+ * P13-D-11 / NFR5: the loader ships a BOUNDED window of the agent group's
+ * console, so the console starts mid-history on a long-lived task. It must stay
+ * a paginated view of UI-53's whole history, not a truncation of it.
+ */
+describe("P13-D-11: the console pages backwards", () => {
+  const withheldRun = () =>
+    mkRun({
+      state: "idle",
+      lifecycle: "finished",
+      finished: "2026-07-24T09:41:00.000Z",
+      lineCount: 928,
+      logWindow: {
+        totalLines: 928,
+        hasMore: true,
+        runIds: ["run_0", "run_1"],
+        oldest: { runId: "run_1", seq: 528 },
+        headSeq: 927,
+      },
+    });
+  const older = (patch: Partial<OlderLogState> = {}): Record<string, OlderLogState> => ({
+    primary: { hasMore: true, withheld: 528, loading: false, error: null, ...patch },
+  });
+  const rows = (n: number, prefix: string): StreamedLine[] =>
+    Array.from({ length: n }, (_, i) => ({
+      display: { t: "1", ev: "text" as const, tag: "assistant", text: `${prefix}${i}` },
+      raw: "{}",
+    }));
+
+  it("offers a load-older affordance naming how many lines are withheld", () => {
+    const onLoadOlder = vi.fn();
+    const { getByText } = render(
+      <AgentLogsPanel
+        runtime={[withheldRun()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: rows(3, "b") }}
+        olderByThread={older()}
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+    expect(getByText("· 528 earlier lines not loaded")).toBeTruthy();
+    fireEvent.click(getByText("load older lines"));
+    expect(onLoadOlder).toHaveBeenCalledWith("primary");
+  });
+
+  it("hides the affordance once nothing older remains, and states a failed page", () => {
+    const { queryByText, getByText, rerender } = render(
+      <AgentLogsPanel
+        runtime={[withheldRun()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: rows(3, "b") }}
+        olderByThread={older({ hasMore: false, withheld: 0 })}
+        onLoadOlder={() => {}}
+      />,
+    );
+    expect(queryByText("load older lines")).toBeNull();
+
+    rerender(
+      <AgentLogsPanel
+        runtime={[withheldRun()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: rows(3, "b") }}
+        olderByThread={older({ error: "Older lines are project-member only." })}
+        onLoadOlder={() => {}}
+      />,
+    );
+    expect(getByText("· Older lines are project-member only.")).toBeTruthy();
+  });
+
+  it("keeps the reader's place when older lines are prepended", () => {
+    // jsdom reports 0 for every layout box, so the console's geometry is
+    // stubbed — the assertion is on the ARITHMETIC the panel does with it.
+    const { container, getByText, rerender } = render(
+      <AgentLogsPanel
+        runtime={[withheldRun()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: rows(20, "b") }}
+        olderByThread={older()}
+        onLoadOlder={() => {}}
+      />,
+    );
+    const box = container.querySelector(".console") as HTMLElement;
+    let height = 1000;
+    Object.defineProperty(box, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(box, "clientHeight", { get: () => 320, configurable: true });
+    box.scrollTop = 400;
+    fireEvent.scroll(box); // 1000 - 400 - 320 = 280 from the bottom → not following
+
+    fireEvent.click(getByText("load older lines"));
+    height = 1600; // 30 older rows land ABOVE everything the reader was reading
+    rerender(
+      <AgentLogsPanel
+        runtime={[withheldRun()]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [...rows(30, "a"), ...rows(20, "b")] }}
+        olderByThread={older({ withheld: 498 })}
+        onLoadOlder={() => {}}
+      />,
+    );
+    // Same lines under the cursor: offset moved by exactly the prepended height
+    // (600), instead of the classic jump to the top or the bottom.
+    expect(box.scrollTop).toBe(1000);
+  });
+
+  it("counts EVENTS as stored lines — never the synthetic run boundaries", () => {
+    // UI-53's `── resumed ──` rows are not stored log lines and are not in
+    // `lineCount`, so counting the rendered array double-counts them.
+    const run = mkRun({
+      state: "idle",
+      lifecycle: "finished",
+      lineCount: 6,
+      logWindow: {
+        totalLines: 6,
+        hasMore: false,
+        runIds: ["run_0", "run_1"],
+        oldest: null,
+        headSeq: 2,
+      },
+    });
+    const { getByText, rerender } = render(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            ...rows(3, "a"),
+            { display: runBoundaryLine(2, 2), raw: "" },
+            ...rows(3, "b"),
+          ],
+        }}
+      />,
+    );
+    expect(getByText("6 events")).toBeTruthy();
+
+    // A live tail can run ahead of the loader's snapshot — the count follows
+    // the lines that exist, so it never goes backwards.
+    rerender(
+      <AgentLogsPanel
+        runtime={[run]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            ...rows(3, "a"),
+            { display: runBoundaryLine(2, 2), raw: "" },
+            ...rows(5, "b"),
+          ],
+        }}
+      />,
+    );
+    expect(getByText("8 events")).toBeTruthy();
   });
 });

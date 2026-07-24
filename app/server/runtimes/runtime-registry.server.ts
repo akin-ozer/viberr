@@ -189,7 +189,14 @@ export interface AdapterDeps {
   codexFactory?: CodexFactory;
 }
 
-const CREDENTIAL_ENV_RE =
+/**
+ * Credential-shaped env var NAMES. Exported because the OUTPUT side needs the
+ * same list as the input side: `filteredSpawnEnv` strips these from the agent's
+ * child env, and the run sink redacts the VALUES of the ones the app then
+ * deliberately re-adds (P13-U-1) from every persisted log line. One regex, so
+ * "what counts as a credential" cannot drift between the two.
+ */
+export const CREDENTIAL_ENV_RE =
   /(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?|AUTH)(?:_|$)/i;
 const PRIVATE_RUNTIME_ENV_RE =
   /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;

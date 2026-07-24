@@ -12,6 +12,7 @@ import {
   applyOAuthUser,
   isOAuthWhitelisted,
   linkOAuth,
+  type OAuthProvider,
 } from "~/server/auth/oauth-provision.server";
 import { getEnv } from "~/server/config/env.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -60,6 +61,32 @@ export const ALLOWED_AUTH_PATHS = new Set<string>([
 
 /** The concrete better-auth instance type (with our plugins). */
 export type ViberrAuth = ReturnType<typeof betterAuth>;
+
+/**
+ * P13-D-22: which provider's callback is running, read off the endpoint the
+ * database hook fires under. The social callback endpoint is declared
+ * `/callback/:id` (and `/oauth2/callback/:id`), so `params.id` IS the provider
+ * id — the same resolution better-auth's own `lastLoginMethod` plugin uses.
+ *
+ * This has to be threaded explicitly: `databaseHooks.user.create` receives only
+ * the user record, and the whitelist previously had to GUESS the provider from
+ * whether a `githubHandle` came along. That guess is what let the Google-only
+ * domain allowlist admit GitHub sign-ins.
+ *
+ * Returns null when the provider cannot be read; `isOAuthWhitelisted` fails
+ * closed on null (no domain admission), which is the safe direction.
+ */
+export function oauthProviderOf(context: unknown): OAuthProvider | null {
+  const ctx = context as
+    | { path?: string; params?: Record<string, string | undefined> }
+    | undefined;
+  const path = ctx?.path ?? "";
+  if (!path.startsWith("/callback/") && !path.startsWith("/oauth2/callback/")) {
+    return null;
+  }
+  const id = ctx?.params?.id ?? path.split("/").pop();
+  return id === "github" || id === "google" ? id : null;
+}
 
 export interface AuthDeps {
   /** The app database handle. */
@@ -244,7 +271,10 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
     databaseHooks: {
       user: {
         create: {
-          before: (user) =>
+          // P13-D-22: `context` carries the callback endpoint, hence the
+          // provider — without it the whitelist cannot tell a Google sign-in
+          // from a GitHub one, and the Google-only domain rule admits both.
+          before: (user, context) =>
             Promise.resolve(
               isOAuthWhitelisted(deps.db, {
                 id: String(user.id),
@@ -252,17 +282,19 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
                 name: user.name,
                 githubHandle: (user as { githubHandle?: string | null })
                   .githubHandle,
+                provider: oauthProviderOf(context),
               })
                 ? undefined
                 : false,
             ),
-          after: (user) => {
+          after: (user, context) => {
             applyOAuthUser(deps.db, {
               id: String(user.id),
               email: user.email,
               name: user.name,
               githubHandle: (user as { githubHandle?: string | null })
                 .githubHandle,
+              provider: oauthProviderOf(context),
             });
             return Promise.resolve();
           },

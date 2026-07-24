@@ -337,7 +337,10 @@ function EditUserModal({
   const save = () => {
     if (!canSave) return;
     if (isYou && role !== "admin") {
-      push("You can't demote yourself");
+      // P13-D-10: every client-side refusal in this panel ("can't demote /
+      // disable / remove yourself") is a FAILURE toast — they all rendered the
+      // success tick because `push` defaults to "success".
+      push("You can't demote yourself", "error");
       return;
     }
     setErr(null);
@@ -527,7 +530,7 @@ export function UsersPanel({
 
   const setRole = (u: OrgUserView, role: "admin" | "member") => {
     if (u.id === meId && role !== "admin") {
-      push("You can't demote yourself");
+      push("You can't demote yourself", "error");
       return;
     }
     if (u.role === role) return;
@@ -682,7 +685,7 @@ export function UsersPanel({
                   aria-label={"Disable " + u.name}
                   onClick={() => {
                     if (you) {
-                      push("You can't disable your own account");
+                      push("You can't disable your own account", "error");
                       return;
                     }
                     setDisabling(u);
@@ -697,7 +700,7 @@ export function UsersPanel({
                 aria-label={"Remove " + u.name}
                 onClick={() => {
                   if (you) {
-                    push("You can't remove your own account");
+                    push("You can't remove your own account", "error");
                     return;
                   }
                   setConfirm({ kind: "user", item: u });

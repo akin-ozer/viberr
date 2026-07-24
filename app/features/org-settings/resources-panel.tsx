@@ -9,6 +9,7 @@ import type {
 } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { formatRelative } from "~/shared/dates/format";
+import { isMcpHealthStale } from "~/shared/freshness";
 import { slugify } from "~/shared/ids/slugify";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -31,13 +32,12 @@ function rel(iso: string | null): string {
   return iso ? formatRelative(iso) : "never";
 }
 
-/** A health check older than this reads as STALE — a green "up" dot for an
- * hours-old check over-implies "healthy now" (stdio MCPs are only re-checked on
- * save/test, never on page load). Amber + a "stale" hint keeps it honest. */
-const MCP_HEALTH_STALE_MS = 60 * 60 * 1000;
-function isStaleCheck(iso: string | null): boolean {
-  return !!iso && Date.now() - new Date(iso).getTime() > MCP_HEALTH_STALE_MS;
-}
+/** P13-D-32: the "older than an hour reads as STALE" rule is interpretation,
+ * which `architecture.md` forbids a UI component from owning — it now lives in
+ * the shared freshness policy (server door:
+ * `server/interpretation/freshness-policy.server.ts`) next to the identical
+ * rule the GitHub reconcile chip applies. */
+const isStaleCheck = isMcpHealthStale;
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
 function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {
@@ -603,7 +603,13 @@ function AgentModal({
       <div className="field">
         <span className="flabel">
           Default eligible stages<span className="req">*</span>{" "}
-          <span className="fhint">Done is human-only, always</span>
+          {/* P13-D-9: "always" was an over-promise. No AGENT profile can ever
+              transition a task to Done — that part holds for everything this
+              org-level editor creates — but a project's operator can, under the
+              auto preset with an explicit grant. This panel is org-scoped and
+              cannot know a project's policy, so it states the guarantee it
+              actually makes rather than one it cannot. */}
+          <span className="fhint">Done is closed by a human, never by an agent</span>
         </span>
         <div className="pick-chips">
           {stageOpts.map((s) => (

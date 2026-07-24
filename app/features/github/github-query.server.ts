@@ -10,11 +10,22 @@ import {
   getProject,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
+import { isReconcileStale } from "~/server/interpretation/freshness-policy.server";
+import {
+  createReconcileBehindByLookup,
+  latestProjectReconcileAt,
+} from "~/server/provenance/provenance-query.server";
 import {
   getProjectCredentialHealth,
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
 import type { SyncState } from "./github-pills";
+import {
+  mapPrChecks,
+  mapPrReview,
+  type PrChecksRender,
+} from "~/shared/mapping/task.server";
+import type { PrReviewState } from "~/schemas/task-file.schema";
 
 /**
  * Loader assembly for /projects/:slug/github (github-view spec §3.1
@@ -39,6 +50,11 @@ export interface PrRowView {
   /** PR title (the row headline in the mock). */
   title: string;
   branch: string | null;
+  /** P13-D-28: CI health + GitHub's review verdict. Both were fetched-and-
+   *  discarded or never read; the narrowing right here to number/state/title
+   *  IS the "every consumer narrows" the finding describes. */
+  checks: PrChecksRender | null;
+  review: PrReviewState | null;
 }
 
 export interface BranchRowView {
@@ -46,7 +62,13 @@ export interface BranchRowView {
   /** Task title (the Task cell). */
   title: string;
   branch: string;
-  pr: { number: number; state: string } | null;
+  pr: {
+    number: number;
+    state: string;
+    /** P13-D-28. */
+    checks: PrChecksRender | null;
+    review: PrReviewState | null;
+  } | null;
   sync: SyncState;
   /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
   commitCount: number;
@@ -75,38 +97,6 @@ export interface GithubViewData {
     label: string | null;
     /** Never reconciled or older than an hour → the state may be out of date. */
     stale: boolean;
-  };
-}
-
-/**
- * Latest reconciled behindBy per task file, from provenance — or **null when the
- * branch was never compared** (UI-05). This used to return 0 for "no data",
- * which `deriveSyncState` cannot distinguish from a real "0 commits behind", so
- * an unreconciled branch was painted green "synced".
- *
- * Factory: prepare the provenance statement ONCE and map many branch rows
- * through it, instead of re-preparing + running it per row inside `.map`
- * (pass-4 WI-10 n+1).
- */
-function createBehindByResolver(
-  db: DatabaseSync,
-): (sourcePath: string) => number | null {
-  const stmt = db.prepare(
-    `SELECT details_json FROM provenance
-     WHERE source_path = ? AND action = 'github.reconcile'
-     ORDER BY id DESC LIMIT 1`,
-  );
-  return (sourcePath: string): number | null => {
-    const row = stmt.get(sourcePath) as
-      | { details_json: string | null }
-      | undefined;
-    if (!row?.details_json) return null;
-    try {
-      const details = JSON.parse(row.details_json) as { behindBy?: unknown };
-      return typeof details.behindBy === "number" ? details.behindBy : null;
-    } catch {
-      return null;
-    }
   };
 }
 
@@ -177,7 +167,8 @@ export async function getGithubViewData(
   const connection = await checkRepoAccessCached(db, projectSlug, ctx);
 
   const tasks = listProjectTasks(db, projectSlug);
-  const behindByFor = createBehindByResolver(db);
+  // P13-D-16: provenance reads live in server/provenance, not here.
+  const behindByFor = createReconcileBehindByLookup(db);
 
   // Branch table: every task with a branch, in task-key order (the query
   // already sorts numerically — spec §7.11 deterministic-order deviation).
@@ -189,7 +180,14 @@ export async function getGithubViewData(
         taskKey: t.key,
         title: t.title,
         branch: t.branch,
-        pr: t.pr ? { number: t.pr.number, state: t.pr.state } : null,
+        pr: t.pr
+          ? {
+              number: t.pr.number,
+              state: t.pr.state,
+              checks: mapPrChecks(t.pr),
+              review: mapPrReview(t.pr),
+            }
+          : null,
         // UI-05: a merged PR is authoritative regardless of compare data;
         // otherwise a branch with NO compare data reports `unknown`
         // ("not compared") rather than borrowing `deriveSyncState`'s
@@ -213,6 +211,8 @@ export async function getGithubViewData(
       state: t.pr!.state,
       title: t.pr!.title,
       branch: t.branch,
+      checks: mapPrChecks(t.pr),
+      review: mapPrReview(t.pr),
     }))
     .sort((a, b) => b.number - a.number);
 
@@ -220,26 +220,18 @@ export async function getGithubViewData(
   // newest reconcile — the manual "Update status" button OR the 5-min
   // background poller (P11-14). Surface the freshest reconcile time so stale
   // cached PR/branch state can't silently look current. `null` = never
-  // reconciled. Newest `github.reconcile` provenance across the project's tasks.
-  const lastReconcileRow = db
-    .prepare(
-      `SELECT MAX(observed_at) AS latest FROM provenance
-        WHERE action = 'github.reconcile' AND source_path LIKE ?`,
-    )
-    .get(`projects/${projectSlug}/%`) as { latest: string | null } | undefined;
-  const lastReconciledAt = lastReconcileRow?.latest ?? null;
+  // reconciled. P13-D-16/D-32: the provenance read is in server/provenance and
+  // the staleness rule is in server/interpretation — neither belongs here.
+  const lastReconciledAt = latestProjectReconcileAt(db, projectSlug);
   // Computed server-side (SSR-stable, no client clock): the label is as-of page
   // load and refreshes when the loader revalidates on the next GitHub SSE event.
-  const reconciledMs = lastReconciledAt ? Date.parse(lastReconciledAt) : NaN;
   const reconcile = {
     at: lastReconciledAt,
-    label: Number.isFinite(reconciledMs) ? formatRelative(lastReconciledAt!) : null,
-    // Stale = never reconciled, or older than an hour. With the 5-min poller
-    // (P11-14) healthy this only trips when GitHub/config has been broken for
-    // an hour — surfaced honestly by the freshness chip rather than a lie.
-    stale:
-      !Number.isFinite(reconciledMs) ||
-      Date.now() - reconciledMs > 60 * 60_000,
+    label:
+      lastReconciledAt && Number.isFinite(Date.parse(lastReconciledAt))
+        ? formatRelative(lastReconciledAt)
+        : null,
+    stale: isReconcileStale(lastReconciledAt),
   };
 
   return {

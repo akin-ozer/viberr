@@ -14,9 +14,12 @@ import {
  * degraded results the UI renders (`no_pat_configured`,
  * `no_repo_configured`) instead of throwing.
  *
- * Repo resolution: task-level override (task.md `repo`) wins over the
- * project default (projects projection row). Default branch comes from
- * project config (project.md is canonical; the projection mirrors it).
+ * Repo resolution: the project's repo (projects projection row) — ONE project,
+ * ONE repo. P13-D-5: a `repoOverride` option used to let a task.md `repo` field
+ * win here, but no writer ever set that field and the owner deleted the feature
+ * this pass, so the parameter and its four call sites are gone rather than kept
+ * as a permanently-undefined read. Default branch comes from project config
+ * (project.md is canonical; the projection mirrors it).
  */
 
 export interface GithubContext {
@@ -36,8 +39,6 @@ export type GithubContextFailure =
 export type GithubContextResult = GithubContext | GithubContextFailure;
 
 export interface GithubContextOptions {
-  /** Task-level repo override (task.md `repo`); null/undefined → project default. */
-  repoOverride?: string | null;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
 }
@@ -53,7 +54,8 @@ export function getProjectGithubContext(
     | { repo: string | null; default_branch: string | null }
     | undefined;
 
-  const repo = options.repoOverride ?? projectRow?.repo ?? null;
+  // P13-D-5: was `options.repoOverride ?? projectRow?.repo` — the override is gone.
+  const repo = projectRow?.repo ?? null;
   if (!repo) return { status: "no_repo_configured" };
 
   const credential = getProjectCredential(db, projectSlug);

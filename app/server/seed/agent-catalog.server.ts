@@ -93,7 +93,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     },
     {
       direct: ["Assign the primary specialist", "Summon reviewer specialists", "Generate decision & blocking packets", "Append typed important events"],
-      recommend: ["Stage transitions", "Completion for human acceptance"],
+      recommend: ["Stage transitions", "Accept completion into Done"],
       forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
     },
     "A dedicated operator is instantiated for every active task. It coordinates specialists, keeps the canonical task file authoritative, and turns agent work into concise decision packets for human review. It never writes code and never closes a task itself.",
