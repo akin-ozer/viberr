@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
@@ -6,6 +6,7 @@ import { initialsOf } from "~/ui/initials";
 import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
 import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 
 /**
@@ -60,7 +61,7 @@ export function UserMenu({
   const [menu, setMenu] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference }>();
+  const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
@@ -74,14 +75,11 @@ export function UserMenu({
   }, [menu]);
 
   // Toast only once the server confirms the theme write — a failed POST
-  // (expired session/CSRF) must not report a false success (P11-40).
-  const seenTheme = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (seenTheme.current === fetcher.data) return;
-    seenTheme.current = fetcher.data;
-    if (fetcher.data.ok && fetcher.data.theme) push(themeToast(fetcher.data.theme));
-  }, [fetcher.state, fetcher.data, push]);
+  // (expired session/CSRF) reports the failure, not a false success (P11-40).
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok && data.theme) push(themeToast(data.theme));
+    else if (!data.ok) push(data.error ?? "Theme change failed — try again");
+  });
 
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
 

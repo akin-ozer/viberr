@@ -14,8 +14,12 @@ describe("notification kinds — single source (P11-54)", () => {
       path.join(__dirname, "..", "..", "..", "db", "migrations", "0001_baseline.sql"),
       "utf8",
     );
-    // Find the notifications table's `kind TEXT ... CHECK (kind IN (...))`.
-    const match = sql.match(/kind TEXT NOT NULL CHECK \(kind IN \(([^)]+)\)\)/);
+    // Anchor to the notifications table FIRST — other tables also declare a
+    // `kind TEXT NOT NULL CHECK (kind IN (…))` column (e.g. agent_runs), so a
+    // whole-file match would pin whichever table happens to come first.
+    const table = sql.match(/CREATE TABLE notifications \(([\s\S]*?)\);/);
+    expect(table, "notifications table not found in baseline").toBeTruthy();
+    const match = table![1]!.match(/kind TEXT NOT NULL CHECK \(kind IN \(([^)]+)\)\)/);
     expect(match, "notifications.kind CHECK not found in baseline").toBeTruthy();
     const inCheck = match![1]
       .split(",")

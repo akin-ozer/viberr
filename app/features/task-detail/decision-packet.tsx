@@ -155,7 +155,6 @@ export function DecisionPacket({
             onChange={(e) => setNote(e.target.value)}
             placeholder="Add a note for the operator (optional) — e.g. the specific input this option asks for"
             rows={2}
-            style={{ marginTop: "12px", width: "100%" }}
           />
         )}
 

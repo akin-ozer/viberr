@@ -79,11 +79,34 @@ export interface TaskMutationContext {
     backend: RealBackend;
     autonomy: "supervised" | "full";
     reactDepth: number;
+    /** Consecutive operator-authored transition chain depth (see
+     *  OPERATOR_TRANSITION_CHAIN_CAP). Optional: only the operator drive sets
+     *  it; absent reads as 0. */
+    transitionDepth?: number;
   };
 }
 
 /** Hard cap on the operator's react re-invocation chain (runaway backstop). */
 const OPERATOR_REACT_DEPTH_CAP = 4;
+
+/**
+ * Hard cap on CONSECUTIVE operator-authored stage transitions (runaway
+ * backstop for the P11-70 every-transition re-trigger). Each link is a full
+ * LLM operator run, and the chain's normal termination — the operator reaches
+ * a stage where it deploys a specialist or opens a packet — is model behavior,
+ * not structure. A cyclic `auto` stage graph or a model bouncing a task
+ * between two stages it can transition would otherwise loop unbounded. Any
+ * human action or agent reply re-invokes the operator WITHOUT a threaded
+ * depth, which is what resets the chain; legitimate consecutive auto-boundary
+ * walks (Triage → Ready → In Progress) stay far under the cap.
+ */
+export const OPERATOR_TRANSITION_CHAIN_CAP = 8;
+
+/** Depth of the NEXT transition-chain link: a human-authored transition always
+ *  restarts at 0; an operator-authored one extends its drive's threaded depth. */
+export function nextTransitionChainDepth(ctx: TaskMutationContext): number {
+  return ctx.operatorAuthorized ? (ctx.operatorRun?.transitionDepth ?? 0) + 1 : 0;
+}
 
 /** Continue the operator loop only after a new, successful reply within its depth cap. */
 export function operatorShouldReactToReply(
@@ -536,6 +559,9 @@ async function autoInvokeOperator(
   projectSlug: string,
   taskKey: string,
   trigger: "create" | "transition" | "goal-updated",
+  /** Transition-chain depth to thread into the run (transition trigger only —
+   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
+  transitionDepth?: number,
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -546,6 +572,7 @@ async function autoInvokeOperator(
       projectSlug,
       taskKey,
       trigger,
+      ...(transitionDepth !== undefined ? { transitionDepth } : {}),
       dataRoot: ctx.dataRoot,
     });
   } catch (error) {
@@ -2504,15 +2531,45 @@ export async function transitionStage(
   // task). This includes the operator's OWN transitions: a single operator run
   // may advance only one auto boundary (e.g. Triage → Ready) and stop, which
   // used to strand the task at a pre-work stage with `waiting: human` and no
-  // packet (P11-70). Re-triggering on every transition is safe and self-bounding
-  // — `runOperator` holds a single-flight process lease per task and QUEUES a
-  // trigger that arrives mid-run (newest wins), firing it when the current drive
-  // ends; the chain terminates naturally once the operator reaches a stage where
-  // it deploys a specialist and waits (a specialist run is not a transition) or
-  // opens a packet. Fire-and-forget — it never blocks or fails the transition,
-  // and it is a no-op when no operator is deployed.
+  // packet (P11-70). `runOperator` holds a single-flight process lease per task
+  // and QUEUES a trigger that arrives mid-run (newest wins), firing it when the
+  // current drive ends; the chain normally terminates once the operator reaches
+  // a stage where it deploys a specialist and waits (a specialist run is not a
+  // transition) or opens a packet. That termination is model behavior, not
+  // structure — so consecutive OPERATOR-authored transitions also thread a
+  // depth (`transitionDepth`, the reactDepth idiom) and a hard cap turns a
+  // runaway transition loop into a stuck-loop packet instead of unbounded LLM
+  // spend. Any human or agent-reply trigger restarts the chain at 0.
+  // Fire-and-forget — it never blocks or fails the transition, and it is a
+  // no-op when no operator is deployed.
   if (input.toStageId !== lastStageId) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+    const chainDepth = nextTransitionChainDepth(ctx);
+    if (chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP) {
+      logger.warn(
+        "operator transition chain hit its depth cap — pausing auto-coordination",
+        { taskKey: input.taskKey, toStageId: input.toStageId, depth: chainDepth },
+      );
+      // Same escalation the react loop uses at ITS cap: a blocked packet a
+      // human resolves (best-effort — no-ops if one is already open). The
+      // resolution itself is the human action that restarts coordination.
+      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        agentHandle: "operator",
+        reason:
+          `The operator made ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive stage ` +
+          `transitions with no agent run or human action in between — a coordination loop.`,
+      });
+    } else {
+      void autoInvokeOperator(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "transition",
+        chainDepth,
+      );
+    }
   }
 
   // Delivery spine (FR31): entering the REVIEW stage is the point a PR is

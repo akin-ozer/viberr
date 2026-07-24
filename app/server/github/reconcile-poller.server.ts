@@ -72,8 +72,19 @@ export async function pollGithubReconcile(
   return { projects: slugs.length, reconciled, changed };
 }
 
-// Module-scoped handle so a repeat start() is a no-op (HMR/boot-safe).
-let pollerHandle: ReturnType<typeof setInterval> | null = null;
+// HMR-safe singleton — the repo convention (boot, file-watch, kb-watch):
+// module state resets on a dev reload, so a module-scoped handle would let a
+// re-evaluated module stack a second interval next to the orphaned first. The
+// handle lives behind a global symbol instead, making a repeat start() a true
+// no-op — no duplicate interval and no re-fired boot poll.
+const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
+
+function pollerCache(): Record<symbol, ReturnType<typeof setInterval> | undefined> {
+  return globalThis as unknown as Record<
+    symbol,
+    ReturnType<typeof setInterval> | undefined
+  >;
+}
 
 /**
  * Start the poller: run once at boot (catch out-of-band changes that landed
@@ -81,10 +92,11 @@ let pollerHandle: ReturnType<typeof setInterval> | null = null;
  * slow tick can't stack), unref'd (never keeps the process alive), idempotent.
  */
 export function startGithubReconcilePoller(db: DatabaseSync): void {
+  const cache = pollerCache();
+  if (cache[POLLER_KEY]) return;
   void pollGithubReconcile(db).catch(() => {});
-  if (pollerHandle) return;
   let running = false;
-  pollerHandle = setInterval(() => {
+  const handle = setInterval(() => {
     if (running) return;
     running = true;
     void pollGithubReconcile(db)
@@ -97,13 +109,16 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
         running = false;
       });
   }, RECONCILE_POLL_MS);
-  if (typeof pollerHandle.unref === "function") pollerHandle.unref();
+  if (typeof handle.unref === "function") handle.unref();
+  cache[POLLER_KEY] = handle;
 }
 
 /** Stop the poller (tests + graceful shutdown). */
 export function stopGithubReconcilePoller(): void {
-  if (pollerHandle) {
-    clearInterval(pollerHandle);
-    pollerHandle = null;
+  const cache = pollerCache();
+  const handle = cache[POLLER_KEY];
+  if (handle) {
+    clearInterval(handle);
+    cache[POLLER_KEY] = undefined;
   }
 }

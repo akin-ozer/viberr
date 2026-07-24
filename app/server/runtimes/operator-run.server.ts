@@ -75,6 +75,11 @@ export interface RunOperatorInput {
   trigger?: "create" | "transition" | "agent-reply" | "goal-updated" | "manual";
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
+  /** Depth of the CONSECUTIVE operator-authored transition chain (bounds the
+   *  transition→re-trigger loop, the same idiom as reactDepth — see
+   *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
+   *  agent-reply trigger, which is what resets the chain. */
+  transitionDepth?: number;
   /** A human's `@operator …` comment to address in this run (when a person
    *  talks to the operator directly). The operator reads it and responds. */
   humanComment?: string;
@@ -332,6 +337,9 @@ export async function runOperator(
     backend,
     autonomy: authority.autonomy,
     reactDepth: input.reactDepth ?? 0,
+    // Threaded so a transition THIS drive makes carries the chain depth into
+    // transitionStage's re-trigger (see OPERATOR_TRANSITION_CHAIN_CAP).
+    transitionDepth: input.transitionDepth ?? 0,
   };
 
   // The operator is itself an agent working the task: the board should read

@@ -609,6 +609,85 @@ describe("operatorShouldReactToReply (no-progress guard)", () => {
   });
 });
 
+describe("operator transition chain (P11-70 runaway backstop)", () => {
+  it("human transitions restart the chain at 0; operator ones extend the drive's depth", async () => {
+    const { nextTransitionChainDepth, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "./task-actions.server"
+    );
+    expect(nextTransitionChainDepth({})).toBe(0); // human-authored
+    expect(nextTransitionChainDepth({ operatorAuthorized: true })).toBe(1); // first link
+    const drive = (transitionDepth: number) => ({
+      operatorAuthorized: true,
+      operatorRun: {
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+        reactDepth: 0,
+        transitionDepth,
+      },
+    });
+    expect(nextTransitionChainDepth(drive(0))).toBe(1);
+    expect(nextTransitionChainDepth(drive(3))).toBe(4);
+    expect(nextTransitionChainDepth(drive(OPERATOR_TRANSITION_CHAIN_CAP - 1))).toBe(
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    );
+  });
+
+  it("at the cap, the transition lands but coordination pauses on a stuck-loop packet", async () => {
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("triage");
+    const { OPERATOR_TASK_ACTOR, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "./task-actions.server"
+    );
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      OPERATOR_TASK_ACTOR,
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        operatorRun: {
+          backend: "claude",
+          autonomy: "supervised",
+          reactDepth: 0,
+          transitionDepth: OPERATOR_TRANSITION_CHAIN_CAP - 1,
+        },
+      },
+    );
+    const t = task();
+    expect(t.frontmatter.stage).toBe("ready"); // the move itself still lands
+    expect(t.packet).toBeTruthy(); // …but the next hop is a human packet, not another run
+    expect(t.packet!.type).toBe("blocked");
+    expect(t.packet!.body).toContain("coordination loop");
+    // No follow-up operator run was auto-invoked.
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+  });
+
+  it("below the cap, the transition re-triggers coordination and opens no packet", async () => {
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("triage");
+    const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      OPERATOR_TASK_ACTOR,
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        operatorRun: {
+          backend: "claude",
+          autonomy: "supervised",
+          reactDepth: 0,
+          transitionDepth: 0,
+        },
+      },
+    );
+    expect(task().packet).toBeFalsy();
+    // Let the fire-and-forget auto-invoke settle, then clean up its fake run.
+    await new Promise((r) => setTimeout(r, 50));
+    interruptRunningRuns("VIB-1");
+  });
+});
+
 describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
   it("a trigger arriving while a run is in flight is QUEUED and fired once, not dropped", async () => {
     deployRoster(DEFAULT_POLICY);

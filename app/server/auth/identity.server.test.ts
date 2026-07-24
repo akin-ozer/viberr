@@ -159,7 +159,7 @@ describe("identity provisioning", () => {
     expect(isBetterAuthPasswordHash(null)).toBe(false);
   });
 
-  it("blocks unused account-mutation endpoints on the splat, keeps sign-in reachable (P11-02)", async () => {
+  it("404s every endpoint outside the driven allow-list, keeps sign-in reachable (P11-02)", async () => {
     const db = ctx.makeDb();
     const a = auth(db);
     provisionIdentity(db, {
@@ -176,6 +176,9 @@ describe("identity provisioning", () => {
           body: JSON.stringify(body),
         }),
       );
+    // A sample of built-in endpoints the app does NOT drive — the account
+    // mutations the old deny-list named, plus ones it missed (link-social,
+    // revoke-sessions): under the ALLOW-list they all 404 without enumeration.
     for (const path of [
       "/change-password",
       "/update-user",
@@ -183,6 +186,8 @@ describe("identity provisioning", () => {
       "/forget-password",
       "/reset-password",
       "/request-password-reset",
+      "/link-social",
+      "/revoke-sessions",
     ]) {
       const res = await post(path, { email: "blocked@viberr.dev" });
       expect(res.status, `${path} should be blocked`).toBe(404);

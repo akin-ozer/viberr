@@ -5,6 +5,7 @@ import { initialsOf } from "~/ui/initials";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { formatDayBucket } from "~/shared/dates/format";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
@@ -211,24 +212,32 @@ function ProfileNotifications({
 
   // Toast only once the server confirms the routing change — a failed POST
   // (expired session/CSRF) must not report a false success (P11-40). The
-  // message is client-computed, so it's stashed on submit and pushed on the
-  // matching `set-notif` result (the prefs fetcher is shared with Appearance,
-  // hence the intent guard).
-  const pendingToast = useRef<string | null>(null);
-  const seen = useRef<ProfileActionData | null>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (seen.current === fetcher.data) return;
-    seen.current = fetcher.data;
-    if (fetcher.data.intent !== "set-notif") return;
-    if (fetcher.data.ok && pendingToast.current) push(pendingToast.current);
-    pendingToast.current = null;
-  }, [fetcher.state, fetcher.data, push]);
+  // message is client-computed, so it's stashed on submit alongside the
+  // pre-flip state and settled on the matching `set-notif` result (the prefs
+  // fetcher is shared with Appearance, hence the intent guard). On failure the
+  // optimistic flip is ROLLED BACK — silence would leave a toggle that looks
+  // changed but didn't stick.
+  const pending = useRef<{ toast: string; rollback: NotifPrefs } | null>(null);
+  useFetcherResult(fetcher, (data) => {
+    if (data.intent !== "set-notif") return;
+    const p = pending.current;
+    pending.current = null;
+    if (!p) return;
+    if (data.ok) {
+      push(p.toast);
+    } else {
+      setNtf(p.rollback);
+      push(data.error ?? "Saving notification routing failed — change not applied");
+    }
+  });
 
   const flip = (row: (typeof PROFILE_NTF)[number]) => {
     const on = !ntf[row.id].app;
+    pending.current = {
+      toast: row.n + " notifications " + (on ? "on" : "off"),
+      rollback: ntf,
+    };
     setNtf({ ...ntf, [row.id]: { ...ntf[row.id], app: on } });
-    pendingToast.current = row.n + " notifications " + (on ? "on" : "off");
     submit({ intent: "set-notif", category: row.id, on: on ? "1" : "0" });
   };
 

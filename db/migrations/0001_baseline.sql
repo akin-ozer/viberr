@@ -7,13 +7,16 @@
 -- old chain, so a fresh DB gets exactly what the chain produced — minus the
 -- mock scope-violation the old 0005 seeded (schema only, zero demo data).
 --
--- The runner records this filename in schema_migrations and never re-runs it,
--- and it skips by FILENAME alone — so editing this file has no effect on any
--- database that already applied it. There is no longer a drift healer
--- (schema-reconcile.server was removed): a column added here reaches fresh
--- databases ONLY, while existing ones silently lack it and every projection
--- write for that column throws. NEVER add columns to this file. All schema
--- changes go in new numbered migrations (0002_…, 0003_…) from here on.
+-- Convention (owner ruling, pass 11): while pre-prod, schema changes are
+-- squashed INTO this baseline — no incremental migration chain is kept. The
+-- runner records this filename in schema_migrations and skips by FILENAME
+-- alone, so editing this file reaches FRESH databases only: an existing DB
+-- keeps its old schema and every projection write touching a new column
+-- throws (there is no drift healer — schema-reconcile.server was removed).
+-- That is accepted: the DB is a derived projection, so after pulling a
+-- baseline change, wipe the sqlite and re-seed (`npm run seed -- --reset`).
+-- Because users/auth live in the same file, a wipe regenerates user ids.
+-- Revisit this convention at the first real deployment.
 
 -- ============================ tables ============================
 
@@ -323,6 +326,17 @@ CREATE INDEX idx_agent_runs__task ON agent_runs (project_slug, task_key);
 CREATE INDEX idx_agent_runs__state ON agent_runs (state);
 CREATE UNIQUE INDEX idx_agent_runs__thread
   ON agent_runs (project_slug, task_key, thread_id);
+-- F10-05: enforce ONE active delivering ("primary") run per task at the DB
+-- layer. The run service preflight-checks for a live delivering run before its
+-- expensive async setup (repo clone, adapter start), then inserts the run only
+-- afterward — two racing dispatches can both pass that check during their
+-- awaits. This partial unique index makes the second insert fail atomically;
+-- startRun translates the constraint violation into a 409 conflict. Only
+-- queued/running PRIMARY runs are constrained: operator/reviewer runs and any
+-- terminal state (finished/error/interrupted) are unconstrained.
+CREATE UNIQUE INDEX idx_agent_runs__one_delivering
+  ON agent_runs (project_slug, task_key)
+  WHERE kind = 'primary' AND state IN ('queued', 'running');
 CREATE UNIQUE INDEX idx_run_log_lines__run_seq ON run_log_lines (run_id, seq);
 CREATE INDEX "session_userId_idx" on "session" ("userId");
 CREATE INDEX "account_userId_idx" on "account" ("userId");
