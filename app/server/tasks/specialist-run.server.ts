@@ -56,6 +56,7 @@ import {
   type DeliveryPermissions,
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
+  resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
 import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
 import {
@@ -1176,8 +1177,11 @@ export function resolveResumeConfinement(
       ...(outputSchema ? { outputSchema } : {}),
     };
   } catch {
-    // Profile not a current deployment — still apply the conservative settings.
-    return { disallowedTools: resolveSpecialistDisallowedTools([]), env };
+    // Profile not a current deployment (undeployed/deleted). We can't confirm
+    // any grant, so confine CONSERVATIVELY — deny ALL delivery tools, not just
+    // the always-human merge (AO-5 #5). A resumed run of a vanished profile may
+    // read/validate but never write/push/PR.
+    return { disallowedTools: resolveUndeployedDisallowedTools(), env };
   }
 }
 

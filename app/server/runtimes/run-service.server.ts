@@ -206,10 +206,12 @@ export interface StartRunInput {
   mcpServers?: Record<string, unknown>;
   /** Tool allowlist confining the run (operator → its governance tools only). */
   allowedTools?: string[];
-  /** Tool denylist confining a specialist run to its granted capabilities. */
+  /** Tool denylist confining a specialist run to its granted capabilities.
+   *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
-  /** JSON schema constraining the run's final output (Codex structured-output
-   *  operator — the caller parses + executes the emitted decision plan). */
+  /** JSON schema constraining the run's final output. Codex only — used by the
+   *  structured-output operator AND every generic specialist/reviewer run's
+   *  report_outcome envelope; the caller parses + executes/records it. */
   outputSchema?: unknown;
   /** Per-run environment overlay (e.g. GIT_CEILING_DIRECTORIES to confine a
    *  specialist's git to its workspace). Merged on top of the adapter env. */

@@ -201,6 +201,32 @@ describe("edit / role / reset / remove", () => {
     );
     expect(again.user.email).toBe("reuse@test.dev");
   });
+
+  // rbac #5: deleting the identity cascades better-auth `session` rows via the
+  // FK (ON DELETE CASCADE), so deleteOrgUser needs no explicit session revoke.
+  it("delete cascades the user's better-auth sessions", async () => {
+    const db = makeDb();
+    const { user } = await createLocalAccount(
+      db,
+      { name: "Session", email: "session@test.dev", role: "member" },
+      ACTOR,
+    );
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO "session"
+         (id, expiresAt, token, createdAt, updatedAt, userId)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("sess_del", now, "tok_del", now, now, user.id);
+    expect(
+      db.prepare(`SELECT id FROM "session" WHERE userId = ?`).get(user.id),
+    ).toBeTruthy();
+
+    deleteOrgUser(db, user.id, ACTOR);
+
+    expect(
+      db.prepare(`SELECT id FROM "session" WHERE userId = ?`).get(user.id),
+    ).toBeUndefined();
+  });
 });
 
 describe("google domain allowlist", () => {

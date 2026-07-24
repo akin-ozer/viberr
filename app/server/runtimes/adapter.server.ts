@@ -47,9 +47,10 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
-  /** JSON schema constraining the run's final output. Codex only — used by the
-   *  structured-output operator (it has no in-process tool channel), so the run
-   *  emits a decision plan the caller parses + executes. */
+  /** JSON schema constraining the run's final output. Codex only (it has no
+   *  in-process tool channel). Used by BOTH the structured-output operator (a
+   *  decision plan the caller parses + executes) AND every generic specialist/
+   *  reviewer run (the report_outcome envelope — verdict/questions). */
   outputSchema?: unknown;
   /** Per-run environment overlay, merged ON TOP of the adapter's base env for
    *  THIS run only. `GIT_CEILING_DIRECTORIES` prevents accidental parent-repo

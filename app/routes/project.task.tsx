@@ -51,7 +51,10 @@ import {
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
-import { requireRunAgents } from "~/server/auth/project-authority.server";
+import {
+  requireRunAgents,
+  type AuthorityProject,
+} from "~/server/auth/project-authority.server";
 import {
   cancelScheduledAction,
   scheduleTaskAction,
@@ -165,6 +168,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 function backendOverride(formData: FormData): { backendOverride?: "claude" | "codex" } {
   const b = String(formData.get("backend") ?? "");
   return b === "claude" || b === "codex" ? { backendOverride: b } : {};
+}
+
+/** The `{ slug, memberRoles, archived }` snapshot `requireRunAgents` consumes,
+ *  built from the same two projections at every run-agents call site
+ *  (run-operator / schedule-action / cancel-schedule). One definition so the
+ *  guard-input shape can't drift between the three (RU #8). */
+function runAgentsAuthority(
+  db: ReturnType<typeof getDb>,
+  projectSlug: string,
+): AuthorityProject {
+  return {
+    slug: projectSlug,
+    memberRoles: new Map(
+      listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
+    ),
+    archived: getProject(db, projectSlug)?.archived === true,
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -475,13 +495,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // lets the operator drive to Done.
         requireRunAgents(
           db,
-          {
-            slug: projectSlug,
-            memberRoles: new Map(
-              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
-            ),
-            archived: getProject(db, projectSlug)?.archived === true,
-          },
+          runAgentsAuthority(db, projectSlug),
           actor,
           "run the operator",
         );
@@ -525,13 +539,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // is still `run-agents` (maintainer+); the server-side runner fires it.
         requireRunAgents(
           db,
-          {
-            slug: projectSlug,
-            memberRoles: new Map(
-              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
-            ),
-            archived: getProject(db, projectSlug)?.archived === true,
-          },
+          runAgentsAuthority(db, projectSlug),
           actor,
           "schedule an operator re-run",
         );
@@ -559,13 +567,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "cancel-schedule": {
         requireRunAgents(
           db,
-          {
-            slug: projectSlug,
-            memberRoles: new Map(
-              listProjectMembers(db, projectSlug).map((m) => [m.userId, m.role]),
-            ),
-            archived: getProject(db, projectSlug)?.archived === true,
-          },
+          runAgentsAuthority(db, projectSlug),
           actor,
           "cancel a scheduled operator re-run",
         );

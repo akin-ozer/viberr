@@ -2,7 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import type { AuditActor } from "~/server/audit/audit-recorder.server";
+import {
+  OPERATOR_AUDIT_ACTOR,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
 import { agentProfilesDir } from "~/server/files/file-store-root.server";
 import { KB_INJECTION_BUDGET, readKbBody } from "~/server/files/kb-injection.server";
 import { readSkillBody } from "~/server/files/skill-body.server";
@@ -54,8 +57,6 @@ import { registerRunCompletion, startRun } from "./run-service.server";
  *   no credential → startRun records an honest error; the completion hook
  *     escalates a blocked recovery packet.
  */
-
-const OPERATOR_AUDIT_ACTOR: AuditActor = { userId: null, label: "operator" };
 
 export interface RunOperatorInput {
   projectSlug: string;
@@ -455,9 +456,10 @@ const OPERATOR_PLAN_SCHEMA = {
               properties: {
                 kind: { type: "string", enum: [...PACKET_OPTION_KINDS] },
                 title: { type: "string" },
+                detail: { type: ["string", "null"], description: "One concise line of extra context for this option; null if none." },
                 recommended: { type: "boolean" },
               },
-              required: ["kind", "title", "recommended"],
+              required: ["kind", "title", "detail", "recommended"],
             },
           },
         },
@@ -487,6 +489,7 @@ const operatorPlanActionSchema = z.strictObject({
       z.strictObject({
         kind: z.enum(PACKET_OPTION_KINDS),
         title: z.string(),
+        detail: z.string().nullable(),
         recommended: z.boolean(),
       }),
     )
@@ -514,8 +517,10 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  * (the first, if the model marked none or several).
  */
 export function authoredPacketOptions(
-  authored: { kind: PacketOptionKind; title: string; recommended: boolean }[] | null,
-): { kind: PacketOptionKind; title: string; recommended?: boolean }[] | null {
+  authored:
+    | { kind: PacketOptionKind; title: string; detail?: string | null; recommended: boolean }[]
+    | null,
+): { kind: PacketOptionKind; title: string; detail?: string; recommended?: boolean }[] | null {
   if (!authored || authored.length === 0) return null;
   // Filter+cap FIRST, then locate the recommended within the KEPT set — an
   // earlier empty-title option (dropped here) would otherwise shift the raw
@@ -526,6 +531,9 @@ export function authoredPacketOptions(
   return kept.map((o, i) => ({
     kind: o.kind,
     title: o.title.trim(),
+    // Carry the per-option detail line so a Codex-authored packet renders with
+    // the same context a Claude-authored one does (AO-5 #12).
+    ...(o.detail && o.detail.trim() ? { detail: o.detail.trim() } : {}),
     recommended: i === (recIdx >= 0 ? recIdx : 0),
   }));
 }

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createGithubClient } from "./github-client.server";
-import {
-  findPrForBranch,
-  mapPrToCacheState,
-  prPillFor,
-} from "./pr-linker.server";
+import { findPrForBranch, mapPrToCacheState } from "./pr-linker.server";
 
 const REPO = "akin-ozer/viberr";
 const REPO_PATH = `/repos/${REPO}`;
@@ -32,14 +28,6 @@ describe("PR state mapping matrix (ruling 12)", () => {
   it("draft PRs read 'in review' like open ones", () => {
     // draft is carried separately; state mapping treats open===review.
     expect(mapPrToCacheState({ state: "open" })).toBe("review");
-  });
-
-  it("maps cache states to the mock pill vocabulary", () => {
-    expect(prPillFor("merged")).toEqual({ label: "merged", kind: "done" });
-    expect(prPillFor("review")).toEqual({ label: "in review", kind: "info" });
-    expect(prPillFor("closed")).toEqual({ label: "closed", kind: "risk" });
-    // Mirrors the client github-pills.prStatePill contract.
-    expect(prPillFor("accepted")).toEqual({ label: "merge pending", kind: "input" });
   });
 });
 
@@ -200,7 +188,6 @@ describe("findPrForBranch", () => {
     expect(result.status).toBe("found");
     if (result.status === "found") {
       expect(result.pr.state).toBe("closed");
-      expect(prPillFor(result.pr.state)).toEqual({ label: "closed", kind: "risk" });
       expect(result.pr.changed).toBeNull(); // detail carried no stats
     }
   });

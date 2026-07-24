@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -107,5 +107,35 @@ describe("seedOrgResources", () => {
     expect(org).toMatchObject({ kbs: 3, skills: 4, mcps: 0, connections: 0 });
     expect(listSkills(db, { dataRoot })).toHaveLength(4);
     expect(listConnections(db)).toHaveLength(0);
+  });
+
+  it("preserves human edits to existing KB/skill files on a plain re-seed (seed #5)", async () => {
+    const { db, dataRoot } = await seedAll();
+    const kbFile = path.join(dataRoot, "kb", "architecture-notes", "overview.md");
+    const skillFile = path.join(dataRoot, "skills", "conventional-commits", "SKILL.md");
+    writeFileSync(kbFile, "# Edited by a human\n");
+    writeFileSync(skillFile, "## Edited skill body\n");
+    // Row edits an admin could make in the UI (rename, change refresh cadence).
+    db.prepare(
+      `UPDATE org_knowledge_bases SET refresh = 'manual', name = 'Renamed' WHERE dir = 'architecture-notes'`,
+    ).run();
+
+    // Plain re-seed (no --reset) must NOT clobber existing resources.
+    seedOrgResources(db, { dataRoot });
+
+    expect(readFileSync(kbFile, "utf8")).toBe("# Edited by a human\n");
+    expect(readFileSync(skillFile, "utf8")).toBe("## Edited skill body\n");
+    expect(
+      db
+        .prepare(`SELECT refresh, name FROM org_knowledge_bases WHERE dir = 'architecture-notes'`)
+        .get(),
+    ).toMatchObject({ refresh: "manual", name: "Renamed" });
+
+    // But a MISSING resource is (re)created — only-create-what's-absent.
+    rmSync(path.join(dataRoot, "kb", "deploy-runbooks"), { recursive: true, force: true });
+    seedOrgResources(db, { dataRoot });
+    expect(
+      existsSync(path.join(dataRoot, "kb", "deploy-runbooks", "release-checklist.md")),
+    ).toBe(true);
   });
 });

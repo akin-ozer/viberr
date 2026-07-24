@@ -298,8 +298,11 @@ function classifyClaudeError(error: unknown): {
   if (/usage limit|quota|rate limit|too many requests|\b429\b/i.test(raw)) {
     return {
       kind: "quota",
+      // Role-neutral: this classifier runs for operator AND specialist/reviewer
+      // runs, so it must not say "the coordinating model" (misleads a human
+      // triaging a failed delivery run toward the operator).
       message:
-        "The coordinating model is over its usage quota. Retry after the limit resets.",
+        "The Claude model is over its usage quota. Retry after the limit resets.",
     };
   }
   if (

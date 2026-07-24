@@ -98,4 +98,17 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
     expect(authoredPacketOptions([])).toBeNull();
     expect(authoredPacketOptions([{ kind: "custom", title: " ", recommended: true }])).toBeNull();
   });
+
+  it("carries a per-option detail line, and omits it when blank/null (AO-5 #12)", () => {
+    const out = authoredPacketOptions([
+      { kind: "request_edit", title: "A", detail: "  extra context  ", recommended: true },
+      { kind: "edit_goal", title: "B", detail: "   ", recommended: false },
+      { kind: "custom", title: "C", detail: null, recommended: false },
+    ]);
+    expect(out).toEqual([
+      { kind: "request_edit", title: "A", detail: "extra context", recommended: true },
+      { kind: "edit_goal", title: "B", recommended: false },
+      { kind: "custom", title: "C", recommended: false },
+    ]);
+  });
 });

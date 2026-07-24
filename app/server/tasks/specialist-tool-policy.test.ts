@@ -3,6 +3,7 @@ import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
+  resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
 
 /**
@@ -17,6 +18,27 @@ const grant = (capabilityId: string, mode: CapabilityGrant["mode"]) =>
 describe("resolveSpecialistDisallowedTools", () => {
   it("always denies PR merge (an always-human capability), even with no grants", () => {
     expect(resolveSpecialistDisallowedTools([])).toEqual(["Bash(gh pr merge:*)"]);
+  });
+
+  it("confines an UNDEPLOYED profile conservatively — denies ALL delivery, not just merge (AO-5 #5)", () => {
+    const denied = resolveUndeployedDisallowedTools();
+    // Every delivery tool is denied (branch create, commit, push, PR open, file writes),
+    // NOT just the always-human merge — a resumed run of a vanished profile can't deliver.
+    for (const t of [
+      "Bash(git checkout -b:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Edit",
+      "Write",
+    ]) {
+      expect(denied).toContain(t);
+    }
+    // Strictly more restrictive than the empty-grants (deployed, unspecified) case.
+    expect(denied.length).toBeGreaterThan(
+      resolveSpecialistDisallowedTools([]).length,
+    );
   });
 
   it("denies git push when commit-push is withheld (human or off), not when direct", () => {

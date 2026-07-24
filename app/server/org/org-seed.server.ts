@@ -22,11 +22,14 @@ import { ensureOrgStoreDirs } from "./resources.server";
  * GitHub connection are seeded — an admin installs real ones; nothing
  * fabricated is presented as configured (see the note by the seed body).
  *
- * Idempotent: deterministic row ids (INSERT OR REPLACE), files overwritten,
- * file mtimes back-dated so the browser shows the mock's date spread. Any
- * GitHub connection an admin already installed is left intact and survives
- * `--reset` (like the phase-7 PAT tables). `--reset` wipes kb/, skills/ and
- * the resource tables + domain rows, then reseeds them.
+ * Non-destructive re-seed (seed #5): a KB or skill whose folder already exists
+ * is left untouched — its files, row name and UI-set refresh cadence survive a
+ * plain `npm run seed`; only MISSING resources are (re)created. First-run and
+ * post-`--reset` stores seed fresh, with deterministic row ids and back-dated
+ * file mtimes so the browser shows the mock's date spread. Any GitHub
+ * connection an admin already installed is left intact and survives `--reset`
+ * (like the phase-7 PAT tables). `--reset` wipes kb/, skills/ and the resource
+ * tables + domain rows, then reseeds them.
  */
 
 export interface OrgSeedSummary {
@@ -308,9 +311,14 @@ export function seedOrgResources(
   ensureOrgStoreDirs(ctx);
 
   // Knowledge bases — rows + REAL files with back-dated mtimes. created_at
-  // is a fixed ordered stamp so the panel lists in mock order.
+  // is a fixed ordered stamp so the panel lists in mock order. A KB whose
+  // folder already exists is skipped entirely (row + files) so human edits and
+  // UI-set refresh cadence survive a plain re-seed (seed #5); --reset wiped kb/
+  // above, so this only skips on a plain re-run.
   let kbFiles = 0;
   for (const [i, kb] of KB_SEEDS.entries()) {
+    const root = kbDirPath(kb.dir, options.dataRoot);
+    if (existsSync(root)) continue;
     const indexedAt = backdate(kb.indexed, now).toISOString();
     db.prepare(
       `INSERT OR REPLACE INTO org_knowledge_bases
@@ -325,15 +333,17 @@ export function seedOrgResources(
       `2000-01-01T00:00:0${i}.000Z`,
       indexedAt,
     );
-    const root = kbDirPath(kb.dir, options.dataRoot);
     for (const file of kb.files) {
       writeSeedFile(root, file, now);
       kbFiles += 1;
     }
   }
 
-  // Skills — rows + SKILL.md + supporting files.
+  // Skills — rows + SKILL.md + supporting files. Same non-destructive rule: an
+  // existing skill folder is left untouched on a plain re-seed (seed #5).
   for (const [i, skill] of SKILL_SEEDS.entries()) {
+    const root = skillDirPath(skill.name, options.dataRoot);
+    if (existsSync(root)) continue;
     const updatedAt = backdate(skill.updated, now).toISOString();
     db.prepare(
       `INSERT OR REPLACE INTO org_skills
@@ -346,7 +356,6 @@ export function seedOrgResources(
       `2000-01-01T00:00:0${i}.000Z`,
       updatedAt,
     );
-    const root = skillDirPath(skill.name, options.dataRoot);
     writeSeedFile(
       root,
       { rel: "SKILL.md", content: `${skill.body}\n`, date: skill.updated },

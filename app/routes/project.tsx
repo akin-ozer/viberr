@@ -10,6 +10,7 @@ import {
   listNotifications,
 } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
+import type { TaskSummary } from "~/shared/mapping/task.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { Icon } from "~/ui/icon";
@@ -36,21 +37,32 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
-  const board = getBoard(db, params.slug);
-  if (!board) {
+  const raw = getBoard(db, params.slug);
+  if (!raw) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
   // R8-3: annotate each task with whether an open decision here needs THIS
   // viewer's action (the single member-scoped source), so the board's
   // "Waiting on me" chip + per-card badge stop reading the project-wide
-  // `waiting === "human"` enum. Mutates the fresh getBoard task objects.
+  // `waiting === "human"` enum. `waitingOnMe` is viewer-specific, so derive
+  // fresh task objects instead of mutating the ones getBoard returned — a
+  // future read-model cache in board-query.server must never let one viewer's
+  // annotation leak into another's board (RU #11).
   const myDecisions = new Set(
     decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
       (d) => d.taskKey,
     ),
   );
-  for (const t of tasks) t.waitingOnMe = myDecisions.has(t.key);
+  const annotate = (t: TaskSummary): TaskSummary => ({
+    ...t,
+    waitingOnMe: myDecisions.has(t.key),
+  });
+  const board = {
+    ...raw,
+    columns: raw.columns.map((c) => ({ ...c, tasks: c.tasks.map(annotate) })),
+    orphanTasks: raw.orphanTasks.map(annotate),
+  };
+  const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
   const memberRole =
     board.members.find((m) => m.userId === user.id)?.role ?? null;
   // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on

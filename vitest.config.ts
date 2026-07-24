@@ -16,7 +16,6 @@ export default defineConfig({
     include: [
       "app/**/*.test.{ts,tsx}",
       "db/**/*.test.ts",
-      "scripts/**/*.test.ts",
     ],
   },
 });

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
  * F10-06 / F10-33 — authorization for the two RAW RUN ARTIFACT routes.
@@ -22,7 +22,7 @@ const RUN_ID = "run_authfixture";
 
 beforeAll(async () => {
   app = await setupAppTest();
-  const { runDemoSeed } = await import("../../test-support/demo-seed");
+  const { runDemoSeed } = await import("../../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 
   const { findUserByEmail } = await import("~/server/auth/user-store.server");

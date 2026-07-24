@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { SEED_DEFAULT_PASSWORD } from "./app/server/seed/seed.server";
 
 /**
  * E2E golden paths (Phase 11).
@@ -28,10 +29,14 @@ const E2E_ENV = {
   VIBERR_SESSION_SECRET: "e2e-session-secret-0123456789abcdefghijklmnop",
   // base64 of 32 bytes (0x00 * 32) — fine for an ephemeral test store.
   VIBERR_SECRET_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-  // Belt and braces: if the server boots before the demo seed lands, the
-  // bootstrap admin still gets the well-known dev password.
+  // The webServer command is strictly sequential (seed:demo THEN dev), so the
+  // server never boots before the seed — by boot time users exist and
+  // seedInitialAdmin no-ops. These vars just pin the bootstrap admin to the
+  // same well-known credentials the demo seed and e2e login use, keeping them
+  // consistent if the seed ever stops running first. Password is the single
+  // SEED_DEFAULT_PASSWORD constant so it can never drift from the seed.
   VIBERR_SEED_ADMIN_EMAIL: "arda@viberr.dev",
-  VIBERR_SEED_ADMIN_PASSWORD: "viberr-dev-2828",
+  VIBERR_SEED_ADMIN_PASSWORD: SEED_DEFAULT_PASSWORD,
   // NOTE: this config used to force the simulated/scripted runtime here. That
   // engine is gone, and with it the two specs that drove agent runs (02-packet,
   // 04-runtime). The remaining specs never start a run, so the server boots

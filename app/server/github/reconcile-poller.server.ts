@@ -170,7 +170,13 @@ function pollerCache(): Record<symbol, ReturnType<typeof setInterval> | undefine
 export function startGithubReconcilePoller(db: DatabaseSync): void {
   const cache = pollerCache();
   if (cache[POLLER_KEY]) return;
-  void pollGithubReconcile(db).catch(() => {});
+  // Boot pass: log a failure like the interval tick does, so a boot-time poll
+  // failure (e.g. a misconfigured PAT) is diagnosable instead of silent.
+  void pollGithubReconcile(db).catch((error) => {
+    logger.warn("github reconcile poller boot pass failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
   let running = false;
   const handle = setInterval(() => {
     if (running) return;

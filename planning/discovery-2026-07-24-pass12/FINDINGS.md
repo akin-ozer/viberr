@@ -84,6 +84,35 @@ irreversible merge, human finishes the merge), or should autonomous completion b
 a human merges (so Done always ⇒ merged), or should the reconcile poller surface the dangling PR
 as needing a human merge? Currently nothing nudges the human to finish the merge.
 
+## LOW-cluster completion ledger (2026-07-24, "no cut corners" pass — every candidate resolved)
+
+**Runtime (agents-operator-runtimes.md #1-14):** #1 AO-1 FIXED · #2 owner-ruled (Codex
+prompt-only) · #3 AO-3 FIXED · #4 AO-2 FIXED · #5 FIXED (undeployed-profile resume now
+denies ALL delivery via `resolveUndeployedDisallowedTools`, +test) · #6 FIXED (3 stale
+doc-comments: adapter/codex-runtime/run-service) · #7 owner-DEFERRED (operator vocab,
+generic-agents ruling) · #8 by-design (ask-human default; documented) · #9 FIXED (regex
+broadened) · #10 NO-OP-non-issue (no route calls appendComment directly with a named
+mention — only commentToAgent, which sets forceToAgent) · #11 FIXED (quota copy now
+role-neutral) · #12 FIXED (Codex packet options carry `detail`, +test) · #13 FIXED
+(OPERATOR_AUDIT_ACTOR single-sourced in audit-recorder) · #14 KNOWN-LIMITATION (partial-
+react replay: a reply-posted-then-crashed-before-react run isn't replayed — a risky
+recovery-semantics redesign; documented rather than destabilize recovery at pass end).
+
+**Delivery (delivery-github-review.md FC-1..11):** FC-1 DG-4 · FC-2 DG-1 · FC-3a/b DG-3 ·
+FC-4 DG-5 · FC-5 DG-2 (all FIXED earlier) · FC-6 left (task-level repo override — larger) ·
+FC-7 FIXED (stale scope-flag comment) · FC-8 FIXED (stale github-query comments; `stale`
+flag has a live consumer, kept) · FC-9 FIXED (removed dead `prPillFor` + its refs) ·
+FC-10 docs-nuance (no action) · FC-11 FIXED (poller boot pass now logs failures).
+
+**Routes/UI (routes-ui-map.md #1-16):** #1 F12-02 · #2 RU-1 · #3 RU-2 · #4 RU-3 · #7 RU-4
+(FIXED earlier) · #6 RU-6 BY-DESIGN (no shared operator-id constant; cross-cutting) ·
+#8 FIXED (runAgentsAuthority helper) · #11 FIXED (layout loader non-mutating) · #13 FIXED
+(moved misplaced route test) · #5/#9/#10/#12/#14/#15/#16 by-design or maintainability-nuance
+(documented). 
+
+**Data-model (data-model-store.md #1-5):** #1 DM-2 · #2 DM-3b (FIXED) · #3 test-only (raw
+SQL fixture — low) · #4 DM-1 triaged not-a-bug · #5 pre-prod residuals (by-design).
+
 ## Adversarial self-review of the fix PR (2 subagents, diff main...pass12) — all real findings fixed
 - **RBAC/UI reviewer:** no hard bugs. Finding 1 (force-accept only surfaced the reviewer-gate
   wedge, not the blocked-packet/no-branch case the docstring claimed) → FIXED: GithubTrace now

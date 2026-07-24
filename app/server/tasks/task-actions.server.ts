@@ -25,7 +25,10 @@ import {
   isTerminalStage,
   type StageRoles,
 } from "~/shared/workflow/stage-roles";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import {
+  OPERATOR_AUDIT_ACTOR,
+  recordAudit,
+} from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
   encodeActorRef,
@@ -121,8 +124,10 @@ export function operatorShouldReactToReply(
   return true;
 }
 
-/** Audit actor for operator-performed mutations (no human user id). */
-export const OPERATOR_AUDIT_ACTOR = { userId: null, label: "operator" } as const;
+// Audit actor for operator-performed mutations — single-sourced in the audit
+// leaf module, imported above for local use and re-exported for the many
+// existing importers of task-actions.
+export { OPERATOR_AUDIT_ACTOR };
 
 /** Placeholder TaskActor the operator toolkit threads through the shared
  *  mutations; its user id is never read once `operatorAuthorized` is set (the
