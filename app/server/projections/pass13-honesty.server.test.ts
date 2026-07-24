@@ -74,12 +74,13 @@ describe("LV-20: waiting is normalized at the terminal stage", () => {
       packet: {
         type: "input",
         kind: "Completion report",
-        from: { kind: "operator" },
+        from: "operator",
         title: "Ready to accept",
         body: "Everything passed.",
         observations: [],
-        options: [{ kind: "accept_completion", t: "Accept", d: "Move to Done" }],
-        awaiting: null,
+        options: [
+          { kind: "accept_completion", t: "Accept", d: "Move to Done", rec: true },
+        ],
       },
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });

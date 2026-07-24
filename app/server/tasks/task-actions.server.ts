@@ -2155,8 +2155,23 @@ export async function clearWaitingToHuman(
   try {
     const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     if (!existing || existing.parsed.frontmatter.waiting !== "agent") return;
+    // P13-LV-20: a CLOSED task has no human decision left, but every operator
+    // turn settled to `human` anyway — so asking a Done task's operator "is
+    // anything still open?" permanently marked it as waiting on a decision, the
+    // board counted it, and the review queue (which filters on the review
+    // boundary) disagreed. Live-reproduced twice. A terminal-stage task with no
+    // open packet and no pending recommendation settles to `none`.
+    const fm = existing.parsed.frontmatter;
+    const { getProject } = await import("~/server/projections/board-query.server");
+    const stages = getProject(db, projectSlug)?.stages ?? [];
+    const settled =
+      isTerminalStage(fm.stage, stages) &&
+      !existing.parsed.packet &&
+      fm.recommendations.length === 0
+        ? "none"
+        : "human";
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      parsed.frontmatter.waiting = "human";
+      parsed.frontmatter.waiting = settled;
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
   } catch (error) {

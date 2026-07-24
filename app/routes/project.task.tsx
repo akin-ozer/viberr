@@ -186,6 +186,21 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
+    // UI-57: the task's GitHub card (branch / diff / commits / PR) is served
+    // from the SAME cached projection the GitHub page labels "Updated 3m ago /
+    // Not yet synced" — but here it carried no freshness cue at all, so stale
+    // state looked current. Ship the newest reconcile time for this task.
+    githubReconciledAt:
+      (
+        db
+          .prepare(
+            `SELECT MAX(observed_at) AS latest FROM provenance
+              WHERE action = 'github.reconcile' AND source_path = ?`,
+          )
+          .get(`projects/${params.slug}/tasks/${params.key}/task.md`) as
+          | { latest: string | null }
+          | undefined
+      )?.latest ?? null,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
     // UI-11: today this always resolves to `https://github.com` — nothing
     // stores a GHE API base URL — so the value is honest, but the "GHE
@@ -687,6 +702,7 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
       githubHost={loaderData.githubHost}
+      githubReconciledAt={loaderData.githubReconciledAt}
     />
   );
 }
