@@ -40,6 +40,16 @@ function renderInlineCode(text: string): ReactNode[] {
  * `OWNER null` at the human it was asking for a decision. Render the empty
  * cases as English; anything else passes through verbatim.
  */
+/**
+ * P13: the operator authors observation KEYS itself, and it writes machine-ish
+ * ones (`prompt_agent error`, `open packet`). The row uppercases them, so a
+ * live packet rendered "PROMPT_AGENT ERROR" at a human. Underscores become
+ * spaces; the CSS still does the uppercasing.
+ */
+export function observationLabel(key: string): string {
+  return key.replace(/_/g, " ").trim();
+}
+
 export function observationValue(key: string, value: string): string {
   const empty =
     value.trim() === "" ||
@@ -136,7 +146,7 @@ export function DecisionPacket({
             const value = observationValue(o.k, o.v);
             return (
               <div className="obs" key={i}>
-                <span className="k">{o.k}</span>
+                <span className="k">{observationLabel(o.k)}</span>
                 <span>{o.code ? <code>{value}</code> : value}</span>
               </div>
             );

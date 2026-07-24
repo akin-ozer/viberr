@@ -5,7 +5,7 @@ import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter } from "react-router";
-import { DecisionPacket } from "./decision-packet";
+import { DecisionPacket, observationLabel } from "./decision-packet";
 import { GithubTrace } from "./task-detail-page";
 import { ReleaseConfirm } from "./release-confirm";
 import { TimelineItem } from "./timeline";
@@ -1034,5 +1034,15 @@ describe("UI-41: the release dialog only offers members who can OWN a task", () 
     ];
     expect(chips.length).toBeGreaterThan(0);
     expect(chips.every((c) => c.disabled)).toBe(true);
+  });
+});
+
+/* ------------- packet observation key humanising (P13) ------------- */
+
+describe("observationLabel", () => {
+  it("turns the operator's machine-ish keys into readable ones", () => {
+    // Live packet rendered "PROMPT_AGENT ERROR" at a human (the row uppercases).
+    expect(observationLabel("prompt_agent error")).toBe("prompt agent error");
+    expect(observationLabel("stage")).toBe("stage");
   });
 });
