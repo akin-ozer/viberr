@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLocation, useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import {
   NotificationItem,
@@ -27,7 +28,7 @@ export function TopBell({
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
@@ -40,6 +41,21 @@ export function TopBell({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // The mark-all-read toast fires on the server RESULT, not on submit: the
+  // bell's fetcher also handles single-row reads, so a `wantAllRead` flag
+  // scopes the toast, and a failed POST (expired session/CSRF) reports the
+  // failure instead of a false success (P11-40).
+  const wantAllRead = useRef(false);
+  useFetcherResult(fetcher, (data) => {
+    if (!wantAllRead.current) return;
+    wantAllRead.current = false;
+    push(
+      data.ok
+        ? "All notifications marked read"
+        : (data.error ?? "Marking notifications read failed — try again"),
+    );
+  });
+
   const markRead = (ids: string[]) => {
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -51,8 +67,8 @@ export function TopBell({
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
+    wantAllRead.current = true;
     fetcher.submit(fd, { method: "post", action: "/notifications/read" });
-    push("All notifications marked read");
   };
 
   const openItem = (n: NotificationView) => {

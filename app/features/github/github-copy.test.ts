@@ -7,12 +7,12 @@ import {
 } from "./github-copy";
 
 describe("reconcile toast matrix", () => {
-  it("keeps the two verbatim spec strings", () => {
+  it("keeps the two verbatim strings (P11-14: 'Update status' wording)", () => {
     expect(RECONCILE_START_TOAST).toBe(
-      "Reconciling branches and PRs with GitHub…",
+      "Updating branch and PR status from GitHub…",
     );
     expect(RECONCILE_DONE_TOAST).toBe(
-      "Reconciled — every branch and PR maps to its task key",
+      "Status updated — every branch and PR maps to its task key",
     );
   });
 

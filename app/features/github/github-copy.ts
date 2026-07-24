@@ -9,9 +9,9 @@
  * copy authored here, flagged in the phase report.
  */
 
-export const RECONCILE_START_TOAST = "Reconciling branches and PRs with GitHub…";
+export const RECONCILE_START_TOAST = "Updating branch and PR status from GitHub…";
 export const RECONCILE_DONE_TOAST =
-  "Reconciled — every branch and PR maps to its task key";
+  "Status updated — every branch and PR maps to its task key";
 
 /** Input distilled from a ProjectReconcileSummary (server maps to this). */
 export interface ReconcileToastInput {

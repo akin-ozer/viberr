@@ -47,7 +47,11 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("open-review-pr", "Open the review pull request", ["agent"], "Repository & execution"),
   // Agent collaboration toggles (generic-agents G3/G4: gate the agent toolkit —
   // post_comment / ask_human / report_outcome — wired in the pipeline phase).
-  cap("comment-on-task", "Comment on the task", ["agent"], "Collaboration"),
+  // P11-29: this gates EXTRA mid-run commentary (the Claude `post_comment`
+  // tool), NOT whether the agent can reply — its final report always posts on
+  // both backends via the completion pipeline. Labelled precisely so withholding
+  // it doesn't read as "silences the agent".
+  cap("comment-on-task", "Post mid-run comments", ["agent"], "Collaboration"),
   cap("ask-human", "Ask the human a question", ["agent"], "Collaboration"),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.

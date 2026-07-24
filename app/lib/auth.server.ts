@@ -2,6 +2,7 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { DatabaseSync } from "node:sqlite";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
+import { hashPassword, verifyPassword } from "~/server/auth/password.server";
 import {
   clientIpOf,
   getLoginRateLimiter,
@@ -31,6 +32,31 @@ import { getDb } from "~/server/db/sqlite.server";
  */
 
 export const AUTH_BASE_PATH = "/api/auth";
+
+/**
+ * The ONLY Better Auth endpoints the app drives (P11-02) — everything else on
+ * the `/api/auth/*` splat is rejected with a 404. An allow-list, not a
+ * deny-list: Better Auth registers many more endpoints than the app uses
+ * (change-password, update-user, link-social, list-accounts, token …), and any
+ * of the account-mutating ones would bypass the app's own audited,
+ * session-revoking flows or split-brain the canonical `users` row. Enumerating
+ * the blocked set can silently rot as Better Auth adds endpoints; enumerating
+ * the driven set cannot.
+ *
+ * Entries are the endpoints' DECLARED paths (hooks receive `endpoint.path`
+ * verbatim, params un-substituted — hence the literal "/callback/:id").
+ * The hook pipeline also runs for server-side `auth.api.*` calls, so this list
+ * must cover those too: getSession (require-user) and signOut (logout).
+ * "/error" stays reachable because a failed OAuth callback redirects there.
+ */
+export const ALLOWED_AUTH_PATHS = new Set<string>([
+  "/sign-in/email", // app login form
+  "/sign-in/social", // OAuth start (login page buttons)
+  "/callback/:id", // OAuth provider redirect back
+  "/error", // Better Auth's OAuth-failure landing page
+  "/get-session", // session resolution (require-user, on every request)
+  "/sign-out", // logout route
+]);
 
 /** The concrete better-auth instance type (with our plugins). */
 export type ViberrAuth = ReturnType<typeof betterAuth>;
@@ -92,6 +118,20 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
       // No open registration — the whitelist provisions identities.
       disableSignUp: true,
       minPasswordLength: MIN_PASSWORD_LENGTH,
+      // Total hashing hooks (P11-01): a stored credential in a legacy/foreign
+      // format (e.g. the pre-better-auth `scrypt$N$r$p$salt$key` shape) makes
+      // Better Auth's built-in verifier THROW "Invalid password hash". Because
+      // `/api/auth/*` is a splat (routes/api.auth.$.ts), that throw surfaces as
+      // an unhandled 500 on a direct `POST /api/auth/sign-in/email`, and the
+      // account is effectively unrecoverable. Routing through the app's own
+      // wrappers makes verification TOTAL: `verifyPassword` catches any parse
+      // failure and returns false, so an unparseable hash reads as a wrong
+      // password (401) rather than a 500 — and hashing uses the exact same
+      // format everywhere.
+      password: {
+        hash: (password) => hashPassword(password),
+        verify: ({ hash, password }) => verifyPassword(password, hash),
+      },
     },
     rateLimit: {
       enabled: true,
@@ -138,6 +178,18 @@ export function buildAuthOptions(deps: AuthDeps): BetterAuthOptions {
        */
       before: createAuthMiddleware(async (ctx) => {
         const ip = clientIpOf(ctx.headers);
+        // P11-02: the `/api/auth/*` handler is a splat (routes/api.auth.$.ts), so
+        // EVERY built-in Better Auth endpoint would be reachable — including
+        // account mutations Viberr does NOT use because it owns those flows
+        // itself with auditing + session revocation (profile change-password,
+        // admin user-edit/reset). Left open, `/change-password` would bypass the
+        // app's audit + other-session kill, and `/update-user` would write
+        // Better Auth's `user.name` only, diverging from the canonical `users`
+        // row (split-brain). Only the endpoints the app actually drives pass;
+        // everything else 404s (see ALLOWED_AUTH_PATHS).
+        if (!ALLOWED_AUTH_PATHS.has(ctx.path)) {
+          throw new APIError("NOT_FOUND", { message: "Not found." });
+        }
         if (ctx.path === "/sign-in/email") {
           const email =
             typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";

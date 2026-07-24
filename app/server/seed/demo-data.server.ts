@@ -246,7 +246,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // and the master gate for ALL delivery (specialist-tool-policy.ts): with it
       // withheld, the fine-grained branch/commit/PR grants below are vetoed and the
       // developer silently delivers nothing (VIB-1 class). A deliverer MUST hold it.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Comment on the task", "Ask the human a question"],
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question"],
       recommend: ["Move the task to Review"],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
@@ -267,7 +267,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // The single quality specialist: reviews the diff AND authors/runs the
       // validation suite (the former Tester role is folded in here).
-      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Comment on the task", "Ask the human a question", "Report a validation verdict"],
+      direct: ["Read the repository & diff", "Run validation suites", "Author test cases", "Attach evidence references", "Post quality-flag events", "Post mid-run comments", "Ask the human a question", "Report a validation verdict"],
       recommend: ["Approve the review", "Request changes"],
       // The reviewer must NOT push/commit — use the exact catalog label so this
       // becomes a REAL `commit-push-branch: human` grant (D4) that the tool

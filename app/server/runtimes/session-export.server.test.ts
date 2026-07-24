@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resetEnvCacheForTests } from "../config/env.server";
-import { buildResumeScript, locateTranscript } from "./session-export.server";
+import {
+  buildResumeScript,
+  locateTranscript,
+  transcriptExists,
+} from "./session-export.server";
 
 /**
  * Session export: locate a provider transcript by session id (robust to the
@@ -93,6 +97,49 @@ describe("locateTranscript (codex)", () => {
 
   it("returns null when the sessions dir has no matching rollout", () => {
     expect(locateTranscript("codex", sid)).toBeNull();
+  });
+});
+
+describe("transcriptExists (loader-path probe)", () => {
+  it("claude: true only when the sid transcript file exists", () => {
+    const sid = "aaaa1111-ae14-41da-a8d9-f8c48b800605";
+    expect(transcriptExists("claude", "missing-claude-sid")).toBe(false);
+    expect(transcriptExists("claude", "")).toBe(false);
+    writeClaudeSession(sid, "/w/x", [{ type: "queue-operation", sessionId: sid }]);
+    expect(transcriptExists("claude", sid)).toBe(true);
+  });
+
+  it("codex: matches by FILENAME only — a content-only id is a conservative miss", () => {
+    const sid = "0199a2c4-7b31-7802-abcd-00000000ee01";
+    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "06");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-06T12-00-00-${sid}.jsonl`),
+      JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n",
+    );
+    expect(transcriptExists("codex", sid)).toBe(true);
+
+    // An id present ONLY inside file content (not the filename) is skipped by
+    // the probe (no file reads on a loader path) — the full locator still
+    // finds it for the one-shot export route.
+    const contentOnly = "0199a2c4-7b31-7802-abcd-00000000ee02";
+    writeFileSync(
+      path.join(dir, "rollout-2026-07-06T13-00-00-unrelated.jsonl"),
+      JSON.stringify({ type: "session_meta", payload: { id: contentOnly } }) + "\n",
+    );
+    expect(transcriptExists("codex", contentOnly)).toBe(false);
+    expect(locateTranscript("codex", contentOnly)).not.toBeNull();
+  });
+
+  it("caches within the TTL: a hit stays true after the file is deleted", () => {
+    const sid = "0199a2c4-7b31-7802-abcd-00000000ee03";
+    const dir = path.join(process.env.CODEX_HOME!, "sessions", "2026", "07", "07");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `rollout-2026-07-07T12-00-00-${sid}.jsonl`);
+    writeFileSync(file, "{}\n");
+    expect(transcriptExists("codex", sid)).toBe(true);
+    rmSync(file);
+    expect(transcriptExists("codex", sid)).toBe(true); // served from the cache
   });
 });
 

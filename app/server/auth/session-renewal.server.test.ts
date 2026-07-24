@@ -90,7 +90,7 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
 
     const result = (await rootLoader(cookie)) as {
       init?: { headers?: Headers };
-      data?: { user?: { id: string } | null };
+      data?: { theme?: string };
     };
 
     // A renewal is due, so the loader must return data() WITH headers rather
@@ -100,8 +100,9 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     const forwarded = new Headers(headers).getSetCookie();
     expect(forwarded.length).toBeGreaterThan(0);
     expect(forwarded.join("\n")).toContain("session_token");
-    // The payload itself is unchanged.
-    expect(result.data?.user?.id).toBe(ardaId);
+    // The payload itself is still present (P11-46 removed the unread `user`
+    // field; theme remains).
+    expect(result.data?.theme).toBeDefined();
   });
 
   it("a fresh session adds no headers (the common path stays a bare payload)", async () => {
@@ -111,12 +112,12 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
 
     const result = (await rootLoader(cookie)) as {
       init?: unknown;
-      user?: { id: string } | null;
+      theme?: string;
     };
 
     // Bare payload: no data() wrapper, so no stray Set-Cookie is written.
     expect(result.init).toBeUndefined();
-    expect(result.user?.id).toBe(ardaId);
+    expect(result.theme).toBeDefined();
   });
 
   it("the headers export surfaces loader headers for routes without their own", async () => {

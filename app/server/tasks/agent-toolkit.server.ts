@@ -20,7 +20,6 @@ import {
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
-  OPERATOR_AUDIT_ACTOR,
   notifyTaskWatchers,
   reprojectTask,
   taskRef,
@@ -95,9 +94,13 @@ export async function postAgentComment(
     });
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // P11-23: attribute the audit row to the AGENT that commented, not the
+  // operator. Auditing every mid-run agent comment under OPERATOR_AUDIT_ACTOR
+  // made actor-filtered audit views misreport agent comments as the operator's;
+  // the agent identity was only buried in `details.actorRef`.
   recordAudit(db, {
     action: "task.agent.commented",
-    actor: OPERATOR_AUDIT_ACTOR,
+    actor: { userId: null, label: encodeActorRef(input.actorRef) },
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -158,7 +161,8 @@ export async function openAgentQuestionPacket(
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.agent.packet_opened",
-    actor: OPERATOR_AUDIT_ACTOR,
+    // P11-23: the agent opened this question packet — attribute it to the agent.
+    actor: { userId: null, label: encodeActorRef(input.actorRef) },
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
@@ -284,7 +288,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .describe("One-paragraph justification (markdown allowed)."),
         },
         async (args) => {
-          stageOutcome(outcomeKey, {
+          stageOutcome(db, outcomeKey, {
             verdict: args.verdict,
             ...(args.summary ? { summary: prose(args.summary) } : {}),
           });

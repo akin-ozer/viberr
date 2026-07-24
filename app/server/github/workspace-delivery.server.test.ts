@@ -280,6 +280,30 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
+  it("P11-72: a task-branch with ZERO commits mints no work revision (empty diff isn't 'changed')", async () => {
+    const store = setupTask();
+    const workdir = makeWorkspaceRepo();
+
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir,
+      dataRoot: store.dataRoot,
+      backend: "codex",
+      role: "Developer",
+      // On the task branch, but the run produced NO commits ahead of base.
+      exec: fakeExec({ branch: BRANCH, commits: "" }),
+    });
+
+    expect(res.status).toBe("reconciled");
+    const fm = readFm(store).frontmatter;
+    // No delivered work → no revision, and validation stays "none" (not "changed").
+    expect(fm.workRevision).toBeNull();
+    expect(fm.validation).toBe("none");
+  });
+
   it("does not touch the branch when the workspace is on the default branch", async () => {
     const store = setupTask();
     const workdir = makeWorkspaceRepo();

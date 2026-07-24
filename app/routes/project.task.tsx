@@ -41,6 +41,14 @@ import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { runOperator } from "~/server/runtimes/operator-run.server";
+import {
+  isBackendAvailable,
+  type RealBackend,
+} from "~/server/runtimes/runtime-registry.server";
+import {
+  operatorBackendFor,
+  type OperatorAutonomy,
+} from "~/server/tasks/operator-actions.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
@@ -134,6 +142,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     tlDefault,
     runtime,
     deployedSpecialists,
+    // P11-76: the operator's configured backend so the run picker defaults to it.
+    operatorBackend: operatorBackendFor({}, params.slug),
+    // P11-41: which backends are actually configured, so the run picker can
+    // disable an option that would fail fast rather than offering it blindly.
+    backendAvailable: {
+      claude: isBackendAvailable("claude"),
+      codex: isBackendAvailable("codex"),
+    },
     deliveringActive,
     activeReviewerIds,
     mentionables,
@@ -207,9 +223,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+        const note = String(formData.get("note") ?? "").slice(0, 2000);
         const { option } = await resolvePacket(
           db,
-          { projectSlug, taskKey, optionIndex },
+          { projectSlug, taskKey, optionIndex, ...(note.trim() ? { note } : {}) },
           actor,
         );
         const toast =
@@ -457,17 +474,30 @@ export async function action({ request, params }: Route.ActionArgs) {
           actor,
           "run the operator",
         );
-        const backend =
-          String(formData.get("backend") ?? "claude") === "codex" ? "codex" : "claude";
-        const autonomy =
-          String(formData.get("autonomy") ?? "supervised") === "full"
+        // P11-76: only OVERRIDE the backend/autonomy when the form explicitly
+        // asks for one. An absent field must fall through to the operator
+        // profile's configured backend (resolveOperatorAuthority applies the
+        // deployment default) — a hardcoded "claude" default silently ran a
+        // Codex-configured operator on Claude.
+        const backendField = String(formData.get("backend") ?? "");
+        const backend: RealBackend | undefined =
+          backendField === "codex"
+            ? "codex"
+            : backendField === "claude"
+              ? "claude"
+              : undefined;
+        const autonomyField = String(formData.get("autonomy") ?? "");
+        const autonomy: OperatorAutonomy | undefined =
+          autonomyField === "full"
             ? "full"
-            : "supervised";
-        await runOperator(db, {
+            : autonomyField === "supervised"
+              ? "supervised"
+              : undefined;
+        const started = await runOperator(db, {
           projectSlug,
           taskKey,
-          backend,
-          autonomy,
+          ...(backend ? { backend } : {}),
+          ...(autonomy ? { autonomy } : {}),
           // Attribute the run to the human who pressed the button (D8) — the
           // operator's own actions are still audited as the operator, but the
           // "started a run" audit row names the maintainer who launched it.
@@ -476,7 +506,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Operator running · ${backend === "claude" ? "Claude Code" : "Codex"} · ${autonomy} autonomy`,
+          toast: `Operator running · ${started.backend === "claude" ? "Claude Code" : "Codex"} · ${started.autonomy} autonomy`,
         };
       }
       case "schedule-action": {
@@ -582,6 +612,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       task={loaderData.task}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
+      operatorBackend={loaderData.operatorBackend}
+      backendAvailable={loaderData.backendAvailable}
       deliveringActive={loaderData.deliveringActive}
       activeReviewerIds={loaderData.activeReviewerIds}
       timelineHasMore={loaderData.timelineHasMore}

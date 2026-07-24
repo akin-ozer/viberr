@@ -115,6 +115,15 @@ const envSchema = z.object({
   // container so the subscription auth (and its token refresh) persists.
   CODEX_HOME: z.string().optional(),
   VIBERR_CODEX_USE_CLI_AUTH: z.string().optional(),
+
+  // Optional runtime tuning knobs. Parsed as raw strings here (the call sites
+  // apply their own numeric coercion + fallback default); declaring them keeps
+  // the validated env surface complete instead of reading raw process.env.
+  //  - VIBERR_CLAUDE_MAX_TURNS: runaway turn cap for a Claude run (default 2000).
+  //  - VIBERR_CODEX_IDLE_TIMEOUT_MS: idle window before a Codex run is treated as
+  //    hung, in ms (default 15 minutes).
+  VIBERR_CLAUDE_MAX_TURNS: z.string().optional(),
+  VIBERR_CODEX_IDLE_TIMEOUT_MS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

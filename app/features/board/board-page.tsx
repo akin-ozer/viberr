@@ -785,12 +785,16 @@ export function BoardPage({
   orphanTasks,
   canCreate,
   canTransition,
+  canRescan,
 }: {
   columns: BoardColumnData[];
   orphanTasks: TaskSummary[];
   canCreate: boolean;
   /** admin|maintainer — enables the per-card stage-move dropdown. */
   canTransition: boolean;
+  /** Holders of `rescan-project` (admin|maintainer) — the server-checked gate
+   *  for Re-scan; kept distinct from canTransition so the two can't drift. */
+  canRescan: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -995,7 +999,7 @@ export function BoardPage({
         waitingHuman={waitingHuman}
         group={group}
         canCreate={canCreate}
-        canRescan={canTransition}
+        canRescan={canRescan}
         setParam={setParam}
         onRescan={rescan}
         onNew={() => setCreating(stages[0]?.id ?? "triage")}

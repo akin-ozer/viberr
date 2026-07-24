@@ -79,11 +79,34 @@ export interface TaskMutationContext {
     backend: RealBackend;
     autonomy: "supervised" | "full";
     reactDepth: number;
+    /** Consecutive operator-authored transition chain depth (see
+     *  OPERATOR_TRANSITION_CHAIN_CAP). Optional: only the operator drive sets
+     *  it; absent reads as 0. */
+    transitionDepth?: number;
   };
 }
 
 /** Hard cap on the operator's react re-invocation chain (runaway backstop). */
 const OPERATOR_REACT_DEPTH_CAP = 4;
+
+/**
+ * Hard cap on CONSECUTIVE operator-authored stage transitions (runaway
+ * backstop for the P11-70 every-transition re-trigger). Each link is a full
+ * LLM operator run, and the chain's normal termination — the operator reaches
+ * a stage where it deploys a specialist or opens a packet — is model behavior,
+ * not structure. A cyclic `auto` stage graph or a model bouncing a task
+ * between two stages it can transition would otherwise loop unbounded. Any
+ * human action or agent reply re-invokes the operator WITHOUT a threaded
+ * depth, which is what resets the chain; legitimate consecutive auto-boundary
+ * walks (Triage → Ready → In Progress) stay far under the cap.
+ */
+export const OPERATOR_TRANSITION_CHAIN_CAP = 8;
+
+/** Depth of the NEXT transition-chain link: a human-authored transition always
+ *  restarts at 0; an operator-authored one extends its drive's threaded depth. */
+export function nextTransitionChainDepth(ctx: TaskMutationContext): number {
+  return ctx.operatorAuthorized ? (ctx.operatorRun?.transitionDepth ?? 0) + 1 : 0;
+}
 
 /** Continue the operator loop only after a new, successful reply within its depth cap. */
 export function operatorShouldReactToReply(
@@ -536,6 +559,9 @@ async function autoInvokeOperator(
   projectSlug: string,
   taskKey: string,
   trigger: "create" | "transition" | "goal-updated",
+  /** Transition-chain depth to thread into the run (transition trigger only —
+   *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
+  transitionDepth?: number,
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -546,6 +572,7 @@ async function autoInvokeOperator(
       projectSlug,
       taskKey,
       trigger,
+      ...(transitionDepth !== undefined ? { transitionDepth } : {}),
       dataRoot: ctx.dataRoot,
     });
   } catch (error) {
@@ -1688,7 +1715,7 @@ export async function applyAgentCompletionEffects(
       // undeployed — defaults apply
     }
   }
-  const collab = resolveAgentCollab(grants, input.delivers);
+  const collab = resolveAgentCollab(grants);
   // F10-15 consistency: the REQUIRED-reviewer set (acceptanceBlockedReason /
   // requiredReviewers) is computed from the engagement's engage-time
   // `verdictCapable` snapshot. Verdict RECORDING must use the SAME source, or a
@@ -1708,7 +1735,7 @@ export async function applyAgentCompletionEffects(
     : collab.verdict;
   // Envelope: a Claude toolkit-staged outcome first; else a Codex
   // outputSchema reply (JSON) parsed from the stored full text.
-  let outcome = input.outcomeKey ? takeStagedOutcome(input.outcomeKey) : null;
+  let outcome = input.outcomeKey ? takeStagedOutcome(db, input.outcomeKey) : null;
   let replyText = fullText;
   if (!outcome && input.backend === "codex" && fullText) {
     const parsedEnvelope = parseAgentOutcomeJson(fullText);
@@ -1750,6 +1777,14 @@ export async function applyAgentCompletionEffects(
         );
       }
     }
+    // P11-26: question authority deliberately uses the LIVE ask grant, not the
+    // engage-time snapshot the verdict path uses. The snapshot exists ONLY for
+    // verdicts, where a live-grant read would let a removed grant leave a task
+    // permanently un-acceptable (a required reviewer that can approve but never
+    // record). A question is open-only — it never blocks acceptance — so there
+    // is no equivalent hazard, and honoring the current grant (an admin who just
+    // revoked ask-human means it now) is the correct behavior. The asymmetry is
+    // intentional, not an oversight.
     const question = collab.ask ? (outcome?.question ?? null) : null;
     await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
       actorRef,
@@ -2490,15 +2525,51 @@ export async function transitionStage(
   // Approving a requested transition resolves its approval notifications.
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
 
-  // A stage transition is a coordination trigger: when a NON-operator moves a
-  // task onto a new (non-Done) stage, hand off to the operator so it picks the
-  // task up at that stage and prompts the stage's agent (ADR-002 — one operator
-  // per active task). Operator-authored transitions are excluded: the operator's
-  // own run already coordinates the stages it moves through, so re-invoking it
-  // here would be redundant and could recurse. Fire-and-forget — it never blocks
-  // or fails the transition, and it is a no-op when no operator is deployed.
-  if (!ctx.operatorAuthorized && input.toStageId !== lastStageId) {
-    void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  // A stage transition is a coordination trigger: ANY move of a task onto a new
+  // (non-Done) stage hands off to the operator so it picks the task up AT THAT
+  // STAGE and does the stage-right thing (ADR-002 — one operator per active
+  // task). This includes the operator's OWN transitions: a single operator run
+  // may advance only one auto boundary (e.g. Triage → Ready) and stop, which
+  // used to strand the task at a pre-work stage with `waiting: human` and no
+  // packet (P11-70). `runOperator` holds a single-flight process lease per task
+  // and QUEUES a trigger that arrives mid-run (newest wins), firing it when the
+  // current drive ends; the chain normally terminates once the operator reaches
+  // a stage where it deploys a specialist and waits (a specialist run is not a
+  // transition) or opens a packet. That termination is model behavior, not
+  // structure — so consecutive OPERATOR-authored transitions also thread a
+  // depth (`transitionDepth`, the reactDepth idiom) and a hard cap turns a
+  // runaway transition loop into a stuck-loop packet instead of unbounded LLM
+  // spend. Any human or agent-reply trigger restarts the chain at 0.
+  // Fire-and-forget — it never blocks or fails the transition, and it is a
+  // no-op when no operator is deployed.
+  if (input.toStageId !== lastStageId) {
+    const chainDepth = nextTransitionChainDepth(ctx);
+    if (chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP) {
+      logger.warn(
+        "operator transition chain hit its depth cap — pausing auto-coordination",
+        { taskKey: input.taskKey, toStageId: input.toStageId, depth: chainDepth },
+      );
+      // Same escalation the react loop uses at ITS cap: a blocked packet a
+      // human resolves (best-effort — no-ops if one is already open). The
+      // resolution itself is the human action that restarts coordination.
+      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        agentHandle: "operator",
+        reason:
+          `The operator made ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive stage ` +
+          `transitions with no agent run or human action in between — a coordination loop.`,
+      });
+    } else {
+      void autoInvokeOperator(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "transition",
+        chainDepth,
+      );
+    }
   }
 
   // Delivery spine (FR31): entering the REVIEW stage is the point a PR is
@@ -2515,6 +2586,38 @@ export async function transitionStage(
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
 }
 
+/**
+ * Whether the server-owned Review push may commit+push the delivering profile's
+ * workspace (F10-03). Resolves the DELIVERING profile's `execute-code-or-write-repo`
+ * authorization; a withheld grant → false. P11-13: when a deliverer is NAMED but
+ * its profile can no longer be resolved (undeployed between the run and Review),
+ * fall back CONSERVATIVE (false) — never push a workspace whose grant we can't
+ * confirm. Only a task with NO deliverer at all (no grant to enforce) is
+ * permissive. Extracted + exported so the guard is unit-tested directly.
+ */
+export async function resolveDeliveryPushGrant(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<boolean> {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const deliverer = file ? deliveringEngagement(file.parsed.frontmatter) : null;
+  if (!deliverer) return true; // no grant to enforce
+  try {
+    const { resolveDeployedSpecialist } = await import(
+      "~/server/tasks/specialist-run.server"
+    );
+    const { resolveDeliveryPermissions } = await import(
+      "~/server/tasks/specialist-tool-policy"
+    );
+    const resolved = resolveDeployedSpecialist(ctx, projectSlug, deliverer.profileId);
+    return resolveDeliveryPermissions(resolved.capabilities).canCommitPush;
+  } catch {
+    // Known deliverer, unresolvable grant → conservative deny.
+    return false;
+  }
+}
+
 /** Push and open the review PR without letting GitHub failure break the transition. */
 async function openReviewPrBestEffort(
   db: DatabaseSync,
@@ -2525,36 +2628,7 @@ async function openReviewPrBestEffort(
 ): Promise<void> {
   const dataCtx = { dataRoot: ctx.dataRoot };
   try {
-    // F10-03: resolve the DELIVERING profile's repo-write authorization so the
-    // server-owned push honors it. A profile whose `execute-code-or-write-repo`
-    // grant is withheld must not have its workspace staged/committed/pushed.
-    let canCommitPush = true;
-    try {
-      const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-      const deliverer = file
-        ? deliveringEngagement(file.parsed.frontmatter)
-        : null;
-      if (deliverer) {
-        const { resolveDeployedSpecialist } = await import(
-          "~/server/tasks/specialist-run.server"
-        );
-        const { resolveDeliveryPermissions } = await import(
-          "~/server/tasks/specialist-tool-policy"
-        );
-        const resolved = resolveDeployedSpecialist(
-          ctx,
-          projectSlug,
-          deliverer.profileId,
-        );
-        canCommitPush = resolveDeliveryPermissions(
-          resolved.capabilities,
-        ).canCommitPush;
-      }
-    } catch {
-      // Undeployed profile / resolution failure: fall back to permissive — the
-      // deliverer already ran and the common case is a granted profile.
-      canCommitPush = true;
-    }
+    const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
     // 1. Push the workspace commits to the remote task branch (best-effort).
     const { pushWorkspaceBranch } = await import(
@@ -2574,6 +2648,75 @@ async function openReviewPrBestEffort(
       });
     }
 
+    // P11-12: a capability-policy refusal is NOT an empty delivery — surface it
+    // as its own signal so a human sees the branch was blocked, not stalled.
+    if (push.status === "grant_withheld") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery withheld by policy",
+        `${taskKey} reached Review but its delivering agent's repo-write capability is ` +
+          `withheld, so its workspace branch was not pushed. Grant the capability or ` +
+          `deliver the change by hand before accepting.`,
+      );
+      return;
+    }
+
+    // P11-11: a push that FAILED (bad/absent credential, non-zero git push) can
+    // leave the remote carrying stale or partial content while the PR still
+    // opens over it — a silent "newest work is missing" hazard. Surface it.
+    if (push.status === "push_failed" || push.status === "no_pat") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push failed",
+        `${taskKey} reached Review but pushing its execution branch failed (${push.status}). ` +
+          `Any review PR may not reflect the newest commits — check the credential and re-scan.`,
+      );
+      // Still attempt the PR below (a prior push may carry earlier content), now
+      // that the failure is visible.
+    }
+
+    // P11-10: `pushed` means the push may have AUTO-COMMITTED an uncommitted
+    // working tree just now (push-workspace.server), so the remote head can
+    // postdate the workRevision minted at run completion — reviewer verdicts
+    // would bind to a stale sha. Re-reconcile the workspace so the revision
+    // reflects exactly what the PR delivers. Best-effort; never blocks the PR.
+    if (push.status === "pushed") {
+      try {
+        const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+        const deliverer = file
+          ? deliveringEngagement(file.parsed.frontmatter)
+          : null;
+        if (deliverer) {
+          const { reconcileWorkspaceDelivery } = await import(
+            "~/server/github/workspace-delivery.server"
+          );
+          await reconcileWorkspaceDelivery({
+            db,
+            projectSlug,
+            taskKey,
+            profileId: deliverer.profileId,
+            ...(deliverer.backend ? { backend: deliverer.backend } : {}),
+            ...(deliverer.role ? { role: deliverer.role } : {}),
+            ...dataCtx,
+          });
+        }
+      } catch (reconcileErr) {
+        logger.warn("post-push delivery reconcile failed (best-effort)", {
+          taskKey,
+          err:
+            reconcileErr instanceof Error
+              ? reconcileErr
+              : new Error(String(reconcileErr)),
+        });
+      }
+    }
+
     // 2. Open (or reuse) the review PR now that the remote carries the diff.
     const { openTaskPr } = await import("~/server/github/pr-open.server");
     const result = await openTaskPr(
@@ -2586,47 +2729,71 @@ async function openReviewPrBestEffort(
     logger.info("review PR not opened", { taskKey, reason: result.status });
 
     // 3. An empty-diff branch (nothing_to_review) that ALSO had no local commits
-    //    to push means the delivery produced no change — make that visible to a
-    //    human rather than silently stalling at Review with no PR.
-    if (result.status === "nothing_to_review") {
-      try {
-        await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "github",
-            actor: { kind: "system", systemId: "delivery" },
-            title: null,
-            text:
-              "No review pull request could be opened — the execution branch has no " +
-              "commits ahead of the default branch. The delivery may have produced no " +
-              "change, or the commits never reached the remote.",
-            toAgent: false,
-            evidence: null,
-          });
-        });
-        reprojectTask(db, ctx, projectSlug, taskKey);
-        notifyTaskWatchers(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            kind: "policy",
-            title: "Review has no PR",
-            text: `${taskKey} reached Review but its branch has no diff — no PR was opened.`,
-          },
-          ctx,
-        );
-      } catch (surfaceErr) {
-        logger.warn("failed to surface empty-diff review", {
-          taskKey,
-          err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
-        });
-      }
+    //    to push means the delivery produced no change — but only when the push
+    //    itself did not already explain WHY (a withheld grant / failed push was
+    //    surfaced above with a precise reason). Avoid a misleading "no change"
+    //    message on top of a policy refusal or push failure (P11-12/P11-11).
+    if (
+      result.status === "nothing_to_review" &&
+      push.status !== "push_failed" &&
+      push.status !== "no_pat"
+    ) {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Review has no PR",
+        "No review pull request could be opened — the execution branch has no " +
+          "commits ahead of the default branch. The delivery may have produced no " +
+          "change, or the commits never reached the remote.",
+      );
     }
   } catch (error) {
     logger.warn("review PR open failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Surface a delivery-stage signal as a timeline event + watcher notification
+ * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
+ * something a human must see, not just a log line. Best-effort — a failure to
+ * surface only logs.
+ */
+async function surfaceDeliveryEvent(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  title: string,
+  text: string,
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    notifyTaskWatchers(
+      db,
+      { projectSlug, taskKey, kind: "policy", title, text },
+      ctx,
+    );
+  } catch (surfaceErr) {
+    logger.warn("failed to surface delivery event", {
+      taskKey,
+      title,
+      err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
     });
   }
 }
@@ -2769,7 +2936,15 @@ export function packetIdentity(p: TaskPacket): string {
 
 export async function resolvePacket(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; optionIndex: number },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    optionIndex: number;
+    /** P11-71: optional free-text the human types when resolving — recorded on
+     *  the decision event so an option that asks for input ("specify the
+     *  expected behavior", "which target") actually has a channel to carry it. */
+    note?: string;
+  },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<{ task: TaskSummary; option: PacketOption }> {
@@ -3002,7 +3177,14 @@ export async function resolvePacket(
     if (option.kind === "edit_goal" && parsed.packet) {
       parsed.packet.awaiting = "goal_edit";
     }
-    parsed.timeline.unshift(event);
+    // P11-71: carry the human's free-text into the recorded decision so an
+    // option that asked for input isn't resolved with an unstated reading — the
+    // operator (and reviewers reading the timeline) see exactly what was said.
+    const note = input.note?.trim();
+    const eventWithNote = note
+      ? { ...event, text: `${event.text}\n\n> ${note.replace(/\n/g, "\n> ")}` }
+      : event;
+    parsed.timeline.unshift(eventWithNote);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 

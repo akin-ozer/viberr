@@ -103,7 +103,7 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
       <div className="field">
         <span className="flabel">Re-index</span>
         <span className="mini-seg" style={{ alignSelf: "flex-start" }}>
-          {(["manual", "on change", "nightly"] as const).map((r) => (
+          {(["on change", "manual"] as const).map((r) => (
             <button type="button" key={r} className={refresh === r ? "on" : ""} onClick={() => setRefresh(r)}>
               {r}
             </button>
@@ -113,8 +113,9 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
           <Icon name="file" />
           <span>
             Content is plain files inside the folder — inspectable and editable outside
-            Viberr. Agents always read the live folder at run time; this only sets how
-            often the browsed doc count is re-scanned.
+            Viberr. Agents always read the live folder at run time. <strong>On change</strong>{" "}
+            re-scans the doc count automatically whenever a file in the folder changes;{" "}
+            <strong>manual</strong> only re-scans when you click re-scan.
           </span>
         </div>
       </div>
@@ -375,7 +376,18 @@ function AgentModal({
     initial ? initial.backend : "codex",
   );
   const [summary, setSummary] = useState(initial ? initial.summary : "");
-  const [selStages, setSelStages] = useState<string[]>(initial ? initial.stages : ["impl"]);
+  // P11-47: default a new profile's eligible stages to a real work stage that
+  // exists, not a hardcoded "impl" that silently references nothing if the org
+  // stage template renames/removes it. Prefer a stage literally named "impl",
+  // else the middle non-terminal stage, else the first.
+  const workStages = stages.filter((s) => s.id !== "done");
+  const defaultStage =
+    workStages.find((s) => s.id === "impl")?.id ??
+    workStages[Math.floor(workStages.length / 2)]?.id ??
+    workStages[0]?.id;
+  const [selStages, setSelStages] = useState<string[]>(
+    initial ? initial.stages : defaultStage ? [defaultStage] : [],
+  );
   const [selSkills, setSelSkills] = useState<string[]>(
     initial ? match(initial.skills, skillNames) : [],
   );

@@ -165,7 +165,8 @@ export async function cancelScheduledAction(
     const target = parsed.frontmatter.schedules.find((s) => s.id === input.scheduleId);
     if (!target || target.status !== "pending") return; // gone or already resolved
     target.status = "cancelled";
-    target.firedAt = new Date().toISOString();
+    // P11-75: a cancelled schedule was never fired — leave firedAt null rather
+    // than stamping cancel time into a field that means "when the run fired".
     cancelled = true;
     parsed.timeline.unshift(
       scheduleEvent(

@@ -8,12 +8,20 @@ import type { ActorRender } from "./actor.server";
  * project exists locally.
  */
 
-export type NotificationKind =
-  | "packet"
-  | "approval"
-  | "mention"
-  | "quality"
-  | "policy";
+/**
+ * The notification kinds — the SINGLE source (P11-54). The `notifications.kind`
+ * CHECK in db/migrations/0001_baseline.sql must list exactly these; a test
+ * (notification.server.test.ts) pins the two together so adding a kind here
+ * without the migration (or vice-versa) fails CI instead of at INSERT time.
+ */
+export const NOTIFICATION_KINDS = [
+  "packet",
+  "approval",
+  "mention",
+  "quality",
+  "policy",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 export interface NotificationRow {
   id: string;

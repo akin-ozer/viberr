@@ -78,6 +78,10 @@ export interface OperatorAuthority {
   skills: string[];
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
+  /** The deployment's persona override (P11-21) — when a project edits the
+   *  operator's persona in the UI, the run uses it in place of the shipped
+   *  operator definition. `null` falls back to the shipped/baked persona. */
+  persona: string | null;
   /** false when no operator profile is deployed in the project. */
   deployed: boolean;
 }
@@ -107,6 +111,31 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
  * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
  * (the task-detail operator panel) without rewriting the deployment.
  */
+/**
+ * The operator deployment's configured backend for a project (P11-76) — a cheap
+ * read for the UI so the "Run operator" backend picker defaults to what the
+ * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
+ * when no operator is deployed (the same default the run path uses).
+ */
+export function operatorBackendFor(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): RealBackend {
+  try {
+    const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const deployment = file?.parsed.frontmatter.agents.find(
+      (a) => effectiveProfileView(a, ctx.dataRoot).kind === "operator",
+    );
+    if (!deployment) return "claude";
+    const view = effectiveProfileView(deployment, ctx.dataRoot);
+    return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
+      ? "codex"
+      : "claude";
+  } catch {
+    return "claude";
+  }
+}
+
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -133,6 +162,7 @@ export function resolveOperatorAuthority(
       name: "Operator",
       skills: [],
       kb: [],
+      persona: null,
       deployed: false,
     };
   }
@@ -167,6 +197,10 @@ export function resolveOperatorAuthority(
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],
+    persona:
+      isRecord(definition) && typeof definition.persona === "string"
+        ? definition.persona.trim() || null
+        : null,
     deployed: true,
   };
 }
@@ -1326,7 +1360,28 @@ export async function operatorRunAgent(
     input.delivers,
   );
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
-  if (delivers) return operatorRunSpecialist(db, ctx, base, authority);
+  if (delivers) {
+    // P11-22: a delivering run always runs the CURRENT deliverer
+    // (operatorRunSpecialist ignores profileId). If the plan names a specific
+    // profileId that is NOT the current deliverer, DON'T silently run the wrong
+    // agent — refuse and point the operator at engage_agent to change who
+    // delivers (the single-deliverer invariant means only one can).
+    if (input.profileId) {
+      const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+      const current = file
+        ? deliveringEngagement(file.parsed.frontmatter)?.profileId ?? null
+        : null;
+      if (current && current !== input.profileId) {
+        return {
+          outcome: "denied",
+          message:
+            `"${input.profileId}" is not the delivering agent ("${current}" is). ` +
+            "Engage it as the deliverer first if you want it to deliver — a delivering run always runs the current deliverer.",
+        };
+      }
+    }
+    return operatorRunSpecialist(db, ctx, base, authority);
+  }
   if (!input.profileId) {
     return {
       outcome: "denied",

@@ -22,8 +22,9 @@ import { newId } from "~/shared/ids/new-id.server";
  * task.md is the caller's job (github-reconciler / pat-validator grant
  * flow) so file writes stay in the github/secrets layer.
  *
- * Migration 0005 seeds the mock's VIB-142 `pull_request:write` violation
- * as an open row, so a fresh database renders the mock's rail badge (1).
+ * No violation is seeded: the squashed baseline (db/migrations/0001_baseline.sql)
+ * carries no scope_violations rows, so a fresh database starts with an empty
+ * rail badge; violations are opened at runtime by the callers above.
  */
 
 export type ScopeViolationStatus = "open" | "resolved";

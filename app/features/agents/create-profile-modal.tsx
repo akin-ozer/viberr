@@ -401,12 +401,14 @@ function StagesField({
 
 function DefinitionField({
   uid,
+  isOperator,
   definition,
   setDefinition,
   persona,
   setPersona,
 }: {
   uid: string;
+  isOperator: boolean;
   definition: string;
   setDefinition: (v: string) => void;
   persona: string;
@@ -418,8 +420,9 @@ function DefinitionField({
         <label className="flabel" htmlFor={`${uid}-definition`}>
           Description
           <span className="fhint">
-            one short paragraph — the OPERATOR reads this to pick the right
-            agent for a task
+            {isOperator
+              ? "one short paragraph — a human-readable summary of this operator"
+              : "one short paragraph — the OPERATOR reads this to pick the right agent for a task"}
           </span>
         </label>
         <textarea
@@ -434,8 +437,9 @@ function DefinitionField({
         <label className="flabel" htmlFor={`${uid}-persona`}>
           Persona / instructions
           <span className="fhint">
-            the agent's working instructions — injected as its system prompt on
-            every run; markdown ok
+            {isOperator
+              ? "extra operator guidance — appended to the built-in operator manual on every run; markdown ok"
+              : "the agent's working instructions — injected as its system prompt on every run; markdown ok"}
           </span>
         </label>
         <textarea
@@ -882,6 +886,7 @@ export function CreateProfileModal({
 
         <DefinitionField
           uid={uid}
+          isOperator={isOperator}
           definition={definition}
           setDefinition={setDefinition}
           persona={persona}

@@ -387,11 +387,9 @@ function TaskHero({
         </span>
       </div>
       {editing ? (
-        <goalFetcher.Form
-          method="post"
-          className="goal-edit"
-          onSubmit={() => setEditing(true)}
-        >
+        <goalFetcher.Form method="post" className="goal-edit">
+          {/* P11-47: the editor is already open (`editing` is true here); the
+              old onSubmit re-set it to true, a no-op leftover — removed. */}
           <input type="hidden" name="intent" value="update-goal" />
           <input type="hidden" name="_csrf" value={csrf} />
           <textarea
@@ -629,6 +627,8 @@ function ExecutionSection({
   onOwner,
   onRelease,
   deployedSpecialists,
+  operatorBackend,
+  backendAvailable,
   canRunAgents,
   deliveringActive,
   activeReviewerIds,
@@ -642,6 +642,8 @@ function ExecutionSection({
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   onRelease: () => void;
   deployedSpecialists: DeployedSpecialistView[];
+  operatorBackend: "claude" | "codex";
+  backendAvailable: { claude: boolean; codex: boolean };
   canRunAgents: boolean;
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
@@ -732,6 +734,8 @@ function ExecutionSection({
       onOwner={onOwner}
       onRelease={onRelease}
       deployedSpecialists={deployedSpecialists}
+      operatorBackend={operatorBackend}
+      backendAvailable={backendAvailable}
       canRunAgents={canRunAgents}
       deliveringActive={deliveringActive}
       activeReviewerIds={activeReviewerIds}
@@ -1014,6 +1018,8 @@ export function TaskDetailPage({
   task,
   runtime,
   deployedSpecialists,
+  operatorBackend,
+  backendAvailable,
   deliveringActive,
   activeReviewerIds,
   timelineHasMore,
@@ -1034,6 +1040,10 @@ export function TaskDetailPage({
   runtime: RunView[];
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** The operator's configured backend — the run picker's default (P11-76). */
+  operatorBackend: "claude" | "codex";
+  /** P11-41: which backends are configured, for the run picker. */
+  backendAvailable: { claude: boolean; codex: boolean };
   /** A DELIVERING run is active — disables the delivering Run button (F10-04). */
   deliveringActive: boolean;
   /** Reviewer profile ids with an active run — disables only that reviewer. */
@@ -1157,12 +1167,13 @@ export function TaskDetailPage({
     ownerFetcher.submit(fd, { method: "post" });
   };
 
-  const onResolve = (optionIndex: number) => {
+  const onResolve = (optionIndex: number, note = "") => {
     if (resolveBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "resolve-packet");
     fd.set("option", String(optionIndex));
+    if (note.trim()) fd.set("note", note);
     resolveFetcher.submit(fd, { method: "post" });
   };
 
@@ -1225,6 +1236,8 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           deployedSpecialists={deployedSpecialists}
+          operatorBackend={operatorBackend}
+          backendAvailable={backendAvailable}
           canRunAgents={canRunAgents}
           deliveringActive={deliveringActive}
           activeReviewerIds={activeReviewerIds}

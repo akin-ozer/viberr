@@ -105,7 +105,29 @@ describe("DecisionPacket", () => {
     fireEvent.click(radios[1]!);
     expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(primary);
-    expect(onResolve).toHaveBeenCalledWith(1);
+    // P11-71: resolve carries the (optional, here empty) note as a second arg.
+    expect(onResolve).toHaveBeenCalledWith(1, "");
+  });
+
+  it("P11-71: passes a typed note to onResolve", () => {
+    const onResolve = vi.fn();
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+    const note = container.querySelector<HTMLTextAreaElement>("textarea.packet-note")!;
+    fireEvent.change(note, { target: { value: "Gate the /health/scripts route" } });
+    fireEvent.click(container.querySelector(".packet-actions .btn.primary")!);
+    expect(onResolve).toHaveBeenCalledWith(
+      expect.any(Number),
+      "Gate the /health/scripts route",
+    );
   });
 
   it("blocked packets tint blocked; no rec → first option preselected; Ask fires", () => {
@@ -434,6 +456,8 @@ function renderExec(task: TaskSummary, props: Partial<Record<string, unknown>> =
         onOwner={() => {}}
         onRelease={() => {}}
         deployedSpecialists={deployedFixture}
+        operatorBackend="claude"
+        backendAvailable={{ claude: true, codex: true }}
         canRunAgents
         deliveringActive={false}
         activeReviewerIds={[]}
@@ -569,6 +593,23 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     );
     expect(container.textContent).toContain("task closed");
     expect(container.textContent).not.toContain("operator active");
+  });
+
+  it("P11-41: the operator backend picker disables an unconfigured backend and defaults to an available one", () => {
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "codex", // configured backend...
+      backendAvailable: { claude: true, codex: false }, // ...but NOT available
+    });
+    const sel = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Operator backend"]',
+    )!;
+    const codexOpt = Array.from(sel.options).find((o) => o.value === "codex")!;
+    const claudeOpt = Array.from(sel.options).find((o) => o.value === "claude")!;
+    expect(codexOpt.disabled).toBe(true);
+    expect(codexOpt.textContent).toContain("not configured");
+    expect(claudeOpt.disabled).toBe(false);
+    // Defaults to the available backend, not the unconfigured configured one.
+    expect(sel.value).toBe("claude");
   });
 });
 

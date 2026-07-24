@@ -14,6 +14,7 @@ import {
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
+import { resetEnvCacheForTests } from "../config/env.server";
 
 function asSdkEvents(
   events: AsyncGenerator<unknown, void>,
@@ -550,13 +551,15 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
     // Let it start, then interrupt mid-stream.
     await new Promise((r) => setTimeout(r, 1));
-    handle.interrupt("u1", "arda");
+    handle.interrupt();
     await drain();
     expect(exit).toMatchObject({ outcome: "interrupted" });
   });
 
   it("idle-timeout settles error (not interrupted) on a hung stream (A8)", async () => {
     process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS = "20"; // 20ms idle window
+    // codexIdleTimeoutMs now reads the cached validated env, so re-parse it.
+    resetEnvCacheForTests();
     try {
       // A stream whose first event lands, then it hangs (never yields again,
       // never turn.completes). The idle timer must abort → outcome "error".
@@ -587,6 +590,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
       expect(exit).toMatchObject({ outcome: "error" });
     } finally {
       delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+      resetEnvCacheForTests();
     }
   });
 });

@@ -18,6 +18,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { logger } from "~/server/logging/logger.server";
 import {
   isSecretBox,
   openSecret,
@@ -133,8 +134,14 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 
 // ------------------------------------------------------- knowledge bases
 
-export const KB_REFRESH_MODES = ["manual", "on change", "nightly"] as const;
+// R-D (P11-60): "on change" is now REAL — the file watcher re-indexes a KB when
+// its store files change, the same mechanism the rest of the store uses. The
+// old "nightly" mode was decorative (nothing ever scheduled it) and is removed;
+// a KB is either watcher-driven ("on change", the default) or pinned to explicit
+// re-scans only ("manual").
+export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
+export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
 
 export interface KbView {
   id: string;
@@ -363,6 +370,33 @@ export function reindexKnowledgeBase(
   };
 }
 
+/**
+ * Watcher-driven re-index (R-D): a KB's store files changed on disk, so re-scan
+ * that KB by its `dir`. Only KBs in "on change" mode are auto-re-indexed — a KB
+ * pinned to "manual" is left for the explicit re-scan button. Returns the new
+ * doc count, or null when the dir has no metadata row, no longer exists, or is
+ * pinned manual. Best-effort: never throws (the caller is a file-watch handler).
+ */
+export function reindexKnowledgeBaseByDir(
+  db: DatabaseSync,
+  dir: string,
+  ctx: OrgSeedContext = {},
+): { name: string; docCount: number } | null {
+  const row = db
+    .prepare(`SELECT id, name, refresh FROM org_knowledge_bases WHERE dir = ?`)
+    .get(dir) as { id: string; name: string; refresh: string } | undefined;
+  if (!row) return null;
+  if (row.refresh === "manual") return null;
+  const abs = kbDirPath(dir, ctx.dataRoot);
+  if (!existsSync(abs)) return null;
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(now, now, row.id);
+  const tree = scanStoreTree(abs);
+  return { name: row.name, docCount: countKbFiles(tree) };
+}
+
 // ------------------------------------------------------------ MCP servers
 
 export interface McpView {
@@ -420,10 +454,25 @@ export function getMcpCredential(
   const row = db
     .prepare(`SELECT cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { cred_ref: string | null } | undefined;
-  if (!row?.cred_ref || !isSecretBox(row.cred_ref)) return null;
+  if (!row?.cred_ref) return null;
+  // P11-61: a cred_ref is PRESENT but unusable — a legacy/non-secret-box value,
+  // or a sealed secret that no longer opens (the encryption key was rotated).
+  // The run degrades to no-auth, which is safe, but doing so SILENTLY hid a
+  // misconfigured integration. Warn so an operator can diagnose why an MCP that
+  // "has a credential" is being called unauthenticated.
+  if (!isSecretBox(row.cred_ref)) {
+    logger.warn("mcp credential is in a legacy/unreadable format — running no-auth", {
+      mcp: name,
+    });
+    return null;
+  }
   try {
     return openSecret(row.cred_ref);
-  } catch {
+  } catch (error) {
+    logger.warn("mcp credential failed to decrypt (rotated key?) — running no-auth", {
+      mcp: name,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
     return null;
   }
 }

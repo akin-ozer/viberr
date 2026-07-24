@@ -588,7 +588,7 @@ export function interruptRun(
   const state = getState();
   const handle = state.handles.get(input.runId);
   if (handle) {
-    handle.interrupt(actor.userId, actor.label);
+    handle.interrupt();
     state.handles.delete(input.runId);
     // The adapter's onExit → sink.finalize sets the interrupted state; stamp
     // the interrupter here so it lands regardless of the adapter's timing.

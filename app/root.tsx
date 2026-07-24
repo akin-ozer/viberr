@@ -54,7 +54,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   const payload = {
     theme,
     motion,
-    user: auth?.user ?? null,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
   // Forward ONLY the renewal Set-Cookie(s) — never clobber other headers. Most

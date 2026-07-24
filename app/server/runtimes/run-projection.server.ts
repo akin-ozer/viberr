@@ -6,6 +6,7 @@ import {
 } from "~/features/runtime/runtime-types";
 import { findUserById } from "~/server/auth/user-store.server";
 import { listRunLines, listRunsForTaskRows, type AgentRunRow } from "./run-store.server";
+import { transcriptExists } from "./session-export.server";
 
 /**
  * Projects agent_runs rows (+ their log lines) into the `RunView[]` the
@@ -144,6 +145,15 @@ function projectRow(
     sdk: row.sdk || SDK_LABEL[backend] || "",
     model: row.model,
     sid: row.session_id,
+    // P11-43: the Export link 404s when the provider kept no on-disk transcript.
+    // Compute REAL exportability here (does the transcript actually exist?) so
+    // the UI only offers Export when it will produce a file, not whenever a
+    // session id is present. `transcriptExists` is the cheap cached probe —
+    // never the full locator, which reads whole files and is too heavy per run
+    // row on a loader path.
+    exportable: row.session_id
+      ? transcriptExists(backend, row.session_id)
+      : false,
     state: renderStateOf(row.state, finished),
     lifecycle: row.state,
     interruptedBy,

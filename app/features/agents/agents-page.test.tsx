@@ -268,6 +268,24 @@ describe("LiveRoster", () => {
     const { getByText } = render(<LiveRoster deployments={[]} onOpen={() => {}} />);
     expect(getByText("No agents are currently engaged.")).toBeTruthy();
   });
+
+  it("P11-42: resolves a display name from nameById, falling back to the raw profileId", () => {
+    const rows = [
+      mkDeployment({ taskKey: "VIB-1", engagement: "primary", profileId: "docs-writer", status: "working" }),
+      mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", profileId: "orphan", status: "on call" }),
+    ];
+    const { container } = render(
+      <LiveRoster
+        deployments={rows}
+        onOpen={() => {}}
+        nameById={{ "docs-writer": "Docs Writer" }}
+      />,
+    );
+    const names = Array.from(container.querySelectorAll(".live-name")).map((n) => n.textContent);
+    expect(names).toContain("Docs Writer"); // resolved
+    expect(names).toContain("orphan"); // no mapping → raw id fallback
+    expect(names).not.toContain("docs-writer"); // never the raw slug when mapped
+  });
 });
 
 describe("CapabilityMatrixModal", () => {

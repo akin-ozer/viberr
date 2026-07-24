@@ -1,4 +1,5 @@
 import { useFetcher, useNavigate } from "react-router";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -343,7 +344,7 @@ export function GithubViewPage({
 
   // Grant scope stays a governed credential action (conventions: PAT/policy
   // changes are admin-shaped; project roles admin|maintainer hold it).
-  const canGrant = myRole === "admin" || myRole === "maintainer";
+  const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
   // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".
@@ -424,31 +425,31 @@ export function GithubViewPage({
           </div>
         </div>
         <div className="board-tools">
-          {/* F10-28: GitHub state is served from cache + the last MANUAL
-              reconcile (no scheduled sync). Show how fresh it is so stale state
-              can't look current. */}
+          {/* P11-14: GitHub state is served from cache; a background poller
+              refreshes it every 5 minutes, and "Update status" refreshes it now.
+              Show how fresh it is so stale state can't look current. */}
           <span
             className={"gh-freshness" + (data.reconcile.stale ? " stale" : "")}
             title={
               data.reconcile.at
-                ? "Branch/PR state reflects the last manual reconcile — click Reconcile to refresh."
-                : "Branch/PR state has never been reconciled with GitHub."
+                ? "Branch/PR state auto-refreshes every 5 minutes — click Update status to refresh now."
+                : "Branch/PR state has not been synced with GitHub yet."
             }
           >
             <Icon name={data.reconcile.stale ? "alert" : "clock"} />
             {data.reconcile.at
-              ? `Reconciled ${data.reconcile.label}`
-              : "Never reconciled"}
+              ? `Updated ${data.reconcile.label}`
+              : "Not yet synced"}
           </span>
           <button
             type="button"
             className="btn ghost sm"
             onClick={reconcile}
             disabled={busy}
-            title="Reconcile task state with GitHub"
+            title="Update branch/PR status from GitHub now"
           >
             <Icon name="refresh" />
-            Reconcile
+            Update status
           </button>
           {data.project.repo && (
             <a

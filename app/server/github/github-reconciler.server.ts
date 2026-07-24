@@ -26,6 +26,7 @@ import {
   type BranchCompare,
   type BranchSyncState,
 } from "./branch-sync.server";
+import { GITHUB_API_BASE } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -64,6 +65,11 @@ export interface GithubActionContext {
   dataRoot?: string;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
+  /** P11-14: the background poller reconciles every active project every 5 min;
+   *  it suppresses the per-project summary audit (a human clicking "Update
+   *  status" still audits) so poller ticks don't spam the audit log. The
+   *  meaningful per-task divergence EVENTS/notifications still fire. */
+  skipProjectAudit?: boolean;
 }
 
 function taskRefOf(
@@ -459,14 +465,16 @@ export async function reconcileProject(
     }
   }
 
-  recordAudit(db, {
-    action: "github.reconcile.project",
-    actor,
-    subjectKind: "project",
-    subjectId: projectSlug,
-    projectSlug,
-    details: { tasks: rows.length, reconciled, changed, failed },
-  });
+  if (!ctx.skipProjectAudit) {
+    recordAudit(db, {
+      action: "github.reconcile.project",
+      actor,
+      subjectKind: "project",
+      subjectId: projectSlug,
+      projectSlug,
+      details: { tasks: rows.length, reconciled, changed, failed },
+    });
+  }
   return { status: "ok", results, reconciled, changed, failed };
 }
 
@@ -546,7 +554,12 @@ export async function mergeTaskPr(
   );
   if (prView.ok && prView.data.draft === true && prView.data.node_id) {
     await gh.client
-      .request<unknown>("POST", "https://api.github.com/graphql", {
+      // P11-16: derive the GraphQL endpoint from the SAME base the REST client
+      // uses instead of a separate literal, so the two layers agree on the host.
+      // V1 is github.com-only (no non-default baseUrl is ever wired), so this
+      // resolves to api.github.com/graphql; a GHE base would need the different
+      // `/api/graphql` path, which V1 does not claim to support.
+      .request<unknown>("POST", `${GITHUB_API_BASE}/graphql`, {
         body: {
           query:
             "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}",

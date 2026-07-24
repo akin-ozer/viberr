@@ -329,8 +329,17 @@ export async function reconcileWorkspaceDelivery(
     //     this content. A head with the SAME tree as the current revision is the
     //     SAME subject → no new revision (verdicts survive, F10-32); a different
     //     tree mints a new revision id that makes every prior verdict stale.
+    // P11-72: only mint a revision when the branch actually carries task work.
+    // A run that produced NO commits leaves HEAD at the base tip (its tree == the
+    // base tree), so there is nothing to review — minting a revision there would
+    // flip validation to "changed" and open a review over an empty diff (seen
+    // live when a developer correctly declined to guess and committed nothing).
+    // `commits === []` is the known-empty signal; `null` means we could not
+    // enumerate history (shallow + offline), so we keep the prior behavior and
+    // mint, rather than drop a real delivery we simply couldn't count.
+    const hasDeliveredWork = commits === null || commits.length > 0;
     let workRevisionPatch: TaskFrontmatter["workRevision"] | undefined;
-    if (validBranch) {
+    if (validBranch && hasDeliveredWork) {
       const headRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
         cwd: repoDir,
         timeoutMs: 5_000,

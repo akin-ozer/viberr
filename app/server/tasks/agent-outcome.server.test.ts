@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+import { createTestDbContext } from "../../../test-support/test-db";
 import {
   AGENT_OUTCOME_JSON_SCHEMA,
   effectiveCollabMode,
   parseAgentOutcomeJson,
   resolveAgentCollab,
+  stageOutcome,
+  takeStagedOutcome,
 } from "./agent-outcome.server";
 
 /** OpenAI strict structured-output invariant (the `codex_output_schema` rule
@@ -42,41 +45,41 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     // decorative no-op there. It must NOT coerce to `direct` here (that would
     // arm verdict-veto on the builder against live pre-branch data — R1/R2).
     const grants = [grant("report-validation-verdict", "recommend")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", true)).toBe("off");
-    expect(resolveAgentCollab(grants, true).verdict).toBe(false);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab(grants).verdict).toBe(false);
   });
 
   it("F10-14: a SUPPORTING agent with NO verdict grant is OFF (explicit-only)", () => {
     // Verdict authority is explicit-only now — there is no implicit `direct`
     // default for a non-delivering engagement. A reviewer gains gating verdict
     // power ONLY via an explicit report-validation-verdict:direct grant.
-    expect(effectiveCollabMode([], "report-validation-verdict", false)).toBe("off");
-    expect(resolveAgentCollab([], false).verdict).toBe(false);
+    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab([]).verdict).toBe(false);
   });
 
   it("F10-14: a SUPPORTING agent WITH an explicit direct grant is ON", () => {
     const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", false)).toBe("direct");
-    expect(resolveAgentCollab(grants, false).verdict).toBe(true);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
+    expect(resolveAgentCollab(grants).verdict).toBe(true);
   });
 
   it("a DELIVERING agent with no verdict grant stays OFF", () => {
-    expect(effectiveCollabMode([], "report-validation-verdict", true)).toBe("off");
-    expect(resolveAgentCollab([], true).verdict).toBe(false);
+    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
+    expect(resolveAgentCollab([]).verdict).toBe(false);
   });
 
   it("an EXPLICIT direct grant arms verdict even on a delivering agent", () => {
     const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict", true)).toBe("direct");
-    expect(resolveAgentCollab(grants, true).verdict).toBe(true);
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
+    expect(resolveAgentCollab(grants).verdict).toBe(true);
   });
 
   it("an EXPLICIT human/off grant disables verdict even on a supporting agent", () => {
     expect(
-      effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict", false),
+      effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict"),
     ).toBe("off");
     expect(
-      effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict", false),
+      effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict"),
     ).toBe("human");
   });
 });
@@ -126,5 +129,36 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     );
     expect(o?.question?.title).toBe("Which DB?");
     expect(o?.question?.options?.length).toBe(4);
+  });
+});
+
+describe("staged outcomes — restart persistence (P11-28)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  it("round-trips through memory and consumes the row", () => {
+    const db = ctx.makeDb();
+    stageOutcome(db, "oc_1", { verdict: "approve", summary: "LGTM" });
+    // Persisted alongside memory.
+    expect(
+      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+    ).toBe(1);
+    expect(takeStagedOutcome(db, "oc_1")).toEqual({ verdict: "approve", summary: "LGTM" });
+    // Consumed exactly once — the row is gone.
+    expect(
+      (db.prepare(`SELECT count(*) c FROM staged_outcomes`).get() as { c: number }).c,
+    ).toBe(0);
+    expect(takeStagedOutcome(db, "oc_1")).toBeNull();
+  });
+
+  it("recovers a persisted outcome when the in-process map lost it (simulated restart)", () => {
+    const db = ctx.makeDb();
+    // A row that a PRIOR process staged but this process's memory never held.
+    db.prepare(
+      `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at) VALUES (?, ?, ?)`,
+    ).run("oc_restart", JSON.stringify({ verdict: "request_changes" }), new Date().toISOString());
+    expect(takeStagedOutcome(db, "oc_restart")).toEqual({ verdict: "request_changes" });
+    // And it is cleared after consumption.
+    expect(takeStagedOutcome(db, "oc_restart")).toBeNull();
   });
 });

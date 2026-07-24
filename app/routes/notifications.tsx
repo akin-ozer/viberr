@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useLocation, useNavigate, useFetcher } from "react-router";
 import type { Route } from "./+types/notifications";
 import { requireUser } from "~/server/auth/require-user.server";
@@ -9,6 +10,7 @@ import {
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
 import { NotificationsPage } from "~/features/notifications/notifications-page";
@@ -40,9 +42,23 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   const { notifications, unread } = loaderData;
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
+
+  // Mark-all-read toast fires on the server RESULT, not on submit. This
+  // fetcher also handles single-row reads, so a `wantAllRead` flag scopes the
+  // toast; a failed POST reports the failure, not a false success (P11-40).
+  const wantAllRead = useRef(false);
+  useFetcherResult(fetcher, (data) => {
+    if (!wantAllRead.current) return;
+    wantAllRead.current = false;
+    push(
+      data.ok
+        ? "All notifications marked read"
+        : (data.error ?? "Marking notifications read failed — try again"),
+    );
+  });
 
   // New rows / packet-resolution auto-reads land live (the badge in the
   // shells is already SSE-wired; the overlay subscribes on its own since
@@ -70,8 +86,8 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "read-all");
+    wantAllRead.current = true;
     fetcher.submit(fd, { method: "post", action: "/notifications/read" });
-    push("All notifications marked read");
   };
 
   const openItem = (n: NotificationPageItem) => {

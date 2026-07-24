@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getEnv } from "../config/env.server";
@@ -88,47 +88,106 @@ function locateClaude(sessionId: string): string | null {
 }
 
 /** Codex: a `rollout-…jsonl` whose filename embeds the session id, found by
- *  recursively walking the dated dirs under `$CODEX_HOME/sessions`. Falls back
- *  to matching the id inside the file's first meta line. */
-function locateCodex(sessionId: string): string | null {
+ *  recursively walking the dated dirs under `$CODEX_HOME/sessions`.
+ *  Filename-only walk — no file reads. */
+function codexTranscriptByFilename(sessionId: string): string | null {
   const sessionsDir = path.join(codexHome(), "sessions");
   if (!existsSync(sessionsDir)) return null;
   const stack: string[] = [sessionsDir];
-  let byContent: string | null = null;
   while (stack.length) {
     const dir = stack.pop()!;
-    let names: string[];
+    let entries: Dirent[];
     try {
-      names = readdirSync(dir);
+      entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const name of names) {
-      const full = path.join(dir, name);
-      let st;
-      try {
-        st = statSync(full);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) {
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
         stack.push(full);
         continue;
       }
-      if (!name.endsWith(".jsonl")) continue;
-      if (name.includes(sessionId)) return full; // filename embeds the id
-      if (!byContent) {
-        // Cheap fallback: the id appears in the session-meta (first line).
-        try {
-          const head = readFileSync(full, "utf8").split("\n", 1)[0] ?? "";
-          if (head.includes(sessionId)) byContent = full;
-        } catch {
-          // ignore
-        }
+      if (entry.name.endsWith(".jsonl") && entry.name.includes(sessionId)) {
+        return full; // filename embeds the id
       }
     }
   }
-  return byContent;
+  return null;
+}
+
+/** Content fallback: the id appears in the session-meta (first line). Reads
+ *  every candidate file — export-route only, never on a loader path. */
+function codexTranscriptByContent(sessionId: string): string | null {
+  const sessionsDir = path.join(codexHome(), "sessions");
+  if (!existsSync(sessionsDir)) return null;
+  const stack: string[] = [sessionsDir];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+        continue;
+      }
+      if (!entry.name.endsWith(".jsonl")) continue;
+      try {
+        const head = readFileSync(full, "utf8").split("\n", 1)[0] ?? "";
+        if (head.includes(sessionId)) return full;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return null;
+}
+
+function locateCodex(sessionId: string): string | null {
+  return codexTranscriptByFilename(sessionId) ?? codexTranscriptByContent(sessionId);
+}
+
+// ------------------------------------------------------- existence probe
+
+/**
+ * Cheap existence probe for read models (the P11-43 `exportable` flag): the run
+ * projection only needs "will Export produce a file?", not the located stats.
+ * `locateTranscript` is too heavy per run row on a loader path — it reads whole
+ * files (line counts, the Codex content-scan fallback). This probe matches by
+ * FILENAME only (no file reads) and caches results briefly, so a task-detail
+ * load with many runs costs at most one directory walk per stale entry. A
+ * transcript findable only by the content scan shows no Export link (a
+ * conservative miss); the export route itself still runs the full locator.
+ */
+const TRANSCRIPT_EXISTS_TTL_MS = 30_000;
+const TRANSCRIPT_EXISTS_MAX_ENTRIES = 500;
+const transcriptExistsCache = new Map<string, { ok: boolean; at: number }>();
+
+export function transcriptExists(backend: RealBackend, sessionId: string): boolean {
+  if (!sessionId) return false;
+  const key = `${backend}:${sessionId}`;
+  const cached = transcriptExistsCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < TRANSCRIPT_EXISTS_TTL_MS) return cached.ok;
+  const ok =
+    backend === "codex"
+      ? codexTranscriptByFilename(sessionId) !== null
+      : locateClaude(sessionId) !== null;
+  if (
+    transcriptExistsCache.size >= TRANSCRIPT_EXISTS_MAX_ENTRIES &&
+    !transcriptExistsCache.has(key)
+  ) {
+    const oldest = transcriptExistsCache.keys().next().value;
+    if (oldest !== undefined) transcriptExistsCache.delete(oldest);
+  }
+  transcriptExistsCache.delete(key);
+  transcriptExistsCache.set(key, { ok, at: now });
+  return ok;
 }
 
 /**

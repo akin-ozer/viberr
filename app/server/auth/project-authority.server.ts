@@ -82,9 +82,9 @@ export function requireProjectMutable(
   }
 }
 
-/** Whether this user holds the ORG admin role (better-auth membership is
- *  authoritative; `users.role` is the derived-cache fallback — identity.server).
- *  Disabled users never qualify. */
+/** Whether this user holds the ORG admin role. `users.role` is the sole
+ *  authority — there is no better-auth membership plugin; this reads the
+ *  `users` row directly. Disabled users never qualify. */
 export function isOrgAdmin(db: DatabaseSync, userId: string): boolean {
   const row = db
     .prepare(`SELECT role FROM users WHERE id = ? AND disabled = 0`)

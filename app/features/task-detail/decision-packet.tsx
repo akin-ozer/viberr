@@ -53,13 +53,17 @@ export function DecisionPacket({
    *  viewer has canResolve but not this, so the button is blocked while that
    *  option is selected rather than 403ing on click (adversarial-review #15). */
   canResolveCompletion: boolean;
-  onResolve: (optionIndex: number) => void;
+  onResolve: (optionIndex: number, note: string) => void;
   onAsk: () => void;
 }) {
   const p = packet;
   const [sel, setSel] = useState(() =>
     Math.max(0, p.options.findIndex((o) => o.rec)),
   );
+  // P11-71: optional free-text so a human can supply the input an option asks
+  // for (e.g. "specify the expected behavior") instead of resolving with an
+  // unstated reading. Recorded on the decision event.
+  const [note, setNote] = useState("");
   const isBlocked = p.type === "blocked";
 
   const move = (delta: number) => {
@@ -144,6 +148,16 @@ export function DecisionPacket({
           ))}
         </div>
 
+        {canResolve && (
+          <textarea
+            className="packet-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add a note for the operator (optional) — e.g. the specific input this option asks for"
+            rows={2}
+          />
+        )}
+
         <div className="packet-actions">
           {(() => {
             const selected = p.options[sel];
@@ -164,7 +178,7 @@ export function DecisionPacket({
                     ? "Accepting completion is reserved for maintainers"
                     : undefined
                 }
-                onClick={() => onResolve(sel)}
+                onClick={() => onResolve(sel, note)}
               >
                 <Icon name="check" />
                 {/* A concise, stable label — echoing the full (often multi-line)

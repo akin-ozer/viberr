@@ -87,6 +87,7 @@ function transitionAction(extra: Record<string, unknown> = {}) {
     packetType: null,
     text: null,
     reason: "Implementation is complete.",
+    packetOptions: null,
     ...extra,
   };
 }
@@ -244,5 +245,40 @@ describe("Codex structured operator completion", () => {
         event.text.includes("This object has an undeclared action property."),
       ),
     ).toBe(false);
+  });
+
+  it("P11-27: honors the operator's AUTHORED packet options over the defaults", async () => {
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Goal is ambiguous — needs the human to choose.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which config should this target?",
+            reason: "The task names no specific endpoint.",
+            packetOptions: [
+              { kind: "edit_goal", title: "Refine the goal with the exact endpoint", recommended: true },
+              { kind: "custom", title: "Confirm it's intentionally broad", recommended: false },
+            ],
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      expect(task().packet?.options?.length).toBe(2);
+    });
+    const titles = task().packet!.options.map((o) => o.t);
+    expect(titles).toContain("Refine the goal with the exact endpoint");
+    expect(titles).toContain("Confirm it's intentionally broad");
+    // Not the canned default set.
+    expect(titles).not.toContain("Send back to the specialist for changes");
   });
 });

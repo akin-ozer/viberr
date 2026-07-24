@@ -6,6 +6,7 @@ import { initialsOf } from "~/ui/initials";
 import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
 import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 
 /**
@@ -60,7 +61,7 @@ export function UserMenu({
   const [menu, setMenu] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference; error?: string }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
@@ -73,6 +74,13 @@ export function UserMenu({
     return () => window.removeEventListener("keydown", onKey);
   }, [menu]);
 
+  // Toast only once the server confirms the theme write — a failed POST
+  // (expired session/CSRF) reports the failure, not a false success (P11-40).
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok && data.theme) push(themeToast(data.theme));
+    else if (!data.ok) push(data.error ?? "Theme change failed — try again");
+  });
+
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
 
   const cycleTheme = () => {
@@ -82,7 +90,7 @@ export function UserMenu({
     fd.set("_csrf", csrf);
     fd.set("theme", next);
     fetcher.submit(fd, { method: "post", action: "/prefs/theme" });
-    push(themeToast(next));
+    // Toast fires on the server result (effect above), not on submit.
     // Menu intentionally stays open (mock behavior — rapid cycling).
   };
 

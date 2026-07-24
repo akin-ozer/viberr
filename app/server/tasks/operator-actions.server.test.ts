@@ -42,9 +42,11 @@ import {
   operatorResolvePacket,
   operatorPromptReviewer,
   operatorPromptSpecialist,
+  operatorRunAgent,
   operatorRunReviewer,
   operatorRunSpecialist,
   operatorTransitionStage,
+  operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
 } from "./operator-actions.server";
@@ -162,6 +164,18 @@ describe("resolveOperatorAuthority backend override", () => {
     expect(codexAuth.backend).toBe("codex");
     expect(codexAuth.model).not.toBe("sonnet");
     expect(codexAuth.model).toBe(defaultModelFor("codex"));
+  });
+});
+
+describe("operatorBackendFor (P11-76 — run-picker default)", () => {
+  it("returns the operator deployment's configured backend", () => {
+    deployRoster(DEFAULT_POLICY); // definition backends [claude]
+    expect(operatorBackendFor({ dataRoot: store.dataRoot }, store.slug)).toBe("claude");
+  });
+  it("defaults to claude for an unknown project (no operator deployed)", () => {
+    expect(operatorBackendFor({ dataRoot: store.dataRoot }, "ghost-project")).toBe(
+      "claude",
+    );
   });
 });
 
@@ -330,6 +344,49 @@ describe("operatorAssignSpecialist", () => {
     );
     expect(r.outcome).toBe("denied");
     expect(deliveringEngagement(task().frontmatter)).toBeNull();
+  });
+});
+
+describe("operatorRunAgent — delivering profileId guard (P11-22)", () => {
+  it("refuses a delivering run for a profileId that is NOT the current deliverer", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    // "reviewer" is not the deliverer ("developer" is) — a delivering run for it
+    // must be refused, not silently run as the developer.
+    const r = await operatorRunAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("denied");
+    expect(r.message).toContain("not the delivering agent");
+  });
+
+  it("allows a delivering run when the profileId IS the current deliverer", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const { assignSpecialist } = await import("./specialist-run.server");
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const r = await operatorRunAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
+      authority("full"),
+    );
+    expect(r.outcome).not.toBe("denied");
   });
 });
 
@@ -549,6 +606,85 @@ describe("operatorShouldReactToReply (no-progress guard)", () => {
     expect(operatorShouldReactToReply("finished", "new", null, undefined)).toBe(false);
     expect(operatorShouldReactToReply("finished", "new", null, 4)).toBe(false);
     expect(operatorShouldReactToReply("finished", "new", null, 3)).toBe(true); // just under the cap
+  });
+});
+
+describe("operator transition chain (P11-70 runaway backstop)", () => {
+  it("human transitions restart the chain at 0; operator ones extend the drive's depth", async () => {
+    const { nextTransitionChainDepth, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "./task-actions.server"
+    );
+    expect(nextTransitionChainDepth({})).toBe(0); // human-authored
+    expect(nextTransitionChainDepth({ operatorAuthorized: true })).toBe(1); // first link
+    const drive = (transitionDepth: number) => ({
+      operatorAuthorized: true,
+      operatorRun: {
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+        reactDepth: 0,
+        transitionDepth,
+      },
+    });
+    expect(nextTransitionChainDepth(drive(0))).toBe(1);
+    expect(nextTransitionChainDepth(drive(3))).toBe(4);
+    expect(nextTransitionChainDepth(drive(OPERATOR_TRANSITION_CHAIN_CAP - 1))).toBe(
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    );
+  });
+
+  it("at the cap, the transition lands but coordination pauses on a stuck-loop packet", async () => {
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("triage");
+    const { OPERATOR_TASK_ACTOR, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+      "./task-actions.server"
+    );
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      OPERATOR_TASK_ACTOR,
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        operatorRun: {
+          backend: "claude",
+          autonomy: "supervised",
+          reactDepth: 0,
+          transitionDepth: OPERATOR_TRANSITION_CHAIN_CAP - 1,
+        },
+      },
+    );
+    const t = task();
+    expect(t.frontmatter.stage).toBe("ready"); // the move itself still lands
+    expect(t.packet).toBeTruthy(); // …but the next hop is a human packet, not another run
+    expect(t.packet!.type).toBe("blocked");
+    expect(t.packet!.body).toContain("coordination loop");
+    // No follow-up operator run was auto-invoked.
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+  });
+
+  it("below the cap, the transition re-triggers coordination and opens no packet", async () => {
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("triage");
+    const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
+      OPERATOR_TASK_ACTOR,
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        operatorRun: {
+          backend: "claude",
+          autonomy: "supervised",
+          reactDepth: 0,
+          transitionDepth: 0,
+        },
+      },
+    );
+    expect(task().packet).toBeFalsy();
+    // Let the fire-and-forget auto-invoke settle, then clean up its fake run.
+    await new Promise((r) => setTimeout(r, 50));
+    interruptRunningRuns("VIB-1");
   });
 });
 

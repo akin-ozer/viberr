@@ -397,14 +397,31 @@ function ReviewerControl({
 function OperatorRunControl({
   busy,
   disabled,
+  defaultBackend,
+  backendAvailable,
   onRun,
 }: {
   busy: boolean;
   /** Task is closed (terminal stage) — controls render disabled (G9). */
   disabled?: boolean;
+  /** The operator profile's configured backend — the picker's default (P11-76). */
+  defaultBackend: "claude" | "codex";
+  /** Which backends are configured — unavailable ones are disabled (P11-41). */
+  backendAvailable: { claude: boolean; codex: boolean };
   onRun: (backend: string, autonomy: string) => void;
 }) {
-  const [backend, setBackend] = useState("claude");
+  // P11-41: default to the configured backend, but if it isn't actually
+  // available fall back to one that is, so the picker never starts on an option
+  // that would fail fast.
+  const initialBackend =
+    backendAvailable[defaultBackend]
+      ? defaultBackend
+      : backendAvailable.claude
+        ? "claude"
+        : backendAvailable.codex
+          ? "codex"
+          : defaultBackend;
+  const [backend, setBackend] = useState<string>(initialBackend);
   const [autonomy, setAutonomy] = useState("supervised");
   const off = busy || disabled;
   return (
@@ -416,8 +433,12 @@ function OperatorRunControl({
         onChange={(e) => setBackend(e.target.value)}
         disabled={off}
       >
-        <option value="claude">Claude Code</option>
-        <option value="codex">Codex</option>
+        <option value="claude" disabled={!backendAvailable.claude}>
+          Claude Code{backendAvailable.claude ? "" : " — not configured"}
+        </option>
+        <option value="codex" disabled={!backendAvailable.codex}>
+          Codex{backendAvailable.codex ? "" : " — not configured"}
+        </option>
       </select>
       <select
         className="op-sel"
@@ -459,6 +480,8 @@ export function ExecutionProfile({
   onOwner,
   onRelease,
   deployedSpecialists,
+  operatorBackend,
+  backendAvailable,
   canRunAgents,
   deliveringActive,
   activeReviewerIds,
@@ -482,6 +505,10 @@ export function ExecutionProfile({
   onRelease: () => void;
   /** Deployed specialists the assign menu offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** The operator's configured backend — the run picker's default (P11-76). */
+  operatorBackend: "claude" | "codex";
+  /** Which backends are configured — unavailable ones are disabled (P11-41). */
+  backendAvailable: { claude: boolean; codex: boolean };
   /** admin|maintainer — gates the assign/run affordances (server re-checks). */
   canRunAgents: boolean;
   /** A DELIVERING run is active (queued/running) — disables the delivering Run
@@ -571,6 +598,8 @@ export function ExecutionProfile({
               <OperatorRunControl
                 busy={operatorBusy}
                 disabled={closed}
+                defaultBackend={operatorBackend}
+                backendAvailable={backendAvailable}
                 onRun={onRunOperator}
               />
             )}

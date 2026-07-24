@@ -95,6 +95,9 @@ export interface RunView {
   model: string;
   /** Provider session/thread id (may be null before init lands). */
   sid: string | null;
+  /** P11-43: the provider kept an on-disk transcript for this session, so the
+   *  Export installer will actually produce a file (false → hide the link). */
+  exportable: boolean;
   /** Mock-render state: running | idle | done | error (maps from RunState). */
   state: "running" | "idle" | "done" | "error";
   /** Real lifecycle state (queued/running/finished/error/interrupted). */

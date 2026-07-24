@@ -12,6 +12,8 @@ import {
   getDataRoot,
 } from "./files/file-store-root.server";
 import { startFileWatcher } from "./files/file-watch.service.server";
+import { startKbWatcher } from "./files/kb-watch.service.server";
+import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
 import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
@@ -75,6 +77,20 @@ export async function bootServer(): Promise<void> {
   if (cache[BOOT_KEY]) return;
 
   const env = getEnv();
+
+  // P11-03: behind a reverse proxy, better-auth needs BETTER_AUTH_URL to build
+  // OAuth callback + cookie URLs; unset, getAuth collapses trustedOrigins to []
+  // (see app/lib/auth.server.ts) and the OAuth flow breaks. Only matters when an
+  // OAuth provider is configured — without one the inferred origin is fine.
+  if (
+    !env.BETTER_AUTH_URL &&
+    (env.GITHUB_OAUTH_CLIENT_ID || env.GOOGLE_OAUTH_CLIENT_ID)
+  ) {
+    logger.warn(
+      "BETTER_AUTH_URL is unset but OAuth is configured — behind a reverse proxy this collapses trustedOrigins to [] and breaks OAuth callback/cookie URLs. Set BETTER_AUTH_URL to the app's public origin.",
+    );
+  }
+
   ensureDataRootDirs();
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks
@@ -125,6 +141,10 @@ export async function bootServer(): Promise<void> {
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
 
+  // Knowledge-base watcher (R-D): re-index a KB when its store files change,
+  // so "on change" is real instead of a decorative cadence label.
+  startKbWatcher();
+
   // Finalize non-terminal runs at boot: a run left `running`/`queued` has no
   // live process in this fresh boot. Orphans become `error`
   // (interrupted-by-restart) and their tasks are re-coordinated. Runs BEFORE
@@ -164,6 +184,12 @@ export async function bootServer(): Promise<void> {
   // interval. Backend-agnostic — it calls runOperator, so Claude & Codex behave
   // identically. Idempotent start; the timer is unref'd so it never blocks exit.
   startScheduleRunner(db);
+
+  // Start the GitHub PR-status poller (P11-14): reconcile every active branched
+  // project once at boot, then every 5 minutes, so a PR merged/closed out-of-band
+  // surfaces automatically instead of only when a maintainer clicks the manual
+  // "Update status" button. Idempotent start; the timer is unref'd.
+  startGithubReconcilePoller(db);
 
   logBootIntegrity(db);
 

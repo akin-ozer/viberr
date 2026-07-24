@@ -442,7 +442,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.result).toBe("ok");
     expect(outcome.toast).toBe(
-      "Reconciled — every branch and PR maps to its task key",
+      "Status updated — every branch and PR maps to its task key",
     );
 
     const view = (await getGithubViewData(app.db, "viberr-core", {

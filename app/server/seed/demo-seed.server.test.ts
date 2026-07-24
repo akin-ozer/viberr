@@ -1,7 +1,13 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { findUserByEmail } from "~/server/auth/user-store.server";
-import { credentialPasswordHash } from "~/server/auth/identity.server";
+import {
+  credentialPasswordHash,
+  isBetterAuthPasswordHash,
+  setCredentialPassword,
+} from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
 import { getBoard, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -72,6 +78,46 @@ describe("demo seed", () => {
     expect(murat?.role).toBe("member");
     const deniz = findUserByEmail(db, "deniz@viberr.dev");
     expect(deniz).not.toBeNull(); // registered, but member of no project
+  });
+
+  it("re-hashes an existing user's legacy/unverifiable credential (P11-01 recovery)", async () => {
+    const { db, dataRoot } = await seed();
+    const arda = findUserByEmail(db, "arda@viberr.dev")!;
+    // Simulate a data root seeded before the better-auth migration: the stored
+    // credential is in the legacy `scrypt$...` format the verifier throws on.
+    setCredentialPassword(
+      db,
+      arda.id,
+      "scrypt$16384$8$1$firuPx6uzlhAacmTd73at1OAoHciD9IbvW83I1VQvO0=$pX5ob5jrx1kC1KRCGKpsYCtiHZNXCQPO9zbo8RsKN9aRNG7aA3uG0plZc9JfpeL/DQk8A+iAx+cvrJmgwaRfdg==",
+    );
+    expect(isBetterAuthPasswordHash(credentialPasswordHash(db, arda.id))).toBe(false);
+    // Re-running the seed restores a working credential the seed default verifies.
+    await runDemoSeed(db, { dataRoot });
+    const repaired = credentialPasswordHash(db, arda.id);
+    expect(isBetterAuthPasswordHash(repaired)).toBe(true);
+    await expect(verifyPassword(SEED_DEFAULT_PASSWORD, repaired)).resolves.toBe(true);
+  });
+
+  it("--reset preserves runtime credential homes, wipes only transcript dirs (P11-04)", async () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    await runDemoSeed(db, { dataRoot });
+    // A configured Codex credential home + a run transcript dir under runtimes/.
+    const codexAuth = join(dataRoot, "runtimes", "codex-home", "auth.json");
+    const claudeHome = join(dataRoot, "runtimes", "claude-home", "config.json");
+    const transcript = join(dataRoot, "runtimes", "codex", "run_abc.jsonl");
+    mkdirSync(dirname(codexAuth), { recursive: true });
+    mkdirSync(dirname(claudeHome), { recursive: true });
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(codexAuth, '{"token":"secret"}');
+    writeFileSync(claudeHome, "{}");
+    writeFileSync(transcript, "{}\n");
+
+    await runDemoSeed(db, { dataRoot, reset: true });
+
+    expect(existsSync(codexAuth)).toBe(true); // credential home preserved
+    expect(existsSync(claudeHome)).toBe(true);
+    expect(existsSync(transcript)).toBe(false); // transcript wiped
   });
 
   it("boards look like the mock: stage buckets + stub projects", async () => {
