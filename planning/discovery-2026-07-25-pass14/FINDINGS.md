@@ -142,3 +142,20 @@ provisioning consistency (PST-6 class); operator MCP on both backends; skill iso
 on both backends; MCP rename orphan repro; template-library deploy grants; RBAC denial
 matrix; reviewer verdicts; secondary assignments; comment @mention notify incl. first
 mention; PR merge via app, merge via gh, reject via gh)*
+
+## G. Adversarial verification (what the skeptics caught)
+
+Every implementation stream was piped into a verifier whose job was to DISPROVE its
+claims — open the cited code, check the new test would actually fail against the old
+behavior, and hunt for collateral damage. Two claims did not survive:
+
+| id | verdict | what was wrong | resolution |
+| --- | --- | --- | --- |
+| **LV-02 (operator half)** | **BROKEN** by W3's verifier | The *third* writer to Done — `operatorAcceptCompletion`'s full-autonomy branch — still synthesized `validation: "healthy"` with a comment claiming it matched "the human path", which had just moved to `deriveValidation`. An autonomous operator closing a task with no reviewer stamped a green pill onto an empty review record. (Its graph gate had landed by then via the lead handback; only the validation half was open.) | Now `deriveValidation`. Both halves covered: `none` when nothing validated, `healthy` on a real revision-bound approval. |
+| **RT-02 (test claim)** | **BROKEN** by W2's verifier | The fix was real and live-proven, but its coverage tested `buildAnalyzePrompt` in isolation. Deleting `directive`/`directiveFrom` from either fresh branch of `commentToAgent` — the exact defect — left the entire suite green. | `test-support/fake-runtime.ts` now records the `RunSpec`s it was started with, so the test asserts what the run RECEIVED through the real path. Canary-checked: reverting the fix fails it, restoring passes. |
+
+Everything else the verifiers examined came back CONFIRMED at the enforcement layer,
+including RT-01's denylist baseline (with both derived Codex flags), RT-04's Codex
+operator MCP mount (credentials dropped from argv), LV-05's live-state subline, GV-05's
+pre-merge identity re-check (additive — the post-merge check was not removed), GV-06's
+mention fan-out, GV-09's notification, and LV-07's whole server half.
