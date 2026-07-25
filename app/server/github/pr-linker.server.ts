@@ -1,4 +1,9 @@
-import type { PrChecks, PrReviewState, PrState } from "~/schemas/task-file.schema";
+import type {
+  PrChecks,
+  PrMergeable,
+  PrReviewState,
+  PrState,
+} from "~/schemas/task-file.schema";
 import type { GithubClient } from "./github-client.server";
 
 /**
@@ -55,6 +60,9 @@ export interface PrFacts {
    * read this pass (terminal PR, or the call failed) — UNKNOWN, so callers keep
    * the cached value; `null` means read-and-nothing-outstanding. */
   review?: PrReviewState | null;
+  /** P14-LV-07: can GitHub merge this PR? ABSENT when the detail fetch failed
+   * (unknown → callers keep the cached value) or the PR is terminal. */
+  mergeable?: PrMergeable;
 }
 
 export type PrLinkResult =
@@ -78,6 +86,10 @@ interface GhPullDetail extends GhPullListItem {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  /** P14-LV-07: `null` while GitHub computes it (first read after a push), then
+   *  true/false. `mergeable_state` carries the WHY ("dirty" = conflicts). */
+  mergeable?: boolean | null;
+  mergeable_state?: string;
   /** P13-D-28: who has been ASKED to review (free — the detail fetch already
    *  happens). Distinguishes "review required" from "nobody is expected". */
   requested_reviewers?: { login?: string }[];
@@ -138,6 +150,26 @@ export function deriveReviewState(
   if (states.includes("CHANGES_REQUESTED")) return "changes_requested";
   if (states.includes("APPROVED")) return "approved";
   return requestedReviewers > 0 ? "review_required" : null;
+}
+
+/**
+ * P14-LV-07 — GitHub's mergeability, mapped to the `pr.mergeable` cache
+ * vocabulary. `mergeable` is computed asynchronously, so the first read after a
+ * push returns `null` ("unknown"); `mergeable_state: "dirty"` is the conflict.
+ * Every other blocked-ness (required reviews, failing checks, behind base)
+ * leaves `mergeable: true` and is the merge attempt's business, not this pill's.
+ *
+ * Exported for direct unit coverage of the three-way mapping.
+ */
+export function deriveMergeable(pr: {
+  mergeable?: boolean | null;
+  mergeable_state?: string;
+}): PrMergeable {
+  if (pr.mergeable === false || pr.mergeable_state === "dirty") {
+    return "conflicting";
+  }
+  if (pr.mergeable === true) return "clean";
+  return "unknown";
 }
 
 /**
@@ -267,6 +299,14 @@ export async function findPrForBranch(
       draft: pr.draft ?? false,
       headSha,
       ...(review !== undefined ? { review } : {}),
+      // P14-LV-07: only an OPEN PR has a meaningful mergeability, and only the
+      // detail fetch carries it. A failed detail read — or GitHub still
+      // COMPUTING the answer (the first read after a push) — leaves the key
+      // absent, so the caller keeps the last-known value instead of flapping
+      // the pill through "unknown" on every push.
+      ...(detail.ok && state === "review" && deriveMergeable(pr) !== "unknown"
+        ? { mergeable: deriveMergeable(pr) }
+        : {}),
       changed:
         detail.ok &&
         typeof pr.changed_files === "number" &&

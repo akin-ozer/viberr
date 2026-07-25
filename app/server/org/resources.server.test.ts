@@ -162,7 +162,9 @@ describe("knowledge bases", () => {
     expect(fresh.tree[0]).toMatchObject({ type: "dir", name: "decisions" });
 
     const reindexed = reindexKnowledgeBase(db, kb.id, ACTOR, ctx);
-    expect(reindexed.toast).toBe("Architecture notes re-scanned — 1 docs");
+    expect(reindexed.toast).toBe(
+      "Architecture notes re-scanned — 1 doc agents can read",
+    );
   });
 
   it("rename moves the folder; collisions are refused", async () => {
@@ -583,7 +585,17 @@ describe("disk is truth (finding #7)", () => {
 /* --------------------------------- resource reference integrity (P13-KM-07) */
 
 describe("resource reference integrity", () => {
-  function writeProfileTemplate(dataRoot: string, id: string, kb: string[]) {
+  function writeProfileTemplate(
+    dataRoot: string,
+    id: string,
+    resources: { skills?: string[]; mcps?: string[]; kb?: string[] },
+  ) {
+    const list = (key: "skills" | "mcps" | "kb") => {
+      const entries = resources[key] ?? [];
+      return entries.length === 0
+        ? [`  ${key}: []`]
+        : [`  ${key}:`, ...entries.map((e) => `    - ${e}`)];
+    };
     mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "agents", "profiles", `${id}.md`),
@@ -605,10 +617,9 @@ describe("resource reference integrity", () => {
         "capabilities: []",
         "extras: []",
         "resources:",
-        "  skills: []",
-        "  mcps: []",
-        "  kb:",
-        ...kb.map((k) => `    - ${k}`),
+        ...list("skills"),
+        ...list("mcps"),
+        ...list("kb"),
         "---",
         "",
         "Body.",
@@ -630,7 +641,7 @@ describe("resource reference integrity", () => {
       ctx,
     );
     expect(kb.dir).toBe("p13-facts");
-    writeProfileTemplate(dataRoot, "scout", ["p13-facts"]);
+    writeProfileTemplate(dataRoot, "scout", { kb: ["p13-facts"] });
 
     await saveKnowledgeBase(
       db,
@@ -656,7 +667,7 @@ describe("resource reference integrity", () => {
       ACTOR,
       ctx,
     );
-    writeProfileTemplate(dataRoot, "scout", [kb.dir, "keep-me"]);
+    writeProfileTemplate(dataRoot, "scout", { kb: [kb.dir, "keep-me"] });
 
     await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
 
@@ -673,37 +684,7 @@ describe("resource reference integrity", () => {
       ACTOR,
       ctx,
     );
-    mkdirSync(path.join(dataRoot, "agents", "profiles"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "agents", "profiles", "scout.md"),
-      [
-        "---",
-        "id: scout",
-        "kind: specialist",
-        "name: scout",
-        "role: scout",
-        'desc: "t"',
-        "icon: cpu",
-        "backends:",
-        "  - claude",
-        'model: ""',
-        "scope: Global base",
-        "stages:",
-        "  - impl",
-        "spanAll: false",
-        "capabilities: []",
-        "extras: []",
-        "resources:",
-        "  skills:",
-        "    - old-craft",
-        "  mcps: []",
-        "  kb: []",
-        "---",
-        "",
-        "Body.",
-        "",
-      ].join("\n"),
-    );
+    writeProfileTemplate(dataRoot, "scout", { skills: ["old-craft"] });
 
     await saveSkill(
       db,
@@ -714,6 +695,71 @@ describe("resource reference integrity", () => {
 
     expect(grantsOf(dataRoot, "scout")).toContain("new-craft");
     expect(grantsOf(dataRoot, "scout")).not.toContain("old-craft");
+  });
+
+  it("P14-KM-01: renaming an MCP server rewrites its grants instead of orphaning them", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "vm-memory", transport: "stdio", target: "node /tmp/mem.mjs", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(3) },
+      ctx,
+    );
+    writeProfileTemplate(dataRoot, "scout", { mcps: ["vm-memory", "billing-api"] });
+
+    await saveMcpServer(
+      db,
+      {
+        id: saved.mcp.id,
+        name: "vm-graph-memory",
+        transport: "stdio",
+        target: "node /tmp/mem.mjs",
+        cred: "",
+      },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(3) },
+      ctx,
+    );
+
+    // Live-proven before this fix: the row renamed, both scout profiles kept
+    // pointing at `vm-memory`, and the next run advertised the server in its
+    // prompt while exposing zero tools (LV-09).
+    const raw = grantsOf(dataRoot, "scout");
+    expect(raw).toContain("vm-graph-memory");
+    expect(raw).not.toMatch(/- vm-memory$/m);
+    expect(raw).toContain("billing-api");
+  });
+
+  it("deleting an MCP server drops its grants (unchanged), a plain re-save keeps them", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "billing-api", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(2) },
+      ctx,
+    );
+    writeProfileTemplate(dataRoot, "scout", { mcps: ["billing-api"] });
+
+    // Editing WITHOUT a rename must not touch the grant.
+    await saveMcpServer(
+      db,
+      {
+        id: saved.mcp.id,
+        name: "billing-api",
+        transport: "HTTP",
+        target: "https://y.dev/mcp",
+        cred: "",
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(2) },
+      ctx,
+    );
+    expect(grantsOf(dataRoot, "scout")).toContain("billing-api");
+
+    await deleteMcpServer(db, saved.mcp.id, ACTOR, ctx);
+    expect(grantsOf(dataRoot, "scout")).not.toContain("billing-api");
   });
 });
 
@@ -804,5 +850,65 @@ describe("MCP credentials and transports", () => {
       { fetchImpl: mcpHttpFetch(1) },
     );
     expect(cleared.mcp.hasCred).toBe(false);
+  });
+
+  it("P14-KM-04: the stdio probe parses quoted commands the way runs do", async () => {
+    const { db } = setup();
+    let sawCommand: string | null = null;
+    let sawArgs: string[] = [];
+    const spawnImpl: McpSpawn = (cmd, args) => {
+      sawCommand = cmd;
+      sawArgs = args;
+      return fakeMcpSpawn(5)(cmd, args);
+    };
+
+    const saved = await saveMcpServer(
+      db,
+      {
+        name: "quoted",
+        transport: "stdio",
+        // The run resolver has been quote-aware since P13-KM-17; the probe split
+        // on whitespace, so a path with a space reported "exited before
+        // responding" in Settings while working perfectly inside a run.
+        target: `"/opt/my tools/mcp" --config '{"a": 1}'`,
+        cred: "",
+      },
+      ACTOR,
+      { spawnImpl },
+    );
+
+    expect(sawCommand).toBe("/opt/my tools/mcp");
+    expect(sawArgs).toEqual(["--config", '{"a": 1}']);
+    expect(saved.mcp).toMatchObject({ up: true, tools: 5 });
+  });
+});
+
+/* ------------------------------ injectable doc counts (P14-KM-13) */
+
+describe("knowledge-base doc counts", () => {
+  it("counts only the docs a run can read, and keeps the raw file count", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Specs", refresh: "manual" },
+      ACTOR,
+      ctx,
+    );
+    const dir = kbDirPath(kb.dir, dataRoot);
+    writeFileSync(path.join(dir, "overview.md"), "# text");
+    writeFileSync(path.join(dir, "notes.txt"), "text");
+    // A KB of PDFs used to advertise a healthy "N docs" and inject nothing —
+    // the count and `readKbBody` now answer the same question.
+    writeFileSync(path.join(dir, "contract.pdf"), "%PDF-1.7");
+    writeFileSync(path.join(dir, "diagram.png"), "png");
+
+    const fresh = getKnowledgeBase(db, kb.id, ctx)!;
+    expect(fresh.fileCount).toBe(4);
+    expect(fresh.injectableCount).toBe(2);
+
+    const reindexed = reindexKnowledgeBase(db, kb.id, ACTOR, ctx);
+    expect(reindexed.docCount).toBe(2);
+    expect(reindexed.toast).toContain("2 docs agents can read");
+    expect(reindexed.toast).toContain("2 non-text files skipped");
   });
 });

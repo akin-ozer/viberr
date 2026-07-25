@@ -62,6 +62,38 @@ function specialistHandles(sp: DeployedSpecialistView): string[] {
   return [sp.name, sp.id, sp.backend];
 }
 
+/** The single-token mention grammar `findMentionSpans` falls back to when a
+ *  handle is not in the reader's known-names list. */
+const TOKENIZABLE_HANDLE_RE = /^[A-Za-z][\w-]*$/;
+
+/**
+ * The @handle to ADDRESS an agent by — the one derivation every writer uses
+ * (P14-RT-12).
+ *
+ * It used to be derived twice and differently: `startAgentRun` took the first
+ * word of the ROLE (`"Senior Developer"` → `@senior`, which
+ * `resolveMentionedAgent` matches against nothing at all) while `commentToAgent`
+ * took the NAME (`"Docs Writer"` → `@docs writer`, which only resolves for a
+ * reader that already knows the name). The same agent was therefore addressed
+ * differently depending on which path registered its completion, and a stuck
+ * packet's "Agent: @…" observation could name a handle that resolves to nobody.
+ *
+ * The profile id is preferred because it is BOTH resolvable
+ * (`handleMatchesSpecialist` matches it) and tokenizable by the bare `@word`
+ * grammar, so it routes even when the reader passes no known names. A profile id
+ * that is not a bare token (hand-edited store) falls back to the display name,
+ * which the shared span-finder still matches whole.
+ */
+export function agentMentionHandle(agent: {
+  profileId: string;
+  name?: string | null;
+}): string {
+  const id = agent.profileId.trim();
+  if (TOKENIZABLE_HANDLE_RE.test(id)) return id.toLowerCase();
+  const name = (agent.name ?? "").trim();
+  return (name || id).toLowerCase();
+}
+
 /** The generic role/backend handles the resolver honours (mirrors
  *  mention-suggestions' RESERVED and mention-notify's RESERVED_HANDLES). */
 const RESERVED_AGENT_HANDLES = ["operator", "agent", "claude", "codex"];

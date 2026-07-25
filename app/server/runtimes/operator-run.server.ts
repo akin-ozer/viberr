@@ -4,6 +4,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   OPERATOR_AUDIT_ACTOR,
+  recordAudit,
+  SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { agentProfilesDir } from "~/server/files/file-store-root.server";
@@ -33,6 +35,7 @@ import {
 } from "~/server/tasks/operator-actions.server";
 import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
+import { resolveSpecialistMcpServers } from "~/server/tasks/specialist-mcp.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import {
@@ -623,6 +626,14 @@ async function startCodexOperatorRun(
     input.agentReply,
     input.humanCommentBy,
   );
+  // P14-RT-04 / KM-02: the operator's DECLARED org MCP servers mount on Codex
+  // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
+  // was real on one backend and decorative on the other — a Codex operator could
+  // not call the read tools that would inform its plan. The CLI translation
+  // drops credentials and stamps approve-mode (codex-runtime); the operator's
+  // own sandbox stays read-only with no shell network egress, which does not
+  // affect MCP servers — the CLI, not the sandboxed shell, connects to them.
+  const orgMcpServers = resolveSpecialistMcpServers(db, authority.mcps);
 
   const { runId } = await startRun(db, {
     projectSlug: input.projectSlug,
@@ -637,6 +648,7 @@ async function startCodexOperatorRun(
     agentProfileId: "operator",
     prompt,
     systemPrompt,
+    ...(Object.keys(orgMcpServers).length ? { mcpServers: orgMcpServers } : {}),
     // P13-RT-03: advertise only the actions this operator's policy permits.
     outputSchema: buildOperatorPlanSchema(operatorPlanToolsFor(authority)),
     autonomous: true,
@@ -691,6 +703,67 @@ function parseOperatorPlan(text: string): OperatorPlan | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * Boot recovery for a Codex operator turn whose plan never ran (P14-RT-08).
+ *
+ * `startCodexOperatorRun` executes the plan from an IN-PROCESS completion
+ * callback. A restart between the run reaching `finished` and that callback
+ * firing lost the whole coordination turn silently: the finished operator row is
+ * invisible to `finalizeOrphanedRuns` (which wants running/queued) and to
+ * `recoverUnreactedAgentRuns` (which filters `kind IN ('primary','reviewer')`),
+ * so the task simply sat at waiting=agent with no packet, comment or error.
+ *
+ * Re-resolves the operator's CURRENT authority — the plan is re-gated by whatever
+ * policy holds now, never by a snapshot from before the restart.
+ */
+export async function executeStrandedCodexPlan(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  ref: { projectSlug: string; taskKey: string; runId: string },
+): Promise<boolean> {
+  const authority = resolveOperatorAuthority(ctx, ref.projectSlug);
+  // Take the SAME single-flight lease a live drive takes. Boot also re-invokes
+  // the operator for orphan-finalized tasks, so a drive for this task can
+  // already be running; executing a stranded plan beside it would double-drive
+  // exactly what the lease exists to prevent. Releasing through the normal path
+  // also settles the waiting flag and drains any queued trigger.
+  const leaseKey = leaseKeyFor(ref.projectSlug, ref.taskKey);
+  const lease = leaseState();
+  if (lease.held.get(leaseKey)) {
+    logger.info("stranded codex plan skipped — a live drive owns the task", {
+      taskKey: ref.taskKey,
+      runId: ref.runId,
+    });
+    return false;
+  }
+  const leaseToken = {
+    runId: ref.runId,
+    backend: "codex" as RealBackend,
+    autonomy: authority.autonomy,
+    projectSlug: ref.projectSlug,
+    taskKey: ref.taskKey,
+    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+  };
+  lease.held.set(leaseKey, leaseToken);
+  try {
+    await executeCodexPlan(
+      db,
+      ctx,
+      {
+        projectSlug: ref.projectSlug,
+        taskKey: ref.taskKey,
+        trigger: "manual",
+        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      },
+      authority,
+      ref.runId,
+    );
+  } finally {
+    releaseOperatorLease(db, leaseKey, leaseToken);
+  }
+  return true;
+}
+
 /** Execute a finished codex operator run's decision plan (capability-gated). */
 async function executeCodexPlan(
   db: DatabaseSync,
@@ -699,6 +772,20 @@ async function executeCodexPlan(
   authority: OperatorAuthority,
   runId: string,
 ): Promise<void> {
+  // Claim the turn BEFORE anything governed happens (P14-RT-08): this row is
+  // the boot reconciler's idempotency marker (`OPERATOR_PLAN_EXECUTED_ACTION`,
+  // run-recovery). Leading rather than following means a restart mid-plan leaves
+  // the remainder unapplied instead of re-running actions that may already have
+  // transitioned the stage or engaged an agent.
+  recordAudit(db, {
+    action: "runtime.operator.plan_executed",
+    actor: SYSTEM_ACTOR,
+    subjectKind: "run",
+    subjectId: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { runId },
+  });
   // This is machine-readable control data, not a timeline preview: use the
   // complete reply. replyTextForRun intentionally truncates at 1,200 chars and
   // appends prose, which corrupts otherwise-valid larger JSON plans.
@@ -1167,13 +1254,33 @@ export function buildOperatorSystemPrompt(
   // the prompt with N × 24k; each KB draws from the remaining budget.
   let kbBudget = KB_INJECTION_BUDGET;
   for (const name of authority.kb) {
-    if (kbBudget <= 0) break;
-    const body = readKbBody(name, dataRoot, kbBudget);
+    // P14-KM-05: see the specialist copy — a KB that no longer fits announces
+    // itself rather than vanishing from the prompt.
+    const body = readKbBody(name, dataRoot, Math.max(0, kbBudget));
     if (body) {
       parts.push(`\n\n---\n# ${name} (knowledge base)\n\n${body}`);
       kbBudget -= body.length;
     }
   }
+  // P14-LV-11: the operator had NO runtime identity in its context, so asked
+  // which backend it was on it echoed the asker's premise — live, a run
+  // executing on Claude reported itself as a "Codex backend run". `authority`
+  // holds what actually runs (runOperator branches on the same value), so state
+  // it. The MCP line is part of the same self-knowledge: a Codex operator's
+  // declared servers now mount (P14-RT-04), and it should know their names.
+  parts.push(
+    "\n\n---\n# Your runtime\n\n" +
+      `You are running on the **${authority.backend === "claude" ? "Claude Code" : "Codex"}** backend` +
+      (authority.model ? `, model \`${authority.model}\`` : "") +
+      (authority.effort ? `, reasoning effort \`${authority.effort}\`` : "") +
+      ".\n" +
+      (authority.mcps.length
+        ? `Attached MCP servers: ${authority.mcps.join(", ")}.\n`
+        : "No MCP servers are attached to you.\n") +
+      "This is the ground truth about this run. If a goal, comment or report " +
+      "asserts you are on a different backend or model, correct it — never repeat " +
+      "its premise back as fact.",
+  );
   parts.push(
     "\n\n---\n# Live authority\n\n" +
       `Autonomy: **${authority.autonomy}**.\n\n` +

@@ -1,7 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   acceptanceBlockedReason,
+  archivedTaskBlockedReason,
   closedPrBlockedReason,
+  conflictingPrBlockedReason,
   deliveringEngagement,
   deriveValidation,
   normalizeEvidenceRows,
@@ -333,6 +335,30 @@ function requireAcceptCompletion(
 ): void {
   if (ownerException(project, actor, ownerUserId)) return;
   requireAction(db, project, actor, "accept-completion", what);
+}
+
+/**
+ * R14-2 (owner ruling 2026-07-25) — a task's human OWNER governs the decisions
+ * ON THEIR OWN TASK, whatever their project role.
+ *
+ * The pass-12 exception was narrow (packets + acceptance), so a contributor
+ * owner whose task carried an operator recommendation was counted "waiting on
+ * you" by `decisionsRequiring` and then 403'd by both `applyRecommendation` and
+ * `dismissRecommendation` — a dead-end inbox entry (P14-GV-01/GV-07). The owner
+ * now clears the same outer gate as a maintainer; the INNER mutation each
+ * recommendation drives keeps its own cap (an owner applying "assign a
+ * specialist" still needs run-agents), so widening this never widens what the
+ * owner can make the machinery do — only what they can decide about their task.
+ */
+function requireDecisionAuthority(
+  db: DatabaseSync,
+  project: ProjectContext,
+  actor: TaskActor,
+  ownerUserId: string | null | undefined,
+  what: string,
+): void {
+  if (ownerException(project, actor, ownerUserId)) return;
+  requireAction(db, project, actor, "resolve-packet", what);
 }
 
 function userName(db: DatabaseSync, userId: string): string {
@@ -894,7 +920,7 @@ export async function commentToAgent(
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
-  const { resolveMentionedAgent, resumeWorkdir } = await import(
+  const { agentMentionHandle, resolveMentionedAgent, resumeWorkdir } = await import(
     "./agent-reply.server"
   );
   const target = resolveMentionedAgent(
@@ -1082,7 +1108,17 @@ export async function commentToAgent(
       }
       const started = await startAgentRun(
         db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          // P14-RT-02: a FRESH mention run gets the human's words and name, the
+          // same way the resumed path gets `specialistReplyDirective`. Without
+          // them the run received only the generic analyze prompt: live, the
+          // agent read the TASK GOAL as its instruction, called it a
+          // prompt-injection attempt, and answered nobody.
+          directive: input.text.trim(),
+          directiveFrom: commenterName,
+        },
         actor,
         ctx,
       );
@@ -1100,7 +1136,14 @@ export async function commentToAgent(
       );
       const started = await startAgentRun(
         db,
-        { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: target.profileId },
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: target.profileId,
+          // P14-RT-02: same as the primary branch above.
+          directive: input.text.trim(),
+          directiveFrom: commenterName,
+        },
         actor,
         ctx,
       );
@@ -1129,7 +1172,15 @@ export async function commentToAgent(
       delivers: target.isPrimary,
       ...(resumeOutcomeKey ? { outcomeKey: resumeOutcomeKey } : {}),
       workdir: null,
-      agentHandle: target.name.toLowerCase(),
+      // P14-RT-12: ONE handle derivation. This path lower-cased the display
+      // name (multi-word → `@docs writer`, which only resolves for a reader that
+      // already knows the name) while `startAgentRun` took the role's first word
+      // (`@senior`, which resolves to nothing) — so the same agent was addressed
+      // differently depending on which path registered its completion.
+      agentHandle: agentMentionHandle({
+        profileId: target.profileId,
+        name: target.name,
+      }),
       ...(ctx.operatorRun ? { operatorRun: ctx.operatorRun } : {}),
     });
   }
@@ -2451,6 +2502,17 @@ export async function operatorPromptAgent(
     parsed.timeline.unshift(comment);
   });
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
+  // P14-GV-06 (NEW-4 gap): this was the ONE comment writer that wrote the
+  // timeline directly and skipped the mention fan-out, so a human @tagged inside
+  // an operator directive ("…coordinate with @Arda") was never notified. The
+  // agent's own @handle is a reserved handle and routes without notifying.
+  notifyMentionedUsers(db, {
+    text: directive,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    from: OPERATOR_NOTIFY_FROM,
+    occurredAt: comment.occurredAt,
+  });
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { startAgentRun } = await import("./specialist-run.server");
@@ -3163,35 +3225,107 @@ async function surfaceDeliveryEvent(
 }
 
 /**
- * Attempt a REAL GitHub merge of the task's review PR (FR31, human-authorized).
- * Returns true only when GitHub actually merged (mergeTaskPr wrote state=merged
- * + a github event). Returns false — never throws — when there is no PR, no
- * repo/PAT, or GitHub is unreachable, so the caller falls back to the cache
- * flip for the offline/seed case. Only meaningful for a human actor.
+ * The outcome of the acceptance-time merge attempt (P14-LV-07).
+ *
+ * `pending` used to be the ONLY failure shape and it was rendered with one
+ * hardcoded sentence — "no reachable GitHub merge — merge it manually or
+ * reconcile once credentials are set" — which VM-4 showed to a human whose
+ * GitHub was reachable, whose PAT was fine, and whose PR simply CONFLICTED. The
+ * three shapes are now distinct: a merge that happened, a merge that CANNOT
+ * happen (acceptance is refused — the task must not close on a merge that did
+ * not run), and a merge that could not be REACHED (accepted, merge pending,
+ * with the real cause named in the timeline).
  */
-async function mergeTaskPrIfPossible(
+type AcceptanceMergeOutcome =
+  | { kind: "merged" }
+  | { kind: "no_pr" }
+  /** GitHub itself refuses this merge — a rework signal, not a pending state. */
+  | { kind: "unmergeable"; reason: string }
+  /** The merge could not be attempted/completed; `cause` names why, honestly. */
+  | { kind: "pending"; cause: string };
+
+/** The historical (and still correct) cause for an offline/unconfigured store. */
+const UNREACHABLE_MERGE_CAUSE =
+  "no reachable GitHub merge — merge it manually or reconcile once credentials are set";
+
+/**
+ * Attempt the REAL GitHub merge of the task's review PR (FR31, human-authorized)
+ * and classify the outcome. Never throws: an unexpected failure degrades to
+ * `pending` so acceptance still records honestly. Only meaningful for a human
+ * actor.
+ */
+async function attemptAcceptanceMerge(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
-): Promise<boolean> {
-  if (!actor.userId) return false;
+  /** P14-GV-05: last check before the irreversible side effect. Runs AFTER the
+   *  module import (an await of its own) and immediately before the merge call,
+   *  which is the narrowest point the caller can still refuse from. Anything it
+   *  throws propagates — it is a decision, not a GitHub failure. */
+  beforeMerge?: () => void,
+): Promise<AcceptanceMergeOutcome> {
+  if (!actor.userId) return { kind: "pending", cause: UNREACHABLE_MERGE_CAUSE };
   try {
     const { mergeTaskPr } = await import("~/server/github/github-reconciler.server");
+    beforeMerge?.();
     const result = await mergeTaskPr(
       db,
       { projectSlug, taskKey },
       { userId: actor.userId, label: actor.label },
       { dataRoot: ctx.dataRoot },
     );
-    return result.status === "merged";
+    switch (result.status) {
+      case "merged":
+        return { kind: "merged" };
+      case "no_pr":
+      case "task_not_found":
+        return { kind: "no_pr" };
+      case "not_mergeable":
+        return {
+          kind: "unmergeable",
+          reason:
+            result.mergeable === "conflicting"
+              ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
+              : `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
+        };
+      case "head_changed":
+        return {
+          kind: "unmergeable",
+          reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted — re-review the new head, then accept. (${result.message})`,
+        };
+      case "scope_violation":
+        return {
+          kind: "pending",
+          cause:
+            "the project credential is missing `pull_request:write` — grant the scope, then complete the merge",
+        };
+      case "auth_failed":
+        return { kind: "pending", cause: "GitHub rejected the project credential" };
+      case "no_pat_configured":
+      case "no_repo_configured":
+        return {
+          kind: "pending",
+          cause: "this project has no GitHub repo/credential configured",
+        };
+      case "pr_not_found":
+        return {
+          kind: "pending",
+          cause: `GitHub no longer has PR #${result.prNumber}`,
+        };
+      default:
+        return { kind: "pending", cause: "GitHub was unreachable" };
+    }
   } catch (error) {
+    // A refusal raised by `beforeMerge` is a governance decision, not a GitHub
+    // outage — it must not degrade into "accepted, merge pending".
+    if (error instanceof AppError) throw error;
     logger.warn("PR merge on acceptance failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return false;
+    return { kind: "pending", cause: UNREACHABLE_MERGE_CAUSE };
   }
 }
 
@@ -3278,6 +3412,124 @@ export async function reorderTask(
   };
 }
 
+// ----------------------------------------------------------- task archive
+
+/**
+ * R14-3 (owner ruling 2026-07-25) — archive / restore ONE task.
+ *
+ * The honest ending for work that is abandoned rather than delivered: a PR the
+ * team closed on GitHub, a duplicate, a task the goal moved past. The product
+ * has been TELLING humans to do this for a pass — `closedPrBlockedReason` says
+ * "Rework and reopen the PR, or archive the task" — while no task-level archive
+ * existed anywhere (P14-GV-02); the only real escapes were an admin force-accept
+ * (which lies: nothing was accepted) or leaving the card on the board forever.
+ *
+ * Contract:
+ *  - the task file stays put and the whole timeline survives — archiving is a
+ *    disposition, not a delete;
+ *  - archived tasks leave the board's default view and the review queue, and
+ *    stop counting as open decisions (the open packet + pending recommendations
+ *    are withdrawn here, recorded in the archive note, because nobody is waiting
+ *    on abandoned work);
+ *  - it is reversible: restoring puts the task back where it stood, waiting on a
+ *    human to decide what happens next;
+ *  - authority mirrors the board-management tier (`approve-transition`,
+ *    admin|maintainer) — the same authority that moves a task between stages
+ *    decides that it leaves the flow. Archived PROJECTS are frozen upstream by
+ *    `requireAction`'s R6-3 gate, so a task inside one can't be archived either.
+ */
+export async function setTaskArchived(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; archived: boolean },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; archived: boolean; toast: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(
+    db,
+    project,
+    actor,
+    "approve-transition",
+    input.archived ? "archive this task" : "restore this task",
+  );
+
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (existing.parsed.frontmatter.archived === input.archived) {
+    // Idempotent: no second timeline note, no misleading audit row.
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      archived: input.archived,
+      toast: input.archived
+        ? `${input.taskKey} is already archived.`
+        : `${input.taskKey} is not archived.`,
+    };
+  }
+
+  const withdrawn = input.archived
+    ? [
+        ...(existing.parsed.packet ? [`the open “${existing.parsed.packet.title}” decision`] : []),
+        ...existing.parsed.frontmatter.recommendations.map((r) => `“${r.label}”`),
+      ]
+    : [];
+  const withdrawnNote =
+    withdrawn.length > 0
+      ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn — restore the task to reopen the question.`
+      : "";
+
+  const event: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    // Neutral disposition, not a governance violation (P13-LV-03).
+    type: "note",
+    actor: humanActorRef(db, actor),
+    title: null,
+    text: input.archived
+      ? `**Archived:** ${input.taskKey} was archived — it leaves the board and the review queue, and its record is kept.${withdrawnNote}`
+      : `**Restored:** ${input.taskKey} was restored from the archive and is back on the board.`,
+    toAgent: false,
+    evidence: null,
+  };
+
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.archived = input.archived;
+    if (input.archived) {
+      // Nothing waits on abandoned work: withdraw the open decision so the
+      // inbox, the board chip and the review queue stop asking for one.
+      parsed.frontmatter.waiting = "none";
+      parsed.frontmatter.recommendations = [];
+      parsed.packet = null;
+    } else {
+      // A restored task is back in a human's hands — it has no agent in flight
+      // and no decision object, so the honest wait state is "human".
+      parsed.frontmatter.waiting = "human";
+    }
+    parsed.timeline.unshift(event);
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+
+  recordAudit(db, {
+    action: input.archived ? "task.archived" : "task.unarchived",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      stage: existing.parsed.frontmatter.stage,
+      ...(withdrawn.length > 0 ? { withdrawn: withdrawn.length } : {}),
+    },
+  });
+
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    archived: input.archived,
+    toast: input.archived
+      ? `${input.taskKey} archived — find it under Archived on the board.`
+      : `${input.taskKey} restored to ${stageName(project, existing.parsed.frontmatter.stage)}.`,
+  };
+}
+
 // ------------------------------------------------------------ resolvePacket
 
 /** Resolve the active packet by stable option kind and mark its notifications read. */
@@ -3329,13 +3581,12 @@ export async function resolvePacket(
   // identity so a stale resolution can't stamp/clear a different packet.
   const resolvedPacketIdentity = packetIdentity(packet);
 
-  // Packet-resolution authority (owner ruling Q2, 2026-07-11): a decision packet
-  // is addressed to the task OWNER, so the owner (whatever their project role)
-  // OR an admin|maintainer may resolve it — a contributor who took ownership is
-  // no longer told "decision needed" and then handed a 403. The
-  // `accept_completion` option is the one exception: merging + moving to Done
-  // stays admin|maintainer (re-gated below), preserving the human-only-Done
-  // authority split.
+  // Packet-resolution authority (owner ruling Q2 2026-07-11, WIDENED by R14-2
+  // 2026-07-25): a decision packet is addressed to the task OWNER, so the owner
+  // (whatever their project role) OR an admin|maintainer may resolve it — a
+  // contributor who took ownership is no longer told "decision needed" and then
+  // handed a 403. `accept_completion` routes through requireAcceptCompletion
+  // below, which carries the same owner exception (R6-2).
   // `ownerException` additionally requires CURRENT contributor+ membership
   // (adversarial-review #8) — a user removed from the project who still holds a
   // stale ownerUserId must not resolve packets.
@@ -3372,40 +3623,57 @@ export async function resolvePacket(
         existing.parsed.frontmatter.ownerUserId,
         "accept completion into Done",
       );
-      // F10-15: acceptance requires every required reviewer to have approved the
-      // CURRENT work revision (and none to have requested changes on it). A
-      // stale acceptance packet can't merge work the current review hasn't
-      // cleared.
+      // The SAME acceptance gates the direct `acceptCompletion` path applies —
+      // required reviewers on the current revision (F10-15), the closed-PR
+      // rejection (P13-D-4), the conflicting PR and the workflow-graph position
+      // (P14-LV-02). This inlined accept has historically shipped with a subset
+      // of them; one shared helper is the fix. `blockedPacket: false` because
+      // the open packet IS what this call resolves — it can't also be the reason
+      // to refuse the resolution.
       {
-        const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-        if (blockReason) throw AppError.conflict(blockReason);
-      }
-      // P13-D-4: the SAME closed-PR gate the direct `acceptCompletion` path
-      // applies. This inlined accept used to skip it entirely, so resolving an
-      // `accept_completion` packet on a task whose PR a human had closed on
-      // GitHub overwrote `pr.state` to "accepted" and landed it in Done —
-      // durably, since the reconciler only self-heals `pr.state`, never `stage`.
-      {
-        const closedReason = closedPrBlockedReason(
+        const refusal = acceptanceRefusalReason(
+          project,
           existing.parsed.frontmatter,
           input.taskKey,
+          { blockedPacket: false },
         );
-        if (closedReason) throw AppError.conflict(closedReason);
+        if (refusal) throw AppError.conflict(refusal);
       }
       const doneStageId =
         terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
       // Attempt the REAL merge (FR31) and only claim "merged" when it truly
-      // happened; otherwise record "accepted" (merge pending) — never a false
-      // merge (D3 / NFR15).
-      const reallyMerged = await mergeTaskPrIfPossible(
+      // happened; a merge GitHub refuses (conflict, moved head) refuses the
+      // acceptance itself, and an unreachable merge records "accepted" (merge
+      // pending) with its real cause — never a false merge (D3 / NFR15).
+      //
+      // P14-GV-05: the merge is an EXTERNAL, irreversible side effect, and the
+      // only identity re-check used to run AFTER it (inside the write lock) — so
+      // a packet replaced while this resolution was in flight left the PR merged
+      // on GitHub and the resolution 409'd: a real merge committed under a stale
+      // decision, self-healed only by the poller's "merged but not Done" nudge.
+      // Re-check inside `beforeMerge`, the last point before the side effect.
+      const merge = await attemptAcceptanceMerge(
         db,
         ctx,
         input.projectSlug,
         input.taskKey,
         actor,
+        () => {
+          const fresh = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+          if (
+            !fresh?.parsed.packet ||
+            packetIdentity(fresh.parsed.packet) !== resolvedPacketIdentity
+          ) {
+            throw AppError.conflict(
+              "This decision was replaced by a newer one — refresh the task and choose again.",
+            );
+          }
+        },
       );
+      if (merge.kind === "unmergeable") throw AppError.conflict(merge.reason);
+      const reallyMerged = merge.kind === "merged";
       const hasPr = !!existing.parsed.frontmatter.pr;
       event = {
         occurredAt: now,
@@ -3416,7 +3684,7 @@ export async function resolvePacket(
           ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
           : reallyMerged
             ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-            : "Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge).",
+            : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
         toAgent: false,
         evidence: null,
       };
@@ -3424,7 +3692,8 @@ export async function resolvePacket(
         fm.stage = doneStageId;
         fm.readiness = "ready";
         fm.waiting = "none";
-        fm.validation = "healthy"; // accepted work is validated (FR24)
+        // P14-LV-02: derived, never synthesized — see acceptCompletion.
+        fm.validation = deriveValidation(fm);
         // Acceptance consumes standing recommendations — a leftover transition
         // card on a Done task would move it back OUT of Done if applied.
         fm.recommendations = [];
@@ -3644,6 +3913,149 @@ export async function resolvePacket(
 
 // ---------------------------------------------------- operator recommendations
 
+/**
+ * P14-LV-02 — is Done a LEGAL next stage for where this task actually sits?
+ *
+ * Live-proven hole: VM-2 sat at Triage (no branch, no PR, no reviewer, no
+ * verdict) and its operator recommended "Accept completion"; one click moved it
+ * straight to Done. `acceptCompletion` checked reviewer verdicts, blocked
+ * packets and closed PRs — and never once consulted the task's current stage,
+ * the project's transition graph, or the `review → done` boundary the template
+ * declares `human` + `locked`. Acceptance is the human authority AT that
+ * boundary, so it may only be exercised FROM it: the resolved review stage, or
+ * any stage with a declared workflow edge into the terminal one (a custom board
+ * may have several). Everything else must walk the graph first — or take the
+ * audited admin force-accept.
+ */
+function acceptanceStageBlockedReason(
+  project: ProjectContext,
+  fromStageId: string,
+  taskKey: string,
+): string | null {
+  const roles = stageRolesOf(project);
+  const terminalId =
+    roles.terminalId ?? project.stages[project.stages.length - 1]?.id ?? null;
+  // No stages to reason about, or already terminal (the callers' idempotent
+  // "already Done" return handles that) — nothing to refuse.
+  if (!terminalId || fromStageId === terminalId) return null;
+  const hasEdgeToTerminal = project.workflow.some(
+    (w) => w.from === fromStageId && w.to === terminalId,
+  );
+  if (hasEdgeToTerminal || fromStageId === roles.reviewId) return null;
+  const reviewName = roles.reviewId
+    ? stageName(project, roles.reviewId)
+    : "the review stage";
+  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName} — a completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first, or ask an admin to force-accept it.`;
+}
+
+/**
+ * Every gate a human acceptance must clear, in one place (P14-LV-02).
+ *
+ * The three writers to Done each grew their own subset of these checks, which is
+ * how the graph gate came to be missing from all of them. Returns the first
+ * refusal reason or null. `blockedPacket` is passed by the caller because the
+ * packet-resolution path is RESOLVING the very packet that would otherwise
+ * block it.
+ */
+function acceptanceRefusalReason(
+  project: ProjectContext,
+  fm: TaskFrontmatter,
+  taskKey: string,
+  opts: { blockedPacket: boolean },
+): string | null {
+  return (
+    // R14-3: an archived task is out of the flow entirely.
+    archivedTaskBlockedReason(fm, taskKey) ??
+    acceptanceStageBlockedReason(project, fm.stage, taskKey) ??
+    // F10-15: every required reviewer must have approved the CURRENT revision.
+    acceptanceBlockedReason(fm) ??
+    // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
+    // accepting would bury it. Resolving the packet clears readiness.
+    (opts.blockedPacket
+      ? "This task has an open blocked decision — resolve the operator's packet before accepting it."
+      : null) ??
+    // P13-D-4: a PR closed on GitHub without merging is a rejection.
+    closedPrBlockedReason(fm, taskKey) ??
+    // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
+    conflictingPrBlockedReason(fm, taskKey)
+  );
+}
+
+/** What a viewer may do about accepting ONE task, right now (P14-LV-06). */
+export interface AcceptanceAffordance {
+  /** The viewer holds acceptance authority here: maintainer+ or the task owner. */
+  hasAuthority: boolean;
+  /** The task sits where a completion CAN be accepted from (the review boundary). */
+  atBoundary: boolean;
+  /** null when acceptance would succeed right now; else the exact refusal. */
+  blockedReason: string | null;
+  /** Render an acceptance control iff true. */
+  canAccept: boolean;
+}
+
+/**
+ * P14-LV-06 — the ONE predicate behind "can this human accept this task".
+ *
+ * Live-proven mismatch: the review queue listed VM-4 under "Waiting on your
+ * acceptance (1 of 1)" while the task page offered no acceptance affordance at
+ * all — the divergence had withdrawn the operator's recommendation, and the task
+ * page only ever rendered acceptance as a recommendation card. Acceptance is a
+ * standing human authority at the boundary, not something an agent has to
+ * suggest first, so both surfaces read it from here.
+ *
+ * A pure READ: it classifies by project role + ownership exactly like
+ * `decisionsRequiring`, and never calls the audited authority path.
+ */
+export function resolveAcceptanceAffordance(
+  // Deliberately DB-free: membership and ownership both live in the canonical
+  // files, so this resolves on a loader path without a projection read (and
+  // mirrors the review queue's own role+owner test).
+  input: { projectSlug: string; taskKey: string; viewerUserId: string },
+  ctx: TaskMutationContext = {},
+): AcceptanceAffordance {
+  const denied: AcceptanceAffordance = {
+    hasAuthority: false,
+    atBoundary: false,
+    blockedReason: null,
+    canAccept: false,
+  };
+  let project: ProjectContext;
+  try {
+    project = loadProjectContext(ctx, input.projectSlug);
+  } catch {
+    return denied;
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) return denied;
+  const fm = existing.parsed.frontmatter;
+  const role = project.memberRoles.get(input.viewerUserId) ?? null;
+  const hasAuthority =
+    roleCan(role, "accept-completion") ||
+    (fm.ownerUserId === input.viewerUserId && roleCan(role, "own-task"));
+  // An archived project is read-only (R6-3) — no acceptance from any role.
+  if (project.archived) return { ...denied, hasAuthority };
+  const atBoundary =
+    !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
+  const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
+    blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
+  });
+  return {
+    hasAuthority,
+    atBoundary,
+    blockedReason,
+    canAccept: hasAuthority && atBoundary && blockedReason === null,
+  };
+}
+
+/** The parenthetical after "accepted, merge pending" — the honest cause
+ *  (P14-LV-07). A forced acceptance past an `unmergeable` verdict names THAT
+ *  reason rather than the offline copy. */
+function mergePendingCause(merge: AcceptanceMergeOutcome): string {
+  if (merge.kind === "pending") return merge.cause;
+  if (merge.kind === "unmergeable") return merge.reason;
+  return UNREACHABLE_MERGE_CAUSE;
+}
+
 /** Apply human acceptance through the shared Done transition and merge path. */
 async function acceptCompletion(
   db: DatabaseSync,
@@ -3663,47 +4075,6 @@ async function acceptCompletion(
     "accept completion into Done",
   );
 
-  // F10-15: acceptance requires every required reviewer to have approved the
-  // CURRENT work revision (none requesting changes on it). `force` is the
-  // explicit human override. Replaces the old scalar-`failing` gate, which a
-  // maintainer could clear by bouncing a rejected task out of and back into
-  // review without any re-review.
-  if (!input.force) {
-    const blockReason = acceptanceBlockedReason(existing.parsed.frontmatter);
-    if (blockReason) throw AppError.conflict(blockReason);
-  }
-
-  // Refuse to accept while an operator-raised BLOCKED decision is still open
-  // (F7-VAL1/F7-PKT1). A blocked packet means the operator hit something it
-  // couldn't resolve (a denied commit, a crashed run); accepting would bury that
-  // decision. This replaces the old validation="failing"-on-block hack: the
-  // packet, not a fake review verdict, is what holds acceptance. Resolving the
-  // packet clears readiness → acceptance proceeds.
-  if (
-    !input.force &&
-    existing.parsed.frontmatter.readiness === "blocked" &&
-    existing.parsed.packet?.type === "blocked"
-  ) {
-    throw AppError.conflict(
-      "This task has an open blocked decision — resolve the operator's packet before accepting it.",
-    );
-  }
-
-  // NEW-1 (defense-in-depth): a task whose review PR was CLOSED on GitHub without
-  // merging was REJECTED — its work was declined, so it can't be "accepted" into
-  // Done (there's nothing to merge). The human reworks + reopens or archives it.
-  // The review queue already hides such tasks from the acceptance panel; this
-  // guards the direct action path (and the operator's accept_completion rec).
-  // P13-D-4: the check moved into `closedPrBlockedReason` and is now applied by
-  // ALL THREE writers to Done, not just this one.
-  if (!input.force) {
-    const closedReason = closedPrBlockedReason(
-      existing.parsed.frontmatter,
-      input.taskKey,
-    );
-    if (closedReason) throw AppError.conflict(closedReason);
-  }
-
   const doneStageId =
     terminalStageIdOf(project) ??
     project.stages[project.stages.length - 1]?.id ??
@@ -3711,19 +4082,43 @@ async function acceptCompletion(
 
   if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
 
+  // Every acceptance gate — graph position, required reviewers, blocked packet,
+  // closed/conflicting PR, archived task — comes from ONE shared helper, so a
+  // fourth writer to Done can't quietly ship with a subset again. `force` is the
+  // audited admin override (DG-2).
+  if (!input.force) {
+    const refusal = acceptanceRefusalReason(
+      project,
+      existing.parsed.frontmatter,
+      input.taskKey,
+      {
+        blockedPacket:
+          existing.parsed.frontmatter.readiness === "blocked" &&
+          existing.parsed.packet?.type === "blocked",
+      },
+    );
+    if (refusal) throw AppError.conflict(refusal);
+  }
+
   // Human acceptance merges the review PR (FR31: "accepting a completion merges
   // its PR"). Attempt the REAL merge first when a PR + reachable GitHub exist —
-  // mergeTaskPr writes state=merged + a `github` event + audit on success and
-  // returns true. When the real merge CAN'T run (no GitHub / no PAT / not
-  // mergeable) we do NOT claim "merged" — we record "accepted" (merge pending)
-  // so the task record never diverges from GitHub truth (NFR15).
-  const reallyMerged = await mergeTaskPrIfPossible(
+  // mergeTaskPr writes state=merged + a `github` event + audit on success. When
+  // GitHub REFUSES the merge (conflict, moved head) the task must NOT close:
+  // acceptance is refused naming the true cause (P14-LV-07). When the merge
+  // could not be REACHED we still do NOT claim "merged" — we record "accepted"
+  // (merge pending) with the real reason, so the task record never diverges
+  // from GitHub truth (NFR15).
+  const merge = await attemptAcceptanceMerge(
     db,
     ctx,
     input.projectSlug,
     input.taskKey,
     actor,
   );
+  if (merge.kind === "unmergeable" && !input.force) {
+    throw AppError.conflict(merge.reason);
+  }
+  const reallyMerged = merge.kind === "merged";
   const hasPr = !!existing.parsed.frontmatter.pr;
 
   const event: TaskFileEvent = {
@@ -3735,7 +4130,7 @@ async function acceptCompletion(
       ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
       : reallyMerged
         ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-        : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (no reachable GitHub merge — merge it manually or reconcile once credentials are set).`,
+        : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
     toAgent: false,
     evidence: null,
   };
@@ -3743,7 +4138,14 @@ async function acceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
-    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24)
+    // P14-LV-02: acceptance used to stamp `validation: healthy` with the comment
+    // "accepted work is validated (FR24)" — untrue for work no reviewer ever
+    // saw, and the reason a Triage task with no diff at all wore a green
+    // "validation healthy" chip on the board. `validation` has ONE writer
+    // (deriveValidation, F10-15); recompute it and let the cache say what
+    // actually happened: none (nothing delivered), changed (delivered, no
+    // verdict) or healthy (every required reviewer approved this revision).
+    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     if (parsed.frontmatter.pr) {
       parsed.frontmatter.pr = {
         ...parsed.frontmatter.pr,
@@ -3801,12 +4203,16 @@ export async function forceAcceptCompletion(
   if (existing.parsed.frontmatter.stage === doneStageId) {
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
   }
+  // P13-D-4 / P14-LV-02: the audit names the EXACT gate being overridden —
+  // including the graph gate and the conflicting-PR gate, both of which a forced
+  // accept can now bypass. Same shared helper the gate itself uses, so the audit
+  // can never name a stale reason.
   const bypassed =
-    acceptanceBlockedReason(existing.parsed.frontmatter) ??
-    // P13-D-4: a forced accept may now also be bypassing the closed-PR gate —
-    // name it in the audit rather than recording "no gate (already acceptable)"
-    // for an override that overrode exactly that.
-    closedPrBlockedReason(existing.parsed.frontmatter, input.taskKey) ??
+    acceptanceRefusalReason(project, existing.parsed.frontmatter, input.taskKey, {
+      blockedPacket:
+        existing.parsed.frontmatter.readiness === "blocked" &&
+        existing.parsed.packet?.type === "blocked",
+    }) ??
     (existing.parsed.frontmatter.readiness === "blocked"
       ? "an open blocked decision packet"
       : "no gate (already acceptable)");
@@ -3904,13 +4310,24 @@ export async function applyRecommendation(
 ): Promise<{ task: TaskSummary; label: string }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   // Applying an operator recommendation resolves a pending governance decision
-  // (symmetric with dismissRecommendation/resolvePacket) — authorize BEFORE any
-  // task read so an unauthorized caller can't probe task/recommendation
-  // existence through the notFound/conflict responses below. The inner governed
-  // mutations still enforce their own finer-grained caps.
-  requireAction(db, project, actor, "resolve-packet", "apply recommendations");
-
+  // (symmetric with dismissRecommendation/resolvePacket): maintainer+ OR the
+  // task's own human owner (R14-2). The inner governed mutations still enforce
+  // their own finer-grained caps — an owner applying "assign a specialist" is
+  // still stopped by run-agents.
+  //
+  // F20 (no existence probe): the task read has to come FIRST now, because the
+  // owner is a fact of the task file. Authorization still precedes every
+  // response that reveals anything — an unauthorized caller gets the same 403
+  // whether or not the task/recommendation exists, because the guard below
+  // throws before the notFound/conflict lines.
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  requireDecisionAuthority(
+    db,
+    project,
+    actor,
+    existing?.parsed.frontmatter.ownerUserId,
+    "apply recommendations",
+  );
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,
@@ -4000,8 +4417,8 @@ export async function applyRecommendation(
 
 /**
  * Dismiss a pending operator recommendation without acting on it (admin|
- * maintainer — symmetric with resolvePacket; the UI hides the control from
- * lower roles). Idempotent — a missing id is a no-op.
+ * maintainer, or the task's own owner per R14-2 — symmetric with resolvePacket).
+ * Idempotent — a missing id is a no-op.
  */
 export async function dismissRecommendation(
   db: DatabaseSync,
@@ -4011,11 +4428,19 @@ export async function dismissRecommendation(
 ): Promise<{ task: TaskSummary; label: string | null }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   // Dismissing an operator recommendation resolves a pending governance decision
-  // (the non-packet equivalent of resolving a packet) — admin|maintainer only,
-  // symmetric with resolvePacket.
-  requireAction(db, project, actor, "resolve-packet", "dismiss recommendations");
-
+  // (the non-packet equivalent of resolving a packet) — maintainer+ OR the
+  // task's own owner (R14-2), symmetric with resolvePacket/applyRecommendation.
+  // Dismissal is the reason the decisions inbox can honestly count ANY open
+  // decision on an owned task as the owner's: whatever the recommendation is,
+  // the owner can always decide it away.
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  requireDecisionAuthority(
+    db,
+    project,
+    actor,
+    existing?.parsed.frontmatter.ownerUserId,
+    "dismiss recommendations",
+  );
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   const rec = existing.parsed.frontmatter.recommendations.find(
     (r) => r.id === input.recId,

@@ -140,6 +140,61 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(display.text).toContain("VIBERR_CLAUDE_MAX_TURNS");
   });
 
+  // P14-RT-10: an `is_error` RESULT (anything but the max-turns subtype) used to
+  // settle `error` carrying no classified line at all — the result line's own
+  // tag is `result`, which `runFailureReason` never matches — so a quota failure
+  // delivered this way lost its `retry_other_backend` recovery option and got
+  // the generic "run ended in an error" copy. Thrown stream errors never had
+  // that problem, which is exactly the asymmetry.
+  it("classifies an is_error RESULT the same way a thrown stream error is classified", async () => {
+    const { q } = fakeQuery([
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        num_turns: 3,
+        usage: {},
+        result: "Claude AI usage limit reached|1750000000",
+      },
+    ]);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+
+    expect(exit).toMatchObject({ outcome: "error" });
+    const reason = lines.find((l) => l.display?.tag === "run·error·quota");
+    expect(reason).toBeTruthy();
+    expect(reason!.display!.ev).toBe("err");
+    // Redaction-safe: the canonical sentence, never the provider's raw text.
+    expect(reason!.display!.text).toContain("usage quota");
+    expect(reason!.display!.text).not.toContain("1750000000");
+  });
+
+  it("an is_error result with no recognizable cause still lands a tagged line", async () => {
+    const { q } = fakeQuery([
+      { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1, usage: {} },
+    ]);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    expect(lines.some((l) => l.display?.tag === "run·error·unknown")).toBe(true);
+  });
+
+  it("a max-turns result keeps its OWN copy (not the generic classifier's)", async () => {
+    const { q } = fakeQuery([
+      { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 51, usage: {} },
+    ]);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    expect(lines.some((l) => l.display?.tag === "run·error·max_turns")).toBe(true);
+    expect(lines.some((l) => l.display?.tag === "run·error·unknown")).toBe(false);
+  });
+
   it("classifies a swept transcript as run·error·session_missing, not auth (P13-D-2)", async () => {
     // What `claude --resume <id>` prints once the provider has swept the
     // transcript (~30-day retention) — the exact string the export installer

@@ -21,6 +21,19 @@ const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
 /** Same crash-loop backstop for the reply-recovery re-invoke path (below). */
 const RECOVERY_REPLAY_ACTION = "run.recovery.reply_replayed";
+/**
+ * The audit fact `executeCodexPlan` writes before it takes up a plan
+ * (operator-run). Its absence on a FINISHED codex operator run is what marks
+ * that turn as stranded (P14-RT-08).
+ */
+const OPERATOR_PLAN_EXECUTED_ACTION = "runtime.operator.plan_executed";
+/**
+ * How long after a codex operator run finished its plan may still be replayed.
+ * The stranding window is seconds (finish → in-process callback); a boot that
+ * happens hours later is not recovering a dropped turn, it is re-deciding an old
+ * one against state that has moved.
+ */
+const STRANDED_PLAN_MAX_AGE_MS = 60 * 60 * 1000;
 
 /**
  * Boot-time finalization of non-terminal runs.
@@ -215,7 +228,7 @@ export async function recoverUnreactedAgentRuns(
     count: rows.length,
   });
 
-  const [{ applyAgentCompletionEffects }, { replyTextForRun }] =
+  const [{ applyAgentCompletionEffects }, { agentMentionHandle, replyTextForRun }] =
     await Promise.all([
       import("~/server/tasks/task-actions.server"),
       import("~/server/tasks/agent-reply.server"),
@@ -290,7 +303,11 @@ export async function recoverUnreactedAgentRuns(
           // verdict survives a restart instead of falling back to the prose regex.
           ...(row.outcome_key ? { outcomeKey: row.outcome_key } : {}),
           workdir: null,
-          agentHandle: row.role.trim().split(/[\s/&]+/)[0]?.toLowerCase() ?? row.role,
+          // P14-RT-12: the ONE handle derivation every writer shares. The
+          // role's first word ("Senior Developer" → `@senior`) resolved to no
+          // agent at all, so a recovered run's stuck-packet observation named a
+          // handle nobody could reply to.
+          agentHandle: agentMentionHandle({ profileId: row.agent_profile_id }),
         },
         { id: row.id, state: "finished" },
       );
@@ -305,4 +322,97 @@ export async function recoverUnreactedAgentRuns(
   }
   logger.info("agent-reply recovery complete", { recovered, capped });
   return { recovered, capped };
+}
+
+/**
+ * Boot-time recovery of stranded CODEX operator plans (P14-RT-08).
+ *
+ * A Codex operator run does its coordination AFTER the provider run finishes:
+ * the completion callback parses the structured plan and executes it through the
+ * gated operator actions. That callback lives in the process, so a restart in
+ * the window between `finished` and the plan running lost the entire turn with
+ * no trace — the finished row is outside `finalizeOrphanedRuns` (running/queued
+ * only) AND outside `recoverUnreactedAgentRuns` (primary/reviewer only), and the
+ * task kept sitting at waiting=agent.
+ *
+ * Selection mirrors the reply reconciler: a finished codex operator run on a
+ * task still waiting on an agent, with no `runtime.operator.plan_executed` audit
+ * row. That row is written before the first governed action, so a plan that
+ * merely CRASHED mid-execution is never re-run here — re-applying half a plan is
+ * worse than leaving it, and the escalation paths inside the executor already
+ * cover a plan that fails on its own terms.
+ *
+ * Bounded by `STRANDED_PLAN_MAX_AGE_MS`, because a plan is a decision ABOUT a
+ * state: executing a day-old one against a task that has since moved would
+ * duplicate an engagement or transition rather than recover anything. The window
+ * this exists for is seconds long. Anything older is reported, never replayed.
+ */
+export async function recoverStrandedOperatorPlans(
+  db: DatabaseSync,
+  ctx: TaskMutationContext = {},
+): Promise<{ recovered: number; stale: number }> {
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.project_slug, r.task_key, r.finished_at
+         FROM agent_runs r
+         JOIN task_projections t
+           ON t.project_slug = r.project_slug AND t.task_key = r.task_key
+        WHERE r.kind = 'operator'
+          AND r.backend = 'codex'
+          AND r.state = 'finished'
+          AND t.waiting = 'agent'
+          AND NOT EXISTS (
+            SELECT 1 FROM audit_events a
+             WHERE a.action = ?
+               AND a.subject_id = r.id
+          )`,
+    )
+    .all(OPERATOR_PLAN_EXECUTED_ACTION) as {
+    id: string;
+    project_slug: string;
+    task_key: string;
+    finished_at: string | null;
+  }[];
+  if (rows.length === 0) return { recovered: 0, stale: 0 };
+
+  const cutoff = Date.now() - STRANDED_PLAN_MAX_AGE_MS;
+  const fresh = rows.filter((r) => {
+    const at = r.finished_at ? Date.parse(r.finished_at) : NaN;
+    return Number.isFinite(at) && at >= cutoff;
+  });
+  const stale = rows.length - fresh.length;
+  if (stale > 0) {
+    logger.warn("stranded codex operator plans are too old to replay safely", {
+      stale,
+      maxAgeMs: STRANDED_PLAN_MAX_AGE_MS,
+      taskKeys: rows
+        .filter((r) => !fresh.includes(r))
+        .map((r) => r.task_key),
+    });
+  }
+  if (fresh.length === 0) return { recovered: 0, stale };
+
+  logger.info("recovering stranded codex operator plans after restart", {
+    count: fresh.length,
+  });
+  const { executeStrandedCodexPlan } = await import("./operator-run.server");
+  let recovered = 0;
+  for (const row of fresh) {
+    try {
+      const executed = await executeStrandedCodexPlan(db, ctx, {
+        projectSlug: row.project_slug,
+        taskKey: row.task_key,
+        runId: row.id,
+      });
+      if (executed) recovered += 1;
+    } catch (error) {
+      logger.warn("codex operator plan recovery failed for a run", {
+        runId: row.id,
+        taskKey: row.task_key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  logger.info("codex operator plan recovery complete", { recovered, stale });
+  return { recovered, stale };
 }

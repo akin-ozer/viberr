@@ -83,11 +83,13 @@ export interface OperatorAuthority {
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
   /**
-   * The operator's declared org MCP servers. P13-KM-03: these were parsed by
-   * the resource catalog and shown as granted in the UI, but never reached a
-   * run on EITHER backend — `OperatorAuthority` carried skills and kb only.
-   * Live-proven: an operator granted `everything-mcp` reported "MCP
-   * servers/tools I can call: none".
+   * The operator's declared org MCP servers. P13-KM-03 wired them into the
+   * Claude toolkit (they had reached NO run on either backend — `OperatorAuthority`
+   * carried skills and kb only, and an operator granted `everything-mcp`
+   * reported "MCP servers/tools I can call: none"); P14-RT-04 mounts them on the
+   * Codex operator too, so the grant is real on both backends. On Codex the CLI
+   * translation drops credentials (argv exposure) and stamps approve-mode, as it
+   * does for specialists.
    */
   mcps: string[];
   /** The deployment's persona override (P11-21) — when a project edits the

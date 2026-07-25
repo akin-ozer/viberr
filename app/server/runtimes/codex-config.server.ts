@@ -97,6 +97,13 @@ function isTruthy(v: string | undefined): boolean {
  * one credential); falls back to a copy where symlinks are unavailable, and
  * refreshes a stale copy when the source is newer (a re-login).
  *
+ * Called per RUN (from `selectAdapter`), not once per process: the adapter set
+ * is built once, so a boot-time-only mirror never saw an `auth.json` that landed
+ * afterwards — the exact state the availability probe reports as "available, no
+ * restart needed" (P14-RT-05). Idempotent and cheap enough for that: it returns
+ * before touching the disk outside cached-login mode, and a live symlink costs
+ * one lstat.
+ *
  * Only touches the filesystem in CACHED-LOGIN mode (`VIBERR_CODEX_USE_CLI_AUTH`)
  * — that is the only auth mode where `auth.json` is consulted at all; token and
  * API-key modes carry the credential in the spawn env. That also keeps `npm

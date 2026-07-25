@@ -23,6 +23,8 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import {
   boardEmptyCopy,
+  countArchived,
+  isArchived,
   isBoardFilterId,
   matchesBoardFilter,
   matchesSearch,
@@ -641,6 +643,9 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "human", label: "Waiting on me", icon: "hand" },
   { id: "agent", label: "Agent working", icon: "cpu" },
   { id: "risk", label: "Needs attention", icon: "alert" },
+  // R14-3: archived tasks are out of every other view; this is the way back to
+  // them. The chip only renders when the project has any (see FilterBar).
+  { id: "archived", label: "Archived", icon: "lock" },
 ];
 
 function BoardHeader({
@@ -679,8 +684,16 @@ function BoardHeader({
     <div className="board-head">
       <div>
         <h1>Board</h1>
+        {/* P14-WL-04: three surfaces counted "waiting" at three different
+            scopes and none said which — Home said "5 decisions waiting on you"
+            (org-wide, viewer-scoped), this line said "4 waiting on a human
+            decision" (project-wide, anyone) and Agents said "6 threads waiting
+            on a human" (engagements, not tasks). Each number was right; the
+            reader had no way to know they answered different questions. Every
+            one of them now names its scope. */}
         <div className="sub">
-          {countLine} · {waitingHuman} waiting on a human decision
+          {countLine} · {waitingHuman} waiting on a human decision in this
+          project
         </div>
       </div>
       <div className="board-tools">
@@ -733,6 +746,7 @@ function FilterBar({
   filter,
   query,
   waitingOnMe,
+  archived,
   setParam,
   onClear,
 }: {
@@ -741,12 +755,17 @@ function FilterBar({
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
   waitingOnMe: number;
+  /** R14-3: archived tasks in this project — the chip is the only way back to
+   *  them, so it renders only when there are any (and always while it is on). */
+  archived: number;
   setParam: (key: string, value: string | null) => void;
   onClear: () => void;
 }) {
   return (
     <div className="filter-bar">
-      {FILTERS.map((f) => (
+      {FILTERS.filter(
+        (f) => f.id !== "archived" || archived > 0 || filter === "archived",
+      ).map((f) => (
         <button
           type="button"
           key={f.id}
@@ -758,6 +777,9 @@ function FilterBar({
           {f.label}
           {f.id === "human" && waitingOnMe > 0 && (
             <span style={{ opacity: 0.7 }}>· {waitingOnMe}</span>
+          )}
+          {f.id === "archived" && archived > 0 && (
+            <span style={{ opacity: 0.7 }}>· {archived}</span>
           )}
         </button>
       ))}
@@ -1055,10 +1077,14 @@ export function BoardPage({
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
     [columns, orphanTasks],
   );
-  // Subtitle stat: project-wide "waiting on a human decision" (honest, unscoped).
-  const waitingHuman = allTasks.filter((t) => t.waiting === "human").length;
+  // Subtitle stat: project-wide "waiting on a human decision" (the subtitle
+  // labels that scope — P14-WL-04). Archived tasks are a terminal disposition
+  // and never wait on anyone, so they are out of both counts (R14-3).
+  const liveTasks = allTasks.filter((t) => !isArchived(t));
+  const waitingHuman = liveTasks.filter((t) => t.waiting === "human").length;
   // R8-3: the "Waiting on me" chip is member-scoped — decisions THIS viewer can act on.
-  const waitingOnMe = allTasks.filter((t) => t.waitingOnMe).length;
+  const waitingOnMe = liveTasks.filter((t) => t.waitingOnMe).length;
+  const archivedCount = countArchived(allTasks);
   // The card in flight (for the drop-preview shown in the hovered column).
   const draggedTask = drag
     ? (allTasks.find((t) => t.key === drag.key) ?? null)
@@ -1133,7 +1159,10 @@ export function BoardPage({
     <div className="board-wrap" data-screen-label="Board">
       <BoardHeader
         shownCount={shownCount}
-        taskCount={allTasks.length}
+        // R14-3: the denominator follows the view. On the Archived filter the
+        // population IS the archived set, so "2 of 2" reads true instead of
+        // measuring archived cards against a live-task total they left.
+        taskCount={filter === "archived" ? archivedCount : liveTasks.length}
         waitingHuman={waitingHuman}
         group={group}
         canCreate={canCreate}
@@ -1153,9 +1182,21 @@ export function BoardPage({
         filter={filter}
         query={query}
         waitingOnMe={waitingOnMe}
+        archived={archivedCount}
         setParam={setParam}
         onClear={clearFilters}
       />
+
+      {filter === "archived" && (
+        <div className="board-orphans" role="status">
+          <Icon name="lock" />
+          <span className="board-orphans-label">
+            Archived tasks — abandoned work kept for the record. Their timelines
+            and audit are intact, they are out of the review queue, and a
+            maintainer can restore one from its task page.
+          </span>
+        </div>
+      )}
 
       {orphanTasks.length > 0 && <OrphanBanner orphanTasks={orphanTasks} />}
 

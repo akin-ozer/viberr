@@ -34,6 +34,8 @@ function renderBrowser(
     onClose?: () => void;
     /** Make the org-settings action fail, to exercise the failure toast. */
     actionResult?: Record<string, unknown>;
+    /** Per-intent canned responses (the editor reads AND writes). */
+    respond?: (intent: string) => Record<string, unknown> | undefined;
   } = {},
 ) {
   lastForm = null;
@@ -58,7 +60,10 @@ function renderBrowser(
         for (const [k, v] of fd.entries()) {
           if (typeof v === "string") lastForm[k] = v;
         }
-        return overrides.actionResult ?? { ok: true, toast: "stub done" };
+        return (
+          overrides.respond?.(lastForm.intent ?? "") ??
+          overrides.actionResult ?? { ok: true, toast: "stub done" }
+        );
       },
     },
   ]);
@@ -160,8 +165,181 @@ describe("StoreBrowser", () => {
       expect(lastForm).toMatchObject({
         intent: "store-import-github",
         url: "https://github.com/owner/repo/tree/main/docs",
+        path: "[]",
       }),
     );
+  });
+});
+
+/**
+ * The editor cluster (owner ruling R14-4 — P14-KM-08 / UI-59 / UI-60 / UI-61).
+ * Before it, authoring was create-only at the store ROOT, an existing doc could
+ * not be opened at all, a same-named save silently destroyed the file, and the
+ * editor closed before the server answered so a rejected save lost the draft.
+ */
+describe("StoreBrowser document editor", () => {
+  it("writes into the SELECTED folder, not always the store root", async () => {
+    const { getByText, getByLabelText, getByPlaceholderText } = renderBrowser();
+    fireEvent.change(getByLabelText("Destination folder"), {
+      target: { value: "decisions" },
+    });
+    fireEvent.click(getByText("New document"));
+    fireEvent.change(getByPlaceholderText("file-name.md"), {
+      target: { value: "adr-002" },
+    });
+    fireEvent.change(getByLabelText("Document contents"), {
+      target: { value: "# ADR 2" },
+    });
+    fireEvent.click(getByText("Save document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-write-doc",
+        path: JSON.stringify(["decisions"]),
+        name: "adr-002",
+        body: "# ADR 2",
+      }),
+    );
+    // A fresh name never carries the replace intent.
+    expect(lastForm?.overwrite).toBeUndefined();
+  });
+
+  it("the GitHub import lands in the selected folder too", async () => {
+    const { getByText, getByLabelText, getByPlaceholderText } = renderBrowser();
+    fireEvent.change(getByLabelText("Destination folder"), {
+      target: { value: "decisions" },
+    });
+    fireEvent.click(getByText("Add from GitHub"));
+    fireEvent.change(getByPlaceholderText("https://github.com/owner/repo/tree/main/docs"), {
+      target: { value: "https://github.com/owner/repo" },
+    });
+    fireEvent.click(getByText("Import"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-import-github",
+        path: JSON.stringify(["decisions"]),
+      }),
+    );
+  });
+
+  it("clicking a text doc opens it in place with its real contents", async () => {
+    const { getByLabelText, getByText } = renderBrowser({
+      respond: (intent) =>
+        intent === "store-read-doc"
+          ? { ok: true, text: "# Overview\nLOADED", truncated: false }
+          : undefined,
+    });
+    fireEvent.click(getByLabelText("Open overview.md"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-read-doc",
+        path: JSON.stringify(["overview.md"]),
+      }),
+    );
+    const body = getByLabelText("Document contents") as HTMLTextAreaElement;
+    await waitFor(() => expect(body.value).toContain("LOADED"));
+    // The name is the file's own — the editor edits it, it does not re-create it.
+    expect(getByText("overview.md", { selector: ".fm-doc-path" })).toBeTruthy();
+
+    fireEvent.change(body, { target: { value: "# Overview\nEDITED" } });
+    fireEvent.click(getByText("Save document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-write-doc",
+        name: "overview.md",
+        body: "# Overview\nEDITED",
+        overwrite: "1",
+      }),
+    );
+  });
+
+  it("a non-text file offers no editor affordance", () => {
+    const { queryByLabelText } = renderBrowser({
+      tree: [
+        { type: "file", name: "contract.pdf", sizeBytes: 900, mtime: new Date().toISOString() },
+      ],
+    });
+    expect(queryByLabelText("Open contract.pdf")).toBeNull();
+  });
+
+  it("a new document colliding with an existing file confirms before replacing", async () => {
+    const { getByText, getByPlaceholderText, getByLabelText, queryByRole } =
+      renderBrowser();
+    fireEvent.click(getByText("New document"));
+    fireEvent.change(getByPlaceholderText("file-name.md"), {
+      target: { value: "overview.md" },
+    });
+    fireEvent.change(getByLabelText("Document contents"), {
+      target: { value: "CLOBBER" },
+    });
+    fireEvent.click(getByText("Save document"));
+
+    // No write yet: the old editor posted straight through and the server
+    // overwrote with the same "saved" toast.
+    expect(lastForm).toBeNull();
+    expect(getByText("Replace “overview.md”?")).toBeTruthy();
+
+    fireEvent(
+      document.querySelector("dialog.confirm-card")!,
+      new Event("cancel", { bubbles: false, cancelable: true }),
+    );
+    await waitFor(() => expect(queryByRole("alertdialog")).toBeNull());
+    expect(lastForm).toBeNull();
+    // The draft survives the cancelled confirm.
+    expect((getByLabelText("Document contents") as HTMLTextAreaElement).value).toBe(
+      "CLOBBER",
+    );
+
+    fireEvent.click(getByText("Save document"));
+    fireEvent.click(getByText("Replace document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "store-write-doc",
+        name: "overview.md",
+        overwrite: "1",
+      }),
+    );
+  });
+
+  it("P14-UI-60: a rejected save keeps the typed body and says why", async () => {
+    const { getByText, getByPlaceholderText, getByLabelText } = renderBrowser({
+      respond: (intent) =>
+        intent === "store-write-doc"
+          ? { ok: false, error: "facts.md already exists — open it to edit." }
+          : undefined,
+    });
+    fireEvent.click(getByText("New document"));
+    fireEvent.change(getByPlaceholderText("file-name.md"), {
+      target: { value: "facts.md" },
+    });
+    fireEvent.change(getByLabelText("Document contents"), {
+      target: { value: "THE ONLY COPY" },
+    });
+    fireEvent.click(getByText("Save document"));
+
+    // The editor used to close optimistically, so the server's rejection
+    // arrived after the draft had already been destroyed.
+    await waitFor(() =>
+      expect(getByText("facts.md already exists — open it to edit.")).toBeTruthy(),
+    );
+    expect((getByLabelText("Document contents") as HTMLTextAreaElement).value).toBe(
+      "THE ONLY COPY",
+    );
+  });
+
+  it("a doc too large to load cannot be saved back over the original", async () => {
+    const { getByLabelText, getByText } = renderBrowser({
+      respond: (intent) =>
+        intent === "store-read-doc"
+          ? { ok: true, text: "first part only", truncated: true }
+          : undefined,
+    });
+    fireEvent.click(getByLabelText("Open overview.md"));
+    await waitFor(() =>
+      expect(getByText(/larger than the editor can load/)).toBeTruthy(),
+    );
+    expect(
+      (getByText("Save document").closest("button") as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 

@@ -1,6 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
-import { getMcpCredential, listMcpServers } from "~/server/org/resources.server";
+import {
+  getMcpCredential,
+  listMcpServers,
+  splitMcpCommand,
+} from "~/server/org/resources.server";
 
 /**
  * Resolve a specialist profile's declared MCP names to portable runtime
@@ -11,9 +15,12 @@ import { getMcpCredential, listMcpServers } from "~/server/org/resources.server"
  *   - HTTP  → `{ type: "http", url: <target>, headers?: { Authorization } }`
  *   - stdio → `{ command, args, env?: { MCP_CREDENTIAL } }`
  *
- * `viberr` is skipped (it is the OPERATOR's in-process governance server, built
- * separately and never offered to specialists). Unknown names are skipped.
- * Returns `{}` when nothing resolves, so callers can spread it unconditionally.
+ * `viberr` and `viberr_agent` are skipped (Viberr's own in-process governance
+ * and collaboration servers, built separately and never resolved from the org
+ * registry). Unknown names are skipped. Returns `{}` when nothing resolves, so
+ * callers can spread it unconditionally — use
+ * {@link resolveSpecialistMcpServersDetailed} when the caller can record what
+ * failed to resolve.
  *
  * CREDENTIALS (F7-MCP1, ruling 8): a server's credential is stored SEALED in the
  * org registry (secret-box). When present it is decrypted only here, at
@@ -34,36 +41,75 @@ export function resolveSpecialistMcpServers(
   db: DatabaseSync,
   mcpNames: readonly string[],
 ): Record<string, unknown> {
-  if (mcpNames.length === 0) return {};
+  return resolveSpecialistMcpServersDetailed(db, mcpNames).servers;
+}
+
+/** Viberr's own in-process servers. They are built by the toolkit builders, are
+ *  refused as registry names at save (P13-KM-12), and must never be resolved
+ *  from the registry even if a hand-edited row carries one — on Claude a row
+ *  would shadow the real toolkit, on Codex it would not, so the two backends
+ *  would disagree about what the agent can do (P14-KM-15). */
+const RESERVED_MCP_NAMES = new Set(["viberr", "viberr_agent", "viberr-agent"]);
+
+/** A declared MCP grant that reached no run. */
+export interface UnresolvedMcpGrant {
+  name: string;
+  /** Why it produced no server, in words a human can act on. */
+  reason: string;
+}
+
+export interface SpecialistMcpResolution {
+  /** Portable `mcpServers` configs, keyed by server name. */
+  servers: Record<string, unknown>;
+  /**
+   * Grants that produced NOTHING (P14-LV-09). A warn in the server log was the
+   * only trace, so an orphaned grant — the standing consequence of an MCP
+   * rename before P14-KM-01 — was advertised in the run's persona while
+   * exposing zero tools, and no human surface said so. Callers record these
+   * against the run.
+   */
+  unresolved: UnresolvedMcpGrant[];
+}
+
+export function resolveSpecialistMcpServersDetailed(
+  db: DatabaseSync,
+  mcpNames: readonly string[],
+): SpecialistMcpResolution {
+  const servers: Record<string, unknown> = {};
+  const unresolved: UnresolvedMcpGrant[] = [];
+  if (mcpNames.length === 0) return { servers, unresolved };
   let registry: { name: string; transport: "HTTP" | "stdio"; target: string }[];
   try {
     registry = listMcpServers(db);
   } catch {
-    return {};
+    return { servers, unresolved };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));
 
-  const servers: Record<string, unknown> = {};
+  const drop = (name: string, reason: string) => {
+    // P13-KM-11: a declared MCP that resolves to nothing used to be dropped in
+    // silence, so a run went out without a tool surface its profile promised and
+    // nothing anywhere said so. Same honesty rule as skills/KBs.
+    logger.warn("declared MCP server did not resolve — run proceeds WITHOUT it", {
+      mcp: name,
+      reason,
+    });
+    unresolved.push({ name, reason });
+  };
+
   for (const name of mcpNames) {
-    if (name === "viberr") continue; // operator's in-process server, not for specialists
+    if (RESERVED_MCP_NAMES.has(name)) continue; // built in-process, not a grant
     const row = byName.get(name);
     if (!row || !row.target) {
-      // P13-KM-11: a declared MCP that resolves to no registry row used to be
-      // dropped in silence, so a run went out without a tool surface its profile
-      // promised and nothing anywhere said so. Same honesty rule as skills/KBs.
-      logger.warn("declared MCP server not in the org registry — run proceeds WITHOUT it", {
-        mcp: name,
-      });
+      drop(name, "no MCP server by that name in the org registry");
       continue;
     }
     const token = getMcpCredential(db, name);
     if (row.transport === "stdio") {
-      const parts = splitCommand(row.target);
+      const parts = splitMcpCommand(row.target);
       const command = parts[0];
       if (!command) {
-        logger.warn("MCP stdio command is empty — run proceeds WITHOUT it", {
-          mcp: name,
-        });
+        drop(name, "the registered stdio command is empty");
         continue;
       }
       servers[name] = {
@@ -79,20 +125,5 @@ export function resolveSpecialistMcpServers(
       };
     }
   }
-  return servers;
-}
-
-/**
- * Split a stdio command line into argv. P13-KM-17: a naive whitespace split
- * mangles any argument containing a space (a path, a JSON blob, a connection
- * string), so quoted segments are kept whole.
- */
-function splitCommand(target: string): string[] {
-  const out: string[] = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(target.trim())) !== null) {
-    out.push(m[1] ?? m[2] ?? m[3] ?? "");
-  }
-  return out.filter(Boolean);
+  return { servers, unresolved };
 }

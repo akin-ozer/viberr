@@ -217,6 +217,42 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(revOpts.networkAccessEnabled).toBeUndefined();
   });
 
+  // P14-RT-06: `use-web-search-fetch` withheld was enforced on Claude (the
+  // WebFetch/WebSearch denial) and on NOTHING on Codex — although the option
+  // that enforces it was already being set, two lines away, for the operator.
+  it("disables web search for a specialist whose web-egress grant is withheld", async () => {
+    const events = [
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+
+    const withheld = fakeCodex(events);
+    createCodexAdapter({ codexFactory: withheld.factory }).start(
+      { ...SPEC, webSearchWithheld: true },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const withheldOpts = withheld.startOptions() as {
+      webSearchMode?: string;
+      networkAccessEnabled?: boolean;
+      sandboxMode?: string;
+    };
+    expect(withheldOpts.webSearchMode).toBe("disabled");
+    // Only the WEB SEARCH tool goes: declared MCP servers and the workspace's
+    // own tooling still need the network, and a delivering run still writes.
+    expect(withheldOpts.networkAccessEnabled).toBeUndefined();
+    expect(withheldOpts.sandboxMode).toBe("danger-full-access");
+
+    const granted = fakeCodex(events);
+    createCodexAdapter({ codexFactory: granted.factory }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    expect(
+      (granted.startOptions() as { webSearchMode?: string }).webSearchMode,
+    ).toBeUndefined();
+  });
+
   it("keeps subscription auth in the CLI env but out of generated shells", async () => {
     const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },

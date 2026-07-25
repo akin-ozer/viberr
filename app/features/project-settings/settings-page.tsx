@@ -678,6 +678,21 @@ export function DangerZone({
         <Icon name="alert" />
         <h2>Danger zone</h2>
       </div>
+      {/* P14-LV-08: both buttons below were already `disabled` for a
+          non-admin — and live, a contributor clicked them and got nothing at
+          all: no dialog, no toast, no error, no audit row. `disabled` had no
+          styling in app.css (fixed there), and the "why" was parked in a
+          `title` that a disabled element can never show, because no pointer
+          event reaches it. State the authority once, visibly, above the rows
+          it governs. */}
+      {!canManageLifecycle && (
+        <p className="deny-note" style={{ marginBottom: ".55rem" }}>
+          <Icon name="lock" />
+          Archiving and deleting {projectName} need the{" "}
+          <strong>Edit workflow &amp; policy</strong> grant — ask a project
+          admin.
+        </p>
+      )}
       <div className="dz-row">
         <span className="dz-main">
           <div className="dn">

@@ -59,12 +59,13 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
     expect(decisionsRequiring(store.db, store.users.deniz.id).mine).toHaveLength(0);
   });
 
-  it("a contributor-owner does NOT hold a maintainer-only recommendation (transition/assign/run)", () => {
+  it("a contributor-owner DOES hold a transition/assign/run recommendation on their own task (R14-2)", () => {
     const store = setupTestStore(ctx);
-    // A recommendation-ONLY task (no packet) owned by a contributor. Applying a
-    // `transition` needs approve-transition (maintainer+) and even DISMISSING any
-    // recommendation needs resolve-packet (maintainer+) — neither has an owner
-    // exception, so the owner can act on NEITHER: it must not count as `mine`.
+    // A recommendation-ONLY task (no packet) owned by a contributor. Under the
+    // pass-12 narrow exception this was NOT counted as theirs, because neither
+    // apply nor dismiss honored an owner. R14-2 widened the server: the owner
+    // governs every decision on their own task and can always dismiss it, so
+    // counting it here is now honest instead of a dead-end inbox row.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-210", {
         stage: "review",
@@ -76,12 +77,26 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    // selin (contributor + owner) can neither apply nor dismiss it → not hers.
-    expect(decisionsRequiring(store.db, store.users.selin.id).mine).toHaveLength(0);
-    // A maintainer holds it (maintainer+ can act on any decision).
+    expect(
+      decisionsRequiring(store.db, store.users.selin.id).mine.map((d) => d.taskKey),
+    ).toEqual(["VIB-210"]);
+    // A maintainer holds it too (maintainer+ can act on any decision).
     expect(
       decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey),
     ).toEqual(["VIB-210"]);
+    // A contributor who does NOT own it still holds nothing.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-210", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: null,
+        recommendations: [
+          { id: "r1", kind: "transition", toStageId: "done", label: "Accept", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(decisionsRequiring(store.db, store.users.selin.id).mine).toHaveLength(0);
   });
 
   it("a contributor-owner DOES hold an accept_completion recommendation (owner exception)", () => {

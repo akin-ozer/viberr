@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createGithubClient } from "./github-client.server";
 import {
+  deriveMergeable,
   deriveReviewState,
   findPrForBranch,
   mapPrToCacheState,
@@ -381,5 +382,102 @@ describe("findPrForBranch review-state fetch (P13-D-28)", () => {
     expect(result.status).toBe("found");
     if (result.status === "found") expect("review" in result.pr).toBe(false);
     expect(gh.callsTo(`GET ${REPO_PATH}/pulls/298/reviews`)).toHaveLength(0);
+  });
+});
+
+describe("deriveMergeable (P14-LV-07)", () => {
+  it("maps GitHub's mergeable + mergeable_state onto the cache vocabulary", () => {
+    // A conflict is reported EITHER way depending on how fresh the computation
+    // is — both must read "conflicting".
+    expect(deriveMergeable({ mergeable: false })).toBe("conflicting");
+    expect(deriveMergeable({ mergeable: null, mergeable_state: "dirty" })).toBe(
+      "conflicting",
+    );
+    expect(deriveMergeable({ mergeable: true, mergeable_state: "clean" })).toBe("clean");
+    // "blocked" (required review/checks) is still MERGEABLE — the merge attempt
+    // is that state's gate, not this pill.
+    expect(deriveMergeable({ mergeable: true, mergeable_state: "blocked" })).toBe(
+      "clean",
+    );
+    // Still computing (the first read after a push) — never asserted either way.
+    expect(deriveMergeable({ mergeable: null })).toBe("unknown");
+    expect(deriveMergeable({})).toBe("unknown");
+  });
+});
+
+describe("findPrForBranch mergeability (P14-LV-07)", () => {
+  const routesFor = (
+    detail: Record<string, unknown>,
+  ): Parameters<typeof fakeGithubFetch>[0] => ({
+    [`GET ${REPO_PATH}/pulls`]: {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "open",
+          merged_at: null,
+          head: { sha: "headsha318" },
+        },
+      ],
+    },
+    [`GET ${REPO_PATH}/pulls/318`]: {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "open",
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        ...detail,
+      },
+    },
+    [`GET ${REPO_PATH}/pulls/318/reviews`]: { body: [] },
+  });
+
+  it("carries a conflicting open PR's mergeability off the detail fetch it already makes", async () => {
+    const { gh, client: c } = client(routesFor({ mergeable: false, mergeable_state: "dirty" }));
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
+    if (result.status === "found") expect(result.pr.mergeable).toBe("conflicting");
+    // No extra API call was paid for it.
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/318`)).toHaveLength(1);
+  });
+
+  it("leaves the key ABSENT while GitHub is still computing (unknown ≠ mergeable)", async () => {
+    const { client: c } = client(routesFor({ mergeable: null }));
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    if (result.status === "found") expect("mergeable" in result.pr).toBe(false);
+  });
+
+  it("a settled (merged) PR reports no mergeability at all", async () => {
+    const { client: c } = client({
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [
+          {
+            number: 298,
+            title: "Store scan hardening",
+            state: "closed",
+            merged_at: "2026-07-01T10:00:00Z",
+            head: { sha: "sha298" },
+          },
+        ],
+      },
+      [`GET ${REPO_PATH}/pulls/298`]: {
+        body: {
+          number: 298,
+          title: "Store scan hardening",
+          state: "closed",
+          merged: true,
+          merged_at: "2026-07-01T10:00:00Z",
+          head: { sha: "sha298" },
+          mergeable: false,
+        },
+      },
+      [`GET ${REPO_PATH}/branches/vib-139-store-scan`]: {
+        body: { commit: { sha: "sha298" } },
+      },
+    });
+    const result = await findPrForBranch(c, REPO, "vib-139-store-scan");
+    if (result.status === "found") expect("mergeable" in result.pr).toBe(false);
   });
 });

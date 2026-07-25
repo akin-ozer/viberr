@@ -254,6 +254,27 @@ export const PR_REVIEW_VALUES = [
 ] as const;
 export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
 
+/**
+ * P14-LV-07: the canonical `pr.mergeable` vocabulary — whether GitHub can
+ * actually merge this PR, derived by the linker from the PR detail's
+ * `mergeable` + `mergeable_state`:
+ *
+ *   conflicting — the head conflicts with the base branch (`mergeable: false` /
+ *                 `mergeable_state: "dirty"`); a merge WILL fail
+ *   clean       — GitHub reports it mergeable
+ *   unknown     — GitHub is still computing it (`mergeable: null`)
+ *
+ * Live-proven need: a merge that failed because the PR CONFLICTED was reported
+ * to the human as "no reachable GitHub merge — merge it manually or reconcile
+ * once credentials are set", and the task closed as accepted with the PR still
+ * open. Mergeability was fetched on every reconcile (it rides the same PR detail
+ * call as the change stats) and thrown away, so a conflicting PR was
+ * indistinguishable from a credential outage. ABSENT/null means "never read",
+ * exactly like `checks`/`review`.
+ */
+export const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
+export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
+
 /** P13-D-28: check-runs roll-up for the PR head sha. Fetched since phase 7 and
  * discarded until this pass — it now feeds the CI pill next to the PR pill. */
 export const prChecksSchema = z
@@ -283,6 +304,9 @@ export const prRefSchema = z
     // garbage value from nulling the WHOLE ref (same reasoning as `state`).
     checks: prChecksSchema.nullish().catch(null),
     review: z.enum(PR_REVIEW_VALUES).nullish().catch(null),
+    // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
+    // key is "never read", which is NOT the same as "merges cleanly".
+    mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
@@ -545,6 +569,46 @@ export function closedPrBlockedReason(
 ): string | null {
   if (fm.pr?.state !== "closed") return null;
   return `${taskKey}'s review PR was closed on GitHub without merging — it can't be accepted. Rework and reopen the PR, or archive the task.`;
+}
+
+/**
+ * P14-LV-07 — why a CONFLICTING review PR blocks acceptance, or null.
+ *
+ * Accepting a completion MERGES its PR (FR31). A PR whose head conflicts with
+ * the base branch cannot be merged by anyone, so accepting it would close the
+ * task on a merge that did not happen — live-proven: VM-4 went to Done with
+ * `pr.state: accepted` while PR #103 stayed open and conflicting, and the
+ * timeline blamed unreachable GitHub / missing credentials. The conflict is a
+ * REWORK signal (rebase the branch), not a merge-pending state.
+ *
+ * `unknown` (GitHub still computing) never blocks — the merge attempt itself is
+ * the authority there. Shaped like the other acceptance gates (reason-or-null).
+ */
+export function conflictingPrBlockedReason(
+  fm: { pr: PrRef | null },
+  taskKey: string,
+): string | null {
+  const pr = fm.pr;
+  if (!pr || pr.mergeable !== "conflicting") return null;
+  if (pr.state === "merged" || pr.state === "closed") return null;
+  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`;
+}
+
+/**
+ * R14-3 (P14-GV-02) — why an ARCHIVED task can't be accepted, or null.
+ *
+ * Archiving is the terminal disposition for abandoned work (the escape the
+ * closed-PR copy has pointed at since pass 13). An archived task is out of the
+ * flow: it leaves the board's default view and the review queue, so accepting
+ * it into Done would resurrect it through a surface nobody is watching. Restore
+ * it first, then accept.
+ */
+export function archivedTaskBlockedReason(
+  fm: { archived: boolean },
+  taskKey: string,
+): string | null {
+  if (!fm.archived) return null;
+  return `${taskKey} is archived — restore it before accepting the completion.`;
 }
 
 /** Compute the next work revision for a freshly delivered head. A head with the

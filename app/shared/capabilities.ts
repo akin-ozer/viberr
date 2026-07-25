@@ -63,8 +63,12 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // including a "read-only" reviewer with all repository capabilities Off, could
   // WebFetch/WebSearch arbitrary URLs. It is now a real capability: granted by
   // default (nothing regresses), visible in the matrix, and revocable per
-  // profile. Enforced with tool denial on Claude; prompt-level on Codex, whose
-  // built-in web tools have no denylist channel.
+  // profile. Enforced on BOTH backends: tool denial on Claude (WebFetch/
+  // WebSearch removed), `webSearchMode: "disabled"` on Codex (P14-RT-06 — the
+  // "prompt-level on Codex" fallback this comment used to claim never existed;
+  // no prompt anywhere mentioned web egress). `curl`/`wget` through Bash stay
+  // reachable on both, for the same reason shell writes do: the specialist needs
+  // Bash to run validation.
   cap("use-web-search-fetch", "Search & fetch from the web", ["agent", "operator"], "Collaboration"),
   // Verdicts gate acceptance (G2) — default OFF so a casually-created profile
   // never acquires acceptance-veto power; the seed grants it to the reviewer.
@@ -192,9 +196,6 @@ export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set(
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.
   "comment-on-task",
-  // Web egress: real tool denial on Claude (WebFetch/WebSearch removed);
-  // prompt-level only on Codex, which has no per-tool denylist.
-  "use-web-search-fetch",
 ]);
 
 export type EnforcementScope = "both" | "claude-only" | "advisory";

@@ -86,6 +86,15 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
+/** R14-1: eligibility resolves declared ids against the board BY ROLE too, so
+ *  every stage surface needs the board's edges, not just its stage list. */
+const WORKFLOW = [
+  { from: "triage", to: "ready" },
+  { from: "ready", to: "impl" },
+  { from: "impl", to: "review" },
+  { from: "review", to: "done" },
+];
+
 function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
   return {
     id: "developer",
@@ -143,6 +152,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[mkDeployment({})]}
         projectName="Viberr Core"
         canManage
@@ -178,6 +188,7 @@ describe("ProfileDetail", () => {
           model: "claude-sonnet-4-5",
         })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -207,6 +218,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[mkDeployment({})]}
         projectName="Viberr Core"
         canManage
@@ -233,6 +245,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({ id: "operator", kind: "operator", spanAll: true })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -261,6 +274,7 @@ describe("ProfileDetail", () => {
         // "2 of 3 stages" with no chip lit.
         a={mkProfile({ stages: ["ready", "impl"] })}
         stages={board}
+        workflow={BOARD_WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -286,6 +300,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({ stages: [] })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -307,6 +322,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage={false}
@@ -731,6 +747,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
               ]}
               deployments={[]}
               stages={STAGES}
+              workflow={WORKFLOW}
               projectSlug="viberr-core"
               projectName="Viberr Core"
               myRole="admin"

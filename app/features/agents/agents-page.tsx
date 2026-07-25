@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -10,6 +11,7 @@ import { useDialog } from "~/ui/use-dialog";
 import {
   deploymentDot,
   deploymentStatusKind,
+  profileRoleLabel,
   type AgentDeploymentView,
   type AgentProfileView,
   type LibraryProfileView,
@@ -39,6 +41,13 @@ export interface StageView {
   color: string;
 }
 
+/** The board's workflow edges — what `resolveDeclaredStages` needs to map a
+ *  declared stage id onto THIS board by structural role (R14-1). */
+export interface WorkflowEdgeView {
+  from: string;
+  to: string;
+}
+
 // ------------------------------------------------------------ small parts
 
 function BackendChip({ b }: { b: string }) {
@@ -56,7 +65,7 @@ function ProfileGlyph({ a, lg }: { a: AgentProfileView; lg?: boolean }) {
       className={
         "agent-glyph" + (lg ? " lg" : "") + (a.kind === "operator" ? " op" : "")
       }
-      title={a.role}
+      title={profileRoleLabel(a.name, a.role, a.kind)}
     >
       <Icon name={a.icon as IconName} />
     </span>
@@ -90,7 +99,7 @@ function ProfileItem({
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>
-        <span className="sub">{a.role}</span>
+        <span className="sub">{profileRoleLabel(a.name, a.role, a.kind)}</span>
       </span>
       <ActiveBadge count={count} />
     </button>
@@ -229,26 +238,41 @@ function DeleteConfirm({
  *  3. Stale/unknown grants were invisible. They are now shown as such, which
  *     is the only on-screen clue that a profile can't be assigned anywhere.
  *
- * Eligibility mirrors `specialistEligibleForStage` exactly (spanAll, or no
- * declared stages = unrestricted, or an explicit match) so the panel and the
- * assign/run guard can never disagree.
+ * Eligibility mirrors `specialistEligibleForStage` exactly, and since R14-1
+ * that means resolving through the SHARED `resolveDeclaredStages` — literal id,
+ * then structural role, then "means nothing here → unrestricted". Re-deriving
+ * it locally is what made the panel and the run guard disagree in the first
+ * place, so this panel now asks the same function the guard does.
  */
 export function StageEligibility({
   a,
   stages,
+  workflow,
 }: {
   a: AgentProfileView;
   stages: StageView[];
+  workflow: WorkflowEdgeView[];
 }) {
-  const boardIds = new Set(stages.map((s) => s.id));
-  const unrestricted = a.spanAll || a.stages.length === 0;
-  const onBoard = stages.filter((s) => a.stages.includes(s.id)).length;
-  const stale = a.stages.filter((id) => !boardIds.has(id));
+  const resolved = resolveDeclaredStages(a.stages, stages, workflow);
+  // Rule 3 of the shared contract: a declaration that resolves to nothing on
+  // this board says nothing about this workflow, so the profile is unrestricted
+  // here — exactly as `stageEligible` treats it at run time.
+  const unrestricted = a.spanAll || a.stages.length === 0 || resolved.length === 0;
+  const onBoard = resolved.length;
+  // A declared id is STALE only when it lands nowhere ON ITS OWN — asking the
+  // shared resolver one id at a time is the only honest test, because a role
+  // match (`impl` → this board's work stage) resolves to a DIFFERENT id than the
+  // one declared and would otherwise look dead.
+  const stale = a.stages.filter(
+    (id) => resolveDeclaredStages([id], stages, workflow).length === 0,
+  );
   const summary = a.spanAll
     ? "active across the whole lifecycle"
     : a.stages.length === 0
       ? "no stage restriction — eligible everywhere"
-      : `${onBoard} of ${stages.length} stages`;
+      : resolved.length === 0
+        ? "declared stages don't exist here — eligible everywhere"
+        : `${onBoard} of ${stages.length} stages`;
   return (
     <div className="panel">
       <div className="panel-head">
@@ -263,7 +287,7 @@ export function StageEligibility({
       </div>
       <div className="stage-chips">
         {stages.map((s) => {
-          const elig = unrestricted || a.stages.includes(s.id);
+          const elig = unrestricted || resolved.includes(s.id);
           return (
             <span
               key={s.id}
@@ -281,18 +305,23 @@ export function StageEligibility({
           <span
             key={id}
             className="stage-chip off"
-            title={`This profile grants the stage “${id}”, which no longer exists on this board — the grant does nothing.`}
+            title={`This profile grants the stage “${id}”, which is neither a stage on this board nor a role any stage here fills — the grant does nothing.`}
           >
             <span className="sdot" />
             {id} · not on this board
           </span>
         ))}
       </div>
-      {!unrestricted && onBoard === 0 && (
+      {/* R14-1: a declaration that resolves to nothing here no longer disables
+          the profile — silently disabling every agent on a re-templated board is
+          the failure we actually observed (Lightweight Lab, ids todo/doing/done).
+          It DOES mean the declaration is dead weight, so say so. */}
+      {!a.spanAll && a.stages.length > 0 && resolved.length === 0 && (
         <div className="empty" style={{ padding: ".75rem .5rem" }}>
-          None of this profile's eligible stages exist on this board, so it
-          can't be assigned to any task here. Edit the profile's eligible stages
-          to match the board.
+          None of this profile's declared stages ({a.stages.join(", ")}) exist on
+          this board, by id or by role — the declaration says nothing here, so
+          the profile is eligible everywhere. Edit it to restrict the profile to
+          this board's stages.
         </div>
       )}
     </div>
@@ -310,12 +339,22 @@ export function StageEligibility({
  */
 export function LibraryPicker({
   library,
+  stages,
+  workflow,
   projectName,
   busy,
   onClose,
   onAdd,
 }: {
   library: LibraryProfileView[];
+  /** THIS board's stages + workflow. P14-UI-63: the row used to print the
+   *  template's own `stages.length`, which describes the ORG template and not
+   *  the board it is about to land on — so a project whose stages were renamed
+   *  read "2 stages" here and, one click later, "None of this profile's
+   *  declared stages exist on this board" in the roster. Resolve against the
+   *  target board (R14-1) so the promise and the outcome are the same number. */
+  stages: StageView[];
+  workflow: WorkflowEdgeView[];
   projectName: string;
   busy: boolean;
   onClose: () => void;
@@ -352,28 +391,37 @@ export function LibraryPicker({
           </div>
         ) : (
           <div className="deploy-list">
-            {library.map((t) => (
-              <button
-                type="button"
-                className="deploy-row"
-                key={t.id}
-                disabled={busy}
-                onClick={() => onAdd(t.id)}
-              >
-                <span className="deploy-eng">{t.role || "Specialist"}</span>
-                <span className="deploy-task">
-                  <span className="key mono">{t.name}</span> {t.desc}
-                </span>
-                {t.backends.map((b) => (
-                  <BackendChip key={b} b={b} />
-                ))}
-                <Pill kind="neutral" sm>
-                  {t.spanAll
-                    ? "every stage"
-                    : t.stages.length + " stage" + (t.stages.length === 1 ? "" : "s")}
-                </Pill>
-              </button>
-            ))}
+            {library.map((t) => {
+              const here = resolveDeclaredStages(t.stages, stages, workflow);
+              // Mirrors the roster's own reading of the same declaration: no
+              // restriction (or one that means nothing here) = every stage.
+              const everywhere =
+                t.spanAll || t.stages.length === 0 || here.length === 0;
+              return (
+                <button
+                  type="button"
+                  className="deploy-row"
+                  key={t.id}
+                  disabled={busy}
+                  onClick={() => onAdd(t.id)}
+                >
+                  <span className="deploy-eng">
+                    {profileRoleLabel(t.name, t.role, "specialist")}
+                  </span>
+                  <span className="deploy-task">
+                    <span className="key mono">{t.name}</span> {t.desc}
+                  </span>
+                  {t.backends.map((b) => (
+                    <BackendChip key={b} b={b} />
+                  ))}
+                  <Pill kind="neutral" sm>
+                    {everywhere
+                      ? "every stage here"
+                      : `${here.length} stage${here.length === 1 ? "" : "s"} here`}
+                  </Pill>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -397,6 +445,7 @@ export function LibraryPicker({
 export function ProfileDetail({
   a,
   stages,
+  workflow,
   insts,
   projectName,
   canManage,
@@ -406,6 +455,8 @@ export function ProfileDetail({
 }: {
   a: AgentProfileView;
   stages: StageView[];
+  /** R14-1: the board's edges — eligibility resolves by structural role too. */
+  workflow: WorkflowEdgeView[];
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
@@ -437,7 +488,7 @@ export function ProfileDetail({
           <div className="ag-hero-top">
             <h1>{a.name}</h1>
             <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
-              {a.role}
+              {profileRoleLabel(a.name, a.role, a.kind)}
             </Pill>
             {activeKeys.length > 0 ? (
               <span className="ag-running">
@@ -473,7 +524,7 @@ export function ProfileDetail({
 
       <p className="ag-desc">{a.desc}</p>
 
-      <StageEligibility a={a} stages={stages} />
+      <StageEligibility a={a} stages={stages} workflow={workflow} />
 
       <div className="panel">
         <div className="panel-head">
@@ -648,6 +699,12 @@ export function LiveRoster({
         )}
         {sorted.map((d) => {
           const isOp = d.engagement === "operator";
+          // P13-UI-27 residual: an unresolved profileId used to be printed raw
+          // ("dev-2f1c"), which reads like a name and hides the real fact — the
+          // engagement outlived the profile (deleted, or deployed on another
+          // project). Name the condition and keep the id in the tooltip, where
+          // it is diagnostic rather than decorative.
+          const resolved = isOp ? "Operator" : nameById?.[d.profileId];
           return (
             <button
               type="button"
@@ -667,10 +724,21 @@ export function LiveRoster({
                   />
                 </span>
                 <span className="live-ident">
-                  <span className="live-name">
-                    {isOp ? "Operator" : (nameById?.[d.profileId] ?? d.profileId)}
+                  <span
+                    className="live-name"
+                    {...(resolved
+                      ? {}
+                      : {
+                          title: `No profile named ${d.profileId} is approved on this project — the engagement outlived its profile.`,
+                        })}
+                  >
+                    {resolved ?? "profile no longer here"}
                   </span>
-                  {!isOp && <span className="live-role-sub">{d.role}</span>}
+                  {!isOp && (
+                    <span className="live-role-sub">
+                      {profileRoleLabel(resolved ?? d.profileId, d.role, "specialist")}
+                    </span>
+                  )}
                 </span>
               </span>
               <span className="live-be">
@@ -728,6 +796,7 @@ export function AgentsPage({
   library,
   deployments,
   stages,
+  workflow,
   projectSlug,
   projectName,
   myRole,
@@ -739,6 +808,9 @@ export function AgentsPage({
   library?: LibraryProfileView[];
   deployments: AgentDeploymentView[];
   stages: StageView[];
+  /** R14-1: the board's workflow edges, so every stage claim on this page is
+   *  resolved against THIS board the way the run guard resolves it. */
+  workflow: WorkflowEdgeView[];
   projectSlug: string;
   projectName: string;
   myRole: string | null;
@@ -751,14 +823,38 @@ export function AgentsPage({
   const navigate = useNavigate();
   const push = useToast();
   const csrf = useCsrfToken();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
   const canManage = roleCan(myRole as ProjectRole | null, "manage-agents");
-  const [sel, setSel] = useState<string>(
-    () => searchParams.get("profile") ?? "operator",
-  );
-  const [tab, setTab] = useState<"profiles" | "live">("profiles");
+  // P13-UI-58 residual: `?profile=`/`?tab=` were READ once at mount and never
+  // written back, so the selection was unlinkable, un-bookmarkable and lost on
+  // reload — and a pasted `?tab=live` did nothing at all. The URL is the state:
+  // selection reads from it and every click replaces it (replace: true keeps
+  // one history entry per visit, the same rule the topbar search follows).
+  const sel = searchParams.get("profile") ?? "operator";
+  const tab = searchParams.get("tab") === "live" ? "live" : "profiles";
+  const setSel = (profileId: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("profile", profileId);
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
+  const setTab = (next: "profiles" | "live") => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next === "live") params.set("tab", "live");
+        else params.delete("tab");
+        return params;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
@@ -847,7 +943,12 @@ export function AgentsPage({
   };
 
   const deleteProfile = (profileId: string) => {
-    if (sel === profileId) setSel("operator");
+    // P13-UI-58 residual: the selection used to jump to the operator BEFORE the
+    // delete round-tripped, so a refused delete (RBAC, or a profile engaged
+    // elsewhere) left the user staring at a different profile with only a toast
+    // to explain it. Move the selection when the server confirms — the handled
+    // effect above re-selects on success, and a failure leaves you where you
+    // were, next to the profile you tried to delete.
     fetcher.submit(
       { intent: "delete-profile", _csrf: csrf, profileId },
       { method: "post" },
@@ -865,10 +966,14 @@ export function AgentsPage({
           </div>
         </div>
         <div className="board-tools">
+          {/* P13-UI-58 residual: the Profiles/Live seg conveyed its selection
+              with the `on` class alone — the same gap Home's Grid/List seg and
+              the resources Transport seg already closed. */}
           <div className="seg">
             <button
               type="button"
               className={tab === "profiles" ? "on" : ""}
+              aria-pressed={tab === "profiles"}
               onClick={() => setTab("profiles")}
             >
               <Icon name="agents" />
@@ -877,6 +982,7 @@ export function AgentsPage({
             <button
               type="button"
               className={tab === "live" ? "on" : ""}
+              aria-pressed={tab === "live"}
               onClick={() => setTab("live")}
             >
               <Icon name="activity" />
@@ -932,7 +1038,12 @@ export function AgentsPage({
           <div className="n" style={{ color: "var(--blue-pressed)" }}>
             {waiting}
           </div>
-          <div className="l">threads waiting on a human</div>
+          {/* P14-WL-04: this counted agent ENGAGEMENTS parked on a human in
+              THIS project, while the board counted tasks and Home counted the
+              viewer's own decisions org-wide — three different questions with
+              near-identical copy, side by side in one session. Each surface now
+              names its own scope. */}
+          <div className="l">agent threads waiting on a human · this project</div>
         </div>
       </div>
 
@@ -992,6 +1103,7 @@ export function AgentsPage({
             <ProfileDetail
               a={current}
               stages={stages}
+              workflow={workflow}
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}
@@ -1041,6 +1153,8 @@ export function AgentsPage({
       {libraryOpen && (
         <LibraryPicker
           library={libraryProfiles}
+          stages={stages}
+          workflow={workflow}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
           onClose={() => setLibraryOpen(false)}

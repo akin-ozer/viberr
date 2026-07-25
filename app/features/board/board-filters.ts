@@ -4,7 +4,7 @@
  * in pill CSS via app/ui/pill.tsx.
  */
 
-export type BoardFilterId = "all" | "human" | "agent" | "risk";
+export type BoardFilterId = "all" | "human" | "agent" | "risk" | "archived";
 
 export interface FilterableTask {
   waiting: string;
@@ -13,16 +13,28 @@ export interface FilterableTask {
   readiness: string;
   validation: string;
   urgent: boolean;
+  /** WL-03: the review PR's cached state. `closed` = closed WITHOUT merging —
+   *  the work was rejected and only a human can decide what happens next. */
+  pr?: { state: string } | null;
+  /** R14-3: archived tasks are a terminal disposition, not a stage — they leave
+   *  every default view and are reachable only through the Archived filter. */
+  archived?: boolean;
 }
 
 /** Verbatim mock semantics with canonical enum values ("Needs attention" =
- * readiness risk/blocked || validation failing || urgent). The "Waiting on me"
- * filter is member-scoped (R8-3): a decision the viewer can actually act on,
- * not the project-wide `waiting === "human"` enum. */
+ * readiness risk/blocked || validation failing || urgent || a rejected PR). The
+ * "Waiting on me" filter is member-scoped (R8-3): a decision the viewer can
+ * actually act on, not the project-wide `waiting === "human"` enum.
+ *
+ * P14-R14-3: archived tasks are excluded from EVERY filter but `archived`, so
+ * abandoned work stops occupying the board while its timeline stays intact.
+ */
 export function matchesBoardFilter(
   task: FilterableTask,
   filter: BoardFilterId,
 ): boolean {
+  if (filter === "archived") return task.archived === true;
+  if (task.archived === true) return false;
   if (filter === "human") return task.waitingOnMe === true;
   if (filter === "agent") return task.waiting === "agent";
   if (filter === "risk") {
@@ -30,10 +42,31 @@ export function matchesBoardFilter(
       task.readiness === "inconsistency_risk_detected" ||
       task.readiness === "blocked" ||
       task.validation === "failing" ||
-      task.urgent
+      task.urgent ||
+      // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue
+      // files under "Decision required" — the work was declined and the task
+      // needs a rework/reopen/archive call from a human. It carries none of the
+      // four signals above (readiness stays `in_review`, validation stays
+      // healthy, urgent is off), so the board's own "Needs attention" filter
+      // hid the single class of task that most needs a person.
+      task.pr?.state === "closed"
     );
   }
   return true;
+}
+
+/** R14-3 archived predicate. Typed on `FilterableTask` so board code can ask it
+ *  of a task summary while the flag is loader-annotated (the same shape
+ *  `waitingOnMe` already has). */
+export function isArchived(task: FilterableTask): boolean {
+  return task.archived === true;
+}
+
+/** Archived tasks hidden from the current (non-archived) view — the count the
+ *  board discloses next to the Archived chip, so the disposition is never a
+ *  silent disappearance. */
+export function countArchived(tasks: readonly FilterableTask[]): number {
+  return tasks.filter(isArchived).length;
 }
 
 export interface SearchableTask {
@@ -67,7 +100,11 @@ export function matchesSearch(task: SearchableTask, query: string): boolean {
 
 export function isBoardFilterId(value: string | null): value is BoardFilterId {
   return (
-    value === "all" || value === "human" || value === "agent" || value === "risk"
+    value === "all" ||
+    value === "human" ||
+    value === "agent" ||
+    value === "risk" ||
+    value === "archived"
   );
 }
 

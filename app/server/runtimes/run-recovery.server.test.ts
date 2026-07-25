@@ -4,14 +4,19 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { defaultModelFor } from "./model-catalog.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
   finalizeOrphanedRuns,
+  recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
@@ -260,5 +265,146 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.recovered).toBe(1); // run_fresh recovered
     expect(countReplayAudits("run_fresh")).toBe(1);
     expect(countReplayAudits("run_capped")).toBe(RECOVERY_REINVOKE_CAP);
+  });
+});
+
+// ------------------------------------ P14-RT-08: a stranded codex operator plan
+
+describe("recoverStrandedOperatorPlans (P14-RT-08)", () => {
+  /**
+   * A Codex operator coordinates AFTER its provider run finishes: the completion
+   * callback parses the structured plan and executes it. A restart in that
+   * window lost the whole turn with no trace — the finished operator row is
+   * outside `finalizeOrphanedRuns` (running/queued only) and outside
+   * `recoverUnreactedAgentRuns` (primary/reviewer only).
+   */
+  function deployCodexOperator(): void {
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "append-typed-events", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ] as never,
+    });
+  }
+
+  /** A finished codex operator run holding a valid plan its process never ran. */
+  function seedStrandedPlan(id: string, waiting: "agent" | "human" = "agent"): void {
+    deployCodexOperator();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting }),
+      goal: "Coordinate the implementation.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedRun(id, {
+      backend: "codex",
+      state: "finished",
+      finishedAt: new Date().toISOString(),
+    });
+    insertRunLine(store.db, {
+      runId: id,
+      seq: 1,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: {
+        t: "1",
+        ev: "text",
+        tag: "agent_message",
+        text: JSON.stringify({
+          reasoning: "",
+          actions: [
+            {
+              tool: "post_comment",
+              profileId: null,
+              delivers: null,
+              toStageId: null,
+              packetType: null,
+              text: "Implementation looks complete — moving to review next.",
+              reason: null,
+              packetOptions: null,
+            },
+          ],
+        }),
+      },
+    });
+  }
+
+  const timeline = () =>
+    readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+
+  it("executes the plan the restart dropped and marks the turn taken", async () => {
+    seedStrandedPlan("run_stranded");
+
+    const res = await recoverStrandedOperatorPlans(store.db, {
+      dataRoot: store.dataRoot,
+    });
+
+    expect(res.recovered).toBe(1);
+    expect(
+      timeline().some((e) =>
+        e.text.includes("Implementation looks complete"),
+      ),
+    ).toBe(true);
+    expect(
+      listAuditEvents(store.db, { action: "runtime.operator.plan_executed" }),
+    ).toHaveLength(1);
+  });
+
+  it("is idempotent — a turn already taken up is never re-executed", async () => {
+    seedStrandedPlan("run_stranded");
+    await recoverStrandedOperatorPlans(store.db, { dataRoot: store.dataRoot });
+
+    const second = await recoverStrandedOperatorPlans(store.db, {
+      dataRoot: store.dataRoot,
+    });
+    expect(second.recovered).toBe(0);
+    // The comment landed exactly once — re-running a plan would duplicate every
+    // governed action it contains.
+    expect(
+      timeline().filter((e) => e.text.includes("Implementation looks complete")),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a task that is no longer waiting on an agent alone", async () => {
+    seedStrandedPlan("run_settled", "human");
+    const res = await recoverStrandedOperatorPlans(store.db, {
+      dataRoot: store.dataRoot,
+    });
+    expect(res.recovered).toBe(0);
+  });
+
+  it("reports an OLD stranded plan instead of re-deciding it", async () => {
+    seedStrandedPlan("run_old");
+    // A boot hours later is not recovering a dropped turn: the plan named a
+    // stage and a profile for a task state that has since moved on.
+    store.db
+      .prepare(`UPDATE agent_runs SET finished_at = ? WHERE id = 'run_old'`)
+      .run(new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString());
+
+    const res = await recoverStrandedOperatorPlans(store.db, {
+      dataRoot: store.dataRoot,
+    });
+    expect(res).toEqual({ recovered: 0, stale: 1 });
+    expect(
+      timeline().some((e) => e.text.includes("Implementation looks complete")),
+    ).toBe(false);
   });
 });

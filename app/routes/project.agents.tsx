@@ -54,6 +54,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       name: s.name,
       color: s.color,
     })),
+    // R14-1: eligibility resolves declared stage ids against this board by id
+    // AND by structural role (`resolveDeclaredStages`), which needs the workflow
+    // graph, not just the stage list. Both the roster's eligible-stage panel and
+    // the library picker's stage count read it, so the page can never promise a
+    // stage the run guard would refuse (P14-UI-63).
+    workflow: project.workflow.map((w) => ({ from: w.from, to: w.to })),
     projectName: project.name,
     // Live store resources for the profile-editor picker (item-2): a skill/MCP/
     // KB created in org settings is grantable to an agent, replacing the
@@ -167,6 +173,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       library={loaderData.library}
       deployments={loaderData.deployments}
       stages={loaderData.stages}
+      workflow={loaderData.workflow}
       projectSlug={layout?.board.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}

@@ -37,6 +37,7 @@ import {
 } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
+  agentMentionHandle,
   extractReplyText,
   normalizeWorkspacePaths,
   resumeWorkdir,
@@ -426,6 +427,64 @@ describe("resolveMentionedAgent", () => {
     expect(target).not.toBeNull();
     expect(target!.session).not.toBeNull();
     expect(target!.session!.session_id).toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------- agentMentionHandle */
+
+describe("agentMentionHandle (P14-RT-12)", () => {
+  const call = (text: string) =>
+    resolveMentionedAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", text);
+
+  /** Re-deploy `dev` with a multi-word ROLE — the shape the two old, divergent
+   *  derivations disagreed on. */
+  function deployWithRole(role: string): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role,
+            backends: ["claude"],
+            model: "claude-sonnet",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("derives a handle that actually RESOLVES back to the agent", () => {
+    deployWithRole("Senior Developer");
+    const handle = agentMentionHandle({ profileId: "dev", name: "dev" });
+    expect(handle).toBe("dev");
+    expect(call(`@${handle} please continue`)).toMatchObject({ profileId: "dev" });
+  });
+
+  it("the old ROLE-derived handle resolved to nobody — which is the bug", () => {
+    deployWithRole("Senior Developer");
+    // `startAgentRun` used to register completion with the role's first word,
+    // so the stuck packet's "Agent: @senior" named a handle no reply could use.
+    expect(call("@senior please continue")).toBeNull();
+  });
+
+  it("prefers the profile id so the bare @word grammar matches it", () => {
+    // A multi-word NAME is only resolvable to a reader that already knows the
+    // name; the profile id routes for every reader (P14-RT-12).
+    expect(
+      agentMentionHandle({ profileId: "docs-writer", name: "Docs Writer" }),
+    ).toBe("docs-writer");
+    // Only a profile id that is not a bare token falls back to the name.
+    expect(
+      agentMentionHandle({ profileId: "docs writer", name: "Docs Writer" }),
+    ).toBe("docs writer");
   });
 });
 

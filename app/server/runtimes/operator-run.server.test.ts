@@ -40,6 +40,7 @@ import {
   createTestDbContext,
   type TestDbContext,
 } from "../../../test-support/test-db";
+import { listAuditEvents } from "../../../test-support/audit-log";
 
 interface PendingRun {
   spec: RunSpec;
@@ -287,6 +288,13 @@ describe("Codex structured operator completion", () => {
       ).toBe(true);
     });
     expect(task().timeline.some((e) => e.type === "policy")).toBe(false);
+    // P14-RT-08: the live path CLAIMS the turn, so the boot reconciler that
+    // recovers dropped plans can tell an executed one from a stranded one.
+    await eventually(() => {
+      expect(
+        listAuditEvents(store.db, { action: "runtime.operator.plan_executed" }),
+      ).toHaveLength(1);
+    });
   });
 
   it("does not execute a valid partial plan when the turn fails", async () => {
@@ -386,6 +394,65 @@ describe("Codex structured operator completion", () => {
     expect(titles).toContain("Confirm it's intentionally broad");
     // Not the canned default set.
     expect(titles).not.toContain("Send back to the specialist for changes");
+  });
+
+  // P14-RT-04 / KM-02: P13-KM-03 wired the operator's declared org MCP servers
+  // into the CLAUDE toolkit only, so `startCodexOperatorRun` passed none and
+  // `codexConfigForRun` wrote `mcp_servers: {}` — the same grant was real on one
+  // backend and decorative on the other.
+  it("mounts the operator's declared org MCP servers on the Codex run", async () => {
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("mcp_ops", "ops-readonly", "HTTP", "https://mcp.example/sse", null, now, now);
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: OPERATOR_POLICY,
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            resources: { skills: [], kb: [], mcps: ["ops-readonly"] },
+          },
+        },
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    expect(adapter.pending!.spec.mcpServers).toEqual({
+      "ops-readonly": { type: "http", url: "https://mcp.example/sse" },
+    });
+    // …and the operator is told which servers it holds, so it can report them
+    // honestly instead of guessing (P14-LV-11).
+    expect(adapter.pending!.spec.systemPrompt).toContain(
+      "Attached MCP servers: ops-readonly.",
+    );
+  });
+
+  // P14-LV-11: asked which backend it was on, an operator running on Claude
+  // reported "Codex backend run" — it had no runtime identity at all, so it
+  // echoed the premise in the task goal.
+  it("tells the operator which backend and model it is actually running on", async () => {
+    await start();
+    const systemPrompt = adapter.pending!.spec.systemPrompt ?? "";
+    expect(systemPrompt).toContain("# Your runtime");
+    expect(systemPrompt).toContain("You are running on the **Codex** backend");
+    expect(systemPrompt).toContain(defaultModelFor("codex"));
+    expect(systemPrompt).toContain("No MCP servers are attached to you.");
+    expect(systemPrompt).toContain("never repeat");
   });
 });
 

@@ -53,6 +53,12 @@ export interface RunSpec {
    *  NOT folded into `autonomous`, which also drives Claude's `permissionMode`
    *  (flipping that would hang a server run on an unanswerable approval). */
   repoWriteWithheld?: boolean;
+  /** The run's `use-web-search-fetch` grant is WITHHELD. Claude removes the
+   *  WebFetch/WebSearch tools via `disallowedTools`; Codex, which has no
+   *  denylist channel, disables its own web search through `webSearchMode`
+   *  (P14-RT-06). Network stays reachable either way — declared MCP servers and
+   *  the workspace's own tooling are not the egress this capability governs. */
+  webSearchWithheld?: boolean;
   /** JSON schema constraining the run's final output. Codex only (it has no
    *  in-process tool channel). Used by BOTH the structured-output operator (a
    *  decision plan the caller parses + executes) AND every generic specialist/

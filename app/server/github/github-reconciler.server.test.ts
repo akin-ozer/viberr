@@ -494,6 +494,15 @@ describe("reconcileTask", () => {
     expect(policy?.text).toContain(
       "accepted PR #318 was closed on GitHub without merging",
     );
+    // P14-GV-09: this is a divergence like the other two — the Complete-merge
+    // affordance just VANISHED from an accepted task — so it must reach the
+    // supervisors' inbox, not only a visitor to the task page.
+    const notifs = listNotifications(store.db, store.users.arda.id);
+    const alert = notifs.find(
+      (n) => n.kind === "policy" && /closed on GitHub without merging/.test(n.text),
+    );
+    expect(alert).toBeDefined();
+    expect(alert!.title).toContain("merge can't complete");
   });
 
   it("degrades typed: no branch, no PAT, network down; 403 opens a repo violation", async () => {
@@ -917,6 +926,84 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     );
     expect(result.status).toBe("merged");
     expect(gh.calls.some((c) => c.url.pathname === "/graphql")).toBe(false);
+  });
+
+  it("P14-LV-07: a CONFLICTING PR is refused before the merge call, and the conflict is cached", async () => {
+    const { store, actor } = setupWithPr();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, draft: false, mergeable: false, mergeable_state: "dirty" },
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "shouldnothappen", message: "merged" },
+      },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-142" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    // Typed refusal that NAMES the conflict — the caller used to see only a
+    // generic false and blamed unreachable GitHub / missing credentials.
+    expect(result).toMatchObject({
+      status: "not_mergeable",
+      prNumber: 318,
+      mergeable: "conflicting",
+    });
+    expect(result).toMatchObject({ message: expect.stringContaining("conflicts with") });
+    // The merge was never attempted.
+    expect(
+      gh.calls.some((c) => c.url.pathname.endsWith("/pulls/318/merge")),
+    ).toBe(false);
+    // …and the conflict is recorded, so the task card / GitHub page can show it.
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.pr).toMatchObject({ state: "review", mergeable: "conflicting" });
+  });
+
+  it("P14-LV-07: a mergeable PR clears a stale cached conflict and merges", async () => {
+    const { store, actor } = setupWithPr();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-142", {
+        stage: "review",
+        branch: "vib-142-attach-workspace",
+        pr: {
+          number: 318,
+          state: "review",
+          title: "Attach execution workspace",
+          mergeable: "conflicting",
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, draft: false, mergeable: true, mergeable_state: "clean" },
+      },
+      [`PUT ${REPO_PATH}/pulls/318/merge`]: {
+        body: { merged: true, sha: "mergesha04", message: "merged" },
+      },
+    });
+    const result = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-142" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "merged", prNumber: 318 });
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-142",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // A merged PR is settled: the stale "conflicting" is gone, and no
+    // mergeability is frozen onto it.
+    expect(fm.pr).toMatchObject({ state: "merged" });
+    expect(fm.pr?.mergeable ?? null).toBeNull();
   });
 
   it("405 → not_mergeable, 409 → head_changed, 404 → pr_not_found, 401 → auth_failed", async () => {

@@ -46,6 +46,7 @@ import {
   createStoreFolder,
   deleteStoreNode,
   importGithubSnapshot,
+  readStoreDoc,
   writeStoreDoc,
   writeStoreFiles,
   type UploadFileInput,
@@ -364,8 +365,25 @@ export async function action({ request }: Route.ActionArgs) {
           field("name"),
           field("body"),
           actor,
+          // P14-UI-59: writing was create-OR-overwrite behind one "saved" toast,
+          // so authoring a name that already existed destroyed the old file with
+          // a success message. The server refuses a collision unless the UI's
+          // replace confirm says otherwise.
+          { overwrite: field("overwrite") === "1" },
         );
-        return ok(`${result.path.join("/")} saved — ${result.bytes} bytes`);
+        return ok(
+          `${result.path.join("/")} ${result.replaced ? "replaced" : "saved"} — ${result.bytes} bytes`,
+        );
+      }
+      // P14-KM-08/UI-61: `readStoreDoc` shipped in pass 13 with no production
+      // caller, so an existing document could not be opened or edited at all —
+      // the only in-app edit was a blind overwrite by retyping its name.
+      case "store-read-doc": {
+        const target = resolveStoreTarget(db, field("kind"), field("id"));
+        if (!target) return fail("That resource no longer exists.", 404);
+        const doc = readStoreDoc(target, parseJsonStringArray(field("path")));
+        if (!doc) return fail("That file no longer exists.", 404);
+        return ok(undefined, { text: doc.text, truncated: doc.truncated });
       }
       case "store-mkdir": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));
@@ -395,7 +413,11 @@ export async function action({ request }: Route.ActionArgs) {
       case "store-import-github": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));
         if (!target) return fail("That resource no longer exists.", 404);
-        const result = await importGithubSnapshot(db, target, field("url"), actor);
+        const result = await importGithubSnapshot(db, target, field("url"), actor, {
+          // P14-KM-08: the import ignored the browsed folder and always wrote to
+          // the store root, so imports could not be organised from the UI.
+          dirPath: parseJsonStringArray(field("path")),
+        });
         if (result.status !== "imported") return fail(result.message);
         return ok(result.toast, { folder: result.folder });
       }

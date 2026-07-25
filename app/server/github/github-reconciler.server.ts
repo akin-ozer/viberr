@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   GithubCache,
+  PrMergeable,
   PrRef,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
@@ -31,7 +32,7 @@ import {
   getProjectGithubContext,
   type GithubContextFailure,
 } from "./github-context.server";
-import { findPrForBranch, type PrFacts } from "./pr-linker.server";
+import { deriveMergeable, findPrForBranch, type PrFacts } from "./pr-linker.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
@@ -248,6 +249,15 @@ export async function reconcileTask(
   const checks = pr ? (pr.checks ?? cachedPr?.checks ?? null) : null;
   const reviewLive = pr?.review !== undefined ? pr.review : (cachedPr?.review ?? null);
   const review = prState === "review" || prState === "accepted" ? reviewLive : null;
+  // P14-LV-07: mergeability follows the SAME two rules as review state — an
+  // unread value keeps the last-known one for the same PR, and a settled
+  // (merged/closed) PR drops it, because "conflicting" frozen on a merged PR is
+  // a lie. This is the fact that told the human the truth about VM-4's failed
+  // merge instead of blaming their credentials.
+  const mergeableLive =
+    pr?.mergeable !== undefined ? pr.mergeable : (cachedPr?.mergeable ?? null);
+  const mergeable =
+    prState === "review" || prState === "accepted" ? mergeableLive : null;
   const newPr: PrRef | null = pr
     ? {
         number: pr.number,
@@ -255,6 +265,7 @@ export async function reconcileTask(
         title: pr.title,
         ...(checks ? { checks } : {}),
         ...(review ? { review } : {}),
+        ...(mergeable ? { mergeable } : {}),
       }
     : (fm.pr ?? null); // keep last-known PR when lookup was refused/none
 
@@ -283,6 +294,10 @@ export async function reconcileTask(
     fm.pr?.state === "accepted" &&
     newPr?.state === "closed" &&
     fm.pr.number === newPr.number;
+  // P14-GV-09: ONE text for the timeline note and the inbox alert below.
+  const acceptedClosedText = acceptedClosedExternally
+    ? `**Note:** accepted PR #${newPr!.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`
+    : null;
 
   // R8-6: out-of-band GitHub actions that leave the governed task stranded. A
   // PR merged or closed DIRECTLY on GitHub (not through Viberr's accept flow)
@@ -338,14 +353,14 @@ export async function reconcileTask(
       );
     }
     await patchTaskFrontmatter(ref, patch);
-    if (acceptedClosedExternally) {
+    if (acceptedClosedText) {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
         // Neutral divergence note, not a violation (P13-LV-03).
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
-        text: `**Note:** accepted PR #${newPr.number} was closed on GitHub without merging — the pending merge can no longer be completed from Viberr.`,
+        text: acceptedClosedText,
         toAgent: false,
         evidence: null,
       });
@@ -375,7 +390,14 @@ export async function reconcileTask(
     // Notify the task's supervisors (owner + admins/maintainers) so the
     // divergence reaches an inbox, not just the timeline. Dynamic import keeps
     // the reconciler free of a static task-actions cycle (mirrors mergeTaskPr).
-    if (divergenceText) {
+    //
+    // P14-GV-09: the accepted-then-closed-externally case is a divergence too —
+    // it silently REMOVES the "Complete merge" affordance from an accepted task
+    // (pr.state → closed), so only a visitor to the task page ever learned that
+    // the promised merge can no longer happen. It gets the same inbox alert as
+    // the other two branches.
+    const noticeText = divergenceText ?? acceptedClosedText;
+    if (noticeText) {
       const { notifyTaskWatchers } = await import(
         "~/server/tasks/task-actions.server"
       );
@@ -387,8 +409,10 @@ export async function reconcileTask(
           kind: "policy",
           title: mergedButNotDone
             ? `PR #${newPr!.number} merged on GitHub — accept ${fm.key}`
-            : `PR #${newPr!.number} closed on GitHub — ${fm.key} needs a decision`,
-          text: divergenceText,
+            : divergenceText
+              ? `PR #${newPr!.number} closed on GitHub — ${fm.key} needs a decision`
+              : `Accepted PR #${newPr!.number} closed on GitHub — ${fm.key}'s merge can't complete`,
+          text: noticeText,
           from: POLICY_ENGINE_NOTIFY_FROM,
         },
         { dataRoot: ctx.dataRoot },
@@ -520,7 +544,14 @@ export type MergeTaskPrResult =
   | { status: "task_not_found"; taskKey: string }
   | { status: "no_pr"; taskKey: string }
   | GithubContextFailure
-  | { status: "not_mergeable"; prNumber: number; message: string }
+  | {
+      status: "not_mergeable";
+      prNumber: number;
+      message: string;
+      /** P14-LV-07: set when GitHub told us WHY — a head/base conflict. Lets the
+       *  caller name the real cause instead of blaming credentials. */
+      mergeable?: PrMergeable;
+    }
   | { status: "head_changed"; prNumber: number; message: string }
   | {
       status: "scope_violation";
@@ -583,10 +614,38 @@ export async function mergeTaskPr(
   // REST can't unset `draft`), so mark it ready with the project PAT before the
   // merge. Best-effort: if the un-draft fails, the merge attempt below still
   // returns GitHub's own actionable message.
-  const prView = await gh.client.request<{ draft?: boolean; node_id?: string }>(
-    "GET",
-    `/repos/${gh.repo}/pulls/${prNumber}`,
-  );
+  const prView = await gh.client.request<{
+    draft?: boolean;
+    node_id?: string;
+    mergeable?: boolean | null;
+    mergeable_state?: string;
+  }>("GET", `/repos/${gh.repo}/pulls/${prNumber}`);
+
+  // P14-LV-07: the SAME detail call already carries GitHub's mergeability, and
+  // a conflicting PR cannot be merged by anyone. Refuse before the merge attempt
+  // and RECORD the conflict in the task's PR cache, so the acceptance copy, the
+  // task card and the GitHub page all name the real cause instead of the
+  // catch-all "no reachable GitHub merge — … once credentials are set" that
+  // VM-4 shipped while its PR sat open and conflicting.
+  if (prView.ok) {
+    const mergeable = deriveMergeable(prView.data);
+    // Only a DEFINITE answer is worth persisting — "unknown" means GitHub is
+    // still computing, and writing it would churn the file (and blank the pill)
+    // on every merge attempt right after a push.
+    if (mergeable !== "unknown" && mergeable !== (fm.pr.mergeable ?? null)) {
+      await patchTaskFrontmatter(ref, { pr: { ...fm.pr, mergeable } });
+      rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    }
+    if (mergeable === "conflicting") {
+      return {
+        status: "not_mergeable",
+        prNumber,
+        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\` — rebase the branch, then merge.`,
+        mergeable,
+      };
+    }
+  }
+
   if (prView.ok && prView.data.draft === true && prView.data.node_id) {
     await gh.client
       // P11-16: derive the GraphQL endpoint from the SAME base the REST client
@@ -612,8 +671,12 @@ export async function mergeTaskPr(
 
   if (merge.ok) {
     const sha = merge.data.sha ?? null;
-    // File write: cache flips to merged + human-authored github event.
-    await patchTaskFrontmatter(ref, { pr: { ...fm.pr, state: "merged" } });
+    // File write: cache flips to merged + human-authored github event. P14-LV-07:
+    // a settled PR carries no mergeability — drop the key rather than freeze the
+    // pre-merge answer (which would also re-write a conflict the merge just
+    // disproved, since `fm` predates the mergeability patch above).
+    const { mergeable: _settled, ...prBase } = fm.pr;
+    await patchTaskFrontmatter(ref, { pr: { ...prBase, state: "merged" } });
     await appendTimelineEvent(ref, {
       occurredAt: new Date().toISOString(),
       type: "github",
