@@ -1,7 +1,7 @@
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
-  normalizeDeliveryGrants,
+  SCOPED_DELIVERY_CAPABILITY_IDS,
 } from "~/shared/capabilities";
 
 /**
@@ -109,20 +109,29 @@ const GRANT_REQUIRED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Grants → mode lookup, with the SAME delivery repair the write paths apply
- * (`normalizeDeliveryGrants`). A profile that grants branch/commit/PR but whose
- * headline `execute-code-or-write-repo` is merely ABSENT means "it delivers" —
- * under the P14-LV-01 polarity the bare lookup would read that absence as
- * withheld and strip Edit/Write from a working deliverer. Normalizing here keeps
- * the two directions consistent: nothing granted still means nothing allowed,
- * because an empty list has no scoped delivery grant to repair from.
+ * Grants → mode lookup, repairing ONE thing: a headline
+ * `execute-code-or-write-repo` that is **absent** on a profile whose scoped
+ * delivery grants are actionable. Under the P14-LV-01 polarity a bare lookup
+ * reads that absence as withheld and strips Edit/Write from a working deliverer,
+ * so the absence is resolved the way the write paths resolve it.
+ *
+ * It deliberately does NOT reuse `normalizeDeliveryGrants` wholesale. That
+ * helper also rewrites an EXPLICIT `off` headline to `direct` — defensible at
+ * save time, where it repairs an editor artifact an admin can see and re-edit,
+ * but wrong here: at the enforcement layer it would let a scoped grant silently
+ * overturn an admin's explicit "Execute code or write to the repo: Off", handing
+ * back Edit/Write/`git commit`. That is the P14-LV-01 polarity bug in mirror
+ * image — permission appearing from something other than a grant — so the one
+ * mode this layer never reinterprets is an explicit withholding.
  */
 function grantModes(grants: readonly CapabilityGrant[]): Map<string, string> {
-  return new Map(
-    normalizeDeliveryGrants(
-      grants.map((g) => ({ capabilityId: g.capabilityId, mode: g.mode as string })),
-    ).map((g) => [g.capabilityId, g.mode]),
-  );
+  const modes = new Map(grants.map((g) => [g.capabilityId, g.mode as string]));
+  if (modes.has("execute-code-or-write-repo")) return modes;
+  const actionable = (m: string | undefined) => m === "direct" || m === "recommend";
+  if (SCOPED_DELIVERY_CAPABILITY_IDS.some((id) => actionable(modes.get(id)))) {
+    modes.set("execute-code-or-write-repo", "direct");
+  }
+  return modes;
 }
 
 function isWithheld(

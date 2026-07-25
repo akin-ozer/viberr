@@ -226,3 +226,37 @@ key, so the pipeline is exercised identically. Nothing asserted on the echo.
 `commentToAgent` calls `assignSpecialist` only when the task has NO delivering engagement
 (`task-actions.server.ts:1095-1108`), so its `outgoing` is always null there. The guard is
 correctly scoped to deliberate reassignment.
+
+## I. Self-review of the diff — one regression this pass introduced
+
+The delegated five-lens review stalled on rate limits without producing conclusions, so I
+answered its two highest-value questions myself. The second one found a real defect **in my
+own P14-LV-01 fix**.
+
+### RV-01 (MED) — the read side overturned an admin's explicit withholding
+
+To stop the new "absent grant ⇒ withheld" polarity from crippling a working deliverer whose
+headline `execute-code-or-write-repo` was merely ABSENT, I had the enforcement layer reuse
+`normalizeDeliveryGrants`. That helper also rewrites an **explicit `off`** headline to
+`direct` whenever any scoped delivery grant is actionable — defensible at SAVE time, where
+the admin sees the result and can re-edit it, but wrong at the enforcement layer.
+
+Reproduced directly: grants `execute-code-or-write-repo: off` + `commit-push-branch: direct`
+produced a denylist with **no `Edit`, `Write`, `MultiEdit`, `NotebookEdit` or
+`Bash(git commit:*)`** — an admin who switched repo-write Off got file writes back. Before
+this pass the bare lookup read the explicit `off` and denied them, so this was a *regression
+introduced by the fix*, and the mirror image of the bug it was fixing: permission appearing
+from something other than a grant.
+
+Fixed with a narrow repair that resolves ONLY an absent headline and never reinterprets an
+explicit `off`/`human`. Covered by two tests (explicit `off`, explicit `human`) plus the
+existing absent-headline test, so both directions are pinned.
+
+### Verified sound: every path to Done
+
+All four writers that set the terminal stage — `resolvePacket` (:3641), `acceptCompletion`
+(:4128), `forceAcceptCompletion` (:4249) and the operator's own accept
+(`operator-actions.server.ts:1656`) — go through the single `acceptanceRefusalReason`
+helper, which chains archive → graph → reviewer verdicts → blocked packet → closed PR →
+conflicting PR. Force-accept is the one deliberate bypass and its audit names the exact gate
+it overrode, from the same helper, so the audit cannot go stale.

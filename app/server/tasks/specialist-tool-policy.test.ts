@@ -93,6 +93,42 @@ describe("resolveSpecialistDisallowedTools", () => {
     expect(denied).toContain("Bash(gh pr merge:*)");
   });
 
+  it("an EXPLICIT off headline is never overturned by a scoped delivery grant", () => {
+    // The mirror image of P14-LV-01: permission must not appear from anything
+    // other than a grant. The read side repairs an ABSENT headline (below), but
+    // an admin who set "Execute code or write to the repo: Off" while leaving
+    // "Commit & push" on has withheld file writes, and a scoped grant must not
+    // hand them back. (`normalizeDeliveryGrants` does rewrite this at SAVE time,
+    // where the admin can see and re-edit the result — reusing it here silently
+    // re-granted Edit/Write at the enforcement layer.)
+    const denied = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "off"),
+      grant("commit-push-branch", "direct"),
+    ]);
+    expect(denied).toContain("Edit");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("MultiEdit");
+    expect(denied).toContain("NotebookEdit");
+    expect(denied).toContain("Bash(git commit:*)");
+    // The explicitly granted scoped step is still permitted.
+    expect(denied).not.toContain("Bash(git push:*)");
+    expect(
+      resolveDeliveryPermissions([
+        grant("execute-code-or-write-repo", "off"),
+        grant("commit-push-branch", "direct"),
+      ]),
+    ).toMatchObject({ canCommitPush: false });
+  });
+
+  it("an explicit HUMAN headline is likewise respected, not repaired", () => {
+    const denied = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "human"),
+      grant("commit-push-branch", "direct"),
+    ]);
+    expect(denied).toContain("Edit");
+    expect(denied).toContain("Write");
+  });
+
   it("a capability outside the grant-required set stays permissive when unspecified", () => {
     // Web egress is a policy nicety, not a delivery power: absence keeps it.
     expect(resolveSpecialistDisallowedTools([])).not.toContain("WebFetch");
