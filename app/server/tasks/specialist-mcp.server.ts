@@ -51,11 +51,18 @@ export function resolveSpecialistMcpServers(
  *  would disagree about what the agent can do (P14-KM-15). */
 const RESERVED_MCP_NAMES = new Set(["viberr", "viberr_agent", "viberr-agent"]);
 
-/** A declared MCP grant that reached no run. */
+/** A declared MCP grant that reached no run, or that is known to be down. */
 export interface UnresolvedMcpGrant {
   name: string;
-  /** Why it produced no server, in words a human can act on. */
+  /** Why it produced no usable tools, in words a human can act on. */
   reason: string;
+  /**
+   * True when the server WAS mounted anyway (P14-LV-09b): the registry knows it,
+   * but its last health probe failed. Mounting is still right — a probe can be
+   * stale and the CLI may connect where we could not — but the run must not be
+   * told it has tools that may never appear.
+   */
+  mounted?: boolean;
 }
 
 export interface SpecialistMcpResolution {
@@ -78,13 +85,30 @@ export function resolveSpecialistMcpServersDetailed(
   const servers: Record<string, unknown> = {};
   const unresolved: UnresolvedMcpGrant[] = [];
   if (mcpNames.length === 0) return { servers, unresolved };
-  let registry: { name: string; transport: "HTTP" | "stdio"; target: string }[];
+  let registry: {
+    name: string;
+    transport: "HTTP" | "stdio";
+    target: string;
+    up: boolean | null;
+    lastCheckedAt: string | null;
+  }[];
   try {
     registry = listMcpServers(db);
   } catch {
     return { servers, unresolved };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));
+
+  /** Mounted, but its last probe said it was unreachable (P14-LV-09b). */
+  const flagDown = (name: string, lastCheckedAt: string | null) => {
+    unresolved.push({
+      name,
+      reason: lastCheckedAt
+        ? `its last connection check failed (${lastCheckedAt}) — it may expose no tools`
+        : "its last connection check failed — it may expose no tools",
+      mounted: true,
+    });
+  };
 
   const drop = (name: string, reason: string) => {
     // P13-KM-11: a declared MCP that resolves to nothing used to be dropped in
@@ -124,6 +148,11 @@ export function resolveSpecialistMcpServersDetailed(
         ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
       };
     }
+    // P14-LV-09b: a REGISTERED but known-down server resolves to a config, so it
+    // was mounted and announced as usable while exposing nothing. Live, a scout
+    // granted `broken-mcp` reported it "named in the initial context as an
+    // attached MCP server" with "no callable tools ever surfaced for it".
+    if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
   }
   return { servers, unresolved };
 }

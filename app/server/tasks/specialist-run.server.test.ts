@@ -1025,14 +1025,33 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("NOT mounted on this run");
   });
 
+  it("P14-LV-09b: a MOUNTED but known-down server is flagged as possibly unavailable", () => {
+    // Live: `broken-mcp` IS in the registry, so it resolved to a config and was
+    // announced as attached — and exposed no callable tools. Mounting stays
+    // right (a probe can be stale); claiming it works does not.
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http", "broken-mcp"],
+      unhealthyMcps: ["broken-mcp"],
+    });
+    expect(persona).toContain("MCP servers that may be unavailable");
+    expect(persona).toContain("broken-mcp");
+    expect(persona).toContain("last connection check failed");
+    // A down server is NOT the same claim as one that reached no server at all.
+    expect(persona).not.toContain("Unavailable MCP servers");
+  });
+
   it("P14-LV-09: says nothing about unavailable servers when every grant resolved", () => {
     const persona = buildSpecialistPersona({
       profileId: "scout",
       skills: [],
       mcps: ["everything-http"],
       unresolvedMcps: [],
+      unhealthyMcps: [],
     });
     expect(persona).not.toContain("Unavailable MCP servers");
+    expect(persona).not.toContain("may be unavailable");
   });
 
   it("an operator hand-off (no human author) keeps the impersonal framing", () => {

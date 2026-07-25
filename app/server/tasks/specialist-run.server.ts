@@ -191,11 +191,14 @@ function deploymentGrants(
 function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-): { mcpServers?: Record<string, unknown>; unresolved: string[] } {
+): { mcpServers?: Record<string, unknown>; unresolved: string[]; unhealthy: string[] } {
   const { servers, unresolved } = resolveSpecialistMcpServersDetailed(db, names);
   return {
     ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
-    unresolved: unresolved.map((u) => u.name),
+    // Only the grants that reached NO server; a mounted-but-unhealthy one is
+    // reported separately so the prompt can say which is which (P14-LV-09b).
+    unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
+    unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
   };
 }
 
@@ -727,6 +730,7 @@ export async function startAgentRun(
     kb,
     mcps: Object.keys(resolvedMcps.mcpServers ?? {}),
     unresolvedMcps: resolvedMcps.unresolved,
+    unhealthyMcps: resolvedMcps.unhealthy,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
   });
@@ -1017,6 +1021,8 @@ export function buildSpecialistPersona(input: {
   mcps?: string[];
   /** Declared MCP grants that resolved to NO server (P14-LV-09). */
   unresolvedMcps?: string[];
+  /** Mounted, but the last health check failed (P14-LV-09b). */
+  unhealthyMcps?: string[];
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -1098,6 +1104,19 @@ export function buildSpecialistPersona(input: {
   // human never saw. Live, a scout reported `vm-memory` as "referenced but
   // exposes zero callable tools", and only its own diligence surfaced it. Name
   // the gap so the agent reports it instead of claiming a tool it never had.
+  const unhealthy = input.unhealthyMcps ?? [];
+  if (unhealthy.length > 0) {
+    // P14-LV-09b: mounted, but its last probe failed — so it may expose nothing.
+    // Live, a scout granted `broken-mcp` found it named in its context with "no
+    // callable tools ever surfaced for it". Mounting is still right (a probe can
+    // be stale), but the prompt must not present it as working.
+    parts.push(
+      "\n\n---\n# MCP servers that may be unavailable\n\n" +
+        `${unhealthy.join(", ")} ${unhealthy.length === 1 ? "is" : "are"} attached, ` +
+        `but the last connection check failed — the tools may never appear. If ` +
+        `they are missing, say so rather than treating it as your own error.`,
+    );
+  }
   const unresolved = input.unresolvedMcps ?? [];
   if (unresolved.length > 0) {
     const [it, they] =
@@ -1364,7 +1383,8 @@ export function resolveResumeConfinement(
       skills: resolved.skills,
       kb: resolved.kb,
       mcps: Object.keys(mcpServers),
-      unresolvedMcps: resumeMcps.unresolved.map((u) => u.name),
+      unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
+      unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
     });
