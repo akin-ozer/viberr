@@ -43,8 +43,11 @@ export function getSettingsViewData(
 
   const counts = db
     .prepare(
+      // R14-3: archived tasks are off the board, so the stage rows here must not
+      // still count them — Settings said "Ready · 1 task" for a column the board
+      // drew empty (P14-RV-03).
       `SELECT stage, COUNT(*) AS n FROM task_projections
-        WHERE project_slug = ? GROUP BY stage`,
+        WHERE project_slug = ? AND archived = 0 GROUP BY stage`,
     )
     .all(projectSlug) as { stage: string; n: number }[];
 

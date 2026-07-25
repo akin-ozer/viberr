@@ -283,3 +283,27 @@ Fixed by resolving with `realpathSync` and re-checking containment against the r
 root, so an intermediate symlinked DIRECTORY is caught too; paths that don't exist yet
 resolve their parent, so creates still work. Covered by a read test and a write test, the
 latter asserting the host file the link pointed at is untouched.
+
+### RV-03 (MED) — archiving stopped everything except the one thing that runs unattended
+
+Answering the integration lens myself: I enumerated every reader of `task_projections` and
+checked each against R14-3. Four had been handled (board, review queue, decisions inbox,
+home counts). Five had not, and one of them mattered a great deal.
+
+**`fireDueSchedules` guarded the terminal stage but not `archived`** — and `setTaskArchived`
+withdrew the packet and the recommendations while leaving `schedules` untouched. So a task
+archived with a pending operator re-run still fired it: abandoned work resurrected by an
+agent **with no human watching**, which FR39 calls out as the one capability that acts
+unattended and therefore must stay visible, cancellable and auditable. Archiving stopped
+the board chip, the queue row and the inbox entry — everything except the thing that acts.
+
+Fixed at both layers: archiving now cancels pending/claimed schedules, and the runner
+treats an archived task as moot exactly like a Done one, retiring the occurrence with an
+audited `outcome: "skipped-archived"` rather than dropping it silently. Regression test
+asserts no run is enqueued and the retirement is recorded.
+
+Two stale-count readers fixed alongside: the Settings workflow panel counted archived tasks
+into their old stage (Settings said "Ready · 1 task" for a column the board drew empty), and
+a profile's "Active deployments" list kept showing engagements on archived tasks. The
+remaining two readers are correct as they stand — `reconcile-poller` keeps GitHub truth
+current for any task, and `profile-query`'s task_count is a project-ordering heuristic.

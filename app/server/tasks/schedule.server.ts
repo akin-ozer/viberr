@@ -196,6 +196,8 @@ interface DueRow {
   project_slug: string;
   task_key: string;
   stage: string;
+  /** R14-3 projection column; 1 = archived (P14-RV-03). */
+  archived: number;
   schedules_json: string;
 }
 
@@ -219,7 +221,7 @@ export async function fireDueSchedules(
   const nowMs = Date.now();
   const rows = db
     .prepare(
-      `SELECT project_slug, task_key, stage, schedules_json
+      `SELECT project_slug, task_key, stage, archived, schedules_json
          FROM task_projections
         WHERE schedules_json LIKE '%"status":"pending"%'
            OR schedules_json LIKE '%"status":"claimed"%'`,
@@ -264,7 +266,16 @@ export async function fireDueSchedules(
       return s.status === "pending" || isStaleClaim(s);
     });
     if (due.length === 0) continue;
-    const isDone = terminalFor(row.project_slug) !== null && row.stage === terminalFor(row.project_slug);
+    // P14-RV-03: an ARCHIVED task is as moot as a Done one. Archiving withdraws
+    // the packet and the recommendations but never touched `schedules`, so a
+    // scheduled operator re-run on abandoned work still fired — the one thing
+    // archiving failed to stop was the one thing that acts with NO human
+    // watching (FR39). Retired here the same way a Done task's is, so the
+    // occurrence is recorded rather than silently dropped.
+    const isMoot =
+      row.archived === 1 ||
+      (terminalFor(row.project_slug) !== null &&
+        row.stage === terminalFor(row.project_slug));
 
     for (const s of due) {
       try {
@@ -280,7 +291,7 @@ export async function fireDueSchedules(
           const target = parsed.frontmatter.schedules.find((x) => x.id === s.id);
           if (!target) return;
           if (target.status !== "pending" && !isStaleClaim(target)) return;
-          if (isDone) {
+          if (isMoot) {
             target.status = "fired";
             target.firedAt = new Date().toISOString();
             parsed.timeline.unshift(
@@ -310,9 +321,16 @@ export async function fireDueSchedules(
           subjectId: row.task_key,
           projectSlug: row.project_slug,
           taskKey: row.task_key,
-          details: { scheduleId: s.id, outcome: isDone ? "skipped-done" : "claimed" },
+          details: {
+            scheduleId: s.id,
+            outcome: isMoot
+              ? row.archived === 1
+                ? "skipped-archived"
+                : "skipped-done"
+              : "claimed",
+          },
         });
-        if (isDone) {
+        if (isMoot) {
           skipped += 1;
         } else {
           toRun.push({

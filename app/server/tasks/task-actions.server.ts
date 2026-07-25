@@ -3505,6 +3505,16 @@ export async function setTaskArchived(
       parsed.frontmatter.waiting = "none";
       parsed.frontmatter.recommendations = [];
       parsed.packet = null;
+      // P14-RV-03: and the SCHEDULES. Withdrawing the packet and the
+      // recommendations but leaving a pending operator re-run behind meant the
+      // one thing archiving failed to stop was the one thing that acts with no
+      // human watching (FR39). The runner also treats an archived task as moot,
+      // so this is belt-and-braces for a task archived by a file edit.
+      parsed.frontmatter.schedules = parsed.frontmatter.schedules.map((s) =>
+        s.status === "pending" || s.status === "claimed"
+          ? { ...s, status: "cancelled" as const }
+          : s,
+      );
     } else {
       // A restored task is back in a human's hands — it has no agent in flight
       // and no decision object, so the honest wait state is "human".
