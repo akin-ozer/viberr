@@ -72,9 +72,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // to break the operator. The editor is one modal for both kinds, so the
     // catalog now carries the operator set (which is a superset: it merely adds
     // the reserved name) and the specialist picker filters it out per profile.
-    resourceCatalog: buildResourceCatalog(db, undefined, {
-      profileKind: "operator",
-    }),
+    resourceCatalog: buildResourceCatalog(db),
     // Per-backend credential availability (same cheap SDK-auth check the run
     // service uses). The create/edit modal disables a backend that isn't
     // configured so a new profile can't be pinned to a runtime whose every run

@@ -831,17 +831,13 @@ export function CreateProfileModal({
   // The live store catalog (buildResourceCatalog) drives the picker; an empty
   // store means an empty picker — never a mock fallback.
   //
-  // P13-KM-09/UI-28: the loader ships the OPERATOR catalog (a superset that
-  // includes the reserved in-process `viberr` toolkit) so editing the operator
-  // no longer paints its real grant as "no longer in the store — click to
-  // remove". A specialist can never mount that server, so it is filtered out
-  // here instead of being missing from the data.
-  const resCatalog: readonly ResCatalogGroup[] = (resourceCatalog ?? []).map(
-    (group) =>
-      group.key === "mcps" && !isOperator
-        ? { ...group, items: group.items.filter((i) => i.id !== "viberr") }
-        : group,
-  );
+  // P13-KM-09/UI-28 wanted the operator's real `viberr` grant to stop rendering
+  // as "no longer in the store", and did it by shipping a superset catalog and
+  // filtering the reserved name back out for specialists. P14-KM-14 removed the
+  // grant instead: the in-process toolkit mounts unconditionally, so the toggle
+  // governed nothing. The catalog is now the registry for both kinds and needs
+  // no per-kind filtering.
+  const resCatalog: readonly ResCatalogGroup[] = resourceCatalog ?? [];
   const [openRes, setOpenRes] = useState<Record<string, boolean>>(() =>
     resCatalog[0] ? { [resCatalog[0].group]: true } : {},
   );

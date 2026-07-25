@@ -947,6 +947,35 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("NOT an authority grant");
   });
 
+  // P14-LV-09: the run prompt must describe what MOUNTED, and name what did not.
+  // Live, renaming an org MCP orphaned every grant to it; the next run still
+  // announced the old name and found zero tools under it, and only the agent's
+  // own diligence surfaced the gap.
+  it("P14-LV-09: names an unresolvable MCP grant instead of advertising it", () => {
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http"],
+      unresolvedMcps: ["vm-memory"],
+    });
+    // What mounted is offered…
+    expect(persona).toContain("everything-http");
+    // …and what didn't is named as unavailable, not silently dropped.
+    expect(persona).toContain("Unavailable MCP servers");
+    expect(persona).toContain("vm-memory");
+    expect(persona).toContain("NOT mounted on this run");
+  });
+
+  it("P14-LV-09: says nothing about unavailable servers when every grant resolved", () => {
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http"],
+      unresolvedMcps: [],
+    });
+    expect(persona).not.toContain("Unavailable MCP servers");
+  });
+
   it("an operator hand-off (no human author) keeps the impersonal framing", () => {
     const prompt = buildAnalyzePrompt({
       ...base,

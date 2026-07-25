@@ -34,14 +34,19 @@ import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
  *
  * Which tools are offered depends on the operator's capability policy: a
  * capability in `off` mode ("don't recommend") is withheld — its tool is not
- * even built (mirrors the operator RBAC). `allowedTools` then confines the run
- * to exactly these tools, so a server-spawned operator can never write code.
+ * even built (mirrors the operator RBAC). `allowedTools` then AUTO-APPROVES
+ * those tools; under `bypassPermissions` it removes nothing from the model's
+ * context, so it is NOT the fence (P14-KM-12 — this used to claim it "confines
+ * the run"). What actually stops a server-spawned operator writing code is the
+ * DENY list (`claude-runtime.server.ts`) plus the fact that no repo-write tool
+ * is built here at all.
  */
 
 export interface OperatorToolkit {
   /** `{ viberr: <sdk mcp server> }` for the Claude query `mcpServers` option. */
   mcpServers: Record<string, unknown>;
-  /** The `mcp__viberr__*` tool names the run is confined to. */
+  /** The `mcp__*` tool names this run AUTO-APPROVES (P14-KM-12: confinement is
+   *  the deny list, not this). */
   allowedTools: string[];
 }
 
@@ -363,8 +368,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // and kb only, so a live operator granted `everything-mcp` correctly reported
   // "MCP servers/tools I can call: none". `resolveSpecialistMcpServers` skips
   // the reserved `viberr` name, so the in-process toolkit can never be shadowed.
-  // Their tools must also be ALLOWED: `allowedTools` confines an operator run to
-  // exactly the listed names, so mounting without allowing would be decorative.
+  // Their tools must also be auto-approved: `allowedTools` is the APPROVAL list,
+  // not a restriction (P14-KM-12) — without the entry every org MCP call would
+  // stall on a permission prompt no human is there to answer.
   const orgServers = resolveSpecialistMcpServers(db, authority.mcps);
   for (const name of Object.keys(orgServers)) {
     allowed.push(`mcp__${name}`);

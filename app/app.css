@@ -3022,6 +3022,15 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--fg), transparent 95%); border: 1px solid var(--hairline); }
 
 /* ---------- KB file browser ---------- */
+/* P14-KM-08: a text doc row opens the in-place editor. */
+.fm-row.openable { cursor: pointer; }
+/* P14-KM-08: the destination every toolbar action writes into. */
+.fm-toolbar select {
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  padding: .3rem .45rem; background: var(--surface); color: var(--fg);
+  font-family: var(--font-mono); font-size: .76rem;
+}
+.fm-toolbar label.fm-hint { margin-left: auto; }
 .r90 { transform: rotate(90deg); }
 .fm-toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .fm-hint { font-size: .74rem; color: var(--placeholder); margin-left: auto; }
@@ -3144,6 +3153,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .fm-doc .ta { min-height: 8rem; resize: vertical; }
 .fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }
+/* P14-UI-61: an OPENED document shows its real path — the name is the file's own
+   and is not retyped, so there is no name input to style here. */
+.fm-doc-path { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); }
+.fm-doc-acts .fm-hint { margin-left: 0; margin-right: auto; }
 
 /* Capability-matrix runtime-difference notes (P13-RT-14). */
 .mx-notes { padding: .9rem .2rem .2rem; }

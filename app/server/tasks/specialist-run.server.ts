@@ -67,7 +67,7 @@ import {
   resolveSpecialistDisallowedTools,
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
-import { resolveSpecialistMcpServers } from "./specialist-mcp.server";
+import { resolveSpecialistMcpServersDetailed } from "./specialist-mcp.server";
 import {
   cloneFailureLogDetails,
   createGitHubClonePlan,
@@ -181,13 +181,22 @@ function deploymentGrants(
   return withheldAgentGrants() as CapabilityGrant[];
 }
 
-/** Resolve declared MCP names to the portable runtime MCP shape, or `{}`. */
+/**
+ * Resolve declared MCP names to the portable runtime MCP shape, plus the names
+ * that resolved to NOTHING (P14-LV-09). A grant pointing at a server the
+ * registry no longer holds used to vanish into a log warn while the run prompt
+ * still announced it — live, an agent reported `vm-memory` as "mounted" and
+ * found zero tools under it. The caller owes the run an honest prompt.
+ */
 function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-): { mcpServers?: Record<string, unknown> } {
-  const servers = resolveSpecialistMcpServers(db, names);
-  return Object.keys(servers).length ? { mcpServers: servers } : {};
+): { mcpServers?: Record<string, unknown>; unresolved: string[] } {
+  const { servers, unresolved } = resolveSpecialistMcpServersDetailed(db, names);
+  return {
+    ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
+    unresolved: unresolved.map((u) => u.name),
+  };
 }
 
 /**
@@ -677,11 +686,16 @@ export async function startAgentRun(
   // The agent's run persona: its detailed definition + declared skills + KB
   // docs. Claude takes it as a system prompt; Codex receives the same persona
   // through the supported `developer_instructions` configuration channel.
+  // P14-LV-09: resolve BEFORE the persona, and build it from what actually
+  // mounted — passing the DECLARED names is the literal symptom (the prompt
+  // announced a server the run had no tools for).
+  const resolvedMcps = mcpServersFor(db, mcpNames);
   const persona = buildSpecialistPersona({
     profileId: engagement.profileId,
     skills,
     kb,
-    mcps: mcpNames,
+    mcps: Object.keys(resolvedMcps.mcpServers ?? {}),
+    unresolvedMcps: resolvedMcps.unresolved,
     ...(resolved?.definition ? { definition: resolved.definition } : {}),
     dataRoot: ctx.dataRoot,
   });
@@ -807,7 +821,7 @@ export async function startAgentRun(
   //            SDK can't mount our in-process tools) — only when a structured
   //            field (verdict/question) is actually usable, so a plain
   //            developer's report stays natural prose.
-  const declaredMcps = mcpServersFor(db, mcpNames);
+  const declaredMcps = resolvedMcps;
   const toolkit =
     backend === "claude" && realBackend
       ? buildAgentToolkit({
@@ -970,6 +984,8 @@ export function buildSpecialistPersona(input: {
   kb?: string[];
   /** MCP servers mounted for this run — used for the governance rule below. */
   mcps?: string[];
+  /** Declared MCP grants that resolved to NO server (P14-LV-09). */
+  unresolvedMcps?: string[];
   /** The profile's own persona body (D6) — used when the store ships no
    *  agents/definitions/<id>.md override. Custom profiles finally run AS
    *  themselves instead of persona-less on the generic analyze prompt. */
@@ -1044,6 +1060,22 @@ export function buildSpecialistPersona(input: {
         "to Done, change project policy, or perform any action your capability " +
         "policy withholds. Viberr owns delivery and merging — if a tool would " +
         "do one of those, stop and report instead.",
+    );
+  }
+  // P14-LV-09: a granted MCP server that resolves to nothing used to be
+  // announced in the prompt and mounted nowhere — silent capability loss the
+  // human never saw. Live, a scout reported `vm-memory` as "referenced but
+  // exposes zero callable tools", and only its own diligence surfaced it. Name
+  // the gap so the agent reports it instead of claiming a tool it never had.
+  const unresolved = input.unresolvedMcps ?? [];
+  if (unresolved.length > 0) {
+    const [it, they] =
+      unresolved.length === 1 ? ["it is", "it"] : ["they are", "them"];
+    parts.push(
+      "\n\n---\n# Unavailable MCP servers\n\n" +
+        `Your profile grants ${unresolved.join(", ")}, but ${it} NOT mounted on ` +
+        `this run — no such server is in the org registry. Do not claim or ` +
+        `attempt tools from ${they}; report the gap in your findings instead.`,
     );
   }
   return parts.join("");
@@ -1267,15 +1299,19 @@ export function resolveResumeConfinement(
       input.projectSlug,
       input.profileId,
     );
+    // P14-LV-09: resolve first, then describe what MOUNTED — the resumed run
+    // gets the same honest prompt as a fresh one.
+    const resumeMcps = resolveSpecialistMcpServersDetailed(db, resolved.mcps);
+    const mcpServers = resumeMcps.servers;
     const persona = buildSpecialistPersona({
       profileId: input.profileId,
       skills: resolved.skills,
       kb: resolved.kb,
-      mcps: resolved.mcps,
+      mcps: Object.keys(mcpServers),
+      unresolvedMcps: resumeMcps.unresolved.map((u) => u.name),
       ...(resolved.definition ? { definition: resolved.definition } : {}),
       dataRoot: ctx.dataRoot,
     });
-    const mcpServers = resolveSpecialistMcpServers(db, resolved.mcps);
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
     // Codex. Both key off the SAME collaboration grants the fresh run resolves.
