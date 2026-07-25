@@ -34,6 +34,9 @@ test("StoreBrowser creates a folder through the UI", async ({ page }) => {
   await input.fill("e2e-golden-path");
   await input.press("Enter");
 
-  // The created folder appears in the tree (a real fs mkdir + rescan).
-  await expect(browser.getByText("e2e-golden-path").first()).toBeVisible();
+  // The created folder appears in the TREE (a real fs mkdir + rescan). Scoped to
+  // `.fm-name` because P14-KM-08 added a destination picker whose `<option>` for
+  // the same folder matches a bare text lookup first — and an `<option>` is never
+  // "visible", so the unscoped assertion failed on a feature that works.
+  await expect(browser.locator(".fm-name", { hasText: "e2e-golden-path" }).first()).toBeVisible();
 });
