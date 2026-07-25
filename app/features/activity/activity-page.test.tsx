@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
-import { ActivityPage } from "./activity-page";
+import { ActivityPage, actIcon } from "./activity-page";
 import {
   auditTimeLabel,
   groupStreamByDay,
@@ -245,5 +245,51 @@ describe("ActivityPage", () => {
     const view = renderActivity([{ ...STREAM[0]!, text: "short enough" }]);
     expect(view.queryByText(/Show more|Show less/)).toBeNull();
     expect(view.container.querySelector(".act-collapsible")).toBeNull();
+  });
+});
+
+/**
+ * P14-UI-62: pass 13 added the neutral `note` type and moved every benign
+ * governance event onto it — a goal edit, a divergence note, an archive
+ * disposition — precisely so they stop rendering as "Policy violation". The
+ * Activity page's icon map never learned the word, so those rows fell through
+ * to the unknown-type dot and emitted an `act-note` tint class `app.css` did
+ * not define: de-alarmed events rendered typeless in the one cross-task feed.
+ */
+describe("stream vocabulary (P14-UI-62)", () => {
+  it("gives `note` a real icon and tint class, not the unknown-type dot", () => {
+    const { container } = renderActivity([
+      {
+        id: 9,
+        taskKey: "VIB-151",
+        type: "note",
+        actor: { kind: "human", name: "Arda Kaya" },
+        occurredAt: iso(0, 10, 12),
+        text: "**Archived:** VIB-151 was archived — its record is kept.",
+      },
+    ]);
+    const ico = container.querySelector(".pev-ico")!;
+    expect(ico.className).toContain("act-note");
+    // `dot` is the tolerant fallback for a type outside the vocabulary — the
+    // exact glyph a `note` row used to get.
+    expect(actIcon("note")).toBe("message");
+    expect(ico.querySelector("svg")!.innerHTML).not.toContain("circle");
+  });
+
+  it("an unknown type still falls back to the dot rather than throwing", () => {
+    const { container } = renderActivity([
+      {
+        id: 10,
+        taskKey: "VIB-151",
+        type: "from-a-future-version",
+        actor: { kind: "system", name: "Projection" },
+        occurredAt: iso(0, 10, 13),
+        text: "something new",
+      },
+    ]);
+    expect(actIcon("from-a-future-version")).toBe("dot");
+    expect(
+      container.querySelector(".pev-ico svg")!.innerHTML,
+    ).toContain("circle");
   });
 });

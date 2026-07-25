@@ -6,7 +6,10 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
-import type { MatrixProfile } from "~/features/agents/agent-types";
+import {
+  profileRoleLabel,
+  type MatrixProfile,
+} from "~/features/agents/agent-types";
 
 /** The Agent-capability rows need the matrix shape plus the role sub-line. */
 export type PcapProfile = MatrixProfile & { role: string };
@@ -275,7 +278,13 @@ export function AgentCapability({
             </span>
             <span className="pcap-main">
               <span className="nm">{p.name}</span>
-              <span className="sub">{p.role}</span>
+              {/* P14-WL-05: the deployed "Org Docs Writer" read
+                  "Org Docs Writer · Org Docs Writer" here — the library deploy
+                  copies the NAME into the role when the template declares none.
+                  One shared label rule for every roster surface. */}
+              <span className="sub">
+                {profileRoleLabel(p.name, p.role, p.kind)}
+              </span>
             </span>
             <span className="pcap-counts">
               {p.actions.direct.length +

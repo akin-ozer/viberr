@@ -313,3 +313,28 @@ acceptance promised with no affordance · **LV-07** merge failure blamed on cred
 **LV-08** inert destructive controls for insufficient roles · **LV-09** orphaned MCP grant
 is invisible at run time (KM-01) · **LV-10** guardrail false positive · **LV-11** operator
 runtime self-knowledge.
+
+---
+
+# Live RE-VERIFICATION against the fixed app (2026-07-25, branch pass14/product-fixes)
+
+Each defect re-run through the same UI that produced it.
+
+| id | what was done | result |
+| --- | --- | --- |
+| **LV-01** | Deleted the over-granted deployment, re-deployed `Org Docs Writer` through the same **Add from library** button | **FIXED.** On disk: `execute-code-or-write-repo`, `create-task-branch`, `commit-push-branch`, `open-review-pr`, `report-validation-verdict` all `off`. The Agents page "Acts directly" column no longer lists any delivery capability (shot `22-*`). |
+| **LV-02** | Created VM-7 (no branch, no PR, no reviewer, `validation: none`) and used the stage menu to move it to **Done** | **FIXED.** The task stayed at `impl` with `validation: none`. Toast: *"VM-7 is at In Progress, not Review — a completion can only be accepted from the boundary the workflow puts before Done. Move the task through the workflow first, or ask an admin to force-accept it."* Names the real reason and both escapes (shot `23-*`). |
+| **KM-01** | Renamed org MCP `vm-memory` → `vm-knowledge-graph` in the edit dialog | **FIXED.** Both scout profiles' grants were rewritten to `vm-knowledge-graph` in `project.md`. Pre-fix, the identical action left them pointing at a name the registry no longer held. |
+| **RT-02 / LV-04** | First-ever @mention of `VM Docs Writer` on VM-6 (no prior session): asked it to echo `PROBE-P14-RERUN-8KQ2` and say who asked | **FIXED.** Reply: *"@Arda PROBE-P14-RERUN-8KQ2. Arda asked me."* — it received the question, answered exactly it, and tagged the asker. Pre-fix the run never saw the text, answered the task goal instead, and called the goal a prompt-injection attempt. |
+| **WL-04** | Board/Agents headers after the scope-labelling change | **FIXED.** "4 agent threads waiting on a human · this project", "…waiting on a human decision in this project". |
+| **WL-05** | The deployed library profile's role label | **FIXED.** Renders `Specialist`, not the name duplicated. |
+
+Also observed live and worth recording: the anti-fabrication behavior is genuinely good.
+Asked to implement VM-7 (a probe with no real work in it), the Codex Developer refused —
+*"Nothing to implement… fabricating a branch diff, reviewer evidence, validation, or PR
+would invalidate its stated purpose"* — and the operator turned that into a blocked
+decision packet for a human instead of inventing a delivery.
+
+| **R14-3** | Archived VM-7 from the task page, checked the board, then the Archived view | **DELIVERED.** The confirm names what is kept and what is withdrawn: *"Off the board and out of the review queue. The task file, its timeline and its audit trail are kept exactly as they are — this is a disposition, not a delete."* plus *"WITHDRAWN — the open '…confirm how to resolve' decision — restoring the task reopens the…"*. The board's default view no longer lists VM-7; the Archived chip does (shots `24-*`, `25-*`). |
+| **R14-4** | Clicked an existing KB document in the store browser, edited it, saved | **DELIVERED.** The editor opens with the real body (sentinel `KB-VM-P14-9X3T` loaded), the edit lands on disk, and the toast says **replaced**, not the old ambiguous "saved" (shot `26-*`). |
+| **UI-59 / UI-60** | Authored a NEW document using a name that already exists | **FIXED.** A confirm appears — *"A document with that name is already in the store. Saving overwrites its contents — the old text is gone, and agents load the new text on their next context load."* — the original file is untouched, and the editor keeps the typed draft instead of discarding it (shot `27-*`). |

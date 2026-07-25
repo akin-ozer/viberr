@@ -475,6 +475,24 @@ describe("CapabilityMatrixModal", () => {
     );
     expect(onClose).toHaveBeenCalled();
   });
+
+  // P14-LV-03: live, the same MCP server answered `get-annotated-message` on
+  // Claude and `get_annotated_message` on Codex, and Claude listed one tool
+  // Codex never saw. The parity note covered only the SERVER segment, so it
+  // implied a tool name written into a persona would survive both backends.
+  it("states that MCP TOOL names, not just server names, differ per backend", () => {
+    const { getByText, container } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    expect(getByText("MCP tool names differ per backend.")).toBeTruthy();
+    const codes = [...container.querySelectorAll("code")].map((c) => c.textContent);
+    expect(codes).toContain("mcp__everything-http__get-annotated-message");
+    expect(codes).toContain("mcp__everything_http__get_annotated_message");
+  });
 });
 
 describe("CreateProfileModal", () => {
@@ -707,6 +725,33 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
       getByText("A reusable agent the operator can assign to tasks."),
     ).toBeTruthy();
     expect(queryByText(/forks/)).toBeNull();
+  });
+});
+
+/**
+ * P13-UI-52 residual: the form is single-select and the save writes exactly one
+ * backend, so editing ANYTHING on a seeded two-backend profile silently dropped
+ * the second — the roster reported the loss afterwards, the editor never
+ * mentioned it.
+ */
+describe("P13-UI-52 — the editor states the backend narrowing before the save", () => {
+  it("warns which backend a save will drop", () => {
+    // mkProfile's Developer declares both backends; the form seeds the first.
+    const { getByText } = renderModal({ initial: mkProfile({}) });
+    expect(getByText(/Saving pins this profile to one backend/)).toBeTruthy();
+    expect(getByText(/Claude Code will be dropped/)).toBeTruthy();
+  });
+
+  it("says nothing when the profile already declares exactly one", () => {
+    const { queryByText } = renderModal({
+      initial: mkProfile({ backends: ["codex"] }),
+    });
+    expect(queryByText(/Saving pins this profile to one backend/)).toBeNull();
+  });
+
+  it("says nothing in create mode — there is nothing to narrow", () => {
+    const { queryByText } = renderModal({ initial: null });
+    expect(queryByText(/Saving pins this profile to one backend/)).toBeNull();
   });
 });
 

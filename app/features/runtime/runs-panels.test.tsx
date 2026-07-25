@@ -108,6 +108,38 @@ describe("AgentLogsPanel", () => {
     expect(queryByText("friendly text")).toBeNull();
   });
 
+  // P14-WL-02: the console rendered `rate_limit_event` JSON blobs and dozens of
+  // `system·thinking_tokens` rows as ordinary timeline lines, burying the run.
+  it("folds wire telemetry into one row, and the raw toggle still shows it", () => {
+    const rawTelemetry = '{"type":"rate_limit_event","rate_limits":{"primary":{"used_percent":12}}}';
+    const { container, getByText, queryByText } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 4 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            { display: { t: "1", ev: "tool", tag: "tool_use", text: "npm test", name: "Bash" }, raw: "{}" },
+            { display: { t: "2", ev: "meta", tag: "system·thinking_tokens", text: "thinking_tokens" }, raw: "{}" },
+            { display: { t: "3", ev: "meta", tag: "system·thinking_tokens", text: "thinking_tokens" }, raw: "{}" },
+            { display: { t: "4", ev: "meta", tag: "rate_limit_event", text: rawTelemetry }, raw: rawTelemetry },
+          ],
+        }}
+      />,
+    );
+    expect(getByText("npm test")).toBeTruthy();
+    // Three telemetry rows became one that says so — and the blob is not drawn.
+    expect(container.querySelectorAll(".log-line")).toHaveLength(2);
+    expect(getByText(/3 telemetry events/)).toBeTruthy();
+    expect(queryByText(rawTelemetry)).toBeNull();
+    // The stored stream stays reachable, unfolded, behind the existing toggle.
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.querySelectorAll(".log-line")).toHaveLength(4);
+    expect(container.textContent).toContain(rawTelemetry);
+    // The footer counts stored lines, so folding never changes the total.
+    expect(getByText("4 events")).toBeTruthy();
+  });
+
   it("codex meta line vs claude meta line", () => {
     const codex = mkRun({ backend: "codex", sid: "0199a2c4-7b31-7802", state: "idle", lifecycle: "finished" });
     const { getByText } = render(

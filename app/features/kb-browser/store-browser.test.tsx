@@ -77,7 +77,13 @@ describe("StoreBrowser", () => {
     expect(getByText("decisions")).toBeTruthy();
     expect(getByText("adr-001.md")).toBeTruthy(); // expanded by default
     expect(getByText("overview.md")).toBeTruthy();
-    expect(getByText("4.2 KB · just now")).toBeTruthy();
+    // P13-UI-20 residual: the mtime moved into its own live-updating child
+    // component, so the size and the age are two nodes inside `.fm-meta`.
+    expect(
+      [...document.querySelectorAll(".fm-meta")].some(
+        (m) => m.textContent === "4.2 KB · just now",
+      ),
+    ).toBe(true);
     expect(getByText("1 folder · 2 files · indexed just now")).toBeTruthy();
     expect(getByText(/This is the real folder on disk/)).toBeTruthy();
     expect(getByText("drag files or folders onto a folder to upload there")).toBeTruthy();
@@ -361,5 +367,30 @@ describe("StoreBrowser failure toast kind (P13-D-10)", () => {
     expect(toast.textContent).toContain("Folder already exists.");
     // `alert` is the triangle path; `check` is the tick.
     expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+  });
+});
+
+/**
+ * P13-UI-08 residual: an upload whose every path was dot-filtered submitted
+ * nothing and said nothing — no request, no toast, no error. From the user's
+ * side that is indistinguishable from a successful upload.
+ */
+describe("StoreBrowser upload that uploads nothing (P13-UI-08)", () => {
+  const hidden = (name: string) => new File(["x"], name, { type: "text/plain" });
+
+  it("says the drop was all hidden files instead of doing nothing", async () => {
+    const { container } = renderBrowser();
+    const input = container.querySelector(
+      'input[type="file"]:not([webkitdirectory])',
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [hidden(".DS_Store"), hidden(".env")] },
+    });
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+    expect(document.querySelector(".toast")!.textContent).toContain(
+      "Nothing uploaded — 2 hidden items skipped",
+    );
+    // Nothing was posted — the filter is client-side, and it stays that way.
+    expect(lastForm).toBeNull();
   });
 });

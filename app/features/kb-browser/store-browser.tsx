@@ -7,11 +7,11 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { useFetcher } from "react-router";
-import { formatRelative } from "~/shared/dates/format";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useRelativeTime } from "~/ui/use-relative-time";
 import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
   entriesFromDataTransfer,
@@ -223,6 +223,19 @@ function BrowserToolbar({
   );
 }
 
+/**
+ * P13-UI-20 residual: the file rows called `formatRelative` straight in render,
+ * so the string was minted on the SERVER's clock and then never aged — a
+ * browser left open kept claiming a file changed "2m ago" an hour later. The
+ * shared hook re-renders on mount and every 30s; a component per row is what
+ * lets a hook run inside the row map at all.
+ */
+function FileMtime({ iso }: { iso: string | null }) {
+  const rel = useRelativeTime(iso);
+  if (!rel) return null;
+  return <span suppressHydrationWarning>{" · " + rel}</span>;
+}
+
 /** The file tree with drag-drop upload targets and the inline new-folder
  * row; owns the transient drop-target highlight. */
 function StoreTree({
@@ -409,7 +422,7 @@ function StoreTree({
               ) : (
                 <span className="fm-meta">
                   {prettySize(r.node.sizeBytes)}
-                  {r.node.mtime ? " · " + formatRelative(r.node.mtime) : ""}
+                  <FileMtime iso={r.node.mtime} />
                 </span>
               )}
               <span className="fm-acts" onClick={(e) => e.stopPropagation()}>

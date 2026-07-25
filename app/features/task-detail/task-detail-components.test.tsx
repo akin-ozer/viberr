@@ -734,6 +734,49 @@ describe("ExecutionProfile — reviewers", () => {
   });
 });
 
+// P14-WL-07: PST-1 was Done+merged and wore the "task closed" pill while the
+// panel still offered "Assign delivering agent" and "Engage reviewer" — G9
+// disabled the RUN buttons and stopped there, so a closed task could still take
+// an engagement that had nothing left to run.
+describe("ExecutionProfile — a closed task offers no new engagements (P14-WL-07)", () => {
+  const closedTask = () =>
+    execTask({ displayReadiness: "merged" } as unknown as Partial<TaskSummary>);
+
+  it("replaces the assign menu with the reason", () => {
+    const { container, getByText } = renderExec(closedTask());
+    expect(
+      Array.from(container.querySelectorAll(".own-btn")).some((b) =>
+        b.textContent?.includes("Assign delivering agent"),
+      ),
+    ).toBe(false);
+    expect(getByText(/Task closed — reopen it from Current state/)).toBeTruthy();
+  });
+
+  it("replaces the reviewer menu with the reason", () => {
+    const { container, getByText } = renderExec(closedTask());
+    expect(
+      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
+        b.textContent?.includes("Engage reviewer"),
+      ),
+    ).toBe(false);
+    expect(getByText("Task closed — no new reviewer engagements.")).toBeTruthy();
+  });
+
+  it("still offers both on an OPEN task", () => {
+    const { container } = renderExec(execTask());
+    expect(
+      Array.from(container.querySelectorAll(".own-btn")).some((b) =>
+        b.textContent?.includes("Assign delivering agent"),
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
+        b.textContent?.includes("Engage reviewer"),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("ExecutionProfile — owner hand-off candidates", () => {
   it("hand-off list offers only members who can own a task (F10-13)", () => {
     // F10-13: viewers are read + comment only — the server rejects a hand-off to

@@ -671,3 +671,65 @@ describe("assign-specialist + run-specialist intents", () => {
     expect(result.init.status).toBe(403);
   });
 });
+
+/* ------------------------------------ acceptance affordance + task archive */
+
+/**
+ * P14-LV-06 — the review queue counted a viewer under "Waiting on your
+ * acceptance" while the task page rendered acceptance only as an operator
+ * recommendation, so a withdrawn recommendation left the promised decision with
+ * no control. The loader now ships the same predicate the queue counts with.
+ *
+ * R14-3 — the task archive the closed-PR guidance had been naming for a pass.
+ */
+describe("acceptance affordance (P14-LV-06)", () => {
+  it("ships the viewer's authority, the boundary and the refusal", async () => {
+    const atTriage = await runLoader("VIB-166", ids.arda);
+    expect(atTriage.acceptance.hasAuthority).toBe(true);
+    // Not at the review boundary → no acceptance control is rendered at all.
+    expect(atTriage.acceptance.atBoundary).toBe(false);
+    expect(atTriage.acceptance.canAccept).toBe(false);
+    expect(atTriage.acceptance.blockedReason).toBeTruthy();
+  });
+
+  it("a non-member holds no acceptance authority", async () => {
+    const result = await runLoader("VIB-142", ids.deniz);
+    expect(result.acceptance.hasAuthority).toBe(false);
+    expect(result.acceptance.canAccept).toBe(false);
+  });
+
+  it("accept-completion refuses when the task is not at the boundary", async () => {
+    const result = (await postIntent("VIB-166", ids.arda, {
+      intent: "accept-completion",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("task archive (R14-3)", () => {
+  it("a contributor cannot archive", async () => {
+    const result = (await postIntent("VIB-153", ids.selin, {
+      intent: "archive-task",
+    })) as { data: { ok: false; error: string }; init: { status: number } };
+    expect(result.init.status).toBe(403);
+  });
+
+  it("a maintainer archives and restores; the loader reports the disposition", async () => {
+    const archived = (await postIntent("VIB-153", ids.murat, {
+      intent: "archive-task",
+    })) as { ok: true; toast: string };
+    expect(archived.ok).toBe(true);
+    expect(archived.toast).toContain("archived");
+    const after = await runLoader("VIB-153", ids.murat);
+    expect(after.archived).toBe(true);
+    // An archived task is out of the flow — acceptance is refused with a reason.
+    expect(after.acceptance.canAccept).toBe(false);
+
+    const restored = (await postIntent("VIB-153", ids.murat, {
+      intent: "restore-task",
+    })) as { ok: true; toast: string };
+    expect(restored.ok).toBe(true);
+    expect(restored.toast).toContain("restored");
+    expect((await runLoader("VIB-153", ids.murat)).archived).toBe(false);
+  });
+});
