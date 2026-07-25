@@ -18,6 +18,7 @@ import {
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
 import type {
   RunCallbacks,
@@ -282,6 +283,64 @@ describe("engagement uniqueness (adversarial-review)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
+
+  // P14-GV-10: replacing the deliverer used to be silent — the outgoing agent's
+  // run kept going and still reconciled delivery under its own profile while the
+  // task file already named someone else, so "who owned this revision" read
+  // wrong afterwards.
+  it("P14-GV-10: refuses to replace the deliverer while its run is in flight", async () => {
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    // A primary run in flight for the CURRENT deliverer.
+    upsertRun(store.db, {
+      id: "run_live",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_live",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "dev",
+      state: "running",
+    });
+    await expect(
+      assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+    ).rejects.toMatchObject({ status: 409 });
+    // The task still names the original deliverer — no half-applied swap.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(deliveringEngagement(fm)?.profileId).toBe("dev");
+  });
+
+  it("P14-GV-10: a settled run allows the swap, and the handoff is its own audited fact", async () => {
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_done",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_done",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(deliveringEngagement(file.parsed.frontmatter)?.profileId).toBe("style");
+    // The timeline says a handoff happened, naming both sides…
+    expect(file.parsed.timeline[0]!.text).toContain("handed off");
+    expect(file.parsed.timeline[0]!.text).toContain("dev");
+    // …and the audit is `task.delivery.handoff`, not a plain first assignment.
+    const handoffs = listAuditEvents(store.db, { action: "task.delivery.handoff" });
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]?.details).toMatchObject({ profileId: "style", fromProfileId: "dev" });
+  });
 
   it("promoting a SUPPORTING profile to deliverer never duplicates its profileId", async () => {
     deploySecond("style");
@@ -1013,6 +1072,37 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
     expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
     expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+  });
+
+  // P14-LV-10: the event this drives says "the operator directive ASKED the
+  // specialist to push or open/merge a pull request", and it is permanent
+  // timeline. A prohibition is the opposite of a request — live, the operator's
+  // own ANTI-injection directive ("Do not push the branch, open a PR, approve,
+  // or merge") produced an event accusing it of demanding exactly that.
+  it("P14-LV-10: does not flag a PROHIBITION against delivering", () => {
+    expect(
+      directiveRequestsDelivery(
+        "Do not push the branch, open a PR, approve, or merge — Viberr handles delivery.",
+      ),
+    ).toBe(false);
+    expect(directiveRequestsDelivery("don't open a pull request yourself")).toBe(false);
+    expect(directiveRequestsDelivery("never merge the pull request")).toBe(false);
+    expect(
+      directiveRequestsDelivery("commit locally, without pushing the branch"),
+    ).toBe(false);
+  });
+
+  it("P14-LV-10: does not flag a QUESTION about delivery", () => {
+    expect(
+      directiveRequestsDelivery("Does your prompt tell you to open a pull request?"),
+    ).toBe(false);
+  });
+
+  it("P14-LV-10: a real request after a prohibited clause still flags", () => {
+    // A clause boundary ends the negation's scope — this one genuinely asks.
+    expect(
+      directiveRequestsDelivery("Do not touch the tests. Then push the branch."),
+    ).toBe(true);
   });
 });
 

@@ -136,22 +136,39 @@ function ResGroup({
   label,
   icon,
   items,
+  known,
 }: {
   label: string;
   icon: IconName;
   items: string[];
+  /** P14-KM-11: the ids the store actually holds. `undefined` = unknown here, so
+   *  nothing is marked (never invent a "missing" state from missing data). */
+  known?: ReadonlySet<string>;
 }) {
   return (
     <div className="res-group">
       <div className="lbl">{label}</div>
       <div className="res-chips">
         {items.length ? (
-          items.map((x) => (
-            <span className="res-chip" key={x}>
-              <Icon name={icon} />
+          items.map((x) => {
+            // A grant naming a resource the store no longer has reaches the run
+            // as nothing at all — live, a renamed MCP left this panel painting a
+            // healthy chip while the agent found zero tools under that name.
+            const missing = known ? !known.has(x) : false;
+            return (
+            <span
+              className={missing ? "res-chip missing" : "res-chip"}
+              key={x}
+              {...(missing
+                ? { title: `${x} is no longer in the store — this grant reaches no run` }
+                : {})}
+            >
+              <Icon name={missing ? "alert" : icon} />
               {x}
+              {missing && <span className="res-chip-note">missing</span>}
             </span>
-          ))
+            );
+          })
         ) : (
           <span
             className="sub"
@@ -446,6 +463,7 @@ export function ProfileDetail({
   a,
   stages,
   workflow,
+  resourceCatalog,
   insts,
   projectName,
   canManage,
@@ -457,6 +475,9 @@ export function ProfileDetail({
   stages: StageView[];
   /** R14-1: the board's edges — eligibility resolves by structural role too. */
   workflow: WorkflowEdgeView[];
+  /** P14-KM-11: the live store catalog, so a grant naming a resource the store
+   *  no longer holds renders as missing rather than healthy. */
+  resourceCatalog?: readonly ResCatalogGroup[];
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
@@ -466,6 +487,12 @@ export function ProfileDetail({
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const [confirm, setConfirm] = useState(false);
+  // P14-KM-11: what the store actually holds, per resource kind. Absent catalog
+  // ⇒ undefined ⇒ nothing is marked missing (see ResGroup).
+  const known = (key: string): ReadonlySet<string> | undefined => {
+    const group = resourceCatalog?.find((g) => g.key === key);
+    return group ? new Set(group.items.map((i) => i.id)) : undefined;
+  };
   const canDelete = a.kind !== "operator" && canManage;
 
   return (
@@ -544,9 +571,9 @@ export function ProfileDetail({
           <h2>Context resources &amp; runtime</h2>
         </div>
         <div className="res-groups">
-          <ResGroup label="Skills" icon="bolt" items={a.resources.skills} />
-          <ResGroup label="MCP servers" icon="cpu" items={a.resources.mcps} />
-          <ResGroup label="Knowledge bases" icon="file" items={a.resources.kb} />
+          <ResGroup label="Skills" icon="bolt" items={a.resources.skills} known={known("skills")} />
+          <ResGroup label="MCP servers" icon="cpu" items={a.resources.mcps} known={known("mcps")} />
+          <ResGroup label="Knowledge bases" icon="file" items={a.resources.kb} known={known("kb")} />
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
@@ -1104,6 +1131,7 @@ export function AgentsPage({
               a={current}
               stages={stages}
               workflow={workflow}
+              {...(resourceCatalog ? { resourceCatalog } : {})}
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}

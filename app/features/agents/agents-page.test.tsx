@@ -368,6 +368,57 @@ describe("ProfileDetail", () => {
   });
 });
 
+describe("ProfileDetail resource chips (P14-KM-11)", () => {
+  const withGrants = (): AgentProfileView => ({
+    ...mkProfile({}),
+    resources: { skills: ["writer-skill"], mcps: ["vm-memory"], kb: [] },
+  });
+
+  it("marks a grant the store no longer holds as MISSING, not healthy", () => {
+    // Live: renaming an org MCP orphaned every grant to it, and this panel kept
+    // painting a normal chip while the run exposed zero tools under that name.
+    const { container, getByText } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        resourceCatalog={[
+          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill", def: false }] },
+          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http", def: false }] },
+          { group: "Knowledge bases", key: "kb", mono: true, items: [] },
+        ]}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const missing = container.querySelectorAll(".res-chip.missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0]!.textContent).toContain("vm-memory");
+    expect(getByText("writer-skill").closest(".res-chip")!.className).not.toContain("missing");
+  });
+
+  it("marks nothing when the catalog is unknown — never invents a missing state", () => {
+    const { container } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(container.querySelectorAll(".res-chip.missing")).toHaveLength(0);
+  });
+});
+
 describe("LiveRoster", () => {
   it("sorts by task key then operator→primary→reviewer and renders backends", () => {
     const rows = [

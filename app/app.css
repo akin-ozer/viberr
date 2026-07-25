@@ -1300,6 +1300,15 @@ h1, h2, h3, h4 {
   font-family: var(--font-mono); font-size: .74rem; color: var(--muted);
 }
 .res-chip .ico { width: 12px; height: 12px; color: var(--placeholder); }
+/* P14-KM-11: a grant naming a resource the store no longer holds. It reaches the
+   run as nothing at all, so it must not read like a healthy attachment. */
+.res-chip.missing {
+  border-color: color-mix(in srgb, var(--coral-dark), transparent 60%);
+  background: color-mix(in srgb, var(--coral-light), var(--surface) 60%);
+  color: var(--coral-dark);
+}
+.res-chip.missing .ico { color: var(--coral-dark); }
+.res-chip-note { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
 
 .runtime-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
 .rt-cell .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }

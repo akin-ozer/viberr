@@ -295,14 +295,42 @@ export async function assignSpecialist(
     projectBoard(ctx, input.projectSlug),
   );
 
+  // P14-GV-10: swapping the DELIVERER out from under a live run. The outgoing
+  // agent's run keeps going and still reconciles delivery under its own profile,
+  // while the task file already names someone else — so "who owned this
+  // revision" reads wrong afterwards. Refuse while its run is in flight and name
+  // the run, so the human interrupts deliberately instead of discovering the
+  // overlap later in the timeline.
+  const outgoing = deliveringEngagement(existing.parsed.frontmatter);
+  if (outgoing && outgoing.profileId !== specialist.profileId) {
+    const liveRun = listRunsForTaskRows(db, input.projectSlug, input.taskKey).find(
+      (r) =>
+        r.kind === "primary" &&
+        (r.state === "running" || r.state === "queued"),
+    );
+    if (liveRun) {
+      throw AppError.conflict(
+        `${input.taskKey}'s current deliverer has a run in flight (${liveRun.id}). ` +
+          `Interrupt it first, then assign ${specialist.name} — replacing the ` +
+          `deliverer mid-run leaves that run delivering under a profile the task ` +
+          `no longer names.`,
+      );
+    }
+  }
+
   const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
   const ref: AgentRef = {
     profileId: specialist.profileId,
     backend: specialist.backend,
     role: specialist.role,
   };
+  const handoff = outgoing && outgoing.profileId !== specialist.profileId
+    ? outgoing
+    : null;
   const event = agentEvent(
-    `Deployed **${specialist.name}** (${specialist.role}, ${backendLabel}) as the primary specialist.`,
+    handoff
+      ? `Delivery handed off from **${handoff.profileId}** to **${specialist.name}** (${specialist.role}, ${backendLabel}).`
+      : `Deployed **${specialist.name}** (${specialist.role}, ${backendLabel}) as the primary specialist.`,
   );
 
   await updateTaskFile(
@@ -334,8 +362,10 @@ export async function assignSpecialist(
   );
   reproject(db, ctx, input.projectSlug, input.taskKey);
 
+  // P14-GV-10: a handoff is its own fact — "assigned" reads as a first
+  // assignment and loses the identity of the agent that was replaced.
   recordAudit(db, {
-    action: "task.specialist.assigned",
+    action: handoff ? "task.delivery.handoff" : "task.specialist.assigned",
     actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
@@ -345,6 +375,7 @@ export async function assignSpecialist(
       profileId: specialist.profileId,
       backend: specialist.backend,
       role: specialist.role,
+      ...(handoff ? { fromProfileId: handoff.profileId } : {}),
     },
   });
 
@@ -1213,15 +1244,40 @@ export function buildAnalyzePrompt(input: {
   return prompt;
 }
 
-/** Detect directives that contradict the server-owned delivery contract. This
- *  is a SECONDARY reminder — the base specialist prompt already forbids pushing
- *  unconditionally — so a missed phrasing only drops the extra nudge, never the
- *  guarantee. Kept broad (open/create/raise/submit/publish a PR, git push,
- *  commit-and-push) so the common delivery phrasings are covered. */
+const DELIVERY_PHRASE_RE =
+  /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|commit\s+and\s+push|publish\s+(?:the\s+|your\s+)?branch|(?:open|create|raise|submit|file)(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/gi;
+
+/** Words that turn a delivery phrase into a PROHIBITION rather than a request. */
+const NEGATION_RE =
+  /\b(?:do\s+not|don'?t|never|no\s+need\s+to|without|must\s+not|cannot|can'?t|refrain\s+from|avoid|instead\s+of|rather\s+than|nor)\b/i;
+
+/**
+ * Detect directives that contradict the server-owned delivery contract — a
+ * directive ASKING the specialist to push or open/merge a PR.
+ *
+ * This is a SECONDARY reminder (the base prompt forbids pushing unconditionally),
+ * so a missed phrasing only drops the extra nudge, never the guarantee. It stays
+ * broad on the phrasings, but it must not fire on a PROHIBITION: P14-LV-10 saw
+ * it label a question ("does your prompt tell you to open a pull request?") as an
+ * attempted authority override, and then — worse, live — fire on the operator's
+ * own ANTI-injection directive ("Do not push the branch, open a PR, approve, or
+ * merge"), writing a permanent policy event claiming the directive asked for the
+ * exact thing it forbade. A negation anywhere in the ~60 characters before the
+ * phrase, or a question mark right after it, means the directive is not asking.
+ */
 export function directiveRequestsDelivery(directive: string): boolean {
-  return /\b(?:git\s+push|push\s+(?:the\s+|your\s+)?(?:branch|commit|commits|changes|code|work)|commit\s+and\s+push|publish\s+(?:the\s+|your\s+)?branch|(?:open|create|raise|submit|file)(?:ing)?\s+(?:a\s+|the\s+)?(?:pr\b|pull\s*request)|gh\s+pr\s+(?:create|merge)|merge\s+(?:the\s+)?(?:pr\b|pull\s*request|branch))/i.test(
-    directive,
-  );
+  DELIVERY_PHRASE_RE.lastIndex = 0;
+  for (let m = DELIVERY_PHRASE_RE.exec(directive); m; m = DELIVERY_PHRASE_RE.exec(directive)) {
+    const lead = directive.slice(Math.max(0, m.index - 60), m.index);
+    // A clause boundary resets the scope of a negation ("don't edit code. push
+    // the branch" is still a push request), so only look back to the last one.
+    const clause = lead.split(/[.;!?\n]/).pop() ?? lead;
+    if (NEGATION_RE.test(clause)) continue;
+    // "…tell you to open a pull request?" is asking ABOUT delivery, not for it.
+    if (/^[^.\n]{0,40}\?/.test(directive.slice(m.index + m[0].length))) continue;
+    return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------------- repo clone

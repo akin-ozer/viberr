@@ -154,6 +154,26 @@ behavior, and hunt for collateral damage. Two claims did not survive:
 | **LV-02 (operator half)** | **BROKEN** by W3's verifier | The *third* writer to Done — `operatorAcceptCompletion`'s full-autonomy branch — still synthesized `validation: "healthy"` with a comment claiming it matched "the human path", which had just moved to `deriveValidation`. An autonomous operator closing a task with no reviewer stamped a green pill onto an empty review record. (Its graph gate had landed by then via the lead handback; only the validation half was open.) | Now `deriveValidation`. Both halves covered: `none` when nothing validated, `healthy` on a real revision-bound approval. |
 | **RT-02 (test claim)** | **BROKEN** by W2's verifier | The fix was real and live-proven, but its coverage tested `buildAnalyzePrompt` in isolation. Deleting `directive`/`directiveFrom` from either fresh branch of `commentToAgent` — the exact defect — left the entire suite green. | `test-support/fake-runtime.ts` now records the `RunSpec`s it was started with, so the test asserts what the run RECEIVED through the real path. Canary-checked: reverting the fix fails it, restoring passes. |
 
+### Three rows this ledger had marked DONE that were NOT done
+
+Caught by auditing the ledger against the code rather than trusting it — the
+bulk `OPEN → DONE` rewrite at pass close was too optimistic. All three closed now,
+each with a test that fails against the old behavior:
+
+- **LV-10** — `directiveRequestsDelivery` was still the bare regex. A LIVE run made
+  it worse than first recorded: the operator's own ANTI-injection directive ("Do not
+  push the branch, open a PR, approve, or merge") produced a permanent policy event
+  claiming the directive *asked* for exactly what it forbade. Now negation-aware
+  (a prohibition or a question no longer fires it; a real request after a
+  prohibited clause still does).
+- **GV-10** — no live-run guard and no distinct hand-off audit existed at all.
+  Replacing the deliverer while its run is in flight now 409s naming the run, a
+  settled run allows the swap, and the swap audits as `task.delivery.handoff`
+  carrying `fromProfileId` with a timeline note that names both sides.
+- **KM-11** — the agents panel still painted dangling grants as healthy chips.
+  They now render as `missing` against the live store catalog, with the honest
+  fallback that an absent catalog marks nothing (never invent a missing state).
+
 ### Outstanding handbacks the workflow result surfaced
 
 The workflow's final result named three items W1 had reported **NOT-DONE** — the lead had
