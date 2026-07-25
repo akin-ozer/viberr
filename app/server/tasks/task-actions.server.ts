@@ -439,7 +439,6 @@ export async function createTask(
     stage: stageId,
     readiness: "input_required",
     waiting: "human",
-    archived: false,
     ownerUserId: null,
     engagements: [],
     recommendations: [],
@@ -450,6 +449,7 @@ export async function createTask(
         ? null
         : { assignedAtStageId: stageId },
     urgent: input.urgent ?? false,
+    archived: false,
     validation: "none",
     workRevision: null,
     verdicts: [],
