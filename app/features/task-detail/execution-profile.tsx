@@ -234,6 +234,7 @@ function SpecialistControl({
   projectSlug,
   specialists,
   busy,
+  closed = false,
   onAssign,
 }: {
   projectSlug: string;
@@ -347,6 +348,7 @@ function ReviewerControl({
   specialists,
   hasAnyDeployed,
   busy,
+  closed = false,
   onAssign,
 }: {
   projectSlug: string;

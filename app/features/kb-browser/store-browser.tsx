@@ -16,7 +16,7 @@ import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
   entriesFromDataTransfer,
   entriesFromFileList,
-  type UploadEntry,
+  type UploadSelection,
 } from "./local-files";
 import {
   countKbDirs,
@@ -252,7 +252,7 @@ function StoreTree({
   onDelete: (path: string[], node: StoreNode) => void;
   onUploadEntries: (
     path: string[],
-    entries: UploadEntry[],
+    selection: UploadSelection,
     mode: "files" | "folder",
   ) => void;
 }) {
@@ -284,11 +284,11 @@ function StoreTree({
     e.stopPropagation();
     setDropTgt(null);
     const dt = e.dataTransfer;
-    void entriesFromDataTransfer(dt).then((entries) => {
-      const mode = entries.some((x) => x.relPath.includes("/"))
+    void entriesFromDataTransfer(dt).then((selection) => {
+      const mode = selection.entries.some((x) => x.relPath.includes("/"))
         ? "folder"
         : "files";
-      onUploadEntries(path, entries, mode);
+      onUploadEntries(path, selection, mode);
     });
   };
 
@@ -579,10 +579,22 @@ function useStoreOps(
   };
   const submitUpload = (
     path: string[],
-    entries: UploadEntry[],
+    selection: UploadSelection,
     mode: "files" | "folder",
   ) => {
-    if (entries.length === 0) return;
+    const { entries, skipped } = selection;
+    if (entries.length === 0) {
+      // P13-UI-08 residual: a drop of nothing but dot-files returned here with
+      // no request, no toast and no error — the user saw exactly what a
+      // successful upload looks like. Say which of the two nothings happened.
+      if (skipped > 0) {
+        push(
+          `Nothing uploaded — ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
+          "error",
+        );
+      }
+      return;
+    }
     const fd = new FormData();
     fd.set("intent", "store-upload");
     fd.set("mode", mode);

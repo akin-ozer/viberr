@@ -220,6 +220,7 @@ function BackendField({
   backend,
   setBackend,
   available,
+  seededBackends,
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
@@ -228,7 +229,15 @@ function BackendField({
    *  run would fail — EXCEPT the one an edited profile already runs on, which
    *  stays selectable so re-saving doesn't force a backend change (RU-2). */
   available: Record<"codex" | "claude", boolean>;
+  /** P13-UI-52: the backends the profile being edited ALREADY declares. A
+   *  seeded profile can list two; this form is single-select and saving writes
+   *  exactly one, so editing anything else on such a profile silently dropped
+   *  the second backend. Nothing here can widen the form (a run uses the first
+   *  backend anyway — the roster says so), but the narrowing must be stated
+   *  BEFORE the save, not discovered in the roster afterwards. */
+  seededBackends?: readonly ("codex" | "claude")[];
 }) {
+  const dropping = (seededBackends ?? []).filter((b) => b !== backend);
   // Chip groups have no labelable control — a `<label>` here names nothing.
   // role="group" + aria-labelledby gives screen readers the same caption.
   const capId = useId();
@@ -260,6 +269,20 @@ function BackendField({
           );
         })}
       </div>
+      {dropping.length > 0 && (
+        <p className="deny-note">
+          <Icon name="alert" />
+          <span>
+            <strong>Saving pins this profile to one backend.</strong> It
+            currently declares{" "}
+            {(seededBackends ?? [])
+              .map((b) => (b === "claude" ? "Claude Code" : "Codex"))
+              .join(" and ")}
+            ; {dropping.map((b) => (b === "claude" ? "Claude Code" : "Codex")).join(" and ")}{" "}
+            will be dropped.
+          </span>
+        </p>
+      )}
     </div>
   );
 }
@@ -714,15 +737,18 @@ function ModalFooter({
         <button type="button" className="btn ghost" onClick={onClose}>
           Cancel
         </button>
+        {/* P13-UI-58 residual: the submit had no busy state for assistive tech —
+            a save in flight looked idle to a screen reader. */}
         <button
           type="button"
           className="btn primary"
           onClick={onSubmitClick}
           disabled={!valid || busy}
+          aria-busy={busy}
           style={!valid ? { opacity: 0.5, pointerEvents: "none" } : undefined}
         >
           <Icon name="check" />
-          {editing ? "Save changes" : "Create profile"}
+          {busy ? "Saving…" : editing ? "Save changes" : "Create profile"}
         </button>
       </div>
     </div>
@@ -929,6 +955,7 @@ export function CreateProfileModal({
           backend={backend}
           setBackend={setBackend}
           available={available}
+          {...(initial ? { seededBackends: initial.backends } : {})}
         />
 
         {isOperator && (

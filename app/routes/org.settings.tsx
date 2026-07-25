@@ -340,12 +340,29 @@ export async function action({ request }: Route.ActionArgs) {
           })),
         );
         const result = writeStoreFiles(db, target, dirPath, files, actor);
-        if (result.added === 0) return ok();
         const atPath = [target.rootUri, ...dirPath].join("/") + "/";
+        // P13-UI-08 residual: an upload that wrote nothing answered with a bare
+        // `ok()` — no toast at all, so a drop the server dropped (every path a
+        // dot-file) looked exactly like one it stored. Both halves of that now
+        // report: the client for a selection it filtered itself, this for one
+        // the server's own `cleanRelPath` rejected.
+        const skipped = files.length - result.added;
+        if (result.added === 0) {
+          return ok(
+            skipped > 0
+              ? `Nothing uploaded to ${atPath} — ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`
+              : `Nothing uploaded — that selection had no files.`,
+          );
+        }
+        const skippedNote =
+          skipped > 0
+            ? ` · ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped`
+            : "";
         const toast =
-          field("mode") === "folder" && result.topLevelDirs.length > 0
+          (field("mode") === "folder" && result.topLevelDirs.length > 0
             ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is — ${result.added} file${result.added === 1 ? "" : "s"}`
-            : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`;
+            : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`) +
+          skippedNote;
         return ok(toast, {
           ...(result.capturedSkillMd
             ? {

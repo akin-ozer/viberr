@@ -126,14 +126,15 @@ export async function entriesFromDataTransfer(
   }
   if (entries.length > 0) {
     try {
+      const skipped = { n: 0 };
       const collected = await Promise.all(
         entries.map(async (entry) => {
           const acc: UploadEntry[] = [];
-          await walkEntry(entry, "", acc);
+          await walkEntry(entry, "", acc, skipped);
           return acc;
         }),
       );
-      return collected.flat();
+      return { entries: collected.flat(), skipped: skipped.n };
     } catch {
       // fall through to the flat list
     }
