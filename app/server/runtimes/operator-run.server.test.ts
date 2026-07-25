@@ -24,6 +24,7 @@ import {
   resetOperatorLeasesForTests,
   runOperator,
 } from "./operator-run.server";
+import * as operatorPrompts from "./operator-run.server";
 import type {
   OperatorAuthority,
   OperatorAutonomy,
@@ -514,5 +515,85 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // A misconfiguration rather than an expressible run shape — every action it
     // then proposes is refused VISIBLY by the executor rather than silently.
     expect(operatorPlanToolsFor(authority({}))).toHaveLength(9);
+  });
+});
+
+describe("pr-diverged turn instruction (both backends)", () => {
+  function snapshot(
+    over: Partial<import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot> = {},
+  ): import("~/server/tasks/operator-actions.server").OperatorTaskSnapshot {
+    return {
+      key: "VIB-9",
+      title: "T",
+      goal: "Do the thing.",
+      stage: "review",
+      stageName: "Review",
+      readiness: "ready",
+      waiting: "human",
+      owner: null,
+      specialist: null,
+      reviewers: [],
+      nextStages: [{ id: "done", name: "Done", boundary: "human" }],
+      stageIds: ["triage", "ready", "impl", "review", "done"],
+      doneStageId: "done",
+      reviewStageId: "review",
+      workStageId: "impl",
+      deployedSpecialists: [],
+      openPacket: false,
+      packet: null,
+      recentTimeline: [],
+      pr: { number: 318, state: "closed", title: "PR" },
+      branch: "vib-9",
+      autonomy: "supervised" as OperatorAutonomy,
+      policy: {},
+      ...over,
+    };
+  }
+  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt } = operatorPrompts;
+
+  it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
+    const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");
+    expect(prompt).toContain("closed WITHOUT merging");
+    expect(prompt).toContain("open_decision_packet");
+    expect(prompt).toContain("`archive_task`");
+    expect(prompt).toContain("`deleteBranch: true`");
+    expect(prompt).toContain("`vib-9`"); // names the branch the option would delete
+    expect(prompt).toContain("never recommend acceptance while the PR is closed");
+  });
+
+  it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot({ pr: { number: 318, state: "merged", title: "PR" } }),
+      "pr-diverged",
+    );
+    expect(prompt).toContain("merged OUT-OF-BAND");
+    expect(prompt).toContain("`accept_completion`");
+    expect(prompt).not.toContain("archive_task");
+  });
+
+  it("PR live again → withdraw the moot packet and continue", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot({ pr: { number: 318, state: "review", title: "PR" } }),
+      "pr-diverged",
+    );
+    expect(prompt).toContain("live again");
+    expect(prompt).toContain("resolve_decision_packet");
+  });
+
+  it("accepted-then-closed at the terminal stage → packet with custom options, not archive", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot({ stage: "done", stageName: "Done" }),
+      "pr-diverged",
+    );
+    expect(prompt).toContain("terminal stage");
+    expect(prompt).toContain("`custom` options");
+    expect(prompt).not.toContain("archive_task");
+  });
+
+  it("the Codex plan prompt carries the same instruction plus the archive_task option vocabulary", () => {
+    const prompt = buildCodexOperatorPrompt(snapshot(), "pr-diverged");
+    expect(prompt).toContain("closed WITHOUT merging");
+    expect(prompt).toContain("`archive_task` to archive the task");
+    expect(prompt).toContain("deleteBranch: true");
   });
 });

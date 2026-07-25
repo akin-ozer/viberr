@@ -80,8 +80,18 @@ export interface RunOperatorInput {
    *   agent-reply → REACT: an agent the operator prompted just replied — read its
    *     report and propose the next state change (recommend/perform the transition
    *     or accept completion), rather than re-prompting.
+   *   pr-diverged → RECOVER: GitHub reported an out-of-band PR state change
+   *     (closed without merge / merged uncelebrated / reopened) — assess it and
+   *     open the recovery decision, withdraw a moot packet, or recommend
+   *     acceptance, per the turn instruction.
    */
-  trigger?: "create" | "transition" | "agent-reply" | "goal-updated" | "manual";
+  trigger?:
+    | "create"
+    | "transition"
+    | "agent-reply"
+    | "goal-updated"
+    | "pr-diverged"
+    | "manual";
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
   /** Depth of the CONSECUTIVE operator-authored transition chain (bounds the
@@ -513,8 +523,13 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                 title: { type: "string" },
                 detail: { type: ["string", "null"], description: "One concise line of extra context for this option; null if none." },
                 recommended: { type: "boolean" },
+                deleteBranch: {
+                  type: ["boolean", "null"],
+                  description:
+                    "archive_task only: true = ALSO delete the task's remote branch (discard the rejected work). Null otherwise.",
+                },
               },
-              required: ["kind", "title", "detail", "recommended"],
+              required: ["kind", "title", "detail", "recommended", "deleteBranch"],
             },
           },
         },
@@ -547,6 +562,9 @@ const operatorPlanActionSchema = z.strictObject({
         title: z.string(),
         detail: z.string().nullable(),
         recommended: z.boolean(),
+        // Tolerated as ABSENT too (not just null): plans persisted before this
+        // field existed must stay executable across a restart-resume.
+        deleteBranch: z.boolean().nullable().optional(),
       }),
     )
     .nullable(),
@@ -574,9 +592,21 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  */
 export function authoredPacketOptions(
   authored:
-    | { kind: PacketOptionKind; title: string; detail?: string | null; recommended: boolean }[]
+    | {
+        kind: PacketOptionKind;
+        title: string;
+        detail?: string | null;
+        recommended: boolean;
+        deleteBranch?: boolean | null;
+      }[]
     | null,
-): { kind: PacketOptionKind; title: string; detail?: string; recommended?: boolean }[] | null {
+): {
+  kind: PacketOptionKind;
+  title: string;
+  detail?: string;
+  recommended?: boolean;
+  deleteBranch?: boolean;
+}[] | null {
   if (!authored || authored.length === 0) return null;
   // Filter+cap FIRST, then locate the recommended within the KEPT set — an
   // earlier empty-title option (dropped here) would otherwise shift the raw
@@ -591,6 +621,9 @@ export function authoredPacketOptions(
     // the same context a Claude-authored one does (AO-5 #12).
     ...(o.detail && o.detail.trim() ? { detail: o.detail.trim() } : {}),
     recommended: i === (recIdx >= 0 ? recIdx : 0),
+    // archive_task only — any other kind ignores it at resolution, so gating
+    // here would just second-guess the resolver.
+    ...(o.deleteBranch ? { deleteBranch: true } : {}),
   }));
 }
 
@@ -1346,6 +1379,39 @@ function operatorTurnInstruction(
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
     );
   }
+  if (trigger === "pr-diverged") {
+    const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
+    const prState = snapshot.pr?.state ?? null;
+    const atTerminal =
+      snapshot.doneStageId !== null && snapshot.stage === snapshot.doneStageId;
+    if (prState === "closed" && atTerminal) {
+      return (
+        `GitHub reports accepted PR ${prNo} was closed WITHOUT merging after ${snapshot.key} reached its terminal stage — the pending merge can no longer complete from Viberr (see the newest policy-engine note). ` +
+        "Open ONE decision packet (type \"input\") with `custom` options so a human decides: reopen and merge the PR on GitHub (Viberr reconciles it automatically), or accept that the work stays unmerged and re-deliver via a new task. Do not re-prompt any agent."
+      );
+    }
+    if (prState === "closed") {
+      return (
+        `GitHub reports review PR ${prNo} was closed WITHOUT merging while ${snapshot.key} is still active (see the newest policy-engine note). Acceptance is refused while the PR is closed. ` +
+        "Turn that prose into ONE recovery decision: `open_decision_packet` (type \"input\") whose options are the real paths —\n" +
+        "- a `custom` option to REWORK: the resolver's note steers the rework; on resolution you are re-invoked to move the task back to the work stage per policy and re-prompt the delivering profile with that steer;\n" +
+        "- an `archive_task` option to ARCHIVE the task, keeping its branch for a later restore;\n" +
+        `- when the task has a branch${snapshot.branch ? ` (it is \`${snapshot.branch}\`)` : ""}, an \`archive_task\` option with \`deleteBranch: true\` to archive AND delete the remote branch — discarding the rejected work entirely.\n` +
+        "Mark exactly one option recommended (rework, unless the timeline shows the work was rejected outright), and say in the packet body that reopening the PR on GitHub is also a valid path — Viberr detects it automatically and withdraws the packet. " +
+        "If an open packet already covers this same closed PR, do nothing. Do not re-prompt any agent and never recommend acceptance while the PR is closed."
+      );
+    }
+    if (prState === "merged") {
+      return (
+        `GitHub reports PR ${prNo} was merged OUT-OF-BAND while ${snapshot.key} has not been accepted (see the newest policy-engine note). The delivered work is already on the default branch, so acceptance is the honest next state: use \`accept_completion\` — policy decides whether that records a recommendation or performs it. Do not re-prompt any agent.`
+      );
+    }
+    // review — a closed PR was reopened or replaced: the divergence healed.
+    return (
+      `GitHub reports PR ${prNo} is live again — a closed PR was reopened or replaced (see the newest policy-engine note). ` +
+      "If your open decision packet was about the closed PR, withdraw it with `resolve_decision_packet` — it is moot now. Then continue the current stage from the live snapshot (an already-approved review can move to `accept_completion` per policy). Do not duplicate work that is already in flight."
+    );
+  }
 
   const scope = goalIsUnspecified(snapshot.goal)
     ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. "
@@ -1378,7 +1444,7 @@ export function buildCodexOperatorPrompt(
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
     operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend`, `accept_completion`, `block_on_policy`. Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend`, `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );

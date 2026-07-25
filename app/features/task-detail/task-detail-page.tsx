@@ -1374,6 +1374,15 @@ export function TaskDetailPage({
   // contributor-owner was counted "waiting on you" by the decisions inbox and
   // then shown a blocked Accept option and disabled recommendation buttons.
   const canDecideOwned = canRunAgents || isOwner;
+  // An `archive_task` packet option runs the R14-3 archive, whose authority is
+  // the board-management tier (`approve-transition`) — NOT the packet-resolver
+  // set. A contributor-owner may resolve the packet but not this option, so the
+  // card blocks it with the reason instead of 403ing on click (same treatment
+  // as edit_goal / accept_completion).
+  const canArchiveViaPacket = roleCan(
+    myRole as ProjectRole | null,
+    "approve-transition",
+  );
 
   // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
   // never mere attachment. The runtime projection already carries kind+state.
@@ -1500,6 +1509,7 @@ export function TaskDetailPage({
             // hero's Edit button uses. An owner-only resolver must not be
             // offered a decision they cannot then carry out.
             canEditGoal={canRunAgents}
+            canArchive={canArchiveViaPacket}
             onResolve={onResolve}
             onAsk={() => setAsk((a) => a + 1)}
           />

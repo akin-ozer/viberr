@@ -58,6 +58,8 @@ const FULL: ParsedTaskFile = {
       { kind: "accept_completion", t: "Accept completion", d: "Mark task done and merge the review PR. Human-authorized.", rec: true, accept: true },
       { kind: "request_edit", t: "Request one edit", d: "Ask the developer to widen PAT scope.", rec: false, ev: "**Decision:** request one edit." },
       { kind: "block_on_policy", t: "Block on policy", d: "Hold until policy updates.", rec: false },
+      // The pr-diverged recovery option: archive + discard the remote branch.
+      { kind: "archive_task", t: "Archive and delete the branch", d: "Discards the rejected work entirely.", rec: false, deleteBranch: true },
     ],
   },
   timeline: [

@@ -165,6 +165,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
                 recommended: z.boolean().optional().describe("Mark exactly ONE option recommended."),
+                deleteBranch: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    "archive_task only: ALSO delete the task's remote branch (discard the rejected work entirely).",
+                  ),
               }),
             )
             .describe("The 2-4 resolvable options; exactly one recommended."),
@@ -195,6 +201,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   title: prose(o.title),
                   ...(o.detail ? { detail: prose(o.detail) } : {}),
                   ...(o.recommended !== undefined ? { recommended: o.recommended } : {}),
+                  ...(o.deleteBranch ? { deleteBranch: true } : {}),
                 })),
               },
               authority,

@@ -935,6 +935,137 @@ describe("resolvePacket kind matrix", () => {
     ).toBe(true);
   });
 
+  // The recovery packet the operator authors on a closed-without-merge PR
+  // (pr-diverged trigger): rework / archive / archive+delete-branch.
+  const RECOVERY_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "PR #318 was closed without merging — choose a recovery path",
+    body: "Reopening the PR on GitHub is also valid — Viberr detects it automatically.",
+    observations: [],
+    options: [
+      { kind: "custom", t: "Rework and re-run the Developer", d: "", rec: true },
+      { kind: "archive_task", t: "Archive the task (keep the branch)", d: "", rec: false },
+      {
+        kind: "archive_task",
+        t: "Archive and delete branch vib-1-work",
+        d: "Discards the rejected work entirely.",
+        rec: false,
+        deleteBranch: true,
+      },
+    ],
+  };
+
+  it("archive_task: runs the real R14-3 archive (schedules cancelled, packet cleared, audited); a contributor-OWNER is refused", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.selin.id, // contributor owner — may resolve packets…
+        pr: { number: 318, state: "closed", title: "PR" },
+        branch: "vib-1-work",
+        schedules: [
+          {
+            id: "sch_arch1",
+            action: "run-operator",
+            dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+            backend: "claude",
+            autonomy: "supervised",
+            note: "re-check",
+            createdBy: store.users.arda.id,
+            createdByLabel: "Arda",
+            createdAt: new Date().toISOString(),
+            status: "pending",
+            firedAt: null,
+            claimedAt: null,
+            retries: 0,
+          },
+        ],
+      },
+      RECOVERY_PACKET,
+    );
+
+    // …but archiving is the board-management tier (approve-transition): the
+    // owner exception that admits selin to the PACKET does not widen R14-3.
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const { task, option } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.murat), // maintainer
+      { dataRoot: store.dataRoot },
+    );
+    expect(option.kind).toBe("archive_task");
+    expect(task.packet).toBeNull();
+
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.archived).toBe(true);
+    expect(fm.waiting).toBe("none");
+    // P14-RV-03 belt-and-braces rides along: the pending operator re-run dies
+    // with the archive instead of firing on abandoned work.
+    expect(fm.schedules[0]!.status).toBe("cancelled");
+    // Stage untouched — archiving is a disposition, not a transition.
+    expect(fm.stage).toBe("review");
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    const texts = detail!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("**Decision:** Archive the task (keep the branch)"))).toBe(true);
+    expect(texts.some((t) => t.includes("was archived"))).toBe(true);
+    expect(listAuditEvents(store.db, { action: "task.archived" })).toHaveLength(1);
+    const resolved = listAuditEvents(store.db, { action: "task.packet.resolved" });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]!.details).toMatchObject({ optionKind: "archive_task" });
+  });
+
+  it("archive_task + deleteBranch: the archive stands even when GitHub is unconfigured, with an honest failure note", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        pr: { number: 318, state: "closed", title: "PR" },
+        branch: "vib-1-work",
+      },
+      RECOVERY_PACKET,
+    );
+    // No project credential in this fixture — the deletion degrades typed
+    // (no_pat_configured), and the archive must NOT be rolled back by that.
+    const { task } = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.packet).toBeNull();
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.archived).toBe(true);
+
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    const texts = detail!.timeline.map((e) => e.text);
+    expect(
+      texts.some((t) => t.includes("The branch was **not** deleted") && t.includes("no GitHub repo or credential")),
+    ).toBe(true);
+  });
+
   it("edit_goal: packet stays (stamped awaiting goal_edit) until the edited goal lands, then clears instantly", async () => {
     const store = prepared();
     const SCOPE_PACKET: TaskPacket = {

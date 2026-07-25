@@ -72,6 +72,12 @@ export const PACKET_OPTION_KINDS = [
   // packet stays (stamped `awaiting: goal_edit`) and clears the moment the
   // edited goal is saved — the decision is then fully carried out.
   "edit_goal",
+  // Archive the task as the chosen disposition (R14-3 contract: reversible,
+  // record kept, leaves the board/queue). With `deleteBranch: true` on the
+  // option, the remote branch is deleted too — the discard-entirely path for
+  // work whose PR a human closed without merging. Resolution enforces the
+  // same `approve-transition` authority as the Archive button.
+  "archive_task",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -355,6 +361,10 @@ export const packetOptionSchema = z
     /** retry_other_backend — a reviewer retry names its profile (the primary
      *  specialist needs none). */
     profileId: z.string().optional(),
+    /** archive_task — ALSO delete the task's remote branch when archiving
+     *  (discard the rejected work entirely, not just the task's board row).
+     *  Resolution refuses it while the PR is still open. */
+    deleteBranch: z.boolean().optional(),
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;

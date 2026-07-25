@@ -70,7 +70,7 @@ function ev(partial: Partial<TimelineEventRender>): TimelineEventRender {
 describe("DecisionPacket", () => {
   it("renders the packet card: tint, kind pill, observations, options, rec tag", () => {
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
@@ -99,7 +99,7 @@ describe("DecisionPacket", () => {
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
-      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={onResolve} onAsk={() => {}} />,
+      <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={onResolve} onAsk={() => {}} />,
     );
     const primary = container.querySelector(".packet-actions .btn.primary")!;
     // F-UI1: the button no longer echoes the (often long, multi-line) option
@@ -123,6 +123,7 @@ describe("DecisionPacket", () => {
         canResolve
         canResolveCompletion
         canEditGoal
+        canArchive
         onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -145,7 +146,7 @@ describe("DecisionPacket", () => {
       options: packet142.options.map((o) => ({ ...o, rec: false })),
     };
     const { container } = render(
-      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} onResolve={() => {}} onAsk={onAsk} />,
+      <DecisionPacket packet={blocked} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolve={() => {}} onAsk={onAsk} />,
     );
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
@@ -961,6 +962,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
         canResolve
         canResolveCompletion
         canEditGoal
+        canArchive
         onResolve={() => {}}
         onAsk={() => {}}
       />,
@@ -990,6 +992,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolve
         canResolveCompletion={false}
         canEditGoal={false}
+        canArchive
         onResolve={onResolve}
         onAsk={() => {}}
       />,
@@ -1013,6 +1016,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolve
         canResolveCompletion
         canEditGoal
+        canArchive
         onResolve={() => {}}
         onAsk={() => {}}
       />,
@@ -1025,6 +1029,58 @@ describe("UI-42/UI-44: the decision packet", () => {
     ).toBe(false);
   });
 
+  // The pr-diverged recovery packet: archive_task options carry the R14-3
+  // authority (approve-transition), and the deleteBranch variant must be LOUD.
+  const recoveryPacket: PacketRender = {
+    ...packet142,
+    options: [
+      { kind: "custom", t: "Rework and re-run the Developer", d: "", rec: true },
+      { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+      { kind: "archive_task", t: "Archive and delete the branch", d: "Discards the work.", rec: false, deleteBranch: true },
+    ],
+  };
+
+  it("blocks archive_task for a resolver below approve-transition, with the reason", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={recoveryPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive={false}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[0]!.getAttribute("aria-disabled")).toBeNull(); // rework stays open
+    expect(opts[1]!.getAttribute("aria-disabled")).toBe("true");
+    expect(opts[1]!.textContent).toContain("your role can't archive");
+    // Selecting the blocked option is refused, so Confirm stays on the open one.
+    fireEvent.click(opts[1]!);
+    expect(opts[0]!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("tags the deleteBranch variant 'deletes branch' and offers it to a maintainer", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={recoveryPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
+    expect(opts[1]!.getAttribute("aria-disabled")).toBeNull();
+    expect(opts[1]!.textContent).not.toContain("deletes branch");
+    expect(opts[2]!.textContent).toContain("deletes branch");
+  });
+
   it("UI-44: uses a roving tabindex so Tab does not walk every option", () => {
     const { container } = render(
       <DecisionPacket
@@ -1033,6 +1089,7 @@ describe("UI-42/UI-44: the decision packet", () => {
         canResolve
         canResolveCompletion
         canEditGoal
+        canArchive
         onResolve={() => {}}
         onAsk={() => {}}
       />,

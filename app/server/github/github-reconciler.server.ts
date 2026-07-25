@@ -316,6 +316,17 @@ export async function reconcileTask(
     !acceptedClosedExternally;
   const mergedButNotDone = prJustMerged && !taskTerminal;
   const closedButActive = prJustClosed && !taskTerminal;
+  // The divergence HEALING transition: a closed PR went live again — the same
+  // number reopened, or a fresh PR now tracks the branch. Without this the
+  // closed-PR alarm (and the operator's recovery packet below) had no
+  // counter-event: a human who fixed the situation ON GITHUB left Viberr
+  // holding a stale "needs a decision" state forever.
+  const prJustReopened = fm.pr?.state === "closed" && newPr?.state === "review";
+  const reopenedText = prJustReopened
+    ? fm.pr!.number === newPr!.number
+      ? `**Note:** PR #${newPr!.number} was reopened on GitHub — ${fm.key}'s review is live again and the closed-PR block is lifted.`
+      : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number} — the closed-PR block is lifted.`
+    : null;
 
   const changed =
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
@@ -384,6 +395,17 @@ export async function reconcileTask(
         evidence: null,
       });
     }
+    if (reopenedText) {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text: reopenedText,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
@@ -396,7 +418,7 @@ export async function reconcileTask(
     // (pr.state → closed), so only a visitor to the task page ever learned that
     // the promised merge can no longer happen. It gets the same inbox alert as
     // the other two branches.
-    const noticeText = divergenceText ?? acceptedClosedText;
+    const noticeText = divergenceText ?? acceptedClosedText ?? reopenedText;
     if (noticeText) {
       const { notifyTaskWatchers } = await import(
         "~/server/tasks/task-actions.server"
@@ -411,11 +433,38 @@ export async function reconcileTask(
             ? `PR #${newPr!.number} merged on GitHub — accept ${fm.key}`
             : divergenceText
               ? `PR #${newPr!.number} closed on GitHub — ${fm.key} needs a decision`
-              : `Accepted PR #${newPr!.number} closed on GitHub — ${fm.key}'s merge can't complete`,
+              : acceptedClosedText
+                ? `Accepted PR #${newPr!.number} closed on GitHub — ${fm.key}'s merge can't complete`
+                : `PR #${newPr!.number} live again on GitHub — ${fm.key} resumes`,
           text: noticeText,
           from: POLICY_ENGINE_NOTIFY_FROM,
         },
         { dataRoot: ctx.dataRoot },
+      );
+    }
+    // The out-of-band PR transition is a COORDINATION event, so it wakes the
+    // task's operator like any other (create/transition/agent-reply already
+    // do). On closed-but-active the operator turns the prose above into a real
+    // decision packet (rework / archive / archive+delete-branch); on
+    // merged-but-not-done it proposes acceptance per policy; on reopen it
+    // withdraws the now-moot recovery packet. Fire-and-forget on the same
+    // transition edge as the notes — a persistent divergence never re-fires,
+    // and a project with no operator deployed is a no-op inside.
+    if (
+      mergedButNotDone ||
+      closedButActive ||
+      acceptedClosedExternally ||
+      prJustReopened
+    ) {
+      const { autoInvokeOperator } = await import(
+        "~/server/tasks/task-actions.server"
+      );
+      void autoInvokeOperator(
+        db,
+        { dataRoot: ctx.dataRoot },
+        input.projectSlug,
+        input.taskKey,
+        "pr-diverged",
       );
     }
   }
@@ -778,5 +827,124 @@ export async function mergeTaskPr(
   return {
     status: "network_unavailable",
     message: merge.kind === "http" ? merge.message : `GitHub ${merge.status}`,
+  };
+}
+
+// ------------------------------------------------------- branch deletion
+
+export type BranchDeleteResult =
+  | { status: "deleted"; branch: string }
+  /** GitHub reports the ref no longer exists — the cleanup already happened. */
+  | { status: "already_gone"; branch: string }
+  | { status: "no_branch" }
+  /** Structural refusals (open PR / base branch) and GitHub failures alike:
+   *  the branch stays, `message` says why in human terms. */
+  | { status: "refused"; branch: string; message: string };
+
+/**
+ * Delete the task's remote branch — the discard half of the
+ * `archive_task` + `deleteBranch` packet option (a human chose to abandon
+ * work whose PR was closed without merging).
+ *
+ * Deliberate refusals, not just failures:
+ *  - while the task's PR is OPEN (`review`/`accepted`): deleting the head
+ *    branch makes GitHub silently close the PR — that decision belongs to a
+ *    human on the PR, not to a cleanup side effect;
+ *  - when the branch IS the project's default branch (a misconfigured task
+ *    must never take out `main`).
+ *
+ * Never throws: callers record the typed outcome on the timeline and move on —
+ * an archive whose branch cleanup failed is still an archive.
+ */
+export async function deleteTaskRemoteBranch(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<BranchDeleteResult | GithubContextFailure> {
+  const ref = taskRefOf(input, ctx);
+  const file = readTaskFile(ref);
+  if (!file?.parsed.frontmatter.branch) return { status: "no_branch" };
+  const fm = file.parsed.frontmatter;
+  const branch = fm.branch!;
+  const userId = actor.userId;
+  if (!userId) {
+    // Branch deletion is a HUMAN decision (an archive_task packet option) —
+    // there is no system path to it, so an anonymous actor is refused.
+    return { status: "refused", branch, message: "No acting user." };
+  }
+
+  const gh = getProjectGithubContext(db, input.projectSlug, {
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
+  if (gh.status !== "ok") return gh;
+
+  if (branch === gh.defaultBranch) {
+    return {
+      status: "refused",
+      branch,
+      message: `\`${branch}\` is the project's default branch — Viberr never deletes it.`,
+    };
+  }
+  if (fm.pr && (fm.pr.state === "review" || fm.pr.state === "accepted")) {
+    return {
+      status: "refused",
+      branch,
+      message: `PR #${fm.pr.number} is still open on \`${branch}\` — deleting the branch would silently close it. Close or merge the PR first.`,
+    };
+  }
+
+  const del = await gh.client.request<unknown>(
+    "DELETE",
+    `/repos/${gh.repo}/git/refs/heads/${branch}`,
+  );
+
+  if (del.ok) {
+    await appendTimelineEvent(ref, {
+      occurredAt: new Date().toISOString(),
+      type: "github",
+      actor: {
+        kind: "human",
+        userId,
+        nameHint: userName(db, userId),
+      },
+      title: null,
+      text: `Deleted branch \`${branch}\` from GitHub.`,
+      toAgent: false,
+      evidence: null,
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    recordGithubProvenance(db, {
+      absPath: resolveTaskFilePath(ref),
+      dataRoot: ctx.dataRoot,
+      action: "github.branch_delete",
+      details: { repo: gh.repo, branch },
+    });
+    recordAudit(db, {
+      action: "github.branch.deleted",
+      actor,
+      subjectKind: "branch",
+      subjectId: `${gh.repo}:${branch}`,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { repo: gh.repo, branch },
+    });
+    return { status: "deleted", branch };
+  }
+
+  // GitHub answers "Reference does not exist" with a 422 — someone already
+  // cleaned it up. That is the state the human asked for, reported honestly.
+  if (del.kind === "http" && del.status === 422) {
+    return { status: "already_gone", branch };
+  }
+  return {
+    status: "refused",
+    branch,
+    message:
+      del.kind === "network"
+        ? `GitHub is unreachable (${del.message}).`
+        : del.kind === "http"
+          ? `GitHub refused the deletion (${del.message}).`
+          : `GitHub gave an unexpected response (${del.status}).`,
   };
 }

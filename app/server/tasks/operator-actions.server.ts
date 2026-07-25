@@ -479,6 +479,8 @@ export interface OperatorPacketOptionInput {
   backend?: "codex" | "claude";
   /** retry_other_backend — a reviewer retry names its profile. */
   profileId?: string;
+  /** archive_task — also delete the task's remote branch (discard the work). */
+  deleteBranch?: boolean;
 }
 
 export interface OperatorOpenPacketInput {
@@ -538,6 +540,7 @@ export async function operatorOpenPacket(
       ...(o.ev ? { ev: o.ev } : {}),
       ...(o.backend ? { backend: o.backend } : {}),
       ...(o.profileId ? { profileId: o.profileId } : {}),
+      ...(o.deleteBranch ? { deleteBranch: true } : {}),
     };
   });
   if (!recSeen && options[0]) options[0].rec = true;
@@ -735,6 +738,9 @@ export interface OperatorTaskSnapshot {
    *  nor reason about it before recommending/accepting completion. `state` is
    *  the task-file cache vocabulary: review | merged | closed | accepted. */
   pr: { number: number; state: PrState; title: string } | null;
+  /** The task's delivery branch (null before any delivery). Lets recovery
+   *  packets name the branch a `deleteBranch` archive option would remove. */
+  branch: string | null;
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
@@ -838,6 +844,10 @@ export function operatorSnapshot(
     pr: fm.pr
       ? { number: fm.pr.number, state: fm.pr.state, title: fm.pr.title }
       : null,
+    // The task branch, so recovery copy can NAME what an `archive_task`
+    // option with `deleteBranch: true` would delete instead of gesturing at
+    // "the branch".
+    branch: fm.branch ?? null,
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),
   };

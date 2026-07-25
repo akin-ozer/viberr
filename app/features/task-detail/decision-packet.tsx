@@ -66,6 +66,7 @@ export function DecisionPacket({
   canResolve,
   canResolveCompletion,
   canEditGoal,
+  canArchive,
   onResolve,
   onAsk,
 }: {
@@ -87,6 +88,10 @@ export function DecisionPacket({
    *  refines the task goal", got "type the new goal", and found no editor and no
    *  Edit button, with the packet open forever. */
   canEditGoal: boolean;
+  /** Whether the viewer holds `approve-transition` — the R14-3 archive tier an
+   *  `archive_task` option re-checks server-side. Same block-with-reason
+   *  treatment as the two flags above. */
+  canArchive: boolean;
   onResolve: (optionIndex: number, note: string) => void;
   onAsk: () => void;
 }) {
@@ -172,6 +177,11 @@ export function DecisionPacket({
             // UI-42: an option the viewer cannot carry out is disabled and says
             // why, instead of recording a decision that dead-ends.
             const goalBlocked = o.kind === "edit_goal" && !canEditGoal;
+            // archive_task re-checks `approve-transition` server-side (R14-3):
+            // same honest block for a resolver below that tier (LV-08 — no
+            // control that only exists to 403).
+            const archiveBlocked = o.kind === "archive_task" && !canArchive;
+            const blocked = goalBlocked || archiveBlocked;
             return (
               <button
                 key={i}
@@ -181,19 +191,21 @@ export function DecisionPacket({
                   optionRefs.current[i] = el;
                 }}
                 aria-checked={sel === i}
-                aria-disabled={goalBlocked || undefined}
+                aria-disabled={blocked || undefined}
                 tabIndex={sel === i ? 0 : -1}
                 className={
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
                 }
-                style={goalBlocked ? { opacity: 0.55 } : undefined}
+                style={blocked ? { opacity: 0.55 } : undefined}
                 title={
                   goalBlocked
                     ? "Editing the goal is reserved for maintainers — ask one to refine it"
-                    : undefined
+                    : archiveBlocked
+                      ? "Archiving is reserved for maintainers and admins"
+                      : undefined
                 }
                 onClick={() => {
-                  if (goalBlocked) return;
+                  if (blocked) return;
                   setSel(i);
                 }}
               >
@@ -205,8 +217,21 @@ export function DecisionPacket({
                     {goalBlocked
                       ? " · your role can't edit the goal — a maintainer must"
                       : ""}
+                    {archiveBlocked
+                      ? " · your role can't archive — a maintainer must"
+                      : ""}
                   </div>
                 </span>
+                {/* The destructive half of archive_task is loud: this option
+                    doesn't just file the task away, it deletes the remote
+                    branch. */}
+                {o.kind === "archive_task" && o.deleteBranch && (
+                  <span className="rec-tag">
+                    <Pill kind="blocked" sm>
+                      deletes branch
+                    </Pill>
+                  </span>
+                )}
                 {o.rec && (
                   <span className="rec-tag">
                     <Pill kind="info" sm>
@@ -241,6 +266,8 @@ export function DecisionPacket({
             // admin|maintainer, so resolving it without that grant leaves the
             // packet open with no way to type the new goal.
             const goalBlocked = selected?.kind === "edit_goal" && !canEditGoal;
+            const archiveBlocked =
+              selected?.kind === "archive_task" && !canArchive;
             if (!canResolve) return null;
             return (
               <button
@@ -250,7 +277,8 @@ export function DecisionPacket({
                   busy ||
                   p.options.length === 0 ||
                   completionBlocked ||
-                  goalBlocked
+                  goalBlocked ||
+                  archiveBlocked
                 }
                 aria-busy={busy}
                 title={
@@ -258,7 +286,9 @@ export function DecisionPacket({
                     ? "Accepting completion is reserved for maintainers and this task's owner"
                     : goalBlocked
                       ? "Editing the goal is reserved for maintainers"
-                      : undefined
+                      : archiveBlocked
+                        ? "Archiving is reserved for maintainers and admins"
+                        : undefined
                 }
                 onClick={() => onResolve(sel, note)}
               >

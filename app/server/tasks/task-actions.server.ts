@@ -595,13 +595,17 @@ export async function updateTaskGoal(
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
-/** Best-effort operator handoff; dynamically imported to avoid a module cycle. */
-async function autoInvokeOperator(
+/** Best-effort operator handoff; dynamically imported to avoid a module cycle.
+ *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
+ *  change (`pr-diverged`) is a coordination event like any other, so the
+ *  reconciler wakes the operator through the same seam instead of leaving the
+ *  divergence as prose only a human ever acts on. */
+export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
-  trigger: "create" | "transition" | "goal-updated",
+  trigger: "create" | "transition" | "goal-updated" | "pr-diverged",
   /** Transition-chain depth to thread into the run (transition trigger only —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
   transitionDepth?: number,
@@ -3797,6 +3801,38 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "archive_task": {
+      // R14-3 authority, re-checked inside the case exactly like
+      // accept_completion re-checks its own gate: packet resolution admits the
+      // task's OWNER (R14-2), but archiving is the board-management tier — the
+      // same `approve-transition` the Archive button requires. A
+      // contributor-owner picking this option gets the honest 403 instead of a
+      // silent widening of R14-3. The archive itself (and the optional branch
+      // deletion) runs AFTER the resolution write below.
+      requireAction(
+        db,
+        project,
+        actor,
+        "approve-transition",
+        option.deleteBranch
+          ? "archive this task and delete its branch"
+          : "archive this task",
+      );
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text: option.ev ?? `**Decision:** ${option.t}.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "none";
+      };
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       event = {
@@ -3877,6 +3913,60 @@ export async function resolvePacket(
     option.kind === "custom";
   if (sentBackToAgent) {
     void autoInvokeOperator(db, ctx, input.projectSlug, input.taskKey, "transition");
+  }
+
+  // archive_task: the decision IS the archive — run the real R14-3 contract
+  // (schedules cancelled, recommendations withdrawn, reversible, audited) and
+  // then the optional remote-branch cleanup. The archive gate already ran
+  // inside the case above, so this cannot 403 after the packet cleared. Branch
+  // deletion is best-effort: an archive whose cleanup failed is still an
+  // archive, and every non-success outcome lands on the timeline in plain
+  // words (the delete helper writes its own `github` event on success).
+  if (option.kind === "archive_task") {
+    await setTaskArchived(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, archived: true },
+      actor,
+      ctx,
+    );
+    if (option.deleteBranch && actor.userId) {
+      const { deleteTaskRemoteBranch } = await import(
+        "~/server/github/github-reconciler.server"
+      );
+      const outcome = await deleteTaskRemoteBranch(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        { userId: actor.userId, label: actor.label },
+        { dataRoot: ctx.dataRoot },
+      );
+      const outcomeText =
+        outcome.status === "deleted"
+          ? null
+          : outcome.status === "already_gone"
+            ? `Branch \`${outcome.branch}\` was already gone on GitHub — nothing left to delete.`
+            : outcome.status === "no_branch"
+              ? "The task has no delivery branch — nothing to delete."
+              : outcome.status === "refused"
+                ? `Branch \`${outcome.branch}\` was **not** deleted — ${outcome.message}`
+                : "The branch was **not** deleted — this project has no GitHub repo or credential configured.";
+      if (outcomeText) {
+        await updateTaskFile(
+          taskRef(ctx, input.projectSlug, input.taskKey),
+          (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text: outcomeText,
+              toAgent: false,
+              evidence: null,
+            });
+          },
+        );
+        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      }
+    }
   }
 
   // retry_other_backend: actually start the promised run. Operator-authorized
