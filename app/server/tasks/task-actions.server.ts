@@ -3239,8 +3239,10 @@ async function surfaceDeliveryEvent(
 type AcceptanceMergeOutcome =
   | { kind: "merged" }
   | { kind: "no_pr" }
-  /** GitHub itself refuses this merge — a rework signal, not a pending state. */
-  | { kind: "unmergeable"; reason: string }
+  /** GitHub itself refuses this merge — a rework signal, not a pending state.
+   *  `reason` is the refusal shown to whoever tried to accept; `cause` is the
+   *  short form for the timeline of an admin who forced it through anyway. */
+  | { kind: "unmergeable"; reason: string; cause: string }
   /** The merge could not be attempted/completed; `cause` names why, honestly. */
   | { kind: "pending"; cause: string };
 
@@ -3289,11 +3291,16 @@ async function attemptAcceptanceMerge(
             result.mergeable === "conflicting"
               ? `${taskKey}'s review PR #${result.prNumber} conflicts with the base branch — GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`
               : `GitHub refuses to merge ${taskKey}'s review PR #${result.prNumber}: ${result.message}`,
+          cause:
+            result.mergeable === "conflicting"
+              ? "the PR conflicts with the base branch — rebase it, then merge"
+              : `GitHub refuses the merge: ${result.message}`,
         };
       case "head_changed":
         return {
           kind: "unmergeable",
           reason: `PR #${result.prNumber}'s head changed on GitHub while it was being accepted — re-review the new head, then accept. (${result.message})`,
+          cause: "the PR head changed on GitHub — re-review the new head, then merge",
         };
       case "scope_violation":
         return {
@@ -3981,6 +3988,38 @@ function acceptanceRefusalReason(
   );
 }
 
+/**
+ * The acceptance refusal for a task by key, or null when it could be accepted
+ * right now (P14-LV-02). The entry point for the writers that live OUTSIDE this
+ * module — the operator's own acceptance path and its `accept_completion`
+ * recommendation — so every proposer and writer reads the same gate as the two
+ * human paths do. Returns null for an unreadable project/task; the caller's own
+ * notFound handling owns that case.
+ */
+export function acceptanceRefusalFor(
+  input: { projectSlug: string; taskKey: string },
+  ctx: TaskMutationContext = {},
+): string | null {
+  let project: ProjectContext;
+  try {
+    project = loadProjectContext(ctx, input.projectSlug);
+  } catch {
+    return null;
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) return null;
+  return acceptanceRefusalReason(
+    project,
+    existing.parsed.frontmatter,
+    input.taskKey,
+    {
+      blockedPacket:
+        existing.parsed.frontmatter.readiness === "blocked" &&
+        existing.parsed.packet?.type === "blocked",
+    },
+  );
+}
+
 /** What a viewer may do about accepting ONE task, right now (P14-LV-06). */
 export interface AcceptanceAffordance {
   /** The viewer holds acceptance authority here: maintainer+ or the task owner. */
@@ -4051,8 +4090,7 @@ export function resolveAcceptanceAffordance(
  *  (P14-LV-07). A forced acceptance past an `unmergeable` verdict names THAT
  *  reason rather than the offline copy. */
 function mergePendingCause(merge: AcceptanceMergeOutcome): string {
-  if (merge.kind === "pending") return merge.cause;
-  if (merge.kind === "unmergeable") return merge.reason;
+  if (merge.kind === "pending" || merge.kind === "unmergeable") return merge.cause;
   return UNREACHABLE_MERGE_CAUSE;
 }
 

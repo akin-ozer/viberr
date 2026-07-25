@@ -377,17 +377,18 @@ export function rebuildTaskFile(
   db.prepare(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, stored_readiness,
-        waiting, urgent, validation, validation_block_reason, owner_user_id, specialist_json,
+        waiting, urgent, archived, validation, validation_block_reason, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         goal, packet_json, recommendation_count, recommendation_kinds,
         schedules_json, event_count, comment_count,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
        waiting = excluded.waiting, urgent = excluded.urgent,
+       archived = excluded.archived,
        validation = excluded.validation,
        validation_block_reason = excluded.validation_block_reason,
        owner_user_id = excluded.owner_user_id,
@@ -416,6 +417,7 @@ export function rebuildTaskFile(
     storedReadiness,
     projectedWaiting,
     fm.urgent ? 1 : 0,
+    fm.archived ? 1 : 0,
     fm.validation,
     acceptanceBlockedReason(fm),
     fm.ownerUserId,

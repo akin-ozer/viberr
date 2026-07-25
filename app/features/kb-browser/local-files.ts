@@ -11,21 +11,39 @@ export interface UploadEntry {
   relPath: string;
 }
 
+/**
+ * P13-UI-08 residual: the collectors used to return the surviving entries only,
+ * so a selection of nothing BUT dot-files came back empty and the caller's
+ * `if (entries.length === 0) return;` made the whole upload a silent no-op — no
+ * request, no toast, no error, indistinguishable from a successful drop. The
+ * count of what the filter removed travels with the selection so the browser
+ * can say what happened.
+ */
+export interface UploadSelection {
+  entries: UploadEntry[];
+  /** Files skipped because a path segment starts with "." (never uploaded). */
+  skipped: number;
+}
+
 function hasDotSegment(relPath: string): boolean {
   return relPath.split("/").some((p) => p.startsWith("."));
 }
 
 /** Plain file picker / `webkitdirectory` folder picker. */
-export function entriesFromFileList(files: FileList | File[]): UploadEntry[] {
+export function entriesFromFileList(files: FileList | File[]): UploadSelection {
   const out: UploadEntry[] = [];
+  let skipped = 0;
   for (const file of Array.from(files)) {
     const rel =
       (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
       file.name;
-    if (!rel || hasDotSegment(rel)) continue;
+    if (!rel || hasDotSegment(rel)) {
+      skipped += 1;
+      continue;
+    }
     out.push({ file, relPath: rel });
   }
-  return out;
+  return { entries: out, skipped };
 }
 
 interface FileSystemEntryLike {
@@ -45,9 +63,16 @@ function walkEntry(
   entry: FileSystemEntryLike,
   prefix: string,
   out: UploadEntry[],
+  skipped: { n: number },
 ): Promise<void> {
   const name = entry.name ?? "";
-  if (!name || name.startsWith(".")) return Promise.resolve();
+  if (!name) return Promise.resolve();
+  if (name.startsWith(".")) {
+    // A skipped DIRECTORY counts once: the browser never reads inside it, so
+    // the honest number is "one hidden thing", not a file count we don't have.
+    skipped.n += 1;
+    return Promise.resolve();
+  }
   if (entry.isFile && entry.file) {
     return new Promise((res) => {
       entry.file!(
@@ -72,7 +97,8 @@ function walkEntry(
     return readAll([]).then((children) =>
       children
         .reduce(
-          (p, child) => p.then(() => walkEntry(child, `${prefix}${name}/`, out)),
+          (p, child) =>
+            p.then(() => walkEntry(child, `${prefix}${name}/`, out, skipped)),
           Promise.resolve(),
         )
         .then(() => undefined),
@@ -85,7 +111,7 @@ function walkEntry(
  * to the flat file list (mock semantics). */
 export async function entriesFromDataTransfer(
   dt: DataTransfer,
-): Promise<UploadEntry[]> {
+): Promise<UploadSelection> {
   const items = Array.from(dt.items ?? []);
   const entries: FileSystemEntryLike[] = [];
   for (const item of items) {

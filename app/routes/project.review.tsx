@@ -34,7 +34,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // (maintainer+ / owner), computed per review-stage task inside getReviewQueue.
   const queue = getReviewQueue(db, params.slug, { viewerUserId: ctx.user.id });
   // UI-49: the page used to hardcode "Review → Done". Stages are per-project and
-  // renameable (a Lightweight board's review role is `doing`), and the queue
+  // renameable (a board's review stage need not be named `review`), and the queue
   // itself resolves them from the workflow graph — so ship the RESOLVED names.
   const roles = resolveStageRoles(project.stages, project.workflow);
   const nameOf = (id: string | null) =>

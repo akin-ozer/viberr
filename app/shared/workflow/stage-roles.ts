@@ -4,12 +4,10 @@ import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
  * Canonical stage-role resolution.
  *
  * Stages are per-project and freely renamed/reordered, so NOTHING in the app
- * may hard-code the literal ids "triage" / "ready" / "review" / "done". A board
- * carried over from the deleted 3-stage preset is `todo / doing / done`; a
- * customized board could be anything. Every place that used to test
- * `stage === "done"` or
- * `stages[length-2]` now asks this resolver, so the four structural roles are
- * derived one way from the workflow graph:
+ * may hard-code the literal ids "triage" / "ready" / "review" / "done" — a
+ * customized board can be anything. Every place that used to test
+ * `stage === "done"` or `stages[length-2]` now asks this resolver, so the four
+ * structural roles are derived one way from the workflow graph:
  *
  * - `entry`    = the first stage (index 0) — where new tasks land.
  * - `terminal` = the last stage (index length-1) — the human-only Done stage.

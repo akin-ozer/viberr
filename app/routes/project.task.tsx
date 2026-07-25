@@ -25,8 +25,10 @@ import {
   dismissRecommendation,
   forceAcceptCompletion,
   releaseOwner,
+  resolveAcceptanceAffordance,
   resolvePacket,
   setOwner,
+  setTaskArchived,
   transitionStage,
   updateTaskGoal,
 } from "~/server/tasks/task-actions.server";
@@ -81,7 +83,8 @@ import { Icon } from "~/ui/icon";
  * TOAST COPY IS THE VERBATIM SPEC §5 CONTRACT — it lives here so every
  * caller shows identical strings):
  *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
- *   transition · run-interrupt · assign-specialist · run-specialist ·
+ *   transition · accept-completion · archive-task · restore-task ·
+ *   run-interrupt · assign-specialist · run-specialist ·
  *   assign-reviewer · run-reviewer · remove-reviewer
  */
 
@@ -171,6 +174,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // loader revalidates on every SSE task change, so applied/dismissed ones drop.
   const taskFile = readTaskFile({ projectSlug: params.slug, taskKey: params.key });
   const recommendations = taskFile?.parsed.frontmatter.recommendations ?? [];
+  // R14-3: the archive disposition lives in the task FILE (the projection has no
+  // column for it), and the page needs it for the archived banner + the
+  // archive/restore control. Read from the same file the recommendations do.
+  const archived = taskFile?.parsed.frontmatter.archived === true;
   // Pending scheduled operator re-runs (O-3), rendered as cancellable cards.
   const schedules = (taskFile?.parsed.frontmatter.schedules ?? []).filter(
     (s) => s.status === "pending",
@@ -180,6 +187,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     task: { ...detail, timeline: slice.events },
     recommendations,
     schedules,
+    archived,
+    // P14-LV-06: the review queue counted this viewer under "Waiting on your
+    // acceptance" while the page rendered acceptance ONLY as an operator
+    // recommendation card — so a withdrawn recommendation left the promised
+    // decision with no control at all. Acceptance is a standing authority at the
+    // review boundary; both surfaces now read it from the same predicate.
+    acceptance: resolveAcceptanceAffordance({
+      projectSlug: params.slug,
+      taskKey: params.key,
+      viewerUserId: user.id,
+    }),
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
@@ -353,6 +371,48 @@ export async function action({ request, params }: Route.ActionArgs) {
             ? result.message
             : `Not merged — ${result.message}`,
         };
+      }
+      case "accept-completion": {
+        // P14-LV-06: the human acceptance the review queue promises, as a
+        // first-class control instead of something an operator has to recommend
+        // first. A human moving a task INTO the terminal stage IS accepting the
+        // completion — `transitionStage` routes that through the full acceptance
+        // contract (every gate, the real merge attempt, the completion event),
+        // and its `requireAcceptCompletion` carries the owner exception (R6-2),
+        // so a contributor who owns the task passes here exactly as the queue
+        // said they would.
+        const proj = getProject(db, projectSlug);
+        const terminal = proj?.stages[proj.stages.length - 1]?.id;
+        if (!terminal) {
+          return data(
+            { ok: false as const, error: "This project has no stages to accept into." },
+            { status: 400 },
+          );
+        }
+        const task = await transitionStage(
+          db,
+          { projectSlug, taskKey, toStageId: terminal, manual: true },
+          actor,
+        );
+        const toName =
+          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        return {
+          ok: true as const,
+          intent,
+          toast: `Completion accepted · ${taskKey} moved to ${toName}`,
+        };
+      }
+      case "archive-task":
+      case "restore-task": {
+        // R14-3: the terminal disposition for abandoned work — the ending the
+        // closed-PR guidance has been telling humans to use since pass 13.
+        // maintainer+ (`approve-transition`), enforced inside setTaskArchived.
+        const result = await setTaskArchived(
+          db,
+          { projectSlug, taskKey, archived: intent === "archive-task" },
+          actor,
+        );
+        return { ok: true as const, intent, toast: result.toast };
       }
       case "force-accept": {
         // Admin-only override of the review gate (DG-2): accept a task wedged on
@@ -709,6 +769,8 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
+      archived={loaderData.archived}
+      acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
     />

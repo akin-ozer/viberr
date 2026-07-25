@@ -1123,6 +1123,12 @@ h1, h2, h3, h4 {
 .kv-row .k { color: var(--faint); font-size: .8rem; }
 .kv-row .v { font-weight: 700; font-family: var(--font-display); display: inline-flex; align-items: center; gap: .4rem; }
 .kv-row .v .mono { font-weight: 400; }
+/* P14-LV-06 / R14-3: the dispositions a human decides in Current state —
+   accepting the completion, archiving/restoring the task. Separated from the
+   fact rows above them, because these are ACTIONS, not readings. */
+.state-acts { margin-top: .85rem; padding-top: .85rem; border-top: 1px solid var(--hairline); }
+.state-acts + .state-acts { border-top: 0; padding-top: .5rem; }
+.state-acts .deny-note { margin-top: .4rem; }
 
 .gh-bar {
   display: flex; align-items: center; gap: .6rem;

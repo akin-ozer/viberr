@@ -25,6 +25,7 @@ import {
   createTask,
   DEFAULT_GOAL,
   notifyTaskWatchers,
+  operatorPromptAgent,
   packetIdentity,
   postAgentReplyComment,
   recordAgentCompletion,
@@ -419,6 +420,51 @@ describe("appendComment", () => {
     expect(rows[0]!.kind).toBe("mention");
     // Attributed to the reviewer agent (kind agent + backend), NOT a human.
     expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
+  });
+});
+
+describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
+  it("notifies a human @tagged inside the operator's directive comment", async () => {
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const firstName = store.users.arda.name.split(" ")[0];
+    // The run itself can't start here (no deployed profile) — the directive
+    // COMMENT is written first, and that comment was the one writer in the app
+    // that never fanned its mentions out (NEW-4 gap).
+    await expect(
+      operatorPromptAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          role: "developer",
+          backend: "claude",
+          directive: `Implement the fix and coordinate with @${firstName} on the copy.`,
+          kind: "primary",
+          handle: "dev",
+        },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toBeTruthy();
+
+    const rows = store.db
+      .prepare(`SELECT user_id, kind, actor_json, text FROM notifications`)
+      .all() as {
+      user_id: string;
+      kind: string;
+      actor_json: string | null;
+      text: string;
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: store.users.arda.id, kind: "mention" });
+    // Attributed to the operator, like its narration comments.
+    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({
+      kind: "agent",
+      name: "Operator",
+    });
   });
 });
 

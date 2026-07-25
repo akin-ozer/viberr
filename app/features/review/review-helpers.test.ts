@@ -35,3 +35,54 @@ describe("reviewRowSub", () => {
     expect(reviewRowSub({ ...base, waiting: "agent" })).toContain("Agent working");
   });
 });
+
+describe("reviewRowSub live PR state (P14-LV-05)", () => {
+  it("describes a REOPENED PR by its live state, never by the stale closure note", () => {
+    // Live repro: #103 was closed on GitHub, the divergence note was written,
+    // the PR was reopened and reconciled — and the queue kept telling the human
+    // the PR was closed, because the subline was built from the last note.
+    const sub = reviewRowSub({
+      ...base,
+      pr: { number: 103, state: "review" },
+      latestEventText:
+        "**Divergence:** PR #103 was closed on GitHub without merging, but VM-4 is still active.",
+    });
+    expect(sub).toBe("PR #103 is open for review on GitHub.");
+    expect(sub).not.toContain("closed");
+  });
+
+  it("states a genuinely closed PR and points at the two real escapes", () => {
+    const sub = reviewRowSub({ ...base, pr: { number: 103, state: "closed" } });
+    expect(sub).toContain("closed on GitHub without merging");
+    expect(sub).toContain("archive the task");
+  });
+
+  it("surfaces a conflicting PR — the state that used to be invisible (LV-07)", () => {
+    expect(
+      reviewRowSub({
+        ...base,
+        pr: { number: 103, state: "review", mergeable: "conflicting" },
+      }),
+    ).toContain("conflicts with the base branch");
+  });
+
+  it("a merged PR reads as merged, whatever the newest event says", () => {
+    expect(
+      reviewRowSub({
+        ...base,
+        pr: { number: 311, state: "merged" },
+        latestEventText: "**Transition request:** move on",
+      }),
+    ).toContain("is merged on GitHub");
+  });
+
+  it("the block reason still outranks everything (F10-11)", () => {
+    expect(
+      reviewRowSub({
+        ...base,
+        pr: { number: 103, state: "review" },
+        blockReason: "Waiting on 1 required reviewer approval of the current revision.",
+      }),
+    ).toBe("Waiting on 1 required reviewer approval of the current revision.");
+  });
+});

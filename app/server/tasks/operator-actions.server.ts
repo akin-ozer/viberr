@@ -48,6 +48,7 @@ import {
   DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  acceptanceRefusalFor,
   notifyTaskWatchers,
   operatorPromptAgent,
   transitionStage,
@@ -1643,6 +1644,20 @@ export async function operatorAcceptCompletion(
       input.taskKey,
     );
     if (closedReason) return { outcome: "noop", message: closedReason };
+  }
+
+  // P14-LV-02: the same graph gate the human writers take. This is the half that
+  // produced the live defect — the operator offered "Accept completion" on a
+  // TRIAGE task with no branch, no PR and no reviewer, and the card rendered as
+  // an ordinary one-click action. Checked before BOTH branches below, so a
+  // supervised operator never posts a card acceptance would refuse and a
+  // full-autonomy one never closes a task off-boundary.
+  {
+    const refusal = acceptanceRefusalFor(
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      ctx,
+    );
+    if (refusal) return { outcome: "noop", message: refusal };
   }
 
   // Never accept a task with an open BLOCKED decision (mirrors the human

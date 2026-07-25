@@ -95,6 +95,19 @@ const WORKFLOW = [
   { from: "review", to: "done" },
 ];
 
+/** The legacy 3-stage board of P14-WL-01 (`Lightweight Lab`): none of the
+ *  governed template's stage ids exist here, which is exactly the case R14-1
+ *  resolves by role. */
+const LIGHTWEIGHT_BOARD = [
+  { id: "todo", name: "To do", color: "#a5a8b5" },
+  { id: "doing", name: "Doing", color: "#7b61ff" },
+  { id: "done", name: "Done", color: "#00b473" },
+];
+const LIGHTWEIGHT_WORKFLOW = [
+  { from: "todo", to: "doing" },
+  { from: "doing", to: "done" },
+];
+
 function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
   return {
     id: "developer",
@@ -384,7 +397,11 @@ describe("LiveRoster", () => {
     expect(getByText("No agents are currently engaged.")).toBeTruthy();
   });
 
-  it("P11-42: resolves a display name from nameById, falling back to the raw profileId", () => {
+  // P13-UI-27 residual: an id with no profile used to be printed raw, which
+  // reads as a name and hides what actually happened — the engagement outlived
+  // its profile. The row now NAMES that condition and keeps the id in the
+  // tooltip, where it is diagnostic rather than decorative.
+  it("P11-42: resolves a display name from nameById; an unresolved id names the condition", () => {
     const rows = [
       mkDeployment({ taskKey: "VIB-1", engagement: "primary", profileId: "docs-writer", status: "working" }),
       mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", profileId: "orphan", status: "on call" }),
@@ -396,10 +413,15 @@ describe("LiveRoster", () => {
         nameById={{ "docs-writer": "Docs Writer" }}
       />,
     );
-    const names = Array.from(container.querySelectorAll(".live-name")).map((n) => n.textContent);
+    const cells = Array.from(container.querySelectorAll(".live-name"));
+    const names = cells.map((n) => n.textContent);
     expect(names).toContain("Docs Writer"); // resolved
-    expect(names).toContain("orphan"); // no mapping → raw id fallback
+    expect(names).toContain("profile no longer here");
+    expect(names).not.toContain("orphan"); // never the bare id as a name
     expect(names).not.toContain("docs-writer"); // never the raw slug when mapped
+    expect(
+      cells.find((n) => n.textContent === "profile no longer here")!.getAttribute("title"),
+    ).toContain("orphan");
   });
 });
 
@@ -707,6 +729,8 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
     const { getByText } = render(
       <LibraryPicker
         library={TEMPLATES}
+        stages={STAGES}
+        workflow={WORKFLOW}
         projectName="Viberr Core"
         busy={false}
         onClose={() => {}}
@@ -717,15 +741,55 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
     expect(
       getByText("Reviews IAM, secrets handling and supply-chain risk."),
     ).toBeTruthy();
-    expect(getByText("1 stage")).toBeTruthy();
+    expect(getByText("1 stage here")).toBeTruthy();
     fireEvent.click(getByText("Security reviewer"));
     expect(onAdd).toHaveBeenCalledWith("security-reviewer");
+  });
+
+  // P14-UI-63: the pill printed the TEMPLATE's own stage count, so this row
+  // promised "1 stage" on a board that has no `review` stage at all — and the
+  // roster contradicted it one click later. The count is now what the profile
+  // will actually be eligible for HERE.
+  it("counts the stages the template resolves to on THIS board, not its own", () => {
+    const { getByText, queryByText } = render(
+      <LibraryPicker
+        library={TEMPLATES}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        projectName="Lightweight Lab"
+        busy={false}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    // `review` names the REVIEW role; this 3-stage board fills it with `doing`.
+    expect(getByText("1 stage here")).toBeTruthy();
+    expect(queryByText("1 stage")).toBeNull();
+  });
+
+  it("says 'every stage here' when the declaration means nothing on this board", () => {
+    const { getByText } = render(
+      <LibraryPicker
+        library={[{ ...TEMPLATES[0]!, stages: ["spec-review"] }]}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        projectName="Lightweight Lab"
+        busy={false}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    // Rule 3 (R14-1) — unrestricted rather than eligible for nothing, and the
+    // pill says the same thing the roster will say after the deploy.
+    expect(getByText("every stage here")).toBeTruthy();
   });
 
   it("says so when every global profile is already deployed", () => {
     const { getByText } = render(
       <LibraryPicker
         library={[]}
+        stages={STAGES}
+        workflow={WORKFLOW}
         projectName="Viberr Core"
         busy={false}
         onClose={() => {}}

@@ -19,6 +19,7 @@ import {
   runStatePill,
   useElapsed,
 } from "./runs-helpers";
+import { collapseTelemetry, telemetryLabel } from "./log-noise";
 import { isRunBoundary, type RunView } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
@@ -377,6 +378,10 @@ export function AgentLogsPanel({
     ? (streamed ?? cur.lines.map((display, i) => ({ display, raw: cur.raw[i] ?? "" })))
     : [];
   const older = cur ? olderByThread?.[cur.id] : undefined;
+  // P14-WL-02: what the console actually draws — telemetry runs folded into one
+  // row each, unless the raw toggle is on. `shown` stays the counting basis, so
+  // the footer's event total is unaffected by the folding.
+  const entries = collapseTelemetry(shown, raw);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -563,22 +568,34 @@ export function AgentLogsPanel({
             </span>
           </div>
         ) : null}
-        {shown.map((l, i) => (
-          <div className={"log-line " + l.display.ev} key={i}>
-            <span className="lt">{l.display.t}</span>
-            <span className="ltag">{l.display.tag}</span>
-            <span className="lx">
-              {raw ? (
-                l.raw
-              ) : (
-                <>
-                  {l.display.name ? <b className="ln">{l.display.name} </b> : null}
-                  {l.display.text}
-                </>
-              )}
-            </span>
-          </div>
-        ))}
+        {/* P14-WL-02: telemetry blocks fold into one dim row; `raw` renders the
+            stored stream untouched (`collapseTelemetry` is a no-op there). */}
+        {entries.map((entry, i) =>
+          entry.kind === "telemetry" ? (
+            <div className="log-line meta" key={i}>
+              <span className="lt" />
+              <span className="ltag">telemetry</span>
+              <span className="lx">{telemetryLabel(entry)}</span>
+            </div>
+          ) : (
+            <div className={"log-line " + entry.line.display.ev} key={i}>
+              <span className="lt">{entry.line.display.t}</span>
+              <span className="ltag">{entry.line.display.tag}</span>
+              <span className="lx">
+                {raw ? (
+                  entry.line.raw
+                ) : (
+                  <>
+                    {entry.line.display.name ? (
+                      <b className="ln">{entry.line.display.name} </b>
+                    ) : null}
+                    {entry.line.display.text}
+                  </>
+                )}
+              </span>
+            </div>
+          ),
+        )}
         {cur!.state === "running" && (
           <div className="log-line cursor">
             <span className="lt"></span>

@@ -130,13 +130,24 @@ describe("UI-58: the list view has a keyboard move control", () => {
   });
 });
 
+/** The board subtitle as ONE string. WL-04 gave the stat a scope clause and JSX
+ *  wraps the sentence, so it spans several text nodes and `getByText` can't see
+ *  it whole. */
+function subtitle(container: HTMLElement): string {
+  return container.querySelector(".board-head .sub")!.textContent!.replace(/\s+/g, " ").trim();
+}
+
 describe("LV-20 family: the board subtitle counts what the projection says", () => {
   it("does not count a done task whose projected waiting is none", () => {
-    const { getByText } = renderBoard([
+    const { container } = renderBoard([
       task({ key: "VIB-1", stage: "done", waiting: "none" }),
       task({ key: "VIB-2", stage: "impl", waiting: "human" }),
     ]);
-    expect(getByText("2 tasks · 1 waiting on a human decision")).toBeTruthy();
+    // WL-04: the stat now names its scope ("…in this project"), and JSX line
+    // wrapping splits the sentence across text nodes — match the whole line.
+    expect(subtitle(container)).toBe(
+      "2 tasks · 1 waiting on a human decision in this project",
+    );
   });
 });
 
@@ -250,18 +261,20 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
   it("makes the header count agree with what the columns draw", () => {
     // The header used to print the UNFILTERED total over columns that all said
     // "No tasks".
-    const { getByText } = renderBoard(
+    const { container } = renderBoard(
       [
         task({ key: "VIB-1", stage: "impl", waiting: "human" }),
         task({ key: "VIB-2", stage: "impl", waiting: "none" }),
       ],
       { search: "filter=agent" },
     );
-    expect(getByText("0 of 2 tasks · 1 waiting on a human decision")).toBeTruthy();
+    expect(subtitle(container)).toBe(
+      "0 of 2 tasks · 1 waiting on a human decision in this project",
+    );
   });
 
   it("offers one Clear affordance that resets the filter AND the search", () => {
-    const { getByTitle, getByText, queryByText } = renderBoard(
+    const { container, getByTitle, queryByText } = renderBoard(
       [task({ key: "VIB-1", stage: "impl" })],
       { search: "filter=risk&q=zzz" },
     );
@@ -270,7 +283,9 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
     );
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.
-    expect(getByText("1 task · 0 waiting on a human decision")).toBeTruthy();
+    expect(subtitle(container)).toBe(
+      "1 task · 0 waiting on a human decision in this project",
+    );
     expect(queryByText("Clear")).toBeNull();
   });
 

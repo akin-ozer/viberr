@@ -76,9 +76,10 @@ export function DecisionPacket({
    *  (commenting is app-wide). */
   canResolve: boolean;
   /** Whether the viewer may resolve the ACCEPT_COMPLETION option specifically —
-   *  admin|maintainer only (the always-human Done authority). An owner-only
-   *  viewer has canResolve but not this, so the button is blocked while that
-   *  option is selected rather than 403ing on click (adversarial-review #15). */
+   *  admin|maintainer, or this task's own human owner (R6-2, widened by R14-2).
+   *  A viewer with canResolve but not this (e.g. a packet addressed to someone
+   *  else's task) has the button blocked while that option is selected rather
+   *  than 403ing on click (adversarial-review #15). */
   canResolveCompletion: boolean;
   /** UI-42: whether the viewer may actually EDIT the goal. `edit_goal` is
    *  offered to any packet resolver (which includes the task owner), but
@@ -231,9 +232,9 @@ export function DecisionPacket({
         <div className="packet-actions">
           {(() => {
             const selected = p.options[sel];
-            // The accept_completion option is admin|maintainer only; an
-            // owner-only viewer can't resolve it (the server 403s), so block the
-            // button while it's selected rather than let them click into a 403.
+            // accept_completion is maintainer+ OR this task's own owner (R6-2,
+            // widened by R14-2); anyone else gets a server 403, so block the
+            // button while it's selected rather than let them click into one.
             const completionBlocked =
               selected?.kind === "accept_completion" && !canResolveCompletion;
             // UI-42: same treatment for `edit_goal` — `update-goal` is
@@ -254,7 +255,7 @@ export function DecisionPacket({
                 aria-busy={busy}
                 title={
                   completionBlocked
-                    ? "Accepting completion is reserved for maintainers"
+                    ? "Accepting completion is reserved for maintainers and this task's owner"
                     : goalBlocked
                       ? "Editing the goal is reserved for maintainers"
                       : undefined

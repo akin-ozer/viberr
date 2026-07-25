@@ -11,7 +11,7 @@ import { getProject, listProjectTasks } from "./board-query.server";
  * edge into the terminal stage — `resolveStageRoles().reviewId`), NOT the
  * literal id "review". This is the exact predicate the workspace-layout rail
  * badge uses (routes/project.tsx), so the two counts can never drift — on a
- * Lightweight board (`todo/doing/done`) the review role is `doing`, and a
+ * board whose review stage is not literally named `review`, a
  * literal-"review" filter left this queue permanently empty while the rail
  * showed a count (pass-4 WI-1). Panel split (R8-3, member-scoped): a
  * review-stage task waiting on a human lands in "Waiting on your acceptance"

@@ -239,6 +239,8 @@ function SpecialistControl({
   projectSlug: string;
   specialists: DeployedSpecialistView[];
   busy: boolean;
+  /** G9/P14-WL-07: the task is at the terminal stage. */
+  closed?: boolean;
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -259,6 +261,17 @@ function SpecialistControl({
       window.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // P14-WL-07: G9 disabled the RUN buttons on a closed task but left the two
+  // engage menus fully live, so a Done+merged task still offered to assign a
+  // delivering agent — an engagement that lands and then has nothing to run.
+  if (closed) {
+    return (
+      <span className="sub">
+        Task closed — reopen it from Current state to assign a delivering agent.
+      </span>
+    );
+  }
 
   if (specialists.length === 0) {
     return (
@@ -342,6 +355,8 @@ function ReviewerControl({
   /** Whether the project has any deployed specialist at all (empty-state copy). */
   hasAnyDeployed: boolean;
   busy: boolean;
+  /** G9/P14-WL-07: the task is at the terminal stage. */
+  closed?: boolean;
   onAssign: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -362,6 +377,16 @@ function ReviewerControl({
       window.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // P14-WL-07: same reason as SpecialistControl — a closed task must not offer
+  // to engage a reviewer whose Run button would then render disabled.
+  if (closed) {
+    return (
+      <span className="sub">
+        Task closed — no new reviewer engagements.
+      </span>
+    );
+  }
 
   if (!hasAnyDeployed) {
     return (
@@ -689,6 +714,7 @@ export function ExecutionProfile({
                   projectSlug={task.projectSlug}
                   specialists={deployedSpecialists}
                   busy={runBusy}
+                  closed={closed}
                   onAssign={onAssignSpecialist}
                 />
               </div>
@@ -758,6 +784,7 @@ export function ExecutionProfile({
                 specialists={availableReviewers}
                 hasAnyDeployed={deployedSpecialists.length > 0}
                 busy={reviewerBusy}
+                closed={closed}
                 onAssign={onAssignReviewer}
               />
             )}

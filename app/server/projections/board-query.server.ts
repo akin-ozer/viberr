@@ -138,6 +138,12 @@ export function resolveTaskOwner(
 export function listProjectTasks(
   db: DatabaseSync,
   slug: string,
+  opts: {
+    /** R14-3: include archived tasks — only the board's explicit "Archived"
+     *  view asks for them. Every other read model (board columns, review queue,
+     *  home counts) inherits the exclusion by going through here. */
+    includeArchived?: boolean;
+  } = {},
 ): TaskSummary[] {
   const project = getProject(db, slug);
   const stages = project
@@ -155,6 +161,7 @@ export function listProjectTasks(
   const rows = db
     .prepare(
       `SELECT * FROM task_projections WHERE project_slug = ?
+         ${opts.includeArchived ? "" : "AND archived = 0"}
        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
     .all(slug) as unknown as TaskProjectionRow[];
@@ -192,7 +199,11 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
     ),
   }));
 
-  const tasks = listProjectTasks(db, slug);
+  // R14-3: the BOARD loads archived tasks and hides them client-side, because
+  // its "Archived" chip is the only way back to them (`matchesBoardFilter`
+  // excludes them from every other filter). Every OTHER read model — the review
+  // queue, the decisions inbox, home's counts — takes the default exclusion.
+  const tasks = listProjectTasks(db, slug, { includeArchived: true });
   const byStage = new Map<string, TaskSummary[]>();
   for (const stage of project.stages) byStage.set(stage.id, []);
   const orphanTasks: TaskSummary[] = [];

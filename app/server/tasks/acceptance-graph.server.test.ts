@@ -183,9 +183,8 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     expect(detail?.timeline[0]).toMatchObject({ type: "completion" });
   });
 
-  it("derives the validation cache instead of stamping healthy", async () => {
+  it("derives 'none' for accepted work nothing was ever delivered for", async () => {
     const store = prepared();
-    // Nothing delivered → "none" (the Triage-with-no-diff case, one stage on).
     seed(store, { stage: "review", waiting: "human" });
     await transitionStage(
       store.db,
@@ -193,10 +192,13 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
+    // The old code stamped "healthy" here, which is how a task with no diff at
+    // all wore a green validation chip on the board.
     expect(taskFile(store).parsed.frontmatter.validation).toBe("none");
+  });
 
-    // A delivered revision every required reviewer approved → "healthy",
-    // because it really is.
+  it("derives 'healthy' when every required reviewer really approved the revision", async () => {
+    const store = prepared();
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -297,6 +299,43 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
       message: expect.stringContaining("conflicts with the base branch"),
     });
     expect(taskFile(store).parsed.frontmatter.stage).toBe("review");
+  });
+
+  it("an admin CAN force past a conflict, and the timeline says what is really pending", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR", mergeable: "conflicting" },
+    });
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    vi.spyOn(reconciler, "mergeTaskPr").mockResolvedValue({
+      status: "not_mergeable",
+      prNumber: 103,
+      message: "PR #103 conflicts with `main` — rebase the branch, then merge.",
+      mergeable: "conflicting",
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const file = taskFile(store);
+    expect(file.parsed.frontmatter.stage).toBe("done");
+    expect(file.parsed.frontmatter.pr?.state).toBe("accepted");
+    // The forced acceptance does not inherit the "so it can't be accepted"
+    // refusal copy — it states what is still pending.
+    expect(file.parsed.timeline[0]!.text).toContain("accepted, merge pending");
+    expect(file.parsed.timeline[0]!.text).toContain("conflicts with the base branch");
+    expect(file.parsed.timeline[0]!.text).not.toContain("credentials are set");
+    expect(
+      String(
+        listAuditEvents(store.db, { action: "task.acceptance.forced" })[0]!.details
+          ?.bypassed,
+      ),
+    ).toContain("conflicts");
   });
 
   it("an unreachable merge still accepts, but names the honest cause", async () => {

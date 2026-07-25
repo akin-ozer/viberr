@@ -759,6 +759,10 @@ describe("ExecutionProfile — owner hand-off candidates", () => {
 
 /* -------------------------------------------------- GithubTrace force-accept */
 
+/** P14-UI-11: the browse host is the loader's, always — the component no longer
+ *  carries its own `github.com` fallback, so every caller passes one. */
+const GH_HOST = "https://github.com";
+
 function traceTask(patch: Record<string, unknown> = {}): TaskDetail {
   return {
     ...taskFixture("u-arda", "Arda Kaya"),
@@ -780,6 +784,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     const { container, getByText } = render(
       <MemoryRouter>
         <GithubTrace
+          githubHost={GH_HOST}
           task={traceTask({
             blockReason: "Waiting on 1 required reviewer approval of the current revision.",
           })}
@@ -801,6 +806,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     const { container, getByText } = render(
       <MemoryRouter>
         <GithubTrace
+          githubHost={GH_HOST}
           task={traceTask({
             branch: null,
             pr: null,
@@ -826,6 +832,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     const { container } = render(
       <MemoryRouter>
         <GithubTrace
+          githubHost={GH_HOST}
           task={traceTask({ blockReason: "Waiting on 1 required reviewer approval." })}
         />
       </MemoryRouter>,
@@ -851,7 +858,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     }) as unknown as TaskDetail;
 
   it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
-    const closed = render(<GithubTrace task={withPr("closed")} />);
+    const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} />);
     const closedPill = closed.container.querySelector(".gh-bar .pill")!;
     // Before the fix this branch didn't exist: a rejected PR rendered as the
     // blue `info` "PR #14", identical to a PR still under review.
@@ -859,19 +866,19 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     expect(closedPill.className).toContain("risk");
     cleanup();
 
-    const review = render(<GithubTrace task={withPr("review")} />);
+    const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} />);
     const reviewPill = review.container.querySelector(".gh-bar .pill")!;
     expect(reviewPill.textContent).toContain("PR #14");
     expect(reviewPill.className).toContain("info");
   });
 
   it("keeps merged and merge-pending distinct", () => {
-    const merged = render(<GithubTrace task={withPr("merged")} />);
+    const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} />);
     expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
       "merged",
     );
     cleanup();
-    const accepted = render(<GithubTrace task={withPr("accepted")} />);
+    const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} />);
     expect(
       accepted.container.querySelector(".gh-bar .pill")!.textContent,
     ).toContain("merge pending");
@@ -888,7 +895,7 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
       pr: null,
       changed: { files: 1, add: 3, del: 1 },
     } as unknown as TaskDetail;
-    const { container } = render(<GithubTrace task={task} />);
+    const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} />);
     const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
       r.textContent?.startsWith("Diff"),
     )!;

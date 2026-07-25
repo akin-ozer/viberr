@@ -81,6 +81,10 @@ CREATE TABLE task_projections (
   stored_readiness TEXT,
   waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
   urgent INTEGER NOT NULL DEFAULT 0,
+  -- R14-3: the terminal disposition for abandoned work. Projected because every
+  -- board/queue/inbox read model reads this table and each of them has to hide
+  -- archived tasks without re-reading task files on a loader path.
+  archived INTEGER NOT NULL DEFAULT 0,
   validation TEXT NOT NULL CHECK (validation IN ('healthy', 'changed', 'failing', 'none')),
   -- Derived from the revision-bound review model (acceptanceBlockedReason): NULL
   -- when the current revision is acceptance-ready, a human-readable reason
