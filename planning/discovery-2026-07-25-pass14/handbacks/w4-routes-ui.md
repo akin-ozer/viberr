@@ -6,55 +6,19 @@ else for the W4 findings is implemented and tested on the branch.
 
 ---
 
-## H1 — `archived` must reach the BOARD projection (R14-3) — REQUIRED
+## H1 — `archived` on the BOARD projection (R14-3) — ALREADY APPLIED ✅
 
-The task-level archive is complete on the task page: the route carries
-`archive-task` / `restore-task` (`app/routes/project.task.tsx`), the loader ships
-`archived` read from the task file, and `setTaskArchived` writes the disposition.
-The BOARD half is written and tested (`app/features/board/board-filters.ts`
-excludes archived tasks from every filter but `archived`; `board-page.tsx`
-renders the Archived chip with its count and an explanatory banner) but it is
-**inert until the projection carries the flag** — `TaskSummary` has no
-`archived`, so `isArchived(task)` is always false, archived tasks stay on the
-board, and the Archived chip never appears (it renders only at count > 0).
+Recorded for the audit trail: W4's board half (`board-filters.ts` excludes
+archived tasks from every filter but `archived`; `board-page.tsx` renders the
+Archived chip with its count and the banner) was inert while `TaskSummary`
+carried no `archived`. The lead landed the projection in `c528a18`
+(`task_projections.archived`, `rebuilder.server.ts:380,391`,
+`app/shared/mapping/task.server.ts:36,114,293`), so the filter now has data.
 
-Three coordinated edits, all outside W4's ownership:
-
-1. **`app/server/db/migrations/0001_baseline.sql`** — add the column to
-   `task_projections` (migrations stay squashed into 0001 pre-prod, per the
-   pass-11 ruling):
-
-   ```sql
-   archived INTEGER NOT NULL DEFAULT 0,
-   ```
-
-2. **`app/server/projections/rebuilder.server.ts`** (the `INSERT INTO
-   task_projections` at ~`:380` + its `ON CONFLICT … DO UPDATE SET`) — project
-   `fm.archived ? 1 : 0` the way `urgent` is projected. The `projectedWaiting`
-   normalization just above is the precedent for reading a frontmatter field
-   into a board-visible column.
-
-3. **`app/shared/mapping/task.server.ts`** — add to `TaskSummary` and map it:
-
-   ```ts
-   /** R14-3: archived tasks are a terminal disposition, not a stage — they
-    *  leave the board's default view and the review queue, and only the
-    *  Archived filter shows them. */
-   archived: boolean;
-   ```
-   ```ts
-   archived: row.archived === 1,
-   ```
-   (`TaskProjectionRow` needs the field too.)
-
-Verification once applied: `matchesBoardFilter` already has the contract test
-(`app/features/board/board-filters.test.ts` → "archived tasks are excluded from
-every filter but Archived"); the round trip is covered end-to-end by
+Contract tests: `app/features/board/board-filters.test.ts` → "archived tasks are
+excluded from every filter but Archived"; end-to-end round trip in
 `app/features/task-detail/task-detail-route.server.test.ts` → "a maintainer
 archives and restores".
-
-Until then the review queue also still lists archived tasks — `review-queue.server.ts`
-filters on the same projection.
 
 ---
 
