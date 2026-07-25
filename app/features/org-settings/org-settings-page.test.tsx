@@ -326,6 +326,26 @@ describe("ResourcesPanel", () => {
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
   });
 
+  it("P14-WL-06: says 'resource' for one and 'resources' for several", () => {
+    // The `used in N project(s)` half of the same line always pluralized; the
+    // resource count always said "resources", so a single grant read
+    // "1 context resources".
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={[
+          { ...GAGENTS[0]!, id: "one", name: "One", skills: ["terraform-review"], mcps: [], kbs: [], used: 1 },
+          { ...GAGENTS[0]!, id: "many", name: "Many", skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 3 },
+        ]}
+        stages={STAGES}
+      />,
+    );
+    expect(getByText(/1 context resource · used in 1 project$/)).toBeTruthy();
+    expect(getByText(/2 context resources · used in 3 projects$/)).toBeTruthy();
+  });
+
   it("renders a stale health check as amber (not a fresh-green 'up') with a retest hint", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [

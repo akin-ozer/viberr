@@ -195,6 +195,18 @@ operator MCP mount (credentials dropped from argv), LV-05's live-state subline, 
 pre-merge identity re-check (additive — the post-merge check was not removed), GV-06's
 mention fan-out, GV-09's notification, and LV-07's whole server half.
 
+### A fourth false-DONE, caught by auditing citations rather than the ledger
+
+Re-running the audit (grep every finding id for a real code citation, then hand-check
+each miss) turned up **WL-06** — `{res} context resources` still read "1 context
+resources" on the org profile rows, while the very next clause on the same line already
+pluralized `project`/`projects`. Fixed with a test asserting both halves.
+
+Four misses in that audit were false alarms, resolved under a sibling id and verified by
+hand: KM-02 under RT-04 (Codex operator MCP mount), KM-06 under RT-06 (web egress), GV-03
+(the stale preset prose is simply gone), LV-04 under RT-02 (the guardrail misfire was a
+symptom of the missing directive).
+
 ## H. CI-only flake (found after the PR was green locally)
 
 `verify` failed once on `task-detail-route.server.test.ts > @codex also routes + triggers`

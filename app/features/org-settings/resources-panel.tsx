@@ -1153,7 +1153,10 @@ function AgentPanel({
                 <span className="sub">{a.summary}</span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
-                  {stageNames || "no stages"} · {res} context resources ·{" "}
+                  {/* P14-WL-06: the row right below already pluralizes
+                      ("project"/"projects"); this one always said "resources". */}
+                  {stageNames || "no stages"} · {res} context resource
+                  {res === 1 ? "" : "s"} ·{" "}
                   {a.used > 0
                     ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
                     : "not deployed"}
