@@ -4,6 +4,7 @@ import {
   acceptanceBlockedReason,
   closedPrBlockedReason,
   deliveringEngagement,
+  deriveValidation,
   supportingEngagements,
   type PacketOption,
   type PrState,
@@ -1720,7 +1721,13 @@ export async function operatorAcceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
-    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24) — same as the human path
+    // P14-LV-02: DERIVE the validation state, never assert it. This said
+    // `"healthy"` — "accepted work is validated (FR24)" — which is a claim about
+    // work nothing may have validated: an operator closing a task with no
+    // reviewer and no revision stamped a green pill onto an empty record. The
+    // human writers moved to `deriveValidation` in this pass; this one carried
+    // the old line plus a comment claiming parity it no longer had.
+    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     // Acceptance consumes any standing recommendations (a leftover transition
     // card on a Done task would move it back OUT of Done if applied).
     parsed.frontmatter.recommendations = [];

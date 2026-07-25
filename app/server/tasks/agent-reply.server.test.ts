@@ -29,7 +29,7 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { installFakeRuntime, startedRunSpecs } from "../../../test-support/fake-runtime";
 import {
   insertRunLine,
   listRunsForTaskRows,
@@ -893,6 +893,30 @@ describe("commentToAgent", () => {
       );
     });
     expect(posted).toBe(true);
+  }, 20_000);
+
+  // P14-RT-02 / LV-04: the WIRING, not just the prompt builder. `commentToAgent`
+  // threaded the human's words into the RESUMED path and the operator-prompt
+  // path but neither FRESH branch, so a first-ever @mention started a run that
+  // never saw the question. Live, the agent then read the TASK GOAL as its
+  // instruction, called it a prompt-injection attempt, and tagged nobody — the
+  // asker was never notified (NEW-4). Deleting `directive`/`directiveFrom` from
+  // either fresh branch must fail HERE; the builder-level test cannot see it.
+  it("P14-RT-02: a FIRST-EVER @mention sends the human's words and name to the run", async () => {
+    const question = "does the health endpoint still return 200 on a cold start?";
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: `@dev ${question}` },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("started"); // the fresh branch, not a resume
+
+    expect(await waitFor(() => startedRunSpecs().length > 0, 10_000)).toBe(true);
+    const spec = startedRunSpecs().at(-1)!;
+    expect(spec.prompt).toContain(question);
+    // …and it knows WHO asked, which is what makes the reply tag a real person.
+    expect(spec.prompt).toContain(store.users.arda.name);
   }, 20_000);
 
   it("returns the grouped Agent-logs id (logThreadId) for the reply run (BUG 3)", async () => {

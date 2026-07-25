@@ -906,9 +906,66 @@ describe("operatorAcceptCompletion", () => {
     expect(r.outcome).toBe("done");
     expect(task().frontmatter.stage).toBe("done");
     expect(task().frontmatter.waiting).toBe("none");
-    expect(task().frontmatter.validation).toBe("healthy");
+    // P14-LV-02: DERIVED, not asserted. This fixture has no reviewer and no
+    // revision, so nothing validated the work — and the record has to say that.
+    // It used to be hardcoded `"healthy"`, which put a green pill on an empty
+    // review record whenever an autonomous operator closed a task.
+    expect(task().frontmatter.validation).toBe("none");
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).toContain("task.operator.accepted_completion");
+  });
+
+  it("reports validation HEALTHY when a required reviewer really approved the revision", async () => {
+    // The other half of the derivation: real review evidence still reads healthy,
+    // so the honest version is not just "always none".
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
+    seedTask("review");
+    const head = "a".repeat(40);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...task().frontmatter,
+        workRevision: {
+          id: "rev_1",
+          headSha: head,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-07-25T09:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: head,
+            result: "approve" as const,
+            reason: "looks right",
+            at: "2026-07-25T09:30:00.000Z",
+          },
+        ],
+      },
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(task().frontmatter.validation).toBe("healthy");
   });
 
   it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
