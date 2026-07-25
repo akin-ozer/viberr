@@ -313,6 +313,7 @@ function fm(input: {
     recommendations: input.recommendations ?? [],
     schedules: [],
     urgent: input.urgent,
+    archived: false,
     validation: input.validation,
     workRevision,
     verdicts,

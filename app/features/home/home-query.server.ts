@@ -157,6 +157,9 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
                          OR recommendation_count > 0
                        THEN 1 ELSE 0 END) AS w
        FROM task_projections
+       -- R14-3: archived tasks leave the home card's stage bar and its
+       -- waiting count, the same way they leave the board's default view.
+       WHERE archived = 0
        GROUP BY project_slug, stage`,
     )
     .all() as { project_slug: string; stage: string; n: number; w: number }[];
@@ -183,6 +186,7 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
               COUNT(*) AS total,
               MAX(updated_at) AS updated_at
        FROM task_projections
+       WHERE archived = 0
        GROUP BY project_slug`,
     )
     .all() as { project_slug: string; total: number; updated_at: string }[];

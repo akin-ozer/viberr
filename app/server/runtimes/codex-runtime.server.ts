@@ -515,7 +515,16 @@ export function createCodexAdapter(
                 networkAccessEnabled: false,
                 webSearchMode: "disabled",
               }
-            : {}),
+            : // P14-RT-06: a specialist whose `use-web-search-fetch` grant is
+              // withheld loses Codex's web search too. Claude removes WebFetch/
+              // WebSearch from the run; Codex has no denylist channel, so the
+              // grant used to bind on one backend only — while this exact option
+              // was already being set two lines up for the operator. Network
+              // access stays ON: declared MCP servers and the workspace's own
+              // tooling are not the egress this capability governs.
+              spec.webSearchWithheld
+              ? { webSearchMode: "disabled" as const }
+              : {}),
         };
         const thread = spec.resumeSessionId
           ? codex.resumeThread(spec.resumeSessionId, threadOptions)

@@ -137,6 +137,39 @@ describe("AgentCapability", () => {
     fireEvent.click(container.querySelectorAll(".pcap-row")[1]!);
     expect(onOpenProfile).toHaveBeenCalledWith("developer");
   });
+
+  // P14-WL-05: the library deploy copies the NAME into `role` when a template
+  // declares none, and this row printed it raw — the deployed "Org Docs Writer"
+  // read "Org Docs Writer · Org Docs Writer" here.
+  it("a role that only repeats the name renders as what the profile IS", () => {
+    const { container } = render(
+      <AgentCapability
+        profiles={[
+          { ...PROFILES[1]!, id: "docs", name: "Org Docs Writer", role: "Org Docs Writer" },
+        ]}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    const row = container.querySelector(".pcap-main")!;
+    expect(row.querySelector(".nm")!.textContent).toBe("Org Docs Writer");
+    expect(row.querySelector(".sub")!.textContent).toBe("Specialist");
+  });
+
+  it("keeps a real role verbatim", () => {
+    const { container } = render(
+      <AgentCapability
+        profiles={[PROFILES[1]!]}
+        onOpenProfile={() => {}}
+        onManageProfiles={() => {}}
+        onMatrix={() => {}}
+      />,
+    );
+    expect(
+      container.querySelector(".pcap-main .sub")!.textContent,
+    ).toBe("Implementation");
+  });
 });
 
 describe("WorkflowRules", () => {

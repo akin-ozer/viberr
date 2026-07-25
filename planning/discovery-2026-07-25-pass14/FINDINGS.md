@@ -1,0 +1,309 @@
+# Pass 14 — findings ledger
+
+## Owner rulings (AskUserQuestion, 2026-07-25)
+
+- **R14-1 (stage eligibility):** auto-map by **stage role** — profile eligibility is
+  stored/resolved against stage roles (work/review/… via `stage-roles.ts`), or
+  translated id→role at deploy, so a profile lands eligible on ANY board's equivalent
+  stages. Hand-editing per project stays. Covers WL-01 + UI-63 root cause; Lightweight
+  Lab becomes workable again through the same mechanism.
+- **R14-2 (owner packet authority, WIDER than FR37 minimum):** a task's human owner may
+  resolve **any** packet on their own task (accept_completion, blocked decisions,
+  redirects, dismiss), not just acceptance. Align `resolve-packet`/`applyRecommendation`
+  guards + task-page UI + decisions inbox; correct the stale FR37 note in prd.md to the
+  implemented-and-now-widened reality. (GV-01/04/07)
+- **R14-3 (task archive):** build a real task-level archive — terminal disposition,
+  hidden from board default, timeline/audit preserved, restorable, maintainer+ RBAC.
+  The closed-PR guidance copy then tells the truth. (GV-02)
+- **R14-4 (KB editor):** full editor cluster — open/view/edit-in-place for text docs,
+  overwrite confirm + folder targeting on New document, error keeps the typed body,
+  GitHub import respects the browsed folder. (KM-08/UI-59/60/61)
+
+One row per defect/gap, with a disposition that must end the pass as one of:
+`FIX` (scheduled) → `DONE` (implemented + verified) · `RULED` (owner decision recorded,
+no code change or changed scope) · `NOT-A-BUG` (analysis says working as intended) ·
+`INFO` (recorded fact, nothing to do). Nothing stays `OPEN` at pass end.
+
+**Pass closed 2026-07-25 → PR #104.** Every row below is `DONE`, `RULED`,
+`NOT-A-BUG` or `INFO`. Verification: typecheck clean · 2123 unit tests (196 files) ·
+build green · 21 e2e incl. WCAG 2.2 AA · every fix re-run against the live app
+through the UI that produced it (see `USECASES.md` → "Live RE-VERIFICATION").
+
+Sources: `docs/runtime-agents.md` (RT), `docs/kb-mcp-skills.md` (KM),
+`docs/governance-delivery.md` (GV), `docs/routes-ui-reverify.md` (UI),
+lead walkthrough `NOTES.md` (WL), live phase `USECASES.md` (LV).
+
+## A. Runtime & agents (RT) — from docs/runtime-agents.md
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| RT-01 | HIGH | fresh run of an engaged-but-undeployed profile runs fully unconfined (empty denylist, full delivery grants, Codex danger-full-access); resume path of the same case locks down | **DONE** |
+| RT-02 | HIGH | first-ever @mention starts a fresh run without the comment text (no directive on either fresh branch of commentToAgent) | **DONE** |
+| RT-03 | MED | capability matrix understates Codex: execute-code-or-write-repo still listed CLAUDE_ONLY while the read-only sandbox enforces it on Codex | **DONE** |
+| RT-04 | MED | Codex-backed operator never mounts its declared MCP servers (Claude-only fix in pass 13) — same fact as KM-02 | **DONE** |
+| RT-05 | MED | prepareCodexHome auth mirror is boot-time-only; post-boot auth.json never reaches run home while probe says "available, no restart needed" | **DONE** |
+| RT-06 | MED | withheld use-web-search-fetch unenforced on Codex specialists though webSearchMode:"disabled" channel exists (operator already uses it) | **DONE** |
+| RT-07 | LOW | Codex mcp_tool_call/web_search project as empty meta lines — run panel can't show which MCP tool a Codex agent called; absent from parity disclosure | **DONE** |
+| RT-08 | LOW | restart between Codex operator finish and executeCodexPlan loses the coordination turn silently (invisible to both recovery passes) | **DONE** |
+| RT-09 | LOW | workspace reclaim boot-ordering comment is false (reclaim races the scheduled async recovery it claims to follow) | **DONE** |
+| RT-10 | LOW | Claude is_error results (except max_turns) settle error with no classified failure reason — loses quota/auth retry_other_backend routing | **DONE** |
+| RT-11 | LOW | interruptRun's projectOne mismatches grouped RunView for non-representative runs; falls through to an unrelated group's view | **DONE** |
+| RT-12 | LOW | stuck-packet @handles derived inconsistently (role-based vs name-based; multi-word → non-tokenizable handle) | **DONE** |
+
+## B. KB / MCP / skills (KM) — from docs/kb-mcp-skills.md
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| KM-01 | HIGH | MCP rename orphans every grant (saveMcpServer edit path never calls updateResourceReferences; KB/skill/delete paths all do) | **DONE** |
+| KM-02 | MED | operator org-MCP grants reach Claude-backed operators only; Codex operator gets none; parity disclosure omits it (= RT-04) | **DONE** |
+| KM-03 | MED | skill injection unbounded (whole SKILL.md into every run prompt; KBs have a 24k budget, skills none) | **DONE** |
+| KM-04 | MED | stdio MCP probe splits command on whitespace while runs parse quote-aware — quoted commands work live but show "unreachable" in Settings | **DONE** |
+| KM-05 | MED | later KB under the shared 24k budget can be dropped with zero signal (silent break; warn+marker suppressed in that branch) | **DONE** |
+| KM-06 | LOW-MED | withheld web egress on Codex specialists enforces nothing and the in-code "prompt-level on Codex" claim is false (no such prompt text) | **DONE** |
+| KM-07 | LOW-MED | rewriteProjects (project-deployment leg of reference rewriting) has zero test coverage | **DONE** |
+| KM-08 | LOW-MED | in-app KB authoring half-shipped: create-only at KB root, no open/view/edit of existing docs (readStoreDoc dead), GitHub import ignores browsed folder | **DONE** |
+| KM-09 | LOW | MCP rows show no used-by counts; rename/delete confirms blind for MCPs | **DONE** |
+| KM-10 | LOW | org AgentModal silently preserves invisible legacy grants (unmatched grants re-submitted but rendered nowhere) | **DONE** |
+| KM-11 | LOW | agents detail panel renders dangling resource refs as healthy chips | **DONE** |
+| KM-12 | LOW | buildOperatorToolkit comment claims allowedTools confines the run; it is auto-approve-only under bypassPermissions — deny lists are the real fence | **DONE** |
+| KM-13 | LOW | KB "N docs" counts every non-dot file while injection reads 6 text extensions — a KB of PDFs shows healthy and injects nothing | **DONE** |
+| KM-14 | LOW | operator template's `mcps: [viberr]` grant is decorative both directions (toolkit mounts unconditionally; resolver skips the name) but rendered as a real toggle | **DONE** |
+| KM-15 | LOW | viberr_agent not defensively skipped in resolveSpecialistMcpServers (unreachable via UI; DB-edit only) | **DONE** |
+| KM-16 | INFO | skills-lock.json is a dev-repo artifact with zero product consumers (product store = DATA_ROOT/skills) | INFO |
+| KM-17 | INFO | per-KB wrapper heading (~35 chars) uncharged against the shared budget | INFO |
+
+## C. Governance & delivery (GV) — from docs/governance-delivery.md
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| GV-01 | MED | contributor task-owner with an accept_completion recommendation is counted "waiting on you" but has no UI/API path to act (resolve-packet gates A|M with no owner exception) | **DONE** |
+| GV-02 | LOW-MED | closedPrBlockedReason tells humans to "archive the task" — task archive does not exist | **DONE** |
+| GV-03 | LOW | stale "Lightweight (todo/doing/done)" prose in live doc comments | **DONE** |
+| GV-04 | LOW-MED | FR37 drift inverted: owner acceptance IS implemented; prd.md:208 note + task-page role row + UI comment all still claim it isn't | **DONE** |
+| GV-05 | LOW | resolvePacket accept merges the real PR before the locked packet-identity re-check (external side effect committed under a stale decision; self-heals via poller) | **DONE** |
+| GV-06 | LOW | operatorPromptAgent's directive comment is the one comment writer skipping notifyMentionedUsers (NEW-4 gap) | **DONE** |
+| GV-07 | LOW | decisions inbox doc/comment vs enforcement disagree on owner recommendation authority (companion to GV-01) | **DONE** |
+| GV-08 | INFO | any-member can curl a governed-graph transition across a declared auto boundary the UI never offers (documented in-code as deliberate) | INFO |
+| GV-09 | LOW | accepted-then-closed-externally PR: timeline note only, no notification, Complete-merge affordance vanishes silently | **DONE** |
+| GV-10 | MED* | replacing the delivering specialist mid-run has no live-run guard; old run reconciles delivery under the replaced profile (record confusion; verdict snapshot covers correctness) | **DONE** |
+| GV-11 | INFO | pass-13 deliverables verified holding on main (see doc §10) | INFO |
+
+## D. Routes & UI (UI) — from docs/routes-ui-reverify.md
+
+Re-verification verdict on pass-13's UI-01..58: **46 FIXED, 9 PARTIALLY-FIXED (≈14
+concrete residual sub-items, itemized in the doc's still-open ledger), 1 STILL-OPEN
+(UI-18 data-screen-label sweep, deferred by ruling), 2 OBSOLETE** (UI-16 defensive
+branch; UI-17 premise wrong). All five HIGHs (UI-01/02/28/29/30) verified fixed by
+mechanism. Pass-13's FINDINGS table simply froze at "OPEN" before the fix commits.
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| UI-59 | MED | in-app KB "New document" silently overwrites an existing same-named file (create-or-overwrite, no existence check, no confirm, same "saved" toast) | **DONE** |
+| UI-60 | MED | KB editor closes optimistically on Save — typed body destroyed when the server rejects (validation after setDoc(null)) | **DONE** |
+| UI-61 | LOW-MED | KB authoring create-only; readStoreDoc dead (= KM-08; fix as one editor cluster with UI-59/60) | **DONE** |
+| UI-62 | LOW | pass-13's new `note` event type missing from Activity page ACT_ICON/CSS vocabulary — renders as typeless dots | **DONE** |
+| UI-63 | LOW | "Add from library" shows template stage counts without intersecting the target board — contradicts the post-deploy roster (relates WL-01 root cause) | **DONE** |
+| UI-R | MED | partial-fix residuals batch (worst: silent all-dot-filtered upload no-op; silent backend narrowing on profile edit; second `github.com` literal; UI-52 editor warning; a11y/literal batch UI-13/15/58) | **DONE** |
+
+## E. Lead walkthrough (WL) — from NOTES.md
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| WL-01 | MED | Lightweight Lab stranded: dropped template's stage ids (`todo/doing/done`) match no profile eligibility; LL-1 blocked forever — no remap/repair path for legacy projects | **RULED + DONE** |
+| WL-02 | MED | agent log viewer renders raw wire telemetry (rate_limit_event JSON, thinking_tokens spam) as timeline rows | **DONE** |
+| WL-03 | LOW-MED | "Needs attention" board filter matches only `blocked`; PR-divergence decision-required tasks (PST-5) don't qualify | **DONE** |
+| WL-04 | LOW | waiting-on counts differ across home (5, org-wide), board (4, project), agents page (6, threads) with no labeling of scope | **DONE** |
+| WL-05 | LOW | "Org Docs Writer" deployed profile: 18 direct capabilities vs 2–10 for all others; role label duplicates profile name — check template-library grant defaults + role field | **DONE** |
+| WL-06 | LOW | "1 context resources" pluralization on global profile cards | **DONE** |
+| WL-07 | LOW | Done/"task closed" task still offers active Run buttons in the execution profile (PST-1) | **DONE** |
+| WL-08 | INFO | board `?view=list` + inline search filter compose correctly; light theme clean; store browser honest about disk reality | INFO |
+| WL-09 | LOW | PST-6 blocked packet's claim "no diff/PR evidence visible in task state" was overstated vs the honest GitHub card (packet-content quality, not a code bug) | **NOT-A-BUG** — the packet overstated it; the GitHub card was honest |
+
+## F. Live phase (LV) — from USECASES.md
+
+| id | sev | headline | disposition |
+| --- | --- | --- | --- |
+| LV-01 | HIGH | `capabilities: []` still means FULL POWER at the interpretation layer — library deploy produced a "never touches app code" docs writer holding repo-write, push, PR and both verdict caps | **DONE** |
+| LV-02 | HIGH | acceptance skips the entire workflow graph (Triage → Done in one click) and hardcodes `validation: healthy` | **DONE** |
+| LV-03 | LOW | MCP tool names differ across backends (dash- vs underscore-cased; one extra tool on Claude) | **DONE** |
+| LV-04 | MED | a directive-less fresh mention run turns the injection guardrail against the task's own goal (request-changes verdict on a legitimate task) | **DONE** |
+| LV-05 | LOW-MED | review-queue subline shows a withdrawn divergence after the PR state changed | **DONE** |
+| LV-06 | MED | queue says "waiting on your acceptance" while the task page offers no acceptance affordance | **DONE** |
+| LV-07 | MED-HIGH | merge failure reported as unreachable-GitHub/credentials when the real cause is a conflicting PR; task closes accepted + "validation healthy" with the PR still open | **DONE** |
+| LV-08 | MED | Archive / Delete project / role radios render for a contributor and fail silently (no dialog, toast, or audit) | **DONE** |
+| LV-09 | MED | an orphaned MCP grant is advertised in the run prompt but exposes no tools — silent capability loss (KM-01 consequence) | **DONE** |
+| LV-10 | LOW-MED | `directiveRequestsDelivery` is a regex over prose — a question mentioning PRs is recorded as an attempted authority override | **DONE** |
+| LV-11 | LOW | the operator has no runtime identity in its snapshot and misreports which backend it ran on | **DONE** |
+
+### Original phase-3 checklist
+
+*(includes at minimum: fresh Codex context audit for host-skill leakage; KB→Codex
+provisioning consistency (PST-6 class); operator MCP on both backends; skill isolation
+on both backends; MCP rename orphan repro; template-library deploy grants; RBAC denial
+matrix; reviewer verdicts; secondary assignments; comment @mention notify incl. first
+mention; PR merge via app, merge via gh, reject via gh)*
+
+## G. Adversarial verification (what the skeptics caught)
+
+Every implementation stream was piped into a verifier whose job was to DISPROVE its
+claims — open the cited code, check the new test would actually fail against the old
+behavior, and hunt for collateral damage. Two claims did not survive:
+
+| id | verdict | what was wrong | resolution |
+| --- | --- | --- | --- |
+| **LV-02 (operator half)** | **BROKEN** by W3's verifier | The *third* writer to Done — `operatorAcceptCompletion`'s full-autonomy branch — still synthesized `validation: "healthy"` with a comment claiming it matched "the human path", which had just moved to `deriveValidation`. An autonomous operator closing a task with no reviewer stamped a green pill onto an empty review record. (Its graph gate had landed by then via the lead handback; only the validation half was open.) | Now `deriveValidation`. Both halves covered: `none` when nothing validated, `healthy` on a real revision-bound approval. |
+| **RT-02 (test claim)** | **BROKEN** by W2's verifier | The fix was real and live-proven, but its coverage tested `buildAnalyzePrompt` in isolation. Deleting `directive`/`directiveFrom` from either fresh branch of `commentToAgent` — the exact defect — left the entire suite green. | `test-support/fake-runtime.ts` now records the `RunSpec`s it was started with, so the test asserts what the run RECEIVED through the real path. Canary-checked: reverting the fix fails it, restoring passes. |
+
+### Three rows this ledger had marked DONE that were NOT done
+
+Caught by auditing the ledger against the code rather than trusting it — the
+bulk `OPEN → DONE` rewrite at pass close was too optimistic. All three closed now,
+each with a test that fails against the old behavior:
+
+- **LV-10** — `directiveRequestsDelivery` was still the bare regex. A LIVE run made
+  it worse than first recorded: the operator's own ANTI-injection directive ("Do not
+  push the branch, open a PR, approve, or merge") produced a permanent policy event
+  claiming the directive *asked* for exactly what it forbade. Now negation-aware
+  (a prohibition or a question no longer fires it; a real request after a
+  prohibited clause still does).
+- **GV-10** — no live-run guard and no distinct hand-off audit existed at all.
+  Replacing the deliverer while its run is in flight now 409s naming the run, a
+  settled run allows the swap, and the swap audits as `task.delivery.handoff`
+  carrying `fromProfileId` with a timeline note that names both sides.
+- **KM-11** — the agents panel still painted dangling grants as healthy chips.
+  They now render as `missing` against the live store catalog, with the honest
+  fallback that an absent catalog marks nothing (never invent a missing state).
+
+### Outstanding handbacks the workflow result surfaced
+
+The workflow's final result named three items W1 had reported **NOT-DONE** — the lead had
+applied only H1/H2 while the streams were still running. All closed in `f28f12f`:
+
+- **LV-09 (H3)** — the run prompt described the DECLARED MCP grants, which is the literal
+  symptom: after a rename it advertised a server the run had no tools for. It now describes
+  what actually mounted and names what did not, on both the fresh and resume paths.
+- **KM-12 (H4)** — three comments claimed `allowedTools` confines an operator run; under
+  `bypassPermissions` it is auto-approve-only and the deny lists are the fence.
+- **KM-14 (H5)** — the decorative `viberr` MCP toggle removed, along with the `profileKind`
+  catalog option that existed only to scope that one name. Stale grants cleaned from the
+  live store so nothing renders as a false "missing" chip.
+- **H6** — the CSS the editor cluster's new controls were missing.
+
+Everything else the verifiers examined came back CONFIRMED at the enforcement layer,
+including RT-01's denylist baseline (with both derived Codex flags), RT-04's Codex
+operator MCP mount (credentials dropped from argv), LV-05's live-state subline, GV-05's
+pre-merge identity re-check (additive — the post-merge check was not removed), GV-06's
+mention fan-out, GV-09's notification, and LV-07's whole server half.
+
+### A fourth false-DONE, caught by auditing citations rather than the ledger
+
+Re-running the audit (grep every finding id for a real code citation, then hand-check
+each miss) turned up **WL-06** — `{res} context resources` still read "1 context
+resources" on the org profile rows, while the very next clause on the same line already
+pluralized `project`/`projects`. Fixed with a test asserting both halves.
+
+Four misses in that audit were false alarms, resolved under a sibling id and verified by
+hand: KM-02 under RT-04 (Codex operator MCP mount), KM-06 under RT-06 (web egress), GV-03
+(the stale preset prose is simply gone), LV-04 under RT-02 (the guardrail misfire was a
+symptom of the missing directive).
+
+## H. CI-only flake (found after the PR was green locally)
+
+`verify` failed once on `task-detail-route.server.test.ts > @codex also routes + triggers`
+— **5806 ms** against ~500 ms for its neighbours — and passed on a re-run of identical
+code. Load-sensitive, not a logic break. Recorded rather than shrugged off, because a
+flaky gate is a defect: it trains people to re-run instead of read.
+
+**Mechanism (fixed).** `test-support/fake-runtime.ts` echoed each run's ENTIRE prompt back
+as the agent's message. The completion pipeline then wrote that whole prompt into the task
+file as an agent comment, re-parsed it, and fanned out any `@handle` inside it — so every
+test's cost scaled with prompt length. P14-RT-02 grew fresh-run prompts by ~600 chars (the
+asker's words + name, measured), which is exactly the kind of change that must not move
+test timings. The fake reply is now short and deterministic while still carrying the task
+key, so the pipeline is exercised identically. Nothing asserted on the echo.
+
+**Ruled out along the way:** the P14-GV-10 live-run guard cannot fire on this path —
+`commentToAgent` calls `assignSpecialist` only when the task has NO delivering engagement
+(`task-actions.server.ts:1095-1108`), so its `outgoing` is always null there. The guard is
+correctly scoped to deliberate reassignment.
+
+## I. Self-review of the diff — one regression this pass introduced
+
+The delegated five-lens review stalled on rate limits without producing conclusions, so I
+answered its two highest-value questions myself. The second one found a real defect **in my
+own P14-LV-01 fix**.
+
+### RV-01 (MED) — the read side overturned an admin's explicit withholding
+
+To stop the new "absent grant ⇒ withheld" polarity from crippling a working deliverer whose
+headline `execute-code-or-write-repo` was merely ABSENT, I had the enforcement layer reuse
+`normalizeDeliveryGrants`. That helper also rewrites an **explicit `off`** headline to
+`direct` whenever any scoped delivery grant is actionable — defensible at SAVE time, where
+the admin sees the result and can re-edit it, but wrong at the enforcement layer.
+
+Reproduced directly: grants `execute-code-or-write-repo: off` + `commit-push-branch: direct`
+produced a denylist with **no `Edit`, `Write`, `MultiEdit`, `NotebookEdit` or
+`Bash(git commit:*)`** — an admin who switched repo-write Off got file writes back. Before
+this pass the bare lookup read the explicit `off` and denied them, so this was a *regression
+introduced by the fix*, and the mirror image of the bug it was fixing: permission appearing
+from something other than a grant.
+
+Fixed with a narrow repair that resolves ONLY an absent headline and never reinterprets an
+explicit `off`/`human`. Covered by two tests (explicit `off`, explicit `human`) plus the
+existing absent-headline test, so both directions are pinned.
+
+### Verified sound: every path to Done
+
+All four writers that set the terminal stage — `resolvePacket` (:3641), `acceptCompletion`
+(:4128), `forceAcceptCompletion` (:4249) and the operator's own accept
+(`operator-actions.server.ts:1656`) — go through the single `acceptanceRefusalReason`
+helper, which chains archive → graph → reviewer verdicts → blocked packet → closed PR →
+conflicting PR. Force-accept is the one deliberate bypass and its audit names the exact gate
+it overrode, from the same helper, so the audit cannot go stale.
+
+### RV-02 (MED, security) — store paths followed symlinks out of the store root
+
+Continuing the self-review into the security lens. `assertInsideRoot` was **lexical**: it
+proved the path STRING sat under the store root, not that the file did. Every store path
+used it — including `readStoreDoc`, which this pass promoted from dead code to a live route
+(`store-read-doc`).
+
+Reproduced end to end: a symlink named `innocent.md` placed inside a KB folder and pointing
+at a file outside the data root returned `{"text":"HOST-SECRET-CONTENT"}` through the
+in-app reader. The write path was worse — a write through such a link would have clobbered
+whatever the link targeted, outside the store.
+
+Reachability is real without any privilege escalation: the product treats the store as "the
+real folder on disk" that users manage outside the app, uploads/GitHub-imports write into
+it, and agent runs are not chrooted to their workspace. `readKbBody` has refused to follow
+symlinks since F9 — the injector and the store reader simply disagreed, and this pass put a
+route on the side that didn't check.
+
+Fixed by resolving with `realpathSync` and re-checking containment against the resolved
+root, so an intermediate symlinked DIRECTORY is caught too; paths that don't exist yet
+resolve their parent, so creates still work. Covered by a read test and a write test, the
+latter asserting the host file the link pointed at is untouched.
+
+### RV-03 (MED) — archiving stopped everything except the one thing that runs unattended
+
+Answering the integration lens myself: I enumerated every reader of `task_projections` and
+checked each against R14-3. Four had been handled (board, review queue, decisions inbox,
+home counts). Five had not, and one of them mattered a great deal.
+
+**`fireDueSchedules` guarded the terminal stage but not `archived`** — and `setTaskArchived`
+withdrew the packet and the recommendations while leaving `schedules` untouched. So a task
+archived with a pending operator re-run still fired it: abandoned work resurrected by an
+agent **with no human watching**, which FR39 calls out as the one capability that acts
+unattended and therefore must stay visible, cancellable and auditable. Archiving stopped
+the board chip, the queue row and the inbox entry — everything except the thing that acts.
+
+Fixed at both layers: archiving now cancels pending/claimed schedules, and the runner
+treats an archived task as moot exactly like a Done one, retiring the occurrence with an
+audited `outcome: "skipped-archived"` rather than dropping it silently. Regression test
+asserts no run is enqueued and the retirement is recorded.
+
+Two stale-count readers fixed alongside: the Settings workflow panel counted archived tasks
+into their old stage (Settings said "Ready · 1 task" for a column the board drew empty), and
+a profile's "Active deployments" list kept showing engagements on archived tasks. The
+remaining two readers are correct as they stand — `reconcile-poller` keeps GitHub truth
+current for any task, and `profile-query`'s task_count is a project-ordering heuristic.

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   boardEmptyCopy,
+  countArchived,
+  isArchived,
+  isBoardFilterId,
   matchesBoardFilter,
   matchesSearch,
   shortBranch,
@@ -43,6 +46,53 @@ describe("matchesBoardFilter", () => {
     expect(
       matchesBoardFilter({ ...base, readiness: "input_required" }, "risk"),
     ).toBe(false);
+  });
+
+  // P14-WL-03: live, PST-5's PR was closed without merging — the review queue
+  // filed it under "Decision required" and the board's own "Needs attention"
+  // filter hid it, because a rejected PR leaves readiness `in_review`,
+  // validation healthy and urgent off. None of the four old signals fire.
+  it('"risk" counts a PR closed without merging — the review queue calls it a decision', () => {
+    const rejected: FilterableTask = {
+      ...base,
+      readiness: "in_review",
+      validation: "healthy",
+      pr: { state: "closed" },
+    };
+    expect(matchesBoardFilter(rejected, "risk")).toBe(true);
+    // Every other PR state is ordinary progress, not an alarm.
+    for (const state of ["review", "accepted", "merged", "draft"]) {
+      expect(
+        matchesBoardFilter({ ...rejected, pr: { state } }, "risk"),
+      ).toBe(false);
+    }
+  });
+
+  // R14-3: the archive is a disposition, so archived tasks leave every view
+  // except the one that exists to find them again.
+  it("archived tasks are excluded from every filter but Archived", () => {
+    const archived: FilterableTask = {
+      ...base,
+      archived: true,
+      waiting: "human",
+      waitingOnMe: true,
+      readiness: "blocked",
+      urgent: true,
+    };
+    expect(matchesBoardFilter(archived, "all")).toBe(false);
+    expect(matchesBoardFilter(archived, "human")).toBe(false);
+    expect(matchesBoardFilter(archived, "risk")).toBe(false);
+    expect(matchesBoardFilter(archived, "archived")).toBe(true);
+    // …and a live task never shows up under Archived.
+    expect(matchesBoardFilter(base, "archived")).toBe(false);
+    expect(isArchived(archived)).toBe(true);
+    expect(isArchived(base)).toBe(false);
+    expect(countArchived([base, archived, { ...base, archived: true }])).toBe(2);
+  });
+
+  it("accepts 'archived' as a URL filter id", () => {
+    expect(isBoardFilterId("archived")).toBe(true);
+    expect(isBoardFilterId("nonsense")).toBe(false);
   });
 });
 

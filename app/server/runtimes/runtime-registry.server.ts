@@ -279,7 +279,8 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   // offers — `--config` overrides merge into whatever the home declares, so a
   // host home leaks its `config.toml` MCP servers, `skills/`, `plugins/` and
   // `AGENTS.md` into every governed run. `prepareCodexHome` mirrors the login's
-  // auth.json in so subscription auth keeps working.
+  // auth.json in so subscription auth keeps working — and `selectAdapter`
+  // re-mirrors per run, because this factory runs once per process (P14-RT-05).
   const codexEnv = codexSpawnEnv(
     prepareCodexHome().home,
     env.CODEX_ACCESS_TOKEN,
@@ -325,8 +326,26 @@ export type SelectResult =
 /**
  * Selects the requested adapter when its credential is present, otherwise
  * reports that it is unavailable.
+ *
+ * P14-RT-05: the codex auth mirror is refreshed HERE, per run, not once in
+ * `createAdapters`. The adapter set is built once per process, so on any
+ * deployment where the login dir differs from the run home (every non-container
+ * dev machine) an `auth.json` that landed after boot never reached the run home
+ * — while `isBackendAvailable` (which probes the LOGIN dir, live) kept reporting
+ * codex available and the unavailable-copy promised "the next run picks it up
+ * without a restart". Runs then failed auth against an empty home. Refreshing at
+ * selection time makes that promise true, and covers a mid-process re-login on
+ * hosts where the mirror is a copy rather than a symlink. Cheap and idempotent:
+ * outside cached-login mode `prepareCodexHome` returns before touching the disk,
+ * and a live symlink is a single lstat.
  */
 export function selectAdapter(backend: RealBackend, adapters: AdapterSet): SelectResult {
-  if (isBackendAvailable(backend)) return { kind: "real", adapter: adapters[backend] };
-  return { kind: "unavailable" };
+  if (!isBackendAvailable(backend)) return { kind: "unavailable" };
+  if (backend === "codex") {
+    const { authMirrored, home } = prepareCodexHome();
+    if (authMirrored) {
+      logger.info("codex run home auth mirror refreshed", { home });
+    }
+  }
+  return { kind: "real", adapter: adapters[backend] };
 }

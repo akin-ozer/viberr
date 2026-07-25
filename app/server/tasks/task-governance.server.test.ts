@@ -760,7 +760,11 @@ describe("resolvePacket kind matrix", () => {
     expect(task.stage).toBe("done");
     expect(task.waiting).toBe("none");
     expect(task.displayReadiness).toBe("accepted");
-    expect(task.validation).toBe("healthy"); // accepted work is validated (FR24)
+    // P14-LV-02: acceptance no longer STAMPS "healthy". This task has no
+    // delivered work revision at all, so the derived state is "none" — the
+    // synthesized green chip is exactly what let a Triage task with no diff
+    // claim it had been validated.
+    expect(task.validation).toBe("none");
     // D3: no reachable GitHub merge in the test env, so the PR is recorded as
     // "accepted" (merge pending) — NEVER a false "merged".
     expect(task.pr).toMatchObject({ state: "accepted" });

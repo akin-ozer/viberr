@@ -970,7 +970,12 @@ function HomeHero({
         {/* UI-10: the copy (and the animated `.working` pulse dot) asserted
             activity even at zero — "Your agents kept working — •0 runs active".
             The zero case now reads as the quiet state it is, and the pulse dot
-            renders only when something is actually running. */}
+            renders only when something is actually running.
+
+            P14-WL-04: "N decisions waiting on you" is counted across EVERY
+            project this user belongs to, while a board header counts tasks in
+            one project and the Agents page counts engagements — three numbers,
+            three questions, near-identical copy. Each names its scope now. */}
         <p className="sub">
           {projectCount === 0 ? (
             "No projects yet — create your first project below."
@@ -983,10 +988,10 @@ function HomeHero({
                     {totalWaiting}{" "}
                     {totalWaiting === 1 ? "decision" : "decisions"}
                   </b>{" "}
-                  waiting on you.
+                  waiting on you across all your projects.
                 </>
               ) : (
-                "Nothing is waiting on you."
+                "Nothing is waiting on you in any of your projects."
               )}
             </>
           ) : (
@@ -1000,7 +1005,7 @@ function HomeHero({
               <b>
                 {totalWaiting} {totalWaiting === 1 ? "decision" : "decisions"}
               </b>{" "}
-              waiting on you.
+              waiting on you across all your projects.
             </>
           )}
         </p>

@@ -275,7 +275,7 @@ const KBS: KbView[] = [
       ] },
       { type: "file", name: "overview.md", sizeBytes: 9100, mtime: new Date().toISOString() },
     ],
-    fileCount: 2, uri: "store://kb/architecture-notes",
+    fileCount: 2, injectableCount: 2, uri: "store://kb/architecture-notes",
   },
 ];
 const MCPS: McpView[] = [
@@ -315,7 +315,7 @@ function renderResources() {
 describe("ResourcesPanel", () => {
   it("renders the four panels with store paths, health and usage lines", () => {
     const { getByText } = renderResources();
-    expect(getByText("store://kb/architecture-notes/ · 2 docs")).toBeTruthy();
+    expect(getByText("store://kb/architecture-notes/ · 2 docs agents read")).toBeTruthy();
     expect(getByText(/read live · re-scanned just now/)).toBeTruthy();
     expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
@@ -324,6 +324,26 @@ describe("ResourcesPanel", () => {
     ).toBeTruthy();
     expect(getByText(/Codex · Ready · In Progress · 2 context resources · used in 4 projects/)).toBeTruthy();
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
+  });
+
+  it("P14-WL-06: says 'resource' for one and 'resources' for several", () => {
+    // The `used in N project(s)` half of the same line always pluralized; the
+    // resource count always said "resources", so a single grant read
+    // "1 context resources".
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={[
+          { ...GAGENTS[0]!, id: "one", name: "One", skills: ["terraform-review"], mcps: [], kbs: [], used: 1 },
+          { ...GAGENTS[0]!, id: "many", name: "Many", skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 3 },
+        ]}
+        stages={STAGES}
+      />,
+    );
+    expect(getByText(/1 context resource · used in 1 project$/)).toBeTruthy();
+    expect(getByText(/2 context resources · used in 3 projects$/)).toBeTruthy();
   });
 
   it("renders a stale health check as amber (not a fresh-green 'up') with a retest hint", () => {
@@ -392,6 +412,120 @@ describe("ResourcesPanel", () => {
     expect(
       getByText(/This is the real folder on disk — files added outside Viberr/),
     ).toBeTruthy();
+  });
+
+  /* ---- honesty deltas (P14-KM-09 / KM-10 / KM-13) */
+
+  it("P14-KM-13: a KB row counts the docs a run reads and names the rest", () => {
+    const withBinaries: KbView[] = [
+      {
+        ...KBS[0]!,
+        tree: [
+          ...KBS[0]!.tree,
+          { type: "file", name: "contract.pdf", sizeBytes: 900, mtime: new Date().toISOString() },
+        ],
+        fileCount: 3,
+        injectableCount: 2,
+      },
+    ];
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={withBinaries}
+        mcps={[]}
+        skills={[]}
+        gagents={[]}
+        stages={STAGES}
+      />,
+    );
+    // The old row said "3 docs" — a KB of PDFs read as healthy and injected
+    // nothing, because only six text extensions ever reach a run.
+    expect(
+      getByText(
+        "store://kb/architecture-notes/ · 2 docs agents read · 1 non-text file skipped",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("P14-KM-09: MCP rows and the delete confirm count the templates that grant them", () => {
+    const { getByText, getByLabelText } = renderResources();
+    // KB and skill rows have counted templates since P13-KM-08; the MCP row was
+    // the one destructive path with no idea what depended on it.
+    expect(getByText(/14 tools · checked just now · auth: configured · 1 template/)).toBeTruthy();
+
+    fireEvent.click(getByLabelText("Remove github-mcp"));
+    expect(
+      getByText(/The grant is dropped from 1 agent template and from every project/),
+    ).toBeTruthy();
+  });
+
+  it("P14-KM-09: editing an MCP warns how many grants a rename will rewrite", () => {
+    const { getByText, getByLabelText } = renderResources();
+    fireEvent.click(getByLabelText("Edit github-mcp"));
+    expect(getByText(/1 agent template grants/)).toBeTruthy();
+    expect(getByText(/Renaming it rewrites their grants/)).toBeTruthy();
+  });
+
+  it("P14-KM-10: the agent modal renders orphaned grants as removable red chips", () => {
+    const orphaned: GagentView[] = [
+      {
+        ...GAGENTS[0]!,
+        skills: ["terraform-review", "deleted-craft"],
+        mcps: ["vm-memory"],
+        kbs: ["gone-kb"],
+      },
+    ];
+    const { getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={orphaned}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Developer"));
+
+    // They were preserved on every save and rendered NOWHERE, so an orphan
+    // could not be seen or removed from org settings at all.
+    const missing = [...document.querySelectorAll(".pick-chip.missing")].map(
+      (c) => c.textContent,
+    );
+    expect(missing).toEqual(["deleted-craft", "vm-memory", "gone-kb"]);
+
+    // Clicking one drops it from the grant list that gets submitted.
+    fireEvent.click(
+      [...document.querySelectorAll(".pick-chip.missing")].find(
+        (c) => c.textContent === "vm-memory",
+      )!,
+    );
+    expect(
+      [...document.querySelectorAll(".pick-chip.missing")].map((c) => c.textContent),
+    ).toEqual(["deleted-craft", "gone-kb"]);
+  });
+
+  it("P14-KM-10: dropped orphans are gone from the submitted grants", async () => {
+    const orphaned: GagentView[] = [
+      { ...GAGENTS[1]!, skills: ["deleted-craft"], mcps: [], kbs: [] },
+    ];
+    const { getByText, getByLabelText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={orphaned}
+        stages={STAGES}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Spare"));
+    fireEvent.click(
+      [...document.querySelectorAll(".pick-chip.missing")].find(
+        (c) => c.textContent === "deleted-craft",
+      )!,
+    );
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "agent-save", skills: "[]" }),
+    );
   });
 });
 

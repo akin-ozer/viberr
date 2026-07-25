@@ -232,14 +232,14 @@ describe("users & access intents", () => {
 });
 
 describe("resource + store intents", () => {
-  it("kb re-index reports the real doc count", async () => {
+  it("kb re-index reports the real INJECTABLE doc count (P14-KM-13)", async () => {
     const result = await postAction(ids.arda, {
       intent: "kb-reindex",
       kbId: "kb_seed_arch",
     });
     expect(result).toMatchObject({
       ok: true,
-      toast: "Architecture notes re-scanned — 6 docs",
+      toast: "Architecture notes re-scanned — 6 docs agents can read",
     });
   });
 

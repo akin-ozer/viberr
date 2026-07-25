@@ -19,11 +19,15 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
  *
  * Member-scoping (the fix): a decision is `mine` iff the user can actually act
  * on it — maintainer+ on that project (resolve-packet / accept-completion /
- * approve-transition all share the maintainer+ tier) OR the task's owner acting
- * within the NARROW owner exception (Q2/R6-2): an owner governs its packet and
- * its `accept_completion` recommendation, but NOT transition/assign/run
- * recommendations (maintainer-only — an owner would 403 on both apply AND
- * dismiss). A decision the user could act on ONLY through the D2 org-admin
+ * approve-transition all share the maintainer+ tier) OR the task's OWNER, who
+ * governs every decision on their own task (R14-2, 2026-07-25). The pass-12
+ * owner exception was narrower than this list — packets and `accept_completion`
+ * only — but nothing server-side honored even that for recommendations, so a
+ * contributor owner was counted "waiting on you" and then 403'd by both apply
+ * and dismiss (P14-GV-01/GV-07). `applyRecommendation`/`dismissRecommendation`/
+ * `resolvePacket` now all carry the owner exception, and dismissal is always
+ * available to the owner, so every decision counted here is really actionable.
+ * A decision the user could act on ONLY through the D2 org-admin
  * emergency override (org admin whose own project role — none, viewer, or a
  * below-tier membership — is insufficient) is `overrideEligible`, never `mine`:
  * governance reach, not a personal inbox. Viewers and contributor-non-owners
@@ -37,17 +41,6 @@ export interface DecisionRef {
   taskKey: string;
   kind: "packet" | "recommendation";
   stage: string;
-}
-
-/** Does the projected recommendation-kinds array contain an owner-actionable
- * `accept_completion`? Tolerant of a malformed/legacy value (treated as none). */
-function hasAcceptCompletionRec(recommendationKinds: string): boolean {
-  try {
-    const kinds = JSON.parse(recommendationKinds) as unknown;
-    return Array.isArray(kinds) && kinds.includes("accept_completion");
-  } catch {
-    return false;
-  }
 }
 
 export interface DecisionsForUser {
@@ -64,7 +57,6 @@ interface OpenDecisionRow {
   owner_user_id: string | null;
   has_packet: number;
   recommendation_count: number;
-  recommendation_kinds: string;
 }
 
 export function decisionsRequiring(
@@ -91,9 +83,14 @@ export function decisionsRequiring(
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id,
               (CASE WHEN packet_json IS NOT NULL AND packet_json <> '' THEN 1 ELSE 0 END) AS has_packet,
-              recommendation_count, recommendation_kinds
+              recommendation_count
          FROM task_projections
         WHERE ((packet_json IS NOT NULL AND packet_json <> '') OR recommendation_count > 0)
+          -- R14-3: archiving already withdraws the packet and the pending
+          -- recommendations, so an archived task drops out of the inbox by
+          -- itself. This covers the other way in — a task archived by editing
+          -- the file directly, which the projection picks up untouched.
+          AND archived = 0
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,
     )
     .all(...(opts.projectSlug ? [opts.projectSlug] : [])) as unknown as OpenDecisionRow[];
@@ -119,17 +116,12 @@ export function decisionsRequiring(
     // completion / approve-transition / dismiss-recommendation all share the
     // maintainer+ tier), so a maintainer+ can act on ANY open decision.
     const canGovern = roleCan(role, "resolve-packet");
-    // The task OWNER exception (Q2/R6-2) is NARROW: an owner (contributor+) can
-    // resolve its packet and accept its completion — but NOT act on transition/
-    // assign/run recommendations (those need approve-transition/run-agents, and
-    // even DISMISSING a recommendation needs resolve-packet, none with an owner
-    // exception). So an owner's decision is `mine` only when it is a packet OR an
-    // `accept_completion` recommendation; a maintainer-only recommendation on an
-    // owned task is NOT the owner's to act on (it would 403 on apply and dismiss).
-    const isOwner = row.owner_user_id === userId && roleCan(role, "own-task");
-    const ownerCanAct =
-      isOwner &&
-      (row.has_packet === 1 || hasAcceptCompletionRec(row.recommendation_kinds));
+    // The task OWNER (contributor+) governs EVERY open decision on their own
+    // task (R14-2): resolve the packet, accept the completion, apply what they
+    // hold the inner authority for, and always dismiss. The old narrow rule
+    // counted only packets and `accept_completion` recommendations — and the
+    // server honored neither, which is exactly the dead-end this widening ends.
+    const ownerCanAct = row.owner_user_id === userId && roleCan(role, "own-task");
 
     if (canGovern || ownerCanAct) {
       mine.push(ref);

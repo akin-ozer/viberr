@@ -31,10 +31,20 @@ describe("capability catalog", () => {
 });
 
 describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
-  it("classifies specialist tool-denylist caps as claude-only", () => {
-    for (const id of ["create-task-branch", "commit-push-branch", "open-review-pr", "execute-code-or-write-repo"]) {
+  it("classifies the FINE-GRAINED tool-denylist caps as claude-only", () => {
+    for (const id of ["create-task-branch", "commit-push-branch", "open-review-pr"]) {
       expect(capabilityEnforcement(id), id).toBe("claude-only");
     }
+  });
+
+  it("classifies the headline repo-write cap as BOTH — the Codex sandbox enforces it (P14-RT-03)", () => {
+    // Since P13-RT-02 a Codex run with repo-write withheld gets the read-only
+    // sandbox, which is OS-level enforcement. Leaving it labeled claude-only
+    // made the capability matrix understate the product's own guarantee.
+    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("both");
+    expect(
+      CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("execute-code-or-write-repo"),
+    ).toBe(false);
   });
 
   it("classifies structural ALWAYS_HUMAN caps as BOTH — never advisory-on-Codex", () => {
@@ -57,6 +67,16 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
   });
 
+  it("classifies web egress as BOTH — the Codex webSearchMode channel enforces it (P14-RT-06)", () => {
+    // It used to be labeled claude-only on the strength of a "prompt-level on
+    // Codex" fallback that never existed in any prompt. Codex now disables web
+    // search for a withheld grant, so both backends remove the built-in tool.
+    expect(capabilityEnforcement("use-web-search-fetch")).toBe("both");
+    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("use-web-search-fetch")).toBe(
+      false,
+    );
+  });
+
   it("classifies generic-agent collaboration gates by their real transport", () => {
     // verdict + ask-human gate server-side at completion → both backends;
     // the mid-run comment tool is Claude-only (Codex has no comment channel).
@@ -65,16 +85,19 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("comment-on-task")).toBe("claude-only");
   });
 
-  it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 4 tool-denylist rows", () => {
+  it("the matrix badge (capabilityByLabel → enforcement) is claude-only ONLY for the 3 fine-grained delivery rows", () => {
     // What the CapabilityMatrixModal actually does: label → id → enforcement.
-    const claudeOnlyLabels = ["Create the task-key branch", "Commit & push to the branch", "Open the review pull request", "Execute code or write to the repo"];
+    const claudeOnlyLabels = ["Create the task-key branch", "Commit & push to the branch", "Open the review pull request"];
     for (const label of claudeOnlyLabels) {
       const id = capabilityByLabel(label)?.id;
       expect(id, label).toBeTruthy();
       expect(capabilityEnforcement(id!), label).toBe("claude-only");
     }
-    // Merge a pull request must NOT get the claude-only badge.
+    // Merge a pull request and the headline repo-write must NOT get the badge.
     expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
+    expect(
+      capabilityEnforcement(capabilityByLabel("Execute code or write to the repo")!.id),
+    ).toBe("both");
   });
 });
 

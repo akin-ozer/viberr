@@ -1,0 +1,636 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
+import type {
+  Engagement,
+  TaskPacket,
+  WorkRevision,
+} from "~/schemas/task-file.schema";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { getTaskDetail } from "~/server/projections/task-query.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  applyRecommendation,
+  dismissRecommendation,
+  forceAcceptCompletion,
+  resolveAcceptanceAffordance,
+  resolvePacket,
+  setTaskArchived,
+  transitionStage,
+} from "./task-actions.server";
+
+/**
+ * Pass-14 acceptance contract (P14-LV-02 / LV-06 / LV-07, R14-2, R14-3).
+ *
+ * The live phase proved acceptance was a side door around the whole product:
+ * a task at TRIAGE — no branch, no PR, no reviewer, no verdict — carried an
+ * operator "Accept completion" recommendation, and one click moved it to Done,
+ * marked it accepted and stamped `validation: healthy`. These tests hold the
+ * boundary shut: acceptance is only legal FROM the review boundary, the
+ * validation cache is derived rather than synthesized, a merge GitHub refuses
+ * refuses the acceptance, and the owner/archive rulings behave.
+ */
+
+const ctx = createTestDbContext();
+afterEach(() => {
+  vi.restoreAllMocks();
+  ctx.cleanup();
+});
+
+function actor(user: { id: string; email: string }) {
+  return { userId: user.id, label: user.email };
+}
+
+const ACCEPT_PACKET: TaskPacket = {
+  id: "pkt_accept_1",
+  type: "input",
+  kind: "Completion report",
+  from: "operator",
+  title: "Accept completion, or send back for one fix?",
+  body: "Body.",
+  observations: [],
+  options: [
+    { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
+    { kind: "request_edit", t: "Request one edit", d: "", rec: false },
+  ],
+};
+
+const REVIEWER: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+
+function revision(): WorkRevision {
+  return {
+    id: "rev_1",
+    headSha: "a".repeat(40),
+    treeSha: "t".repeat(40),
+    branch: "vib-1-work",
+    createdAt: "2026-07-25T09:00:00.000Z",
+    sourceProfileId: "dev",
+  };
+}
+
+function approval() {
+  return {
+    profileId: "reviewer",
+    revisionId: "rev_1",
+    headSha: "a".repeat(40),
+    result: "approve" as const,
+    reason: "looks right",
+    at: "2026-07-25T09:30:00.000Z",
+  };
+}
+
+function prepared(): TestStore {
+  const store = setupTestStore(ctx);
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+  return store;
+}
+
+function seed(
+  store: TestStore,
+  patch: Parameters<typeof baseTaskFrontmatter>[1] = {},
+  packet: TaskPacket | null = null,
+): void {
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", patch),
+    packet,
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+function taskFile(store: TestStore) {
+  return readTaskFile({
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    dataRoot: store.dataRoot,
+  })!;
+}
+
+describe("P14-LV-02: acceptance respects the workflow graph", () => {
+  it("refuses to accept a TRIAGE task through the operator's recommendation (the live defect)", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "triage",
+      waiting: "human",
+      recommendations: [
+        {
+          id: "r-accept",
+          kind: "accept_completion",
+          toStageId: "done",
+          label: "Accept completion — move VIB-1 to Done",
+          detail: "",
+        },
+      ],
+    });
+    await expect(
+      applyRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-accept" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("triage"); // never moved
+    expect(fm.validation).toBe("none"); // never stamped healthy
+    // The refusal names where the task is and where acceptance lives.
+    await expect(
+      applyRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-accept" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ message: expect.stringContaining("Review") });
+  });
+
+  it("refuses a manual board move from Triage straight to Done", async () => {
+    const store = prepared();
+    seed(store, { stage: "triage" });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("triage");
+  });
+
+  it("accepts from the REVIEW stage — the boundary the workflow declares", async () => {
+    const store = prepared();
+    seed(store, { stage: "review", waiting: "human" });
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("done");
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    expect(detail?.timeline[0]).toMatchObject({ type: "completion" });
+  });
+
+  it("derives 'none' for accepted work nothing was ever delivered for", async () => {
+    const store = prepared();
+    seed(store, { stage: "review", waiting: "human" });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The old code stamped "healthy" here, which is how a task with no diff at
+    // all wore a green validation chip on the board.
+    expect(taskFile(store).parsed.frontmatter.validation).toBe("none");
+  });
+
+  it("derives 'healthy' when every required reviewer really approved the revision", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      engagements: [REVIEWER],
+      workRevision: revision(),
+      verdicts: [approval()],
+      validation: "healthy",
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).parsed.frontmatter.validation).toBe("healthy");
+  });
+
+  it("an admin can still force-accept off-boundary, and the audit names the graph gate", async () => {
+    const store = prepared();
+    seed(store, { stage: "triage" });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
+    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(forced).toHaveLength(1);
+    expect(String(forced[0]!.details?.bypassed)).toContain("Triage");
+  });
+
+  it("the same gate holds on the packet path", async () => {
+    const store = prepared();
+    seed(store, { stage: "impl", waiting: "human" }, ACCEPT_PACKET);
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    // The packet survives the refusal — the decision is still open.
+    expect(taskFile(store).parsed.packet).not.toBeNull();
+  });
+});
+
+describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
+  it("blocks acceptance on a PR the cache knows conflicts, naming the real cause", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR", mergeable: "conflicting" },
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("conflicts with the base branch"),
+    });
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("review");
+    expect(fm.pr?.state).toBe("review"); // NOT flipped to "accepted"
+  });
+
+  it("refuses when GitHub reports the conflict only at merge time", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR" },
+    });
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    vi.spyOn(reconciler, "mergeTaskPr").mockResolvedValue({
+      status: "not_mergeable",
+      prNumber: 103,
+      message: "PR #103 conflicts with `main` — rebase the branch, then merge.",
+      mergeable: "conflicting",
+    });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("conflicts with the base branch"),
+    });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("review");
+  });
+
+  it("an admin CAN force past a conflict, and the timeline says what is really pending", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR", mergeable: "conflicting" },
+    });
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    vi.spyOn(reconciler, "mergeTaskPr").mockResolvedValue({
+      status: "not_mergeable",
+      prNumber: 103,
+      message: "PR #103 conflicts with `main` — rebase the branch, then merge.",
+      mergeable: "conflicting",
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const file = taskFile(store);
+    expect(file.parsed.frontmatter.stage).toBe("done");
+    expect(file.parsed.frontmatter.pr?.state).toBe("accepted");
+    // The forced acceptance does not inherit the "so it can't be accepted"
+    // refusal copy — it states what is still pending.
+    expect(file.parsed.timeline[0]!.text).toContain("accepted, merge pending");
+    expect(file.parsed.timeline[0]!.text).toContain("conflicts with the base branch");
+    expect(file.parsed.timeline[0]!.text).not.toContain("credentials are set");
+    expect(
+      String(
+        listAuditEvents(store.db, { action: "task.acceptance.forced" })[0]!.details
+          ?.bypassed,
+      ),
+    ).toContain("conflicts");
+  });
+
+  it("an unreachable merge still accepts, but names the honest cause", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR" },
+    });
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    vi.spyOn(reconciler, "mergeTaskPr").mockResolvedValue({
+      status: "scope_violation",
+      prNumber: 103,
+      scope: "pull_request:write",
+      violationId: "v1",
+      message: "refused",
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const file = taskFile(store);
+    expect(file.parsed.frontmatter.pr?.state).toBe("accepted");
+    // NOT the old catch-all "no reachable GitHub merge … credentials are set".
+    expect(file.parsed.timeline[0]!.text).toContain("pull_request:write");
+  });
+});
+
+describe("P14-GV-05: no external merge under a stale decision", () => {
+  it("re-checks the packet identity BEFORE the merge call", async () => {
+    const store = prepared();
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        pr: { number: 103, state: "review", title: "PR" },
+      },
+      ACCEPT_PACKET,
+    );
+    const reconciler = await import("~/server/github/github-reconciler.server");
+    const merge = vi
+      .spyOn(reconciler, "mergeTaskPr")
+      .mockResolvedValue({ status: "merged", prNumber: 103, sha: "deadbeef" });
+
+    // Resolve the packet, and let a REPLACEMENT packet land while the
+    // resolution is still in flight (the module import is a real await point).
+    const pending = resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        branch: "vib-1-work",
+        pr: { number: 103, state: "review", title: "PR" },
+      }),
+      packet: { ...ACCEPT_PACKET, id: "pkt_replacement", title: "Something else came up" },
+    });
+
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+    // The PR was NOT merged under the superseded decision.
+    expect(merge).not.toHaveBeenCalled();
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("review");
+    expect(fm.pr?.state).toBe("review");
+  });
+});
+
+describe("R14-2: a task owner governs the decisions on their own task", () => {
+  function ownedRec(store: TestStore, kind: "transition" | "accept_completion") {
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      ownerUserId: store.users.selin.id, // contributor
+      recommendations: [
+        { id: "r1", kind, toStageId: "done", label: "Move VIB-1 to Done", detail: "" },
+      ],
+    });
+  }
+
+  it("the contributor OWNER may dismiss any recommendation on their task", async () => {
+    const store = prepared();
+    ownedRec(store, "transition");
+    const { label } = await dismissRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(label).toBe("Move VIB-1 to Done");
+    expect(taskFile(store).parsed.frontmatter.recommendations).toHaveLength(0);
+  });
+
+  it("the contributor OWNER may apply an accept_completion recommendation", async () => {
+    const store = prepared();
+    ownedRec(store, "accept_completion");
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
+  });
+
+  it("a contributor who does NOT own the task is still refused (403, no existence leak)", async () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      ownerUserId: null,
+      recommendations: [
+        { id: "r1", kind: "transition", toStageId: "done", label: "Move", detail: "" },
+      ],
+    });
+    await expect(
+      dismissRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    // An unauthorized caller gets 403 for a task that does not exist either —
+    // the guard still runs before anything reveals existence (F20).
+    await expect(
+      applyRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-404", recId: "r1" },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("R14-3: the task archive", () => {
+  it("archives with a note, withdraws the open decision, and is restorable", async () => {
+    const store = prepared();
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        recommendations: [
+          { id: "r1", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+        ],
+      },
+      ACCEPT_PACKET,
+    );
+    const archived = await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
+      actor(store.users.murat), // maintainer
+      { dataRoot: store.dataRoot },
+    );
+    expect(archived.archived).toBe(true);
+    const file = taskFile(store);
+    expect(file.parsed.frontmatter.archived).toBe(true);
+    expect(file.parsed.frontmatter.waiting).toBe("none");
+    expect(file.parsed.frontmatter.recommendations).toHaveLength(0);
+    expect(file.parsed.packet).toBeNull();
+    // The whole record survives, with the disposition on top of it.
+    expect(file.parsed.timeline[0]).toMatchObject({ type: "note" });
+    expect(file.parsed.timeline[0]!.text).toContain("was archived");
+    expect(file.parsed.timeline[0]!.text).toContain("withdrawn");
+    expect(listAuditEvents(store.db, { action: "task.archived" })).toHaveLength(1);
+    // Stage is untouched — archiving is not a transition.
+    expect(file.parsed.frontmatter.stage).toBe("review");
+
+    const restored = await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(restored.archived).toBe(false);
+    const back = taskFile(store).parsed.frontmatter;
+    expect(back.archived).toBe(false);
+    expect(back.waiting).toBe("human");
+    expect(listAuditEvents(store.db, { action: "task.unarchived" })).toHaveLength(1);
+  });
+
+  it("is maintainer+ (a contributor — even the owner — cannot archive)", async () => {
+    const store = prepared();
+    seed(store, { stage: "review", ownerUserId: store.users.selin.id });
+    await expect(
+      setTaskArchived(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("is idempotent — re-archiving writes no second note or audit row", async () => {
+    const store = prepared();
+    seed(store, { stage: "review", archived: true });
+    const events = taskFile(store).parsed.timeline.length;
+    const result = await setTaskArchived(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.toast).toContain("already archived");
+    expect(taskFile(store).parsed.timeline).toHaveLength(events);
+    expect(listAuditEvents(store.db, { action: "task.archived" })).toHaveLength(0);
+  });
+
+  it("an archived task cannot be accepted — restore it first (GV-02 copy is now true)", async () => {
+    const store = prepared();
+    seed(store, { stage: "review", waiting: "none", archived: true });
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("archived"),
+    });
+  });
+});
+
+describe("P14-LV-06: the acceptance affordance the queue promises", () => {
+  it("is true for a maintainer and for the owner at the boundary — with no recommendation in sight", () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      ownerUserId: store.users.selin.id,
+    });
+    const forOwner = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.selin.id },
+      { dataRoot: store.dataRoot },
+    );
+    expect(forOwner).toMatchObject({
+      hasAuthority: true,
+      atBoundary: true,
+      blockedReason: null,
+      canAccept: true,
+    });
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.murat.id },
+        { dataRoot: store.dataRoot },
+      ).canAccept,
+    ).toBe(true);
+    // A viewer never holds acceptance.
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.elif.id },
+        { dataRoot: store.dataRoot },
+      ),
+    ).toMatchObject({ hasAuthority: false, canAccept: false });
+  });
+
+  it("reports the exact blocker instead of an affordance that would 409", () => {
+    const store = prepared();
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      branch: "vib-1-work",
+      pr: { number: 103, state: "review", title: "PR", mergeable: "conflicting" },
+    });
+    const conflicted = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    );
+    expect(conflicted.canAccept).toBe(false);
+    expect(conflicted.atBoundary).toBe(true);
+    expect(conflicted.blockedReason).toContain("conflicts with the base branch");
+
+    // Off-boundary: authority intact, but this is not where acceptance happens.
+    seed(store, { stage: "triage" });
+    const offBoundary = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    );
+    expect(offBoundary).toMatchObject({
+      hasAuthority: true,
+      atBoundary: false,
+      canAccept: false,
+    });
+  });
+});

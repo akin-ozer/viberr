@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { KB_INJECTION_BUDGET, readKbBody } from "./kb-injection.server";
+import {
+  KB_INJECTION_BUDGET,
+  isInjectableKbDoc,
+  readKbBody,
+} from "./kb-injection.server";
 
 function freshKb(dir = "notes"): { dataRoot: string; kbDir: string } {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
@@ -85,5 +89,40 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
 
   it("exposes a sane default budget", () => {
     expect(KB_INJECTION_BUDGET).toBe(24_000);
+  });
+
+  it("P14-KM-05: a KB that fits NOTHING still says so instead of vanishing", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(500), "utf8");
+    writeFileSync(path.join(kbDir, "b.md"), "B".repeat(500), "utf8");
+    // The shared 24k budget is spent by the KBs ahead of this one, so the
+    // caller passes what's left. The old `parts.length > 0` guard suppressed
+    // both the marker AND the warn in exactly this branch, so the KB was
+    // dropped with zero signal anywhere.
+    const body = readKbBody("notes", dataRoot, 5);
+    expect(body).toContain("omitted entirely");
+    expect(body).toContain("2 docs dropped");
+    expect(body).not.toContain("AAAA");
+  });
+
+  it("an exhausted budget (0 chars left) is reported, not silently skipped", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(50), "utf8");
+    expect(readKbBody("notes", dataRoot, 0)).toContain("omitted entirely");
+  });
+
+  it("a KB whose docs are all EMPTY injects nothing and claims no budget drop", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "blank.md"), "   \n\n", "utf8");
+    expect(readKbBody("notes", dataRoot)).toBe("");
+  });
+
+  it("isInjectableKbDoc is the predicate the org doc count shares", () => {
+    for (const name of ["a.md", "b.MDX", "c.txt", "d.rst"]) {
+      expect(isInjectableKbDoc(name)).toBe(true);
+    }
+    for (const name of ["contract.pdf", "diagram.png", "data.json", ".hidden.md"]) {
+      expect(isInjectableKbDoc(name)).toBe(false);
+    }
   });
 });

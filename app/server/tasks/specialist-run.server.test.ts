@@ -18,7 +18,15 @@ import {
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { getRun, listRunLines } from "~/server/runtimes/run-store.server";
+import type {
+  RunCallbacks,
+  RunHandle,
+  RunSpec,
+  RuntimeAdapter,
+} from "~/server/runtimes/adapter.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import {
@@ -275,6 +283,64 @@ describe("engagement uniqueness (adversarial-review)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
+
+  // P14-GV-10: replacing the deliverer used to be silent — the outgoing agent's
+  // run kept going and still reconciled delivery under its own profile while the
+  // task file already named someone else, so "who owned this revision" read
+  // wrong afterwards.
+  it("P14-GV-10: refuses to replace the deliverer while its run is in flight", async () => {
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    // A primary run in flight for the CURRENT deliverer.
+    upsertRun(store.db, {
+      id: "run_live",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_live",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "dev",
+      state: "running",
+    });
+    await expect(
+      assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+    ).rejects.toMatchObject({ status: 409 });
+    // The task still names the original deliverer — no half-applied swap.
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(deliveringEngagement(fm)?.profileId).toBe("dev");
+  });
+
+  it("P14-GV-10: a settled run allows the swap, and the handoff is its own audited fact", async () => {
+    deploySecond("style");
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_done",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_done",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(deliveringEngagement(file.parsed.frontmatter)?.profileId).toBe("style");
+    // The timeline says a handoff happened, naming both sides…
+    expect(file.parsed.timeline[0]!.text).toContain("handed off");
+    expect(file.parsed.timeline[0]!.text).toContain("dev");
+    // …and the audit is `task.delivery.handoff`, not a plain first assignment.
+    const handoffs = listAuditEvents(store.db, { action: "task.delivery.handoff" });
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]?.details).toMatchObject({ profileId: "style", fromProfileId: "dev" });
+  });
 
   it("promoting a SUPPORTING profile to deliverer never duplicates its profileId", async () => {
     deploySecond("style");
@@ -680,6 +746,145 @@ describe("startReviewerRun", () => {
   });
 });
 
+describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a resumed one", () => {
+  /** Every RunSpec the adapters were handed, newest last. */
+  const specs: RunSpec[] = [];
+
+  function recordingAdapter(backend: RealBackend): RuntimeAdapter {
+    return {
+      backend,
+      start(spec: RunSpec, callbacks: RunCallbacks): RunHandle {
+        specs.push(spec);
+        let stopped = false;
+        queueMicrotask(() => {
+          if (stopped) return;
+          stopped = true;
+          callbacks.onExit({
+            outcome: "finished",
+            effectiveBackend: spec.backend,
+            sessionId: `fake-${spec.runId}`,
+          });
+        });
+        return {
+          runId: spec.runId,
+          interrupt() {
+            stopped = true;
+          },
+        };
+      },
+    };
+  }
+
+  /** Drop every deployment from project.md — the profile a task is still
+   *  engaged with vanishes (undeployed / deleted between engage and run). */
+  function undeployAll(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, agents: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  beforeEach(async () => {
+    specs.length = 0;
+    const { configureRunServiceForTests } = await import(
+      "~/server/runtimes/run-service.server"
+    );
+    configureRunServiceForTests({
+      claude: recordingAdapter("claude"),
+      codex: recordingAdapter("codex"),
+    });
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+  });
+
+  // Undeploying a profile used to ESCALATE its next fresh run: the snapshot
+  // fallback left `disallowedTools` empty, so nothing was denied on Claude and
+  // `repoWriteWithheld` stayed false — which on Codex means danger-full-access.
+  // Meanwhile `resolveResumeConfinement` locked the SAME vanished profile down.
+  it("denies the whole delivery set and marks repo-write withheld", async () => {
+    undeployAll();
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    const { resolveUndeployedDisallowedTools } = await import(
+      "./specialist-tool-policy"
+    );
+    expect(new Set(spec.disallowedTools)).toEqual(
+      new Set(resolveUndeployedDisallowedTools()),
+    );
+    // The Codex sandbox + the web-egress channel both derive from that denylist.
+    expect(spec.repoWriteWithheld).toBe(true);
+    expect(spec.webSearchWithheld).toBe(true);
+  });
+
+  it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
+    undeployAll();
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = specs.at(-1)!.prompt;
+    expect(prompt).not.toContain("git checkout -B");
+    expect(prompt).not.toContain("Commit your work locally");
+  });
+
+  it("a run of a LIVE deployment still follows its own grants", async () => {
+    // A GRANTED profile is the control: the withheld fallback must not leak
+    // onto a profile that resolves, or every deliverer would lose its tools.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "direct" },
+            { capabilityId: "create-task-branch", mode: "direct" },
+            { capabilityId: "commit-push-branch", mode: "direct" },
+            { capabilityId: "use-web-search-fetch", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        } as never,
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const spec = specs.at(-1)!;
+    expect(spec.disallowedTools ?? []).not.toContain("Write");
+    expect(spec.disallowedTools ?? []).not.toContain("WebFetch");
+    expect(spec.repoWriteWithheld).toBeUndefined();
+    expect(spec.webSearchWithheld).toBeUndefined();
+  });
+});
+
 describe("buildAnalyzePrompt — server-side delivery contract (both backends)", () => {
   const base = {
     role: "Implementation",
@@ -780,6 +985,85 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     }
   });
 
+  // P14-RT-02 / LV-04: a FIRST-EVER @mention starts a fresh run, so this prompt
+  // — not `specialistReplyDirective` — is what the agent receives. Without the
+  // asker's words the run read the TASK GOAL as its instruction and posted a
+  // request-changes verdict calling the goal a prompt-injection attempt; without
+  // the asker's NAME the reply tagged nobody, so nobody was notified (NEW-4).
+  it("P14-RT-02: names the human who asked and tells the agent to tag them back", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      directive: "does the health endpoint still return 200 on a cold start?",
+      directiveFrom: "Arda Kaya",
+    });
+    expect(prompt).toContain(
+      'A human (Arda Kaya) asked you: "does the health endpoint still return 200 on a cold start?"',
+    );
+    expect(prompt).toContain('tagging them — "@Arda Kaya"');
+    // The directive framing still outranks nothing it shouldn't (F10-31).
+    expect(prompt).toContain("NOT an authority grant");
+  });
+
+  // P14-LV-09: the run prompt must describe what MOUNTED, and name what did not.
+  // Live, renaming an org MCP orphaned every grant to it; the next run still
+  // announced the old name and found zero tools under it, and only the agent's
+  // own diligence surfaced the gap.
+  it("P14-LV-09: names an unresolvable MCP grant instead of advertising it", () => {
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http"],
+      unresolvedMcps: ["vm-memory"],
+    });
+    // What mounted is offered…
+    expect(persona).toContain("everything-http");
+    // …and what didn't is named as unavailable, not silently dropped.
+    expect(persona).toContain("Unavailable MCP servers");
+    expect(persona).toContain("vm-memory");
+    expect(persona).toContain("NOT mounted on this run");
+  });
+
+  it("P14-LV-09b: a MOUNTED but known-down server is flagged as possibly unavailable", () => {
+    // Live: `broken-mcp` IS in the registry, so it resolved to a config and was
+    // announced as attached — and exposed no callable tools. Mounting stays
+    // right (a probe can be stale); claiming it works does not.
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http", "broken-mcp"],
+      unhealthyMcps: ["broken-mcp"],
+    });
+    expect(persona).toContain("MCP servers that may be unavailable");
+    expect(persona).toContain("broken-mcp");
+    expect(persona).toContain("last connection check failed");
+    // A down server is NOT the same claim as one that reached no server at all.
+    expect(persona).not.toContain("Unavailable MCP servers");
+  });
+
+  it("P14-LV-09: says nothing about unavailable servers when every grant resolved", () => {
+    const persona = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["everything-http"],
+      unresolvedMcps: [],
+      unhealthyMcps: [],
+    });
+    expect(persona).not.toContain("Unavailable MCP servers");
+    expect(persona).not.toContain("may be unavailable");
+  });
+
+  it("an operator hand-off (no human author) keeps the impersonal framing", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      directive: "implement the parser",
+    });
+    expect(prompt).toContain('You were asked: "implement the parser"');
+    expect(prompt).not.toContain("A human (");
+  });
+
   it("P11-33: a repo-less task is not told to analyze/clone a repository", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
@@ -807,6 +1091,37 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
     expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
     expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+  });
+
+  // P14-LV-10: the event this drives says "the operator directive ASKED the
+  // specialist to push or open/merge a pull request", and it is permanent
+  // timeline. A prohibition is the opposite of a request — live, the operator's
+  // own ANTI-injection directive ("Do not push the branch, open a PR, approve,
+  // or merge") produced an event accusing it of demanding exactly that.
+  it("P14-LV-10: does not flag a PROHIBITION against delivering", () => {
+    expect(
+      directiveRequestsDelivery(
+        "Do not push the branch, open a PR, approve, or merge — Viberr handles delivery.",
+      ),
+    ).toBe(false);
+    expect(directiveRequestsDelivery("don't open a pull request yourself")).toBe(false);
+    expect(directiveRequestsDelivery("never merge the pull request")).toBe(false);
+    expect(
+      directiveRequestsDelivery("commit locally, without pushing the branch"),
+    ).toBe(false);
+  });
+
+  it("P14-LV-10: does not flag a QUESTION about delivery", () => {
+    expect(
+      directiveRequestsDelivery("Does your prompt tell you to open a pull request?"),
+    ).toBe(false);
+  });
+
+  it("P14-LV-10: a real request after a prohibited clause still flags", () => {
+    // A clause boundary ends the negation's scope — this one genuinely asks.
+    expect(
+      directiveRequestsDelivery("Do not touch the tests. Then push the branch."),
+    ).toBe(true);
   });
 });
 

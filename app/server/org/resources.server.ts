@@ -30,6 +30,7 @@ import {
   skillDirPath,
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
+import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
@@ -158,6 +159,13 @@ export interface KbView {
   lastIndexedAt: string | null;
   tree: StoreNode[];
   fileCount: number;
+  /**
+   * Files a run would actually read (P14-KM-13). `fileCount` is every file in
+   * the folder, which is the honest number for "delete removes N files" but a
+   * lie when read as "N docs the agent has" — a KB of PDFs counted healthy and
+   * injected nothing. Both numbers ship so the row can say which is which.
+   */
+  injectableCount: number;
   /** "store://kb/<dir>" (no trailing slash — mock root prop contract). */
   uri: string;
 }
@@ -188,8 +196,23 @@ function buildKb(
     lastIndexedAt: row ? row.last_indexed_at : null,
     tree,
     fileCount: countKbFiles(tree),
+    injectableCount: countInjectableDocs(tree),
     uri: `store://kb/${dir}`,
   };
+}
+
+/** Recursive count of the files `readKbBody` would inject (P14-KM-13). */
+function countInjectableDocs(nodes: StoreNode[]): number {
+  return nodes.reduce(
+    (sum, node) =>
+      sum +
+      (node.type === "dir"
+        ? countInjectableDocs(node.children)
+        : isInjectableKbDoc(node.name)
+          ? 1
+          : 0),
+    0,
+  );
 }
 
 const KB_SQL = `SELECT id, name, dir, refresh, last_indexed_at
@@ -376,11 +399,19 @@ export function reindexKnowledgeBase(
     actor,
     subjectKind: "org_kb",
     subjectId: existing?.id ?? kb.dir,
-    details: { docCount: kb.fileCount },
+    details: { docCount: kb.injectableCount, files: kb.fileCount },
   });
+  // P14-KM-13: "N docs" used to be every file in the folder, so re-scanning a
+  // KB of PDFs cheerfully reported docs no run can read. Count what injects, and
+  // name the rest rather than folding it in.
+  const skipped = kb.fileCount - kb.injectableCount;
   return {
-    docCount: kb.fileCount,
-    toast: `${kb.name} re-scanned — ${kb.fileCount} docs`,
+    docCount: kb.injectableCount,
+    toast:
+      `${kb.name} re-scanned — ${kb.injectableCount} doc${kb.injectableCount === 1 ? "" : "s"} agents can read` +
+      (skipped > 0
+        ? ` · ${skipped} non-text file${skipped === 1 ? "" : "s"} skipped`
+        : ""),
   };
 }
 
@@ -424,7 +455,9 @@ export function reindexKnowledgeBaseByDir(
     `UPDATE org_knowledge_bases SET last_indexed_at = ?, updated_at = ? WHERE id = ?`,
   ).run(now, now, row.id);
   const tree = scanStoreTree(abs);
-  return { name: row.name, docCount: countKbFiles(tree) };
+  // P14-KM-13: the watcher's log line reports the same number the row does —
+  // docs a run can actually read, not every file that landed in the folder.
+  return { name: row.name, docCount: countInjectableDocs(tree) };
 }
 
 // ------------------------------------------------------------ MCP servers
@@ -580,6 +613,25 @@ export type StdioDiscovery =
   | { kind: "down"; reason: string };
 
 /**
+ * Split a stdio MCP command line into argv, keeping quoted segments whole.
+ *
+ * P13-KM-17 made the RUN side quote-aware and left the probe splitting on
+ * whitespace, so a command with a quoted path or a JSON argument connected
+ * perfectly inside a run while Settings reported it "unreachable" — the exact
+ * health-vs-runtime divergence P13-KM-05 fixed for credentials (P14-KM-04).
+ * One parser, used by discovery here and by `resolveSpecialistMcpServers`.
+ */
+export function splitMcpCommand(target: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(target.trim())) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3] ?? "");
+  }
+  return out.filter(Boolean);
+}
+
+/**
  * Best-effort stdio MCP tool-count discovery: spawn the command and run a
  * minimal JSON-RPC `initialize` → `notifications/initialized` → `tools/list`
  * handshake over newline-delimited stdio, returning the tool count. Never
@@ -591,7 +643,7 @@ export async function discoverStdioMcpTools(
   command: string,
   options: { spawnImpl?: McpSpawn; timeoutMs?: number; token?: string | null } = {},
 ): Promise<StdioDiscovery> {
-  const parts = command.trim().split(/\s+/).filter(Boolean);
+  const parts = splitMcpCommand(command);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
   const timeoutMs = options.timeoutMs ?? 5000;
@@ -889,6 +941,7 @@ export async function saveMcpServer(
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
+  ctx: OrgSeedContext = {},
 ): Promise<{ mcp: McpView; toast: string }> {
   const name = slugify(input.name);
   const target = input.target.trim();
@@ -969,12 +1022,21 @@ export async function saveMcpServer(
            tools_count = ?, up = ?, last_checked_at = ?, updated_at = ?
        WHERE id = ?`,
     ).run(name, transport, target, cred, tools, up, checkedAt, now, id);
+    // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
+    // leg that never rewrote it — KB and skill renames did, every delete dropped
+    // its grants, but renaming a server left each profile pointing at a name the
+    // registry no longer held. Live-proven: `vm-memory` → `vm-graph-memory` left
+    // both scout profiles orphaned, and the next run advertised the server in
+    // its prompt while exposing zero tools (LV-09).
+    if (existing.name !== name) {
+      await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
+    }
     recordAudit(db, {
       action: "org.mcp.updated",
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: { name, transport },
+      details: { name, transport, renamed: existing.name !== name },
     });
   } else {
     id = newId("mcp");

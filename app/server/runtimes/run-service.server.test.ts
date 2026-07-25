@@ -414,6 +414,45 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     }
   });
 
+  // P14-RT-11: the response view matched `RunView.id === run.thread_id`, but a
+  // group's id is its REPRESENTATIVE's thread id — so interrupting any older run
+  // of a resumed agent fell through to `projectRunsForTask(...)[0]!` and
+  // returned an unrelated group's view (and threw outright on an empty one).
+  it("returns THIS run's group, not the first group, for a non-representative run", async () => {
+    // Group 1: the operator. It is created first, so it is `[0]` — what the
+    // broken fallback returned for everything.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "op-1", role: "Operator",
+      kind: "operator", backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    // Group 2: one agent, two runs — the newer one is the representative.
+    const older = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary-a", role: "R",
+      kind: "primary", backend: "claude", model: "m", agentProfileId: "dev",
+      prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    const newer = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary-b", role: "R",
+      kind: "primary", backend: "claude", model: "m", agentProfileId: "dev",
+      prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const result = interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: older.runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    expect(result.outcome).toBe("already-terminal");
+    expect(result.run).not.toBeNull();
+    expect(result.run!.kind).toBe("primary");
+    expect(result.run!.profileId).toBe("dev");
+    // The group's identity is its representative — the NEWEST run of the agent.
+    expect(result.run!.serverRunId).toBe(newer.runId);
+  });
+
   it("interrupting a finished run is an idempotent no-op (not an error)", async () => {
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
@@ -798,6 +837,29 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[1]?.repoWriteWithheld).toBeUndefined();
+  });
+
+  // P14-RT-06: the web-egress grant travels the same way, so a Codex specialist
+  // finally enforces it (webSearchMode) instead of only Claude.
+  it("marks webSearchWithheld from the capability denylist", async () => {
+    const { specs } = captureSpecs();
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
+      disallowedTools: ["WebFetch", "WebSearch"],
+    });
+    await settle();
+    expect(specs[0]?.webSearchWithheld).toBe(true);
+
+    // Withholding repo write must not silently take web egress with it — the
+    // two capabilities are separate rows in the matrix.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-web-ok", role: "R", kind: "primary",
+      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
+      disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit"],
+    });
+    await settle();
+    expect(specs[1]?.webSearchWithheld).toBeUndefined();
   });
 
   it("an explicit caller value wins over the derivation", async () => {

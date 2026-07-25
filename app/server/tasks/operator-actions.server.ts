@@ -4,6 +4,7 @@ import {
   acceptanceBlockedReason,
   closedPrBlockedReason,
   deliveringEngagement,
+  deriveValidation,
   supportingEngagements,
   type PacketOption,
   type PrState,
@@ -48,6 +49,7 @@ import {
   DEFAULT_GOAL,
   OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
+  acceptanceRefusalFor,
   notifyTaskWatchers,
   operatorPromptAgent,
   transitionStage,
@@ -57,6 +59,7 @@ import {
   assignReviewer,
   assignSpecialist,
   listDeployedSpecialists,
+  projectBoard,
   specialistEligibleForStage,
   startAgentRun,
   type DeployedSpecialistView,
@@ -82,11 +85,13 @@ export interface OperatorAuthority {
   /** The operator's declared knowledge bases (docs injected into its context). */
   kb: string[];
   /**
-   * The operator's declared org MCP servers. P13-KM-03: these were parsed by
-   * the resource catalog and shown as granted in the UI, but never reached a
-   * run on EITHER backend — `OperatorAuthority` carried skills and kb only.
-   * Live-proven: an operator granted `everything-mcp` reported "MCP
-   * servers/tools I can call: none".
+   * The operator's declared org MCP servers. P13-KM-03 wired them into the
+   * Claude toolkit (they had reached NO run on either backend — `OperatorAuthority`
+   * carried skills and kb only, and an operator granted `everything-mcp`
+   * reported "MCP servers/tools I can call: none"); P14-RT-04 mounts them on the
+   * Codex operator too, so the grant is real on both backends. On Codex the CLI
+   * translation drops credentials (argv exposure) and stamps approve-mode, as it
+   * does for specialists.
    */
   mcps: string[];
   /** The deployment's persona override (P11-21) — when a project edits the
@@ -801,7 +806,11 @@ export function operatorSnapshot(
     workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
       ...s,
-      eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
+      eligibleForCurrentStage: specialistEligibleForStage(
+        s,
+        file.parsed.frontmatter.stage,
+        { stages, workflow },
+      ),
     })),
     openPacket: !!file.parsed.packet,
     packet: file.parsed.packet
@@ -1305,7 +1314,9 @@ function recordAgentSelectionTrace(
     const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
-        eligibleForStage: stage ? specialistEligibleForStage(s, stage) : false,
+        eligibleForStage: stage
+          ? specialistEligibleForStage(s, stage, projectBoard(ctx, input.projectSlug))
+          : false,
         alreadyEngaged: engaged.has(s.id),
         chosen: s.id === input.profileId,
       }),
@@ -1636,6 +1647,20 @@ export async function operatorAcceptCompletion(
     if (closedReason) return { outcome: "noop", message: closedReason };
   }
 
+  // P14-LV-02: the same graph gate the human writers take. This is the half that
+  // produced the live defect — the operator offered "Accept completion" on a
+  // TRIAGE task with no branch, no PR and no reviewer, and the card rendered as
+  // an ordinary one-click action. Checked before BOTH branches below, so a
+  // supervised operator never posts a card acceptance would refuse and a
+  // full-autonomy one never closes a task off-boundary.
+  {
+    const refusal = acceptanceRefusalFor(
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      ctx,
+    );
+    if (refusal) return { outcome: "noop", message: refusal };
+  }
+
   // Never accept a task with an open BLOCKED decision (mirrors the human
   // acceptCompletion guard, task-actions.server.ts). F7-VAL1 decoupled a blocked
   // packet from validation="failing" (blocked-ness lives on `readiness` now), so
@@ -1696,7 +1721,13 @@ export async function operatorAcceptCompletion(
     parsed.frontmatter.stage = doneStageId;
     parsed.frontmatter.readiness = "ready";
     parsed.frontmatter.waiting = "none";
-    parsed.frontmatter.validation = "healthy"; // accepted work is validated (FR24) — same as the human path
+    // P14-LV-02: DERIVE the validation state, never assert it. This said
+    // `"healthy"` — "accepted work is validated (FR24)" — which is a claim about
+    // work nothing may have validated: an operator closing a task with no
+    // reviewer and no revision stamped a green pill onto an empty record. The
+    // human writers moved to `deriveValidation` in this pass; this one carried
+    // the old line plus a comment claiming parity it no longer had.
+    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
     // Acceptance consumes any standing recommendations (a leftover transition
     // card on a Done task would move it back OUT of Done if applied).
     parsed.frontmatter.recommendations = [];

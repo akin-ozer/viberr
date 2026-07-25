@@ -86,6 +86,28 @@ const STAGES = [
   { id: "done", name: "Done", color: "#00b473" },
 ];
 
+/** R14-1: eligibility resolves declared ids against the board BY ROLE too, so
+ *  every stage surface needs the board's edges, not just its stage list. */
+const WORKFLOW = [
+  { from: "triage", to: "ready" },
+  { from: "ready", to: "impl" },
+  { from: "impl", to: "review" },
+  { from: "review", to: "done" },
+];
+
+/** The legacy 3-stage board of P14-WL-01 (`Lightweight Lab`): none of the
+ *  governed template's stage ids exist here, which is exactly the case R14-1
+ *  resolves by role. */
+const LIGHTWEIGHT_BOARD = [
+  { id: "todo", name: "To do", color: "#a5a8b5" },
+  { id: "doing", name: "Doing", color: "#7b61ff" },
+  { id: "done", name: "Done", color: "#00b473" },
+];
+const LIGHTWEIGHT_WORKFLOW = [
+  { from: "todo", to: "doing" },
+  { from: "doing", to: "done" },
+];
+
 function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
   return {
     id: "developer",
@@ -143,6 +165,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[mkDeployment({})]}
         projectName="Viberr Core"
         canManage
@@ -178,6 +201,7 @@ describe("ProfileDetail", () => {
           model: "claude-sonnet-4-5",
         })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -207,6 +231,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[mkDeployment({})]}
         projectName="Viberr Core"
         canManage
@@ -233,6 +258,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({ id: "operator", kind: "operator", spanAll: true })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -249,36 +275,56 @@ describe("ProfileDetail", () => {
     expect(container.querySelectorAll(".stage-chip.off")).toHaveLength(0);
   });
 
-  it("LV-02: stale stage grants are surfaced, counted honestly, and flagged as unassignable", () => {
-    const board = [
-      { id: "todo", name: "To do", color: "#a5a8b5" },
-      { id: "doing", name: "In progress", color: "#7b61ff" },
-      { id: "done", name: "Done", color: "#00b473" },
-    ];
+  it("R14-1: a declared id that no stage here fills BY ROLE resolves onto this board", () => {
+    // The Lightweight board (P14-WL-01): ids `todo/doing/done`, so the
+    // governed `ready`/`impl` grants match no id at all. Before R14-1 the panel
+    // read "0 of 3 stages" with every chip struck through and the profile was
+    // unassignable; `impl` names the WORK role, and this board's work stage is
+    // `doing` (its entry stage `todo` fills work too on a board this short).
     const { container, getByText, queryByText } = render(
       <ProfileDetail
-        // Governed stage ids on a 3-stage board: the old counter said
-        // "2 of 3 stages" with no chip lit.
         a={mkProfile({ stages: ["ready", "impl"] })}
-        stages={board}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
         insts={[]}
-        projectName="Viberr Core"
+        projectName="Lightweight Lab"
         canManage
         onOpen={() => {}}
         onDelete={() => {}}
         onEdit={() => {}}
       />,
     );
-    expect(getByText("0 of 3 stages")).toBeTruthy();
-    expect(queryByText("2 of 3 stages")).toBeNull();
-    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(0);
-    // The two grants that point at stages this board doesn't have are shown.
+    expect(getByText("2 of 3 stages")).toBeTruthy();
+    expect(queryByText("0 of 3 stages")).toBeNull();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(2);
+    // `impl` resolved by role, so it is NOT a dead grant …
+    expect(queryByText("impl · not on this board")).toBeNull();
+    // … while `ready` — a role no stage on this 3-stage board fills — is.
     expect(getByText("ready · not on this board")).toBeTruthy();
-    expect(getByText("impl · not on this board")).toBeTruthy();
-    // …and the consequence is stated, not left for the user to infer.
+  });
+
+  it("R14-1: a declaration that lands nowhere leaves the profile eligible everywhere", () => {
+    const { container, getByText } = render(
+      <ProfileDetail
+        // Neither id is a stage here and neither names a known role, so the
+        // declaration says nothing about this workflow. Rule 3: unrestricted —
+        // silently disabling every agent is the failure we actually observed.
+        a={mkProfile({ stages: ["spec-review", "handoff"] })}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        insts={[]}
+        projectName="Lightweight Lab"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
     expect(
-      getByText(/can't be assigned to any task here/),
+      getByText("declared stages don't exist here — eligible everywhere"),
     ).toBeTruthy();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(3);
+    expect(getByText(/the declaration says nothing here/)).toBeTruthy();
   });
 
   it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {
@@ -286,6 +332,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({ stages: [] })}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage
@@ -307,6 +354,7 @@ describe("ProfileDetail", () => {
       <ProfileDetail
         a={mkProfile({})}
         stages={STAGES}
+        workflow={WORKFLOW}
         insts={[]}
         projectName="Viberr Core"
         canManage={false}
@@ -317,6 +365,57 @@ describe("ProfileDetail", () => {
     );
     expect(queryByText("Delete")).toBeNull();
     expect(queryByText("Edit profile")).toBeNull();
+  });
+});
+
+describe("ProfileDetail resource chips (P14-KM-11)", () => {
+  const withGrants = (): AgentProfileView => ({
+    ...mkProfile({}),
+    resources: { skills: ["writer-skill"], mcps: ["vm-memory"], kb: [] },
+  });
+
+  it("marks a grant the store no longer holds as MISSING, not healthy", () => {
+    // Live: renaming an org MCP orphaned every grant to it, and this panel kept
+    // painting a normal chip while the run exposed zero tools under that name.
+    const { container, getByText } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        resourceCatalog={[
+          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill", def: false }] },
+          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http", def: false }] },
+          { group: "Knowledge bases", key: "kb", mono: true, items: [] },
+        ]}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const missing = container.querySelectorAll(".res-chip.missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0]!.textContent).toContain("vm-memory");
+    expect(getByText("writer-skill").closest(".res-chip")!.className).not.toContain("missing");
+  });
+
+  it("marks nothing when the catalog is unknown — never invents a missing state", () => {
+    const { container } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(container.querySelectorAll(".res-chip.missing")).toHaveLength(0);
   });
 });
 
@@ -349,7 +448,11 @@ describe("LiveRoster", () => {
     expect(getByText("No agents are currently engaged.")).toBeTruthy();
   });
 
-  it("P11-42: resolves a display name from nameById, falling back to the raw profileId", () => {
+  // P13-UI-27 residual: an id with no profile used to be printed raw, which
+  // reads as a name and hides what actually happened — the engagement outlived
+  // its profile. The row now NAMES that condition and keeps the id in the
+  // tooltip, where it is diagnostic rather than decorative.
+  it("P11-42: resolves a display name from nameById; an unresolved id names the condition", () => {
     const rows = [
       mkDeployment({ taskKey: "VIB-1", engagement: "primary", profileId: "docs-writer", status: "working" }),
       mkDeployment({ taskKey: "VIB-2", engagement: "reviewer", profileId: "orphan", status: "on call" }),
@@ -361,10 +464,15 @@ describe("LiveRoster", () => {
         nameById={{ "docs-writer": "Docs Writer" }}
       />,
     );
-    const names = Array.from(container.querySelectorAll(".live-name")).map((n) => n.textContent);
+    const cells = Array.from(container.querySelectorAll(".live-name"));
+    const names = cells.map((n) => n.textContent);
     expect(names).toContain("Docs Writer"); // resolved
-    expect(names).toContain("orphan"); // no mapping → raw id fallback
+    expect(names).toContain("profile no longer here");
+    expect(names).not.toContain("orphan"); // never the bare id as a name
     expect(names).not.toContain("docs-writer"); // never the raw slug when mapped
+    expect(
+      cells.find((n) => n.textContent === "profile no longer here")!.getAttribute("title"),
+    ).toContain("orphan");
   });
 });
 
@@ -417,6 +525,24 @@ describe("CapabilityMatrixModal", () => {
       new Event("cancel", { bubbles: false, cancelable: true }),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // P14-LV-03: live, the same MCP server answered `get-annotated-message` on
+  // Claude and `get_annotated_message` on Codex, and Claude listed one tool
+  // Codex never saw. The parity note covered only the SERVER segment, so it
+  // implied a tool name written into a persona would survive both backends.
+  it("states that MCP TOOL names, not just server names, differ per backend", () => {
+    const { getByText, container } = render(
+      <CapabilityMatrixModal
+        profiles={[mkProfile({})]}
+        projectName="Viberr Core"
+        onClose={() => {}}
+      />,
+    );
+    expect(getByText("MCP tool names differ per backend.")).toBeTruthy();
+    const codes = [...container.querySelectorAll("code")].map((c) => c.textContent);
+    expect(codes).toContain("mcp__everything-http__get-annotated-message");
+    expect(codes).toContain("mcp__everything_http__get_annotated_message");
   });
 });
 
@@ -653,6 +779,33 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
   });
 });
 
+/**
+ * P13-UI-52 residual: the form is single-select and the save writes exactly one
+ * backend, so editing ANYTHING on a seeded two-backend profile silently dropped
+ * the second — the roster reported the loss afterwards, the editor never
+ * mentioned it.
+ */
+describe("P13-UI-52 — the editor states the backend narrowing before the save", () => {
+  it("warns which backend a save will drop", () => {
+    // mkProfile's Developer declares both backends; the form seeds the first.
+    const { getByText } = renderModal({ initial: mkProfile({}) });
+    expect(getByText(/Saving pins this profile to one backend/)).toBeTruthy();
+    expect(getByText(/Claude Code will be dropped/)).toBeTruthy();
+  });
+
+  it("says nothing when the profile already declares exactly one", () => {
+    const { queryByText } = renderModal({
+      initial: mkProfile({ backends: ["codex"] }),
+    });
+    expect(queryByText(/Saving pins this profile to one backend/)).toBeNull();
+  });
+
+  it("says nothing in create mode — there is nothing to narrow", () => {
+    const { queryByText } = renderModal({ initial: null });
+    expect(queryByText(/Saving pins this profile to one backend/)).toBeNull();
+  });
+});
+
 describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
   const TEMPLATES = [
     {
@@ -672,6 +825,8 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
     const { getByText } = render(
       <LibraryPicker
         library={TEMPLATES}
+        stages={STAGES}
+        workflow={WORKFLOW}
         projectName="Viberr Core"
         busy={false}
         onClose={() => {}}
@@ -682,15 +837,55 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
     expect(
       getByText("Reviews IAM, secrets handling and supply-chain risk."),
     ).toBeTruthy();
-    expect(getByText("1 stage")).toBeTruthy();
+    expect(getByText("1 stage here")).toBeTruthy();
     fireEvent.click(getByText("Security reviewer"));
     expect(onAdd).toHaveBeenCalledWith("security-reviewer");
+  });
+
+  // P14-UI-63: the pill printed the TEMPLATE's own stage count, so this row
+  // promised "1 stage" on a board that has no `review` stage at all — and the
+  // roster contradicted it one click later. The count is now what the profile
+  // will actually be eligible for HERE.
+  it("counts the stages the template resolves to on THIS board, not its own", () => {
+    const { getByText, queryByText } = render(
+      <LibraryPicker
+        library={TEMPLATES}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        projectName="Lightweight Lab"
+        busy={false}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    // `review` names the REVIEW role; this 3-stage board fills it with `doing`.
+    expect(getByText("1 stage here")).toBeTruthy();
+    expect(queryByText("1 stage")).toBeNull();
+  });
+
+  it("says 'every stage here' when the declaration means nothing on this board", () => {
+    const { getByText } = render(
+      <LibraryPicker
+        library={[{ ...TEMPLATES[0]!, stages: ["spec-review"] }]}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        projectName="Lightweight Lab"
+        busy={false}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    // Rule 3 (R14-1) — unrestricted rather than eligible for nothing, and the
+    // pill says the same thing the roster will say after the deploy.
+    expect(getByText("every stage here")).toBeTruthy();
   });
 
   it("says so when every global profile is already deployed", () => {
     const { getByText } = render(
       <LibraryPicker
         library={[]}
+        stages={STAGES}
+        workflow={WORKFLOW}
         projectName="Viberr Core"
         busy={false}
         onClose={() => {}}
@@ -731,6 +926,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
               ]}
               deployments={[]}
               stages={STAGES}
+              workflow={WORKFLOW}
               projectSlug="viberr-core"
               projectName="Viberr Core"
               myRole="admin"

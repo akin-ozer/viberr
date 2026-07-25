@@ -39,9 +39,9 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     expect(ids("skills")).toContain("my-house-rules");
     // KB: the real on-disk folder.
     expect(ids("kb")).toContain("runbooks");
-    // MCP: the org registry row + the in-process viberr server.
+    // MCP: the org registry row, and ONLY the registry (P14-KM-14).
     expect(ids("mcps")).toContain("github-mcp");
-    expect(ids("mcps")).toContain("viberr");
+    expect(ids("mcps")).not.toContain("viberr");
   });
 
   it("unions org_knowledge_bases rows — a KB row without a folder stays grantable (E7)", () => {
@@ -72,32 +72,24 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
       )
       .run(now, now);
 
-    const specialist = buildResourceCatalog(store.db, store.dataRoot, {
-      profileKind: "specialist",
-    });
-    const specialistMcps = specialist
+    // P14-KM-14: the catalog is the REGISTRY, identical for every profile kind.
+    // `viberr` is offered to nobody — the operator toolkit mounts it whatever the
+    // grants say and the specialist resolver skips the name, so a toggle for it
+    // governed nothing in either direction.
+    const mcps = buildResourceCatalog(store.db, store.dataRoot)
       .find((g) => g.key === "mcps")!
       .items.map((i) => i.id);
-    // The operator's in-process toolkit is NOT specialist-attachable…
-    expect(specialistMcps).not.toContain("viberr");
-    // …but real org MCP servers still are.
-    expect(specialistMcps).toContain("notes-fixture");
-
-    // The operator/default catalog still surfaces viberr.
-    const operator = buildResourceCatalog(store.db, store.dataRoot, {
-      profileKind: "operator",
-    });
-    expect(
-      operator.find((g) => g.key === "mcps")!.items.map((i) => i.id),
-    ).toContain("viberr");
+    expect(mcps).not.toContain("viberr");
+    expect(mcps).toContain("notes-fixture");
   });
 
   it("handles a store with no resources without throwing", () => {
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-empty-"));
     const store = setupTestStore(ctx);
     const catalog = buildResourceCatalog(store.db, dataRoot);
-    // Three groups always present; skills/kb empty, mcp has at least viberr.
+    // Three groups always present; all three are empty in an empty store — the
+    // reserved `viberr` name is no longer synthesized into the MCP group.
     expect(catalog.map((g) => g.key).sort()).toEqual(["kb", "mcps", "skills"]);
-    expect(catalog.find((g) => g.key === "mcps")!.items.map((i) => i.id)).toContain("viberr");
+    expect(catalog.find((g) => g.key === "mcps")!.items).toEqual([]);
   });
 });

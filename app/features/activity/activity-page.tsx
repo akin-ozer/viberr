@@ -4,6 +4,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { formatClock } from "~/shared/dates/format";
+import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
@@ -74,18 +75,37 @@ function ActivityText({ text }: { text: string }) {
  * The actor filter does NOT touch the audit panel (mock behavior, kept).
  */
 
-/** Stream event type → icon (mock ACT_ICON; unknown → dot). */
-const ACT_ICON: Record<string, IconName> = {
+/**
+ * Stream event type → icon (mock ACT_ICON; an unknown string still → dot).
+ *
+ * P14-UI-62: pass 13 added the neutral `note` type and moved every benign
+ * governance event onto it (a goal edit, a divergence note, a scheduled re-run)
+ * so they stop rendering as "Policy violation" — and this map never learned the
+ * word. `note` took the unknown-type `dot` fallback and emitted an `act-note`
+ * tint class that `app.css` did not define, so the de-alarmed events rendered
+ * typeless and untinted in the one cross-task feed members triage. Keying the
+ * map on TIMELINE_EVENT_TYPES makes the next added type a COMPILE error here
+ * instead of a silent dot.
+ */
+const ACT_ICON: Record<(typeof TIMELINE_EVENT_TYPES)[number], IconName> = {
   comment: "message",
   completion: "check",
   github: "github",
   policy: "shield",
+  note: "message",
   quality: "flag",
   transition: "arrow",
   blocked: "alert",
   agent: "agents",
   assign: "user",
 };
+
+/** The row icon for a stream type. The projection keeps unknown strings as-is
+ *  (tolerant-parsing contract), so a type outside the vocabulary still falls
+ *  back to the neutral dot rather than throwing. */
+export function actIcon(type: string): IconName {
+  return ACT_ICON[type as (typeof TIMELINE_EVENT_TYPES)[number]] ?? "dot";
+}
 
 /** Audit kind → icon + pev-ico tint class (mock PEV_META; unknown → change). */
 const PEV_META: Record<string, { icon: IconName; cls: string }> = {
@@ -326,7 +346,7 @@ export function ActivityPage({
                 {g.rows.map((r) => (
                   <div className="pol-ev" key={r.id}>
                     <span className={"pev-ico act-" + r.type}>
-                      <Icon name={ACT_ICON[r.type] ?? "dot"} />
+                      <Icon name={actIcon(r.type)} />
                     </span>
                     <span className="pev-main">
                       <strong className="act-actor">

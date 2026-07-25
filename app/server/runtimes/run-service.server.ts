@@ -228,6 +228,10 @@ export interface StartRunInput {
    *  it with a read-only sandbox (P13-RT-02). Omit to let `startRun` derive it
    *  from `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
   repoWriteWithheld?: boolean;
+  /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by
+   *  disabling its web search (P14-RT-06). Omit to let `startRun` derive it from
+   *  `disallowedTools` (see `webSearchWithheldFromDenylist`). */
+  webSearchWithheld?: boolean;
   /** JSON schema constraining the run's final output. Codex only — used by the
    *  structured-output operator AND every generic specialist/reviewer run's
    *  report_outcome envelope; the caller parses + executes/records it. */
@@ -271,6 +275,23 @@ export function repoWriteWithheldFromDenylist(
   if (!disallowedTools?.length) return false;
   const denied = new Set(disallowedTools);
   return REPO_WRITE_DENY_MARKERS.every((t) => denied.has(t));
+}
+
+/**
+ * The web tools `resolveSpecialistDisallowedTools` emits for a WITHHELD
+ * `use-web-search-fetch` grant — the same derive-from-the-denylist trick
+ * `repoWriteWithheldFromDenylist` uses, so the two backends enforce the grant
+ * the matrix shows without a second source of truth.
+ */
+const WEB_SEARCH_DENY_MARKERS = ["WebFetch", "WebSearch"] as const;
+
+/** Whether a run's capability denylist says its web-egress grant is withheld. */
+export function webSearchWithheldFromDenylist(
+  disallowedTools?: readonly string[],
+): boolean {
+  if (!disallowedTools?.length) return false;
+  const denied = new Set(disallowedTools);
+  return WEB_SEARCH_DENY_MARKERS.every((t) => denied.has(t));
 }
 
 /**
@@ -381,6 +402,12 @@ export async function startRun(
     ...((input.repoWriteWithheld ??
       repoWriteWithheldFromDenylist(input.disallowedTools))
       ? { repoWriteWithheld: true }
+      : {}),
+    // Same shape for web egress: withheld ⇒ Codex runs with its web search
+    // disabled, the channel the operator already uses (P14-RT-06).
+    ...((input.webSearchWithheld ??
+      webSearchWithheldFromDenylist(input.disallowedTools))
+      ? { webSearchWithheld: true }
       : {}),
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
     ...(input.env && Object.keys(input.env).length ? { env: input.env } : {}),
@@ -926,6 +953,19 @@ export function getRunLog(
   };
 }
 
-function projectOne(db: DatabaseSync, run: AgentRunRow): RunView {
-  return projectRunsForTask(db, run.project_slug, run.task_key).find((r) => r.id === run.thread_id) ?? projectRunsForTask(db, run.project_slug, run.task_key)[0]!;
+/**
+ * The grouped view this run belongs to.
+ *
+ * P14-RT-11: matching `r.id === run.thread_id` was wrong for every run that is
+ * not its group's REPRESENTATIVE — a group's id is the representative's thread
+ * id (run-projection), so interrupting an older resume while a newer row existed
+ * fell through to `[0]!`, returning an unrelated agent's view (and throwing
+ * outright when the projection was empty). `logWindow.runIds` lists every row in
+ * the group, which is the membership test this always wanted. Null when the run
+ * has no projected group — `InterruptResult.run` is nullable and the interrupt
+ * itself has already been performed and audited.
+ */
+function projectOne(db: DatabaseSync, run: AgentRunRow): RunView | null {
+  const groups = projectRunsForTask(db, run.project_slug, run.task_key);
+  return groups.find((r) => r.logWindow.runIds.includes(run.id)) ?? null;
 }

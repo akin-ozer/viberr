@@ -160,6 +160,37 @@ describe("fireDueSchedules", () => {
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
   });
 
+  it("P14-RV-03: an ARCHIVED task never fires — the run is retired, not started", async () => {
+    // R14-3 calls archive a terminal disposition, and the dialog promises the
+    // task "leaves the board and the review queue". Archiving withdrew the
+    // packet and the recommendations but never touched `schedules`, so the one
+    // thing it failed to stop was the one thing that acts with NO human
+    // watching (FR39): a scheduled operator re-run on abandoned work.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "impl",
+        archived: true,
+        schedules: [rawSchedule({ id: "sch_arch" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(0);
+    expect(res.skipped).toBe(1);
+    // The occurrence is RETIRED (recorded), not left pending to fire later.
+    expect(schedules("VIB-9").find((s) => s.id === "sch_arch")!.status).not.toBe(
+      "pending",
+    );
+    // The retirement IS audited (the occurrence must never vanish), but the
+    // outcome names WHY it did not run — no operator was enqueued.
+    const audit = listAuditEvents(store.db).filter(
+      (e) => e.action === "task.schedule.fired",
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ outcome: "skipped-archived" });
+  });
+
   it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
     // A claim whose lease expired = the enqueuing tick crashed before finalize.
     writeTask(store.dataRoot, store.slug, {

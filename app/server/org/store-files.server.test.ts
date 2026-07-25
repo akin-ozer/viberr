@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
@@ -252,7 +252,7 @@ describe("github import", () => {
     if (result.status === "imported") {
       expect(result).toMatchObject({ folder: "docs", fileCount: 2 });
       expect(result.toast).toContain(
-        "2 files imported from owner/repo/docs — snapshot, not a live sync",
+        "2 files imported from owner/repo/docs into docs/ — snapshot, not a live sync",
       );
     }
     expect(readFileSync(path.join(target.rootAbs, "docs", "readme.md"), "utf8")).toBe(
@@ -431,6 +431,67 @@ describe("writeStoreDoc", () => {
     expect(readStoreDoc(target, ["notes", "a.md"])).toMatchObject({ text: "hello" });
     expect(readStoreDoc(target, ["nope.md"])).toBeNull();
   });
+
+  it("P14-UI-59: refuses to clobber an existing doc unless told to replace it", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    writeStoreDoc(db, target, [], "facts.md", "ORIGINAL", ACTOR);
+
+    // The old write path was unconditional create-or-overwrite and reported both
+    // with the same "saved" toast, so retyping a name destroyed the file.
+    expect(() =>
+      writeStoreDoc(db, target, [], "facts.md", "CLOBBER", ACTOR),
+    ).toThrowError(/already exists/);
+    const abs = path.join(kbDirPath(kb.dir, ctx.dataRoot), "facts.md");
+    expect(readFileSync(abs, "utf8")).toBe("ORIGINAL");
+
+    const replaced = writeStoreDoc(db, target, [], "facts.md", "REPLACED", ACTOR, {
+      overwrite: true,
+    });
+    expect(replaced.replaced).toBe(true);
+    expect(readFileSync(abs, "utf8")).toBe("REPLACED");
+  });
+
+  // P14-RV-02: `assertInsideRoot` was LEXICAL — it proved the path STRING sat
+  // under the store root, not the file. A symlink inside the store (which users
+  // manage on disk, and uploads/imports write to) pointed anywhere: a link named
+  // `innocent.md` served an arbitrary host file to whoever opened it in the app,
+  // and a write through one would have clobbered the link's target. The KB
+  // injector has refused to follow symlinks since F9; the store paths now agree.
+  it("P14-RV-02: refuses to READ through a symlink that leaves the store", async () => {
+    const { ctx, kb, target } = await setupKb();
+    const dir = kbDirPath(kb.dir, ctx.dataRoot);
+    const outside = path.join(ctx.dataRoot, "outside-secret.md");
+    writeFileSync(outside, "HOST-SECRET");
+    symlinkSync(outside, path.join(dir, "innocent.md"));
+    expect(() => readStoreDoc(target, ["innocent.md"])).toThrowError(
+      /leaves the store folder/,
+    );
+  });
+
+  it("P14-RV-02: refuses to WRITE through a symlink that leaves the store", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const dir = kbDirPath(kb.dir, ctx.dataRoot);
+    const outside = path.join(ctx.dataRoot, "host-file.md");
+    writeFileSync(outside, "ORIGINAL");
+    symlinkSync(outside, path.join(dir, "looks-local.md"));
+    expect(() =>
+      writeStoreDoc(db, target, [], "looks-local.md", "CLOBBERED", ACTOR, {
+        overwrite: true,
+      }),
+    ).toThrowError(/leaves the store folder/);
+    // The host file the link pointed at is untouched.
+    expect(readFileSync(outside, "utf8")).toBe("ORIGINAL");
+  });
+
+  it("refuses to open a non-text document by TYPE, not as 'missing'", async () => {
+    const { ctx, kb, target } = await setupKb();
+    writeFileSync(path.join(kbDirPath(kb.dir, ctx.dataRoot), "contract.pdf"), "%PDF");
+    expect(() => readStoreDoc(target, ["contract.pdf"])).toThrowError(
+      /only opens text documents/,
+    );
+    // A doc that just isn't there is still null, not an error.
+    expect(readStoreDoc(target, ["gone.md"])).toBeNull();
+  });
 });
 
 /* --------------------------- re-import refreshes in place (P13-KM-13) */
@@ -492,5 +553,68 @@ describe("importGithubSnapshot re-import", () => {
     expect(readFileSync(path.join(target.rootAbs, "docs", "a.md"), "utf8")).toBe(
       "second",
     );
+  });
+
+  it("P14-KM-08: lands under the browsed folder, and refreshes in place there", async () => {
+    const { db, target } = await setupKb();
+    insertUser(db, {
+      id: "u_admin3",
+      email: "admin3@test.dev",
+      name: "Admin Three",
+      role: "admin",
+    });
+    const connectTransport = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "owner" },
+        headers: { "x-oauth-scopes": "repo, workflow" },
+      },
+      "GET /users/owner": { body: { public_repos: 1 } },
+    });
+    await createConnection(
+      db,
+      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin3" },
+      ACTOR,
+      { fetchImpl: connectTransport.fetchImpl },
+    );
+    const snapshot = fakeGithubFetch({
+      "GET /repos/owner/repo/git/trees/main": {
+        body: {
+          truncated: false,
+          tree: [{ path: "docs/a.md", type: "blob", sha: "s1", size: 5 }],
+        },
+      },
+      "GET /repos/owner/repo/git/blobs/s1": {
+        body: { content: b64("body"), encoding: "base64" },
+      },
+    });
+
+    const url = "https://github.com/owner/repo/tree/main/docs";
+    // The import used to ignore the browsed folder entirely and always write to
+    // the store root, so imports could not be organised from the UI.
+    const first = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot.fetchImpl,
+      dirPath: ["vendor"],
+    });
+    expect(first.status).toBe("imported");
+    if (first.status !== "imported") return;
+    expect(first.folder).toBe("vendor/docs");
+    expect(first.toast).toContain("into vendor/docs/");
+    expect(
+      readFileSync(path.join(target.rootAbs, "vendor", "docs", "a.md"), "utf8"),
+    ).toBe("body");
+    expect(existsSync(path.join(target.rootAbs, "docs"))).toBe(false);
+
+    // The provenance marker travels with the folder, so the same source
+    // re-imported into the same folder still refreshes rather than suffixing.
+    const again = await importGithubSnapshot(db, target, url, ACTOR, {
+      fetchImpl: snapshot.fetchImpl,
+      dirPath: ["vendor"],
+    });
+    expect(again.status).toBe("imported");
+    if (again.status !== "imported") return;
+    expect(again.folder).toBe("vendor/docs");
+    expect(
+      scanStoreTree(path.join(target.rootAbs, "vendor")).map((n) => n.name),
+    ).toEqual(["docs"]);
   });
 });

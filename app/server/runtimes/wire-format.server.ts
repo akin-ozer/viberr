@@ -249,8 +249,54 @@ function projectCodex(e: Json, type: string, t: string): ProjectedEnvelope {
           // as an error-looking timeline row, but do not poison an otherwise
           // successful turn; only top-level `turn.failed` / `error` do that.
           return { display: { t, ev: "err", tag: "error", text: str(item.message) }, facts: {} };
+        case "mcp_tool_call": {
+          // P14-RT-07: an MCP call is a TOOL call, and the console must say
+          // which one. The default branch below projected it as a dim `meta`
+          // line whose text read `item.text ?? item.query` — neither of which an
+          // McpToolCallItem carries — so every Codex MCP call rendered as an
+          // empty row while Claude logged tool name + input. `item.started`
+          // carries the server/tool/arguments, so log it there (mirroring
+          // command_execution) and log the failure on completion.
+          const name = `${str(item.server)}.${str(item.tool)}`;
+          if (type === "item.started") {
+            return {
+              display: {
+                t,
+                ev: "tool",
+                tag: "mcp_tool_call",
+                name,
+                text: summarizeMcpArguments(item.arguments),
+                input: isRecord(item.arguments) ? item.arguments : null,
+              },
+              facts: {},
+            };
+          }
+          if (completed) {
+            const error = isRecord(item.error) ? str(item.error.message) : "";
+            // A successful call already has its `item.started` row; only the
+            // failure adds information worth a second line.
+            return error
+              ? { display: { t, ev: "err", tag: "mcp_tool_call", name, text: error }, facts: {} }
+              : { display: null, facts: {} };
+          }
+          return { display: null, facts: {} };
+        }
+        case "web_search":
+          // Same fix, same reason: the query IS the content of the row.
+          return completed
+            ? {
+                display: {
+                  t,
+                  ev: "tool",
+                  tag: "web_search",
+                  name: "web_search",
+                  text: str(item.query),
+                },
+                facts: {},
+              }
+            : { display: null, facts: {} };
         default:
-          // web_search / mcp_tool_call / todo_list — completed only, meta.
+          // todo_list and any item type a future SDK adds — completed only, meta.
           return completed
             ? { display: { t, ev: "meta", tag: itemType || "item", text: str(item.text ?? item.query ?? "") }, facts: {} }
             : { display: null, facts: {} };
@@ -259,6 +305,22 @@ function projectCodex(e: Json, type: string, t: string): ProjectedEnvelope {
     default:
       return { display: { t, ev: "meta", tag: type || "unknown", text: str(e) }, facts: {} };
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The console row for an MCP call's arguments — the same "show the useful
+ *  field, else the JSON" rule `summarizeToolInput` applies on Claude. */
+function summarizeMcpArguments(args: unknown): string {
+  if (args == null) return "";
+  if (!isRecord(args)) return str(args);
+  for (const key of ["query", "path", "url", "name", "message"]) {
+    const v = args[key];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return JSON.stringify(args);
 }
 
 function cleanCommand(command: string): string {

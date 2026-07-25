@@ -33,6 +33,7 @@ export interface TaskProjectionRow {
   stored_readiness: string | null;
   waiting: Waiting;
   urgent: 0 | 1;
+  archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
   owner_user_id: string | null;
@@ -109,6 +110,8 @@ export interface TaskSummary {
    * the project-wide `waiting === "human"` enum. */
   waitingOnMe?: boolean;
   urgent: boolean;
+  /** R14-3: archived tasks leave every default view but keep their record. */
+  archived: boolean;
   validation: Validation;
   /** Revision-bound acceptance block reason (P11-50): null when the current
    *  revision is acceptance-ready, else why it isn't. Projected so read models
@@ -287,6 +290,7 @@ export function mapTaskProjectionRow(
       : row.readiness,
     waiting: row.waiting,
     urgent: row.urgent === 1,
+    archived: row.archived === 1,
     validation: row.validation,
     blockReason: row.validation_block_reason,
     owner: context.owner,

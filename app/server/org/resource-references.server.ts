@@ -63,7 +63,12 @@ export async function updateResourceReferences(
   return { updated };
 }
 
-/** Apply the rename/drop to one reference list; null when unchanged. */
+/** Apply the rename/drop to one reference list; null when unchanged.
+ *
+ * A grant list is a SET: renaming `a` → `b` on a profile that already granted
+ * `b` must leave one `b`, not two. The old de-dup only looked at what had been
+ * emitted so far, so it missed a target appearing LATER in the list (P14-KM-07,
+ * caught by the first test the deployment leg ever had). */
 function nextList(
   list: readonly string[] | undefined,
   from: string,
@@ -72,11 +77,8 @@ function nextList(
   if (!list || !list.includes(from)) return null;
   const out: string[] = [];
   for (const entry of list) {
-    if (entry !== from) {
-      out.push(entry);
-      continue;
-    }
-    if (to && !out.includes(to)) out.push(to);
+    const next = entry === from ? to : entry;
+    if (next && !out.includes(next)) out.push(next);
   }
   return out;
 }

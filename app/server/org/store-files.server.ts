@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -128,6 +129,25 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   const rel = path.relative(rootAbs, absPath);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw AppError.validation("Invalid store path.");
+  }
+  // P14-RV-02: the check above is LEXICAL — it proves the path string sits under
+  // the root, not that the file does. A symlink inside the store (the store is a
+  // real folder users manage outside the app, and uploads/imports/agents all
+  // write there) points wherever it likes: a link named `notes.md` served an
+  // arbitrary host file through the in-app reader, and a write through one would
+  // have clobbered the link's target. `readKbBody` has refused to follow
+  // symlinks since F9 (`kb-injection.server.ts`) — every store path now agrees.
+  // Resolved with `realpathSync` so an intermediate symlinked DIRECTORY is
+  // caught too, and only on parts that exist (creates resolve their parent).
+  const existing = existsSync(absPath) ? absPath : path.dirname(absPath);
+  if (!existsSync(existing)) return; // nothing on disk yet — nothing to resolve
+  const realRoot = realpathSync(rootAbs);
+  const realPath = realpathSync(existing);
+  const realRel = path.relative(realRoot, realPath);
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
+    throw AppError.validation(
+      "That path leaves the store folder — Viberr does not follow links out of it.",
+    );
   }
 }
 
@@ -346,9 +366,14 @@ const EDITABLE_EXTENSIONS = new Set([
 export interface StoreDocResult {
   path: string[];
   bytes: number;
+  /** An existing document was replaced rather than created (P14-UI-59). */
+  replaced: boolean;
 }
 
-/** Read one store text doc for the editor (`null` when absent/too large). */
+/** Read one store text doc for the editor (`null` when absent). A doc the
+ *  editor cannot round-trip safely is refused by TYPE rather than reported as
+ *  missing (P14-KM-08 — this reader had no production caller at all until the
+ *  editor could open existing files). */
 export function readStoreDoc(
   target: StoreTarget,
   nodePath: string[],
@@ -358,6 +383,11 @@ export function readStoreDoc(
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
+  if (!EDITABLE_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
+    throw AppError.validation(
+      `Viberr only opens text documents (${[...EDITABLE_EXTENSIONS].join(", ")}).`,
+    );
+  }
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
   const size = statSync(abs).size;
   const text = readFileSync(abs, "utf8").slice(0, maxBytes);
@@ -365,14 +395,20 @@ export function readStoreDoc(
 }
 
 /**
- * Create or overwrite one text document inside a store folder (P13-LV-06,
- * owner ruling 3).
+ * Create or replace one text document inside a store folder (P13-LV-06,
+ * owner ruling 3; extended by P14 owner ruling R14-4).
  *
  * Knowledge bases could only be filled by upload / folder-drop / "Add from
  * GitHub", even though skills have a full in-app SKILL.md editor and the KB
  * modal's own copy says "drop docs in, or let agents append". Writing the three
  * facts your agents must know meant leaving the product. This is the same write
  * path uploads use, so the watcher re-index and doc counts behave identically.
+ *
+ * P14-UI-59: writing was unconditionally create-OR-overwrite and reported both
+ * outcomes with the same "saved" toast, so retyping the name of an existing doc
+ * destroyed it with no confirmation and no trace. Replacing an existing file now
+ * needs the caller's explicit intent; the UI asks first, and the editor's
+ * open-an-existing-doc path carries it.
  */
 export function writeStoreDoc(
   db: DatabaseSync,
@@ -381,6 +417,7 @@ export function writeStoreDoc(
   name: string,
   body: string,
   actor: AuditActor,
+  opts: { overwrite?: boolean } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = name.trim().replace(/[\\/]/g, "-");
@@ -397,6 +434,17 @@ export function writeStoreDoc(
   assertInsideRoot(target.rootAbs, dirAbs);
   const abs = path.join(dirAbs, withExt.slice(0, 200));
   assertInsideRoot(target.rootAbs, abs);
+  const existed = existsSync(abs);
+  if (existed && statSync(abs).isDirectory()) {
+    throw AppError.validation(
+      `A folder named “${withExt}” already exists there — pick another name.`,
+    );
+  }
+  if (existed && !opts.overwrite) {
+    throw AppError.conflict(
+      `${[...base, withExt].join("/")} already exists — open it to edit, or pick another name.`,
+    );
+  }
   mkdirSync(dirAbs, { recursive: true });
   writeFileSync(abs, body);
   touchResource(db, target);
@@ -405,9 +453,13 @@ export function writeStoreDoc(
     actor,
     subjectKind: `org_${target.kind}`,
     subjectId: target.id,
-    details: { path: [...base, withExt].join("/"), bytes: body.length },
+    details: {
+      path: [...base, withExt].join("/"),
+      bytes: body.length,
+      replaced: existed,
+    },
   });
-  return { path: [...base, withExt], bytes: body.length };
+  return { path: [...base, withExt], bytes: body.length, replaced: existed };
 }
 
 // ---------------------------------------------------------------- delete
@@ -487,6 +539,7 @@ function writeImportMarker(rootAbs: string, folder: string, source: string): voi
 export type GithubImportResult =
   | {
       status: "imported";
+      /** Store-relative destination path (browsed folder + snapshot folder). */
       folder: string;
       fileCount: number;
       /** Blobs that were selected but could not be fetched/written (E5) —
@@ -512,7 +565,7 @@ export async function importGithubSnapshot(
   target: StoreTarget,
   url: string,
   actor: AuditActor,
-  options: { fetchImpl?: typeof fetch } = {},
+  options: { fetchImpl?: typeof fetch; dirPath?: string[] } = {},
 ): Promise<GithubImportResult> {
   const m = url.trim().match(GITHUB_IMPORT_URL_RE);
   if (!m) return { status: "invalid_url", message: GITHUB_IMPORT_URL_ERROR };
@@ -589,6 +642,14 @@ export async function importGithubSnapshot(
     Boolean(treeRes.data.truncated) || blobs.length > IMPORT_MAX_FILES;
   const selected = blobs.slice(0, IMPORT_MAX_FILES);
 
+  // P14-KM-08 (owner ruling R14-4): the import always landed at the STORE ROOT,
+  // ignoring whichever folder the admin was browsing — so organising imports
+  // into subfolders was impossible from the UI. It now lands under the browsed
+  // path, resolved with the same sanitizer every other store write uses.
+  const base = sanitizeDirPath(options.dirPath ?? []);
+  const baseAbs = path.join(target.rootAbs, ...base);
+  assertInsideRoot(target.rootAbs, baseAbs);
+
   // Root folder named after the last path segment (or the repo).
   //
   // P13-KM-13: this ALWAYS collision-suffixed, so re-importing the same source
@@ -603,10 +664,10 @@ export async function importGithubSnapshot(
   let folder = baseName;
   let refreshed = false;
   let i = 2;
-  while (existsSync(path.join(target.rootAbs, folder))) {
-    if (importSourceOf(target.rootAbs, folder) === sourceKey) {
+  while (existsSync(path.join(baseAbs, folder))) {
+    if (importSourceOf(baseAbs, folder) === sourceKey) {
       refreshed = true;
-      rmSync(path.join(target.rootAbs, folder), { recursive: true, force: true });
+      rmSync(path.join(baseAbs, folder), { recursive: true, force: true });
       break;
     }
     folder = `${baseName}-${i++}`;
@@ -627,7 +688,7 @@ export async function importGithubSnapshot(
         blobRes.data.encoding === "base64"
           ? Buffer.from(content.replace(/\n/g, ""), "base64")
           : Buffer.from(content, "utf8");
-      const abs = path.join(target.rootAbs, folder, ...parts);
+      const abs = path.join(baseAbs, folder, ...parts);
       assertInsideRoot(target.rootAbs, abs);
       mkdirSync(path.dirname(abs), { recursive: true });
       writeFileSync(abs, data);
@@ -645,15 +706,25 @@ export async function importGithubSnapshot(
   // silently into the success toast — count and surface them instead.
   const skipped = selected.length - written;
 
-  writeImportMarker(target.rootAbs, folder, sourceKey);
+  writeImportMarker(baseAbs, folder, sourceKey);
   touchResource(db, target);
   const source = sourceKey;
+  // Store-relative destination: what the client expands, and the honest answer
+  // to "where did my import go" now that it is not always the root.
+  const destination = [...base, folder].join("/");
   recordAudit(db, {
     action: "org.store.github_import",
     actor,
     subjectKind: `org_${target.kind}`,
     subjectId: target.id,
-    details: { source, branch, folder, fileCount: written, skipped, truncated },
+    details: {
+      source,
+      branch,
+      folder: destination,
+      fileCount: written,
+      skipped,
+      truncated,
+    },
   });
   const suffix = [
     ...(truncated ? [" (truncated)"] : []),
@@ -663,11 +734,11 @@ export async function importGithubSnapshot(
   ].join("");
   return {
     status: "imported",
-    folder,
+    folder: destination,
     fileCount: written,
     skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} — snapshot, not a live sync${suffix}`,
+    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ — snapshot, not a live sync${suffix}`,
   };
 }

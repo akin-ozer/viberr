@@ -105,11 +105,13 @@ describe("ReviewQueuePage", () => {
     expect(first.textContent).toContain("evidence changed");
 
     const second = rows[1]!;
-    // Markdown markers stripped from the timeline subline.
-    expect(second.querySelector(".sub")!.textContent).toContain(
-      "Transition request:",
+    // P14-LV-05: a row that carries a PR describes the PR's LIVE state — the
+    // newest timeline note (here a stale "Transition request") is history, and
+    // rendering it as the row's current state is how a REOPENED PR kept reading
+    // "closed on GitHub without merging".
+    expect(second.querySelector(".sub")!.textContent).toBe(
+      "PR #311 is merged on GitHub — accept the completion to close the task.",
     );
-    expect(second.querySelector(".sub")!.textContent).not.toContain("**");
     expect(second.querySelector(".wait-tag.agent")!.textContent).toContain(
       "agent working",
     );

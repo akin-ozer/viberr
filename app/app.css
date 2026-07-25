@@ -351,16 +351,43 @@ h1, h2, h3, h4 {
   white-space: nowrap;
   transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
-.btn:hover { transform: translateY(-1px); border-color: var(--fg); }
-.btn:active { transform: translateY(0) scale(.97); }
+.btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--fg); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.97); }
 .btn.primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-fg); }
-.btn.primary:hover { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
+.btn.primary:hover:not(:disabled) { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
 .btn.ghost { background: transparent; border-color: var(--hairline); color: var(--muted); }
-.btn.ghost:hover { color: var(--fg); border-color: var(--border); }
+.btn.ghost:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
 .btn.danger { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 78%); background: color-mix(in srgb, var(--coral-light), var(--surface) 55%); }
-.btn.danger:hover { border-color: var(--coral-dark); }
+.btn.danger:hover:not(:disabled) { border-color: var(--coral-dark); }
 .btn.sm { min-height: 30px; padding: .32rem .6rem; font-size: .8rem; }
 .btn .ico { width: 15px; height: 15px; }
+/* P14-LV-08: `disabled` had NO visual expression anywhere in this sheet, so a
+   control the viewer's role can't use rendered pixel-identical to a live one and
+   still lifted under the pointer — live, a contributor clicked "Archive" and
+   "Delete project" and got no dialog, no toast, no error and no audit row,
+   because the request never left the client. Every disabled control now READS
+   disabled; the REASON is copy the owning surface renders, because `title`
+   never opens on a disabled element (no pointer events reach it). */
+.btn:disabled,
+.icon-btn:disabled,
+.seg button:disabled,
+.mini-seg button:disabled,
+.cap-seg button:disabled,
+.fchip:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  transform: none;
+}
+/* The visible "why" that replaces the unreachable `title` on a disabled
+   control. Sits next to the control it explains, never as a tooltip. */
+.deny-note {
+  display: flex; align-items: flex-start; gap: .35rem;
+  margin: 0;
+  font-size: .76rem; font-weight: 600; line-height: 1.45;
+  color: var(--faint);
+}
+.deny-note .ico { width: 13px; height: 13px; flex: none; margin-top: .16rem; }
+.deny-note strong { color: var(--muted); }
 .icon-btn {
   display: grid; place-items: center;
   width: 38px; height: 38px;
@@ -370,8 +397,8 @@ h1, h2, h3, h4 {
   color: var(--muted);
   transition: border-color .15s ease, color .15s ease, transform .1s var(--ease-out);
 }
-.icon-btn:hover { border-color: var(--border); color: var(--fg); }
-.icon-btn:active { transform: scale(.94); }
+.icon-btn:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
+.icon-btn:active:not(:disabled) { transform: scale(.94); }
 .icon-btn .ico { width: 17px; height: 17px; }
 
 /* ---------- Pills (state vocabulary) ---------- */
@@ -493,7 +520,7 @@ h1, h2, h3, h4 {
   font-size: .8rem; font-weight: 700; color: var(--muted);
   transition: border-color .14s ease, color .14s ease, background .14s ease, transform .1s var(--ease-out);
 }
-.fchip:hover { border-color: var(--border); color: var(--fg); }
+.fchip:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
 .fchip.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .fchip .ico { width: 14px; height: 14px; }
 
@@ -1096,6 +1123,12 @@ h1, h2, h3, h4 {
 .kv-row .k { color: var(--faint); font-size: .8rem; }
 .kv-row .v { font-weight: 700; font-family: var(--font-display); display: inline-flex; align-items: center; gap: .4rem; }
 .kv-row .v .mono { font-weight: 400; }
+/* P14-LV-06 / R14-3: the dispositions a human decides in Current state —
+   accepting the completion, archiving/restoring the task. Separated from the
+   fact rows above them, because these are ACTIONS, not readings. */
+.state-acts { margin-top: .85rem; padding-top: .85rem; border-top: 1px solid var(--hairline); }
+.state-acts + .state-acts { border-top: 0; padding-top: .5rem; }
+.state-acts .deny-note { margin-top: .4rem; }
 
 .gh-bar {
   display: flex; align-items: center; gap: .6rem;
@@ -1267,6 +1300,15 @@ h1, h2, h3, h4 {
   font-family: var(--font-mono); font-size: .74rem; color: var(--muted);
 }
 .res-chip .ico { width: 12px; height: 12px; color: var(--placeholder); }
+/* P14-KM-11: a grant naming a resource the store no longer holds. It reaches the
+   run as nothing at all, so it must not read like a healthy attachment. */
+.res-chip.missing {
+  border-color: color-mix(in srgb, var(--coral-dark), transparent 60%);
+  background: color-mix(in srgb, var(--coral-light), var(--surface) 60%);
+  color: var(--coral-dark);
+}
+.res-chip.missing .ico { color: var(--coral-dark); }
+.res-chip-note { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
 
 .runtime-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
 .rt-cell .lbl { font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
@@ -1491,7 +1533,7 @@ dialog[data-closing]::backdrop {
 .cap-mname { flex: 1; min-width: 160px; font-size: .85rem; color: var(--fg); }
 .cap-seg { display: inline-flex; padding: .15rem; gap: .1rem; flex: none; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: color-mix(in srgb, var(--fg), transparent 97%); }
 .cap-seg button { border: 0; background: none; padding: .3rem .55rem; border-radius: 6px; font-family: var(--font-display); font-weight: 700; font-size: .74rem; color: var(--faint); transition: background .12s ease, color .12s ease, transform .1s var(--ease-out); }
-.cap-seg button:hover { color: var(--fg); }
+.cap-seg button:hover:not(:disabled) { color: var(--fg); }
 .cap-seg button.direct.on { background: var(--teal-light); color: var(--teal-dark); }
 .cap-seg button.recommend.on { background: var(--blue-soft); color: var(--blue-pressed); }
 .cap-seg button.human.on { background: var(--red-light); color: var(--coral-dark); }
@@ -1595,7 +1637,7 @@ dialog[data-closing]::backdrop {
   font-family: var(--font-display); font-weight: 700; font-size: .72rem; color: var(--faint);
   transition: background .12s ease, color .12s ease, transform .1s var(--ease-out);
 }
-.mini-seg button:hover { color: var(--fg); }
+.mini-seg button:hover:not(:disabled) { color: var(--fg); }
 .mini-seg button.on { background: var(--fg); color: var(--surface); }
 
 /* rbac matrix */
@@ -1809,6 +1851,13 @@ dialog[data-closing]::backdrop {
 .pev-ico.act-completion { background: var(--teal-light); color: var(--teal-dark); border-color: color-mix(in srgb, var(--teal-dark), transparent 78%); }
 .pev-ico.act-github { background: color-mix(in srgb, var(--fg), transparent 94%); color: var(--fg); }
 .pev-ico.act-policy { background: var(--orange-light); color: var(--yellow-dark); border-color: color-mix(in srgb, var(--yellow-dark), transparent 72%); }
+/* P14-UI-62: `note` is the NEUTRAL half of what `policy` used to carry, so it
+   takes the quiet comment tint — the whole point of the split is that a goal
+   edit must not look like a governance violation. `assign` was missing for the
+   same reason (never added to the tint set); it shares the transition tint its
+   timeline node already uses. */
+.pev-ico.act-note { background: color-mix(in srgb, var(--fg), transparent 96%); color: var(--muted); }
+.pev-ico.act-assign { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-quality { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
@@ -2982,6 +3031,15 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--fg), transparent 95%); border: 1px solid var(--hairline); }
 
 /* ---------- KB file browser ---------- */
+/* P14-KM-08: a text doc row opens the in-place editor. */
+.fm-row.openable { cursor: pointer; }
+/* P14-KM-08: the destination every toolbar action writes into. */
+.fm-toolbar select {
+  border: 1px solid var(--border); border-radius: var(--radius-button);
+  padding: .3rem .45rem; background: var(--surface); color: var(--fg);
+  font-family: var(--font-mono); font-size: .76rem;
+}
+.fm-toolbar label.fm-hint { margin-left: auto; }
 .r90 { transform: rotate(90deg); }
 .fm-toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .fm-hint { font-size: .74rem; color: var(--placeholder); margin-left: auto; }
@@ -3064,7 +3122,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .opt:active, .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active, .org-tile.go:active, .pj-card:active { transform: translateY(0) scale(.99); }
 .deploy-row:active, .pj-row:active { transform: translateX(0) scale(.99); }
-.seg button:active, .fchip:active, .pick-chip:active, .tl-filter button:active, .cap-seg button:active, .mini-seg button:active, .stage-menu-btn:active, .own-btn:active, .rev-add:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
+.seg button:active:not(:disabled), .fchip:active:not(:disabled), .pick-chip:active, .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
 .nav-item:active { transform: scale(.985); }
 .rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .ag-add:active, .col-head .add:active, .session-id-copy:active { transform: scale(.9); }
 .fm-act:active { transform: translateY(0) scale(.94); }
@@ -3104,6 +3162,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .fm-doc .ta { min-height: 8rem; resize: vertical; }
 .fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }
+/* P14-UI-61: an OPENED document shows its real path — the name is the file's own
+   and is not retyped, so there is no name input to style here. */
+.fm-doc-path { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); }
+.fm-doc-acts .fm-hint { margin-left: 0; margin-right: auto; }
 
 /* Capability-matrix runtime-difference notes (P13-RT-14). */
 .mx-notes { padding: .9rem .2rem .2rem; }

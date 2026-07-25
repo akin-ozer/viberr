@@ -32,6 +32,15 @@ function rel(iso: string | null): string {
   return iso ? formatRelative(iso) : "never";
 }
 
+/** Delete-confirm tail naming the grants that are about to be dropped
+ *  (P14-KM-09). "Templates" because project deployments carry their own copies
+ *  and are rewritten separately by `updateResourceReferences`. */
+function grantTail(templates: number): string {
+  return templates > 0
+    ? ` The grant is dropped from ${templates} agent template${templates === 1 ? "" : "s"} and from every project that deployed them.`
+    : " No agent template grants it.";
+}
+
 /** P13-D-32: the "older than an hour reads as STALE" rule is interpretation,
  * which `architecture.md` forbids a UI component from owning — it now lives in
  * the shared freshness policy (server door:
@@ -130,7 +139,16 @@ function KBModal({ initial, onClose }: { initial: KbView | null; onClose: () => 
   );
 }
 
-function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () => void }) {
+function McpModal({
+  initial,
+  usedBy,
+  onClose,
+}: {
+  initial: McpView | null;
+  /** Global templates granting this server (P14-KM-09). */
+  usedBy: number;
+  onClose: () => void;
+}) {
   const [name, setName] = useState(initial ? initial.name : "");
   const [transport, setTransport] = useState<"HTTP" | "stdio">(
     initial ? initial.transport : "HTTP",
@@ -227,6 +245,19 @@ function McpModal({ initial, onClose }: { initial: McpView | null; onClose: () =
           }}
         />
       </div>
+      {/* P14-KM-09/KM-01: renaming a server rewrites every grant that names it
+          (KB and skill renames always did; the MCP leg didn't, which orphaned
+          them silently). Say how many grants are at stake before the rename. */}
+      {initial && usedBy > 0 && (
+        <div className="def-note">
+          <Icon name="agents" />
+          <span>
+            {usedBy} agent template{usedBy === 1 ? "" : "s"} grant{usedBy === 1 ? "s" : ""}{" "}
+            <strong>{initial.name}</strong>. Renaming it rewrites their grants;
+            projects that already deployed those templates are rewritten too.
+          </span>
+        </div>
+      )}
       <div className="field">
         <label className="flabel" htmlFor="mcp-cred">
           Credential{" "}
@@ -410,6 +441,34 @@ const kbLegacyOf = (list: string[], kbs: KbView[]) => {
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
+/** Grants pointing at a resource this org no longer has, rendered removable —
+ *  the same red `missing` chip the project profile modal uses (P14-KM-10). */
+function MissingChips({
+  ids,
+  mono,
+  onDrop,
+}: {
+  ids: string[];
+  mono?: boolean;
+  onDrop: (id: string) => void;
+}) {
+  return (
+    <>
+      {ids.map((id) => (
+        <button
+          type="button"
+          key={id}
+          className={"pick-chip missing on" + (mono ? " mono" : "")}
+          title="No longer in the store — click to remove this grant"
+          onClick={() => onDrop(id)}
+        >
+          {id}
+        </button>
+      ))}
+    </>
+  );
+}
+
 function AgentModal({
   initial,
   stages,
@@ -463,13 +522,22 @@ function AgentModal({
   const [selKbs, setSelKbs] = useState<string[]>(
     initial ? kbDirsOf(initial.kbs, kbs) : [],
   );
-  // Legacy template resource strings that don't match an org resource are
-  // preserved untouched on save (documented deviation).
-  const legacy = {
-    skills: initial ? unmatched(initial.skills, skillNames) : [],
-    mcps: initial ? unmatched(initial.mcps, mcpNames) : [],
-    kbs: initial ? kbLegacyOf(initial.kbs, kbs) : [],
-  };
+  // P14-KM-10: grants that match no org resource used to be preserved on save
+  // and rendered NOWHERE, so an orphan — the standing residue of a rename or a
+  // disk-side delete — was invisible and unremovable from org settings while
+  // the project modal showed the same thing as a removable red chip. They are
+  // state now, so they render and can be dropped.
+  const [legacySkills, setLegacySkills] = useState<string[]>(
+    initial ? unmatched(initial.skills, skillNames) : [],
+  );
+  const [legacyMcps, setLegacyMcps] = useState<string[]>(
+    initial ? unmatched(initial.mcps, mcpNames) : [],
+  );
+  const [legacyKbs, setLegacyKbs] = useState<string[]>(
+    initial ? kbLegacyOf(initial.kbs, kbs) : [],
+  );
+  const drop = (list: string[], set: (v: string[]) => void, id: string) =>
+    set(list.filter((x) => x !== id));
   const { action, err, setErr } = useModalAction(() => onClose());
 
   const stageOpts = stages.filter((s) => s.id !== "done");
@@ -507,9 +575,9 @@ function AgentModal({
           summary: summary.trim(),
           persona: persona.trim(),
           stages: JSON.stringify(selStages),
-          skills: JSON.stringify([...selSkills, ...legacy.skills]),
-          mcps: JSON.stringify([...selMcps, ...legacy.mcps]),
-          kbs: JSON.stringify([...selKbs, ...legacy.kbs]),
+          skills: JSON.stringify([...selSkills, ...legacySkills]),
+          mcps: JSON.stringify([...selMcps, ...legacyMcps]),
+          kbs: JSON.stringify([...selKbs, ...legacyKbs]),
         });
       }}
     >
@@ -643,7 +711,14 @@ function AgentModal({
                   {s.name}
                 </button>
               ))}
-              {skills.length === 0 && <span className="ctx-none">none defined</span>}
+              <MissingChips
+                ids={legacySkills}
+                mono
+                onDrop={(id) => drop(legacySkills, setLegacySkills, id)}
+              />
+              {skills.length === 0 && legacySkills.length === 0 && (
+                <span className="ctx-none">none defined</span>
+              )}
             </div>
           </div>
           <div className="ctx-group">
@@ -659,7 +734,14 @@ function AgentModal({
                   {m.name}
                 </button>
               ))}
-              {mcps.length === 0 && <span className="ctx-none">none defined</span>}
+              <MissingChips
+                ids={legacyMcps}
+                mono
+                onDrop={(id) => drop(legacyMcps, setLegacyMcps, id)}
+              />
+              {mcps.length === 0 && legacyMcps.length === 0 && (
+                <span className="ctx-none">none defined</span>
+              )}
             </div>
           </div>
           <div className="ctx-group">
@@ -676,7 +758,13 @@ function AgentModal({
                   {k.name}
                 </button>
               ))}
-              {kbs.length === 0 && <span className="ctx-none">none defined</span>}
+              <MissingChips
+                ids={legacyKbs}
+                onDrop={(id) => drop(legacyKbs, setLegacyKbs, id)}
+              />
+              {kbs.length === 0 && legacyKbs.length === 0 && (
+                <span className="ctx-none">none defined</span>
+              )}
             </div>
           </div>
         </div>
@@ -752,8 +840,20 @@ function KbPanel({
                   {kb.name}
                 </button>
               </b>
+              {/* P14-KM-13: "N docs" counted EVERY file while injection reads
+                  six text extensions, so a KB of PDFs advertised a healthy count
+                  and injected nothing. Count what a run reads, and name the rest
+                  rather than folding it in. */}
               <span className="sub mono">
-                store://kb/{kb.dir}/ · {kb.fileCount} docs
+                store://kb/{kb.dir}/ · {kb.injectableCount} doc
+                {kb.injectableCount === 1 ? "" : "s"} agents read
+                {kb.fileCount > kb.injectableCount
+                  ? " · " +
+                    (kb.fileCount - kb.injectableCount) +
+                    " non-text file" +
+                    (kb.fileCount - kb.injectableCount === 1 ? "" : "s") +
+                    " skipped"
+                  : ""}
               </span>
               <span className="sub">
                 read live · re-scanned {rel(kb.lastIndexedAt)}
@@ -810,6 +910,7 @@ function KbPanel({
 
 function McpPanel({
   mcps,
+  usedBy,
   testing,
   onNew,
   onTest,
@@ -817,6 +918,7 @@ function McpPanel({
   onDelete,
 }: {
   mcps: McpView[];
+  usedBy: (slug: string) => number;
   testing: string | null;
   onNew: () => void;
   onTest: (m: McpView) => void;
@@ -874,6 +976,16 @@ function McpPanel({
                          null only appears for a row written outside Viberr. */
                       "not health-checked yet"}
                 {m.hasCred ? " · auth: configured" : ""}
+                {/* P14-KM-09: KB and skill rows have counted their templates
+                    since P13-KM-08; MCP rows showed nothing, so an admin about
+                    to rename or remove a server had no idea what depended on
+                    it. Same count, same honest "templates" label. */}
+                {usedBy(m.name) > 0
+                  ? " · " +
+                    usedBy(m.name) +
+                    " template" +
+                    (usedBy(m.name) === 1 ? "" : "s")
+                  : ""}
               </span>
             </span>
             <span className="rsrc-acts">
@@ -1041,7 +1153,10 @@ function AgentPanel({
                 <span className="sub">{a.summary}</span>
                 <span className="sub mono">
                   {a.backend === "claude" ? "Claude Code" : "Codex"} ·{" "}
-                  {stageNames || "no stages"} · {res} context resources ·{" "}
+                  {/* P14-WL-06: the row right below already pluralizes
+                      ("project"/"projects"); this one always said "resources". */}
+                  {stageNames || "no stages"} · {res} context resource
+                  {res === 1 ? "" : "s"} ·{" "}
                   {a.used > 0
                     ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
                     : "not deployed"}
@@ -1145,6 +1260,7 @@ export function ResourcesPanel({
 
         <McpPanel
           mcps={mcps}
+          usedBy={(slug) => usedBy("mcps", slug)}
           testing={testing}
           onNew={() => setModal({ kind: "mcp", item: null })}
           onTest={(m) => {
@@ -1194,7 +1310,12 @@ export function ResourcesPanel({
         <KBModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
       )}
       {modal && modal.kind === "mcp" && (
-        <McpModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
+        <McpModal
+          key={modal.item?.id ?? "new"}
+          initial={modal.item}
+          usedBy={modal.item ? usedBy("mcps", modal.item.name) : 0}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal && modal.kind === "skill" && (
         <SkillModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
@@ -1237,11 +1358,17 @@ export function ResourcesPanel({
           what={confirm.item.name}
           detail={
             confirm.kind === "kb"
-              ? "The index is removed from the store. Profiles referencing it simply stop loading it — nothing else breaks."
+              ? "The index is removed from the store." +
+                grantTail(usedBy("kbs", confirm.item.dir))
               : confirm.kind === "mcp"
-                ? "Profiles referencing this server lose its tools on their next run."
+                ? // P14-KM-09: this said "profiles referencing this server" with
+                  // no idea how many there were — the last guardrail before a
+                  // destructive change was the only blind one of the three.
+                  "Its tools disappear from every run." +
+                  grantTail(usedBy("mcps", confirm.item.name))
                 : confirm.kind === "skill"
-                  ? "store://skills/" + confirm.item.name + "/ is deleted. Profiles referencing it stop loading it."
+                  ? "store://skills/" + confirm.item.name + "/ is deleted." +
+                    grantTail(usedBy("skills", confirm.item.name))
                   : "The base definition is deleted. It isn't deployed anywhere."
           }
           onCancel={() => setConfirm(null)}

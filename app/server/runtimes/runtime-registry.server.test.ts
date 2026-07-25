@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
 
 describe("runtime-registry", () => {
   const tmpDirs: string[] = [];
+  const savedDataRoot = process.env.VIBERR_DATA_ROOT;
   afterEach(() => {
     resetRegistryForTests();
     delete process.env.ANTHROPIC_API_KEY;
@@ -24,6 +25,10 @@ describe("runtime-registry", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.VIBERR_CODEX_USE_CLI_AUTH;
     delete process.env.CODEX_HOME;
+    // The mirror resolves the run home under the data root, so these tests
+    // repoint it; put the ambient value back rather than dropping it.
+    if (savedDataRoot === undefined) delete process.env.VIBERR_DATA_ROOT;
+    else process.env.VIBERR_DATA_ROOT = savedDataRoot;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
@@ -126,6 +131,47 @@ describe("runtime-registry", () => {
     setBackendAvailability("codex", false);
     const adapters = createAdapters();
     expect(selectAdapter("codex", adapters)).toEqual({ kind: "unavailable" });
+  });
+
+  // P14-RT-05: the mirror used to run ONCE, inside createAdapters. The
+  // availability probe re-probes live and reports codex available the moment
+  // auth.json lands, and the unavailable copy promises "the next run picks it up
+  // without a restart" — but the run home stayed empty until a restart, so runs
+  // failed auth instead. Selection is per-run, so the mirror belongs here.
+  it("selectAdapter mirrors an auth.json that lands AFTER the adapters were built", () => {
+    process.env.VIBERR_CODEX_USE_CLI_AUTH = "1";
+    const login = codexHome(false);
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
+    tmpDirs.push(dataRoot);
+    process.env.CODEX_HOME = login;
+    process.env.VIBERR_DATA_ROOT = dataRoot;
+    const runHome = path.join(dataRoot, "runtimes", "codex-home");
+
+    // Boot: no login yet, so nothing to mirror.
+    const adapters = createAdapters();
+    expect(existsSync(path.join(runHome, "auth.json"))).toBe(false);
+
+    // The human logs in (or `docker compose cp`s the file in) mid-process.
+    writeFileSync(path.join(login, "auth.json"), "{}");
+    expect(selectAdapter("codex", adapters)).toEqual({
+      kind: "real",
+      adapter: adapters.codex,
+    });
+    expect(existsSync(path.join(runHome, "auth.json"))).toBe(true);
+  });
+
+  it("selectAdapter touches nothing for claude, or outside cached-login mode", () => {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-data-root-"));
+    tmpDirs.push(dataRoot);
+    process.env.VIBERR_DATA_ROOT = dataRoot;
+    process.env.CODEX_HOME = codexHome(true);
+    // Token auth: auth.json is irrelevant, so the run home is never populated.
+    process.env.CODEX_ACCESS_TOKEN = "cat-test";
+    const adapters = createAdapters();
+    expect(selectAdapter("codex", adapters).kind).toBe("real");
+    expect(
+      existsSync(path.join(dataRoot, "runtimes", "codex-home", "auth.json")),
+    ).toBe(false);
   });
 
   it("codexSpawnEnv preserves runtime essentials but filters unrelated server secrets", () => {

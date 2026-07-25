@@ -212,10 +212,19 @@ export function CapabilityMatrixModal({
                 declared server unauthenticated, because its MCP config travels in argv.
               </li>
               <li>
-                Codex renames hyphens to underscores in MCP tool names
-                (<code>mcp__everything-http__echo</code> on Claude is{" "}
-                <code>mcp__everything_http__echo</code> on Codex), so never name an MCP
-                tool literally in a persona or skill.
+                {/* P14-LV-03: live, the same server answered `get-annotated-message`
+                    on Claude and `get_annotated_message` on Codex, and Claude
+                    listed one tool Codex never saw. The old copy covered only the
+                    SERVER segment, so a persona naming a tool still broke on one
+                    backend while this text implied it wouldn't. */}
+                <b>MCP tool names differ per backend.</b> Codex renames hyphens to
+                underscores in the whole tool id — server AND tool segment:{" "}
+                <code>mcp__everything-http__get-annotated-message</code> on Claude
+                is <code>mcp__everything_http__get_annotated_message</code> on
+                Codex. The two clients can also expose different tool SETS from one
+                server. Never name an MCP tool literally in a persona or skill, and
+                read any tool count Viberr shows as what its OWN probe client saw,
+                not as what a given run will get.
               </li>
               <li>
                 <b>MCP tools are not gated by this matrix.</b> Viberr can't know what a

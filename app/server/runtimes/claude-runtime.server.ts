@@ -397,6 +397,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let sawResult = false;
       let resultIsError = false;
       let resultSubtype: string | null = null;
+      /** The failing RESULT envelope's own error prose, kept only long enough to
+       *  classify it (P14-RT-10) — it is never persisted or logged raw. */
+      let resultErrorText: string | null = null;
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
@@ -608,6 +611,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               resultIsError = !!facts.isError;
               resultSubtype =
                 (message as { subtype?: string }).subtype ?? null;
+              const detail = (message as { result?: unknown }).result;
+              resultErrorText =
+                typeof detail === "string" && detail.trim() ? detail : null;
             } else {
               const u = assistantUsage(message);
               if (u) {
@@ -662,6 +668,29 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
                 "not a task failure. Re-prompt the agent to continue from its " +
                 "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
+            },
+            facts: {},
+            occurredAt: now,
+          });
+        } else if (sawResult && resultIsError) {
+          // P14-RT-10: a run the SDK ends with an `is_error` result (rather than
+          // a thrown stream error) used to settle `error` carrying no classified
+          // line at all — the result line's own tag is `result`, which
+          // `runFailureReason` never matches, so a quota/auth failure delivered
+          // this way lost its `retry_other_backend` recovery option and got the
+          // generic "run ended in an error" copy. Classify it the same way a
+          // thrown error is classified; the raw text never leaves this scope.
+          const failure = classifyClaudeError(
+            new Error(resultErrorText ?? resultSubtype ?? ""),
+          );
+          const now = new Date().toISOString();
+          cb.onLine({
+            raw: "",
+            display: {
+              t: now.slice(11, 19),
+              ev: "err",
+              tag: `run·error·${failure.kind}`,
+              text: failure.message,
             },
             facts: {},
             occurredAt: now,

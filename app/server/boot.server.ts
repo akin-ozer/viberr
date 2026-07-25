@@ -18,6 +18,7 @@ import { logger } from "./logging/logger.server";
 import { rescanProjections } from "./projections/rescan.server";
 import {
   finalizeOrphanedRuns,
+  recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
 } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
@@ -63,6 +64,58 @@ function logBootIntegrity(db: DatabaseSync): void {
     projections: { projects, tasks },
     users,
   });
+}
+
+/**
+ * Everything a restart stranded mid-completion, recovered in ONE ordered chain,
+ * then the disk it frees reclaimed. Every step is idempotent and self-catching:
+ * one failure never stops the next, and none of them blocks boot.
+ *
+ *  1. agent replies (NFR17, B9) — a specialist/reviewer run that finished before
+ *     its in-process reply callback fired left the task at waiting=agent with no
+ *     error. Post the reply + re-invoke the operator.
+ *  2. codex operator plans (P14-RT-08) — a Codex operator coordinates AFTER its
+ *     run finishes, so the same restart window loses the entire turn.
+ *  3. workspace reclaim (P13, ARCH-6 audit) — each task that ever ran a
+ *     specialist holds an 11-16 MB working tree and nothing had ever removed
+ *     one; a one-project test instance was already carrying 101 MB. The clone is
+ *     a cache (canonical state is task.md, delivered work is on the remote) and
+ *     a reopened task simply re-clones.
+ *
+ * P14-RT-09: the reclaim used to run right after SCHEDULING step 1 while
+ * claiming to run "after the recovery pass above", so a recovered run's delivery
+ * reconcile could race the `rmSync` of the very workspace it reads. It is
+ * sequenced now, which is what the claim always said. Exported so that ordering
+ * is testable rather than only asserted in a comment.
+ */
+export async function reconcileRestartedWork(db: DatabaseSync): Promise<void> {
+  try {
+    await recoverUnreactedAgentRuns(db);
+  } catch (error) {
+    logger.error("agent-reply recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  try {
+    await recoverStrandedOperatorPlans(db);
+  } catch (error) {
+    logger.error("codex operator plan recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  try {
+    const reclaimed = reclaimTerminalTaskWorkspaces(db);
+    if (reclaimed.removed > 0) {
+      logger.info("reclaimed finished task workspaces", {
+        workspaces: reclaimed.removed,
+        mb: Math.round((reclaimed.bytes / (1024 * 1024)) * 10) / 10,
+      });
+    }
+  } catch (error) {
+    logger.error("task workspace reclamation failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /**
@@ -169,36 +222,9 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Recover dropped agent-reply reactions (NFR17, B9): if the server restarted
-  // after a specialist/reviewer run finished but before its in-process reply
-  // callback fired, the task stalled at waiting=agent with no error. Post the
-  // missing reply + re-invoke the operator. Idempotent; failures never block
-  // boot. Fire-and-forget — the reconciler awaits its own runs internally.
-  void recoverUnreactedAgentRuns(db).catch((error) => {
-    logger.error("agent-reply recovery failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-  });
-
-  // Reclaim the git clone under every FINISHED task (P13, ARCH-6 audit). Each
-  // task that ever ran a specialist holds an 11-16 MB working tree and nothing
-  // had ever removed one — a one-project test instance was already carrying
-  // 101 MB. The clone is a cache (canonical state is task.md, delivered work is
-  // on the remote), and a reopened task simply re-clones. Runs after the
-  // recovery pass above so nothing in flight is touched; never blocks boot.
-  try {
-    const reclaimed = reclaimTerminalTaskWorkspaces(db);
-    if (reclaimed.removed > 0) {
-      logger.info("reclaimed finished task workspaces", {
-        workspaces: reclaimed.removed,
-        mb: Math.round((reclaimed.bytes / (1024 * 1024)) * 10) / 10,
-      });
-    }
-  } catch (error) {
-    logger.error("task workspace reclamation failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-  }
+  // Fire-and-forget: the chain awaits its own runs internally and must never
+  // hold up the server coming online.
+  void reconcileRestartedWork(db);
 
   // Start the server-side schedule runner (O-3): fire due scheduled operator
   // re-runs once at boot (catching any that came due while down), then on an

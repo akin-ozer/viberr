@@ -26,6 +26,7 @@ const FULL: ParsedTaskFile = {
     recommendations: [],
     schedules: [],
     urgent: true,
+    archived: false,
     validation: "changed",
     workRevision: null,
     verdicts: [],

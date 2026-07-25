@@ -8,6 +8,8 @@ import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
+import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import { ArchiveConfirm } from "./archive-confirm";
 import { DecisionPacket } from "./decision-packet";
 import {
   ExecutionProfile,
@@ -74,8 +76,9 @@ export function GithubTrace({
   merging,
 }: {
   task: TaskDetail;
-  /** GitHub web host for browse links (loader-derived; GHE-safe). */
-  githubHost?: string;
+  /** GitHub web host for browse links — always the loader's `githubWebHost()`
+   *  (P14-UI-11: no client-side default, so the literal lives in one place). */
+  githubHost: string;
   /** UI-57: ISO of the newest `github.reconcile` for THIS task, or null when it
    *  has never been synced. Diff/commits/PR below are a CACHE — the GitHub page
    *  discloses its freshness and this card did not. */
@@ -133,14 +136,12 @@ export function GithubTrace({
   // Real external link (spec §4.9: the prototype toast goes away): the PR when
   // one exists, else the branch tree.
   //
-  // UI-11 honesty note: the comment here used to claim the host is
-  // "connection-derived, never hardcoded — GHE deployments keep working". It is
-  // not. `githubWebHost()` is called with no argument at both of its call sites,
-  // no connection record stores an API base URL, and the reconciler states
-  // outright that V1 is github.com-only. So this literal is the SAME value the
-  // loader sends; it is a default for callers that omit the prop (tests), not a
-  // GHE fallback. Wiring a real base URL is tracked separately.
-  const host = githubHost ?? "https://github.com";
+  // P14-UI-11 residual: this used to carry its own `?? "https://github.com"`
+  // fallback, so the app held the host literal in TWO places while the fix note
+  // in `github-query.server.ts` designated ONE thread-through point for a real
+  // GHE base URL. The loader always sends `githubWebHost()`, so the prop is
+  // required and the second literal is gone.
+  const host = githubHost;
   const ghHref = task.repo
     ? task.pr
       ? `${host}/${task.repo}/pull/${task.pr.number}`
@@ -274,12 +275,19 @@ function PolicyPanel({
   projectSlug,
   myRole,
   stages,
+  ownsTask,
 }: {
   projectSlug: string;
   myRole: string | null;
   /** UI-15/UI-49 family: the boundary row names the project's OWN review and
    *  terminal stages instead of the literals "Review → Done". */
   stages: TaskDetail["stages"];
+  /** P14-GV-04: this viewer holds the task's owner seat. The acceptance row is
+   *  the one platform rule that is NOT identical for every task — R6-2 gives the
+   *  owner acceptance authority whatever their project role — and this panel
+   *  told a contributor-owner "Maintainer or admin only" while the server let
+   *  them accept and the review queue counted them as the one who must. */
+  ownsTask: boolean;
 }) {
   const reviewName =
     stages.length >= 2 ? stages[stages.length - 2]!.name : "the review stage";
@@ -306,7 +314,9 @@ function PolicyPanel({
       k: "Accept completion",
       v: roleCan(r, "accept-completion")
         ? "You can accept → Done"
-        : "Maintainer or admin only",
+        : ownsTask
+          ? "You own this task — you can accept it → Done"
+          : "Maintainer, admin, or the task's own owner",
       icon: "flag",
     },
     {
@@ -340,8 +350,9 @@ function PolicyPanel({
           color: "var(--faint)",
         }}
       >
-        Fixed platform rules — identical for every task. This task's live stage,
-        owner and waiting-on are in <b>Current state</b> above.
+        Platform rules as they apply to <b>you on this task</b> — role grants,
+        plus the owner authority R6-2 adds. This task's live stage, owner and
+        waiting-on are in <b>Current state</b> above.
       </p>
       {rows.map((r) => (
         <div className="policy-line" key={r.k}>
@@ -407,12 +418,16 @@ export function TaskHero({
   task,
   stage,
   canEditGoal,
+  archived = false,
   agentWorking = false,
   editGoalSignal = 0,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
   canEditGoal: boolean;
+  /** R14-3: archived tasks are off the board and out of the review queue —
+   *  say so at the top, or the page reads like ordinary open work. */
+  archived?: boolean;
   /** A live run is in flight — the triage "input required" pill would read as
    *  "waiting on you RIGHT NOW", which is false mid-run, so it yields to an
    *  agent-working pill. Real states (blocked / risk) still show. */
@@ -461,6 +476,12 @@ export function TaskHero({
       <span className="key">{task.key}</span>
       <h1>{task.title}</h1>
       <div className="hero-meta">
+        {archived && (
+          <Pill kind="neutral">
+            <Icon name="lock" />
+            archived
+          </Pill>
+        )}
         <Pill kind="neutral">
           <span
             className="col-stage-dot"
@@ -861,27 +882,43 @@ function ExecutionSection({
 }
 
 /** Sidebar "Current state" panel — stage (with governed transition menu),
- * waiting-on, owner controls, repo. */
+ * waiting-on, owner controls, repo, and the two dispositions a human decides
+ * here: accepting the completion (P14-LV-06) and archiving (R14-3). */
 function CurrentStatePanel({
   task,
   stage,
   meId,
   myRole,
+  archived,
+  acceptance,
   ownerBusy,
   onOwner,
   onRelease,
+  onArchive,
+  dispositionBusy,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
   meId: string;
   myRole: string | null;
+  /** R14-3: this task is archived — the panel offers Restore instead. */
+  archived: boolean;
+  /** P14-LV-06: what this viewer may do about accepting, resolved server-side
+   *  by the same predicate the review queue counts with. */
+  acceptance: AcceptanceAffordance;
   ownerBusy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   onRelease: () => void;
+  /** Open the archive confirm (archived === false) or restore immediately. */
+  onArchive: () => void;
+  /** An accept / archive / restore submission is in flight. */
+  dispositionBusy: boolean;
 }) {
   const csrf = useCsrfToken();
   const transitionFetcher = useFetcher<ActionResult>();
   useActionFeedback(transitionFetcher);
+  const acceptFetcher = useFetcher<ActionResult>();
+  useActionFeedback(acceptFetcher);
 
   // Manual stage change from the Current-state dropdown (admin|maintainer; the
   // server re-checks). Goes through the same governed transition that an applied
@@ -901,12 +938,29 @@ function CurrentStatePanel({
 
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const ownerMine = !!(owner && owner.userId === meId);
+  const acceptBusy = acceptFetcher.state !== "idle" || dispositionBusy;
+  const terminalName =
+    task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
+  const onAccept = () => {
+    if (acceptBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "accept-completion");
+    acceptFetcher.submit(fd, { method: "post" });
+  };
 
   return (
     <div className="panel">
       <div className="panel-head">
         <Icon name="bolt" />
         <h2>Current state</h2>
+        {archived && (
+          <span className="right">
+            <Pill kind="neutral" sm>
+              archived
+            </Pill>
+          </span>
+        )}
       </div>
       <div className="kv">
         <div className="kv-row">
@@ -998,6 +1052,58 @@ function CurrentStatePanel({
           <span className="v mono">{task.repo}</span>
         </div>
       </div>
+      {/* P14-LV-06: the acceptance the review queue promises. It renders for a
+          viewer who HOLDS acceptance authority here (maintainer+, or this task's
+          own owner per R6-2/R14-2) once the task stands at the boundary a
+          completion can be accepted from — never as an inert button, and never
+          silently absent while the queue says "waiting on your acceptance". */}
+      {acceptance.hasAuthority && acceptance.atBoundary && !archived && (
+        <div className="state-acts">
+          <button
+            type="button"
+            className="btn primary sm"
+            style={{ width: "100%" }}
+            disabled={!acceptance.canAccept || acceptBusy}
+            onClick={onAccept}
+          >
+            <Icon name="check" />
+            Accept completion → {terminalName}
+          </button>
+          {acceptance.blockedReason && (
+            // The reason has to be TEXT, not a `title`: a disabled control gets
+            // no pointer events, so a tooltip on it never opens (P14-LV-08).
+            <p className="deny-note">
+              <Icon name="alert" />
+              <span>
+                <strong>Not acceptable yet.</strong> {acceptance.blockedReason}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+      {/* R14-3: the honest ending for abandoned work — the one the closed-PR
+          guidance has been naming since pass 13. Board-management authority
+          (`approve-transition`), the same tier that moves a task between
+          stages; hidden for everyone else rather than rendered inert. */}
+      {canTransition && (
+        <div className="state-acts">
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ width: "100%" }}
+            disabled={dispositionBusy}
+            onClick={onArchive}
+          >
+            <Icon name={archived ? "refresh" : "lock"} />
+            {archived ? "Restore from archive" : "Archive task"}
+          </button>
+          <p className="hint" style={{ margin: ".35rem 0 0" }}>
+            {archived
+              ? "Archived — off the board and out of the review queue. Restoring puts it back where it stood, waiting on a human."
+              : "Keeps the record, takes the task off the board and out of the review queue. Reversible."}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1162,6 +1268,8 @@ export function TaskDetailPage({
   mentionables,
   recommendations,
   schedules,
+  archived = false,
+  acceptance,
   githubHost,
   githubReconciledAt = null,
 }: {
@@ -1196,13 +1304,20 @@ export function TaskDetailPage({
   recommendations: RecommendationView[];
   /** Pending scheduled operator re-runs (O-3, loader — from the task file). */
   schedules: TaskSchedule[];
-  /** GitHub web host for browse links (loader-derived; GHE-safe). */
-  githubHost?: string;
+  /** R14-3: the task's archive disposition (loader — from the task file, which
+   *  is where it lives; the projection has no column for it). */
+  archived?: boolean;
+  /** P14-LV-06: the viewer's acceptance authority + the exact refusal, resolved
+   *  server-side by the predicate the review queue also counts with. */
+  acceptance: AcceptanceAffordance;
+  /** GitHub web host for browse links — the loader's `githubWebHost()`. */
+  githubHost: string;
   /** UI-57: newest `github.reconcile` for this task (freshness cue). */
   githubReconciledAt?: string | null;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [releasing, setReleasing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [ask, setAsk] = useState(0);
   const csrf = useCsrfToken();
 
@@ -1217,10 +1332,15 @@ export function TaskDetailPage({
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
+  // R14-3: its own fetcher — an archive/restore must not be able to strand or be
+  // stranded by an ownership submission sharing one fetcher (UI-56's lesson).
+  const archiveFetcher = useFetcher<ActionResult>();
   useActionFeedback(ownerFetcher);
   useActionFeedback(resolveFetcher);
+  useActionFeedback(archiveFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
+  const archiveBusy = archiveFetcher.state !== "idle";
   // A confirmed edit_goal packet decision drops the human straight into the
   // goal editor (TaskHero opens + focuses it on this signal).
   const [editGoalSignal, setEditGoalSignal] = useState(0);
@@ -1241,15 +1361,19 @@ export function TaskDetailPage({
   const canRunAgents = roleCan(myRole as ProjectRole | null, "run-agents");
   const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
   // The viewer may resolve THIS packet when they're admin|maintainer OR the
-  // task owner (M2 / owner ruling Q2). accept_completion is additionally
-  // re-gated to admin|maintainer on the server — an owner-only viewer who
-  // picks it gets a friendly 409, but the common non-completion options work.
-  // The owner bypass requires `own-task` (contributor+): the server's owner
-  // check does too, so a demoted viewer-owner must NOT be shown resolve options
-  // that would 403 (matches releaseOwner's own-task gate).
+  // task owner (M2 / owner ruling Q2, WIDENED by R14-2). The owner bypass
+  // requires `own-task` (contributor+): the server's owner check does too, so a
+  // demoted viewer-owner must NOT be shown resolve options that would 403
+  // (matches releaseOwner's own-task gate).
   const isOwner =
     task.owner?.kind === "human" && task.owner.userId === me.id && canOwn;
   const canResolvePacket = canRunAgents || isOwner;
+  // P14-GV-01/R14-2: acceptance carries the owner exception (R6-2) on the
+  // server, and since R14-2 so do apply/dismiss — the owner governs EVERY
+  // decision on their own task. This flag used to be `canRunAgents` alone, so a
+  // contributor-owner was counted "waiting on you" by the decisions inbox and
+  // then shown a blocked Accept option and disabled recommendation buttons.
+  const canDecideOwned = canRunAgents || isOwner;
 
   // F7-UI1: "operator active" reflects a LIVE operator run (queued/running),
   // never mere attachment. The runtime projection already carries kind+state.
@@ -1317,6 +1441,16 @@ export function TaskDetailPage({
     ownerFetcher.submit(fd, { method: "post" });
   };
 
+  // R14-3: archiving asks first (it withdraws the open decision); restoring is
+  // additive and reversible, so it submits straight away.
+  const submitArchive = (nextArchived: boolean) => {
+    if (archiveBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", nextArchived ? "archive-task" : "restore-task");
+    archiveFetcher.submit(fd, { method: "post" });
+  };
+
   const onResolve = (optionIndex: number, note = "") => {
     if (resolveBusy) return;
     const fd = new FormData();
@@ -1339,6 +1473,7 @@ export function TaskDetailPage({
           task={task}
           stage={stage}
           canEditGoal={canRunAgents}
+          archived={archived}
           agentWorking={anyRunLive}
           editGoalSignal={editGoalSignal}
         />
@@ -1360,7 +1495,7 @@ export function TaskDetailPage({
             packet={task.packet}
             busy={resolveBusy}
             canResolve={canResolvePacket}
-            canResolveCompletion={canRunAgents}
+            canResolveCompletion={canDecideOwned}
             // UI-42: `update-goal` is admin|maintainer — the same grant the
             // hero's Edit button uses. An owner-only resolver must not be
             // offered a decision they cannot then carry out.
@@ -1372,7 +1507,7 @@ export function TaskDetailPage({
 
         <RecommendationsSection
           recommendations={recommendations}
-          canApply={canRunAgents}
+          canApply={canDecideOwned}
         />
 
         <ScheduledActions
@@ -1445,7 +1580,7 @@ export function TaskDetailPage({
       <div className="detail-side">
         <GithubTrace
           task={task}
-          {...(githubHost ? { githubHost } : {})}
+          githubHost={githubHost}
           reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
           {...(onForceAccept ? { onForceAccept } : {})}
@@ -1456,16 +1591,34 @@ export function TaskDetailPage({
           stage={stage}
           meId={me.id}
           myRole={myRole}
+          archived={archived}
+          acceptance={acceptance}
           ownerBusy={ownerBusy}
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
+          onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
+          dispositionBusy={archiveBusy}
         />
         <PolicyPanel
           projectSlug={task.projectSlug}
           myRole={myRole}
           stages={task.stages}
+          ownsTask={isOwner}
         />
       </div>
+
+      {archiving && (
+        <ArchiveConfirm
+          task={task}
+          pendingRecommendations={recommendations.length}
+          busy={archiveBusy}
+          onCancel={() => setArchiving(false)}
+          onConfirm={() => {
+            setArchiving(false);
+            submitArchive(true);
+          }}
+        />
+      )}
 
       {releasing && (
         <ReleaseConfirm

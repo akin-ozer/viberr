@@ -70,7 +70,9 @@ export function listAgentDeployments(
       `SELECT task_key, title, stage, waiting, specialist_json,
               reviewers_json, operator_json
          FROM task_projections
-        WHERE project_slug = ?
+        -- R14-3: an archived task is out of the flow, so its engagement must not
+        -- keep showing under a profile's "Active deployments" (P14-RV-03).
+        WHERE project_slug = ? AND archived = 0
         ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
     .all(projectSlug) as unknown as DeploymentTaskRow[];

@@ -93,6 +93,29 @@ export interface LibraryProfileView {
   resources: { skills: string[]; mcps: string[]; kb: string[] };
 }
 
+/**
+ * The role line a profile renders under (or beside) its name.
+ *
+ * P14-WL-05: the library deploy writes `role: fm.role || fm.name`, so a
+ * template whose frontmatter carries no `role` deploys with its NAME in the
+ * role field — live, the deployed "Org Docs Writer" rendered
+ * "Org Docs Writer · Org Docs Writer" on its roster row, its hero pill and the
+ * glyph tooltip. A role that only repeats the name carries no information, so
+ * fall back to what the profile IS on this board. Purely a render decision: the
+ * stored role stays whatever the deploy wrote.
+ */
+export function profileRoleLabel(
+  name: string,
+  role: string,
+  kind: "operator" | "specialist",
+): string {
+  const trimmed = role.trim();
+  if (!trimmed || trimmed.toLowerCase() === name.trim().toLowerCase()) {
+    return kind === "operator" ? "Orchestration" : "Specialist";
+  }
+  return trimmed;
+}
+
 /** Minimal profile shape the CapabilityMatrixModal needs (Policy passes
  * the same roster). */
 export type MatrixProfile = Pick<

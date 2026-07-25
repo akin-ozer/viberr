@@ -4,7 +4,7 @@ import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.sch
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
-  defaultGrantsFor,
+  conservativeGrantsFor,
   normalizeDeliveryGrants,
 } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
@@ -315,10 +315,16 @@ export async function createAgentProfile(
  *  - a FULL definition snapshot of the template (the same shape the project
  *    editor writes), so the deployment is self-contained and editable here;
  *  - EXPLICIT capability grants — the template's own grants when it has any,
- *    else the catalog defaults. Never `[]`: an empty grant list means
- *    "unspecified", and unspecified means GRANTED at the tool layer, so
- *    copying an org template's empty array would have handed the new agent
- *    full repo-write power (P13-AP-06).
+ *    else the CONSERVATIVE defaults (delivery withheld), matching what the org
+ *    editor persists for a template it has no capability UI for.
+ *
+ * P14-LV-01: this fallback used to be `defaultGrantsFor("agent")`, which grants
+ * all four delivery capabilities at `direct`. Deploying `org-docs-writer` — a
+ * template whose own description reads "never touches app code" and whose file
+ * carries `capabilities: []` — therefore produced a project agent holding
+ * repo-write, branch, push, open-PR and both verdict capabilities. Observed
+ * live through this exact button. The project editor (which DOES have a
+ * capability matrix) is where power gets opened up.
  */
 export async function deployAgentProfileFromLibrary(
   db: DatabaseSync,
@@ -383,13 +389,13 @@ export async function deployAgentProfileFromLibrary(
       };
       const deployment: AgentDeployment = {
         profileId,
-        // AP-06: explicit grants, never an empty list — the template's own
-        // grants when it has them, else the catalog defaults (the same list
-        // org-level create now persists).
+        // AP-06 / P14-LV-01: explicit grants, never an empty list — the
+        // template's own grants when it has them, else the CONSERVATIVE set
+        // (delivery withheld), the same list org-level create persists.
         capabilities: normalizeDeliveryGrants(
           (fm.capabilities.length
             ? fm.capabilities
-            : defaultGrantsFor("agent")
+            : conservativeGrantsFor("agent")
           ).map((g) => ({
             capabilityId: g.capabilityId,
             mode: (ALWAYS_HUMAN.has(g.capabilityId)

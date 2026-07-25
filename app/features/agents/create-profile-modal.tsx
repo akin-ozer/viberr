@@ -220,6 +220,7 @@ function BackendField({
   backend,
   setBackend,
   available,
+  seededBackends,
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
@@ -228,7 +229,15 @@ function BackendField({
    *  run would fail — EXCEPT the one an edited profile already runs on, which
    *  stays selectable so re-saving doesn't force a backend change (RU-2). */
   available: Record<"codex" | "claude", boolean>;
+  /** P13-UI-52: the backends the profile being edited ALREADY declares. A
+   *  seeded profile can list two; this form is single-select and saving writes
+   *  exactly one, so editing anything else on such a profile silently dropped
+   *  the second backend. Nothing here can widen the form (a run uses the first
+   *  backend anyway — the roster says so), but the narrowing must be stated
+   *  BEFORE the save, not discovered in the roster afterwards. */
+  seededBackends?: readonly ("codex" | "claude")[];
 }) {
+  const dropping = (seededBackends ?? []).filter((b) => b !== backend);
   // Chip groups have no labelable control — a `<label>` here names nothing.
   // role="group" + aria-labelledby gives screen readers the same caption.
   const capId = useId();
@@ -260,6 +269,20 @@ function BackendField({
           );
         })}
       </div>
+      {dropping.length > 0 && (
+        <p className="deny-note">
+          <Icon name="alert" />
+          <span>
+            <strong>Saving pins this profile to one backend.</strong> It
+            currently declares{" "}
+            {(seededBackends ?? [])
+              .map((b) => (b === "claude" ? "Claude Code" : "Codex"))
+              .join(" and ")}
+            ; {dropping.map((b) => (b === "claude" ? "Claude Code" : "Codex")).join(" and ")}{" "}
+            will be dropped.
+          </span>
+        </p>
+      )}
     </div>
   );
 }
@@ -714,15 +737,18 @@ function ModalFooter({
         <button type="button" className="btn ghost" onClick={onClose}>
           Cancel
         </button>
+        {/* P13-UI-58 residual: the submit had no busy state for assistive tech —
+            a save in flight looked idle to a screen reader. */}
         <button
           type="button"
           className="btn primary"
           onClick={onSubmitClick}
           disabled={!valid || busy}
+          aria-busy={busy}
           style={!valid ? { opacity: 0.5, pointerEvents: "none" } : undefined}
         >
           <Icon name="check" />
-          {editing ? "Save changes" : "Create profile"}
+          {busy ? "Saving…" : editing ? "Save changes" : "Create profile"}
         </button>
       </div>
     </div>
@@ -805,17 +831,13 @@ export function CreateProfileModal({
   // The live store catalog (buildResourceCatalog) drives the picker; an empty
   // store means an empty picker — never a mock fallback.
   //
-  // P13-KM-09/UI-28: the loader ships the OPERATOR catalog (a superset that
-  // includes the reserved in-process `viberr` toolkit) so editing the operator
-  // no longer paints its real grant as "no longer in the store — click to
-  // remove". A specialist can never mount that server, so it is filtered out
-  // here instead of being missing from the data.
-  const resCatalog: readonly ResCatalogGroup[] = (resourceCatalog ?? []).map(
-    (group) =>
-      group.key === "mcps" && !isOperator
-        ? { ...group, items: group.items.filter((i) => i.id !== "viberr") }
-        : group,
-  );
+  // P13-KM-09/UI-28 wanted the operator's real `viberr` grant to stop rendering
+  // as "no longer in the store", and did it by shipping a superset catalog and
+  // filtering the reserved name back out for specialists. P14-KM-14 removed the
+  // grant instead: the in-process toolkit mounts unconditionally, so the toggle
+  // governed nothing. The catalog is now the registry for both kinds and needs
+  // no per-kind filtering.
+  const resCatalog: readonly ResCatalogGroup[] = resourceCatalog ?? [];
   const [openRes, setOpenRes] = useState<Record<string, boolean>>(() =>
     resCatalog[0] ? { [resCatalog[0].group]: true } : {},
   );
@@ -929,6 +951,7 @@ export function CreateProfileModal({
           backend={backend}
           setBackend={setBackend}
           available={available}
+          {...(initial ? { seededBackends: initial.backends } : {})}
         />
 
         {isOperator && (

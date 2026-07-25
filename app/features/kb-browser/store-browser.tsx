@@ -7,16 +7,16 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { useFetcher } from "react-router";
-import { formatRelative } from "~/shared/dates/format";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useRelativeTime } from "~/ui/use-relative-time";
 import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
   entriesFromDataTransfer,
   entriesFromFileList,
-  type UploadEntry,
+  type UploadSelection,
 } from "./local-files";
 import {
   countKbDirs,
@@ -78,11 +78,36 @@ function ghImportReducer(
   }
 }
 
+/**
+ * Extensions the in-app editor offers to open. The SERVER is the authority —
+ * `readStoreDoc`/`writeStoreDoc` refuse anything else — this list only decides
+ * which rows are clickable, so a PDF doesn't look editable (P14-KM-08).
+ */
+const EDITABLE_EXTENSIONS = [
+  ".md",
+  ".markdown",
+  ".mdx",
+  ".txt",
+  ".rst",
+  ".text",
+  ".json",
+  ".yaml",
+  ".yml",
+];
+
+function isEditableDoc(name: string): boolean {
+  const lower = name.toLowerCase();
+  return EDITABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 /** Toolbar row + the collapsible GitHub import bar and its error line. */
 function BrowserToolbar({
   gh,
   dispatchGh,
   importing,
+  dest,
+  folders,
+  onDest,
   onImport,
   onUploadFiles,
   onUploadFolder,
@@ -92,6 +117,11 @@ function BrowserToolbar({
   gh: GhImportState;
   dispatchGh: (action: GhImportAction) => void;
   importing: boolean;
+  /** Store-relative folder every toolbar action writes into ([] = root). */
+  dest: string[];
+  /** Every folder in the tree, as store-relative paths (root excluded). */
+  folders: string[][];
+  onDest: (path: string[]) => void;
   onImport: () => void;
   onUploadFiles: () => void;
   onUploadFolder: () => void;
@@ -128,6 +158,30 @@ function BrowserToolbar({
           <FolderIco />
           New folder
         </button>
+        {/* P14-KM-08 (owner ruling R14-4): every toolbar action wrote to the
+            store ROOT no matter which folder you were looking at — "New
+            document" hardcoded `path: []` and the GitHub import carried no path
+            at all — so organising a KB into folders was impossible from the UI.
+            One destination drives all of them; the per-row actions set it too. */}
+        <label className="fm-hint" htmlFor="fm-dest">
+          into
+        </label>
+        <select
+          id="fm-dest"
+          className="mono"
+          value={dest.join("/")}
+          aria-label="Destination folder"
+          onChange={(e) =>
+            onDest(e.target.value ? e.target.value.split("/") : [])
+          }
+        >
+          <option value="">/ (store root)</option>
+          {folders.map((path) => (
+            <option key={path.join("/")} value={path.join("/")}>
+              {path.join("/")}/
+            </option>
+          ))}
+        </select>
         <span className="fm-hint">drag files or folders onto a folder to upload there</span>
       </div>
       {gh.open && (
@@ -169,6 +223,19 @@ function BrowserToolbar({
   );
 }
 
+/**
+ * P13-UI-20 residual: the file rows called `formatRelative` straight in render,
+ * so the string was minted on the SERVER's clock and then never aged — a
+ * browser left open kept claiming a file changed "2m ago" an hour later. The
+ * shared hook re-renders on mount and every 30s; a component per row is what
+ * lets a hook run inside the row map at all.
+ */
+function FileMtime({ iso }: { iso: string | null }) {
+  const rel = useRelativeTime(iso);
+  if (!rel) return null;
+  return <span suppressHydrationWarning>{" · " + rel}</span>;
+}
+
 /** The file tree with drag-drop upload targets and the inline new-folder
  * row; owns the transient drop-target highlight. */
 function StoreTree({
@@ -180,6 +247,7 @@ function StoreTree({
   onDismissNew,
   onCreateFolder,
   onStartUpload,
+  onOpenDoc,
   onDelete,
   onUploadEntries,
 }: {
@@ -192,10 +260,12 @@ function StoreTree({
   onDismissNew: () => void;
   onCreateFolder: (path: string[], name: string) => void;
   onStartUpload: (path: string[]) => void;
+  /** Open an existing text doc in the in-place editor (dir path + file name). */
+  onOpenDoc: (path: string[], name: string) => void;
   onDelete: (path: string[], node: StoreNode) => void;
   onUploadEntries: (
     path: string[],
-    entries: UploadEntry[],
+    selection: UploadSelection,
     mode: "files" | "folder",
   ) => void;
 }) {
@@ -227,11 +297,11 @@ function StoreTree({
     e.stopPropagation();
     setDropTgt(null);
     const dt = e.dataTransfer;
-    void entriesFromDataTransfer(dt).then((entries) => {
-      const mode = entries.some((x) => x.relPath.includes("/"))
+    void entriesFromDataTransfer(dt).then((selection) => {
+      const mode = selection.entries.some((x) => x.relPath.includes("/"))
         ? "folder"
         : "files";
-      onUploadEntries(path, entries, mode);
+      onUploadEntries(path, selection, mode);
     });
   };
 
@@ -281,107 +351,121 @@ function StoreTree({
       }}
     >
       {newIn && newIn.length === 0 && newFolderRow([], 0)}
-      {rows.map((r) => (
-        <Fragment key={r.key + (r.node.type || "")}>
-          <div
-            className={
-              "fm-row " +
-              (r.node.type === "dir" ? "dir" : "file") +
-              (dropTgt &&
-              dropTgt ===
-                (r.node.type === "dir" ? r.key : r.path.join("/"))
-                ? " droptgt"
-                : "")
-            }
-            style={{ paddingLeft: `${0.6 + r.depth * 1.3}rem` }}
-            role={r.node.type === "dir" ? "button" : undefined}
-            tabIndex={r.node.type === "dir" ? 0 : undefined}
-            aria-expanded={r.node.type === "dir" ? r.open : undefined}
-            onClick={r.node.type === "dir" ? () => onToggle(r.key) : undefined}
-            onKeyDown={
-              r.node.type === "dir"
-                ? (e) => {
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onToggle(r.key);
+      {rows.map((r) => {
+        // P14-KM-08/UI-61: a text doc opens in the in-place editor. Binaries
+        // stay inert rather than pretending to be editable — the server refuses
+        // them either way, but a clickable PDF would be a lie.
+        const openable = r.node.type === "file" && isEditableDoc(r.node.name);
+        const activate =
+          r.node.type === "dir"
+            ? () => onToggle(r.key)
+            : openable
+              ? () => onOpenDoc(r.path, r.node.name)
+              : undefined;
+        return (
+          <Fragment key={r.key + (r.node.type || "")}>
+            <div
+              className={
+                "fm-row " +
+                (r.node.type === "dir" ? "dir" : "file") +
+                (openable ? " openable" : "") +
+                (dropTgt &&
+                dropTgt ===
+                  (r.node.type === "dir" ? r.key : r.path.join("/"))
+                  ? " droptgt"
+                  : "")
+              }
+              style={{ paddingLeft: `${0.6 + r.depth * 1.3}rem` }}
+              role={activate ? "button" : undefined}
+              tabIndex={activate ? 0 : undefined}
+              aria-expanded={r.node.type === "dir" ? r.open : undefined}
+              aria-label={openable ? "Open " + r.node.name : undefined}
+              onClick={activate}
+              onKeyDown={
+                activate
+                  ? (e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        activate();
+                      }
                     }
-                  }
-                : undefined
-            }
-            onDragOver={(e) =>
-              overDir(e, r.node.type === "dir" ? r.key : r.path.join("/"))
-            }
-            onDrop={(e) =>
-              dropInto(
-                e,
-                r.node.type === "dir" ? [...r.path, r.node.name] : r.path,
-              )
-            }
-          >
-            <span className="twist">
-              {r.node.type === "dir" && (
-                <Icon name="chevron" className={r.open ? "r90" : ""} />
-              )}
-            </span>
-            {r.node.type === "dir" ? (
-              <FolderIco open={r.open} />
-            ) : (
-              <Icon name="file" />
-            )}
-            <span className="fm-name">{r.node.name}</span>
-            {r.node.type === "dir" ? (
-              <span className="fm-meta">
-                {countKbFiles(r.node.children) +
-                  " file" +
-                  (countKbFiles(r.node.children) === 1 ? "" : "s")}
+                  : undefined
+              }
+              onDragOver={(e) =>
+                overDir(e, r.node.type === "dir" ? r.key : r.path.join("/"))
+              }
+              onDrop={(e) =>
+                dropInto(
+                  e,
+                  r.node.type === "dir" ? [...r.path, r.node.name] : r.path,
+                )
+              }
+            >
+              <span className="twist">
+                {r.node.type === "dir" && (
+                  <Icon name="chevron" className={r.open ? "r90" : ""} />
+                )}
               </span>
-            ) : (
-              <span className="fm-meta">
-                {prettySize(r.node.sizeBytes)}
-                {r.node.mtime ? " · " + formatRelative(r.node.mtime) : ""}
-              </span>
-            )}
-            <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
-              {r.node.type === "dir" && (
-                <>
-                  <button
-                    type="button"
-                    className="fm-act"
-                    title="Upload here"
-                    aria-label={"Upload into " + r.node.name}
-                    onClick={() => onStartUpload([...r.path, r.node.name])}
-                  >
-                    <UploadIco />
-                  </button>
-                  <button
-                    type="button"
-                    className="fm-act"
-                    title="New subfolder"
-                    aria-label={"New folder in " + r.node.name}
-                    onClick={() => onStartNew([...r.path, r.node.name])}
-                  >
-                    <Icon name="plus" />
-                  </button>
-                </>
+              {r.node.type === "dir" ? (
+                <FolderIco open={r.open} />
+              ) : (
+                <Icon name="file" />
               )}
-              <button
-                type="button"
-                className="fm-act del"
-                title="Delete"
-                aria-label={"Delete " + r.node.name}
-                onClick={() => onDelete(r.path, r.node)}
-              >
-                <Icon name="x" />
-              </button>
-            </span>
-          </div>
-          {newIn &&
-            r.node.type === "dir" &&
-            newIn.join("/") === r.key &&
-            newFolderRow(newIn, r.depth + 1)}
-        </Fragment>
-      ))}
+              <span className="fm-name">{r.node.name}</span>
+              {r.node.type === "dir" ? (
+                <span className="fm-meta">
+                  {countKbFiles(r.node.children) +
+                    " file" +
+                    (countKbFiles(r.node.children) === 1 ? "" : "s")}
+                </span>
+              ) : (
+                <span className="fm-meta">
+                  {prettySize(r.node.sizeBytes)}
+                  <FileMtime iso={r.node.mtime} />
+                </span>
+              )}
+              <span className="fm-acts" onClick={(e) => e.stopPropagation()}>
+                {r.node.type === "dir" && (
+                  <>
+                    <button
+                      type="button"
+                      className="fm-act"
+                      title="Upload here"
+                      aria-label={"Upload into " + r.node.name}
+                      onClick={() => onStartUpload([...r.path, r.node.name])}
+                    >
+                      <UploadIco />
+                    </button>
+                    <button
+                      type="button"
+                      className="fm-act"
+                      title="New subfolder"
+                      aria-label={"New folder in " + r.node.name}
+                      onClick={() => onStartNew([...r.path, r.node.name])}
+                    >
+                      <Icon name="plus" />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="fm-act del"
+                  title="Delete"
+                  aria-label={"Delete " + r.node.name}
+                  onClick={() => onDelete(r.path, r.node)}
+                >
+                  <Icon name="x" />
+                </button>
+              </span>
+            </div>
+            {newIn &&
+              r.node.type === "dir" &&
+              newIn.join("/") === r.key &&
+              newFolderRow(newIn, r.depth + 1)}
+          </Fragment>
+        );
+      })}
       {rows.length === 0 && !newIn && (
         <div className="fm-empty">
           Empty — drag files or folders here, upload, or import from GitHub.
@@ -508,10 +592,22 @@ function useStoreOps(
   };
   const submitUpload = (
     path: string[],
-    entries: UploadEntry[],
+    selection: UploadSelection,
     mode: "files" | "folder",
   ) => {
-    if (entries.length === 0) return;
+    const { entries, skipped } = selection;
+    if (entries.length === 0) {
+      // P13-UI-08 residual: a drop of nothing but dot-files returned here with
+      // no request, no toast and no error — the user saw exactly what a
+      // successful upload looks like. Say which of the two nothings happened.
+      if (skipped > 0) {
+        push(
+          `Nothing uploaded — ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
+          "error",
+        );
+      }
+      return;
+    }
     const fd = new FormData();
     fd.set("intent", "store-upload");
     fd.set("mode", mode);
@@ -563,7 +659,7 @@ function useStoreOps(
     e.target.value = "";
   };
 
-  const ghImport = () => {
+  const ghImport = (dest: string[]) => {
     if (importing) return;
     if (!gh.url.trim()) {
       dispatchGh({
@@ -580,6 +676,9 @@ function useStoreOps(
         kind: resource.kind,
         id: resource.id,
         url: gh.url.trim(),
+        // P14-KM-08: the import used to carry no path at all, so a snapshot
+        // always landed at the store root regardless of the browsed folder.
+        path: JSON.stringify(dest),
       },
       { method: "post", action },
     );
@@ -602,6 +701,175 @@ function useStoreOps(
     onDirFiles,
     ghImport,
   };
+}
+
+/** The in-place document editor's state (P14-KM-08 / UI-59 / UI-60 / UI-61). */
+interface DocDraft {
+  /** Store-relative folder holding the document. */
+  dir: string[];
+  /** File name — fixed once the document exists on disk. */
+  name: string;
+  body: string;
+  existing: boolean;
+  /** The on-disk file exceeded the read cap, so this body is a partial copy. */
+  truncated: boolean;
+  err: string | null;
+}
+
+/**
+ * The in-app document editor (owner ruling R14-4).
+ *
+ * It used to be create-only, and it closed OPTIMISTICALLY on save — the draft
+ * was thrown away before the server answered, so a rejected write destroyed
+ * whatever had been typed (UI-60). Existing documents could not be opened at
+ * all: `readStoreDoc` shipped with no production caller, so the only way to
+ * change a doc in-app was to retype its name and blind-overwrite it (UI-61).
+ *
+ * It owns its OWN fetchers, separate from the file-op ones, so a read or a
+ * rejected save never rides the generic store toast — the editor stays open and
+ * says what went wrong.
+ */
+function useDocEditor(
+  resource: StoreBrowserResource,
+  action: string,
+  onSaved: (path: string) => void,
+) {
+  const csrf = useCsrfToken();
+  const readFetcher = useFetcher<Record<string, unknown>>();
+  const saveFetcher = useFetcher<Record<string, unknown>>();
+  const [doc, setDoc] = useState<DocDraft | null>(null);
+  /** A save the user has confirmed will replace an existing file (UI-59). */
+  const [confirmReplace, setConfirmReplace] = useState(false);
+
+  const loading = readFetcher.state !== "idle";
+  const saving = saveFetcher.state !== "idle";
+
+  const handledRead = useRef<unknown>(null);
+  useEffect(() => {
+    if (readFetcher.state !== "idle" || !readFetcher.data) return;
+    if (handledRead.current === readFetcher.data) return;
+    handledRead.current = readFetcher.data;
+    const d = readFetcher.data as {
+      ok?: boolean;
+      text?: string;
+      truncated?: boolean;
+      error?: string;
+    };
+    setDoc((prev) =>
+      prev
+        ? d.ok
+          ? { ...prev, body: d.text ?? "", truncated: Boolean(d.truncated), err: null }
+          : { ...prev, err: d.error ?? "That document could not be read." }
+        : prev,
+    );
+  }, [readFetcher.state, readFetcher.data]);
+
+  const handledSave = useRef<unknown>(null);
+  useEffect(() => {
+    if (saveFetcher.state !== "idle" || !saveFetcher.data) return;
+    if (handledSave.current === saveFetcher.data) return;
+    handledSave.current = saveFetcher.data;
+    const d = saveFetcher.data as { ok?: boolean; toast?: string; error?: string };
+    if (d.ok) {
+      setConfirmReplace(false);
+      setDoc(null);
+      onSaved(d.toast ?? "Document saved");
+      return;
+    }
+    // UI-60: keep the draft. The typed body is the only copy that exists.
+    setConfirmReplace(false);
+    setDoc((prev) =>
+      prev ? { ...prev, err: d.error ?? "The document was not saved." } : prev,
+    );
+  }, [saveFetcher.state, saveFetcher.data, onSaved]);
+
+  const openNew = (dir: string[]) =>
+    setDoc({ dir, name: "", body: "", existing: false, truncated: false, err: null });
+
+  const openExisting = (dir: string[], name: string) => {
+    setDoc({ dir, name, body: "", existing: true, truncated: false, err: null });
+    readFetcher.submit(
+      {
+        _csrf: csrf,
+        intent: "store-read-doc",
+        kind: resource.kind,
+        id: resource.id,
+        path: JSON.stringify([...dir, name]),
+      },
+      { method: "post", action },
+    );
+  };
+
+  const save = (overwrite: boolean) => {
+    if (!doc || saving) return;
+    saveFetcher.submit(
+      {
+        _csrf: csrf,
+        intent: "store-write-doc",
+        kind: resource.kind,
+        id: resource.id,
+        path: JSON.stringify(doc.dir),
+        name: doc.name.trim(),
+        body: doc.body,
+        ...(overwrite ? { overwrite: "1" } : {}),
+      },
+      { method: "post", action },
+    );
+  };
+
+  return {
+    doc,
+    setDoc,
+    loading,
+    saving,
+    confirmReplace,
+    setConfirmReplace,
+    openNew,
+    openExisting,
+    save,
+  };
+}
+
+/** Nested "this file already exists" confirm — its own native <dialog>, so it
+ *  stacks over the browser card exactly like the delete confirm (UI-59). */
+function ReplaceConfirm({
+  path,
+  onCancel,
+  onConfirm,
+}: {
+  path: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { ref, close } = useDialog(onCancel);
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      style={{ zIndex: 71 }}
+      role="alertdialog"
+      aria-labelledby="store-replace-title"
+      aria-describedby="store-replace-desc"
+    >
+      <div className="confirm-icon">
+        <Icon name="alert" />
+      </div>
+      <h3 id="store-replace-title">Replace “{path}”?</h3>
+      <p id="store-replace-desc">
+        A document with that name is already in the store. Saving overwrites its
+        contents — the old text is gone, and agents load the new text on their
+        next context load.
+      </p>
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={close}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onConfirm}>
+          Replace document
+        </button>
+      </div>
+    </dialog>
+  );
 }
 
 export function StoreBrowser({
@@ -628,8 +896,8 @@ export function StoreBrowser({
       ),
   );
   const [newIn, setNewIn] = useState<string[] | null>(null);
-  /** The in-app document editor (P13-LV-06): `null` = closed. */
-  const [doc, setDoc] = useState<{ name: string; body: string } | null>(null);
+  /** Store-relative folder every toolbar action writes into (P14-KM-08). */
+  const [dest, setDest] = useState<string[]>([]);
   const [confirm, setConfirm] = useState<{
     path: string[];
     node: StoreNode;
@@ -651,10 +919,20 @@ export function StoreBrowser({
     });
 
   const ops = useStoreOps(resource, action, expand);
+  const push = useToast();
+  const editor = useDocEditor(resource, action, (toast) => {
+    push(toast);
+    expand(dest);
+  });
+
+  /** Pick the destination folder AND reveal it, so the two never disagree. */
+  const target = (path: string[]) => {
+    setDest(path);
+    expand(path);
+  };
 
   // ---- GitHub-import feedback: lives here (not in the hook) because a
   // successful import expands the tree state this component owns.
-  const push = useToast();
   const handledGh = useRef<unknown>(null);
   const { ghFetcher, dispatchGh } = ops;
   useEffect(() => {
@@ -670,7 +948,16 @@ export function StoreBrowser({
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.folder) {
-        setExpanded((s) => new Set([...s, d.folder!]));
+        // The destination is store-relative now, so every ancestor of the
+        // imported folder has to open for it to be visible (P14-KM-08).
+        const parts = d.folder.split("/");
+        setExpanded(
+          (s) =>
+            new Set([
+              ...s,
+              ...parts.map((_, i) => parts.slice(0, i + 1).join("/")),
+            ]),
+        );
       }
       dispatchGh({ type: "reset" });
     } else if (d.error) {
@@ -683,9 +970,18 @@ export function StoreBrowser({
   // open new-folder input consumes the dismiss (onDismissRequest → true, no
   // exit animation) before the modal itself closes.
   const { ref: dialogRef, close } = useDialog(onClose, () => {
-    if (!newIn) return false;
-    setNewIn(null);
-    return true;
+    if (newIn) {
+      setNewIn(null);
+      return true;
+    }
+    // An open editor holds unsaved text, so Escape closes the editor, not the
+    // browser under it (P14-UI-60 — losing the draft to a stray Escape is the
+    // same data loss as losing it to a rejected save).
+    if (editor.doc) {
+      editor.setDoc(null);
+      return true;
+    }
+    return false;
   });
 
   const createFolder = (path: string[], name: string) => {
@@ -712,6 +1008,15 @@ export function StoreBrowser({
 
   const nFiles = countKbFiles(nodes);
   const nDirs = countKbDirs(nodes);
+  const folders = folderPaths(nodes);
+  const { doc } = editor;
+  /** Does a file with the draft's name already sit in the destination folder? */
+  const draftCollides = (draft: DocDraft): boolean => {
+    const wanted = draft.name.trim().includes(".")
+      ? draft.name.trim()
+      : `${draft.name.trim()}.md`;
+    return childNames(nodes, draft.dir).includes(wanted);
+  };
 
   return (
     <>
@@ -720,7 +1025,7 @@ export function StoreBrowser({
         className="modal-card modal-wide"
         aria-label={"Files — " + title}
         data-screen-label={"Files — " + title}
-        inert={confirm !== null}
+        inert={confirm !== null || editor.confirmReplace}
       >
         <div className="modal-head">
           <span className="conn-ico" style={{ width: 34, height: 34, borderRadius: 10 }}>
@@ -739,50 +1044,92 @@ export function StoreBrowser({
             gh={ops.gh}
             dispatchGh={ops.dispatchGh}
             importing={ops.importing}
-            onImport={ops.ghImport}
-            onUploadFiles={() => ops.startUpload([])}
-            onUploadFolder={() => ops.startDirUpload([])}
-            onNewFolder={() => setNewIn([])}
-            onNewDoc={() => setDoc({ name: "", body: "" })}
+            dest={dest}
+            folders={folders}
+            onDest={target}
+            onImport={() => ops.ghImport(dest)}
+            onUploadFiles={() => ops.startUpload(dest)}
+            onUploadFolder={() => ops.startDirUpload(dest)}
+            onNewFolder={() => setNewIn(dest)}
+            onNewDoc={() => editor.openNew(dest)}
           />
 
           {doc && (
             <div className="fm-doc">
-              <input
-                type="text"
-                className="mono"
-                value={doc.name}
-                placeholder="file-name.md"
-                aria-label="Document file name"
-                onChange={(e) => setDoc({ ...doc, name: e.target.value })}
-              />
+              {doc.existing ? (
+                <div className="fm-doc-path mono">
+                  {[...doc.dir, doc.name].join("/")}
+                  {editor.loading ? " · loading…" : ""}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  className="mono"
+                  value={doc.name}
+                  placeholder="file-name.md"
+                  aria-label="Document file name"
+                  onChange={(e) =>
+                    editor.setDoc({ ...doc, name: e.target.value, err: null })
+                  }
+                />
+              )}
               <textarea
                 className="ta mono"
                 rows={10}
                 value={doc.body}
                 placeholder={"# Title\n\nWhat your agents must know."}
                 aria-label="Document contents"
-                onChange={(e) => setDoc({ ...doc, body: e.target.value })}
+                onChange={(e) =>
+                  editor.setDoc({ ...doc, body: e.target.value, err: null })
+                }
               />
+              {doc.truncated && (
+                <div className="cred-warn">
+                  <Icon name="alert" />
+                  This document is larger than the editor can load, so only the
+                  first part is shown — saving would destroy the rest. Edit it on
+                  disk instead.
+                </div>
+              )}
+              {doc.err && (
+                <div className="cred-warn">
+                  <Icon name="alert" />
+                  {doc.err}
+                </div>
+              )}
               <div className="fm-doc-acts">
-                <button type="button" className="btn ghost sm" onClick={() => setDoc(null)}>
+                <span className="fm-hint mono">
+                  {(doc.dir.length > 0 ? doc.dir.join("/") + "/" : "/") +
+                    (doc.existing ? "" : " · new document")}
+                </span>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => editor.setDoc(null)}
+                >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="btn sm primary"
-                  disabled={!doc.name.trim()}
+                  disabled={
+                    !doc.name.trim() ||
+                    doc.truncated ||
+                    editor.saving ||
+                    editor.loading
+                  }
                   onClick={() => {
-                    ops.submitFields({
-                      intent: "store-write-doc",
-                      path: JSON.stringify([]),
-                      name: doc.name.trim(),
-                      body: doc.body,
-                    });
-                    setDoc(null);
+                    // UI-59: a new document that would land on an existing file
+                    // asks first. Saving an OPENED document is already an
+                    // explicit edit of that file, so it replaces directly.
+                    if (!doc.existing && draftCollides(doc)) {
+                      editor.setConfirmReplace(true);
+                      return;
+                    }
+                    editor.save(doc.existing);
                   }}
                 >
-                  Save document
+                  {editor.saving ? "Saving…" : "Save document"}
                 </button>
               </div>
             </div>
@@ -794,12 +1141,16 @@ export function StoreBrowser({
             newIn={newIn}
             onToggle={toggle}
             onStartNew={(path) => {
-              expand(path);
+              target(path);
               setNewIn(path);
             }}
             onDismissNew={() => setNewIn(null)}
             onCreateFolder={createFolder}
-            onStartUpload={ops.startUpload}
+            onStartUpload={(path) => {
+              target(path);
+              ops.startUpload(path);
+            }}
+            onOpenDoc={editor.openExisting}
             onDelete={(path, node) => setConfirm({ path, node })}
             onUploadEntries={ops.submitUpload}
           />
@@ -859,6 +1210,40 @@ export function StoreBrowser({
           onConfirm={() => removeNode(confirm.path, confirm.node)}
         />
       )}
+      {editor.confirmReplace && doc && (
+        <ReplaceConfirm
+          path={[...doc.dir, doc.name.trim()].join("/")}
+          onCancel={() => editor.setConfirmReplace(false)}
+          onConfirm={() => {
+            editor.setConfirmReplace(false);
+            editor.save(true);
+          }}
+        />
+      )}
     </>
   );
+}
+
+/** Every folder in the tree as a store-relative path, depth-first (the
+ *  destination picker's options). */
+function folderPaths(nodes: StoreNode[], base: string[] = []): string[][] {
+  const out: string[][] = [];
+  for (const node of nodes) {
+    if (node.type !== "dir") continue;
+    const path = [...base, node.name];
+    out.push(path);
+    out.push(...folderPaths(node.children, path));
+  }
+  return out;
+}
+
+/** File names directly inside `dir` ([] = the store root). */
+function childNames(nodes: StoreNode[], dir: string[]): string[] {
+  let level = nodes;
+  for (const segment of dir) {
+    const next = level.find((n) => n.type === "dir" && n.name === segment);
+    if (!next || next.type !== "dir") return [];
+    level = next.children;
+  }
+  return level.flatMap((n) => (n.type === "file" ? [n.name] : []));
 }

@@ -106,7 +106,11 @@ describe("UI-10: the hero must not assert activity at zero", () => {
     expect(
       getByText(/All quiet — no agent runs right now\./),
     ).toBeTruthy();
-    expect(getByText(/Nothing is waiting on you\./)).toBeTruthy();
+    // P14-WL-04: the hero's count is org-wide (every project the viewer is in),
+    // so it says so — the board header and the Agents page count other things.
+    expect(
+      getByText(/Nothing is waiting on you in any of your projects\./),
+    ).toBeTruthy();
     // The animated pulse dot is gone at zero (it used to render inside the
     // bold "0 runs active").
     expect(container.querySelector(".home-hero .working")).toBeNull();
@@ -118,6 +122,16 @@ describe("UI-10: the hero must not assert activity at zero", () => {
     );
     expect(getByText(/Your agents kept working/)).toBeTruthy();
     expect(container.querySelector(".home-hero .working")).toBeTruthy();
+  });
+
+  // P14-WL-04: Home said "5 decisions waiting on you", the board header
+  // "4 waiting on a human decision" and the Agents page "6 threads waiting on a
+  // human" in one session. Every number was right; none said what it counted.
+  it("names the scope of the waiting count", () => {
+    const { getByText } = renderHome(
+      baseData([card({ total: 5, running: 1, waiting: 2 })]),
+    );
+    expect(getByText(/waiting on you across all your projects/)).toBeTruthy();
   });
 });
 

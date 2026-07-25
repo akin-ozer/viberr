@@ -43,6 +43,17 @@ const KB_TEXT_EXTENSIONS = new Set([
   ".text",
 ]);
 
+/**
+ * Would this file name reach a run? P14-KM-13: the org-settings row counted
+ * EVERY non-dot file as a "doc", so a KB holding nothing but PDFs advertised a
+ * healthy count while injecting zero bytes. The count and the injector must
+ * answer the same question, so the injector owns the predicate.
+ */
+export function isInjectableKbDoc(fileName: string): boolean {
+  if (fileName.startsWith(".")) return false; // dotfiles are not content
+  return KB_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+}
+
 /** Default per-run character budget across ALL of a KB's docs. */
 export const KB_INJECTION_BUDGET = 24_000;
 
@@ -99,10 +110,7 @@ function collectKbDocs(dir: string): KbDoc[] {
       if (st.isSymbolicLink()) continue; // never follow symlinks out of the root
       if (st.isDirectory()) {
         walk(childAbs, [...relParts, entry], depth + 1);
-      } else if (
-        st.isFile() &&
-        KB_TEXT_EXTENSIONS.has(path.extname(entry).toLowerCase())
-      ) {
+      } else if (st.isFile() && isInjectableKbDoc(entry)) {
         out.push({
           rel: [...relParts, entry].join("/"),
           abs: childAbs,
@@ -119,9 +127,10 @@ function collectKbDocs(dir: string): KbDoc[] {
  * Read a knowledge base's documents from the store, concatenated with per-doc
  * headings and bounded by {@link KB_INJECTION_BUDGET}. Returns "" when the KB
  * folder is absent (an unresolved KB reference injects nothing, exactly as
- * skills do). When the budget clips content, a `_(… N doc(s) omitted — KB
- * exceeds the Nk injection budget)_` marker is appended so the truncation is
- * never silent.
+ * skills do). When the budget clips content a truncation marker is appended,
+ * and when the remaining budget fits NOTHING the marker is returned on its own
+ * (P14-KM-05) — a KB is never dropped silently, whether it was partly or wholly
+ * squeezed out by the KBs ahead of it.
  */
 export function readKbBody(
   name: string,
@@ -180,14 +189,33 @@ export function readKbBody(
       budget -= heading.length + slice.length;
       parts.push(`${heading}${slice}`);
     }
-    if ((omitted > 0 || truncatedADoc) && parts.length > 0) {
-      const kb = Math.round(budgetChars / 1000);
+    if (parts.length === 0) {
+      if (omitted > 0) {
+        // P14-KM-05: NOTHING fit. The old `parts.length > 0` guard suppressed
+        // both the marker and the warn in exactly this branch, so an earlier KB
+        // that spent the shared budget made every later one vanish without a
+        // trace — no prompt section, no log — while every UI still showed the
+        // grant attached. Return the marker alone so the run's own prompt says
+        // the KB was dropped.
+        logger.warn(
+          "declared knowledge base did not fit the run's injection budget — NOTHING of it reached the run",
+          { kb: name, docs: omitted, budgetChars },
+        );
+        return `_(knowledge base omitted entirely — ${omitted} doc${omitted === 1 ? "" : "s"} dropped; only ${budgetChars} chars of the shared knowledge-base budget were left)_`;
+      }
+      logger.warn(
+        "declared knowledge base holds no readable text — run proceeds WITHOUT it",
+        { kb: name, docs: docs.length },
+      );
+      return "";
+    }
+    if (omitted > 0 || truncatedADoc) {
       const tail =
         omitted > 0
           ? `${omitted} more doc${omitted === 1 ? "" : "s"} omitted`
           : `this doc was clipped`;
       parts.push(
-        `_(knowledge base truncated — ${tail}; KB exceeds the ${kb}k-char injection budget)_`,
+        `_(knowledge base truncated — ${tail}; it exceeded the ${budgetChars}-char budget left for knowledge bases)_`,
       );
     }
     return parts.join("\n\n");

@@ -23,18 +23,18 @@ import { listMcpServers, listSkills } from "./resources.server";
  * `id` is the reference the run layer resolves (skill name, MCP name, KB dir),
  * so a grant made here actually reaches the agent's context.
  *
- * `profileKind` scopes the MCP set (F7-RES3): the in-process `viberr` toolkit is
- * the OPERATOR's own coordination server and is never resolvable through a
- * specialist's `resources.mcps` (specialist-mcp.server.ts skips it), so it must
- * not be offered as a specialist-attachable MCP. It stays in the general/operator
- * catalog (the default) so existing operator surfaces are unchanged.
+ * The MCP set is the org REGISTRY, the same for every profile kind. The
+ * in-process `viberr` toolkit is never listed (P14-KM-14): the operator toolkit
+ * mounts it unconditionally and the specialist resolver skips it, so offering it
+ * as a grant was a toggle over a decision the product had already made. The
+ * former `profileKind` option existed only to scope that one name and went with
+ * it (F7-RES3 superseded).
  */
 export const RESERVED_OPERATOR_MCP = "viberr";
 
 export function buildResourceCatalog(
   db: DatabaseSync,
   dataRoot?: string,
-  opts: { profileKind?: "operator" | "specialist" } = {},
 ): ResCatalogGroup[] {
   const skillIds = new Set<string>(dirNames(skillsRootDir(dataRoot)));
   for (const s of safe(() => listSkills(db))) skillIds.add(s.name);
@@ -46,12 +46,14 @@ export function buildResourceCatalog(
     kbIds.add(row.dir);
   }
 
-  const mcpIds =
-    opts.profileKind === "specialist"
-      ? new Set<string>()
-      : new Set<string>([RESERVED_OPERATOR_MCP]);
+  // P14-KM-14: the registry only, for BOTH profile kinds. `viberr` used to be
+  // offered to the operator as a real-looking toggle over a decision the product
+  // had already made: `buildOperatorToolkit` mounts the in-process server
+  // unconditionally and `resolveSpecialistMcpServers` skips the reserved name,
+  // so granting or revoking it changed nothing in either direction.
+  const mcpIds = new Set<string>();
   for (const m of safe(() => listMcpServers(db))) {
-    if (opts.profileKind === "specialist" && m.name === RESERVED_OPERATOR_MCP) {
+    if (m.name === RESERVED_OPERATOR_MCP) {
       continue; // never let a real org row shadow the reserved operator toolkit
     }
     mcpIds.add(m.name);
