@@ -140,7 +140,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // Archived read-only gate enforced (R8-5).
         assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential");
         return intent === "set-credential"
-          ? runSetCredential(db, slug, actor)
+          ? await runSetCredential(db, slug, actor)
           : runClearCredential(db, slug, actor);
       }
       case "archive-project": {

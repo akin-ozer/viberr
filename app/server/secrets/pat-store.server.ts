@@ -24,12 +24,17 @@ import { listScopeViolations } from "~/server/projections/policy-violations.serv
  * reader falls back to it so seeded demo projects render the mock exactly.
  */
 
-// The mock's required-scope vocabulary (project-settings spec §3.4) — used
-// when a project defines no credentialPolicy.requiredScopes of its own.
+// The scopes Viberr's own GitHub writes actually use — branch pushes (repo
+// contents), PR open and PR merge — used when a project defines no
+// credentialPolicy.requiredScopes of its own. Owner ruling 2026-07-25: the
+// mock-era `workflow` and `read:org` are gone. Nothing in the app reads org
+// data, and workflow-file pushes are situational — when a task really edits
+// `.github/workflows/*`, the push 403s and opens a scope violation with
+// GitHub's own message, which is a better verdict than an unprovable chip
+// (fine-grained tokens offer no safe workflow probe). A project policy may
+// still require either; they are validated like any policy scope.
 export const DEFAULT_REQUIRED_SCOPES = [
   "repo",
-  "workflow",
-  "read:org",
   "pull_request:write",
 ] as const;
 

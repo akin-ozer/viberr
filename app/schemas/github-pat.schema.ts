@@ -7,13 +7,16 @@ import { z } from "zod";
  * pat-validator run as this shape; loaders re-parse it tolerantly
  * (invalid/legacy blobs → null, never a crash).
  *
- * Scope-id vocabulary: the mock's display ids are the contract
- * (`repo`, `workflow`, `read:org`, `pull_request:write` — see
- * project.md credentialPolicy.requiredScopes). For CLASSIC tokens they
- * are compared literally against the `x-oauth-scopes` header. For
- * FINE-GRAINED tokens GitHub exposes no scope introspection, so each id
- * maps to a read-only probe where one exists and is otherwise "assumed"
- * granted until a real 403 opens a scope violation (ruling 5).
+ * Scope-id vocabulary: the classic-scope display ids are the contract —
+ * the required set is `repo` + `pull_request:write` (what Viberr's own
+ * writes use; owner ruling 2026-07-25 dropped the mock-era `workflow` and
+ * `read:org`), and project.md credentialPolicy.requiredScopes may add
+ * others. For CLASSIC tokens ids are compared literally against the
+ * `x-oauth-scopes` header. For FINE-GRAINED tokens GitHub exposes no
+ * scope introspection, so each id maps to a live probe where one exists —
+ * reads directly, writes via the empty-payload dry-run (422 = authorized,
+ * 403 = refused) — and is otherwise "assumed" granted until a real 403
+ * opens a scope violation (ruling 5).
  */
 
 export const PAT_VALIDATION_STATUS_VALUES = [

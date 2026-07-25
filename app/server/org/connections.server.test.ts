@@ -64,7 +64,10 @@ describe("createConnection", () => {
     const gh = fakeGithubFetch({
       "GET /user": {
         body: { login: "x" },
-        headers: { "x-oauth-scopes": "repo" }, // workflow missing
+        // `repo` missing (and with it the implied pull_request:write). The
+        // former fixture was refused for the mock-era `workflow` — dropped by
+        // owner ruling 2026-07-25, so a repo-scoped classic token now passes.
+        headers: { "x-oauth-scopes": "gist" },
       },
     });
     const result = await createConnection(
@@ -76,7 +79,7 @@ describe("createConnection", () => {
     expect(result.status).toBe("validation_failed");
     if (result.status === "validation_failed") {
       expect(result.message).toContain("Validation failed");
-      expect(result.message).toContain("workflow");
+      expect(result.message).toContain("repo");
       expect(result.message).toContain("Nothing was saved.");
     }
     expect(listConnections(db)).toHaveLength(0);

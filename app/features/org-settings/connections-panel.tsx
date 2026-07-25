@@ -18,7 +18,10 @@ import { useOrgAction, type OrgActionData } from "./use-org-action";
  * failure copy renders in the modal's `.cred-warn` and nothing is saved.
  */
 
-const SCOPES = ["repo", "workflow", "pull_request:write"] as const;
+// Owner ruling 2026-07-25: the required set is what Viberr's own writes use —
+// branch push + PR open/merge. The mock-era `workflow` (unprovable on
+// fine-grained tokens, over-demanding on classic ones) is gone.
+const SCOPES = ["repo", "pull_request:write"] as const;
 
 function ConnectionModal({
   initial,
@@ -147,9 +150,9 @@ function ConnectionModal({
           <span>
             Verified when you apply: a classic PAT publishes its scopes, so a
             missing one refuses the token and nothing is saved. A{" "}
-            <strong>fine-grained</strong> PAT publishes none — those scopes are
-            marked <span className="mono">~assumed</span> and only prove
-            themselves on the first real repository call.
+            <strong>fine-grained</strong> PAT publishes none — its permissions
+            are proven by real probes (including write dry-runs) once the
+            connection is attached to a project with a repository.
           </span>
         </div>
       </div>
@@ -228,32 +231,46 @@ export function ConnectionsPanel({
                   {expiry || "—"}
                 </span>
                 <span className="scope-chips">
-                  {/* P13-UI-01: a ✓ now means the scope was actually OBSERVED.
-                      A fine-grained PAT publishes no scope header, so the
-                      validator marks every scope `assumed` without probing —
-                      painting ✓ there claimed a verification that never ran. */}
-                  {SCOPES.map((s) => {
-                    const ev = (c.scopes ?? []).find((x) => x.id === s);
-                    const observed = verified && ev?.ok && ev.source !== "assumed";
-                    const assumed = verified && ev?.source === "assumed";
+                  {/* P13-UI-01 + owner ruling 2026-07-25: chips are PROVEN
+                      verdicts only — a scope header (classic) or a real probe
+                      (fine-grained; writes via the empty-payload dry-run). An
+                      `assumed` entry is not evidence, so it renders no chip:
+                      unproven scopes collapse into the single honest line
+                      below instead of a pseudo-check next to real ones. */}
+                  {(() => {
+                    const evidence = verified ? (c.scopes ?? []) : [];
+                    const proven = evidence.filter((s) => s.source !== "assumed");
+                    const unproven = evidence.filter((s) => s.source === "assumed");
                     return (
-                      <span
-                        className={"scope-chip" + (assumed ? " assumed" : "")}
-                        key={s}
-                        title={
-                          assumed
-                            ? "This token doesn't publish its scopes — Viberr assumes it and finds out on the first refusal."
-                            : observed
-                              ? "Confirmed against the token's scopes."
-                              : undefined
-                        }
-                      >
-                        {observed && <Icon name="check" />}
-                        {assumed && <span aria-hidden>~</span>}
-                        {s}
-                      </span>
+                      <>
+                        {proven.map((s) => (
+                          <span
+                            className={"scope-chip" + (s.ok ? "" : " miss")}
+                            key={s.id}
+                            title={
+                              (s.source === "header"
+                                ? "Confirmed against the token's published scopes."
+                                : "Proven by a live probe against the repository.") +
+                              (s.note ? ` (${s.note})` : "")
+                            }
+                          >
+                            <Icon name={s.ok ? "check" : "alert"} />
+                            {s.id}
+                          </span>
+                        ))}
+                        {unproven.length > 0 && (
+                          <span
+                            className="sub"
+                            title={unproven.map((s) => s.note ?? s.id).join(" · ")}
+                          >
+                            {proven.length > 0 ? " · " : ""}
+                            {unproven.map((s) => s.id).join(", ")} unproven —
+                            verified when attached to a project
+                          </span>
+                        )}
+                      </>
                     );
-                  })}
+                  })()}
                 </span>
               </span>
               {c.validationState === "unvalidated" && (

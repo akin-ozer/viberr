@@ -258,16 +258,54 @@ export async function validatePatToken(
           ? false
           : null;
     }
+    // WRITE permissions via the empty-payload dry-run: GitHub authorizes a
+    // request BEFORE validating its body, so a write endpoint hit with `{}`
+    // answers 422 (Validation Failed) when the permission is HELD — nothing
+    // can be created from an empty payload — and 403 when it is refused.
+    // That turns the two delivery-critical writes from eternal "assumed"
+    // chips into probe verdicts. Any other answer (404 resource-hiding, 5xx,
+    // network) stays UNKNOWN → the honest "assumed" fallback below.
+    const dryRunWrite = async (
+      method: "POST" | "PUT",
+      path: string,
+    ): Promise<boolean | null> => {
+      const dry = await client.request<unknown>(method, path, { body: {} });
+      if (dry.ok) return true; // cannot really happen for an empty payload
+      if (dry.kind !== "http") return null;
+      if (dry.status === 422) return true;
+      if (dry.status === 403) return false;
+      return null;
+    };
+    const contentsWriteOk =
+      repo && repoAccessible === true && requiredScopes.includes("repo")
+        ? await dryRunWrite("PUT", `/repos/${repo}/contents/viberr-scope-probe`)
+        : null;
+    const pullsWriteOk =
+      repo && pullsReadOk === true
+        ? await dryRunWrite("POST", `/repos/${repo}/pulls`)
+        : null;
     for (const id of requiredScopes) {
       if (id === "repo" && repoAccessible !== null) {
-        scopes.push({
-          id,
-          ok: repoAccessible,
-          source: "probe",
-          note: `repository ${repoAccessible ? "readable" : "not readable"}`,
-        });
+        scopes.push(
+          repoAccessible && contentsWriteOk === true
+            ? { id, ok: true, source: "probe", note: "read + write proven by dry-run" }
+            : repoAccessible && contentsWriteOk === false
+              ? { id, ok: false, source: "probe", note: "repository readable but not writable" }
+              : {
+                  id,
+                  ok: repoAccessible,
+                  source: "probe",
+                  note: `repository ${repoAccessible ? "readable; write unverified" : "not readable"}`,
+                },
+        );
       } else if (id === "read:org" && orgReadOk !== null) {
         scopes.push({ id, ok: orgReadOk, source: "probe" });
+      } else if (id === "pull_request:write" && pullsWriteOk !== null) {
+        scopes.push(
+          pullsWriteOk
+            ? { id, ok: true, source: "probe", note: "write proven by dry-run" }
+            : { id, ok: false, source: "probe", note: "pull-request write refused" },
+        );
       } else if (id === "pull_request:write" && pullsReadOk === false) {
         scopes.push({
           id,
@@ -426,6 +464,14 @@ export async function revalidateProjectCredential(
   // GitHub. The violation sweep below still runs against the cached scopes, so
   // a suppressed round trip changes nothing an operator can observe except the
   // wasted API call. See REVALIDATE_COOLDOWN_MS for why only `valid` qualifies.
+  //
+  // Reuse additionally requires the cache to cover the SAME repo this run
+  // would probe: the connection modal validates with `repo: null`, so its
+  // fresh-but-repo-less "valid" used to suppress the first project-scoped
+  // run (add connection → attach within the cooldown), pinning a
+  // fine-grained token at all-"assumed" scope chips that a repo probe would
+  // have upgraded. A repo-context change is a new question, not a repeat.
+  const targetRepo = ctx.repo !== undefined ? ctx.repo : (projectRow?.repo ?? null);
   const now = (ctx.now ?? Date.now)();
   const cached = credential.validation;
   const cachedAge =
@@ -435,6 +481,7 @@ export async function revalidateProjectCredential(
   const reusable =
     cached !== null &&
     cached.status === "valid" &&
+    (cached.repo ?? null) === targetRepo &&
     Number.isFinite(cachedAge) &&
     cachedAge >= 0 &&
     cachedAge < REVALIDATE_COOLDOWN_MS
@@ -444,7 +491,7 @@ export async function revalidateProjectCredential(
   const validation =
     reusable ??
     (await validatePat(db, credential.id, {
-      repo: ctx.repo !== undefined ? ctx.repo : (projectRow?.repo ?? null),
+      repo: targetRepo,
       ...(requiredScopes ? { requiredScopes } : {}),
       knownExpiresAt: credential.validation?.expiresAt ?? null,
       ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),

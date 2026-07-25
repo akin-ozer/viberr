@@ -529,28 +529,52 @@ describe("ResourcesPanel", () => {
   });
 });
 
-/* --------------------- PAT scope evidence (P13-UI-01) --------------------- */
+/* ---------------- PAT scope evidence (P13-UI-01, hardened) ---------------- */
 
 describe("ConnectionsPanel — scope evidence", () => {
-  it("shows a check only for OBSERVED scopes and marks assumed ones", () => {
+  it("renders chips for PROVEN scopes only; assumed ones collapse into the honest line", () => {
+    // Owner ruling 2026-07-25: an `assumed` entry is not evidence — P13-UI-01's
+    // `~` pseudo-chips still LOOKED like verification, so they render no chip
+    // at all now. A validated-but-unprobed fine-grained PAT shows zero chips
+    // and says its scopes are proven once attached to a project.
     const assumed: ConnectionRecord = {
       ...CONNECTIONS[1]!,
       id: "cx_fine",
       owner: "fine-grained",
       scopes: [
         { id: "repo", ok: true, source: "assumed" },
-        { id: "workflow", ok: true, source: "assumed" },
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
     };
     const { container } = renderPanel(
       <ConnectionsPanel connections={[assumed]} />,
     );
+    expect(container.querySelectorAll(".conn-row .scope-chip").length).toBe(0);
+    expect(container.querySelector(".conn-row .scope-chips")!.textContent).toContain(
+      "repo, pull_request:write unproven — verified when attached to a project",
+    );
+  });
+
+  it("probe-backed verdicts render real chips — ✓ for held, alert for refused", () => {
+    const probed: ConnectionRecord = {
+      ...CONNECTIONS[1]!,
+      id: "cx_probed",
+      owner: "fine-grained",
+      scopes: [
+        { id: "repo", ok: true, source: "probe", note: "read + write proven by dry-run" },
+        { id: "pull_request:write", ok: false, source: "probe", note: "pull-request write refused" },
+      ],
+    };
+    const { container } = renderPanel(
+      <ConnectionsPanel connections={[probed]} />,
+    );
     const chips = [...container.querySelectorAll(".conn-row .scope-chip")];
-    // The validator never probed anything for a fine-grained PAT, so a ✓ here
-    // would claim a verification that did not happen.
-    expect(chips.every((c) => c.className.includes("assumed"))).toBe(true);
-    expect(chips.length).toBe(3);
-    expect(container.querySelectorAll(".conn-row .scope-chip .ico").length).toBe(0);
+    expect(chips.map((c) => c.textContent)).toEqual(["repo", "pull_request:write"]);
+    expect(chips[0]!.className).not.toContain("miss");
+    expect(chips[1]!.className).toContain("miss");
+    // No unproven line when every scope has a verdict.
+    expect(container.querySelector(".conn-row .scope-chips")!.textContent).not.toContain(
+      "unproven",
+    );
   });
 });

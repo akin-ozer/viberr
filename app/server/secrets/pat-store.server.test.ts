@@ -191,13 +191,11 @@ describe("pat-store", () => {
       expiresAt: null,
       repo: null,
       scopes: [
-        { id: "repo", ok: true, source: "header" },
-        { id: "workflow", ok: false, source: "header" },
-        { id: "read:org", ok: true, source: "header" },
+        { id: "repo", ok: false, source: "header" },
         { id: "pull_request:write", ok: true, source: "header" },
       ],
-      missingScopes: ["workflow"],
-      detail: "Missing scope: workflow.",
+      missingScopes: ["repo"],
+      detail: "Missing scope: repo.",
     });
 
     openScopeViolation(store.db, VIB142_VIOLATION(store.slug));
@@ -207,7 +205,7 @@ describe("pat-store", () => {
     expect(health.patId).toBe(pat.id);
     expect(health.masked).toBe("····42af");
     // Validator verdict shows through…
-    expect(health.scopes.find((s) => s.id === "workflow")).toMatchObject({
+    expect(health.scopes.find((s) => s.id === "repo")).toMatchObject({
       ok: false,
       source: "header",
     });

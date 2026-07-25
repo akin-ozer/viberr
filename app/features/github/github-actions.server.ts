@@ -101,11 +101,12 @@ export async function runGrantScope(
  * the current default (the org connection is where a token is actually
  * replaced). No default connection is a degraded VALUE, never a throw.
  */
-export function runSetCredential(
+export async function runSetCredential(
   db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
-): GithubActionOutcome {
+  ctx: GithubActionContext = {},
+): Promise<GithubActionOutcome> {
   const connection = getDefaultConnection(db);
   if (!connection) {
     return {
@@ -119,6 +120,21 @@ export function runSetCredential(
   // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
   // probe. Without this the row kept saying "no credential" after a full reload.
   invalidateRepoAccess(db, projectSlug);
+  // Attaching is the first moment this PAT meets a real repository, so refresh
+  // its cached validation WITH that context. The connection modal necessarily
+  // validated with `repo: null`, which pins a fine-grained token at
+  // all-"assumed" (`~`) scope chips forever — on the org card too, since both
+  // surfaces render the same per-PAT cache. A project-scoped run upgrades
+  // `repo` (and pull-read) to probe-backed verdicts. Best-effort: a degraded
+  // GitHub must not fail the attach — the bind above already happened.
+  try {
+    await revalidateProjectCredential(db, projectSlug, actor, {
+      dataRoot: ctx.dataRoot,
+      ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+    });
+  } catch {
+    // tolerated — the credential works; chips upgrade on the next re-check
+  }
   return {
     ok: true,
     toast: wasBound

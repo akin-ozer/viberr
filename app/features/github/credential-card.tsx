@@ -77,6 +77,16 @@ export function CredentialCard({
   const unverified =
     credential.scopes.length > 0 &&
     credential.scopes.every((s) => s.source === "unchecked");
+  // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
+  // live probe (writes via the empty-payload dry-run), or an open violation.
+  // `assumed`/`unchecked` entries are not evidence, so they render as the
+  // honest "unproven" line instead of a pseudo-check next to real ones.
+  const proven = credential.scopes.filter(
+    (s: ScopeChip) => s.source !== "assumed" && s.source !== "unchecked",
+  );
+  const unproven = credential.scopes.filter(
+    (s: ScopeChip) => s.source === "assumed" || s.source === "unchecked",
+  );
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -87,12 +97,18 @@ export function CredentialCard({
         </span>
       </div>
       <div className="scope-chips">
-        {credential.scopes.map((s: ScopeChip) => (
+        {proven.map((s: ScopeChip) => (
           <span className={"scope-chip" + (s.ok ? "" : " miss")} key={s.id}>
             <Icon name={s.ok ? "check" : "alert"} />
             {s.id}
           </span>
         ))}
+        {!unverified && unproven.length > 0 && (
+          <span className="sub" style={{ alignSelf: "center" }}>
+            {unproven.map((s) => s.id).join(", ")} unproven — verified on
+            first use
+          </span>
+        )}
       </div>
       {connectionAuth === "revoked" || connectionAuth === "expired" ? (
         <div className="cred-warn">
@@ -135,8 +151,9 @@ export function CredentialCard({
       ) : (
         <div className="cred-ok">
           <Icon name="check" />
-          All required scopes granted. Secrets stay isolated from task
-          records and timelines.
+          {unproven.length > 0
+            ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
+            : "All required scopes proven. Secrets stay isolated from task records and timelines."}
         </div>
       )}
       {manageActions}

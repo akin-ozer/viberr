@@ -38,10 +38,13 @@ import { formatCalendarDate } from "~/shared/dates/format";
  * validator semantics, unchanged.
  */
 
-/** The mock's fixed minimum scope copy: repo · workflow · pull_request:write. */
+/** The minimum a connection must hold for Viberr's own writes (branch push,
+ * PR open, PR merge). Owner ruling 2026-07-25: the mock-era `workflow`
+ * requirement is gone — it blocked classic tokens that were perfectly able to
+ * deliver, and it is unprovable for fine-grained ones; a workflow-file push
+ * that GitHub refuses surfaces as a scope violation at the moment it matters. */
 export const CONNECTION_REQUIRED_SCOPES = [
   "repo",
-  "workflow",
   "pull_request:write",
 ] as const;
 

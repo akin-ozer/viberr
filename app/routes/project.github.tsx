@@ -65,7 +65,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     if (intent === "set-credential" || intent === "clear-credential") {
       requireGithubAction("grant-github-scope", "change the credential");
       return intent === "set-credential"
-        ? runSetCredential(db, params.slug, actor)
+        ? await runSetCredential(db, params.slug, actor)
         : runClearCredential(db, params.slug, actor);
     }
     return data(

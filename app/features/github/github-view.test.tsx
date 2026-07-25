@@ -151,8 +151,33 @@ describe("CredentialCard states", () => {
     );
     expect(container.querySelector(".cred-warn")).toBeNull();
     expect(container.querySelectorAll(".scope-chip.miss").length).toBe(0);
+    // "proven", not "granted" — every chip here is header/probe evidence
+    // (owner ruling 2026-07-25: chips render proven verdicts only).
     expect(container.querySelector(".cred-ok")!.textContent).toContain(
-      "All required scopes granted. Secrets stay isolated from task records and timelines.",
+      "All required scopes proven. Secrets stay isolated from task records and timelines.",
+    );
+  });
+
+  it("assumed scopes render NO chip — the honest 'unproven' line instead", () => {
+    const mixed: ProjectCredentialHealth = {
+      ...healthyCredential,
+      scopes: [
+        { id: "repo", ok: true, source: "probe" },
+        { id: "workflow", ok: true, source: "assumed" },
+      ],
+    };
+    const { container } = render(
+      <CredentialCard credential={mixed} onOpenTask={() => {}} />,
+    );
+    const chips = [...container.querySelectorAll(".scope-chip")].map(
+      (c) => c.textContent,
+    );
+    expect(chips).toEqual(["repo"]); // the assumed scope is not a chip
+    expect(container.querySelector(".scope-chips")!.textContent).toContain(
+      "workflow unproven — verified on first use",
+    );
+    expect(container.querySelector(".cred-ok")!.textContent).toContain(
+      "Every provable scope verified.",
     );
   });
 
