@@ -106,11 +106,6 @@ CREATE TABLE task_projections (
   -- as a count so read paths (notifications "Waiting on you", home decisions)
   -- can reconcile decision notifications against LIVE state without file I/O.
   recommendation_count INTEGER NOT NULL DEFAULT 0,
-  -- The KINDS of those pending recommendations (JSON string array). Decision
-  -- scoping (R8-3) needs the kinds, not just the count: a task OWNER can act on
-  -- an `accept_completion` recommendation (owner exception, like a packet) but
-  -- NOT on transition/assign/run recommendations (maintainer+). '[]' when none.
-  recommendation_kinds TEXT NOT NULL DEFAULT '[]',
   -- Pending/fired scheduled actions (O-3), as a JSON array of the task file's
   -- `schedules`. The server-side schedule runner queries this to find due
   -- entries without reading every task file. '[]' when none.
