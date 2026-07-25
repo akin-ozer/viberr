@@ -78,3 +78,4 @@ ON by default for every project via `DEFAULT_GUARDRAILS` in
 `guardrails` array in that project's canonical frontmatter.
 
 See also: [testing-quickstart.md](./testing-quickstart.md).
+Viberr Meta verified Claude/Codex parity on 2026-07-25.
