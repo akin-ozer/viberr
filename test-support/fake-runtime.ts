@@ -148,16 +148,30 @@ function inferOutcome(lines: LogLine[]): "finished" | "error" {
     : "finished";
 }
 
+/**
+ * The reply a queue-less fake run emits.
+ *
+ * It used to echo the WHOLE prompt as the agent's message, which made every
+ * test's cost scale with prompt length — and the completion pipeline then wrote
+ * that entire prompt into the task file as an agent comment, re-parsed it, and
+ * fanned out any `@handle` it happened to contain. P14-RT-02 grew fresh-run
+ * prompts by ~600 chars (the asker's words + name), which is exactly the kind of
+ * change that should not move test timings at all. A short, deterministic reply
+ * that still carries the task key keeps the pipeline exercised without the
+ * coupling. Tests needing specific reply text queue their own lines.
+ */
 function defaultLines(backend: RealBackend, prompt: string): LogLine[] {
+  const key = /\b([A-Z][A-Z0-9]{1,5}-\d+)\b/.exec(prompt)?.[1] ?? "the task";
+  const reply = `Looked at ${key} and reported back.`;
   return backend === "codex"
     ? [
         { t: "", ev: "init", tag: "thread.started", text: "test thread" },
-        { t: "", ev: "text", tag: "agent_message", text: prompt },
+        { t: "", ev: "text", tag: "agent_message", text: reply },
         { t: "", ev: "result", tag: "turn.completed", text: "done" },
       ]
     : [
         { t: "", ev: "init", tag: "system·init", text: "test session" },
-        { t: "", ev: "text", tag: "assistant", text: prompt },
+        { t: "", ev: "text", tag: "assistant", text: reply },
         { t: "", ev: "result", tag: "result", text: "done" },
       ];
 }
