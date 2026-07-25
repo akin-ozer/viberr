@@ -1,6 +1,8 @@
-# Tracked repository files
+# Repository file listing
 
-Generated from Git’s tracked-file index. Paths are grouped by top-level directory and sorted lexicographically.
+Generated from the actual repository tree on 2026-07-25 (Europe/Istanbul).
+
+Includes 673 files and symbolic links. Excludes `.git/`, dependency directories, and generated outputs (`build/`, `data/`, `docker-data/`, `coverage/`, `playwright-report/`, `test-results/`, `e2e/.tmp-data/`, `e2e/.auth/`, and `.react-router/`).
 
 ## Repository root
 
@@ -69,6 +71,7 @@ vitest.config.ts
 
 ```text
 app/app.css
+app/app.css.test.ts
 app/entry.client.tsx
 app/entry.server.tsx
 app/features/activity/activity-page.test.tsx
@@ -80,6 +83,7 @@ app/features/agents/agent-profile-actions.server.ts
 app/features/agents/agent-types.ts
 app/features/agents/agents-page.test.tsx
 app/features/agents/agents-page.tsx
+app/features/agents/agents-query.server.test.ts
 app/features/agents/agents-query.server.ts
 app/features/agents/agents-route.server.test.ts
 app/features/agents/capability-catalog.test.ts
@@ -89,6 +93,7 @@ app/features/agents/create-profile-modal.tsx
 app/features/agents/model-catalog-route.server.test.ts
 app/features/board/board-filters.test.ts
 app/features/board/board-filters.ts
+app/features/board/board-page.test.tsx
 app/features/board/board-page.tsx
 app/features/github/credential-card.tsx
 app/features/github/github-actions.server.ts
@@ -100,6 +105,7 @@ app/features/github/github-query.server.ts
 app/features/github/github-route.server.test.ts
 app/features/github/github-view.test.tsx
 app/features/github/github-view.tsx
+app/features/home/home-page.test.tsx
 app/features/home/home-page.tsx
 app/features/home/home-phase10-route.server.test.ts
 app/features/home/home-query.server.test.ts
@@ -109,6 +115,7 @@ app/features/home/project-create.server.ts
 app/features/home/project-name.test.ts
 app/features/home/project-name.ts
 app/features/kb-browser/icons.tsx
+app/features/kb-browser/local-files.test.ts
 app/features/kb-browser/local-files.ts
 app/features/kb-browser/store-browser.test.tsx
 app/features/kb-browser/store-browser.tsx
@@ -131,7 +138,9 @@ app/features/org-settings/org-settings-page.test.tsx
 app/features/org-settings/org-settings-page.tsx
 app/features/org-settings/org-settings-route.server.test.ts
 app/features/org-settings/resources-panel.tsx
+app/features/org-settings/use-org-action.test.tsx
 app/features/org-settings/use-org-action.ts
+app/features/org-settings/users-panel.test.tsx
 app/features/org-settings/users-panel.tsx
 app/features/policy/policy-actions.server.ts
 app/features/policy/policy-data.ts
@@ -146,31 +155,45 @@ app/features/profile/profile-page.test.tsx
 app/features/profile/profile-page.tsx
 app/features/profile/profile-query.server.ts
 app/features/profile/profile-route.server.test.ts
+app/features/project-settings/ghost-members.server.test.ts
 app/features/project-settings/membership.server.ts
+app/features/project-settings/settings-actions.server.test.ts
 app/features/project-settings/settings-actions.server.ts
 app/features/project-settings/settings-page.test.tsx
 app/features/project-settings/settings-page.tsx
 app/features/project-settings/settings-query.server.ts
 app/features/project-settings/settings-route.server.test.ts
+app/features/review/review-acceptance-authority.server.test.ts
+app/features/review/review-acceptance-authority.server.ts
 app/features/review/review-helpers.test.ts
 app/features/review/review-helpers.ts
 app/features/review/review-page.test.tsx
 app/features/review/review-page.tsx
 app/features/review/review-route.server.test.ts
+app/features/runtime/log-noise.test.ts
+app/features/runtime/log-noise.ts
+app/features/runtime/run-artifact-routes.server.test.ts
 app/features/runtime/runs-helpers.test.ts
 app/features/runtime/runs-helpers.ts
 app/features/runtime/runs-panels.test.tsx
 app/features/runtime/runs-panels.tsx
 app/features/runtime/runtime-types.ts
 app/features/runtime/use-elapsed.test.tsx
+app/features/runtime/use-run-log-stream.test.tsx
 app/features/runtime/use-run-log-stream.ts
+app/features/shell/csrf-result.server.ts
+app/features/shell/nav.test.ts
 app/features/shell/nav.ts
 app/features/shell/rail.tsx
+app/features/shell/route-pending-bar.test.tsx
+app/features/shell/route-pending-bar.tsx
+app/features/shell/shell-components.test.tsx
 app/features/shell/theme-preference.ts
 app/features/shell/top-bell.tsx
 app/features/shell/topbar.tsx
 app/features/shell/user-menu.tsx
 app/features/shell/workspace-routes.server.test.ts
+app/features/task-detail/archive-confirm.tsx
 app/features/task-detail/decision-packet.tsx
 app/features/task-detail/event-meta.ts
 app/features/task-detail/execution-profile.tsx
@@ -183,22 +206,27 @@ app/features/task-detail/release-confirm.tsx
 app/features/task-detail/task-detail-components.test.tsx
 app/features/task-detail/task-detail-page.tsx
 app/features/task-detail/task-detail-route.server.test.ts
+app/features/task-detail/task-disposition.test.tsx
 app/features/task-detail/task-runtime-route.server.test.ts
 app/features/task-detail/timeline-slice.test.ts
 app/features/task-detail/timeline-slice.ts
 app/features/task-detail/timeline.tsx
 app/features/task-detail/use-mention-autocomplete.ts
+app/lib/auth.server.test.ts
 app/lib/auth.server.ts
 app/root.test.tsx
 app/root.tsx
 app/routes.ts
 app/routes/_index.tsx
 app/routes/api.auth.$.ts
+app/routes/login.server.test.ts
 app/routes/login.tsx
 app/routes/logout.tsx
 app/routes/notifications.read.tsx
+app/routes/notifications.test.tsx
 app/routes/notifications.tsx
 app/routes/org.settings.tsx
+app/routes/org.settings.upload.test.ts
 app/routes/prefs.theme.tsx
 app/routes/profile.tsx
 app/routes/project._index.tsx
@@ -215,9 +243,9 @@ app/routes/projects.tsx
 app/routes/resources.events.ts
 app/routes/resources.health.ts
 app/routes/resources.model-catalog.ts
+app/routes/resources.run-log.test.ts
 app/routes/resources.run-log.ts
 app/routes/resources.session-export.ts
-app/routes/run-artifact-routes.server.test.ts
 app/schemas/file-diagnostics.ts
 app/schemas/github-pat.schema.ts
 app/schemas/project-file.schema.test.ts
@@ -251,6 +279,7 @@ app/server/auth/session-renewal.server.test.ts
 app/server/auth/user-admin.server.test.ts
 app/server/auth/user-admin.server.ts
 app/server/auth/user-store.server.ts
+app/server/boot.server.test.ts
 app/server/boot.server.ts
 app/server/config/env.server.test.ts
 app/server/config/env.server.ts
@@ -258,6 +287,7 @@ app/server/db/migration-runner.server.test.ts
 app/server/db/migration-runner.server.ts
 app/server/db/retention.server.test.ts
 app/server/db/retention.server.ts
+app/server/db/sqlite.server.test.ts
 app/server/db/sqlite.server.ts
 app/server/db/transaction.server.ts
 app/server/errors/app-error.server.ts
@@ -269,6 +299,7 @@ app/server/events/sse-broker.server.test.ts
 app/server/events/sse-broker.server.ts
 app/server/files/actor-ref.server.test.ts
 app/server/files/actor-ref.server.ts
+app/server/files/agent-profile-file.server.test.ts
 app/server/files/agent-profile-file.server.ts
 app/server/files/atomic-file.server.ts
 app/server/files/file-mutex.server.test.ts
@@ -285,6 +316,7 @@ app/server/files/kb-watch.service.server.ts
 app/server/files/project-file.server.ts
 app/server/files/project-writer.server.test.ts
 app/server/files/project-writer.server.ts
+app/server/files/skill-body.server.test.ts
 app/server/files/skill-body.server.ts
 app/server/files/task-file.server.test.ts
 app/server/files/task-file.server.ts
@@ -311,9 +343,13 @@ app/server/github/scope-flag.server.ts
 app/server/github/workspace-delivery.server.test.ts
 app/server/github/workspace-delivery.server.ts
 app/server/interpretation/diagnostics-policy.server.ts
+app/server/interpretation/freshness-policy.server.test.ts
+app/server/interpretation/freshness-policy.server.ts
 app/server/interpretation/readiness-policy.server.test.ts
 app/server/interpretation/readiness-policy.server.ts
 app/server/logging/logger.server.ts
+app/server/logging/request-context.server.test.ts
+app/server/logging/request-context.server.ts
 app/server/org/connections.server.test.ts
 app/server/org/connections.server.ts
 app/server/org/gagents.server.test.ts
@@ -325,6 +361,8 @@ app/server/org/org-users.server.ts
 app/server/org/org-view.server.ts
 app/server/org/resource-catalog.server.test.ts
 app/server/org/resource-catalog.server.ts
+app/server/org/resource-references.server.test.ts
+app/server/org/resource-references.server.ts
 app/server/org/resources.server.test.ts
 app/server/org/resources.server.ts
 app/server/org/store-files.server.test.ts
@@ -341,6 +379,7 @@ app/server/projections/decisions.server.ts
 app/server/projections/diagnostics-flow.server.test.ts
 app/server/projections/notifications.server.test.ts
 app/server/projections/notifications.server.ts
+app/server/projections/pass13-honesty.server.test.ts
 app/server/projections/policy-violations.server.test.ts
 app/server/projections/policy-violations.server.ts
 app/server/projections/rebuild.server.test.ts
@@ -350,17 +389,25 @@ app/server/projections/rebuilder.server.ts
 app/server/projections/rescan.server.ts
 app/server/projections/review-queue.server.test.ts
 app/server/projections/review-queue.server.ts
+app/server/projections/single-flight.server.test.ts
+app/server/projections/single-flight.server.ts
 app/server/projections/task-query.server.ts
+app/server/provenance/provenance-query.server.test.ts
+app/server/provenance/provenance-query.server.ts
+app/server/provenance/provenance-recorder.server.ts
 app/server/runtimes/adapter.server.ts
 app/server/runtimes/claude-config.server.ts
 app/server/runtimes/claude-runtime.server.test.ts
 app/server/runtimes/claude-runtime.server.ts
+app/server/runtimes/codex-config.server.test.ts
+app/server/runtimes/codex-config.server.ts
 app/server/runtimes/codex-runtime.server.test.ts
 app/server/runtimes/codex-runtime.server.ts
 app/server/runtimes/harness-hermeticity.server.test.ts
 app/server/runtimes/model-catalog.server.test.ts
 app/server/runtimes/model-catalog.server.ts
 app/server/runtimes/operator-kb-injection.server.test.ts
+app/server/runtimes/operator-prompt-mention.server.test.ts
 app/server/runtimes/operator-run.server.test.ts
 app/server/runtimes/operator-run.server.ts
 app/server/runtimes/run-events.server.ts
@@ -370,6 +417,7 @@ app/server/runtimes/run-recovery.server.test.ts
 app/server/runtimes/run-recovery.server.ts
 app/server/runtimes/run-service.server.test.ts
 app/server/runtimes/run-service.server.ts
+app/server/runtimes/run-sink.server.test.ts
 app/server/runtimes/run-sink.server.ts
 app/server/runtimes/run-store.server.ts
 app/server/runtimes/runtime-registry.server.test.ts
@@ -393,11 +441,17 @@ app/server/seed/assets/reviewer-expertise.skill.md
 app/server/seed/assets/reviewer.definition.md
 app/server/seed/assets/viberr-app-expertise.skill.md
 app/server/seed/base-agents.server.test.ts
+app/server/seed/default-assets.server.test.ts
 app/server/seed/default-assets.server.ts
 app/server/seed/demo-fixture.test.ts
 app/server/seed/ensure-base-agents.server.ts
+app/server/seed/operator-parity.server.test.ts
+app/server/seed/seed-credentials.ts
 app/server/seed/seed.server.test.ts
 app/server/seed/seed.server.ts
+app/server/tasks/acceptance-closed-pr.server.test.ts
+app/server/tasks/acceptance-graph.server.test.ts
+app/server/tasks/agent-completion-notify.server.test.ts
 app/server/tasks/agent-completion.server.test.ts
 app/server/tasks/agent-outcome.server.test.ts
 app/server/tasks/agent-outcome.server.ts
@@ -406,17 +460,22 @@ app/server/tasks/agent-reply.server.ts
 app/server/tasks/agent-toolkit.server.test.ts
 app/server/tasks/agent-toolkit.server.ts
 app/server/tasks/archive-readonly.server.test.ts
+app/server/tasks/canonical-anchor.server.test.ts
 app/server/tasks/comment-guardrails.server.test.ts
 app/server/tasks/comment-guardrails.server.ts
 app/server/tasks/delivery-push-grant.server.test.ts
+app/server/tasks/evidence-rows.server.test.ts
 app/server/tasks/git-clone-auth.server.test.ts
 app/server/tasks/git-clone-auth.server.ts
+app/server/tasks/mention-notify.server.test.ts
+app/server/tasks/mention-notify.server.ts
 app/server/tasks/mention-suggestions.server.test.ts
 app/server/tasks/mention-suggestions.server.ts
 app/server/tasks/model-prose.server.test.ts
 app/server/tasks/model-prose.server.ts
 app/server/tasks/operator-actions.server.test.ts
 app/server/tasks/operator-actions.server.ts
+app/server/tasks/operator-toolkit.server.test.ts
 app/server/tasks/operator-toolkit.server.ts
 app/server/tasks/schedule.server.test.ts
 app/server/tasks/schedule.server.ts
@@ -431,14 +490,18 @@ app/server/tasks/task-actions.server.ts
 app/server/tasks/task-governance.server.test.ts
 app/server/tasks/timeline-compaction.server.test.ts
 app/server/tasks/timeline-compaction.server.ts
+app/server/tasks/workspace-retention.server.test.ts
+app/server/tasks/workspace-retention.server.ts
 app/server/theme/theme-cookie.server.ts
 app/shared/auth/password-policy.ts
 app/shared/capabilities.test.ts
 app/shared/capabilities.ts
 app/shared/dates/format.test.ts
 app/shared/dates/format.ts
+app/shared/freshness.ts
 app/shared/ids/new-id.server.ts
 app/shared/ids/slugify.ts
+app/shared/mapping/actor.server.test.ts
 app/shared/mapping/actor.server.ts
 app/shared/mapping/notification.server.test.ts
 app/shared/mapping/notification.server.ts
@@ -448,9 +511,13 @@ app/shared/mapping/task.server.test.ts
 app/shared/mapping/task.server.ts
 app/shared/mapping/user.server.ts
 app/shared/rbac.ts
+app/shared/workflow/stage-eligibility.test.ts
+app/shared/workflow/stage-eligibility.ts
 app/shared/workflow/stage-roles.test.ts
 app/shared/workflow/stage-roles.ts
 app/shared/workflow/templates.ts
+app/shared/workflow/transitions.test.ts
+app/shared/workflow/transitions.ts
 app/ui/avatar.tsx
 app/ui/csrf-input.tsx
 app/ui/icon.tsx
@@ -464,14 +531,19 @@ app/ui/page-overlay.tsx
 app/ui/pill.tsx
 app/ui/rich-text.test.tsx
 app/ui/rich-text.tsx
+app/ui/skip-link.tsx
 app/ui/stage-menu.test.tsx
 app/ui/stage-menu.tsx
 app/ui/toast.test.tsx
 app/ui/toast.tsx
 app/ui/toggle.tsx
+app/ui/use-action-toast.test.tsx
 app/ui/use-action-toast.ts
 app/ui/use-dialog.ts
 app/ui/use-fetcher-result.ts
+app/ui/use-relative-time.ts
+app/ui/use-shortcut-hint.test.tsx
+app/ui/use-shortcut-hint.ts
 ```
 
 ## db/
@@ -542,6 +614,7 @@ design/support.js
 ## docs/
 
 ```text
+docs/architecture/decisions.md
 docs/architecture/file-formats.md
 docs/contributing-quickstart.md
 docs/operations/deployment.md
@@ -556,6 +629,7 @@ docs/testing.md
 e2e/01-home-board.spec.ts
 e2e/05-feeds-profile.spec.ts
 e2e/06-org-settings-store.spec.ts
+e2e/07-accessibility.spec.ts
 e2e/auth.setup.ts
 e2e/global-teardown.ts
 ```
@@ -573,6 +647,70 @@ planning/discovery-2026-07-23-pass11/docs/data-model-store.md
 planning/discovery-2026-07-23-pass11/docs/delivery-github-review.md
 planning/discovery-2026-07-23-pass11/docs/rbac-auth-org.md
 planning/discovery-2026-07-23-pass11/docs/routes-ui-map.md
+planning/discovery-2026-07-24-pass12/.gitignore
+planning/discovery-2026-07-24-pass12/FINDINGS.md
+planning/discovery-2026-07-24-pass12/NOTES.md
+planning/discovery-2026-07-24-pass12/PLAN.md
+planning/discovery-2026-07-24-pass12/USECASES.md
+planning/discovery-2026-07-24-pass12/docs/agents-operator-runtimes.md
+planning/discovery-2026-07-24-pass12/docs/data-model-store.md
+planning/discovery-2026-07-24-pass12/docs/delivery-github-review.md
+planning/discovery-2026-07-24-pass12/docs/rbac-auth-org.md
+planning/discovery-2026-07-24-pass12/docs/routes-ui-map.md
+planning/discovery-2026-07-24-pass12/docs/seed-testing-infra.md
+planning/discovery-2026-07-24-pass13/.gitignore
+planning/discovery-2026-07-24-pass13/ARCHIVED-BRANCHES.md
+planning/discovery-2026-07-24-pass13/DRIFT-TRIAGE.md
+planning/discovery-2026-07-24-pass13/FINDINGS.md
+planning/discovery-2026-07-24-pass13/INTENT-VS-IMPLEMENTATION.md
+planning/discovery-2026-07-24-pass13/NOTES.md
+planning/discovery-2026-07-24-pass13/PLAN.md
+planning/discovery-2026-07-24-pass13/USECASES.md
+planning/discovery-2026-07-24-pass13/docs/agent-profile-lifecycle.md
+planning/discovery-2026-07-24-pass13/docs/kb-mcp-subsystem.md
+planning/discovery-2026-07-24-pass13/docs/routes-ui-audit.md
+planning/discovery-2026-07-24-pass13/docs/runtime-parity.md
+planning/discovery-2026-07-25-pass14/FINDINGS.md
+planning/discovery-2026-07-25-pass14/NOTES.md
+planning/discovery-2026-07-25-pass14/PLAN.md
+planning/discovery-2026-07-25-pass14/USECASES.md
+planning/discovery-2026-07-25-pass14/docs/governance-delivery.md
+planning/discovery-2026-07-25-pass14/docs/kb-mcp-skills.md
+planning/discovery-2026-07-25-pass14/docs/routes-ui-reverify.md
+planning/discovery-2026-07-25-pass14/docs/runtime-agents.md
+planning/discovery-2026-07-25-pass14/handbacks/w1-kb-mcp-skills.md
+planning/discovery-2026-07-25-pass14/handbacks/w2-agent-runtime.md
+planning/discovery-2026-07-25-pass14/handbacks/w3-governance-delivery.md
+planning/discovery-2026-07-25-pass14/handbacks/w4-routes-ui.md
+planning/discovery-2026-07-25-pass14/shots/01-login.png
+planning/discovery-2026-07-25-pass14/shots/02-home.png
+planning/discovery-2026-07-25-pass14/shots/03-board-pass13.png
+planning/discovery-2026-07-25-pass14/shots/04-board-list.png
+planning/discovery-2026-07-25-pass14/shots/05-task-PST-3-open-recommendation.png
+planning/discovery-2026-07-25-pass14/shots/06-task-PST-6-blocked-codex-kb.png
+planning/discovery-2026-07-25-pass14/shots/07-task-PST-1-done-merged.png
+planning/discovery-2026-07-25-pass14/shots/08-review-queue.png
+planning/discovery-2026-07-25-pass14/shots/09-agents-profiles.png
+planning/discovery-2026-07-25-pass14/shots/10-policy.png
+planning/discovery-2026-07-25-pass14/shots/11-github.png
+planning/discovery-2026-07-25-pass14/shots/12-activity.png
+planning/discovery-2026-07-25-pass14/shots/13-project-settings.png
+planning/discovery-2026-07-25-pass14/shots/14-org-connections.png
+planning/discovery-2026-07-25-pass14/shots/15-org-users.png
+planning/discovery-2026-07-25-pass14/shots/16-org-resources.png
+planning/discovery-2026-07-25-pass14/shots/17-profile.png
+planning/discovery-2026-07-25-pass14/shots/18-notifications.png
+planning/discovery-2026-07-25-pass14/shots/19-lightweight-lab-board.png
+planning/discovery-2026-07-25-pass14/shots/20-viberr-project-settings.png
+planning/discovery-2026-07-25-pass14/shots/21-library-deploy-full-power.png
+planning/discovery-2026-07-25-pass14/shots/22-reverify-library-deploy-withheld.png
+planning/discovery-2026-07-25-pass14/shots/23-reverify-acceptance-gate.png
+planning/discovery-2026-07-25-pass14/shots/24-reverify-task-archived.png
+planning/discovery-2026-07-25-pass14/shots/25-reverify-board-archived-view.png
+planning/discovery-2026-07-25-pass14/shots/26-reverify-kb-editor-open.png
+planning/discovery-2026-07-25-pass14/shots/27-reverify-kb-overwrite-confirm.png
+planning/discovery-2026-07-25-pass14/shots/28-reverify-external-merge.png
+planning/discovery-2026-07-25-pass14/shots/29-reverify-resource-pluralization.png
 planning/planning-artifacts/architecture.md
 planning/planning-artifacts/prd.md
 planning/planning-artifacts/ux-design-specification.md
@@ -597,6 +735,7 @@ scripts/seed.ts
 
 ```text
 test-support/audit-log.ts
+test-support/custom-board.ts
 test-support/demo-data.ts
 test-support/demo-seed.ts
 test-support/fake-github.ts
