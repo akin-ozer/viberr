@@ -194,3 +194,23 @@ including RT-01's denylist baseline (with both derived Codex flags), RT-04's Cod
 operator MCP mount (credentials dropped from argv), LV-05's live-state subline, GV-05's
 pre-merge identity re-check (additive — the post-merge check was not removed), GV-06's
 mention fan-out, GV-09's notification, and LV-07's whole server half.
+
+## H. CI-only flake (found after the PR was green locally)
+
+`verify` failed once on `task-detail-route.server.test.ts > @codex also routes + triggers`
+— **5806 ms** against ~500 ms for its neighbours — and passed on a re-run of identical
+code. Load-sensitive, not a logic break. Recorded rather than shrugged off, because a
+flaky gate is a defect: it trains people to re-run instead of read.
+
+**Mechanism (fixed).** `test-support/fake-runtime.ts` echoed each run's ENTIRE prompt back
+as the agent's message. The completion pipeline then wrote that whole prompt into the task
+file as an agent comment, re-parsed it, and fanned out any `@handle` inside it — so every
+test's cost scaled with prompt length. P14-RT-02 grew fresh-run prompts by ~600 chars (the
+asker's words + name, measured), which is exactly the kind of change that must not move
+test timings. The fake reply is now short and deterministic while still carrying the task
+key, so the pipeline is exercised identically. Nothing asserted on the echo.
+
+**Ruled out along the way:** the P14-GV-10 live-run guard cannot fire on this path —
+`commentToAgent` calls `assignSpecialist` only when the task has NO delivering engagement
+(`task-actions.server.ts:1095-1108`), so its `outgoing` is always null there. The guard is
+correctly scoped to deliberate reassignment.
