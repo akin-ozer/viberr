@@ -78,3 +78,5 @@ ON by default for every project via `DEFAULT_GUARDRAILS` in
 `guardrails` array in that project's canonical frontmatter.
 
 See also: [testing-quickstart.md](./testing-quickstart.md).
+
+Pass-14 smoke note: Viberr Meta's release cadence is every second Tuesday.
