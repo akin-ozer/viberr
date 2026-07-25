@@ -179,6 +179,11 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // P13-D-26: the agent's own evidence rows are gated server-side in the
   // completion pipeline, so withholding this binds on both backends.
   "attach-evidence-references",
+  // P14-RT-06: withheld web egress binds on BOTH backends — WebFetch/WebSearch
+  // denied on Claude, `webSearchMode: "disabled"` on Codex. It moved out of the
+  // claude-only set below; without landing HERE it would read as "advisory",
+  // understating the enforcement further than the label it replaced.
+  "use-web-search-fetch",
 ]);
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.

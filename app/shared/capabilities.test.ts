@@ -67,6 +67,16 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
   });
 
+  it("classifies web egress as BOTH — the Codex webSearchMode channel enforces it (P14-RT-06)", () => {
+    // It used to be labeled claude-only on the strength of a "prompt-level on
+    // Codex" fallback that never existed in any prompt. Codex now disables web
+    // search for a withheld grant, so both backends remove the built-in tool.
+    expect(capabilityEnforcement("use-web-search-fetch")).toBe("both");
+    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("use-web-search-fetch")).toBe(
+      false,
+    );
+  });
+
   it("classifies generic-agent collaboration gates by their real transport", () => {
     // verdict + ask-human gate server-side at completion → both backends;
     // the mid-run comment tool is Claude-only (Codex has no comment channel).

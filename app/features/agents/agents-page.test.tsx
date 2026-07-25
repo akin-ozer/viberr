@@ -262,37 +262,56 @@ describe("ProfileDetail", () => {
     expect(container.querySelectorAll(".stage-chip.off")).toHaveLength(0);
   });
 
-  it("LV-02: stale stage grants are surfaced, counted honestly, and flagged as unassignable", () => {
-    const board = [
-      { id: "todo", name: "To do", color: "#a5a8b5" },
-      { id: "doing", name: "In progress", color: "#7b61ff" },
-      { id: "done", name: "Done", color: "#00b473" },
-    ];
+  it("R14-1: a declared id that no stage here fills BY ROLE resolves onto this board", () => {
+    // The Lightweight board (P14-WL-01): ids `todo/doing/done`, so the
+    // governed `ready`/`impl` grants match no id at all. Before R14-1 the panel
+    // read "0 of 3 stages" with every chip struck through and the profile was
+    // unassignable; `impl` names the WORK role, and this board's work stage is
+    // `doing` (its entry stage `todo` fills work too on a board this short).
     const { container, getByText, queryByText } = render(
       <ProfileDetail
-        // Governed stage ids on a 3-stage board: the old counter said
-        // "2 of 3 stages" with no chip lit.
         a={mkProfile({ stages: ["ready", "impl"] })}
-        stages={board}
-        workflow={BOARD_WORKFLOW}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
         insts={[]}
-        projectName="Viberr Core"
+        projectName="Lightweight Lab"
         canManage
         onOpen={() => {}}
         onDelete={() => {}}
         onEdit={() => {}}
       />,
     );
-    expect(getByText("0 of 3 stages")).toBeTruthy();
-    expect(queryByText("2 of 3 stages")).toBeNull();
-    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(0);
-    // The two grants that point at stages this board doesn't have are shown.
+    expect(getByText("2 of 3 stages")).toBeTruthy();
+    expect(queryByText("0 of 3 stages")).toBeNull();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(2);
+    // `impl` resolved by role, so it is NOT a dead grant …
+    expect(queryByText("impl · not on this board")).toBeNull();
+    // … while `ready` — a role no stage on this 3-stage board fills — is.
     expect(getByText("ready · not on this board")).toBeTruthy();
-    expect(getByText("impl · not on this board")).toBeTruthy();
-    // …and the consequence is stated, not left for the user to infer.
+  });
+
+  it("R14-1: a declaration that lands nowhere leaves the profile eligible everywhere", () => {
+    const { container, getByText } = render(
+      <ProfileDetail
+        // Neither id is a stage here and neither names a known role, so the
+        // declaration says nothing about this workflow. Rule 3: unrestricted —
+        // silently disabling every agent is the failure we actually observed.
+        a={mkProfile({ stages: ["spec-review", "handoff"] })}
+        stages={LIGHTWEIGHT_BOARD}
+        workflow={LIGHTWEIGHT_WORKFLOW}
+        insts={[]}
+        projectName="Lightweight Lab"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
     expect(
-      getByText(/can't be assigned to any task here/),
+      getByText("declared stages don't exist here — eligible everywhere"),
     ).toBeTruthy();
+    expect(container.querySelectorAll(".stage-chip.elig")).toHaveLength(3);
+    expect(getByText(/the declaration says nothing here/)).toBeTruthy();
   });
 
   it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {

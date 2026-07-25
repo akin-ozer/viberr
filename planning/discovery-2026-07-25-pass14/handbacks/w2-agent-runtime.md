@@ -1,160 +1,73 @@
 # W2 (agent runtime) → lead: changes needed in files I do not own
 
-Four requests. Each is a small edit in a file outside my ownership list; the
-runtime-side support each one needs is already landed in my files.
+Status at hand-back time: **items 1, 2, 4 and 5 were already applied by the lead**
+(commit `71aa7a9`) while this stream was running — they are recorded here for the
+audit trail and verified against the current tree. **Item 3 is applied but
+half-finished**; one line remains.
 
 ---
 
-## 1. RT-02 / LV-04 — thread the human's comment into a FIRST-EVER @mention run
+## 1. RT-02 / LV-04 — thread the human's comment into a FIRST-EVER @mention run — APPLIED ✅
 
-**File:** `app/server/tasks/task-actions.server.ts` (`commentToAgent`, both fresh
-branches, currently lines 1109-1114 and 1127-1132).
+`app/server/tasks/task-actions.server.ts` (`commentToAgent`, both fresh branches,
+now lines 1109-1124 and 1137-1148) passes `directive: input.text.trim()` +
+`directiveFrom: commenterName`. Verified present.
 
-**Why:** neither fresh branch passes `directive`, so a first-ever @mention starts
-a run that never receives the comment. Live (LV-04) the agent then read the TASK
-GOAL as its instruction, classified it as a prompt-injection attempt and posted a
-request-changes verdict on a task with no diff — and, having no asker to address,
-tagged nobody, so nobody was notified (NEW-4).
-
-**Runtime support already landed:** `startAgentRun` accepts `directive` and a new
-`directiveFrom` (the asker's display name); `buildAnalyzePrompt` renders
-`A human (<name>) asked you: "<text>"` plus `start your reply by tagging them —
-"@<name>"`. Covered by
+Runtime support in my files: `startAgentRun` accepts `directive` +
+`directiveFrom`; `buildAnalyzePrompt` renders `A human (<name>) asked you: "<text>"`
+and `start your reply by tagging them — "@<name>"`. Covered by
 `app/server/tasks/specialist-run.server.test.ts` → "P14-RT-02: names the human who
 asked and tells the agent to tag them back".
 
-**Exact change** — `commenterName` is already in scope (assigned just above, line
-~1023). Primary branch:
+## 2. RT-12 — one @handle derivation — APPLIED ✅
 
-```ts
-      const started = await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          // P14-RT-02: a FRESH mention run gets the human's words + name, the
-          // same way the resumed path gets `specialistReplyDirective`.
-          directive: input.text.trim(),
-          directiveFrom: commenterName,
-        },
-        actor,
-        ctx,
-      );
-```
+`task-actions.server.ts:1180` now calls
+`agentMentionHandle({ profileId: target.profileId, name: target.name })`, imported
+from `./agent-reply.server` at :923. Verified present.
 
-Reviewer branch (keep `profileId`):
+`agentMentionHandle` (profile-id first, so the bare `@word` grammar matches it;
+display-name fallback) lives in `app/server/tasks/agent-reply.server.ts` and is
+used by `specialist-run.server.ts` and `run-recovery.server.ts` as well. Tested in
+`agent-reply.server.test.ts` → describe "agentMentionHandle (P14-RT-12)".
 
-```ts
-      const started = await startAgentRun(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: target.profileId,
-          directive: input.text.trim(),
-          directiveFrom: commenterName,
-        },
-        actor,
-        ctx,
-      );
-```
+## 4. RT-04 / KM-02 — `OperatorAuthority.mcps` docstring — APPLIED ✅
 
----
-
-## 2. RT-12 — one @handle derivation
-
-**File:** `app/server/tasks/task-actions.server.ts:1132` (the resumed branch's
-`registerAgentCompletion` call), currently `agentHandle: target.name.toLowerCase()`.
-
-**Why:** the handle was derived twice and differently — role-first-word in
-`startAgentRun` (`"Senior Developer"` → `@senior`, which resolves to no agent at
-all) and name-lowercased here (multi-word names → `@docs writer`, resolvable only
-to a reader that already knows the name). The stuck packet's `Agent: @…`
-observation could therefore name a handle nobody could reply to.
-
-**Runtime support already landed:** `agentMentionHandle({ profileId, name })` in
-`app/server/tasks/agent-reply.server.ts` (profile-id first, so the bare `@word`
-grammar matches it; falls back to the name). `specialist-run.server.ts` and
-`run-recovery.server.ts` already use it. Tested in
-`app/server/tasks/agent-reply.server.test.ts` → describe "agentMentionHandle
-(P14-RT-12)".
-
-**Exact change** — `agentMentionHandle` is exported from the module
-`commentToAgent` already imports at the top of the function (`resolveMentionedAgent,
-resumeWorkdir` from `./agent-reply.server`): add it to that destructure and use
-
-```ts
-      agentHandle: agentMentionHandle({
-        profileId: target.profileId,
-        name: target.name,
-      }),
-```
-
----
-
-## 3. RT-06 / KM-06 — the capability metadata now understates Codex
-
-**File:** `app/shared/capabilities.ts`.
-
-**Why:** `use-web-search-fetch` withheld is now REALLY enforced on Codex —
-`codex-runtime.server.ts` sets `webSearchMode: "disabled"` for a specialist whose
-grant is withheld (the same channel the operator already used), fed by
-`webSearchWithheldFromDenylist` in `run-service.server.ts`. Both backends now
-remove the built-in web tool and neither blocks `curl` through Bash, so the
-enforcement is at parity. Two statements are false as they stand:
-
-**(a) line ~66**, in the `cap("use-web-search-fetch", …)` docstring:
-
-> `Enforced with tool denial on Claude; prompt-level on Codex, whose built-in web tools have no denylist channel.`
-
-There is no such prompt text anywhere — the claim was invented, not merely stale.
-Replace with:
-
-```ts
-  // profile. Enforced on BOTH backends: tool denial on Claude (WebFetch/
-  // WebSearch removed), `webSearchMode: "disabled"` on Codex (P14-RT-06).
-  // `curl`/`wget` through Bash stay reachable on both — the specialist needs
-  // Bash for validation; that tension is documented, not papered over.
-```
-
-**(b) lines ~194-196** — remove `use-web-search-fetch` (and its two-line comment)
-from `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, exactly as P14-RT-03 removed
-`execute-code-or-write-repo`. It currently renders a matrix badge reading
-"binds tools on Claude runs · advisory on Codex" for a capability that binds on
-both.
-
----
-
-## 4. RT-04 / KM-02 — the `OperatorAuthority.mcps` docstring is now out of date
-
-**File:** `app/server/tasks/operator-actions.server.ts` (~line 84).
-
-**Why:** the gap it describes ("never reached a run on EITHER backend") is closed
-on both backends now — `startCodexOperatorRun` mounts
+`app/server/tasks/operator-actions.server.ts:85-93` now says the grant is real on
+both backends. Matches the code: `startCodexOperatorRun` mounts
 `resolveSpecialistMcpServers(db, authority.mcps)` (tested in
-`app/server/runtimes/operator-run.server.test.ts` → "mounts the operator's declared
-org MCP servers on the Codex run"). Suggested replacement for the docstring body:
+`operator-run.server.test.ts` → "mounts the operator's declared org MCP servers on
+the Codex run").
 
-```ts
-  /**
-   * The operator's declared org MCP servers. P13-KM-03 wired them into the
-   * Claude toolkit; P14-RT-04 mounts them on the Codex operator too, so the
-   * grant is real on both backends. On Codex the CLI translation drops
-   * credentials (argv exposure) and stamps approve-mode, as for specialists.
-   */
-```
+## 5. `specialist-tool-policy.ts` header claim — APPLIED ✅
+
+Lines 22-25 now name both derivations (`repoWriteWithheldFromDenylist`,
+`webSearchWithheldFromDenylist`) instead of claiming Codex ignores the list.
 
 ---
 
-## 5. (minor) `specialist-tool-policy.ts` header claim
+## 3. RT-06 / KM-06 — capability metadata — ONE LINE STILL MISSING ⚠️
 
-**File:** `app/server/tasks/specialist-tool-policy.ts:22`.
+**Applied:** the `cap("use-web-search-fetch", …)` docstring no longer claims a
+non-existent "prompt-level on Codex" fallback, and the id was removed from
+`CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`. Both correct — `codex-runtime.server.ts`
+now sets `webSearchMode: "disabled"` for a specialist whose grant is withheld, fed
+by `webSearchWithheldFromDenylist` in `run-service.server.ts`, so the two backends
+are at parity (each removes the built-in web tool; neither blocks `curl`).
 
-> `Codex runs use their own sandbox config and ignore this list.`
+**Still needed** — `app/shared/capabilities.ts`: the id was removed from the
+Claude-only set but never added to `ENFORCED_CAPABILITY_IDS`, so
+`capabilityEnforcement("use-web-search-fetch")` now returns **`"advisory"`** —
+i.e. "withholding this constrains nothing", which understates it further than the
+"claude-only" it used to return. Add it to `ENFORCED_CAPABILITY_IDS` (line ~181),
+next to the other both-backend collaboration gates:
 
-No longer wholly true: `run-service.server.ts` derives BOTH `repoWriteWithheld`
-(P13-RT-02) and `webSearchWithheld` (P14-RT-06) from this list, and the Codex
-adapter enforces them. Suggested: "Codex has no denylist channel, so the two
-headline rules in this list are derived from it and enforced through the Codex
-sandbox / `webSearchMode` instead (`repoWriteWithheldFromDenylist`,
-`webSearchWithheldFromDenylist`)."
+```ts
+  // P14-RT-06: withheld web egress binds on BOTH backends — WebFetch/WebSearch
+  // denied on Claude, `webSearchMode: "disabled"` on Codex.
+  "use-web-search-fetch",
+```
+
+Only the matrix badge consumes `capabilityEnforcement` today (the `"claude-only"`
+branch), so this is a correctness fix to the shared contract rather than a visible
+regression. `app/shared/capabilities.test.ts` (also not mine) is where the
+assertion belongs — the "enforced on both" list at :56.
