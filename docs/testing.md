@@ -80,3 +80,4 @@ ON by default for every project via `DEFAULT_GUARDRAILS` in
 See also: [testing-quickstart.md](./testing-quickstart.md).
 
 Pass-14 smoke note: Viberr Meta's release cadence is every second Tuesday.
+Pass-14 external-merge check: this line was merged with gh, outside Viberr.
