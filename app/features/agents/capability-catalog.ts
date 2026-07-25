@@ -74,14 +74,15 @@ export const CAP_MODAL_DEFAULTS: Readonly<Record<string, CapMode>> =
 /**
  * P13-AP-06 — every agent capability, EXPLICITLY WITHHELD.
  *
- * The grant polarity is "deny only on an explicit `human`/`off`", so an
- * UNSPECIFIED capability is GRANTED: a deployment carrying `capabilities: []`
- * gets Edit/Write/`git commit` and canBranch/canCommitPush/canOpenPr all true —
- * full repo-write power that nobody chose and no UI shows. Creation paths fix
- * that by persisting `defaultGrantsFor("agent")`; this is the RUN-time
- * counterpart for a deployment that STILL carries no grants (a hand-edited or
- * imported `project.md`): nobody granted it anything, so it gets nothing — the
- * same safe-by-default posture `resolveUndeployedDisallowedTools` takes.
+ * The RUN-time posture for a deployment that carries no grants at all (a
+ * hand-edited or imported `project.md`): nobody granted it anything, so it gets
+ * nothing — the same stance `resolveUndeployedDisallowedTools` takes.
+ *
+ * P14-LV-01 made the tool layer itself deny an ABSENT delivery/verdict grant, so
+ * this is no longer the only thing standing between `capabilities: []` and full
+ * repo-write. It stays because it makes the withholding VISIBLE — the capability
+ * matrix and the agent panel render these grants, so an admin sees "withheld"
+ * rather than an empty policy they have to know how to read.
  *
  * Derived from the same catalog list as the defaults so the two can't drift;
  * only the modes differ (always-human ids stay `human`, the rest become `off`).

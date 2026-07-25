@@ -16,14 +16,34 @@ const grant = (capabilityId: string, mode: CapabilityGrant["mode"]) =>
   ({ capabilityId, mode }) as CapabilityGrant;
 
 describe("resolveSpecialistDisallowedTools", () => {
-  it("always denies PR merge (an always-human capability), even with no grants", () => {
-    expect(resolveSpecialistDisallowedTools([])).toEqual(["Bash(gh pr merge:*)"]);
+  it("denies EVERY delivery tool when no grant says otherwise (P14-LV-01)", () => {
+    // The polarity that matters: an empty grant list is not "unspecified, so
+    // allowed" — it is "nobody granted delivery, so none of it". Live, the old
+    // polarity let a deployed org template described as "never touches app
+    // code" branch, commit, push and open PRs.
+    const denied = resolveSpecialistDisallowedTools([]);
+    for (const t of [
+      "Bash(git checkout -b:*)",
+      "Bash(git checkout -B:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Edit",
+      "MultiEdit",
+      "Write",
+      "NotebookEdit",
+    ]) {
+      expect(denied).toContain(t);
+    }
+    // Non-delivery capabilities keep the permissive default — withholding web
+    // egress is a policy choice, not something absence should decide.
+    expect(denied).not.toContain("WebFetch");
+    expect(denied).not.toContain("WebSearch");
   });
 
-  it("confines an UNDEPLOYED profile conservatively — denies ALL delivery, not just merge (AO-5 #5)", () => {
+  it("confines an UNDEPLOYED profile even harder — web egress goes too (AO-5 #5)", () => {
     const denied = resolveUndeployedDisallowedTools();
-    // Every delivery tool is denied (branch create, commit, push, PR open, file writes),
-    // NOT just the always-human merge — a resumed run of a vanished profile can't deliver.
     for (const t of [
       "Bash(git checkout -b:*)",
       "Bash(git push:*)",
@@ -32,10 +52,13 @@ describe("resolveSpecialistDisallowedTools", () => {
       "Bash(gh pr merge:*)",
       "Edit",
       "Write",
+      "WebFetch",
+      "WebSearch",
     ]) {
       expect(denied).toContain(t);
     }
-    // Strictly more restrictive than the empty-grants (deployed, unspecified) case.
+    // "We know nothing about this profile" is stricter than "this profile was
+    // authored with no delivery grants": only the former also loses the web.
     expect(denied.length).toBeGreaterThan(
       resolveSpecialistDisallowedTools([]).length,
     );
@@ -53,11 +76,29 @@ describe("resolveSpecialistDisallowedTools", () => {
     ).not.toContain("Bash(git push:*)");
   });
 
-  it("keeps default tool access for unspecified / recommend capabilities", () => {
-    // Only the always-human merge deny is present; push/PR/branch stay allowed.
+  it("a scoped delivery grant repairs the absent headline instead of crippling the run", () => {
+    // `recommend` on a scoped delivery capability is actionable, so the write
+    // paths' `normalizeDeliveryGrants` repair applies here too: the profile
+    // clearly delivers, so an ABSENT `execute-code-or-write-repo` must not read
+    // as withheld and strip Edit/Write from a working deliverer.
+    const denied = resolveSpecialistDisallowedTools([
+      grant("commit-push-branch", "recommend"),
+    ]);
+    expect(denied).not.toContain("Bash(git push:*)");
+    expect(denied).not.toContain("Edit");
+    expect(denied).not.toContain("Write");
+    // Un-granted delivery steps are still denied, and merge is always human.
+    expect(denied).toContain("Bash(git checkout -b:*)");
+    expect(denied).toContain("Bash(gh pr create:*)");
+    expect(denied).toContain("Bash(gh pr merge:*)");
+  });
+
+  it("a capability outside the grant-required set stays permissive when unspecified", () => {
+    // Web egress is a policy nicety, not a delivery power: absence keeps it.
+    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebFetch");
     expect(
-      resolveSpecialistDisallowedTools([grant("commit-push-branch", "recommend")]),
-    ).toEqual(["Bash(gh pr merge:*)"]);
+      resolveSpecialistDisallowedTools([grant("use-web-search-fetch", "off")]),
+    ).toContain("WebFetch");
   });
 
   it("withholding execute-code-or-write-repo denies Edit/MultiEdit/Write + git commit (D1, XS-13)", () => {

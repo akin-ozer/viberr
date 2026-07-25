@@ -17,6 +17,7 @@ const FULL: ParsedTaskFile = {
     stage: "review",
     readiness: "input_required",
     waiting: "human",
+    archived: false,
     ownerUserId: "u_arda01",
     engagements: [
       { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },

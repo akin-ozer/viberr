@@ -1,5 +1,8 @@
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
-import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
+import {
+  ALWAYS_HUMAN_CAPABILITY_IDS,
+  normalizeDeliveryGrants,
+} from "~/shared/capabilities";
 
 /**
  * Specialist capability → runtime tool confinement.
@@ -18,11 +21,22 @@ import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
  * merge PR). Finer-grained delivery capabilities remain advisory in the run
  * persona. Codex runs use their own sandbox config and ignore this list.
  *
- * Polarity (safe-by-default): a capability is enforced (its commands denied)
- * only when an admin has EXPLICITLY withheld it — mode `human` (reserved for a
- * person) or `off` (withheld) — or when it is an always-human capability.
- * `direct` / `recommend` / unspecified capabilities keep the agent's default
- * tool access, so an ordinary developer run is never crippled.
+ * Polarity (P14-LV-01, safe-by-default and now actually safe): a delivery or
+ * verdict capability is granted ONLY when a grant says so. Withheld means mode
+ * `human` / `off`, an always-human capability, **or no grant at all**.
+ *
+ * It used to mean the opposite — an unlisted capability kept default tool
+ * access — and that inversion was load-bearing in the wrong direction. Live
+ * proof: deploying the org template `org-docs-writer` (whose file carries
+ * `capabilities: []`, and whose own description is "never touches app code")
+ * produced a project agent holding repo-write, branch, push, open-PR and both
+ * verdict capabilities. Pass 13 patched two creation paths to persist explicit
+ * grants and left the interpretation alone, so every profile authored before
+ * that — or on disk, or through any path that forgets — stayed fully powered.
+ *
+ * Non-delivery capabilities (comment, ask-human, evidence, validation…) keep the
+ * permissive default: withholding them is a policy nicety, and denying them by
+ * omission would cripple ordinary runs for no safety gain.
  */
 
 const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
@@ -77,14 +91,45 @@ const CAP_DENY_RULES: readonly {
   // from the catalog rather than narrowed.
 ];
 
+/**
+ * Capabilities that must be GRANTED to be held — absence is withholding, not
+ * permission (P14-LV-01). Everything that can push code, change the repo, or
+ * record a binding verdict lives here.
+ */
+const GRANT_REQUIRED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+  "execute-code-or-write-repo",
+  "create-task-branch",
+  "commit-push-branch",
+  "open-review-pr",
+  "merge-pull-request",
+  "report-validation-verdict",
+]);
+
+/**
+ * Grants → mode lookup, with the SAME delivery repair the write paths apply
+ * (`normalizeDeliveryGrants`). A profile that grants branch/commit/PR but whose
+ * headline `execute-code-or-write-repo` is merely ABSENT means "it delivers" —
+ * under the P14-LV-01 polarity the bare lookup would read that absence as
+ * withheld and strip Edit/Write from a working deliverer. Normalizing here keeps
+ * the two directions consistent: nothing granted still means nothing allowed,
+ * because an empty list has no scoped delivery grant to repair from.
+ */
+function grantModes(grants: readonly CapabilityGrant[]): Map<string, string> {
+  return new Map(
+    normalizeDeliveryGrants(
+      grants.map((g) => ({ capabilityId: g.capabilityId, mode: g.mode as string })),
+    ).map((g) => [g.capabilityId, g.mode]),
+  );
+}
+
 function isWithheld(
   modeById: Map<string, string>,
   capabilityId: string,
 ): boolean {
+  if (ALWAYS_HUMAN.has(capabilityId)) return true;
   const mode = modeById.get(capabilityId);
-  return (
-    ALWAYS_HUMAN.has(capabilityId) || mode === "human" || mode === "off"
-  );
+  if (mode === undefined) return GRANT_REQUIRED_CAPABILITY_IDS.has(capabilityId);
+  return mode === "human" || mode === "off";
 }
 
 /**
@@ -94,7 +139,7 @@ function isWithheld(
 export function resolveSpecialistDisallowedTools(
   grants: readonly CapabilityGrant[],
 ): string[] {
-  const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  const modeById = grantModes(grants);
   const denied = new Set<string>();
   for (const rule of CAP_DENY_RULES) {
     if (isWithheld(modeById, rule.capabilityId)) {
@@ -106,11 +151,15 @@ export function resolveSpecialistDisallowedTools(
 
 /**
  * The disallowedTools for a run whose profile can NO LONGER be resolved to a
- * live deployment (undeployed/deleted between engage and resume). We can't
- * confirm any grant, and the safe-by-default polarity treats "unspecified" as
- * full access — which would leave a resumed run of a vanished profile nearly
- * unconfined (only `gh pr merge` denied). So treat EVERY delivery capability as
- * explicitly withheld: an undeployed run may read/validate but never deliver.
+ * live deployment (undeployed/deleted between engage and resume). Nothing can be
+ * confirmed about its grants, so every rule-bearing capability is withheld: such
+ * a run may read and validate, never deliver.
+ *
+ * Since P14-LV-01 an empty grant list already denies the delivery set, so this
+ * mainly adds the non-delivery rules (web egress) — but it stays explicit rather
+ * than relying on the default, because "we know nothing about this profile" and
+ * "this profile was authored with no delivery grants" are different facts and
+ * only one of them should also lose web access.
  */
 export function resolveUndeployedDisallowedTools(): string[] {
   return resolveSpecialistDisallowedTools(
@@ -133,7 +182,7 @@ export interface DeliveryPermissions {
 export function resolveDeliveryPermissions(
   grants: readonly CapabilityGrant[],
 ): DeliveryPermissions {
-  const modeById = new Map(grants.map((g) => [g.capabilityId, g.mode]));
+  const modeById = grantModes(grants);
   // The headline repo-write capability gates ALL delivery. The tool layer
   // already denies `git commit` when `execute-code-or-write-repo` is withheld
   // (CAP_DENY_RULES above) — but this prompt-side resolution used to consult

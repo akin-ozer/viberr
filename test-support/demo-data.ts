@@ -307,6 +307,7 @@ function fm(input: {
     stage: input.stage,
     readiness: input.readiness,
     waiting: input.waiting,
+    archived: false,
     ownerUserId: input.owner,
     engagements,
     operator: input.operator,

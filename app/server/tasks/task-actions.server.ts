@@ -439,6 +439,7 @@ export async function createTask(
     stage: stageId,
     readiness: "input_required",
     waiting: "human",
+    archived: false,
     ownerUserId: null,
     engagements: [],
     recommendations: [],

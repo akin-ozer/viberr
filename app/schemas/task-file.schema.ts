@@ -419,6 +419,12 @@ export const taskFrontmatterSchema = z.object({
   /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
   schedules: z.array(scheduleSchema),
   urgent: z.boolean(),
+  /** R14-3: the task was archived — abandoned work, kept for the record.
+   *  Archived tasks leave the board's default view and the review queue, keep
+   *  their whole timeline, and can be restored. The one honest ending for a task
+   *  whose PR was rejected: the acceptance copy told humans to "archive the
+   *  task" for a pass while no such thing existed (P14-GV-02). */
+  archived: z.boolean(),
   /** DERIVED cache of the review state for the board/pills (F10-15). No longer
    *  written as a source of truth — `deriveValidation` recomputes it from
    *  `workRevision` + `verdicts` + the required-reviewer set on every write. */
@@ -588,6 +594,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "recommendations",
   "schedules",
   "urgent",
+  "archived",
   "validation",
   "workRevision",
   "verdicts",
@@ -889,6 +896,14 @@ export function parseTaskFrontmatter(
       "urgent",
       data.urgent,
       taskFrontmatterSchema.shape.urgent,
+      false,
+    ),
+    // archived, likewise: absent means "not archived" and is not a diagnostic.
+    archived: tolerant(
+      diagnostics,
+      "archived",
+      data.archived,
+      taskFrontmatterSchema.shape.archived,
       false,
     ),
     validation: tolerant(

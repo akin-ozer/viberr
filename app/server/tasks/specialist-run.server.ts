@@ -16,6 +16,10 @@ import {
   resolveAgentCollab,
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
+import {
+  resolveDeclaredStages,
+  stageEligible,
+} from "~/shared/workflow/stage-eligibility";
 import { buildAgentToolkit } from "./agent-toolkit.server";
 import type {
   AgentDeployment,
@@ -276,7 +280,11 @@ export async function assignSpecialist(
     input.projectSlug,
     input.profileId,
   );
-  assertStageEligible(specialist, existing.parsed.frontmatter.stage);
+  assertStageEligible(
+    specialist,
+    existing.parsed.frontmatter.stage,
+    projectBoard(ctx, input.projectSlug),
+  );
 
   const backendLabel = specialist.backend === "claude" ? "Claude Code" : "Codex";
   const ref: AgentRef = {
@@ -378,7 +386,11 @@ export async function assignReviewer(
     input.projectSlug,
     input.profileId,
   );
-  assertStageEligible(reviewer, existing.parsed.frontmatter.stage);
+  assertStageEligible(
+    reviewer,
+    existing.parsed.frontmatter.stage,
+    projectBoard(ctx, input.projectSlug),
+  );
 
   // Already engaged in ANY capacity (delivering OR supporting): no-op. Scanning
   // only the supporting list let the CURRENT deliverer be re-added as a
@@ -642,7 +654,11 @@ export async function startAgentRun(
   // agent must not be re-run after the task moved to a stage it isn't eligible
   // for. Outside the try so the undeployed-profile fallback can't swallow it.
   if (resolved) {
-    assertStageEligible(resolved, existing.parsed.frontmatter.stage);
+    assertStageEligible(
+      resolved,
+      existing.parsed.frontmatter.stage,
+      projectBoard(ctx, input.projectSlug),
+    );
   }
 
   // The agent's run persona: its detailed definition + declared skills + KB
@@ -1147,6 +1163,25 @@ function projectRepo(ctx: TaskMutationContext, projectSlug: string): string | nu
   return file?.parsed.frontmatter.repo ?? null;
 }
 
+/**
+ * The board a profile's declared stages resolve against (R14-1). Returns null
+ * when the project can't be read, which falls eligibility back to literal ids.
+ */
+export function projectBoard(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): {
+  stages: readonly { id: string }[];
+  workflow: readonly { from: string; to: string }[];
+} | null {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!file) return null;
+  return {
+    stages: file.parsed.frontmatter.stages,
+    workflow: file.parsed.frontmatter.workflow,
+  };
+}
+
 /** Keep every specialist cwd below the task workspace and Git discovery ceiling. */
 function taskWorkspaceRoot(
   projectSlug: string,
@@ -1475,17 +1510,30 @@ export interface DeployedSpecialistView {
 }
 
 /**
- * True when a specialist may work a task at `stageId`: it spans all stages, OR
- * declares no eligible stages (treated as unrestricted, back-compat), OR lists
- * this stage. Consumed by the operator picker and the assign/run guards (F1).
+ * True when a specialist may work a task at `stageId`, resolved against THIS
+ * board (R14-1). Declared ids match literally first, then by structural role, and
+ * a declaration that means nothing on this board is unrestricted — see
+ * `~/shared/workflow/stage-eligibility`. Consumed by the operator picker and the
+ * assign/run guards (F1).
+ *
+ * `board` is optional only so the pure-id call sites in tests stay readable;
+ * every production caller passes the project's stages + workflow, because
+ * without them a renamed or re-templated board silently disables every agent.
  */
 export function specialistEligibleForStage(
   spec: { stages: string[]; spanAll: boolean },
   stageId: string,
+  board?: {
+    stages: readonly { id: string }[];
+    workflow: readonly { from: string; to: string }[];
+  } | null,
 ): boolean {
-  if (spec.spanAll) return true;
-  if (spec.stages.length === 0) return true;
-  return spec.stages.includes(stageId);
+  if (!board) {
+    if (spec.spanAll) return true;
+    if (spec.stages.length === 0) return true;
+    return spec.stages.includes(stageId);
+  }
+  return stageEligible(spec, stageId, board.stages, board.workflow);
 }
 
 /**
@@ -1497,11 +1545,18 @@ export function specialistEligibleForStage(
 function assertStageEligible(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
+  board?: {
+    stages: readonly { id: string }[];
+    workflow: readonly { from: string; to: string }[];
+  } | null,
 ): void {
-  if (specialistEligibleForStage(spec, stageId)) return;
+  if (specialistEligibleForStage(spec, stageId, board)) return;
+  const scopedTo = board
+    ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).join(", ")
+    : spec.stages.join(", ");
   throw AppError.validation(
     `${spec.name} is not eligible for the "${stageId}" stage — its profile is scoped to ${
-      spec.stages.join(", ") || "no stages"
+      scopedTo || spec.stages.join(", ") || "no stages"
     }. Change the task's stage or the profile's eligible stages.`,
   );
 }

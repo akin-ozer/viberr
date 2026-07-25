@@ -57,6 +57,7 @@ import {
   assignReviewer,
   assignSpecialist,
   listDeployedSpecialists,
+  projectBoard,
   specialistEligibleForStage,
   startAgentRun,
   type DeployedSpecialistView,
@@ -801,7 +802,11 @@ export function operatorSnapshot(
     workStageId: roles.workId,
     deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
       ...s,
-      eligibleForCurrentStage: specialistEligibleForStage(s, file.parsed.frontmatter.stage),
+      eligibleForCurrentStage: specialistEligibleForStage(
+        s,
+        file.parsed.frontmatter.stage,
+        { stages, workflow },
+      ),
     })),
     openPacket: !!file.parsed.packet,
     packet: file.parsed.packet
@@ -1305,7 +1310,9 @@ function recordAgentSelectionTrace(
     const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
-        eligibleForStage: stage ? specialistEligibleForStage(s, stage) : false,
+        eligibleForStage: stage
+          ? specialistEligibleForStage(s, stage, projectBoard(ctx, input.projectSlug))
+          : false,
         alreadyEngaged: engaged.has(s.id),
         chosen: s.id === input.profileId,
       }),

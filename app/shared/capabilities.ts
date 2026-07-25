@@ -177,12 +177,17 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "attach-evidence-references",
 ]);
 
-/** Specialist tool-denial capabilities enforced by Claude but advisory on Codex. */
+/** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.
+ *
+ * P14-RT-03: `execute-code-or-write-repo` LEFT this set. Since P13-RT-02 a Codex
+ * run whose repo-write grant is withheld gets the read-only sandbox, which is
+ * real OS-level enforcement — the metadata was still calling it "advisory on
+ * Codex" right next to the fix that made it bite, understating the product's own
+ * guarantees in the capability matrix. */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",
-  "execute-code-or-write-repo",
   // The mid-run post_comment tool is mounted only on Claude (Codex has no
   // in-process comment channel at all — its final reply always posts), so
   // withholding comment-on-task binds on Claude and is advisory on Codex.
