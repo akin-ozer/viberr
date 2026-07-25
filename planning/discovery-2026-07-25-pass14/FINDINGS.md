@@ -154,6 +154,21 @@ behavior, and hunt for collateral damage. Two claims did not survive:
 | **LV-02 (operator half)** | **BROKEN** by W3's verifier | The *third* writer to Done — `operatorAcceptCompletion`'s full-autonomy branch — still synthesized `validation: "healthy"` with a comment claiming it matched "the human path", which had just moved to `deriveValidation`. An autonomous operator closing a task with no reviewer stamped a green pill onto an empty review record. (Its graph gate had landed by then via the lead handback; only the validation half was open.) | Now `deriveValidation`. Both halves covered: `none` when nothing validated, `healthy` on a real revision-bound approval. |
 | **RT-02 (test claim)** | **BROKEN** by W2's verifier | The fix was real and live-proven, but its coverage tested `buildAnalyzePrompt` in isolation. Deleting `directive`/`directiveFrom` from either fresh branch of `commentToAgent` — the exact defect — left the entire suite green. | `test-support/fake-runtime.ts` now records the `RunSpec`s it was started with, so the test asserts what the run RECEIVED through the real path. Canary-checked: reverting the fix fails it, restoring passes. |
 
+### Outstanding handbacks the workflow result surfaced
+
+The workflow's final result named three items W1 had reported **NOT-DONE** — the lead had
+applied only H1/H2 while the streams were still running. All closed in `f28f12f`:
+
+- **LV-09 (H3)** — the run prompt described the DECLARED MCP grants, which is the literal
+  symptom: after a rename it advertised a server the run had no tools for. It now describes
+  what actually mounted and names what did not, on both the fresh and resume paths.
+- **KM-12 (H4)** — three comments claimed `allowedTools` confines an operator run; under
+  `bypassPermissions` it is auto-approve-only and the deny lists are the fence.
+- **KM-14 (H5)** — the decorative `viberr` MCP toggle removed, along with the `profileKind`
+  catalog option that existed only to scope that one name. Stale grants cleaned from the
+  live store so nothing renders as a false "missing" chip.
+- **H6** — the CSS the editor cluster's new controls were missing.
+
 Everything else the verifiers examined came back CONFIRMED at the enforcement layer,
 including RT-01's denylist baseline (with both derived Codex flags), RT-04's Codex
 operator MCP mount (credentials dropped from argv), LV-05's live-state subline, GV-05's
