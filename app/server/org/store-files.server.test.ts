@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
@@ -449,6 +449,38 @@ describe("writeStoreDoc", () => {
     });
     expect(replaced.replaced).toBe(true);
     expect(readFileSync(abs, "utf8")).toBe("REPLACED");
+  });
+
+  // P14-RV-02: `assertInsideRoot` was LEXICAL — it proved the path STRING sat
+  // under the store root, not the file. A symlink inside the store (which users
+  // manage on disk, and uploads/imports write to) pointed anywhere: a link named
+  // `innocent.md` served an arbitrary host file to whoever opened it in the app,
+  // and a write through one would have clobbered the link's target. The KB
+  // injector has refused to follow symlinks since F9; the store paths now agree.
+  it("P14-RV-02: refuses to READ through a symlink that leaves the store", async () => {
+    const { ctx, kb, target } = await setupKb();
+    const dir = kbDirPath(kb.dir, ctx.dataRoot);
+    const outside = path.join(ctx.dataRoot, "outside-secret.md");
+    writeFileSync(outside, "HOST-SECRET");
+    symlinkSync(outside, path.join(dir, "innocent.md"));
+    expect(() => readStoreDoc(target, ["innocent.md"])).toThrowError(
+      /leaves the store folder/,
+    );
+  });
+
+  it("P14-RV-02: refuses to WRITE through a symlink that leaves the store", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const dir = kbDirPath(kb.dir, ctx.dataRoot);
+    const outside = path.join(ctx.dataRoot, "host-file.md");
+    writeFileSync(outside, "ORIGINAL");
+    symlinkSync(outside, path.join(dir, "looks-local.md"));
+    expect(() =>
+      writeStoreDoc(db, target, [], "looks-local.md", "CLOBBERED", ACTOR, {
+        overwrite: true,
+      }),
+    ).toThrowError(/leaves the store folder/);
+    // The host file the link pointed at is untouched.
+    expect(readFileSync(outside, "utf8")).toBe("ORIGINAL");
   });
 
   it("refuses to open a non-text document by TYPE, not as 'missing'", async () => {

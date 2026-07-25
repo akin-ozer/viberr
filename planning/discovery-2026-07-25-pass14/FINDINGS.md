@@ -260,3 +260,26 @@ All four writers that set the terminal stage — `resolvePacket` (:3641), `accep
 helper, which chains archive → graph → reviewer verdicts → blocked packet → closed PR →
 conflicting PR. Force-accept is the one deliberate bypass and its audit names the exact gate
 it overrode, from the same helper, so the audit cannot go stale.
+
+### RV-02 (MED, security) — store paths followed symlinks out of the store root
+
+Continuing the self-review into the security lens. `assertInsideRoot` was **lexical**: it
+proved the path STRING sat under the store root, not that the file did. Every store path
+used it — including `readStoreDoc`, which this pass promoted from dead code to a live route
+(`store-read-doc`).
+
+Reproduced end to end: a symlink named `innocent.md` placed inside a KB folder and pointing
+at a file outside the data root returned `{"text":"HOST-SECRET-CONTENT"}` through the
+in-app reader. The write path was worse — a write through such a link would have clobbered
+whatever the link targeted, outside the store.
+
+Reachability is real without any privilege escalation: the product treats the store as "the
+real folder on disk" that users manage outside the app, uploads/GitHub-imports write into
+it, and agent runs are not chrooted to their workspace. `readKbBody` has refused to follow
+symlinks since F9 — the injector and the store reader simply disagreed, and this pass put a
+route on the side that didn't check.
+
+Fixed by resolving with `realpathSync` and re-checking containment against the resolved
+root, so an intermediate symlinked DIRECTORY is caught too; paths that don't exist yet
+resolve their parent, so creates still work. Covered by a read test and a write test, the
+latter asserting the host file the link pointed at is untouched.

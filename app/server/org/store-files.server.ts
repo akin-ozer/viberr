@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -128,6 +129,25 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   const rel = path.relative(rootAbs, absPath);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw AppError.validation("Invalid store path.");
+  }
+  // P14-RV-02: the check above is LEXICAL — it proves the path string sits under
+  // the root, not that the file does. A symlink inside the store (the store is a
+  // real folder users manage outside the app, and uploads/imports/agents all
+  // write there) points wherever it likes: a link named `notes.md` served an
+  // arbitrary host file through the in-app reader, and a write through one would
+  // have clobbered the link's target. `readKbBody` has refused to follow
+  // symlinks since F9 (`kb-injection.server.ts`) — every store path now agrees.
+  // Resolved with `realpathSync` so an intermediate symlinked DIRECTORY is
+  // caught too, and only on parts that exist (creates resolve their parent).
+  const existing = existsSync(absPath) ? absPath : path.dirname(absPath);
+  if (!existsSync(existing)) return; // nothing on disk yet — nothing to resolve
+  const realRoot = realpathSync(rootAbs);
+  const realPath = realpathSync(existing);
+  const realRel = path.relative(realRoot, realPath);
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
+    throw AppError.validation(
+      "That path leaves the store folder — Viberr does not follow links out of it.",
+    );
   }
 }
 
