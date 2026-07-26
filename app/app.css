@@ -885,8 +885,10 @@ h1, h2, h3, h4 {
 .opt .od { font-size: .78rem; color: var(--faint); margin-top: .1rem; }
 .opt .rec-tag { margin-left: auto; }
 
-/* Optional free-text a human attaches when resolving a packet (P11-71). */
-.packet-note { margin-top: .75rem; width: 100%; }
+/* Optional free-text a human attaches when resolving a packet (P11-71).
+   Styling rides the standard `.field textarea` tokens — its wrapper carries
+   the spacing (owner feedback 2026-07-26). */
+.packet-note { width: 100%; }
 
 .packet-actions { display: flex; gap: .55rem; margin-top: 1rem; flex-wrap: wrap; }
 .packet-actions .btn { flex: 1; min-width: 130px; }

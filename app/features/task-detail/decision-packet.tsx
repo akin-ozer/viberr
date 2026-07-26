@@ -245,13 +245,26 @@ export function DecisionPacket({
         </div>
 
         {canResolve && (
-          <textarea
-            className="packet-note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Add a note for the operator (optional) — e.g. the specific input this option asks for"
-            rows={2}
-          />
+          // The one input on the app's highest-stakes card wears the same
+          // form language as every other input: `.field` + uppercase label +
+          // hint (owner feedback 2026-07-26 — it was a bare textarea outside
+          // `.field`, so none of the border/focus/typography tokens applied).
+          <div className="field" style={{ marginTop: ".75rem" }}>
+            <label className="flabel" htmlFor="pkt-note">
+              Note for the operator
+              <span className="fhint">
+                optional · recorded on the decision, steers the follow-up
+              </span>
+            </label>
+            <textarea
+              id="pkt-note"
+              className="packet-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. what to change before reopening"
+              rows={2}
+            />
+          </div>
         )}
 
         <div className="packet-actions">

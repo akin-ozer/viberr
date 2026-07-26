@@ -89,7 +89,11 @@ const VALIDATION_DISPLAY: Record<
   { kind: PillKind; label: string }
 > = {
   healthy: { kind: "ready", label: "validation healthy" },
-  changed: { kind: "input", label: "evidence changed" },
+  // `changed` = the delivered revision has no reviewer verdict covering it
+  // (never reviewed, or re-delivered since the last verdict). The old label
+  // "evidence changed" described the MECHANISM; this one names what is owed —
+  // owner feedback 2026-07-26.
+  changed: { kind: "input", label: "awaiting verdict" },
   failing: { kind: "blocked", label: "validation failing" },
   none: { kind: "neutral", label: "no validation" },
 };

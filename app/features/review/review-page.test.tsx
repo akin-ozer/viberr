@@ -102,7 +102,9 @@ describe("ReviewQueuePage", () => {
       "your acceptance",
     );
     expect(first.textContent).toContain("PR #318");
-    expect(first.textContent).toContain("evidence changed");
+    // validation `changed` names what is OWED, not the mechanism (owner
+    // feedback 2026-07-26 — was "evidence changed").
+    expect(first.textContent).toContain("awaiting verdict");
 
     const second = rows[1]!;
     // P14-LV-05: a row that carries a PR describes the PR's LIVE state — the
