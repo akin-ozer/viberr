@@ -4,6 +4,7 @@ import {
   getProjectCredentialHealth,
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
+import { repoFootprintTasks } from "./settings-actions.server";
 import { listMembershipViews, type MembershipView } from "./membership.server";
 
 /**
@@ -31,6 +32,9 @@ export interface SettingsViewData {
   stageCounts: Record<string, number>;
   members: MembershipView[];
   credential: ProjectCredentialHealth;
+  /** Tasks whose GitHub records (linked PR / pushed commits) point at the
+   * current repo — drives the repair dialog's footprint acknowledgment. */
+  repoFootprintTasks: number;
 }
 
 export function getSettingsViewData(
@@ -69,5 +73,6 @@ export function getSettingsViewData(
     stageCounts: Object.fromEntries(counts.map((c) => [c.stage, c.n])),
     members: listMembershipViews(db, projectSlug, ctx),
     credential: getProjectCredentialHealth(db, projectSlug),
+    repoFootprintTasks: repoFootprintTasks(db, projectSlug),
   };
 }

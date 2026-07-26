@@ -267,6 +267,11 @@ describe("RepoPanel", () => {
     const onOpenTask = vi.fn();
     const { container, getByText, queryByText } = render(
       <RepoPanel
+        canRepair
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
         repo="akin-ozer/viberr"
         credential={CREDENTIAL}
         canGrant
@@ -306,6 +311,11 @@ describe("RepoPanel", () => {
     const onSet = vi.fn();
     const { container, getByText } = render(
       <RepoPanel
+        canRepair
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
         repo="akin-ozer/viberr"
         credential={NO_CREDENTIAL}
         canGrant
@@ -339,6 +349,11 @@ describe("RepoPanel", () => {
     };
     const { container, getByText, queryByText } = render(
       <RepoPanel
+        canRepair
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
         repo="akin-ozer/viberr"
         credential={bound}
         canGrant
@@ -369,6 +384,11 @@ describe("RepoPanel", () => {
     };
     const { container, getByText } = render(
       <RepoPanel
+        canRepair
+        footprintTasks={0}
+        repairBusy={false}
+        repairResult={undefined}
+        onRepair={() => {}}
         repo="akin-ozer/viberr"
         credential={allOk}
         canGrant={false}

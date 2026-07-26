@@ -10,7 +10,12 @@ import {
   projectDir,
   projectFilePath,
 } from "~/server/files/file-store-root.server";
-import { updateProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { getProjectGithubContext } from "~/server/github/github-context.server";
+import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
@@ -142,6 +147,162 @@ export async function updateProjectIdentity(
     details: { fields: changedFields },
   });
   return { toast: "Project settings saved", changed: true };
+}
+
+// -------------------------------------------------------------- repo repair
+
+/** `owner/name` from free input — tolerates a pasted GitHub URL and a
+ * trailing `.git`, refuses anything that is not exactly one owner + one
+ * name. */
+export function normalizeRepoInput(raw: string): string | null {
+  let s = raw.trim();
+  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  s = s.replace(/^github\.com\//i, "");
+  s = s.replace(/\.git$/i, "").replace(/\/+$/, "");
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(s)
+    ? s
+    : null;
+}
+
+/** Tasks whose GitHub records point at the CURRENT repo: a linked PR, or
+ * commits observed on a pushed branch. A truly misconfigured repo has zero
+ * (every push failed), which is what keeps its repair friction-free. */
+export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM task_projections
+       WHERE project_slug = ?
+         AND (pr_json IS NOT NULL
+              OR COALESCE(json_array_length(json_extract(github_json, '$.commits')), 0) > 0)`,
+    )
+    .get(projectSlug) as { n: number };
+  return row.n;
+}
+
+/**
+ * Owner ruling 2026-07-26 — the repository identity stays ONE-per-project and
+ * is deliberately not editable in place; this is the explicit REPAIR path for
+ * the one legitimate case: the repo was misconfigured at creation (wrong
+ * owner, wrong name, or both) and every sync has been failing since.
+ *
+ * Contract:
+ *  - the human TYPES the corrected `owner/name` — nothing is inferred from
+ *    the connection owner and there is no automatic failover;
+ *  - when a credential is bound, the new repo is probed live and a miss
+ *    REFUSES the repair (a repair must not install the next
+ *    misconfiguration); a hit also refreshes `defaultBranch` from GitHub;
+ *  - a project whose tasks already carry PRs or pushed commits demands
+ *    `confirmFootprint` — those records keep pointing at the old repo;
+ *  - `edit-policy` tier (admin), audited from → to.
+ */
+export async function repairProjectRepo(
+  db: DatabaseSync,
+  input: { projectSlug: string; repo: string; confirmFootprint?: boolean },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<{ toast: string; changed: boolean; repo: string }> {
+  requireProjectAction(
+    db,
+    ctx,
+    "edit-policy",
+    input.projectSlug,
+    actor,
+    "repair the project repository",
+  );
+
+  const repo = normalizeRepoInput(input.repo);
+  if (!repo) {
+    throw AppError.validation(
+      "Enter the repository as owner/name (a pasted GitHub URL works too).",
+    );
+  }
+
+  const current = readProjectFile(projectRef(ctx, input.projectSlug));
+  if (!current) throw AppError.notFound(`Project not found: ${input.projectSlug}`);
+  const from = current.parsed.frontmatter.repo ?? null;
+  if (from === repo) {
+    return {
+      toast: `The project already points at ${repo}`,
+      changed: false,
+      repo,
+    };
+  }
+
+  const footprint = repoFootprintTasks(db, input.projectSlug);
+  if (footprint > 0 && !input.confirmFootprint) {
+    throw AppError.validation(
+      `${footprint} task${footprint === 1 ? "" : "s"} in this project carry branch/PR records against ${from ?? "the current repo"} — confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
+    );
+  }
+
+  // Verify the target with the BOUND credential before anything is written.
+  // No credential → nothing to probe with; the repair applies and the
+  // credential card keeps saying so.
+  const gh = getProjectGithubContext(db, input.projectSlug, {
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
+  let probed = false;
+  let defaultBranch: string | null = null;
+  if (gh.status === "ok") {
+    const res = await gh.client.request<{ default_branch?: string }>(
+      "GET",
+      `/repos/${repo}`,
+    );
+    if (res.ok) {
+      probed = true;
+      defaultBranch =
+        typeof res.data.default_branch === "string" && res.data.default_branch
+          ? res.data.default_branch
+          : null;
+    } else if (res.kind === "network") {
+      throw AppError.validation(
+        `GitHub is unreachable (${res.message}) — the repair was NOT applied. Try again when it is.`,
+      );
+    } else if (res.status === 404) {
+      throw AppError.validation(
+        `The attached credential cannot see ${repo} — check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.`,
+      );
+    } else if (res.status === 401) {
+      throw AppError.validation(
+        "GitHub rejected the attached credential — update the token in org settings, then repair again. Nothing was changed.",
+      );
+    } else {
+      throw AppError.validation(
+        `GitHub refused the check on ${repo} (${res.status}${res.kind === "http" ? `: ${res.message}` : ""}) — nothing was changed.`,
+      );
+    }
+  }
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    parsed.frontmatter.repo = repo;
+    if (defaultBranch) parsed.frontmatter.defaultBranch = defaultBranch;
+  });
+  reprojectProject(db, ctx, input.projectSlug);
+  // The 30 s memoized repo-access probe still describes the OLD repo.
+  invalidateRepoAccess(db, input.projectSlug);
+  recordAudit(db, {
+    action: "project.repo.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: {
+      from,
+      to: repo,
+      probed,
+      ...(defaultBranch ? { defaultBranch } : {}),
+      ...(footprint > 0 ? { footprintTasks: footprint } : {}),
+    },
+  });
+
+  return {
+    toast: probed
+      ? `Repository repaired — ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
+      : `Repository set to ${repo} — attach a credential to verify access`,
+    changed: true,
+    repo,
+  };
 }
 
 // ------------------------------------------------------------------- stages

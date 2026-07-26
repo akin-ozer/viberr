@@ -1,11 +1,29 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore, type TestStore } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  readProjectFile,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
-import { addStage, removeStage, renameStage, reorderStages } from "./settings-actions.server";
+import {
+  addStage,
+  removeStage,
+  renameStage,
+  reorderStages,
+  repairProjectRepo,
+  repoFootprintTasks,
+} from "./settings-actions.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -243,5 +261,163 @@ describe("renameStage", () => {
     ]);
     expect(workflowOf(store)).toEqual(before);
     expectChainCoversStages(store);
+  });
+});
+
+/* ------------- repo repair (owner ruling 2026-07-26) ------------- */
+
+describe("repairProjectRepo — the explicit misconfiguration escape hatch", () => {
+  const REPO_OK = "akin-ozer/viberr";
+
+  async function misconfigure(store: TestStore, repo = "akin/viberr") {
+    await updateProjectFile(
+      { projectSlug: store.slug, dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.repo = repo;
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  function bindCredential(store: TestStore) {
+    const actor = admin(store);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "github_pat_repair01" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+  }
+
+  it("repairs owner/name (URL input tolerated), refreshes defaultBranch from the probe, audits from → to", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    bindCredential(store);
+    const gh = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: {
+        body: { full_name: REPO_OK, default_branch: "develop" },
+      },
+    });
+    const result = await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: `https://github.com/${REPO_OK}.git` },
+      admin(store),
+      { dataRoot: store.dataRoot },
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.repo).toBe(REPO_OK);
+    expect(result.toast).toContain("Repository repaired — akin/viberr → akin-ozer/viberr");
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.repo).toBe(REPO_OK);
+    expect(fm.defaultBranch).toBe("develop");
+    const audits = listAuditEvents(store.db, { action: "project.repo.updated" });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.details).toMatchObject({
+      from: "akin/viberr",
+      to: REPO_OK,
+      probed: true,
+      defaultBranch: "develop",
+    });
+  });
+
+  it("REFUSES a target the bound credential cannot see — a repair must not install the next misconfiguration", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    bindCredential(store);
+    const gh = fakeGithubFetch({}); // every route 404s
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: "akin-ozer/typo-again" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+        { fetchImpl: gh.fetchImpl },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    // Nothing changed.
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+        .frontmatter.repo,
+    ).toBe("akin/viberr");
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
+  });
+
+  it("with NO credential bound the repair applies unprobed, saying so", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    const result = await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO_OK },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.toast).toContain("attach a credential to verify");
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+        .frontmatter.repo,
+    ).toBe(REPO_OK);
+  });
+
+  it("a project with remote footprint demands the acknowledgment", async () => {
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "review",
+        branch: "vib-9",
+        pr: { number: 42, state: "review", title: "t" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(repoFootprintTasks(store.db, store.slug)).toBe(1);
+
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: REPO_OK },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const confirmed = await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO_OK, confirmFootprint: true },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(confirmed.changed).toBe(true);
+  });
+
+  it("admin-only (edit-policy): a maintainer is refused; same-repo input is a no-op; garbage input is refused", async () => {
+    const store = setupTestStore(ctx);
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: REPO_OK },
+        { userId: store.users.murat.id, label: store.users.murat.email },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const noop = await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO_OK }, // fixture already points here
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(noop.changed).toBe(false);
+
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: "not a repo" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

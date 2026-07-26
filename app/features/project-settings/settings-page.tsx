@@ -492,12 +492,121 @@ export function MembersPanel({
 
 // -------------------------------------------------- repository & credentials
 
+/**
+ * Owner ruling 2026-07-26: the repository stays one-per-project and read-only —
+ * this dialog is the explicit repair path for a repo misconfigured at creation
+ * (wrong owner, wrong name, or both). The human TYPES the corrected target;
+ * the server probes it with the bound credential and refuses misses. Nothing
+ * is inferred and there is no automatic failover.
+ */
+function RepairRepoDialog({
+  current,
+  footprintTasks,
+  hasCredential,
+  busy,
+  result,
+  onCancel,
+  onSubmit,
+}: {
+  current: string | null;
+  footprintTasks: number;
+  hasCredential: boolean;
+  busy: boolean;
+  result: { ok: boolean; error?: string } | undefined;
+  onCancel: () => void;
+  onSubmit: (repo: string, confirmFootprint: boolean) => void;
+}) {
+  const { ref, close } = useDialog(onCancel);
+  const [repo, setRepo] = useState("");
+  const [ack, setAck] = useState(false);
+  const [sent, setSent] = useState(false);
+  const canSave =
+    !busy && repo.trim().length > 2 && (footprintTasks === 0 || ack);
+  const error = sent && !busy && result && !result.ok ? result.error : null;
+  return (
+    <dialog ref={ref} className="confirm-card" aria-label="Repair repository">
+      <div className="confirm-icon">
+        <Icon name="github" />
+      </div>
+      <h3>Repair repository</h3>
+      <p>
+        Currently <code className="mono">{current ?? "unset"}</code>. Enter the
+        corrected <span className="mono">owner/name</span> — for the project
+        that was misconfigured at creation, not for moving healthy work.
+      </p>
+      <div className="field">
+        <input
+          type="text"
+          className="mono"
+          value={repo}
+          placeholder="owner/name"
+          onChange={(e) => setRepo(e.target.value)}
+          data-autofocus=""
+        />
+      </div>
+      <p style={{ color: "var(--muted)", fontSize: ".82rem" }}>
+        {hasCredential
+          ? "The new repository is verified with the attached credential before anything changes — a repo the token can't see refuses the repair."
+          : "No credential is attached, so the new repository can't be verified until one is."}
+      </p>
+      {footprintTasks > 0 && (
+        <label
+          className="cred-warn"
+          style={{ display: "flex", gap: ".5rem", cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={ack}
+            onChange={(e) => setAck(e.target.checked)}
+            style={{ marginTop: ".15rem" }}
+          />
+          <span>
+            {footprintTasks} task{footprintTasks === 1 ? "" : "s"} in this
+            project carry branch/PR records against the current repository.
+            They keep their history, but every future sync runs against the
+            new one.
+          </span>
+        </label>
+      )}
+      {error && (
+        <div className="cred-warn">
+          <Icon name="alert" />
+          {error}
+        </div>
+      )}
+      <div className="confirm-actions">
+        <button type="button" className="btn ghost" onClick={close}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!canSave}
+          aria-busy={busy}
+          onClick={() => {
+            if (!canSave) return;
+            setSent(true);
+            onSubmit(repo, ack);
+          }}
+        >
+          Repair repository
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 export function RepoPanel({
   repo,
   credential,
   canGrant,
   busy,
   credBusy,
+  canRepair,
+  footprintTasks,
+  repairBusy,
+  repairResult,
+  onRepair,
   onGrantScope,
   onSetCredential,
   onClearCredential,
@@ -508,11 +617,27 @@ export function RepoPanel({
   canGrant: boolean;
   busy: boolean;
   credBusy: boolean;
+  /** `edit-policy` (admin) — the repo is project identity, one tier above the
+   *  credential actions. */
+  canRepair: boolean;
+  footprintTasks: number;
+  repairBusy: boolean;
+  repairResult: { ok: boolean; toast?: string; error?: string } | undefined;
+  onRepair: (repo: string, confirmFootprint: boolean) => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
   onClearCredential: () => void;
   onOpenTask: (taskKey: string) => void;
 }) {
+  const [repairing, setRepairing] = useState(false);
+  // Close the dialog only when a repair SUCCEEDS — a probe refusal keeps it
+  // open with the typed reason so the owner can correct the input.
+  const settled = useRef<unknown>(repairResult);
+  useEffect(() => {
+    if (!repairResult || settled.current === repairResult) return;
+    settled.current = repairResult;
+    if (repairResult.ok) setRepairing(false);
+  }, [repairResult]);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -530,6 +655,17 @@ export function RepoPanel({
               <span style={{ color: "var(--placeholder)", fontSize: ".8rem" }}>
                 —
               </span>
+            )}
+            {canRepair && (
+              <button
+                type="button"
+                className="btn ghost sm"
+                style={{ marginLeft: ".5rem" }}
+                onClick={() => setRepairing(true)}
+                title="Fix a repository that was misconfigured at creation — verified against the attached credential before anything changes"
+              >
+                Repair…
+              </button>
             )}
           </span>
         </div>
@@ -553,11 +689,25 @@ export function RepoPanel({
         </div>
       </div>
 
+      {repairing && (
+        <RepairRepoDialog
+          current={repo}
+          footprintTasks={footprintTasks}
+          hasCredential={credential.source === "pat"}
+          busy={repairBusy}
+          result={repairResult}
+          onCancel={() => setRepairing(false)}
+          onSubmit={onRepair}
+        />
+      )}
+
       <CredentialCard
         credential={credential}
         onOpenTask={onOpenTask}
         warnActions={
-          canGrant ? (
+          // "Grant scope" re-checks a credential — on the no-credential card it
+          // can only no-op into a toast, so it doesn't render there.
+          canGrant && credential.source !== "none" ? (
             <button
               type="button"
               className="btn sm"
@@ -891,6 +1041,21 @@ export function SettingsPage({
             canGrant={canGrant}
             busy={repoFetcher.state !== "idle"}
             credBusy={credFetcher.state !== "idle"}
+            canRepair={isAdmin}
+            footprintTasks={data.repoFootprintTasks}
+            repairBusy={repoFetcher.state !== "idle"}
+            repairResult={repoFetcher.data}
+            onRepair={(repoInput, confirmFootprint) =>
+              repoFetcher.submit(
+                {
+                  intent: "repair-repo",
+                  _csrf: csrf,
+                  repo: repoInput,
+                  ...(confirmFootprint ? { confirmFootprint: "1" } : {}),
+                },
+                { method: "post" },
+              )
+            }
             onGrantScope={() =>
               repoFetcher.submit(
                 { intent: "grant-scope", _csrf: csrf },

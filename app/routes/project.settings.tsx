@@ -22,6 +22,7 @@ import {
   removeStage,
   renameStage,
   reorderStages,
+  repairProjectRepo,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
@@ -125,6 +126,22 @@ export async function action({ request, params }: Route.ActionArgs) {
       // persisted a flag and audited a change that no enforcement path ever
       // consulted, next to copy on three surfaces promising a capability
       // nothing could write. One project, one repository.
+      //
+      // Owner ruling 2026-07-26: …and one explicit REPAIR path for the repo
+      // misconfigured at creation. The human types the corrected owner/name;
+      // the server probes it with the bound credential and refuses misses.
+      case "repair-repo": {
+        const result = await repairProjectRepo(
+          db,
+          {
+            projectSlug: slug,
+            repo: field("repo"),
+            confirmFootprint: field("confirmFootprint") === "1",
+          },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
       case "grant-scope": {
         // The single guard path consulting the ACTION_ROLES source:
         // `grant-github-scope` (maintainer+), same as the GitHub view's action
