@@ -14,7 +14,7 @@ import { readSkillBody } from "~/server/files/skill-body.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { updateTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   gate,
   operatorAcceptCompletion,
@@ -99,6 +99,13 @@ export interface RunOperatorInput {
    *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
    *  agent-reply trigger, which is what resets the chain. */
   transitionDepth?: number;
+  /** transition trigger — what just moved (display names) and who moved it.
+   *  `transitionByHuman` null = the operator's own move (continue the flow);
+   *  a name = a human decided it, and the turn instruction tells the operator
+   *  to honor their visible steer or ASK them why (owner ruling 2026-07-26). */
+  transitionFromName?: string;
+  transitionToName?: string;
+  transitionByHuman?: string | null;
   /** A human's `@operator …` comment to address in this run (when a person
    *  talks to the operator directly). The operator reads it and responds. */
   humanComment?: string;
@@ -165,6 +172,15 @@ interface OperatorLeaseState {
       projectSlug: string;
       taskKey: string;
       dataRoot?: string;
+      /** This drive's transition-chain depth — the stranded-coordination
+       *  resume (settle-time) threads depth+1 so the backstop chain shares
+       *  OPERATOR_TRANSITION_CHAIN_CAP with the transition re-trigger. */
+      transitionDepth: number;
+      /** The task's stage when this drive started. A drive that MOVED the
+       *  stage is never "stranded" — the transition's own re-trigger owns the
+       *  follow-up (it is fire-and-forget async, so at settle time it may not
+       *  have reached the queue yet; resuming here would double-drive). */
+      stageAtStart: string | null;
     }
   >;
   pending: Map<string, RunOperatorInput>;
@@ -261,18 +277,178 @@ function leaseRefFromKey(key: string): { projectSlug: string; taskKey: string } 
   return { projectSlug: key.slice(0, i), taskKey: key.slice(i + 1) };
 }
 
+/**
+ * A finished operator drive left the task STRANDED when the stage's own
+ * contract says no human input is due: an `auto` outbound boundary, no open
+ * packet, no pending recommendation, not archived. Live-caught shape: the
+ * create-run drafted the goal, declared "the next invocation will handle the
+ * Triage → Ready transition", and stopped — but nothing re-invokes the
+ * operator for its own `set_goal`, so the task sat at an auto stage labeled
+ * "waiting on a human" with nothing for the human to decide.
+ */
+export function operatorLeftTaskStranded(
+  task: {
+    archived: boolean;
+    stage: string;
+    packet: unknown;
+    recommendations: readonly unknown[];
+  },
+  workflow: readonly { from: string; to: string; boundary: string }[],
+): boolean {
+  if (task.archived) return false;
+  if (task.packet) return false; // a decision IS pending — the human's move
+  if (task.recommendations.length > 0) return false; // ditto
+  return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
+}
+
+/**
+ * Settle-time backstop for the stranded shape above: re-invoke the operator
+ * (its own turn instruction already says "advance the boundary") instead of
+ * stamping "waiting on human". Bounded by OPERATOR_TRANSITION_CHAIN_CAP via
+ * the same transitionDepth the transition re-trigger uses; only a run that
+ * FINISHED cleanly resumes — an errored drive must not loop. Returns true
+ * when a resume was fired (the caller then skips the waiting flip).
+ */
+async function maybeResumeStrandedOperator(
+  db: DatabaseSync,
+  ref: {
+    projectSlug: string;
+    taskKey: string;
+    dataRoot?: string;
+    runId?: string | null;
+    transitionDepth?: number;
+    stageAtStart?: string | null;
+  },
+): Promise<boolean> {
+  // Only the tracked-lease path resumes (it knows the drive's starting stage);
+  // fallback refs (cross-boot drains, key-derived) stay conservative.
+  if (ref.stageAtStart === undefined || ref.stageAtStart === null) return false;
+  const stateRow = ref.runId
+    ? (db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(ref.runId) as
+        | { state: string }
+        | undefined)
+    : (db
+        .prepare(
+          `SELECT state FROM agent_runs
+           WHERE project_slug = ? AND task_key = ? AND kind = 'operator'
+           ORDER BY rowid DESC LIMIT 1`,
+        )
+        .get(ref.projectSlug, ref.taskKey) as { state: string } | undefined);
+  if (stateRow?.state !== "finished") return false;
+
+  const { readProjectFile } = await import("~/server/files/project-writer.server");
+  const file = readTaskFile({
+    projectSlug: ref.projectSlug,
+    taskKey: ref.taskKey,
+    dataRoot: ref.dataRoot,
+  });
+  const project = readProjectFile({
+    projectSlug: ref.projectSlug,
+    dataRoot: ref.dataRoot,
+  });
+  if (!file || !project) return false;
+  // The drive MOVED the stage → its transition re-trigger owns the follow-up.
+  // That re-trigger is fire-and-forget async and may not have reached the
+  // lease queue yet, so resuming here would double-drive the task (observed:
+  // the displaced re-trigger then queued behind the resume's run and re-fired
+  // after a packet was already open).
+  if (file.parsed.frontmatter.stage !== ref.stageAtStart) return false;
+  const stranded = operatorLeftTaskStranded(
+    {
+      archived: file.parsed.frontmatter.archived,
+      stage: file.parsed.frontmatter.stage,
+      packet: file.parsed.packet,
+      recommendations: file.parsed.frontmatter.recommendations,
+    },
+    project.parsed.frontmatter.workflow,
+  );
+  if (!stranded) return false;
+
+  const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
+    "~/server/tasks/task-actions.server"
+  );
+  const depth = (ref.transitionDepth ?? 0) + 1;
+  if (depth > OPERATOR_TRANSITION_CHAIN_CAP) {
+    // The model refused to advance CAP times in a row — surface the dead end
+    // honestly instead of resuming forever or stamping a silent wait.
+    const { appendTimelineEvent } = await import(
+      "~/server/files/task-writer.server"
+    );
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { resolveTaskFilePath } = await import(
+      "~/server/files/task-writer.server"
+    );
+    await appendTimelineEvent(
+      { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
+      {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `**Note:** the operator ended ${OPERATOR_TRANSITION_CHAIN_CAP} consecutive runs without advancing this auto stage, opening a packet, or engaging an agent. ` +
+          "Run the operator manually or adjust the goal.",
+        toAgent: false,
+        evidence: null,
+      },
+    );
+    rebuildPath(
+      db,
+      resolveTaskFilePath({
+        projectSlug: ref.projectSlug,
+        taskKey: ref.taskKey,
+        dataRoot: ref.dataRoot,
+      }),
+      { dataRoot: ref.dataRoot },
+    );
+    logger.warn("stranded-operator resume hit the chain cap — leaving a note", {
+      taskKey: ref.taskKey,
+      depth,
+    });
+    return false;
+  }
+
+  logger.info("operator ended leaving an auto stage idle — resuming the chain", {
+    taskKey: ref.taskKey,
+    stage: file.parsed.frontmatter.stage,
+    depth,
+  });
+  void runOperator(db, {
+    projectSlug: ref.projectSlug,
+    taskKey: ref.taskKey,
+    trigger: "transition",
+    transitionDepth: depth,
+    dataRoot: ref.dataRoot,
+  }).catch((error) => {
+    logger.error("stranded-operator resume failed", {
+      taskKey: ref.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  });
+  return true;
+}
+
 /** After the last operator drive ends with no queued follow-up: if no run is
- *  still live on the task, flip `waiting: agent` → human. Fire-and-forget —
- *  a failed settle only leaves the board reading "working" until the next
- *  task mutation reprojects. */
+ *  still live on the task, RESUME a stranded auto-stage chain (see above) or
+ *  flip `waiting: agent` → human. Fire-and-forget — a failed settle only
+ *  leaves the board reading "working" until the next task mutation
+ *  reprojects. */
 function settleWaitingAfterOperator(
   db: DatabaseSync,
-  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+  ref: {
+    projectSlug: string;
+    taskKey: string;
+    dataRoot?: string;
+    runId?: string | null;
+    transitionDepth?: number;
+    stageAtStart?: string | null;
+  },
 ): void {
   void (async () => {
     try {
       const live = inFlightAgentRun(db, ref.projectSlug, ref.taskKey);
       if (live) return;
+      if (await maybeResumeStrandedOperator(db, ref)) return;
       const { clearWaitingToHuman } = await import(
         "~/server/tasks/task-actions.server"
       );
@@ -369,6 +545,8 @@ export async function runOperator(
   // The lease-entry OBJECT is this drive's release token — every release for
   // this drive passes it, so a stale/duplicate release can never evict a
   // successor's lease (releaseOperatorLease is idempotent per token).
+  // NOTE: no await may sit between the held-check above and this set — the
+  // single-flight coalesce depends on check→set being one synchronous step.
   const leaseToken = {
     runId: null as string | null,
     backend,
@@ -376,6 +554,13 @@ export async function runOperator(
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     dataRoot: input.dataRoot,
+    transitionDepth: input.transitionDepth ?? 0,
+    stageAtStart:
+      readTaskFile({
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        dataRoot: input.dataRoot,
+      })?.parsed.frontmatter.stage ?? null,
   };
   lease.held.set(leaseKey, leaseToken);
 
@@ -658,6 +843,7 @@ async function startCodexOperatorRun(
     input.humanComment,
     input.agentReply,
     input.humanCommentBy,
+    transitionContextOf(input),
   );
   // P14-RT-04 / KM-02: the operator's DECLARED org MCP servers mount on Codex
   // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
@@ -776,6 +962,11 @@ export async function executeStrandedCodexPlan(
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
     ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    // Cross-boot resume of a persisted plan — no prior chain depth survives
+    // the restart; stageAtStart null keeps the stranded-resume backstop out
+    // of this recovery path entirely (conservative).
+    transitionDepth: 0,
+    stageAtStart: null,
   };
   lease.held.set(leaseKey, leaseToken);
   try {
@@ -1106,6 +1297,7 @@ async function startRealOperatorRun(
     input.humanComment,
     input.agentReply,
     input.humanCommentBy,
+    transitionContextOf(input),
   );
 
   const { runId } = await startRun(db, {
@@ -1340,6 +1532,23 @@ function goalIsUnspecified(goal: string): boolean {
 
 type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
 
+/** What a transition trigger carries (owner ruling 2026-07-26). */
+export interface TransitionContext {
+  fromName: string;
+  toName: string;
+  /** null = the operator's own move; a name = a human decided it. */
+  byHuman: string | null;
+}
+
+function transitionContextOf(input: RunOperatorInput): TransitionContext | undefined {
+  if (!input.transitionFromName || !input.transitionToName) return undefined;
+  return {
+    fromName: input.transitionFromName,
+    toName: input.transitionToName,
+    byHuman: input.transitionByHuman ?? null,
+  };
+}
+
 function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
   if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
   const report = agentReply.slice(0, 4000);
@@ -1353,6 +1562,7 @@ function operatorTurnInstruction(
   trigger: OperatorTrigger,
   humanComment?: string,
   humanCommentBy?: string,
+  transition?: TransitionContext,
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -1413,16 +1623,32 @@ function operatorTurnInstruction(
     );
   }
 
+  // Owner ruling 2026-07-26: a transition trigger says WHAT moved and WHO
+  // moved it. The operator honors a human's visible steer — and when the
+  // reason for a human move is not visible, it ASKS instead of guessing.
+  const moveContext =
+    trigger === "transition" && transition
+      ? transition.byHuman
+        ? `A human (${transition.byHuman}) moved this task from "${transition.fromName}" to "${transition.toName}". ` +
+          "Their reason should be in the newest timeline entries (a decision note, a comment, a resolver's steer) — honor it in what you do next; a move back to the work stage usually means re-prompting the delivering profile with that steer. " +
+          `If you cannot tell WHY the task moved, ask them in ONE comment — tag "@${transition.byHuman}" so they are notified — and stop. Never guess a rework direction. `
+        : `You moved this task from "${transition.fromName}" to "${transition.toName}" — continue coordinating at the new stage. `
+      : "";
   const scope = goalIsUnspecified(snapshot.goal)
-    ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. "
+    ? "The goal is unspecified. First use `set_goal` to add concrete scope and acceptance criteria, or request genuinely missing scope with one decision packet. " +
+      "Drafting the goal is SETUP, not this turn's action — after `set_goal`, continue with the stage rule below in the SAME run; nothing re-invokes you for your own `set_goal`. "
     : "";
   return (
+    moveContext +
     scope +
     `You are at stage "${snapshot.stageName}". Do the ONE thing this stage calls for, from the live snapshot:\n` +
     "- Pre-work stage with an `auto` outbound boundary (e.g. Triage → Ready, Ready → In Progress): advance it with `transition_stage`. " +
     "Every transition re-invokes you at the new stage, so advancing one boundary and stopping is fine — you (or a queued follow-up) will pick the task up at the next stage and continue.\n" +
     "- Work stage with no deliverer engaged yet: choose the delivering profile by description and capabilities and hand off with `prompt_agent` (`delivers: true`); supporting review uses `delivers: false`.\n" +
-    "- Work stage where the deliverer is already engaged and its run is in flight or already reported: do nothing and stop — wait for its report (you are re-invoked when it replies). Never re-deploy or duplicate a run that is already working.\n" +
+    "- Work stage where the deliverer's run is IN FLIGHT — `liveRuns` in the snapshot is the ONLY proof of that (`waiting` is a display flag and a directive comment on the timeline is not a running agent): do nothing and stop — you are re-invoked when it reports. Never duplicate a run that is already working.\n" +
+    "- Work stage where the deliverer already reported and its report is still the LATEST word (no newer human steer, rework decision, or request-changes after it): do nothing and stop.\n" +
+    "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work — `prompt_agent` the delivering profile with that steer, quoting it.\n" +
+    "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."
   );
 }
@@ -1435,6 +1661,7 @@ export function buildCodexOperatorPrompt(
   humanComment?: string,
   agentReply?: string,
   humanCommentBy?: string,
+  transition?: TransitionContext,
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -1443,7 +1670,7 @@ export function buildCodexOperatorPrompt(
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
-    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy) +
+    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy, transition) +
     "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal, `retry_other_backend`, `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
@@ -1457,12 +1684,13 @@ export function buildOperatorTurnPrompt(
   humanComment?: string,
   agentReply?: string,
   humanCommentBy?: string,
+  transition?: TransitionContext,
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
     `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
     agentReportBlock(trigger, agentReply) +
     "\n\n" +
-    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy)
+    operatorTurnInstruction(snapshot, trigger, humanComment, humanCommentBy, transition)
   );
 }

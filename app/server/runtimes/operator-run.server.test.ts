@@ -544,6 +544,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       recentTimeline: [],
       pr: { number: 318, state: "closed", title: "PR" },
       branch: "vib-9",
+      liveRuns: [],
       autonomy: "supervised" as OperatorAutonomy,
       policy: {},
       ...over,
@@ -595,5 +596,297 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(prompt).toContain("closed WITHOUT merging");
     expect(prompt).toContain("`archive_task` to archive the task");
     expect(prompt).toContain("deleteBranch: true");
+  });
+});
+
+/* ------- stranded-operator backstop (P14 follow-up, live-caught) ------- */
+
+describe("stranded auto-stage resume", () => {
+  it("operatorLeftTaskStranded: true only for an idle auto stage with no pending decision", () => {
+    const wf = [
+      { from: "triage", to: "ready", boundary: "auto" },
+      { from: "ready", to: "impl", boundary: "auto" },
+      { from: "impl", to: "review", boundary: "approval" },
+      { from: "review", to: "done", boundary: "human" },
+    ];
+    const base = {
+      archived: false,
+      stage: "triage",
+      packet: null as unknown,
+      recommendations: [] as unknown[],
+    };
+    const { operatorLeftTaskStranded } = operatorPrompts;
+    expect(operatorLeftTaskStranded(base, wf)).toBe(true);
+    expect(operatorLeftTaskStranded({ ...base, stage: "ready" }, wf)).toBe(true);
+    expect(operatorLeftTaskStranded({ ...base, stage: "impl" }, wf)).toBe(false); // approval gate
+    expect(operatorLeftTaskStranded({ ...base, stage: "done" }, wf)).toBe(false); // terminal
+    expect(operatorLeftTaskStranded({ ...base, archived: true }, wf)).toBe(false);
+    expect(operatorLeftTaskStranded({ ...base, packet: { title: "?" } }, wf)).toBe(false);
+    expect(operatorLeftTaskStranded({ ...base, recommendations: [{}] }, wf)).toBe(false);
+  });
+
+  it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      {
+        key: "VIB-1",
+        title: "t",
+        goal: "Goal to be refined at the triage quality gate.",
+        stage: "triage",
+        stageName: "Triage",
+        readiness: "input_required",
+        waiting: "human",
+        owner: null,
+        specialist: null,
+        reviewers: [],
+        nextStages: [{ id: "ready", name: "Ready", boundary: "auto" }],
+        stageIds: ["triage", "ready", "impl", "review", "done"],
+        doneStageId: "done",
+        reviewStageId: "review",
+        workStageId: "impl",
+        deployedSpecialists: [],
+        openPacket: false,
+        packet: null,
+        recentTimeline: [],
+        pr: null,
+        branch: null,
+        liveRuns: [],
+        autonomy: "supervised",
+        policy: {},
+      },
+      "create",
+    );
+    expect(prompt).toContain("Drafting the goal is SETUP");
+    expect(prompt).toContain("SAME run");
+  });
+
+  describe("settle-time resume (integration)", () => {
+    let ctx2: TestDbContext;
+    let store2: TestStore;
+    let adapter2: ControlledAdapter;
+
+    beforeEach(() => {
+      ctx2 = createTestDbContext();
+      store2 = setupTestStore(ctx2);
+      const project = readProjectFile({
+        projectSlug: store2.slug,
+        dataRoot: store2.dataRoot,
+      })!;
+      writeProject(store2.dataRoot, {
+        ...project.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "operator",
+            capabilities: OPERATOR_POLICY,
+            extras: [],
+            definition: {
+              kind: "operator",
+              name: "Operator",
+              backends: ["codex"],
+              model: defaultModelFor("codex"),
+            },
+          },
+        ] as never,
+      });
+      // The live stranding shape: fresh task at the AUTO triage stage.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          title: "list files in the project",
+          stage: "triage",
+          readiness: "input_required",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Goal to be refined at the triage quality gate.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      resetSseBrokerForTests();
+      resetOperatorLeasesForTests();
+      adapter2 = new ControlledAdapter();
+      configureRunServiceForTests({ claude: adapter2, codex: adapter2 });
+      setBackendAvailability("codex", true);
+    });
+
+    afterEach(() => {
+      resetOperatorLeasesForTests();
+      resetSseBrokerForTests();
+      ctx2.cleanup();
+    });
+
+    const operatorRuns = () =>
+      store2.db
+        .prepare(`SELECT id, state FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
+        .all() as { id: string; state: string }[];
+
+    it("a drive that ends doing NOTHING at an auto stage is resumed; a pending decision ends the chain", async () => {
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      expect(adapter2.pending).not.toBeNull();
+
+      // Drive 1 strands: no actions, no reasoning — the live "stopped after
+      // set_goal" shape reduced to its observable effect (nothing pending).
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+
+      // The settle-time backstop fires a SECOND drive instead of stamping
+      // "waiting on a human" over an auto stage.
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+
+      // Drive 2 crosses the AUTO boundary (recommend mode gates approval
+      // boundaries; auto ones execute) — and the pass-11 transition re-trigger
+      // fires drive 3 at Ready. The task is fully unstuck.
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [transitionAction({ toStageId: "ready", reason: "Triage done." })],
+        }),
+        "finished",
+      );
+      await eventually(() => {
+        const fm = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed.frontmatter;
+        expect(fm.stage).toBe("ready");
+        expect(operatorRuns()).toHaveLength(3);
+        expect(adapter2.pending).not.toBeNull();
+      });
+
+      // Drive 3 opens a decision packet — a PENDING DECISION is not stranded,
+      // so the settle does NOT resume: the chain rests with the human.
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [
+            {
+              tool: "open_packet",
+              profileId: null,
+              delivers: null,
+              toStageId: null,
+              packetType: "input",
+              text: "Scope the listing format",
+              reason: "Two plausible output formats — a human should pick.",
+              packetOptions: null,
+            },
+          ],
+        }),
+        "finished",
+      );
+      await eventually(() => {
+        expect(
+          readTaskFile({
+            projectSlug: store2.slug,
+            taskKey: "VIB-1",
+            dataRoot: store2.dataRoot,
+          })!.parsed.packet,
+        ).not.toBeNull();
+      });
+      // Give the settle a beat: no fourth drive appears.
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(operatorRuns()).toHaveLength(3);
+    });
+
+    it("an ERRORED drive is not resumed — failures must not loop", async () => {
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      adapter2.finish(store2, "provider exploded", "error");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(operatorRuns()).toHaveLength(1);
+    });
+  });
+});
+
+/* -------- transition context in the turn prompt (owner ruling 2026-07-26) -------- */
+
+describe("transition trigger carries from → to and who moved it", () => {
+  const snap = () => ({
+    key: "VIB-2",
+    title: "t",
+    goal: "Write the post.",
+    stage: "impl",
+    stageName: "In Progress",
+    readiness: "ready",
+    waiting: "agent",
+    owner: null,
+    specialist: null,
+    reviewers: [],
+    nextStages: [{ id: "review", name: "Review", boundary: "approval" }],
+    stageIds: ["triage", "ready", "impl", "review", "done"],
+    doneStageId: "done",
+    reviewStageId: "review",
+    workStageId: "impl",
+    deployedSpecialists: [],
+    openPacket: false,
+    packet: null,
+    recentTimeline: [],
+    pr: null,
+    branch: "vib-2",
+    liveRuns: [],
+    autonomy: "supervised" as OperatorAutonomy,
+    policy: {},
+  });
+
+  it("a HUMAN move names them, points at their steer, and says ASK (@tag) when unclear", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      { fromName: "Review", toName: "In Progress", byHuman: "Arda" },
+    );
+    expect(prompt).toContain('A human (Arda) moved this task from "Review" to "In Progress"');
+    expect(prompt).toContain("re-prompting the delivering profile");
+    expect(prompt).toContain('tag "@Arda"');
+    expect(prompt).toContain("Never guess a rework direction");
+  });
+
+  it("the generic block keys in-flight on liveRuns and covers the undelivered hand-off", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "manual");
+    expect(prompt).toContain("`liveRuns` in the snapshot is the ONLY proof");
+    expect(prompt).toContain("did NOT start a run");
+    expect(prompt).toContain("re-send the prompt yourself");
+  });
+
+  it("the operator's OWN move keeps the normal continue-flow tone", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      { fromName: "Ready", toName: "In Progress", byHuman: null },
+    );
+    expect(prompt).toContain('You moved this task from "Ready" to "In Progress"');
+    expect(prompt).not.toContain("Never guess");
+  });
+
+  it("the Codex plan prompt carries the same context", () => {
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(
+      snap(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      { fromName: "Review", toName: "In Progress", byHuman: "Arda" },
+    );
+    expect(prompt).toContain('A human (Arda) moved this task');
   });
 });

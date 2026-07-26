@@ -609,6 +609,11 @@ export async function autoInvokeOperator(
   /** Transition-chain depth to thread into the run (transition trigger only —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
   transitionDepth?: number,
+  /** Owner ruling 2026-07-26 — the transition trigger carries WHAT moved and
+   *  WHO moved it, so the operator picks the task up knowing from → to. A
+   *  human-authored move whose intent isn't visible on the timeline is
+   *  something the operator ASKS about instead of guessing. */
+  transition?: { fromName: string; toName: string; byHuman: string | null },
 ): Promise<void> {
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
@@ -620,6 +625,13 @@ export async function autoInvokeOperator(
       taskKey,
       trigger,
       ...(transitionDepth !== undefined ? { transitionDepth } : {}),
+      ...(transition
+        ? {
+            transitionFromName: transition.fromName,
+            transitionToName: transition.toName,
+            transitionByHuman: transition.byHuman,
+          }
+        : {}),
       dataRoot: ctx.dataRoot,
     });
   } catch (error) {
@@ -2521,30 +2533,55 @@ export async function operatorPromptAgent(
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { startAgentRun } = await import("./specialist-run.server");
   let runId: string;
-  if (input.kind === "reviewer") {
-    if (!input.profileId) {
-      throw AppError.validation("A reviewer profile id is required to run a reviewer.");
+  try {
+    if (input.kind === "reviewer") {
+      if (!input.profileId) {
+        throw AppError.validation("A reviewer profile id is required to run a reviewer.");
+      }
+      const started = await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId: input.profileId,
+          directive,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+      runId = started.runId;
+    } else {
+      const started = await startAgentRun(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+      runId = started.runId;
     }
-    const started = await startAgentRun(
-      db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        profileId: input.profileId,
-        directive,
+  } catch (error) {
+    // The directive comment above is already on the timeline — a start that
+    // REFUSES (stage eligibility, backend down, policy) must not leave it
+    // standing as a delivered hand-off. Live-caught: an orphaned
+    // "@blog-writer Rework…" from a refused start read as "already prompted"
+    // to every later operator turn, so nothing ever re-engaged the deliverer.
+    const message = error instanceof Error ? error.message : String(error);
+    await updateTaskFile(
+      taskRef(opCtx, input.projectSlug, input.taskKey),
+      (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text: `**Note:** the prompt above did NOT start a run — ${message} @${input.handle} has not been engaged; the directive needs to be re-sent once the blocker is resolved.`,
+          toAgent: false,
+          evidence: null,
+        });
       },
-      OPERATOR_TASK_ACTOR,
-      opCtx,
     );
-    runId = started.runId;
-  } else {
-    const started = await startAgentRun(
-      db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, directive },
-      OPERATOR_TASK_ACTOR,
-      opCtx,
-    );
-    runId = started.runId;
+    reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
+    throw error;
   }
 
   // 3. The completion handler (reply → reconcile → verdict → react) is already
@@ -2969,6 +3006,15 @@ export async function transitionStage(
         input.taskKey,
         "transition",
         chainDepth,
+        {
+          fromName: stageName(project, fromStageId),
+          toName: stageName(project, input.toStageId),
+          // Operator-authored moves need no explanation; a HUMAN's move tells
+          // the operator who to honor — or to ask — by name (NEW-4 tags).
+          byHuman: ctx.operatorAuthorized
+            ? null
+            : (humanActorRef(db, actor).nameHint ?? actor.label),
+        },
       );
     }
   }
@@ -4509,9 +4555,26 @@ export async function applyRecommendation(
       ctx,
     );
   } else if (rec.kind === "transition" && rec.toStageId) {
+    // Owner ruling 2026-07-26: the operator may recommend a move OFF the
+    // declared graph (live case: Review → In Progress to re-engage the
+    // deliverer after a rejected PR), and the human clicking Apply IS the
+    // authorization — the same decision a manual stage-menu move expresses.
+    // A declared boundary keeps its boundary semantics; an undeclared edge
+    // applies as a manual move, whose admin|maintainer gate transitionStage
+    // re-checks (board-management tier — the owner exception that admits a
+    // contributor-owner to THIS decision layer does not widen manual moves).
+    const declaredEdge = project.workflow.some(
+      (w) =>
+        w.from === existing.parsed.frontmatter.stage && w.to === rec.toStageId,
+    );
     await transitionStage(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, toStageId: rec.toStageId },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        toStageId: rec.toStageId,
+        ...(declaredEdge ? {} : { manual: true }),
+      },
       actor,
       ctx,
     );

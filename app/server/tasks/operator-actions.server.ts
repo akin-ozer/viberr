@@ -741,6 +741,17 @@ export interface OperatorTaskSnapshot {
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
+  /** Queued/running agent runs on THIS task — the ONLY truth for "a run is
+   *  in flight". Live-caught: the operator inferred an in-flight deliverer
+   *  from `waiting: "agent"` (a board display flag) plus its own directive
+   *  comment, when the prompt's run had actually REFUSED to start — so the
+   *  rework never resumed. An empty list here means nothing is running,
+   *  whatever the timeline or `waiting` suggest. */
+  liveRuns: {
+    kind: "operator" | "primary" | "reviewer";
+    profileId: string | null;
+    state: "queued" | "running";
+  }[];
   autonomy: OperatorAutonomy;
   /** capabilityId → mode the operator holds (the RBAC the tools honor). */
   policy: Record<string, string>;
@@ -848,6 +859,24 @@ export function operatorSnapshot(
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
     branch: fm.branch ?? null,
+    liveRuns: (
+      db
+        .prepare(
+          `SELECT kind, agent_profile_id, state FROM agent_runs
+           WHERE project_slug = ? AND task_key = ?
+             AND state IN ('queued', 'running')
+           ORDER BY rowid`,
+        )
+        .all(projectSlug, taskKey) as {
+        kind: string;
+        agent_profile_id: string | null;
+        state: string;
+      }[]
+    ).map((r) => ({
+      kind: r.kind as "operator" | "primary" | "reviewer",
+      profileId: r.agent_profile_id,
+      state: r.state as "queued" | "running",
+    })),
     autonomy: authority.autonomy,
     policy: Object.fromEntries(authority.policy),
   };

@@ -243,6 +243,41 @@ describe("path 3 — operatorAcceptCompletion", () => {
     });
   });
 
+  it("operatorSnapshot.liveRuns carries queued/running rows — the ONLY in-flight truth", () => {
+    // Live-caught: the operator inferred an in-flight deliverer from
+    // `waiting: "agent"` + its own directive comment while the prompt's run
+    // had REFUSED to start; the snapshot now states run truth directly.
+    deployOperator();
+    seedClosedPrTask();
+    const empty = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {}),
+    );
+    expect(empty.liveRuns).toEqual([]);
+
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, created_at, updated_at, agent_profile_id)
+         VALUES ('run_live1', 'VIB-1', ?, 't1', 'Implementation', 'primary',
+           'codex', 'gpt-test', 'running', ?, ?, 'blog-writer')`,
+      )
+      .run(store.slug, new Date().toISOString(), new Date().toISOString());
+    const withRun = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, {}),
+    );
+    expect(withRun.liveRuns).toEqual([
+      { kind: "primary", profileId: "blog-writer", state: "running" },
+    ]);
+  });
+
   it("operatorSnapshot.pr is null when the task has no PR", () => {
     deployOperator();
     seedClosedPrTask({ pr: null });

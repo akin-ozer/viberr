@@ -155,6 +155,50 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     ).rejects.toMatchObject({ message: expect.stringContaining("Review") });
   });
 
+  it("applies an operator BACKWARD transition rec (Review → work stage) as the human-authorized move it is", async () => {
+    // Live defect 2026-07-26: the operator recommended Review → In Progress
+    // (the rework path after a rejected PR) and Apply threw "No governed
+    // boundary from Review to In Progress" — the apply path only admitted
+    // declared edges. The human clicking Apply IS the authorization: an
+    // undeclared edge now applies as a manual move (maintainer+).
+    const store = prepared();
+    const rec = {
+      id: "r-back",
+      kind: "transition" as const,
+      toStageId: "impl",
+      label: "Move the task to In Progress",
+      detail: "Rework per resolver's note.",
+    };
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      ownerUserId: store.users.selin.id, // contributor owner
+      recommendations: [rec],
+    });
+    // The owner exception admits selin to the DECISION layer, but an off-graph
+    // move stays board-management tier — the inner manual gate refuses.
+    await expect(
+      applyRecommendation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
+        actor(store.users.selin),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("review");
+
+    // A maintainer applies it: the task moves back to the work stage.
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("impl");
+    expect(fm.recommendations).toHaveLength(0); // consumed
+  });
+
   it("refuses a manual board move from Triage straight to Done", async () => {
     const store = prepared();
     seed(store, { stage: "triage" });
