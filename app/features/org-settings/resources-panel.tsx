@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderIco } from "~/features/kb-browser/icons";
 import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
@@ -316,15 +316,31 @@ function McpModal({
 function SkillModal({
   initial,
   onClose,
+  onFilesCreated,
 }: {
   initial: SkillView | null;
   onClose: () => void;
+  /** Files-mode create landed — the parent opens the store browser on the new
+   *  skill folder so upload / GitHub import / New document are one click away. */
+  onFilesCreated: (name: string) => void;
 }) {
   const [name, setName] = useState(initial ? initial.name : "");
   const [summary, setSummary] = useState(initial ? initial.summary : "");
   const [body, setBody] = useState(initial ? initial.body : "");
-  const { action, err, setErr } = useModalAction(() => onClose());
-  const canSave = !action.busy && slugify(name).length > 1 && summary.trim().length > 3;
+  // One entry point, two ways to give the skill content (owner request
+  // 2026-07-25): write SKILL.md right here, or create the folder and add
+  // content through the store browser (upload files/folder, Add from GitHub,
+  // New document). Edit mode keeps the classic editor only.
+  const [mode, setMode] = useState<"write" | "files">("write");
+  const filesMode = !initial && mode === "files";
+  const { action, err, setErr } = useModalAction(() => {
+    onClose();
+    if (filesMode) onFilesCreated(slugify(name));
+  });
+  const canSave =
+    !action.busy &&
+    slugify(name).length > 1 &&
+    (filesMode || summary.trim().length > 3);
   return (
     <MiniModal
       icon={<Icon name="bolt" />}
@@ -332,7 +348,13 @@ function SkillModal({
       sub="Reusable instructions an agent loads on demand"
       onClose={onClose}
       canSave={canSave}
-      saveLabel={initial ? "Save changes" : "Create skill"}
+      saveLabel={
+        initial
+          ? "Save changes"
+          : filesMode
+            ? "Create & add files"
+            : "Create skill"
+      }
       footHint={"store://skills/" + (slugify(name) || "name") + "/"}
       onSave={() => {
         if (!canSave) return;
@@ -341,8 +363,9 @@ function SkillModal({
           intent: "skill-save",
           ...(initial ? { skillId: initial.id } : {}),
           name: slugify(name),
-          summary: summary.trim(),
-          body,
+          summary: filesMode ? "" : summary.trim(),
+          body: filesMode ? "" : body,
+          contentMode: filesMode ? "files" : "write",
           // P13-KM-18: an empty body means "keep what's on disk" (the editor
           // only round-trips a truncated read for very large files), so
           // BLANKING a SKILL.md was impossible from the UI — the server's
@@ -369,34 +392,81 @@ function SkillModal({
           data-autofocus=""
         />
       </div>
-      <div className="field">
-        <label className="flabel" htmlFor="sk-sum">
-          Summary<span className="req">*</span>{" "}
-          <span className="fhint">shown to the operator when choosing context</span>
-        </label>
-        <input
-          id="sk-sum"
-          type="text"
-          value={summary}
-          placeholder="What does this skill teach the agent?"
-          onChange={(e) => {
-            setSummary(e.target.value);
-            setErr(null);
-          }}
-        />
-      </div>
-      <div className="field">
-        <label className="flabel" htmlFor="sk-body">
-          SKILL.md <span className="fhint">markdown</span>
-        </label>
-        <textarea
-          id="sk-body"
-          rows={body ? Math.min(18, body.split("\n").length + 2) : 6}
-          value={body}
-          placeholder={"## When reviewing a module\n- check state safety\n- flag drift between plan and apply\n- …"}
-          onChange={(e) => setBody(e.target.value)}
-        ></textarea>
-      </div>
+      {!initial && (
+        <div className="field">
+          <span className="flabel">Content</span>
+          <div
+            role="radiogroup"
+            aria-label="How the skill gets its content"
+            style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "write"}
+              className={"btn sm" + (mode === "write" ? "" : " ghost")}
+              onClick={() => setMode("write")}
+            >
+              <EditIco />
+              Write SKILL.md
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "files"}
+              className={"btn sm" + (mode === "files" ? "" : " ghost")}
+              onClick={() => setMode("files")}
+            >
+              <FolderIco />
+              Start from files
+            </button>
+          </div>
+          {filesMode && (
+            <div className="def-note">
+              <Icon name="shield" />
+              <span>
+                Creates the empty skill folder and opens its file browser —
+                upload files or a folder, import from GitHub, or write
+                documents there. The summary comes from your SKILL.md&apos;s
+                frontmatter <span className="mono">description:</span> once it
+                lands (or add one via Edit).
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      {!filesMode && (
+        <>
+          <div className="field">
+            <label className="flabel" htmlFor="sk-sum">
+              Summary<span className="req">*</span>{" "}
+              <span className="fhint">shown to the operator when choosing context</span>
+            </label>
+            <input
+              id="sk-sum"
+              type="text"
+              value={summary}
+              placeholder="What does this skill teach the agent?"
+              onChange={(e) => {
+                setSummary(e.target.value);
+                setErr(null);
+              }}
+            />
+          </div>
+          <div className="field">
+            <label className="flabel" htmlFor="sk-body">
+              SKILL.md <span className="fhint">markdown</span>
+            </label>
+            <textarea
+              id="sk-body"
+              rows={body ? Math.min(18, body.split("\n").length + 2) : 6}
+              value={body}
+              placeholder={"## When reviewing a module\n- check state safety\n- flag drift between plan and apply\n- …"}
+              onChange={(e) => setBody(e.target.value)}
+            ></textarea>
+          </div>
+        </>
+      )}
       {err && (
         <div className="cred-warn">
           <Icon name="alert" />
@@ -1207,6 +1277,18 @@ export function ResourcesPanel({
   const [modal, setModal] = useState<ResourceModal | null>(null);
   const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(null);
   const [confirm, setConfirm] = useState<ResourceConfirm | null>(null);
+  // A files-mode skill create hands straight off to the store browser: the
+  // action only returns a toast, so we wait for the revalidated skills list
+  // to deliver the new row and open its browser then.
+  const [pendingSkillBrowse, setPendingSkillBrowse] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingSkillBrowse) return;
+    const hit = skills.find((s) => s.name === pendingSkillBrowse);
+    if (hit) {
+      setBrowsing({ kind: "skill", id: hit.id });
+      setPendingSkillBrowse(null);
+    }
+  }, [skills, pendingSkillBrowse]);
   const push = useToast();
   const rowAction = useOrgAction();
   const reindexAction = useOrgAction();
@@ -1318,7 +1400,12 @@ export function ResourcesPanel({
         />
       )}
       {modal && modal.kind === "skill" && (
-        <SkillModal key={modal.item?.id ?? "new"} initial={modal.item} onClose={() => setModal(null)} />
+        <SkillModal
+          key={modal.item?.id ?? "new"}
+          initial={modal.item}
+          onClose={() => setModal(null)}
+          onFilesCreated={setPendingSkillBrowse}
+        />
       )}
       {modal && modal.kind === "agent" && (
         <AgentModal

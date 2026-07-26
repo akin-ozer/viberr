@@ -282,6 +282,94 @@ describe("github import", () => {
     }
   });
 
+  it("a /blob/ URL imports its ONE file into the browsed folder — no wrapper dir", async () => {
+    // Live-caught: a single-file URL selected its blob, then the folder flow
+    // sliced the relative path to "" and imported nothing behind a misleading
+    // "GitHub refused the file contents". The skill flow depends on this shape:
+    // SKILL.md must land at the skill ROOT, not as SKILL.md/SKILL.md.
+    const { db, target } = await setupKb();
+    insertUser(db, {
+      id: "u_admin",
+      email: "admin@test.dev",
+      name: "Admin Test",
+      role: "admin",
+    });
+    const connectTransport = fakeGithubFetch({
+      "GET /user": {
+        body: { login: "owner" },
+        headers: { "x-oauth-scopes": "repo, workflow" },
+      },
+      "GET /users/owner": { body: { public_repos: 1 } },
+    });
+    await createConnection(
+      db,
+      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: connectTransport.fetchImpl },
+    );
+
+    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+    const importTransport = fakeGithubFetch({
+      "GET /repos/owner/repo/git/trees/main": {
+        body: {
+          truncated: false,
+          tree: [
+            { path: "SKILL.md", type: "blob", sha: "s1", size: 10 },
+            { path: "docs/guide.md", type: "blob", sha: "s2", size: 10 },
+          ],
+        },
+      },
+      "GET /repos/owner/repo/git/blobs/s1": {
+        body: { content: b64("# humanize"), encoding: "base64" },
+      },
+      "GET /repos/owner/repo/git/blobs/s2": {
+        body: { content: b64("# guide"), encoding: "base64" },
+      },
+    });
+
+    const result = await importGithubSnapshot(
+      db,
+      target,
+      "https://github.com/owner/repo/blob/main/SKILL.md",
+      ACTOR,
+      { fetchImpl: importTransport.fetchImpl },
+    );
+    expect(result.status).toBe("imported");
+    if (result.status === "imported") {
+      expect(result).toMatchObject({ folder: "SKILL.md", fileCount: 1, skipped: 0 });
+      expect(result.toast).toContain("SKILL.md imported from owner/repo/SKILL.md");
+    }
+    // The file itself, AT the browsed root — not wrapped in a folder.
+    expect(readFileSync(path.join(target.rootAbs, "SKILL.md"), "utf8")).toBe("# humanize");
+
+    // Re-import refreshes the same file in place, saying so.
+    const again = await importGithubSnapshot(
+      db,
+      target,
+      "https://github.com/owner/repo/blob/main/SKILL.md",
+      ACTOR,
+      { fetchImpl: importTransport.fetchImpl },
+    );
+    expect(again.status).toBe("imported");
+    if (again.status === "imported") {
+      expect(again.toast).toContain("re-imported");
+    }
+
+    // A NESTED single file lands under its own filename too.
+    const nested = await importGithubSnapshot(
+      db,
+      target,
+      "https://github.com/owner/repo/blob/main/docs/guide.md",
+      ACTOR,
+      { fetchImpl: importTransport.fetchImpl },
+    );
+    expect(nested.status).toBe("imported");
+    if (nested.status === "imported") {
+      expect(nested.folder).toBe("guide.md");
+    }
+    expect(readFileSync(path.join(target.rootAbs, "guide.md"), "utf8")).toBe("# guide");
+  });
+
   it("surfaces per-blob failures instead of a clean success (E5)", async () => {
     const { db, target } = await setupKb();
     insertUser(db, {

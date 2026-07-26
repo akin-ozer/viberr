@@ -578,3 +578,66 @@ describe("ConnectionsPanel — scope evidence", () => {
     );
   });
 });
+
+/* -------------- unified New-skill flow (owner request 2026-07-25) -------------- */
+
+describe("SkillModal — one entry point, two content modes", () => {
+  function openNewSkill() {
+    const utils = renderPanel(
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+    );
+    const skillsPanel = [...document.querySelectorAll(".panel")].find(
+      (p) => p.querySelector("h2")?.textContent === "Skills",
+    )!;
+    fireEvent.click(skillsPanel.querySelector(".panel-head .btn")!);
+    const nameInput = document.querySelector<HTMLInputElement>("#sk-name")!;
+    return { ...utils, nameInput };
+  }
+
+  it("'Start from files' needs only a name and submits contentMode=files", async () => {
+    const { nameInput, getByText } = openNewSkill();
+    fireEvent.change(nameInput, { target: { value: "conventional commits" } });
+    // Classic fields are visible under the default write mode…
+    expect(document.querySelector("#sk-sum")).not.toBeNull();
+    expect(document.querySelector("#sk-body")).not.toBeNull();
+
+    fireEvent.click(getByText("Start from files"));
+    // …and gone in files mode: name is the whole form.
+    expect(document.querySelector("#sk-sum")).toBeNull();
+    expect(document.querySelector("#sk-body")).toBeNull();
+
+    fireEvent.click(getByText("Create & add files"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "skill-save",
+        name: "conventional-commits",
+        summary: "",
+        body: "",
+        contentMode: "files",
+      }),
+    );
+  });
+
+  it("'Write SKILL.md' keeps the classic contract (summary required, contentMode=write)", async () => {
+    const { nameInput, getByText } = openNewSkill();
+    fireEvent.change(nameInput, { target: { value: "tf-review" } });
+    const save = getByText("Create skill").closest("button")!;
+    expect(save.hasAttribute("disabled")).toBe(true); // no summary yet
+    fireEvent.change(document.querySelector("#sk-sum")!, {
+      target: { value: "Module review checklist." },
+    });
+    fireEvent.change(document.querySelector("#sk-body")!, {
+      target: { value: "## Checklist" },
+    });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "skill-save",
+        name: "tf-review",
+        summary: "Module review checklist.",
+        body: "## Checklist",
+        contentMode: "write",
+      }),
+    );
+  });
+});

@@ -227,6 +227,49 @@ describe("skills", () => {
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
   });
 
+  it("files-mode create: folder only, no SKILL.md, empty summary allowed (unified New-skill flow)", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { skill, toast } = await saveSkill(
+      db,
+      {
+        name: "Conventional Commits",
+        summary: "",
+        body: "",
+        contentMode: "files",
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(toast).toBe(
+      "Skill conventional-commits created — add SKILL.md and supporting files",
+    );
+    // The folder exists for the store browser; SKILL.md deliberately does NOT —
+    // it arrives via upload/GitHub/New document, without an overwrite-confirm
+    // against a stub we planted.
+    expect(existsSync(skillDirPath("conventional-commits", dataRoot))).toBe(true);
+    expect(
+      existsSync(path.join(skillDirPath("conventional-commits", dataRoot), "SKILL.md")),
+    ).toBe(false);
+    // The row's empty summary falls back to the derived one: the placeholder
+    // now, the uploaded SKILL.md's frontmatter `description:` once it lands.
+    expect(skill.summary).toBe("On-disk skill — add a summary to describe it");
+    expect(skill.tree).toHaveLength(0);
+
+    // files mode is a CREATE-only affordance: an edit still demands a summary…
+    await expect(
+      saveSkill(
+        db,
+        { id: skill.id, name: "conventional-commits", summary: "", body: "", contentMode: "files" },
+        ACTOR,
+        ctx,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    // …and the classic create path still refuses an empty summary.
+    await expect(
+      saveSkill(db, { name: "another-skill", summary: "", body: "x" }, ACTOR, ctx),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("an EMPTY submitted body keeps the existing SKILL.md (E4 — no blanking)", async () => {
     const { db, dataRoot, ctx } = setup();
     const { skill } = await saveSkill(
@@ -495,6 +538,18 @@ describe("disk is truth (finding #7)", () => {
     expect(disk.updatedAt).toBeNull();
     // getSkill resolves the synthetic id (StoreBrowser / edit rely on this).
     expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
+  });
+
+  it("derives the summary from a BLOCK-SCALAR description (imported skills) — not a literal '|'", () => {
+    const { db, dataRoot, ctx } = setup();
+    const dir = skillDirPath("humanizer", dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "SKILL.md"),
+      "---\nname: humanizer\ndescription: |\n  Remove signs of AI-generated writing from text.\n  Longer tail ignored.\n---\n# body",
+    );
+    const disk = listSkills(db, ctx).find((s) => s.name === "humanizer")!;
+    expect(disk.summary).toBe("Remove signs of AI-generated writing from text.");
   });
 
   it("editing a disk-only skill adopts it into a real metadata row", async () => {

@@ -1171,13 +1171,25 @@ function skillBodyTruncatedOnDisk(name: string, ctx: OrgSeedContext): boolean {
 }
 
 /** A sensible summary for a disk-only skill: the SKILL.md frontmatter
- * `description:` when present, else a plain placeholder. */
+ * `description:` when present, else a plain placeholder. Handles both the
+ * inline form (`description: one line`) and a YAML block scalar
+ * (`description: |` / `>` — common in imported skills), whose summary is the
+ * first non-empty indented line; the old inline-only regex rendered a literal
+ * `|` as the card summary. */
 function deriveSkillSummary(name: string, ctx: OrgSeedContext): string {
   const body = readSkillBody(name, ctx);
   const fm = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (fm) {
-    const desc = fm[1]!.match(/^description:\s*(.+)$/m);
-    if (desc) return desc[1]!.trim().replace(/^["']|["']$/g, "");
+    const desc = fm[1]!.match(/^description:[ \t]*(.*)$/m);
+    if (desc) {
+      const inline = desc[1]!.trim().replace(/^["']|["']$/g, "");
+      if (inline && !/^[|>][+-]?$/.test(inline)) return inline;
+      const after = fm[1]!.slice(fm[1]!.indexOf(desc[0]!) + desc[0]!.length);
+      const firstLine = after
+        .split(/\r?\n/)
+        .find((l) => /^[ \t]+\S/.test(l));
+      if (firstLine) return firstLine.trim();
+    }
   }
   return "On-disk skill — add a summary to describe it";
 }
@@ -1248,14 +1260,21 @@ export async function saveSkill(
      * body on an EXISTING skill keeps the on-disk content (E4: the modal
      * round-trips a possibly-truncated read — empty must never blank). */
     clearBody?: boolean;
+    /** "files" (NEW creates only): the unified New-skill flow — register the
+     * skill by name alone and hand off to the store browser for content
+     * (upload / GitHub import / New document). No SKILL.md is written and the
+     * summary may be empty; both arrive with the files. */
+    contentMode?: "write" | "files";
   },
   actor: AuditActor,
   ctx: OrgSeedContext = {},
 ): Promise<{ skill: SkillView; toast: string }> {
   const name = slugify(input.name);
   const summary = input.summary.trim();
+  const filesMode = input.contentMode === "files" && !input.id;
   if (name.length < 2) throw AppError.validation("Give the skill a name.");
-  if (summary.length < 4) throw AppError.validation("Add a one-line summary.");
+  if (!filesMode && summary.length < 4)
+    throw AppError.validation("Add a one-line summary.");
   const now = new Date().toISOString();
 
   // Resolve the edit subject: a metadata row (by id) OR a disk-only folder
@@ -1314,7 +1333,10 @@ export async function saveSkill(
 
   const dir = skillDirPath(name, ctx.dataRoot);
   mkdirSync(dir, { recursive: true });
-  if (!keepExistingBody) {
+  // files-mode create: the folder is the deliverable — SKILL.md arrives via
+  // the store browser (upload / GitHub import / New document), so writing an
+  // empty one here would only trigger the overwrite-confirm on that upload.
+  if (!keepExistingBody && !filesMode) {
     writeFileSync(path.join(dir, "SKILL.md"), body);
   }
   const updatedToast = keepExistingBody
@@ -1352,11 +1374,19 @@ export async function saveSkill(
     actor,
     subjectKind: "org_skill",
     subjectId: id,
-    details: { name, ...(oldName ? { adopted: true } : {}) },
+    details: {
+      name,
+      ...(oldName ? { adopted: true } : {}),
+      ...(filesMode ? { filesMode: true } : {}),
+    },
   });
   return {
     skill: getSkill(db, id, ctx)!,
-    toast: oldName ? updatedToast : `Skill ${name} created — SKILL.md written`,
+    toast: oldName
+      ? updatedToast
+      : filesMode
+        ? `Skill ${name} created — add SKILL.md and supporting files`
+        : `Skill ${name} created — SKILL.md written`,
   };
 }
 

@@ -293,6 +293,7 @@ export async function action({ request }: Route.ActionArgs) {
             summary: field("summary"),
             body: field("body"),
             clearBody: field("clearBody") === "1",
+            contentMode: field("contentMode") === "files" ? "files" : "write",
           },
           actor,
         );

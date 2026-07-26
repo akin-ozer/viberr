@@ -507,7 +507,7 @@ export const GITHUB_IMPORT_URL_RE =
   /github\.com\/([\w.-]+)\/([\w.-]+)(?:\/(?:tree|blob)\/([\w.-]+)\/?(.*))?/;
 
 export const GITHUB_IMPORT_URL_ERROR =
-  "Paste a GitHub link — a repo, or a folder like github.com/owner/repo/tree/main/docs.";
+  "Paste a GitHub link — a repo, a folder (…/tree/main/docs), or a single file (…/blob/main/SKILL.md).";
 
 const IMPORT_MAX_FILES = 100;
 const IMPORT_MAX_BLOB_BYTES = 1024 * 1024;
@@ -649,6 +649,66 @@ export async function importGithubSnapshot(
   const base = sanitizeDirPath(options.dirPath ?? []);
   const baseAbs = path.join(target.rootAbs, ...base);
   assertInsideRoot(target.rootAbs, baseAbs);
+
+  // A /blob/ URL — a path that IS one file — imports that file straight into
+  // the browsed folder under its own name. The folder flow below would (a)
+  // compute an EMPTY relative path for it (`"SKILL.md".slice("SKILL.md/".length)`)
+  // and import nothing behind a misleading "GitHub refused the file contents",
+  // and (b) even fixed, wrap it as `SKILL.md/SKILL.md` — one level too deep
+  // for anything that expects the file at the root (the skill loader).
+  // Re-importing the same file refreshes it in place.
+  const singleFile =
+    subPath !== "" && blobs.length === 1 && blobs[0]!.path === subPath;
+  if (singleFile) {
+    const blob = blobs[0]!;
+    const filename = subPath.split("/").filter(Boolean).pop()!;
+    const blobRes = await client.request<{ content?: string; encoding?: string }>(
+      "GET",
+      `/repos/${owner}/${repo}/git/blobs/${blob.sha}`,
+    );
+    if (!blobRes.ok) {
+      return {
+        status: "failed",
+        message: "GitHub refused the file contents — nothing was imported.",
+      };
+    }
+    const content = blobRes.data.content ?? "";
+    const data =
+      blobRes.data.encoding === "base64"
+        ? Buffer.from(content.replace(/\n/g, ""), "base64")
+        : Buffer.from(content, "utf8");
+    const abs = path.join(baseAbs, filename);
+    assertInsideRoot(target.rootAbs, abs);
+    const refreshedFile = existsSync(abs);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, data);
+    touchResource(db, target);
+    const fileSource = `${owner}/${repo}/${subPath}`;
+    const destination = [...base, filename].join("/");
+    recordAudit(db, {
+      action: "org.store.github_import",
+      actor,
+      subjectKind: `org_${target.kind}`,
+      subjectId: target.id,
+      details: {
+        source: fileSource,
+        branch,
+        folder: destination,
+        fileCount: 1,
+        skipped: 0,
+        truncated: false,
+      },
+    });
+    return {
+      status: "imported",
+      folder: destination,
+      fileCount: 1,
+      skipped: 0,
+      source: fileSource,
+      truncated: false,
+      toast: `${filename} ${refreshedFile ? "re-imported" : "imported"} from ${fileSource} — snapshot, not a live sync`,
+    };
+  }
 
   // Root folder named after the last path segment (or the repo).
   //
