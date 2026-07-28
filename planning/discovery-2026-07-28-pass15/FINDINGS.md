@@ -117,6 +117,12 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 7. **Post-merge branch cleanup**: merged task branches accumulate (vib-1..4,7,9 remain) — auto-delete option?
 8. **B-AG4**: Undeployed-profile runs: keep permissive collab defaults or go conservative?
 
+## D3. Found while live-proving my own fixes
+
+| id | sev | status | finding |
+|----|-----|--------|---------|
+| F15-20 | MED | DONE (this pass) | `deliver-review-pr` postdates every pre-R15-2 operator deployment; the runtime gate reads an absent grant as `direct`, so delivery worked while the Agents panel — which renders only persisted grants — showed no row for it. A capability governing real behavior was invisible AND uneditable. Materialized in `effectiveProfileView` at the mode the runtime applies, never overriding an explicit one. Canary-proven, verified live on the strict project |
+
 ## E. Known environmental flake (not a product defect)
 
 `app/server/files/file-watch.service.server.test.ts` failed twice across ~8 full-suite runs with

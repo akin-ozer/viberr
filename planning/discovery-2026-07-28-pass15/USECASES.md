@@ -146,3 +146,36 @@ One honest caveat: the audit row above quotes the PRE-fix refusal copy, because 
 image predates commit 9888063. Verified deterministically instead of by another live run —
 after `npm run build`, `build/server/assets/task-actions.server-*.js` contains the corrected
 sentence and **zero** occurrences of "ask an admin to force-accept it".
+
+## Proving the two paths of my OWN fixes that were never exercised live (2026-07-29)
+
+Both fixes were unit-tested and canary-checked, but only one branch of each had been run on the
+real app. Asking "am I actually satisfied the logic is tested?" turned up a third defect.
+
+**F15-14 — the hardened triage gate, against the identical goal that defeated it.**
+Recreated the exact repro ("Make the docs better" / "The documentation could be improved. Make it
+better."). Before: it sailed Triage → Ready → In Progress and burned a 91-turn broad-docs run.
+Now it **stops at Triage** with a decision packet that names what is missing, reports what it could
+actually see, and offers scoped options with acceptance criteria:
+
+> "The goal … names no deliverable or acceptance signal, and the repository visible to me contains
+> no discoverable docs tree to infer scope from safely."
+> REPO CONTENTS VISIBLE · CURRENT GOAL TEXT · then: README audit & rewrite (operator pick) ·
+> Inline code documentation pass · …
+
+**R15-2 recommend-mode — and the defect that hunt exposed (F15-20).**
+Checking the Strict project's operator showed `deliver-review-pr` **missing from its capability
+panel entirely**. Cause: the capability postdates every deployment created before this pass, and
+its runtime gate reads an absent grant as `direct` (`deliverGate`) so delivery kept working — while
+the panel renders only PERSISTED grants. So a capability that genuinely governed behavior was
+invisible and uneditable: that operator was pushing branches and opening PRs with no row saying so.
+
+Fixed at the view layer (no migration — banned by ruling): `effectiveProfileView` materializes the
+grant at the mode the runtime applies, and never overrides an explicit one. Canary: reverting it
+prints `expected [ 'Assign the primary specialist' ] to include 'Deliver the branch & open the
+review …'`. Verified live on the rebuilt image — the strict project's panel now lists it.
+
+**Open question for the owner:** projects created BEFORE this pass run delivery at `direct` by
+absence, while a newly-created **strict** project gets `recommend`. The setting is now visible and
+editable everywhere, so this is a one-click correction rather than hidden drift — but should an
+existing strict project be treated as `recommend` by default instead?

@@ -243,12 +243,26 @@ export function effectiveProfileView(
   // its real `recommend` modes. Runtime tool policy reads `deployment.capabilities`
   // directly (not this view), so no runtime behavior changes.
   const isSpecialist = kind !== "operator";
+  // R15-2 / live find: `deliver-review-pr` postdates every operator deployment
+  // created before this pass, and its runtime gate reads an ABSENT grant as
+  // `direct` (deliverGate) so delivery kept working on those projects. The
+  // panel, however, renders only the grants the deployment PERSISTED — so a
+  // capability that genuinely governs behavior was invisible here and could
+  // not be edited: an operator was pushing branches and opening PRs with no
+  // row saying so. Materialize it at the mode the runtime actually applies.
+  const operatorGrants =
+    deployment.capabilities.some((c) => c.capabilityId === "deliver-review-pr")
+      ? deployment.capabilities
+      : [
+          ...deployment.capabilities,
+          { capabilityId: "deliver-review-pr", mode: "direct" as CapabilityMode },
+        ];
   const effectiveGrants = isSpecialist
     ? deployment.capabilities.map((c) => ({
         capabilityId: c.capabilityId,
         mode: coerceSpecialistCapabilityMode(c.mode),
       }))
-    : deployment.capabilities;
+    : operatorGrants;
   const capabilities = effectiveGrants.map((c) => ({
     capabilityId: c.capabilityId,
     mode: c.mode,

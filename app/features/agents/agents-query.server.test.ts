@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { capabilitiesToActionLabels } from "./agents-query.server";
+import {
+  capabilitiesToActionLabels,
+  effectiveProfileView,
+} from "./agents-query.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 
 const cap = (capabilityId: string, mode: CapabilityMode) => ({ capabilityId, mode });
@@ -74,5 +77,53 @@ describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F1
     );
     expect(out.direct).toContain("Approve the review");
     expect(out.direct).toContain("Request changes");
+  });
+});
+
+/**
+ * Live find (pass 15): `deliver-review-pr` postdates every operator deployment
+ * created before R15-2. Its runtime gate reads an ABSENT grant as `direct`
+ * (deliverGate), so those operators kept delivering — while this view, which
+ * renders only the grants a deployment PERSISTED, showed no row for it at all.
+ * A capability that governs real behavior must not be invisible in the surface
+ * that claims to list the policy, and it must be editable there.
+ */
+describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant", () => {
+  const operatorDeployment = (
+    capabilities: { capabilityId: string; mode: CapabilityMode }[],
+  ) =>
+    ({
+      profileId: "operator",
+      capabilities,
+      extras: [],
+      definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
+    }) as never;
+
+  it("materializes the grant at the mode the runtime applies when it is absent", () => {
+    const view = effectiveProfileView(
+      operatorDeployment([
+        { capabilityId: "assign-primary-specialist", mode: "direct" },
+        { capabilityId: "stage-transitions", mode: "recommend" },
+      ]),
+    );
+    expect(
+      view.actions.direct,
+      "the panel must name the delivery grant the operator actually runs under",
+    ).toContain("Deliver the branch & open the review PR");
+  });
+
+  it("never overrides an EXPLICIT mode — a strict project's recommend stays recommend", () => {
+    const view = effectiveProfileView(
+      operatorDeployment([
+        { capabilityId: "assign-primary-specialist", mode: "direct" },
+        { capabilityId: "deliver-review-pr", mode: "recommend" },
+      ]),
+    );
+    expect(view.actions.recommend).toContain(
+      "Deliver the branch & open the review PR",
+    );
+    expect(view.actions.direct).not.toContain(
+      "Deliver the branch & open the review PR",
+    );
   });
 });
