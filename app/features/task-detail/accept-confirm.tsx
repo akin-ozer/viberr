@@ -112,7 +112,9 @@ export function AcceptConfirm({
         <span className="foot-hint">
           {force
             ? "Admin override — the bypassed gate is recorded to the audit log."
-            : "Merging is one-way. The completion event and the merge are recorded on the timeline."}
+            : task.pr
+              ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
+              : "The completion event is recorded on the timeline. Nothing is merged — this task has no pull request."}
         </span>
         <div className="foot-actions">
           <button type="button" className="btn ghost" onClick={close}>

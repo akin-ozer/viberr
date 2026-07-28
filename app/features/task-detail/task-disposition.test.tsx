@@ -167,6 +167,19 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(findButton(container, "Accept → Done & merge")).toBeDefined();
   });
 
+  it("the confirm does not promise a merge on a task with no pull request", () => {
+    // Live (VAL-2): the dialog correctly said "No linked pull request — the
+    // task closes without a merge" and offered "Accept → Done", while its
+    // footer still read "Merging is one-way … the merge are recorded".
+    const { container } = renderPage({});
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    );
+    expect(dialog?.textContent).toContain("Nothing is merged");
+    expect(dialog?.textContent).not.toContain("Merging is one-way");
+  });
+
   it("a contributor who OWNS the task gets it — R6-2/R14-2, not just maintainers", () => {
     // The live case: the queue counted this viewer, the page offered nothing.
     const { container } = renderPage({
