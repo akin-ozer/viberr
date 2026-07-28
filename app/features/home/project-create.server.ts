@@ -16,6 +16,7 @@ import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { proveAttachedCredential } from "~/features/github/github-actions.server";
 import {
   DEFAULT_GUARDRAILS,
   GOVERNED_TEMPLATE,
@@ -189,7 +190,7 @@ export async function createProject(
   db: DatabaseSync,
   input: CreateProjectInput,
   actor: { userId: string; label: string },
-  ctx: { dataRoot?: string } = {},
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<CreateProjectResult> {
   const name = input.name.trim();
   if (name.length < 2) {
@@ -306,6 +307,17 @@ export async function createProject(
   // Bind the selected connection's PAT to the project so credential health,
   // branch creation, and PR sync work against the real repo.
   setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
+  // F15-01: creation is the first moment this PAT meets the project's REAL
+  // repository, and a fine-grained token's chips stay `assumed` until something
+  // probes it. Attach/rotate has always followed the bind with that
+  // revalidation; creation did not, which is why a brand-new project showed a
+  // credential card affirming scopes nothing had proven. Best-effort by
+  // contract — the bind has already happened, and a degraded GitHub must not
+  // fail the creation.
+  await proveAttachedCredential(db, slug, actor, {
+    ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+  });
 
   recordAudit(db, {
     action: "project.created",

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
+import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, getProjectCredential } from "~/server/secrets/pat-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { createProject } from "./project-create.server";
@@ -62,6 +63,65 @@ describe("createProject — GitHub connection wiring", () => {
       .prepare(`SELECT default_branch FROM projects WHERE slug = ?`)
       .get(result.slug) as { default_branch: string };
     expect(row.default_branch).toBe("master");
+  });
+
+  it("F15-01: creation PROVES the bound credential against the real repo", async () => {
+    // Before this, creation bound the PAT and stopped — a fine-grained token's
+    // scope chips stayed `assumed`, so a brand-new project's credential card
+    // affirmed scopes nothing had checked. Attach/rotate always probed; this is
+    // the same proof on the creation path.
+    const store = setupTestStore(ctx);
+    createPat(
+      store.db,
+      {
+        userId: store.users.arda.id,
+        label: "connection · akin-ozer",
+        token: "github_pat_11CREATE0123456789_createcreate",
+      },
+      ACTOR,
+    );
+    const patId = (
+      store.db
+        .prepare(`SELECT id FROM github_pats ORDER BY created_at DESC LIMIT 1`)
+        .get() as { id: string }
+    ).id;
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+         VALUES (?, ?, ?, 1, 3, ?, ?)`,
+      )
+      .run("akin-ozer", "akin-ozer", patId, now, now);
+
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /user/orgs": { body: [] },
+      "GET /repos/akin-ozer/viberr": { body: { full_name: "akin-ozer/viberr", default_branch: "main" } },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+      "PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe": {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+      "POST /repos/akin-ozer/viberr/pulls": {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+    });
+    vi.stubGlobal("fetch", gh.fetchImpl);
+
+    const result = await createProject(
+      store.db,
+      { name: "Viberr", key: "VIB", owner: "akin-ozer", repoName: "viberr", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+
+    const bound = getProjectCredential(store.db, result.slug);
+    // The validation now carries the PROJECT's repo and probe-backed verdicts —
+    // on the old code it was the connection-time result with no repo at all.
+    expect(bound?.validation?.repo).toBe("akin-ozer/viberr");
+    const repoScope = bound?.validation?.scopes.find((sc) => sc.id === "repo");
+    expect(repoScope?.source).toBe("probe");
   });
 
   it("rejects an owner with NO connection behind it (PAT required)", async () => {
