@@ -30,6 +30,22 @@ F15-04 (navigate to new project), F15-08 (one timezone), F15-09 (single badge), 
 ### W7 — Docs
 C-D1..C-D5 + amend PRD/decisions.md per new rulings from this pass.
 
+## W1 design (binding for the implementation stream) — R15-1/R15-2
+
+**New operator capability `deliver-review-pr`** in the operator capability set (catalog + `operator.profile.md` template: mode `direct` in the shipped template; Strict preset maps it to `recommend`; label "Deliver the branch & open the review PR"). Policy/Agents pages pick it up from the catalog automatically.
+
+**New operator tool `deliver_for_review`** (Claude toolkit + Codex plan mirror): executes the refactored shared `performDelivery(db, ctx, slug, key, actor)` = today's `openReviewPrBestEffort` core (push workspace → reconcile revision → open/reuse PR) made synchronous-with-result for the tool. `gate("deliver-review-pr")`: `recommend` → posts a new recommendation kind `delivery` ("Deliver branch & open review PR") which `applyRecommendation` executes under the human's RBAC; `direct` → performs and narrates. Tool result reports push status + PR number honestly (incl. `push_conflict`).
+
+**Old hook**: `transitionStage`'s `reviewStageId` auto-call is DELETED. Replacement safety nets: (a) entering the structural review-ROLE stage with no live PR writes a typed `github` event "Review reached — no PR yet; the operator decides delivery" (never silent); (b) task-detail GitHub panel gains a human "Deliver branch & open PR" button (maintainer+ or task owner) calling `performDelivery` directly (audited `github.delivery.manual`).
+
+**Operator doctrine** (turn instruction in operator-run.server.ts + delivery block in operator.definition.md): deliver when the work is committed and plausible for review; weigh the REMAINING stages (later stages like QA may not need to gate delivery for this task — offer early delivery when so); open a decision packet when unsure whether to push; never instruct specialists to push/PR (unchanged).
+
+**R15-1 acceptance gate** in the human `acceptCompletion` path: refuse (with rendered `blockReason`, never silent) unless (1) a PR exists, (2) the PR head SHA contains/equals the delivered `workRevision`, (3) the latest verdict on that revision is approve/healthy. In-lock re-check after the merge await (B-WF1). Confirm dialog (new, useDialog pattern) before accept AND force-accept: PR #, head sha, verdict state, target branch. Force-accept (admin, audited) bypasses ONLY missing/failed verdict + blocked packets — never the PR-head-mismatch check. `operatorAcceptCompletion` reuses the same core (B-WF6).
+
+**F15-15 non-FF (B-GH1)**: `pushWorkspaceBranch` distinguishes `push_conflict` (non-fast-forward: remote head not an ancestor of local HEAD) from `push_failed`; conflict copy names the divergence (never credentials); `openTaskPr`/`performDelivery` REFUSES to open a PR whose head ≠ local delivered commit after a failed/conflicted push — opens the operator recovery path (packet: force-push-with-lease / archive) instead. Reviewer prompt pins the PR head SHA (review the pushed revision, not the local tree).
+
+**Stage-role resolver (B-WF4)**: one exported structural resolver (review role, terminal) used by review queue, schedule, operatorAccept, acceptance-graph — delete the positional duplicates.
+
 ## Validation protocol (end of each workstream)
 1. Unit + typecheck green.
 2. Canary: revert the fix locally → the new test must fail.
