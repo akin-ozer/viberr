@@ -514,7 +514,27 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
   it("an all-denied operator falls back to the full list (an enum may not be empty)", () => {
     // A misconfiguration rather than an expressible run shape — every action it
     // then proposes is refused VISIBLY by the executor rather than silently.
-    expect(operatorPlanToolsFor(authority({}))).toHaveLength(9);
+    // R15-2: `deliver-review-pr` must be EXPLICITLY off here — an absent grant
+    // means granted (the capability postdates live deployments).
+    expect(
+      operatorPlanToolsFor(authority({ "deliver-review-pr": "off" })),
+    ).toHaveLength(10);
+  });
+
+  it("R15-2: deliver_for_review is offered when the grant is absent (absent = granted), withheld only when explicitly off", () => {
+    // Fails on pre-R15-2 main twice over: the tool did not exist, and a plain
+    // gate() would read an absent grant as deny.
+    expect(operatorPlanToolsFor(authority({ "append-typed-events": "direct" }))).toContain(
+      "deliver_for_review",
+    );
+    expect(
+      operatorPlanToolsFor(
+        authority({
+          "append-typed-events": "direct",
+          "deliver-review-pr": "off",
+        }),
+      ),
+    ).not.toContain("deliver_for_review");
   });
 });
 

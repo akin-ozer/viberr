@@ -126,6 +126,30 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(boundary(f.workflow, "review", "done")).toBe("human");
     expect(f.workflow.find((b) => b.to === "done")?.locked).toBe(true);
     expect(opAutonomy(f.agents)).toBeUndefined(); // still supervised
+    // R15-2/H3: the strict preset maps delivery to recommend — an operator on
+    // the everything-human-gated preset must not push branches or open PRs at
+    // its own discretion. (Fails on wave-1: presetAgents only touched `auto`.)
+    const op = f.agents.find((a) => a.profileId === "operator")!;
+    expect(
+      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
+    ).toBe("recommend");
+  });
+
+  it("balanced keeps the shipped template's deliver-review-pr: direct", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
+    const r = await createProject(
+      store.db,
+      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    const f = fm(store, r.slug);
+    const op = f.agents.find((a) => a.profileId === "operator")!;
+    expect(
+      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
+    ).toBe("direct");
   });
 
   it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {

@@ -149,11 +149,13 @@ describe("loader", () => {
     expect(operator.model).toBe("orchestration runtime");
     // Operator action-bucket sizes after the role-bindings prune (removed the
     // never-gated `compress-timelines` from direct and `owner-reassignment` from
-    // recommend): 4 direct / 2 recommend / 3 forbidden.
-    expect(operator.actions.direct).toHaveLength(4);
+    // recommend), plus R15-2's `deliver-review-pr` (direct in the shipped
+    // template): 5 direct / 2 recommend / 3 forbidden.
+    expect(operator.actions.direct).toHaveLength(5);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
     expect(operator.actions.direct).toContain("Assign the primary specialist");
+    expect(operator.actions.direct).toContain("Deliver the branch & open the review PR");
     expect(operator.actions.direct).not.toContain("Compress long-running timelines");
 
     // The Reviewer's push restriction is now a REAL enforced grant (D4): it uses

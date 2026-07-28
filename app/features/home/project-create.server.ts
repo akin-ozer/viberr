@@ -68,6 +68,25 @@ function presetAgents(
   preset: PolicyPreset,
   agents: AgentDeployment[],
 ): AgentDeployment[] {
+  // `strict` preset -> delivery (push + review PR) is recommend-only: the
+  // preset whose point is a human gating every advance must not ship an
+  // operator that pushes branches at its own discretion (R15-2; the shipped
+  // template default is `direct` for the balanced/auto presets).
+  if (preset === "strict") {
+    return agents.map((a) =>
+      a.profileId === "operator"
+        ? {
+            ...a,
+            capabilities: [
+              ...a.capabilities.filter(
+                (c) => c.capabilityId !== "deliver-review-pr",
+              ),
+              { capabilityId: "deliver-review-pr", mode: "recommend" as const },
+            ],
+          }
+        : a,
+    );
+  }
   if (preset !== "auto") return agents;
   return agents.map((a) =>
     a.profileId === "operator"

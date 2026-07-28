@@ -9,6 +9,7 @@ import { Pill, ReadinessPill, ValidationPill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import { AcceptConfirm } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
 import { DecisionPacket } from "./decision-packet";
 import {
@@ -73,6 +74,8 @@ export function GithubTrace({
   reconciledAt = null,
   onCompleteMerge,
   onForceAccept,
+  onDeliver,
+  delivering = false,
   merging,
 }: {
   task: TaskDetail;
@@ -87,6 +90,10 @@ export function GithubTrace({
   onCompleteMerge?: () => void;
   /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined otherwise. */
   onForceAccept?: () => void;
+  /** R15-2 safety net (b): perform delivery (push + review PR) by hand —
+   *  maintainer+ or the task owner; undefined hides the control. */
+  onDeliver?: () => void;
+  delivering?: boolean;
   merging?: boolean;
 }) {
   // Admin escape hatch (DG-2): acceptance is wedged either by the required-reviewer
@@ -194,6 +201,11 @@ export function GithubTrace({
               <time dateTime={reconciledAt} suppressHydrationWarning>
                 {formatRelative(reconciledAt)}
               </time>
+            ) : task.pr || task.commits.length > 0 ? (
+              // F15-02: PR/commit facts on screen came from delivery-time
+              // writes, not a reconcile pass — "not yet synced" next to a live
+              // PR read as a contradiction. Say what is actually true.
+              "recorded at delivery — no background sync pass yet"
             ) : (
               "not yet synced with GitHub"
             )}
@@ -240,6 +252,25 @@ export function GithubTrace({
             ))}
           </div>
         )}
+        {/* R15-2 safety net (b): with delivery now an operator decision, a
+            human with authority can always ship the branch by hand — shown when
+            no live PR stands (none yet, or the last one closed/merged). */}
+        {onDeliver &&
+          (!task.pr ||
+            task.pr.state === "closed" ||
+            task.pr.state === "merged") && (
+            <button
+              type="button"
+              className="btn primary sm"
+              style={{ marginTop: ".8rem", width: "100%" }}
+              disabled={delivering}
+              onClick={onDeliver}
+              title="Push the delivering agent's branch and open the review PR (audited)"
+            >
+              <Icon name="branch" />
+              {delivering ? "Delivering…" : "Deliver branch & open PR"}
+            </button>
+          )}
         {task.pr?.state === "accepted" && onCompleteMerge && (
           <button
             type="button"
@@ -895,6 +926,8 @@ function CurrentStatePanel({
   onOwner,
   onRelease,
   onArchive,
+  onAccept,
+  acceptBusy: acceptSubmitting,
   dispositionBusy,
 }: {
   task: TaskDetail;
@@ -911,14 +944,17 @@ function CurrentStatePanel({
   onRelease: () => void;
   /** Open the archive confirm (archived === false) or restore immediately. */
   onArchive: () => void;
+  /** F15-10: opens the accept CONFIRM dialog (the page owns the submission —
+   *  accepting merges the PR, so it never fires on a bare click any more). */
+  onAccept: () => void;
+  /** The accept submission is in flight (page-owned fetcher). */
+  acceptBusy: boolean;
   /** An accept / archive / restore submission is in flight. */
   dispositionBusy: boolean;
 }) {
   const csrf = useCsrfToken();
   const transitionFetcher = useFetcher<ActionResult>();
   useActionFeedback(transitionFetcher);
-  const acceptFetcher = useFetcher<ActionResult>();
-  useActionFeedback(acceptFetcher);
 
   // Manual stage change from the Current-state dropdown (admin|maintainer; the
   // server re-checks). Goes through the same governed transition that an applied
@@ -938,16 +974,9 @@ function CurrentStatePanel({
 
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const ownerMine = !!(owner && owner.userId === meId);
-  const acceptBusy = acceptFetcher.state !== "idle" || dispositionBusy;
+  const acceptBusy = acceptSubmitting || dispositionBusy;
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
-  const onAccept = () => {
-    if (acceptBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "accept-completion");
-    acceptFetcher.submit(fd, { method: "post" });
-  };
 
   return (
     <div className="panel">
@@ -1056,31 +1085,39 @@ function CurrentStatePanel({
           viewer who HOLDS acceptance authority here (maintainer+, or this task's
           own owner per R6-2/R14-2) once the task stands at the boundary a
           completion can be accepted from — never as an inert button, and never
-          silently absent while the queue says "waiting on your acceptance". */}
-      {acceptance.hasAuthority && acceptance.atBoundary && !archived && (
-        <div className="state-acts">
-          <button
-            type="button"
-            className="btn primary sm"
-            style={{ width: "100%" }}
-            disabled={!acceptance.canAccept || acceptBusy}
-            onClick={onAccept}
-          >
-            <Icon name="check" />
-            Accept completion → {terminalName}
-          </button>
-          {acceptance.blockedReason && (
-            // The reason has to be TEXT, not a `title`: a disabled control gets
-            // no pointer events, so a tooltip on it never opens (P14-LV-08).
-            <p className="deny-note">
-              <Icon name="alert" />
-              <span>
-                <strong>Not acceptable yet.</strong> {acceptance.blockedReason}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
+          silently absent while the queue says "waiting on your acceptance".
+          F15-19: the refusal TEXT renders whenever one exists, boundary or not —
+          a silent refusal is how an unreviewed merge looked like a hang. */}
+      {acceptance.hasAuthority &&
+        !archived &&
+        (acceptance.atBoundary || acceptance.blockedReason) && (
+          <div className="state-acts">
+            {acceptance.atBoundary && (
+              <button
+                type="button"
+                className="btn primary sm"
+                style={{ width: "100%" }}
+                disabled={!acceptance.canAccept || acceptBusy}
+                onClick={onAccept}
+              >
+                <Icon name="check" />
+                {acceptBusy
+                  ? "Accepting — merging the review PR…"
+                  : `Accept completion → ${terminalName}`}
+              </button>
+            )}
+            {acceptance.blockedReason && (
+              // The reason has to be TEXT, not a `title`: a disabled control gets
+              // no pointer events, so a tooltip on it never opens (P14-LV-08).
+              <p className="deny-note">
+                <Icon name="alert" />
+                <span>
+                  <strong>Not acceptable yet.</strong> {acceptance.blockedReason}
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       {/* R14-3: the honest ending for abandoned work — the one the closed-PR
           guidance has been naming since pass 13. Board-management authority
           (`approve-transition`), the same tier that moves a task between
@@ -1272,6 +1309,9 @@ export function TaskDetailPage({
   acceptance,
   githubHost,
   githubReconciledAt = null,
+  workRevisionSha = null,
+  defaultBranch = "main",
+  canDeliver = false,
 }: {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -1314,6 +1354,12 @@ export function TaskDetailPage({
   githubHost: string;
   /** UI-57: newest `github.reconcile` for this task (freshness cue). */
   githubReconciledAt?: string | null;
+  /** R15-1: the delivered revision's head sha (task file) for the confirm. */
+  workRevisionSha?: string | null;
+  /** The merge target named in the accept confirm — the project's default branch. */
+  defaultBranch?: string;
+  /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
+  canDeliver?: boolean;
 }) {
   const stage = task.stages.find((s) => s.id === task.stage);
   const [releasing, setReleasing] = useState(false);
@@ -1398,9 +1444,41 @@ export function TaskDetailPage({
     runtime.some(
       (r) => r.lifecycle === "running" || r.lifecycle === "queued",
     );
-  // Terminal-stage task — closed for new work (comments stay open, R7-6).
+  // Terminal-stage OR archived task — closed for new work (comments stay open,
+  // R7-6). F15-11: archived tasks used to keep every live control.
   const taskClosed =
-    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+    task.displayReadiness === "accepted" ||
+    task.displayReadiness === "merged" ||
+    archived;
+
+  // F15-10/R15-1: accepting merges the PR — it fires only through the confirm
+  // dialog (which states PR, revision, verdict state and target branch), for
+  // BOTH plain accept and the admin force-accept.
+  const [confirmAccept, setConfirmAccept] = useState<null | "accept" | "force">(
+    null,
+  );
+  const acceptFetcher = useFetcher<ActionResult>();
+  useActionFeedback(acceptFetcher);
+  const acceptBusy = acceptFetcher.state !== "idle";
+  const submitAccept = () => {
+    if (acceptBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "accept-completion");
+    acceptFetcher.submit(fd, { method: "post" });
+  };
+
+  // R15-2 safety net (b): manual delivery from the GitHub panel.
+  const deliverFetcher = useFetcher<ActionResult>();
+  useActionFeedback(deliverFetcher);
+  const deliverBusy = deliverFetcher.state !== "idle";
+  const onDeliver = () => {
+    if (deliverBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "deliver-review");
+    deliverFetcher.submit(fd, { method: "post" });
+  };
 
   // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
   // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
@@ -1593,7 +1671,11 @@ export function TaskDetailPage({
           githubHost={githubHost}
           reconciledAt={githubReconciledAt}
           {...(onCompleteMerge ? { onCompleteMerge } : {})}
-          {...(onForceAccept ? { onForceAccept } : {})}
+          {...(onForceAccept
+            ? { onForceAccept: () => setConfirmAccept("force") }
+            : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          delivering={deliverBusy}
           merging={runBusy}
         />
         <CurrentStatePanel
@@ -1607,6 +1689,8 @@ export function TaskDetailPage({
           onOwner={onOwner}
           onRelease={() => setReleasing(true)}
           onArchive={() => (archived ? submitArchive(false) : setArchiving(true))}
+          onAccept={() => setConfirmAccept("accept")}
+          acceptBusy={acceptBusy}
           dispositionBusy={archiveBusy}
         />
         <PolicyPanel
@@ -1616,6 +1700,32 @@ export function TaskDetailPage({
           ownsTask={isOwner}
         />
       </div>
+
+      {confirmAccept && (
+        <AcceptConfirm
+          task={task}
+          workRevisionSha={workRevisionSha}
+          defaultBranch={defaultBranch}
+          force={confirmAccept === "force"}
+          blockedReason={
+            confirmAccept === "force"
+              ? (task.blockReason ??
+                acceptance.blockedReason ??
+                (task.packet?.type === "blocked"
+                  ? "An open blocked decision is holding this task."
+                  : null))
+              : acceptance.blockedReason
+          }
+          busy={acceptBusy || runBusy}
+          onCancel={() => setConfirmAccept(null)}
+          onConfirm={() => {
+            const mode = confirmAccept;
+            setConfirmAccept(null);
+            if (mode === "force") onForceAccept?.();
+            else submitAccept();
+          }}
+        />
+      )}
 
       {archiving && (
         <ArchiveConfirm

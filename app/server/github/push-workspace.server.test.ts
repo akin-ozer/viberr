@@ -48,6 +48,8 @@ function fakeGit(opts: {
   branch: string;
   ahead: number;
   pushOk?: boolean;
+  /** stderr the failed push emits (B-GH1 non-fast-forward classification). */
+  pushStderr?: string;
   dirty?: boolean;
   aheadAfterCommit?: number;
 }) {
@@ -71,7 +73,13 @@ function fakeGit(opts: {
       const ahead = committed ? (opts.aheadAfterCommit ?? opts.ahead + 1) : opts.ahead;
       return { ok: true, stdout: String(ahead), stderr: "" };
     }
-    if (args.includes("push")) return { ok: opts.pushOk !== false, stdout: "", stderr: "" };
+    if (args.includes("push")) {
+      return {
+        ok: opts.pushOk !== false,
+        stdout: "",
+        stderr: opts.pushOk === false ? (opts.pushStderr ?? "") : "",
+      };
+    }
     return { ok: true, stdout: "", stderr: "" };
   });
   return { exec, calls };
@@ -181,5 +189,38 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       dataRoot: store.dataRoot, exec: git.exec,
     });
     expect(res.status).toBe("push_failed");
+  });
+
+  it("B-GH1/F15-15: a NON-FAST-FORWARD rejection is push_conflict, naming the branch, never a generic failure", async () => {
+    // Fails on pre-pass-15 main: the union had no push_conflict and this
+    // rejection surfaced as push_failed → "check the credential" copy.
+    bindPat();
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr:
+        " ! [rejected]        vib-1-work -> vib-1-work (non-fast-forward)\n" +
+        "error: failed to push some refs\n" +
+        "hint: Updates were rejected because the tip of your current branch is behind\n",
+    });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("push_conflict");
+    if (res.status === "push_conflict") {
+      expect(res.branch).toBe("vib-1-work");
+      expect(res.reason).toContain("non-fast-forward");
+      expect(res.reason).not.toContain("credential");
+    }
+  });
+
+  it("isNonFastForwardStderr classifies git's rejection texts and nothing else", async () => {
+    const { isNonFastForwardStderr } = await import("./push-workspace.server");
+    expect(isNonFastForwardStderr("! [rejected] x -> x (non-fast-forward)")).toBe(true);
+    expect(isNonFastForwardStderr("hint: (e.g., 'git pull ...') — fetch first")).toBe(true);
+    expect(isNonFastForwardStderr("fatal: Authentication failed for 'https://…'")).toBe(false);
+    expect(isNonFastForwardStderr("fatal: unable to access: Could not resolve host")).toBe(false);
   });
 });

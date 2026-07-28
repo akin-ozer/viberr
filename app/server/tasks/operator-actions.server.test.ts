@@ -927,6 +927,8 @@ describe("operatorAcceptCompletion", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: {
         ...task().frontmatter,
+        // R15-1: delivered work needs its review PR to be acceptable.
+        pr: { number: 7, state: "review" as const, title: "[VIB-1] Operator drive" },
         workRevision: {
           id: "rev_1",
           headSha: head,

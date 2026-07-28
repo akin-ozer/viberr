@@ -6,7 +6,8 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createConnection } from "~/server/org/connections.server";
 import { getProjectCredential } from "~/server/secrets/pat-store.server";
-import { runSetCredential } from "./github-actions.server";
+import { runReconcile, runSetCredential } from "./github-actions.server";
+import { latestProjectReconcileAt } from "~/server/provenance/provenance-query.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -91,5 +92,53 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     });
     expect(outcome.result).toBe("attached");
     expect(getProjectCredential(store.db, store.slug)).not.toBeNull();
+  });
+});
+
+/**
+ * F15-02 (live repro): a young project with a credential but no branched task
+ * hit "Update status" → 14ms POST, success-flavored toast, and the "Not yet
+ * synced" badge never flipped (reconcileProject scanned zero tasks and wrote
+ * no provenance). The pass over nothing must SAY it checked nothing, and it
+ * must still count as an observation.
+ */
+describe("runReconcile on a project with no branched tasks", () => {
+  it("names the nothing-to-sync case and records a freshness heartbeat", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+
+    const addTime = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /user/orgs": { body: [] },
+      "GET /users/akin-ozer": { body: { public_repos: 3 } },
+    });
+    await createConnection(
+      store.db,
+      { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
+      actor,
+      { fetchImpl: addTime.fetchImpl },
+    );
+    const attachTime = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /user/orgs": { body: [] },
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}/pulls`]: { body: [] },
+    });
+    await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: attachTime.fetchImpl,
+    });
+
+    const reconcileTime = fakeGithubFetch({});
+    const outcome = await runReconcile(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: reconcileTime.fetchImpl,
+    });
+    // Fails on wave-1/main: result was "ok" with the generic reconciled toast,
+    // and latestProjectReconcileAt stayed null forever.
+    expect(outcome.result).toBe("no_branched_tasks");
+    expect(outcome.toast).toContain("no task has a delivery branch");
+    expect(latestProjectReconcileAt(store.db, store.slug)).not.toBeNull();
   });
 });

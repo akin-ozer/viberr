@@ -40,6 +40,15 @@ export async function runReconcile(
   ctx: GithubActionContext = {},
 ): Promise<GithubActionOutcome> {
   const summary = await reconcileProject(db, projectSlug, actor, ctx);
+  // F15-02: a pass that scanned nothing must not read as "synced" — name the
+  // no-branched-tasks case; degraded contexts keep their own honest copy below.
+  if (summary.status === "ok" && summary.results.length === 0) {
+    return {
+      ok: true,
+      toast: "Checked GitHub — no task has a delivery branch yet, nothing to sync.",
+      result: "no_branched_tasks",
+    };
+  }
   const failures = summary.results.filter(
     (r) => r.status !== "reconciled" && r.status !== "no_branch",
   );

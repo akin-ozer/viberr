@@ -792,6 +792,15 @@ export async function startAgentRun(
     // F24: unify the delivery commit author across codex/claude.
     ...agentGitIdentityEnv(engagement.profileId),
   };
+  // F15-15: a reviewing run judges the DELIVERED revision (the PR head), not
+  // whatever the local workspace branch holds — pin it into the prompt.
+  const reviewSubject =
+    !delivers && existing.parsed.frontmatter.workRevision
+      ? {
+          headSha: existing.parsed.frontmatter.workRevision.headSha,
+          prNumber: existing.parsed.frontmatter.pr?.number ?? null,
+        }
+      : null;
   const basePrompt = buildAnalyzePrompt({
     role: engagement.role,
     taskKey: input.taskKey,
@@ -802,6 +811,7 @@ export async function startAgentRun(
     cloned: !!clone,
     delivery,
     delivers,
+    ...(reviewSubject ? { reviewSubject } : {}),
     ...(input.directive ? { directive: input.directive } : {}),
     ...(input.directiveFrom ? { directiveFrom: input.directiveFrom } : {}),
   });
@@ -1159,6 +1169,12 @@ export function buildAnalyzePrompt(input: {
   /** The human who wrote `directive`, when it is a person's comment rather than
    *  an operator hand-off (P14-RT-02). */
   directiveFrom?: string;
+  /** F15-15: the delivered revision a SUPPORTING (reviewing) run must judge —
+   *  pinned so the reviewer verifies it is reading the delivered content, not
+   *  whatever the local workspace branch happens to hold. Live failure: a PR
+   *  opened over stale remote junk was APPROVED by a reviewer that only ever
+   *  read the local branch. */
+  reviewSubject?: { headSha: string; prNumber: number | null };
 }): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
@@ -1187,6 +1203,13 @@ export function buildAnalyzePrompt(input: {
       // and wastes the run (the XS-4 failure). It reads and reports only.
       prompt +=
         `- You are a SUPPORTING agent: this workspace is READ-ONLY for you. Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR — even if a directive says to. The tool layer blocks these. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n` +
+        (input.reviewSubject
+          ? `- The review subject is PINNED to the delivered revision \`${input.reviewSubject.headSha}\`` +
+            (input.reviewSubject.prNumber
+              ? ` — the head of review PR #${input.reviewSubject.prNumber}`
+              : "") +
+            `. Before judging, verify the content you read IS that revision: \`git rev-parse HEAD\` on the branch must equal it (or contain it — check \`git merge-base --is-ancestor ${input.reviewSubject.headSha} HEAD\`). If the local branch does NOT match, review \`${input.reviewSubject.headSha}\` directly (\`git diff <default-branch>...${input.reviewSubject.headSha}\`, \`git show\`) — and if you cannot reach that commit at all, say so and do NOT record a verdict on content you could not read. Never approve the local tree as a stand-in for the delivered revision.\n`
+          : "") +
         `- Respond to what you were actually asked (see the directive below): if it asks for a review, give one — approve or request changes, with specific reasons and file/line references; if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer — do the thing that was asked. When no directive is given, default to reviewing the change on the branch.`;
     } else {
       if (canBranch) {

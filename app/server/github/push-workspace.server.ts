@@ -36,6 +36,10 @@ const execFileAsync = promisify(execFile);
 
 export type PushWorkspaceResult =
   | { status: "pushed"; branch: string; commits: number }
+  /** B-GH1/F15-15: the remote branch holds commits the local delivery does not
+   *  (non-fast-forward) — a HISTORY divergence, never a credential problem. The
+   *  branch is carried so recovery copy can name what diverged. */
+  | { status: "push_conflict"; branch: string; reason: string }
   | {
       status:
         | "no_pat"
@@ -75,6 +79,20 @@ const defaultExec: Exec = async (file, args, opts) => {
     };
   }
 };
+
+/**
+ * Non-fast-forward classifier for `git push` stderr (B-GH1). git's rejection
+ * text is stable across versions: `! [rejected] ... (non-fast-forward)` or the
+ * `(fetch first)` hint when the remote ref moved. Exported for its unit test —
+ * misclassifying here re-creates the F15-15 "blame the credential" copy.
+ */
+export function isNonFastForwardStderr(stderr: string): boolean {
+  return (
+    /non-fast-forward/i.test(stderr) ||
+    /fetch first/i.test(stderr) ||
+    (/\[rejected\]/i.test(stderr) && /behind its remote counterpart/i.test(stderr))
+  );
+}
 
 /** Locate the workspace git repo for a task (same conventions as the reconciler). */
 function findRepoDir(
@@ -288,6 +306,24 @@ export async function pushWorkspaceBranch(
         { cwd: repoDir, timeoutMs: 30_000, env: askpass.env },
       );
       if (!pushRes.ok) {
+        // B-GH1/F15-15: a NON-FAST-FORWARD rejection is a history divergence
+        // (the remote branch carries commits the local delivery does not — a
+        // pre-existing branch under the task key, a rebase, a reused
+        // workspace), and it must never be reported as a credential problem.
+        // git names it deterministically on stderr; classify before redacting.
+        if (isNonFastForwardStderr(pushRes.stderr)) {
+          logger.info("workspace branch push rejected non-fast-forward", {
+            taskKey,
+            branch,
+          });
+          return {
+            status: "push_conflict",
+            branch,
+            reason:
+              `the remote branch \`${branch}\` holds commits that are not in ` +
+              `the local delivery (non-fast-forward)`,
+          };
+        }
         // Redact stderr — a git push failure can echo the remote URL/token.
         logger.info("workspace branch push failed", { taskKey, branch });
         return { status: "push_failed", reason: "git push returned non-zero" };

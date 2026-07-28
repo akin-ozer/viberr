@@ -15,6 +15,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getProject } from "~/server/projections/board-query.server";
+import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { TaskMutationContext } from "./task-actions.server";
 import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
 
@@ -74,10 +75,20 @@ function scheduleEvent(
   };
 }
 
-/** The project's final (terminal/Done) stage id, or null. */
+/**
+ * The project's terminal (Done) stage id, or null. Resolved STRUCTURALLY
+ * (B-WF4) — the last-position fallback only covers a project with no declared
+ * workflow, so this can never disagree with the acceptance writers on a board
+ * whose column order diverges from its transition chain.
+ */
 function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
-  const stages = getProject(db, projectSlug)?.stages ?? [];
-  return stages[stages.length - 1]?.id ?? null;
+  const project = getProject(db, projectSlug);
+  if (!project) return null;
+  return (
+    resolveStageRoles(project.stages, project.workflow ?? []).terminalId ??
+    project.stages[project.stages.length - 1]?.id ??
+    null
+  );
 }
 
 // ------------------------------------------------------------------ create

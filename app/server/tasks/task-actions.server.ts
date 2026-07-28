@@ -2791,6 +2791,12 @@ export async function transitionStage(
      *  operator authority; validated below (must be backward + validation
      *  failing). Off-graph like `manual`, but operator-scoped and rework-gated. */
     rework?: boolean;
+    /** R15-3 (owner ruling 2026-07-28): set ONLY by `applyRecommendation` after
+     *  its decision-authority gate passed — the task OWNER applying an operator
+     *  TRANSITION recommendation on their own task IS the authorization, so the
+     *  manual/approval RBAC tier is not re-demanded from them. Never set by a
+     *  route; forging it from a request would bypass the board-management tier. */
+    recommendationAuthorized?: boolean;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2869,13 +2875,25 @@ export async function transitionStage(
   } else if (input.manual) {
     // Manual stage override (board/task dropdown) — a maintainer-level action,
     // regardless of the boundary crossed (forward, backward, or off-graph).
-    requireAction(db, project, actor, "approve-transition", "change the task stage");
+    // R15-3: an owner-applied operator recommendation carries its own authority
+    // (the Apply click) — the archived-project freeze still applies.
+    if (input.recommendationAuthorized) {
+      requireProjectMutable(project, "change the task stage");
+    } else {
+      requireAction(db, project, actor, "approve-transition", "change the task stage");
+    }
   } else if (boundary!.boundary === "auto") {
     // An auto boundary crossed by a human (unreachable from the UI, which always
     // sends manual:true) — the loosest gate: any member.
     requireAnyMember(db, project, actor, "move this task");
   } else if (boundary!.boundary === "approval") {
-    requireAction(db, project, actor, "approve-transition", "approve stage transitions");
+    if (input.recommendationAuthorized) {
+      // R15-3: same owner-applied recommendation authority for a declared
+      // approval boundary.
+      requireProjectMutable(project, "approve stage transitions");
+    } else {
+      requireAction(db, project, actor, "approve-transition", "approve stage transitions");
+    }
   } else {
     // human boundary (review→done locked in V1): acceptance authority, with the
     // task-owner exception (R6-2) — the owner may accept its own completion.
@@ -3019,15 +3037,30 @@ export async function transitionStage(
     }
   }
 
-  // Delivery spine (FR31): entering the REVIEW stage is the point a PR is
-  // opened for review — the developer's branch is put up for human-authorized
-  // review, carrying a link back to this task. Best-effort + fire-and-forget:
-  // it degrades cleanly (no throw) when the repo/PAT isn't configured, so a
-  // transition never fails on GitHub state. The review stage is the one with a
-  // governed edge into the final (Done) stage.
+  // R15-2 (owner ruling 2026-07-28): delivery (push + review PR) is an OPERATOR
+  // decision, never a stage side-effect — the transitionStage auto-delivery hook
+  // is deleted. Safety net (a): entering the structural review-ROLE stage with
+  // no live PR is announced with a typed `github` event so the gap is NEVER
+  // silent (F15-17: a literal "Review" stage that delivered nothing said
+  // nothing). The operator's `deliver_for_review` tool, an applied `delivery`
+  // recommendation, or the task page's manual "Deliver branch & open PR" button
+  // performs the actual delivery.
   const reviewStageId = reviewStageIdOf(project);
   if (reviewStageId && input.toStageId === reviewStageId) {
-    void openReviewPrBestEffort(db, ctx, input.projectSlug, input.taskKey, actor);
+    const pr = existing.parsed.frontmatter.pr;
+    const livePr = pr && pr.state !== "closed" && pr.state !== "merged";
+    if (!livePr) {
+      void surfaceDeliveryEvent(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "Review reached — no PR yet",
+        `${input.taskKey} entered ${stageName(project, input.toStageId)} with no live review pull request. ` +
+          `The operator decides delivery (push + review PR); a maintainer or the task owner can also ` +
+          `deliver from the task page's GitHub panel.`,
+      );
+    }
   }
 
   return summaryOrThrow(db, input.projectSlug, input.taskKey);
@@ -3065,19 +3098,54 @@ export async function resolveDeliveryPushGrant(
   }
 }
 
-/** Push and open the review PR without letting GitHub failure break the transition. */
-async function openReviewPrBestEffort(
+/**
+ * The outcome of one delivery attempt (R15-2). `delivered` is the only success;
+ * every failure names its cause so the operator tool result, the applied
+ * `delivery` recommendation and the manual button all report honestly.
+ */
+export type DeliveryOutcome =
+  | {
+      status: "delivered";
+      prNumber: number;
+      url: string;
+      /** True when this delivery CREATED the PR; false when one was reused. */
+      created: boolean;
+      /** The raw push status ("pushed", or a benign non-push such as
+       *  "no_commits" when an agent already delivered with its own creds). */
+      pushStatus: string;
+    }
+  /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
+   *  opened — it would review the stale remote content, not the delivery. */
+  | { status: "push_conflict"; branch: string; message: string }
+  | { status: "grant_withheld"; message: string }
+  /** The push failed outright; no PR was opened over a possibly-stale remote. */
+  | { status: "push_failed"; message: string }
+  | { status: "nothing_to_review"; message: string }
+  | { status: "failed"; message: string };
+
+/**
+ * Perform delivery: push the deliverer's workspace branch, re-reconcile the
+ * work revision, and open (or reuse) the review PR (R15-2 — the shared core
+ * behind the operator's `deliver_for_review` tool, the applied `delivery`
+ * recommendation and the task page's manual delivery button; formerly the
+ * transitionStage review-entry side effect, deleted by owner ruling).
+ *
+ * Never throws; degraded GitHub state returns a typed outcome AND surfaces a
+ * timeline event so a failed delivery is never silent. RBAC belongs to the
+ * caller — the operator gate (`deliver-review-pr`) or the human authority.
+ */
+export async function performDelivery(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   actor: TaskActor,
-): Promise<void> {
+): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
   try {
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
-    // 1. Push the workspace commits to the remote task branch (best-effort).
+    // 1. Push the workspace commits to the remote task branch.
     const { pushWorkspaceBranch } = await import(
       "~/server/github/push-workspace.server"
     );
@@ -3098,34 +3166,58 @@ async function openReviewPrBestEffort(
     // P11-12: a capability-policy refusal is NOT an empty delivery — surface it
     // as its own signal so a human sees the branch was blocked, not stalled.
     if (push.status === "grant_withheld") {
+      const message =
+        `${taskKey}'s delivering agent's repo-write capability is withheld, so its ` +
+        `workspace branch was not pushed. Grant the capability or deliver the change ` +
+        `by hand before accepting.`;
       await surfaceDeliveryEvent(
         db,
         ctx,
         projectSlug,
         taskKey,
         "Delivery withheld by policy",
-        `${taskKey} reached Review but its delivering agent's repo-write capability is ` +
-          `withheld, so its workspace branch was not pushed. Grant the capability or ` +
-          `deliver the change by hand before accepting.`,
+        message,
       );
-      return;
+      return { status: "grant_withheld", message };
     }
 
-    // P11-11: a push that FAILED (bad/absent credential, non-zero git push) can
-    // leave the remote carrying stale or partial content while the PR still
-    // opens over it — a silent "newest work is missing" hazard. Surface it.
+    // F15-15/B-GH1: a NON-FAST-FORWARD rejection is a branch-history conflict —
+    // the remote already holds commits the delivery does not. Never blame the
+    // credential, and never open a PR over the stale remote content: it would
+    // carry a green-looking diff of the WRONG work (the live F15-15 failure —
+    // the junk PR the reviewer then approved from the local tree).
+    if (push.status === "push_conflict") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery push conflicted",
+        `${taskKey}'s delivery was not pushed: ${push.reason}. This is a branch-history ` +
+          `conflict, not a credential problem. No review PR was opened — it would review ` +
+          `the stale remote content instead of the delivery. Resolve the remote branch ` +
+          `\`${push.branch}\` (delete or rename it, or force-push deliberately), then deliver again.`,
+      );
+      return { status: "push_conflict", branch: push.branch, message: push.reason };
+    }
+
+    // P11-11 hardened by F15-15: a FAILED push leaves the remote missing (or
+    // misrepresenting) the newest work — refuse to open a PR whose head would
+    // not match the delivered commit, instead of opening one "best effort".
     if (push.status === "push_failed" || push.status === "no_pat") {
+      const message =
+        `${taskKey}'s execution branch could not be pushed (${push.status === "no_pat" ? "no project credential" : push.reason}). ` +
+        `No review PR was opened — a PR over a remote missing the newest commits would ` +
+        `review the wrong content. Fix the push, then deliver again.`;
       await surfaceDeliveryEvent(
         db,
         ctx,
         projectSlug,
         taskKey,
         "Delivery push failed",
-        `${taskKey} reached Review but pushing its execution branch failed (${push.status}). ` +
-          `Any review PR may not reflect the newest commits — check the credential and re-scan.`,
+        message,
       );
-      // Still attempt the PR below (a prior push may carry earlier content), now
-      // that the failure is visible.
+      return { status: "push_failed", message };
     }
 
     // P11-10: `pushed` means the push may have AUTO-COMMITTED an uncommitted
@@ -3172,36 +3264,38 @@ async function openReviewPrBestEffort(
       { userId: actor.userId, label: actor.label },
       dataCtx,
     );
-    if (result.status === "ok") return;
+    if (result.status === "ok") {
+      return {
+        status: "delivered",
+        prNumber: result.prNumber,
+        url: result.url,
+        created: result.created,
+        pushStatus: push.status,
+      };
+    }
     logger.info("review PR not opened", { taskKey, reason: result.status });
 
-    // 3. An empty-diff branch (nothing_to_review) that ALSO had no local commits
-    //    to push means the delivery produced no change — but only when the push
-    //    itself did not already explain WHY (a withheld grant / failed push was
-    //    surfaced above with a precise reason). Avoid a misleading "no change"
-    //    message on top of a policy refusal or push failure (P11-12/P11-11).
-    if (
-      result.status === "nothing_to_review" &&
-      push.status !== "push_failed" &&
-      push.status !== "no_pat"
-    ) {
+    // 3. An empty-diff branch means the delivery produced no change (the failed-
+    //    push cases returned above with their own precise reason, P11-12/P11-11).
+    if (result.status === "nothing_to_review") {
+      const message =
+        "No review pull request could be opened — the execution branch has no " +
+        "commits ahead of the default branch. The delivery may have produced no " +
+        "change, or the commits never reached the remote.";
       await surfaceDeliveryEvent(
         db,
         ctx,
         projectSlug,
         taskKey,
         "Review has no PR",
-        "No review pull request could be opened — the execution branch has no " +
-          "commits ahead of the default branch. The delivery may have produced no " +
-          "change, or the commits never reached the remote.",
+        message,
       );
+      return { status: "nothing_to_review", message };
     }
-    // DG-5: a GitHub/credential FAILURE at the review boundary (auth, network,
-    // missing PAT/repo) previously only logged — the task silently reached Review
-    // with no PR and no explanation. Surface it so a human knows the review PR is
-    // missing and why. (scope_violation already carries its own task-visible
-    // violation; nothing_to_review is handled above.)
-    else if (
+    // DG-5: a GitHub/credential FAILURE (auth, network, missing PAT/repo) is
+    // surfaced so a human knows the review PR is missing and why.
+    // (scope_violation already carries its own task-visible violation.)
+    if (
       result.status === "auth_failed" ||
       result.status === "network_unavailable" ||
       result.status === "no_pat_configured" ||
@@ -3221,16 +3315,74 @@ async function openReviewPrBestEffort(
         projectSlug,
         taskKey,
         "Review PR could not be opened",
-        `${taskKey} reached Review but no pull request could be opened — ${why}. ` +
-          "Fix the repository/credential settings, then use “Update status” to open the review PR.",
+        `No pull request could be opened for ${taskKey} — ${why}. ` +
+          "Fix the repository/credential settings, then deliver again.",
       );
+      return { status: "failed", message: why };
     }
+    return {
+      status: "failed",
+      message: `the review PR was not opened (${result.status})`,
+    };
   } catch (error) {
-    logger.warn("review PR open failed", {
+    logger.warn("delivery failed", {
       taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    return {
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
+}
+
+/**
+ * R15-2 safety net (b): a human performs delivery directly from the task page's
+ * GitHub panel — maintainer+ (the run-agents tier) or the task's own OWNER.
+ * Audited as `github.delivery.manual` with the honest outcome.
+ */
+export async function manualDeliverForReview(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<DeliveryOutcome> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (ownerException(project, actor, existing.parsed.frontmatter.ownerUserId)) {
+    // The owner ships their own task's branch; the archived-project freeze
+    // (R6-3) still applies.
+    requireProjectMutable(project, "deliver the branch & open the review PR");
+  } else {
+    requireAction(
+      db,
+      project,
+      actor,
+      "run-agents",
+      "deliver the branch & open the review PR",
+    );
+  }
+  const outcome = await performDelivery(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    actor,
+  );
+  recordAudit(db, {
+    action: "github.delivery.manual",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      status: outcome.status,
+      ...(outcome.status === "delivered" ? { prNumber: outcome.prNumber } : {}),
+    },
+  });
+  return outcome;
 }
 
 /**
@@ -3710,6 +3862,20 @@ export async function resolvePacket(
         terminalStageIdOf(project) ??
         project.stages[project.stages.length - 1]?.id ??
         "done";
+      // R15-1 gate 2 (F15-15): the packet path is a Done writer like the other
+      // two, so the PR head must contain the delivered revision HERE as well —
+      // otherwise the operator's own acceptance packet becomes the one door
+      // through which a stale-head PR merges with a green review attached.
+      const headMismatch = await acceptancePrHeadMismatch(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (headMismatch) throw AppError.conflict(headMismatch);
+      // F15-13: a PR already merged out of band needs no merge attempt, and the
+      // completion event must not claim the merge as this human's act.
+      const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
       // Attempt the REAL merge (FR31) and only claim "merged" when it truly
       // happened; a merge GitHub refuses (conflict, moved head) refuses the
       // acceptance itself, and an unreachable merge records "accepted" (merge
@@ -3720,25 +3886,41 @@ export async function resolvePacket(
       // a packet replaced while this resolution was in flight left the PR merged
       // on GitHub and the resolution 409'd: a real merge committed under a stale
       // decision, self-healed only by the poller's "merged but not Done" nudge.
-      // Re-check inside `beforeMerge`, the last point before the side effect.
-      const merge = await attemptAcceptanceMerge(
-        db,
-        ctx,
-        input.projectSlug,
-        input.taskKey,
-        actor,
-        () => {
-          const fresh = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-          if (
-            !fresh?.parsed.packet ||
-            packetIdentity(fresh.parsed.packet) !== resolvedPacketIdentity
-          ) {
-            throw AppError.conflict(
-              "This decision was replaced by a newer one — refresh the task and choose again.",
-            );
-          }
-        },
-      );
+      // Re-check inside `beforeMerge`, the last point before the side effect —
+      // and re-check the FULL acceptance gate there too (B-WF1): a revision or
+      // verdict that changed during the await must refuse, exactly as the
+      // direct path does.
+      const merge: AcceptanceMergeOutcome = alreadyMerged
+        ? { kind: "merged" }
+        : await attemptAcceptanceMerge(
+            db,
+            ctx,
+            input.projectSlug,
+            input.taskKey,
+            actor,
+            () => {
+              const fresh = readTaskFile(
+                taskRef(ctx, input.projectSlug, input.taskKey),
+              );
+              if (
+                !fresh?.parsed.packet ||
+                packetIdentity(fresh.parsed.packet) !== resolvedPacketIdentity
+              ) {
+                throw AppError.conflict(
+                  "This decision was replaced by a newer one — refresh the task and choose again.",
+                );
+              }
+              const refusal = fresh
+                ? acceptanceRefusalReason(
+                    project,
+                    fresh.parsed.frontmatter,
+                    input.taskKey,
+                    { blockedPacket: false },
+                  )
+                : null;
+              if (refusal) throw AppError.conflict(refusal);
+            },
+          );
       if (merge.kind === "unmergeable") throw AppError.conflict(merge.reason);
       const reallyMerged = merge.kind === "merged";
       const hasPr = !!existing.parsed.frontmatter.pr;
@@ -3749,22 +3931,35 @@ export async function resolvePacket(
         title: "Completion accepted",
         text: !hasPr
           ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
-          : reallyMerged
-            ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-            : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
+          : alreadyMerged
+            ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+            : reallyMerged
+              ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
+              : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
         toAgent: false,
         evidence: null,
       };
       mutate = (fm) => {
+        // In-lock re-check (B-WF1): the generic resolution write below holds the
+        // file lock — this is the last word before Done is recorded.
+        const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
+          blockedPacket: false,
+        });
+        if (refusal) throw AppError.conflict(refusal);
         fm.stage = doneStageId;
         fm.readiness = "ready";
         fm.waiting = "none";
         // P14-LV-02: derived, never synthesized — see acceptCompletion.
         fm.validation = deriveValidation(fm);
-        // Acceptance consumes standing recommendations — a leftover transition
-        // card on a Done task would move it back OUT of Done if applied.
+        // Acceptance consumes ALL standing recommendations (see
+        // applyAcceptanceWrite — same rule, same reason).
         fm.recommendations = [];
-        if (fm.pr) fm.pr = { ...fm.pr, state: reallyMerged ? "merged" : "accepted" };
+        // Never downgrade an already-merged PR to "accepted" (F15-13).
+        if (fm.pr) {
+          const next =
+            fm.pr.state === "merged" || reallyMerged ? "merged" : "accepted";
+          fm.pr = { ...fm.pr, state: next };
+        }
       };
       clearPacket = true;
       break;
@@ -4102,6 +4297,31 @@ function acceptanceStageBlockedReason(
 }
 
 /**
+ * R15-1 (owner ruling 2026-07-28) — the verdict gate: DELIVERED work needs a
+ * healthy verdict on the delivered revision before a human may accept it.
+ *
+ * Live-proven hole (F15-19): VIB-9's revision wore an "awaiting verdict" chip
+ * and plain human acceptance still merged PR #117 with ZERO verdicts on it —
+ * the required-reviewer gate only binds when a verdict-capable reviewer is
+ * engaged, so an unreviewed delivery sailed through. A task with NO delivered
+ * revision stays acceptable (planning / non-repo work). Force-accept is the
+ * audited bypass.
+ */
+function verdictGateReason(fm: TaskFrontmatter, taskKey: string): string | null {
+  if (!fm.workRevision) return null;
+  // Delivered work with no PR: nothing stands for review, so acceptance would
+  // close the task on work no PR ever carried (R15-1 gate 1).
+  if (!fm.pr) {
+    return `${taskKey} has delivered work but no review pull request — deliver the branch & open the PR before accepting.`;
+  }
+  const validation = deriveValidation(fm);
+  if (validation === "healthy") return null;
+  // `failing` is named precisely by acceptanceBlockedReason (checked first).
+  if (validation === "failing") return null;
+  return `${taskKey}'s delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept.`;
+}
+
+/**
  * Every gate a human acceptance must clear, in one place (P14-LV-02).
  *
  * The three writers to Done each grew their own subset of these checks, which is
@@ -4122,6 +4342,8 @@ function acceptanceRefusalReason(
     acceptanceStageBlockedReason(project, fm.stage, taskKey) ??
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm) ??
+    // R15-1: delivered work needs a healthy verdict on the delivered revision.
+    verdictGateReason(fm, taskKey) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     (opts.blockedPacket
@@ -4132,6 +4354,63 @@ function acceptanceRefusalReason(
     // P14-LV-07: a conflicting PR cannot be merged, so it cannot be accepted.
     conflictingPrBlockedReason(fm, taskKey)
   );
+}
+
+/**
+ * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
+ * the acceptance would merge content the delivery never produced (the live
+ * failure: a PR opened over stale remote junk, approved from the local tree).
+ * A live GitHub read; `null` when it cannot be verified (offline / no PR / no
+ * revision / PR already merged) — the merge attempt's own honesty covers those.
+ * This is the ONE acceptance gate force-accept can NEVER bypass.
+ */
+export async function acceptancePrHeadMismatch(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<string | null> {
+  try {
+    const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const fm = file?.parsed.frontmatter;
+    const pr = fm?.pr ?? null;
+    const rev = fm?.workRevision ?? null;
+    if (!pr || !rev || pr.state === "merged") return null;
+    const { getProjectGithubContext } = await import(
+      "~/server/github/github-context.server"
+    );
+    const gh = getProjectGithubContext(db, projectSlug);
+    if (gh.status !== "ok") return null;
+    const live = await gh.client.request<{ head?: { sha?: string } }>(
+      "GET",
+      `/repos/${gh.repo}/pulls/${pr.number}`,
+    );
+    if (!live.ok) return null;
+    const headSha = live.data?.head?.sha;
+    if (typeof headSha !== "string" || headSha === "") return null;
+    if (headSha === rev.headSha) return null;
+    // Not identical — a head that CONTAINS the delivered commit (e.g. the
+    // delivery plus an auto-commit) is still reviewing the delivered work.
+    const cmp = await gh.client.request<{ status?: string }>(
+      "GET",
+      `/repos/${gh.repo}/compare/${rev.headSha}...${headSha}`,
+    );
+    if (!cmp.ok) return null; // could not compare — unknown, not a refusal
+    if (cmp.data?.status === "ahead" || cmp.data?.status === "identical") {
+      return null;
+    }
+    return (
+      `PR #${pr.number}'s head (${headSha.slice(0, 7)}) does not contain the delivered ` +
+      `revision ${rev.headSha.slice(0, 7)} — the PR carries different content than was ` +
+      `delivered. Re-deliver the branch (or fix the remote branch), then re-review.`
+    );
+  } catch (error) {
+    logger.warn("PR-head verification failed (treated as unknown)", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return null;
+  }
 }
 
 /**
@@ -4219,6 +4498,16 @@ export function resolveAcceptanceAffordance(
     (fm.ownerUserId === input.viewerUserId && roleCan(role, "own-task"));
   // An archived project is read-only (R6-3) — no acceptance from any role.
   if (project.archived) return { ...denied, hasAuthority };
+  // F15-11: a task ALREADY at the terminal stage has nothing to accept — the
+  // stage gate returns null for "already Done" (the writers' idempotent return
+  // owns that), which used to render a live Accept button on closed tasks.
+  const terminalId =
+    stageRolesOf(project).terminalId ??
+    project.stages[project.stages.length - 1]?.id ??
+    null;
+  if (terminalId !== null && fm.stage === terminalId) {
+    return { ...denied, hasAuthority };
+  }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
   const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
@@ -4238,6 +4527,71 @@ export function resolveAcceptanceAffordance(
 function mergePendingCause(merge: AcceptanceMergeOutcome): string {
   if (merge.kind === "pending" || merge.kind === "unmergeable") return merge.cause;
   return UNREACHABLE_MERGE_CAUSE;
+}
+
+/**
+ * The ONE Done write every acceptance path shares (B-WF6). Exported for
+ * `operatorAcceptCompletion`, whose full-autonomy branch historically
+ * re-implemented this block inline and drifted gate by gate.
+ *
+ * Unless `skipInLockRecheck` (the audited force override), the acceptance
+ * refusal gates are re-evaluated INSIDE the write lock against the freshly
+ * parsed state (B-WF1): the direct human path awaits a real GitHub merge
+ * between its gate check and this write, and a verdict/revision/packet change
+ * in that window used to be accepted anyway.
+ */
+export async function applyAcceptanceWrite(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    doneStageId: string;
+    /** What the linked PR is stamped to (ignored when the task has no PR). */
+    prState: "merged" | "accepted";
+    event: TaskFileEvent;
+    skipInLockRecheck?: boolean;
+  },
+): Promise<void> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    if (!input.skipInLockRecheck) {
+      const refusal = acceptanceRefusalReason(
+        project,
+        parsed.frontmatter,
+        input.taskKey,
+        {
+          blockedPacket:
+            parsed.frontmatter.readiness === "blocked" &&
+            parsed.packet?.type === "blocked",
+        },
+      );
+      if (refusal) throw AppError.conflict(refusal);
+    }
+    parsed.frontmatter.stage = input.doneStageId;
+    parsed.frontmatter.readiness = "ready";
+    parsed.frontmatter.waiting = "none";
+    // P14-LV-02: acceptance used to stamp `validation: healthy` with the comment
+    // "accepted work is validated (FR24)" — untrue for work no reviewer ever
+    // saw. `validation` has ONE writer (deriveValidation, F10-15); recompute it
+    // and let the cache say what actually happened.
+    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
+    if (parsed.frontmatter.pr) {
+      // Never downgrade an already-merged PR to "accepted" (F15-13).
+      const next =
+        parsed.frontmatter.pr.state === "merged" ? "merged" : input.prState;
+      parsed.frontmatter.pr = { ...parsed.frontmatter.pr, state: next };
+    }
+    // A Done task carries NO standing recommendation cards at all — not just
+    // the transition/acceptance/delivery kinds. A leftover run/assign card on a
+    // closed task is an offer the server would honor later (start a run on a
+    // Done task); acceptance consumes every open offer, matching the packet
+    // resolution path's long-standing behavior.
+    parsed.frontmatter.recommendations = [];
+    parsed.packet = null;
+    parsed.timeline.unshift(input.event);
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 }
 
 /** Apply human acceptance through the shared Done transition and merge path. */
@@ -4266,10 +4620,10 @@ async function acceptCompletion(
 
   if (existing.parsed.frontmatter.stage === doneStageId) return; // already Done.
 
-  // Every acceptance gate — graph position, required reviewers, blocked packet,
-  // closed/conflicting PR, archived task — comes from ONE shared helper, so a
-  // fourth writer to Done can't quietly ship with a subset again. `force` is the
-  // audited admin override (DG-2).
+  // Every acceptance gate — graph position, required reviewers, the R15-1
+  // verdict gate, blocked packet, closed/conflicting PR, archived task — comes
+  // from ONE shared helper, so a fourth writer to Done can't quietly ship with
+  // a subset again. `force` is the audited admin override (DG-2).
   if (!input.force) {
     const refusal = acceptanceRefusalReason(
       project,
@@ -4284,6 +4638,23 @@ async function acceptCompletion(
     if (refusal) throw AppError.conflict(refusal);
   }
 
+  // R15-1 gate 2: the PR head must contain the delivered revision. Checked for
+  // FORCED acceptance too — force bypasses missing/failed verdicts and stale
+  // packets, never a PR that carries different content than was delivered
+  // (F15-15: that is how junk would merge with a green review attached).
+  const headMismatch = await acceptancePrHeadMismatch(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+  );
+  if (headMismatch) throw AppError.conflict(headMismatch);
+
+  // F15-13: a PR already merged on GitHub (out of band, reconciled into the
+  // cache) needs no merge attempt — and the completion event must not claim the
+  // merge as this human's act.
+  const alreadyMerged = existing.parsed.frontmatter.pr?.state === "merged";
+
   // Human acceptance merges the review PR (FR31: "accepting a completion merges
   // its PR"). Attempt the REAL merge first when a PR + reachable GitHub exist —
   // mergeTaskPr writes state=merged + a `github` event + audit on success. When
@@ -4292,13 +4663,40 @@ async function acceptCompletion(
   // could not be REACHED we still do NOT claim "merged" — we record "accepted"
   // (merge pending) with the real reason, so the task record never diverges
   // from GitHub truth (NFR15).
-  const merge = await attemptAcceptanceMerge(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-    actor,
-  );
+  //
+  // P14-GV-05/B-WF1: the merge is an EXTERNAL, irreversible side effect —
+  // re-check the refusal gates at the narrowest point before it (the packet
+  // path has had this since P14-GV-05; the direct path did not).
+  const merge: AcceptanceMergeOutcome = alreadyMerged
+    ? { kind: "merged" }
+    : await attemptAcceptanceMerge(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        actor,
+        input.force
+          ? undefined
+          : () => {
+              const fresh = readTaskFile(
+                taskRef(ctx, input.projectSlug, input.taskKey),
+              );
+              if (!fresh) {
+                throw AppError.notFound(`Task ${input.taskKey} not found.`);
+              }
+              const refusal = acceptanceRefusalReason(
+                project,
+                fresh.parsed.frontmatter,
+                input.taskKey,
+                {
+                  blockedPacket:
+                    fresh.parsed.frontmatter.readiness === "blocked" &&
+                    fresh.parsed.packet?.type === "blocked",
+                },
+              );
+              if (refusal) throw AppError.conflict(refusal);
+            },
+      );
   if (merge.kind === "unmergeable" && !input.force) {
     throw AppError.conflict(merge.reason);
   }
@@ -4312,38 +4710,22 @@ async function acceptCompletion(
     title: "Completion accepted",
     text: !hasPr
       ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
-      : reallyMerged
-        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-        : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
+      : alreadyMerged
+        ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** — the review PR had already been merged on GitHub (out of band).`
+        : reallyMerged
+          ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
+          : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`,
     toAgent: false,
     evidence: null,
   };
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.stage = doneStageId;
-    parsed.frontmatter.readiness = "ready";
-    parsed.frontmatter.waiting = "none";
-    // P14-LV-02: acceptance used to stamp `validation: healthy` with the comment
-    // "accepted work is validated (FR24)" — untrue for work no reviewer ever
-    // saw, and the reason a Triage task with no diff at all wore a green
-    // "validation healthy" chip on the board. `validation` has ONE writer
-    // (deriveValidation, F10-15); recompute it and let the cache say what
-    // actually happened: none (nothing delivered), changed (delivered, no
-    // verdict) or healthy (every required reviewer approved this revision).
-    parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
-    if (parsed.frontmatter.pr) {
-      parsed.frontmatter.pr = {
-        ...parsed.frontmatter.pr,
-        state: reallyMerged ? "merged" : "accepted",
-      };
-    }
-    // A Done task carries no pending transition/acceptance recommendations.
-    parsed.frontmatter.recommendations = parsed.frontmatter.recommendations.filter(
-      (r) => r.kind !== "transition" && r.kind !== "accept_completion",
-    );
-    parsed.packet = null;
-    parsed.timeline.unshift(event);
+  await applyAcceptanceWrite(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    doneStageId,
+    prState: reallyMerged ? "merged" : "accepted",
+    event,
+    ...(input.force ? { skipInLockRecheck: true } : {}),
   });
-  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     action: "task.transition",
@@ -4518,41 +4900,62 @@ export async function applyRecommendation(
   );
   if (!rec) throw AppError.conflict("That recommendation was already resolved.");
 
+  // R15-3 (owner ruling 2026-07-28): the task OWNER may apply ANY operator
+  // recommendation on their own task — the Apply click IS the authorization
+  // (FR37 spirit). Live-proven dead end (F15-12): a contributor-owner was shown
+  // Apply on a transition card and then 403'd by the inner approve-transition /
+  // run-agents tier. When the owner lacks the inner tier, the execution runs as
+  // coordination machinery under operator authority — the same seam
+  // `resolvePacket`'s retry_other_backend uses ("the packet is the human
+  // decision; the execution is coordination machinery").
+  const actorRole = project.memberRoles.get(actor.userId) ?? null;
+  const ownerApplied = ownerException(
+    project,
+    actor,
+    existing.parsed.frontmatter.ownerUserId,
+  );
+  const asCoordination = (needed: RbacAction) =>
+    ownerApplied && !roleCan(actorRole, needed);
+  const runActor = asCoordination("run-agents") ? OPERATOR_TASK_ACTOR : actor;
+  const runCtx: TaskMutationContext = asCoordination("run-agents")
+    ? { ...ctx, operatorAuthorized: true }
+    : ctx;
+
   // Execute the recommended action through the governed mutation (RBAC inside).
   if (rec.kind === "assign_specialist" && rec.profileId) {
     const { assignSpecialist } = await import("./specialist-run.server");
     await assignSpecialist(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      actor,
-      ctx,
+      runActor,
+      runCtx,
     );
   } else if (rec.kind === "assign_reviewer" && rec.profileId) {
     const { assignReviewer } = await import("./specialist-run.server");
     await assignReviewer(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      actor,
-      ctx,
+      runActor,
+      runCtx,
     );
   } else if (rec.kind === "run_specialist") {
     // The operator recommended starting the delivering agent's run (it can't
-    // under `recommend` autonomy) — applying it (admin|maintainer, re-checked
-    // in startAgentRun) starts the run.
+    // under `recommend` autonomy) — applying it starts the run (run-agents
+    // re-checked inside for a maintainer; owner-applied runs as coordination).
     const { startAgentRun } = await import("./specialist-run.server");
     await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey },
-      actor,
-      ctx,
+      runActor,
+      runCtx,
     );
   } else if (rec.kind === "run_reviewer" && rec.profileId) {
     const { startAgentRun } = await import("./specialist-run.server");
     await startAgentRun(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: rec.profileId },
-      actor,
-      ctx,
+      runActor,
+      runCtx,
     );
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the
@@ -4560,9 +4963,10 @@ export async function applyRecommendation(
     // deliverer after a rejected PR), and the human clicking Apply IS the
     // authorization — the same decision a manual stage-menu move expresses.
     // A declared boundary keeps its boundary semantics; an undeclared edge
-    // applies as a manual move, whose admin|maintainer gate transitionStage
-    // re-checks (board-management tier — the owner exception that admits a
-    // contributor-owner to THIS decision layer does not widen manual moves).
+    // applies as a manual move. R15-3 widens the pass-14 stance: the task
+    // OWNER's Apply click authorizes the recommended move too
+    // (`recommendationAuthorized` relaxes only the manual/approval RBAC tier,
+    // only on this recommendation path — never a bare stage-menu move).
     const declaredEdge = project.workflow.some(
       (w) =>
         w.from === existing.parsed.frontmatter.stage && w.to === rec.toStageId,
@@ -4574,10 +4978,28 @@ export async function applyRecommendation(
         taskKey: input.taskKey,
         toStageId: rec.toStageId,
         ...(declaredEdge ? {} : { manual: true }),
+        ...(asCoordination("approve-transition")
+          ? { recommendationAuthorized: true }
+          : {}),
       },
       actor,
       ctx,
     );
+  } else if (rec.kind === "delivery") {
+    // R15-2: the operator recommended DELIVERY (push + review PR) — applying it
+    // performs the delivery under the human's authorization. A failed delivery
+    // keeps the card pending (the refusal names why; events are on the
+    // timeline), so the human can fix the cause and apply again.
+    const outcome = await performDelivery(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      actor,
+    );
+    if (outcome.status !== "delivered") {
+      throw AppError.conflict(`Delivery did not complete — ${outcome.message}`);
+    }
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
     // the human acceptance of the review→done boundary: same semantics as

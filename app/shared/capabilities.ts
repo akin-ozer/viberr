@@ -46,6 +46,13 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // the opposite and the old label ("Completion for human acceptance") read as
   // a guarantee it does not make.
   cap("completion-for-acceptance", "Accept completion into Done", ["operator"], "Permissions", "recommend", false),
+  // R15-2 (owner ruling 2026-07-28): delivery — push the task branch + open the
+  // review PR — is an OPERATOR decision, not a fixed stage side-effect. The
+  // server still executes the mechanics (performDelivery); agents never push.
+  // An ABSENT grant means granted (the catalog default is direct), so operator
+  // deployments persisted before this capability existed keep delivering — the
+  // same polarity `use-web-search-fetch` uses.
+  cap("deliver-review-pr", "Deliver the branch & open the review PR", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist)
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
@@ -169,6 +176,9 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "append-typed-events",
   "stage-transitions",
   "completion-for-acceptance",
+  // R15-2: the deliver_for_review tool + performDelivery gate on this grant
+  // server-side, on both operator backends.
+  "deliver-review-pr",
   "transition-to-done",
   "change-project-policy",
   // Generic-agent collaboration gates (real, both-backend enforcement): the

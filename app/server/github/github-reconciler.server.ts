@@ -583,6 +583,24 @@ export async function reconcileProject(
       details: { tasks: rows.length, reconciled, changed, failed },
     });
   }
+  // F15-02: a successful pass over ZERO branched tasks is still an observation
+  // — without a heartbeat row the GitHub page reads "not yet synced" forever on
+  // a young project, while the button's toast claims success. Task-level passes
+  // already write their own `github.reconcile` rows.
+  if (rows.length === 0) {
+    const { resolveProjectFilePath } = await import(
+      "~/server/files/project-writer.server"
+    );
+    recordGithubProvenance(db, {
+      absPath: resolveProjectFilePath({
+        projectSlug,
+        ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      }),
+      ...(ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      action: "github.reconcile",
+      details: { repo: gh.repo, heartbeat: true, tasks: 0 },
+    });
+  }
   return { status: "ok", results, reconciled, changed, failed };
 }
 

@@ -18,7 +18,10 @@ export interface RecommendationView {
     | "run_specialist"
     | "run_reviewer"
     | "transition"
-    | "accept_completion";
+    | "accept_completion"
+    // R15-2: the operator recommends DELIVERY (push + review PR); applying it
+    // performs the delivery under the human's authorization.
+    | "delivery";
   profileId?: string;
   toStageId?: string;
   label: string;
@@ -32,6 +35,7 @@ const KIND_ICON: Record<RecommendationView["kind"], IconName> = {
   run_reviewer: "bolt",
   transition: "board",
   accept_completion: "check",
+  delivery: "github",
 };
 
 const KIND_LABEL: Record<RecommendationView["kind"], string> = {
@@ -41,6 +45,7 @@ const KIND_LABEL: Record<RecommendationView["kind"], string> = {
   run_reviewer: "Run reviewer",
   transition: "Stage",
   accept_completion: "Completion",
+  delivery: "Delivery",
 };
 
 export function OperatorRecommendations({

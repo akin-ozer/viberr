@@ -953,6 +953,30 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     );
   });
 
+  it("F15-15: a SUPPORTING run is PINNED to the delivered revision (the PR head), never just the local branch", () => {
+    // Fails on main: the reviewer prompt never named the delivered sha, so the
+    // live reviewer approved from the LOCAL workspace branch while the PR
+    // carried stale remote junk.
+    const head = "e669c89".padEnd(40, "0");
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      reviewSubject: { headSha: head, prNumber: 114 },
+    });
+    expect(prompt).toContain(`PINNED to the delivered revision \`${head}\``);
+    expect(prompt).toContain("review PR #114");
+    expect(prompt).toContain("do NOT record a verdict on content you could not read");
+    expect(prompt).toContain("Never approve the local tree as a stand-in");
+    // A delivering run never gets the pin (it authors the revision).
+    const delivering = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      reviewSubject: { headSha: head, prNumber: 114 },
+    });
+    expect(delivering).not.toContain("PINNED to the delivered revision");
+  });
+
   it("R-B: a SUPPORTING run is told to answer what was asked, not always review", () => {
     const prompt = buildAnalyzePrompt({
       ...base,

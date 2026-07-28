@@ -155,12 +155,11 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     ).rejects.toMatchObject({ message: expect.stringContaining("Review") });
   });
 
-  it("applies an operator BACKWARD transition rec (Review → work stage) as the human-authorized move it is", async () => {
-    // Live defect 2026-07-26: the operator recommended Review → In Progress
-    // (the rework path after a rejected PR) and Apply threw "No governed
-    // boundary from Review to In Progress" — the apply path only admitted
-    // declared edges. The human clicking Apply IS the authorization: an
-    // undeclared edge now applies as a manual move (maintainer+).
+  it("R15-3: the task OWNER applies an operator TRANSITION rec on their own task — the Apply click IS the authorization", async () => {
+    // F15-12 live defect: a contributor-OWNER was shown Apply on a stage rec
+    // and then 403'd by the inner approve-transition tier, silently. Owner
+    // ruling R15-3 (2026-07-28): the owner may apply ANY recommendation on
+    // their own task. This FAILED on pre-pass-15 main (the apply threw 403).
     const store = prepared();
     const rec = {
       id: "r-back",
@@ -175,12 +174,36 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       ownerUserId: store.users.selin.id, // contributor owner
       recommendations: [rec],
     });
-    // The owner exception admits selin to the DECISION layer, but an off-graph
-    // move stays board-management tier — the inner manual gate refuses.
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
+      actor(store.users.selin),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = taskFile(store).parsed.frontmatter;
+    expect(fm.stage).toBe("impl");
+    expect(fm.recommendations).toHaveLength(0); // consumed
+  });
+
+  it("R15-3 does not widen the outer gate: a contributor who does NOT own the task still cannot apply", async () => {
+    const store = prepared();
+    const rec = {
+      id: "r-back2",
+      kind: "transition" as const,
+      toStageId: "impl",
+      label: "Move the task to In Progress",
+      detail: "",
+    };
+    seed(store, {
+      stage: "review",
+      waiting: "human",
+      ownerUserId: store.users.murat.id, // owned by someone else
+      recommendations: [rec],
+    });
     await expect(
       applyRecommendation(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
+        { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back2" },
         actor(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
@@ -190,13 +213,11 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     // A maintainer applies it: the task moves back to the work stage.
     await applyRecommendation(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back2" },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
-    const fm = taskFile(store).parsed.frontmatter;
-    expect(fm.stage).toBe("impl");
-    expect(fm.recommendations).toHaveLength(0); // consumed
+    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
   });
 
   it("refuses a manual board move from Triage straight to Done", async () => {
@@ -250,6 +271,8 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       workRevision: revision(),
       verdicts: [approval()],
       validation: "healthy",
+      // R15-1: delivered work needs its review PR to be acceptable.
+      pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
     });
     await transitionStage(
       store.db,

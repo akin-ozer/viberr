@@ -24,6 +24,7 @@ import {
   completeTaskMerge,
   dismissRecommendation,
   forceAcceptCompletion,
+  manualDeliverForReview,
   releaseOwner,
   resolveAcceptanceAffordance,
   resolvePacket,
@@ -69,6 +70,7 @@ import {
   clampTimelineLimit,
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
+import { roleCan } from "~/shared/rbac";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -183,6 +185,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     (s) => s.status === "pending",
   );
 
+  // R15-1: the accept confirm names exactly what merges — the delivered
+  // revision (task file) and the merge target (project default branch).
+  const workRevisionSha =
+    taskFile?.parsed.frontmatter.workRevision?.headSha ?? null;
+  const project = getProject(db, params.slug);
+  const defaultBranch = project?.defaultBranch || "main";
+  // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
+  // the task's own owner — mirror of manualDeliverForReview's server gate.
+  const myProjectRole =
+    listProjectMembers(db, params.slug).find((m) => m.userId === user.id)
+      ?.role ?? null;
+  const canDeliver =
+    roleCan(myProjectRole, "run-agents") ||
+    user.role === "admin" ||
+    (taskFile?.parsed.frontmatter.ownerUserId === user.id &&
+      roleCan(myProjectRole, "own-task"));
+
   return {
     task: { ...detail, timeline: slice.events },
     recommendations,
@@ -227,6 +246,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // R15-1 accept confirm + R15-2 manual-delivery affordance.
+    workRevisionSha,
+    defaultBranch,
+    canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
     // UI-11: today this always resolves to `https://github.com` — nothing
     // stores a GHE API base URL — so the value is honest, but the "GHE
@@ -401,6 +424,31 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: `Completion accepted · ${taskKey} moved to ${toName}`,
         };
+      }
+      case "deliver-review": {
+        // R15-2 safety net (b): a human performs delivery (push + review PR)
+        // directly. Maintainer+ or the task's own owner — enforced (and
+        // audited as github.delivery.manual) inside manualDeliverForReview.
+        const outcome = await manualDeliverForReview(
+          db,
+          { projectSlug, taskKey },
+          actor,
+        );
+        return outcome.status === "delivered"
+          ? {
+              ok: true as const,
+              intent,
+              toast: outcome.created
+                ? `Delivered · opened review PR #${outcome.prNumber}`
+                : `Delivered · reusing open review PR #${outcome.prNumber}`,
+            }
+          : data(
+              {
+                ok: false as const,
+                error: `Delivery did not complete — ${outcome.message}`,
+              },
+              { status: 409 },
+            );
       }
       case "archive-task":
       case "restore-task": {
@@ -773,6 +821,9 @@ export default function TaskDetailRoute({ loaderData }: Route.ComponentProps) {
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      workRevisionSha={loaderData.workRevisionSha}
+      defaultBranch={loaderData.defaultBranch}
+      canDeliver={loaderData.canDeliver}
     />
   );
 }

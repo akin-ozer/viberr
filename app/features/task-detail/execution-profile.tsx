@@ -623,9 +623,12 @@ export function ExecutionProfile({
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
   // buttons (Run operator / Run specialist / Run reviewer) are disabled so a
-  // closed task doesn't advertise live controls.
+  // closed task doesn't advertise live controls. F15-11: an ARCHIVED task is
+  // out of the flow too — it must not advertise them either.
   const closed =
-    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
+    task.displayReadiness === "accepted" ||
+    task.displayReadiness === "merged" ||
+    task.archived;
   return (
     <div className="panel">
       <div className="panel-head">

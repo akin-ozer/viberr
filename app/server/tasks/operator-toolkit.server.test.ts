@@ -89,3 +89,32 @@ describe("buildOperatorToolkit — org MCP grants", () => {
     expect(toolkit.allowedTools).not.toContain("mcp__viberr");
   });
 });
+
+describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
+  it("builds the tool with the grant ABSENT (absent = granted — pre-R15-2 deployments keep delivering)", () => {
+    // Fails on main: the tool did not exist.
+    const db = ctxDb.makeDb();
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority([]),
+    });
+    expect(toolkit.allowedTools).toContain("mcp__viberr__deliver_for_review");
+  });
+
+  it("withholds the tool when deliver-review-pr is explicitly off", () => {
+    const db = ctxDb.makeDb();
+    const auth = authority([]);
+    auth.policy.set("deliver-review-pr", "off");
+    const toolkit = buildOperatorToolkit({
+      db,
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+    expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+  });
+});

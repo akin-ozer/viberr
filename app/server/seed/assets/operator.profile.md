@@ -41,6 +41,10 @@ capabilities:
     mode: recommend
   - capabilityId: completion-for-acceptance
     mode: recommend
+  # R15-2: delivery (push + review PR) is an operator decision. Direct in the
+  # shipped template; the Strict policy preset maps it to recommend.
+  - capabilityId: deliver-review-pr
+    mode: direct
   - capabilityId: execute-code-or-write-repo
     mode: human
   - capabilityId: transition-to-done
