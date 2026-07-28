@@ -1287,7 +1287,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .ag-hero { display: flex; align-items: flex-start; gap: .9rem; }
 .ag-hero-main { flex: 1; min-width: 0; }
 .ag-hero-top { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-.ag-hero-top h1 { font-size: 1.5rem; }
+.ag-hero-top .ag-hero-name { font-size: 1.5rem; margin: 0; }
 .ag-scope { font-size: .8rem; color: var(--faint); margin-top: .35rem; }
 .ag-hero-actions { display: flex; gap: .5rem; flex: none; }
 .ag-running {

@@ -545,7 +545,10 @@ export function ProfileDetail({
         <ProfileGlyph a={a} lg />
         <div className="ag-hero-main">
           <div className="ag-hero-top">
-            <h1>{a.name}</h1>
+            {/* The page's ONE h1 is "Agents" (this is a master-detail layout, and
+                every other surface in the app has exactly one). The selected
+                profile is a section within it. */}
+            <h2 className="ag-hero-name">{a.name}</h2>
             <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm>
               {profileRoleLabel(a.name, a.role, a.kind)}
             </Pill>
