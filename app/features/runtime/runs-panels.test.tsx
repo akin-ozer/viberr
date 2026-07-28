@@ -97,6 +97,32 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".logs-bar .pill.blocked")).not.toBeNull();
   });
 
+  // F15-08: the stored `t` is a UTC wall clock and the timeline on the same
+  // page is local. The zone is pinned (CI is UTC) so a console that rendered
+  // `t` verbatim — the bug — cannot satisfy this.
+  it("renders each line's clock in the VIEWER's zone, anchored to the run", () => {
+    const originalTz = process.env.TZ;
+    process.env.TZ = "Europe/Berlin";
+    try {
+      const run = mkRun({
+        state: "idle",
+        lifecycle: "finished",
+        startedAt: "2026-07-28T17:40:00.000Z",
+      });
+      const { container } = render(
+        <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "17:46:46", ev: "text", tag: "agent_message", text: "done" }, raw: "{}" }] }} />,
+      );
+      const stamps = [...container.querySelectorAll(".log-line .lt")].map(
+        (n) => n.textContent,
+      );
+      expect(stamps).toContain("19:46:46");
+      expect(stamps).not.toContain("17:46:46");
+    } finally {
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
+    }
+  });
+
   it("raw toggle renders the stored wire envelope verbatim", () => {
     const raw = '{"type":"system","subtype":"init","session_id":"51d8f0e2"}';
     const { container, getByText, queryByText } = render(

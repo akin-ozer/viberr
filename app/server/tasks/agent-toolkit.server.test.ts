@@ -7,6 +7,9 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { insertUser } from "~/server/auth/user-store.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import { listNotifications } from "~/server/projections/notifications.server";
 import {
   buildAgentToolkit,
   postAgentComment,
@@ -44,6 +47,52 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     // The actor label is the agent ref, not "operator".
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
     expect(row.actorLabel).not.toBe("operator");
+  });
+
+  /**
+   * S5-G3: a mid-run agent comment tags the human it answers (NEW-4). When the
+   * handle matches two people the ladder routes nowhere, and this writer dropped
+   * the ambiguity on the floor — the agent cannot retag itself, so its comment
+   * is the only place a human would ever learn the ping never happened.
+   */
+  it("an AMBIGUOUS @tag in a mid-run agent comment is disclosed on the comment (S5-G3)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const firstName = store.users.arda.name.split(" ")[0]!.toLowerCase();
+
+    await postAgentComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        text: `@${firstName} the migration needs your call before I continue.`,
+      },
+    );
+
+    const posted = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline[0]!;
+    expect(posted.type).toBe("comment");
+    expect(posted.text).toContain("the migration needs your call");
+    expect(posted.text).toContain("nobody was notified");
+    expect(
+      listNotifications(store.db, store.users.arda.id).filter(
+        (n) => n.kind === "mention",
+      ),
+    ).toHaveLength(0);
   });
 
   it("attributes an agent-opened question packet audit to the AGENT", async () => {

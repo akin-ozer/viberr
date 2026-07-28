@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -6,6 +7,12 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { insertUser } from "~/server/auth/user-store.server";
+import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { projectFilePath } from "~/server/files/file-store-root.server";
+import {
+  parseProjectFileContent,
+  serializeProjectFile,
+} from "~/server/files/project-file.server";
 import { rebuildAll } from "./rebuilder.server";
 import { decisionsRequiring } from "./decisions.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
@@ -33,6 +40,21 @@ function seedOpenDecision(
     frontmatter: baseTaskFrontmatter(key, { stage: "review", ...patch }),
     packet: PACKET,
   });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+/** Archive the fixture PROJECT through its canonical file, membership and all
+ *  else untouched — the projection follows the store, as in the real action. */
+function archiveProject(store: ReturnType<typeof setupTestStore>): void {
+  const filePath = projectFilePath(store.slug, store.dataRoot);
+  const { parsed } = parseProjectFileContent(readFileSync(filePath, "utf8"));
+  writeFileAtomic(
+    filePath,
+    serializeProjectFile({
+      ...parsed,
+      frontmatter: { ...parsed.frontmatter, archived: true },
+    }),
+  );
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
@@ -314,6 +336,57 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
     expect(
       decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey),
     ).not.toContain("VIB-305");
+  });
+
+  it("does NOT count a delivered revision with zero verdict-capable engagements (R15-1)", () => {
+    const store = setupTestStore(ctx);
+    // The live hole: no reviewer is ENGAGED, so `acceptanceBlockedReason` has
+    // nothing to require and the task read as acceptance-ready — while the
+    // server's own affordance answered canAccept:false with R15-1's verdict
+    // gate. Home's count and the notifications inbox promised a decision the
+    // accept action then refused.
+    seedAcceptanceReady(store, "VIB-307", {
+      engagements: [
+        {
+          profileId: "developer",
+          backend: "claude",
+          role: "developer",
+          delivers: true,
+          verdictCapable: false,
+        },
+      ],
+      verdicts: [],
+    });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+    // Same shape, one approving verdict from an engaged reviewer → a real
+    // decision again (the gate blocks the unverdicted case, not acceptance).
+    seedAcceptanceReady(store, "VIB-307");
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
+    ).toEqual(["acceptance"]);
+  });
+
+  it("does NOT count delivered work that has no review PR (R15-1 gate 1)", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-308", { pr: null });
+    expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+  });
+
+  it("an ARCHIVED PROJECT yields no decisions at all — it is read-only (R6-3)", () => {
+    const store = setupTestStore(ctx);
+    seedAcceptanceReady(store, "VIB-309");
+    seedOpenDecision(store, "VIB-310");
+    expect(
+      decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.taskKey).sort(),
+    ).toEqual(["VIB-309", "VIB-310"]);
+
+    archiveProject(store);
+
+    const after = decisionsRequiring(store.db, store.users.murat.id);
+    expect(after.mine).toHaveLength(0);
+    // Not an override case either: nobody can act inside an archived project.
+    expect(after.overrideEligible).toHaveLength(0);
+    expect(decisionsRequiring(store.db, store.users.arda.id).mine).toHaveLength(0);
   });
 
   it("a non-member ORG ADMIN gets acceptance as overrideEligible, never `mine`", () => {

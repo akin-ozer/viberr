@@ -169,18 +169,17 @@ describe("loader — runtime projection shape", () => {
    * a 403 body). One policy: members see the console, everyone else keeps the
    * honest run summary.
    */
-  it("UI-30: a NON-MEMBER gets the run summary without lines, raw envelopes or sid", async () => {
-    const { runtime, runsVisible } = await runLoader("VIB-142", ids.deniz);
-    expect(runsVisible).toBe(false);
-    const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
-    // The summary strip survives — who ran, on what backend, how it ended.
-    expect(run).toMatchObject({ backend: "codex", state: "done" });
-    // The sensitive material does not.
-    expect(run.lines).toEqual([]);
-    expect(run.raw).toEqual([]);
-    expect(run.lineCount).toBe(0);
-    expect(run.sid).toBeNull();
-    expect(run.exportable).toBe(false);
+  it("R15-4: a NON-MEMBER does not reach the task page at all", async () => {
+    // This used to assert the reduced projection a non-member received (UI-30's
+    // summary-without-console). R15-4 moved the boundary one step out: a
+    // non-member cannot open a project's task, so there is no projection to
+    // reduce. The refusal is the layout's byte-identical unknown-slug 404, and
+    // it has to live on THIS loader too — single-fetch honors `?_routes=`, so
+    // the child loader can be invoked without its parent's gate.
+    await expect(runLoader("VIB-142", ids.deniz)).rejects.toMatchObject({
+      init: { status: 404 },
+      data: "No project at projects/viberr-core.",
+    });
   });
 
   it("UI-30: a project MEMBER still gets the full console", async () => {

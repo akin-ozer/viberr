@@ -2,14 +2,16 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
-import { getEnv } from "./config/env.server";
+import { getEnv, type Env } from "./config/env.server";
 import {
   acquireDataRootLock,
+  DataRootLockedError,
   forceDataRootTakeover,
 } from "./db/data-root-lock.server";
 import { getDb } from "./db/sqlite.server";
 import { applyRetention } from "./db/retention.server";
 import { startEventPublisher } from "./events/event-publisher.server";
+import { armProcessShutdown } from "./events/sse-broker.server";
 import {
   DATA_ROOT_SUBDIRS,
   ensureDataRootDirs,
@@ -122,6 +124,50 @@ export async function reconcileRestartedWork(db: DatabaseSync): Promise<void> {
   }
 }
 
+/** Where the boot refusal is printed and how the process ends. Injected by the
+ *  test, which cannot let a real `process.exit` take the worker with it. */
+export interface BootRefusalIo {
+  write: (message: string) => void;
+  exit: (code: number) => void;
+}
+
+const PROCESS_REFUSAL_IO: BootRefusalIo = {
+  write: (message) => void process.stderr.write(message),
+  exit: (code) => void process.exit(code),
+};
+
+/**
+ * Take the data root's single-writer lock, or END the boot with the refusal on
+ * stderr (B-FD1/G1).
+ *
+ * `bootServer` is awaited from `entry.server.tsx` MODULE SCOPE, so an escaping
+ * throw surfaces as an SSR module-init stack trace: the operator sees a React
+ * Router crash page instead of the one message that says which process holds
+ * the root and how to take it over. The refusal is the whole diagnosis, so it
+ * gets printed and the process exits 1 — a refusal to boot, not a crash.
+ * Anything else still throws: an unexpected failure must not read as "held".
+ */
+export function takeDataRootWriterLock(
+  env: Pick<Env, "VIBERR_FORCE_DATA_ROOT_LOCK">,
+  opts: {
+    io?: BootRefusalIo;
+    /** Test override; production takes the configured data root. */
+    dataRoot?: string;
+  } = {},
+): void {
+  const io = opts.io ?? PROCESS_REFUSAL_IO;
+  try {
+    acquireDataRootLock({
+      force: forceDataRootTakeover(env),
+      ...(opts.dataRoot ? { dataRoot: opts.dataRoot } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof DataRootLockedError)) throw error;
+    io.write(`${error.message}\n`);
+    io.exit(1);
+  }
+}
+
 /**
  * One-time server startup: validates the environment (fail fast with a
  * clear message), opens the database (applying pending migrations), seeds
@@ -154,8 +200,13 @@ export async function bootServer(): Promise<void> {
   // process per data root, ever. A second writer is not a slow path, it is
   // corruption (WAL clobbering over a shared mount, per-process run handles
   // finalizing each other's runs), and it has happened twice on this project.
-  // Throwing here stops the boot with a message naming the holder.
-  acquireDataRootLock({ force: forceDataRootTakeover(env) });
+  // A held root stops the boot with a message naming the holder.
+  takeDataRootWriterLock(env);
+  // …and arm the signal handler that RELEASES it. Registration used to ride on
+  // the first SSE publish/connect, so a warm store that emitted nothing on boot
+  // shut down without ever running it — leaving the lock behind for the next
+  // container to refuse.
+  armProcessShutdown();
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks
   // them — before anything reads them. Idempotent and best-effort (never blocks

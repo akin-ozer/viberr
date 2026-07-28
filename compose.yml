@@ -1,6 +1,13 @@
 services:
   app:
     build: .
+    # STABLE identity across container recreation (B-FD1): the data-root writer
+    # lock records its holder's hostname, and a lock from a DIFFERENT host is
+    # refused — the one host it cannot probe for liveness. Compose's default
+    # hostname is the container id, so every `down && up` came back as a
+    # stranger to its own leftover lock. Pinned, a recreated container probes
+    # its predecessor's pid and reclaims a lock the shutdown could not release.
+    hostname: viberr
     env_file: .env
     environment:
       # Force the container-internal values even when .env carries the dev

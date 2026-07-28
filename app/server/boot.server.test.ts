@@ -1,5 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { createTestDbContext } from "../../test-support/test-db";
 
 /**
  * P14-RT-09: the boot reconcile chain is ORDERED.
@@ -42,7 +45,9 @@ vi.mock("./tasks/workspace-retention.server", async () => {
   return { ...actual, reclaimTerminalTaskWorkspaces };
 });
 
-const { reconcileRestartedWork } = await import("./boot.server");
+const { reconcileRestartedWork, takeDataRootWriterLock } = await import(
+  "./boot.server"
+);
 
 /** The chain only passes the handle through — no query runs in these tests. */
 const db = {} as DatabaseSync;
@@ -52,6 +57,74 @@ beforeEach(() => {
   recoverUnreactedAgentRuns.mockClear();
   recoverStrandedOperatorPlans.mockClear();
   reclaimTerminalTaskWorkspaces.mockClear();
+});
+
+/**
+ * G1: a held data root must END the boot with the refusal MESSAGE. `bootServer`
+ * is awaited from entry.server.tsx module scope, so an escaping throw reaches
+ * the operator as an SSR module-init stack instead — the one text that names the
+ * holder and the two remedies never gets read.
+ */
+describe("takeDataRootWriterLock (G1)", () => {
+  const lockCtx = createTestDbContext();
+  afterEach(lockCtx.cleanup);
+
+  function foreignHostLock(): string {
+    const dataRoot = lockCtx.makeTempDir();
+    mkdirSync(path.join(dataRoot, "state"), { recursive: true });
+    // The container-vs-host shape: a lock left by a host this process cannot
+    // probe for liveness, which is exactly what a recreated container found.
+    writeFileSync(
+      path.join(dataRoot, "state", "writer.lock"),
+      JSON.stringify({
+        pid: 1,
+        hostname: "some-dead-container",
+        startedAt: "2026-07-28T09:00:00.000Z",
+      }),
+    );
+    return dataRoot;
+  }
+
+  it("prints the readable refusal and exits 1 instead of throwing an SSR crash", () => {
+    const written: string[] = [];
+    const exits: number[] = [];
+
+    expect(() =>
+      takeDataRootWriterLock(
+        { VIBERR_FORCE_DATA_ROOT_LOCK: undefined },
+        {
+          dataRoot: foreignHostLock(),
+          io: {
+            write: (message) => void written.push(message),
+            exit: (code) => void exits.push(code),
+          },
+        },
+      ),
+    ).not.toThrow();
+
+    expect(exits).toEqual([1]);
+    const message = written.join("");
+    expect(message).toContain("Refusing to boot");
+    expect(message).toContain("some-dead-container");
+    expect(message).toContain("different host");
+    expect(message).toContain("VIBERR_FORCE_DATA_ROOT_LOCK=1");
+    expect(message.endsWith("\n")).toBe(true);
+  });
+
+  it("the force override boots through the same refusal", async () => {
+    const exits: number[] = [];
+    takeDataRootWriterLock(
+      { VIBERR_FORCE_DATA_ROOT_LOCK: "1" },
+      {
+        dataRoot: foreignHostLock(),
+        io: { write: () => {}, exit: (code) => void exits.push(code) },
+      },
+    );
+    expect(exits).toEqual([]);
+    // A forced boot really holds the root afterwards — give it back.
+    const { releaseDataRootLock } = await import("./db/data-root-lock.server");
+    releaseDataRootLock();
+  });
 });
 
 describe("reconcileRestartedWork (P14-RT-09)", () => {

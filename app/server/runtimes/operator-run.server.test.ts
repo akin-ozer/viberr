@@ -1006,6 +1006,53 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("MUST NOT `transition_stage` forward");
   });
 
+  it("F15-14: the GOAL-EDIT turn carries the gate — a still-vague edit buys no move", () => {
+    // The turn right after a human edits a vague goal is where the gate is most
+    // needed, and it had its own branch that returned before the gate spliced in.
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "goal-updated");
+    expect(prompt).toContain("The goal was edited");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+    expect(prompt).toContain("MUST NOT `transition_stage` forward");
+    // Still stage-scoped: a work-stage goal edit gets the plain branch.
+    expect(
+      operatorPrompts.buildOperatorTurnPrompt(
+        snap({ stage: "impl", stageName: "In Progress", goal: "Ship the parser." }),
+        "goal-updated",
+      ),
+    ).not.toContain("TRIAGE QUALITY GATE");
+  });
+
+  it("F15-14: the Codex goal-edit turn carries it too", () => {
+    const prompt = operatorPrompts.buildCodexOperatorPrompt(snap(), "goal-updated");
+    expect(prompt).toContain("TRIAGE QUALITY GATE");
+  });
+
+  it("S3-1: a question answered while a packet is open must not open a SECOND one", () => {
+    // Each queued question drains as its own governed turn and
+    // `open_decision_packet` REPLACES the open packet — the human answering the
+    // first is then told their decision "was replaced by a newer one".
+    const withPacket = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ stage: "impl", stageName: "In Progress", openPacket: true }),
+      "manual",
+      "@operator should we ship without the migration?",
+      undefined,
+      "Arda",
+    );
+    expect(withPacket).toContain("A decision packet is ALREADY OPEN");
+    expect(withPacket).toContain("REPLACES the open one");
+    expect(withPacket).toContain("ONE reply that answers everything quoted");
+    // No open packet → no clause, so the turn never invents a packet to defer to.
+    expect(
+      operatorPrompts.buildOperatorTurnPrompt(
+        snap({ stage: "impl", stageName: "In Progress" }),
+        "manual",
+        "@operator should we ship without the migration?",
+        undefined,
+        "Arda",
+      ),
+    ).not.toContain("A decision packet is ALREADY OPEN");
+  });
+
   it("B-WF3: a scheduled run says so and quotes the note that scheduled it", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       snap({ stage: "impl", stageName: "In Progress" }),
@@ -1145,6 +1192,34 @@ describe("pending trigger queue", () => {
         'moved this task from "Ready" to "In Progress"',
       );
     });
+  });
+
+  it("S3-1: consecutive questions from the SAME human are ONE turn", async () => {
+    await drive({ trigger: "manual" });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator first question",
+      humanCommentBy: "Arda",
+    });
+    await drive({
+      trigger: "manual",
+      humanComment: "@operator and while you are at it, the second",
+      humanCommentBy: "Arda",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    // ONE follow-up drive carrying BOTH messages — not two governed turns, each
+    // able to open a packet that replaces the other's.
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain("first question");
+    });
+    expect(adapter3.pending?.spec.prompt).toContain("the second");
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(operatorRuns()).toHaveLength(2);
+    expect(adapter3.pending).toBeNull();
   });
 
   it("B-OP2: two queued questions both get a turn, oldest first", async () => {

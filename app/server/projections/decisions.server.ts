@@ -29,8 +29,11 @@ import { isTerminalStage, resolveStageRoles } from "~/shared/workflow/stage-role
  * inherits it. The acceptance predicate mirrors the review queue's `isReady`:
  * the resolved review stage, `waiting = human`, no projected acceptance block
  * (`validation_block_reason` — failing verdict / awaiting reviewer / no
- * delivered revision), and a review PR that was not closed unmerged (a rejected
- * PR needs a rework/reopen/archive call, not acceptance).
+ * delivered revision / R15-1's verdict gate on delivered work), and a review PR
+ * that was not closed unmerged (a rejected PR needs a rework/reopen/archive
+ * call, not acceptance). The gate reaches both queues through the PROJECTION
+ * (rebuilder.server.ts `acceptanceBlockReason`) rather than being re-derived
+ * here, so this predicate and the server's refusal cannot drift apart.
  *
  * Member-scoping (the fix): a decision is `mine` iff the user can actually act
  * on it — maintainer+ on that project (resolve-packet / accept-completion /
@@ -94,7 +97,12 @@ export function decisionsRequiring(
   // leftover packet/recommendation is a resolved decision, not a pending one)
   // and each project's RESOLVED review stage (the acceptance boundary — never
   // the literal id "review", which a customized board need not use).
-  const projects = listProjects(db);
+  // An ARCHIVED PROJECT is read-only (R6-3): `requireProjectMutable` refuses
+  // every governed mutation inside it and `resolveAcceptanceAffordance` denies
+  // outright, so nothing in one is a decision anybody can act on. Dropping the
+  // project here covers all three kinds at once — the task-level `archived = 0`
+  // filters below only ever caught individually-archived tasks.
+  const projects = listProjects(db).filter((p) => !p.archived);
   const stagesBySlug = new Map(projects.map((p) => [p.slug, p.stages]));
   const reviewIdBySlug = new Map(
     projects.map((p) => [p.slug, resolveStageRoles(p.stages, p.workflow).reviewId]),

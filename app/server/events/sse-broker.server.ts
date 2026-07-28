@@ -1,4 +1,5 @@
 import type { SseEvent } from "~/schemas/sse-event.schema";
+import { releaseDataRootLock } from "~/server/db/data-root-lock.server";
 import { shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 
@@ -24,8 +25,8 @@ import { logger } from "~/server/logging/logger.server";
  *   buffer window (or a restart reset ids) the client gets `stream.resync`
  *   and revalidates once instead.
  * - HMR-safe singleton (global-symbol state, same pattern as getDb()) +
- *   graceful shutdown: SIGINT/SIGTERM closes every connection, checkpoints and
- *   closes the database (P13-D-43), then re-raises the signal for the default
+ *   graceful shutdown: SIGINT/SIGTERM runs `runProcessShutdown` (connections,
+ *   database, data-root writer lock), then re-raises the signal for the default
  *   handler. This is the app's only signal handler, so it is the process
  *   shutdown hook, not just the SSE one.
  *
@@ -147,18 +148,8 @@ function getState(): BrokerState {
     cache[BROKER_KEY] = state;
   }
   if (!state.signalsRegistered && process.env.NODE_ENV !== "test") {
-    // Graceful shutdown: open SSE responses otherwise keep the prod server's
-    // sockets alive past the signal. Close everything, then re-raise so the
-    // default (or the dev server's own) handler terminates the process.
-    //
-    // P13-D-43: this is the app's ONLY signal handler, so the database close
-    // belongs here too — `closeDb()` had no non-test caller and nothing ever
-    // checkpointed the WAL, leaving `projection.sqlite-wal`/`-shm` (which hold
-    // unrebuildable users/sessions/PATs rows) beside the main file on exit.
-    // Sockets first, then the database, then the re-raise — unchanged.
     const shutdown = (signal: NodeJS.Signals) => {
-      closeAllSseConnections();
-      shutdownDatabase();
+      runProcessShutdown();
       process.kill(process.pid, signal);
     };
     process.once("SIGINT", shutdown);
@@ -331,6 +322,42 @@ export function publishSseEvent(event: SseEvent, route: SseRoute): number {
 }
 
 // ---------------------------------------------------------------- teardown
+
+/**
+ * Everything the process must do before it dies, in order. Exported because the
+ * signal handler itself ends in a re-raise (unrunnable in a test), while THIS is
+ * the part that has to be right.
+ *
+ * - Sockets first: open SSE responses otherwise keep the prod server's sockets
+ *   alive past the signal.
+ * - Then the database (P13-D-43): this is the app's ONLY signal handler, so the
+ *   close belongs here — nothing else ever checkpointed the WAL, leaving
+ *   `projection.sqlite-wal`/`-shm` (which hold unrebuildable users/sessions/PATs
+ *   rows) beside the main file on exit.
+ * - Then the data-root writer lock (B-FD1/G1): the handler re-raises the signal,
+ *   so `process.once("exit")` NEVER fires on SIGINT/SIGTERM and the lock file
+ *   survived every `docker compose stop`. The next `up` gets a new hostname and
+ *   `classifyLock` refuses a foreign-host lock it cannot probe — the app never
+ *   booted again. Last, so the lock outlives the final database write.
+ */
+/**
+ * Arm the SIGINT/SIGTERM handler eagerly, from boot.
+ *
+ * Registration used to happen lazily inside `getState()`, whose only callers
+ * are the publish/connect paths — so on a warm store, where the boot rescan
+ * emits nothing and no client has connected yet, `docker compose stop` ran NO
+ * handler at all: no WAL checkpoint and no writer-lock release, which is the
+ * exact state the release was written to end.
+ */
+export function armProcessShutdown(): void {
+  getState();
+}
+
+export function runProcessShutdown(): void {
+  closeAllSseConnections();
+  shutdownDatabase();
+  releaseDataRootLock();
+}
 
 /** Graceful shutdown / test teardown: closes every connection. */
 export function closeAllSseConnections(): void {

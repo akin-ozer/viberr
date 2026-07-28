@@ -74,7 +74,13 @@ import {
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
-import { notifyMentionedUsers } from "./mention-notify.server";
+import { withheldAgentGrants } from "~/features/agents/capability-catalog";
+import {
+  ambiguousMentionHandles,
+  ambiguousMentionNote,
+  notifyMentionedUsers,
+  withAmbiguityDisclosure,
+} from "./mention-notify.server";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -706,8 +712,24 @@ export async function appendComment(
   );
   const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
   const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  // B-FD2 (H3): a handle that matched several people notifies NOBODY. The
+  // author is the only one who can retag and is still on the page, so the
+  // non-delivery lands next to their comment in the same write — resolved
+  // BEFORE it, since the fan-out below runs after the file is already saved.
+  const ambiguousHandles = ambiguousMentionHandles(db, text);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
+    if (ambiguousHandles.length > 0) {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text: ambiguousMentionNote(ambiguousHandles),
+        toAgent: false,
+        evidence: null,
+      });
+    }
     if (compactOn) {
       parsed.timeline = compactTimelineEvents(
         parsed.timeline,
@@ -936,9 +958,13 @@ export async function commentToAgent(
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
   // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
-  const { agentMentionHandle, resolveMentionedAgent, resumeWorkdir } = await import(
-    "./agent-reply.server"
-  );
+  const {
+    agentMentionHandle,
+    ambiguousBackendHandle,
+    ambiguousBackendHandleNote,
+    resolveMentionedAgent,
+    resumeWorkdir,
+  } = await import("./agent-reply.server");
   const target = resolveMentionedAgent(
     db,
     ctx,
@@ -957,6 +983,43 @@ export async function commentToAgent(
   );
 
   if (!target) {
+    // B-AG2: `@claude` on a project running two claude profiles engages NOBODY
+    // — the refusal is right, but on its own it is a silent drop: no run, no
+    // tint, no trace, while the composer still offers the handle. Say which
+    // profiles the runtime handle covers so the human can re-tag precisely.
+    const ambiguous = ambiguousBackendHandle(ctx, input.projectSlug, input.text);
+    if (ambiguous) {
+      await updateTaskFile(
+        taskRef(ctx, input.projectSlug, input.taskKey),
+        (parsed) => {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text: ambiguousBackendHandleNote(ambiguous),
+            toAgent: false,
+            evidence: null,
+          });
+        },
+      );
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      // Its own action id: the comment itself is already audited as
+      // `task.comment`, and re-using that id would double-count the comment in
+      // every action-keyed projection that reads it.
+      recordAudit(db, {
+        action: "task.comment.unrouted",
+        actor: { userId: actor.userId, label: actor.label },
+        subjectKind: "task",
+        subjectId: input.taskKey,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        details: {
+          ambiguousBackendHandle: ambiguous.backend,
+          candidates: ambiguous.candidates.map((c) => c.profileId).join(", "),
+        },
+      });
+    }
     return { ...base, agent: null, triggered: null, logThreadId: null, runtimeDenied: false };
   }
 
@@ -1284,6 +1347,7 @@ type PreparedReply =
 
 /** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   actorRef: FileActorRef,
@@ -1312,7 +1376,11 @@ async function prepareAgentReplyEvent(
       type: "comment",
       actor: actorRef,
       title: null,
-      text: separated,
+      // The reply directive tells the agent to tag the human it answers, so an
+      // ambiguous name is a NEW-4 failure with no other surface: the agent
+      // cannot retag itself and the fan-out below would drop the handle in
+      // silence (B-FD2 / S5-G3).
+      text: withAmbiguityDisclosure(db, separated),
       toAgent: false,
       evidence: null,
     },
@@ -1354,6 +1422,7 @@ export async function postAgentReplyComment(
   },
 ): Promise<void> {
   const prepared = await prepareAgentReplyEvent(
+    db,
     ctx,
     input.projectSlug,
     input.actorRef,
@@ -1713,6 +1782,7 @@ export async function recordAgentCompletion(
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
   const prepared = await prepareAgentReplyEvent(
+    db,
     ctx,
     projectSlug,
     actorRef,
@@ -2065,10 +2135,17 @@ export async function applyAgentCompletionEffects(
     takeStagedOutcome,
   } = await import("./agent-outcome.server");
   // Gates resolve at COMPLETION time from the live deployment (recovery gets
-  // identical behavior); an undeployed profile falls back to the catalog
-  // defaults — verdict is OFF unless a profile explicitly grants it (F10-14
-  // removed the old "supporting → verdict on" implicit rule).
-  let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] = [];
+  // identical behavior); verdict is OFF unless a profile explicitly grants it
+  // (F10-14 removed the old "supporting → verdict on" implicit rule).
+  //
+  // R15-7 (owner ruling, 2026-07-28): a profile that CANNOT be resolved is
+  // fully conservative HERE too, not just on the run path. This used to start
+  // from `[]`, which `resolveAgentCollab` reads through the catalog defaults as
+  // comment/ask/evidence GRANTED — so a ghost profile's finished run could
+  // still open a question packet and assert evidence rows in a vanished
+  // profile's name, the exact posture the run layer had just withheld.
+  let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] =
+    withheldAgentGrants();
   if (input.profileId) {
     try {
       const { resolveDeployedSpecialist } = await import("./specialist-run.server");
@@ -2078,7 +2155,7 @@ export async function applyAgentCompletionEffects(
         input.profileId,
       ).capabilities;
     } catch {
-      // undeployed — defaults apply
+      // undeployed — everything stays withheld
     }
   }
   const collab = resolveAgentCollab(grants);
@@ -2353,15 +2430,29 @@ export async function applyAgentCompletionEffects(
   // Compare + hand off the RESOLVED prose reply (a Codex envelope run's
   // fullText is raw JSON — the stored comment and the operator both see the
   // summary, so both sides of the comparison must too).
+  // …and through the SAME unconditional transform the stored comment carried:
+  // `prevReply` is read back from the stored comment, which rides
+  // `withAmbiguityDisclosure`. Comparing the disclosed stored form against the
+  // RAW reply meant a verbatim-repeating agent whose report tags an ambiguous
+  // name never tripped `noProgress` — the operator kept reacting (a costed
+  // operator run + a costed agent run per cycle) until the depth cap, and the
+  // packet that finally opened named the wrong reason. (The evidence-separation
+  // half of this asymmetry is per-project and pre-dates this; the disclosure is
+  // unconditional, so it fires on exactly the repeated text.)
+  const replyForCompare = replyText
+    ? withAmbiguityDisclosure(db, replyText)
+    : replyText;
   const shouldReact = operatorShouldReactToReply(
     finished.state,
-    replyText,
+    replyForCompare,
     prevReply,
     currentDepth,
   );
   if (!shouldReact) {
     const noProgress =
-      !!replyText && prevReply !== null && prevReply.trim() === replyText.trim();
+      !!replyForCompare &&
+      prevReply !== null &&
+      prevReply.trim() === replyForCompare.trim();
     const depthCapped =
       !!replyText &&
       !noProgress &&
@@ -2505,12 +2596,16 @@ export async function operatorPromptAgent(
   //    is visible on the board before the agent starts streaming. The comment
   //    @mentions the agent by handle, so it reads as the operator directing that
   //    agent by name ("@dev implement …").
+  // The POSTED form carries the ambiguity disclosure; the run's directive stays
+  // exactly what the operator wrote (S5-G3 — the note addresses the humans
+  // reading the timeline, not the agent about to work).
+  const commentText = withAmbiguityDisclosure(db, directive);
   const comment: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
     actor: { kind: "operator" },
     title: null,
-    text: directive,
+    text: commentText,
     toAgent: true,
     evidence: null,
   };
@@ -2523,7 +2618,7 @@ export async function operatorPromptAgent(
   // an operator directive ("…coordinate with @Arda") was never notified. The
   // agent's own @handle is a reserved handle and routes without notifying.
   notifyMentionedUsers(db, {
-    text: directive,
+    text: commentText,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     from: OPERATOR_NOTIFY_FROM,

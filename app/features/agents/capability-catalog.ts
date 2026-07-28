@@ -118,9 +118,16 @@ export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
  * F15-05/F15-06: the profile detail panel used to pour every stored grant into
  * its three capability columns, so the matrix-only advisory ids (`group: null` —
  * "Approve the review", "Read the repository & diff", …) rendered as held
- * authority beside the real ones. The matrix already segregates them ("Other
- * actions"); this is the same partition, so both surfaces read one policy the
- * same way.
+ * authority beside the real ones. The matrix segregates the same ids under
+ * "Other actions", and both surfaces read the SAME stored grants through the
+ * one server-side interpretation (`capabilitiesToActionLabels`).
+ *
+ * The two partitions are not byte-identical: this set is the union over BOTH
+ * kinds (an operator-only id counts as governed in the panel), while the
+ * matrix's `known` set is the agent editor catalog alone — so an operator
+ * capability sits in a panel column but under the matrix's "Other actions".
+ * The matrix renders specialists beside the operator, which is the surface that
+ * would otherwise mis-file the operator's own governed grants.
  */
 export const GOVERNED_CAP_LABELS: ReadonlySet<string> = new Set(
   UNIFIED_CAP_CATALOG.filter((e) => e.group !== null).map((e) => e.label),

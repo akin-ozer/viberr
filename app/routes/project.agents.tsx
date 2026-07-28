@@ -106,6 +106,12 @@ export async function action({ request, params }: Route.ActionArgs) {
         ok: true as const,
         toast: `Profile "${result.name}" created — available for future assignments`,
         profileId: result.profileId,
+        // B-AG1: a delivery-headline decision the save had to make is NOT a
+        // detail for the audit log alone. A `withheld` notice means the profile
+        // was saved exactly as asked and therefore cannot deliver — the admin
+        // sees that next to the success toast instead of discovering it when a
+        // run silently refuses to push.
+        ...(result.notice ? { notice: result.notice } : {}),
       };
     }
     if (intent === "deploy-profile") {
@@ -121,6 +127,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         ok: true as const,
         toast: `"${result.name}" added from the global library — the operator can assign it now`,
         profileId: result.profileId,
+        ...(result.notice ? { notice: result.notice } : {}),
       };
     }
     if (intent === "update-profile") {
@@ -137,6 +144,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         ok: true as const,
         toast: `Profile "${result.name}" updated — changes apply to future assignments`,
         profileId: result.profileId,
+        ...(result.notice ? { notice: result.notice } : {}),
       };
     }
     if (intent === "delete-profile") {

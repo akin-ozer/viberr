@@ -504,11 +504,21 @@ export function ProfileDetail({
     recommend: a.actions.recommend.filter(isGoverned),
     forbidden: a.actions.forbidden.filter(isGoverned),
   };
+  // The advisory line keeps each label's MODE. Concatenating the three buckets
+  // lost it, so an advisory capability an admin explicitly set to human-only
+  // read exactly like one left at "acts directly" — the matrix still tells them
+  // apart, which is the F15-05 disagreement class one level quieter.
   const advisory = [
-    ...a.actions.direct,
-    ...a.actions.recommend,
-    ...a.actions.forbidden,
-  ].filter((label) => !isGoverned(label));
+    ...a.actions.direct.map((label) => ({ label, mode: CAP_META.direct.label })),
+    ...a.actions.recommend.map((label) => ({
+      label,
+      mode: CAP_META.recommend.label,
+    })),
+    ...a.actions.forbidden.map((label) => ({
+      label,
+      mode: CAP_META.forbidden.label,
+    })),
+  ].filter(({ label }) => !isGoverned(label));
   // P14-KM-11: what the store actually holds, per resource kind. Absent catalog
   // ⇒ undefined ⇒ nothing is marked missing (see ResGroup).
   const known = (key: string): ReadonlySet<string> | undefined => {
@@ -589,8 +599,10 @@ export function ProfileDetail({
           <div className="def-note">
             <Icon name="shield" />
             <span>
-              Advisory guidance, not policy: {advisory.join(" · ")}. These
-              describe how the profile works; nothing in the runtime reads them.
+              Advisory guidance, not policy:{" "}
+              {advisory.map((x) => `${x.label} (${x.mode.toLowerCase()})`).join(" · ")}.
+              These describe how the profile works; nothing in the runtime reads
+              them.
             </span>
           </div>
         )}
@@ -846,7 +858,16 @@ export function LiveRoster({
 // ------------------------------------------------------------------- page
 
 type ProfileActionResult =
-  | { ok: true; toast: string; profileId: string }
+  | {
+      ok: true;
+      toast: string;
+      profileId: string;
+      /** A delivery-headline decision the save had to make (B-AG1). `withheld`
+       *  = the profile was saved as asked and cannot deliver until the headline
+       *  capability is granted — shown as its own failure-toned toast, because
+       *  the green "updated" tick alone reads as "nothing to see here". */
+      notice?: { kind: "repaired" | "withheld"; message: string };
+    }
   | { ok: false; error: string };
 
 export function AgentsPage({
@@ -966,6 +987,9 @@ export function AgentsPage({
     const d = fetcher.data;
     if (d.ok) {
       push(d.toast);
+      if (d.notice) {
+        push(d.notice.message, d.notice.kind === "withheld" ? "error" : "success");
+      }
       setCreating(false);
       setLibraryOpen(false);
       setEditing(null);

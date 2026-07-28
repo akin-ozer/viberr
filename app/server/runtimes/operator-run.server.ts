@@ -174,7 +174,9 @@ function inFlightOperatorRun(
  * question that exists NOWHERE else in the run's input, so human triggers are
  * kept in a queue and drained oldest-first ahead of the machine trigger
  * (B-OP2: a transition landing behind a queued question used to overwrite it,
- * and the person was never answered).
+ * and the person was never answered). Consecutive comments from the SAME
+ * author merge into one queued turn (see queueOperatorTrigger) — one person's
+ * three-message burst is one question, not three governed drives.
  */
 interface OperatorLeaseState {
   held: Map<
@@ -231,11 +233,31 @@ interface PendingTriggers {
  *  every dropped one still sits on the timeline the next drive reads. */
 const MAX_PENDING_HUMAN_TRIGGERS = 8;
 
-/** Queue a trigger that arrived while the lease was held. */
+/**
+ * Queue a trigger that arrived while the lease was held.
+ *
+ * Consecutive comments from the SAME person become ONE queued turn. Every
+ * queued question is a full governed turn — a run, a set of governed actions,
+ * and possibly a decision packet that REPLACES the open one (the human
+ * answering the first is then told their decision "was replaced by a newer
+ * one") — so someone typing three messages in a row must cost one turn, not
+ * three. Different authors are never merged: each is owed their own answer, in
+ * arrival order.
+ */
 function queueOperatorTrigger(key: string, input: RunOperatorInput): void {
   const state = leaseState();
   const queue = state.pending.get(key) ?? { latest: null, humanComments: [] };
   if (input.humanComment?.trim()) {
+    const previous = queue.humanComments[queue.humanComments.length - 1];
+    const by = input.humanCommentBy?.trim();
+    if (by && previous && previous.humanCommentBy?.trim() === by) {
+      queue.humanComments[queue.humanComments.length - 1] = {
+        ...input,
+        humanComment: `${previous.humanComment?.trim()}\n\n${input.humanComment.trim()}`,
+      };
+      state.pending.set(key, queue);
+      return;
+    }
     queue.humanComments.push(input);
     while (queue.humanComments.length > MAX_PENDING_HUMAN_TRIGGERS) {
       const dropped = queue.humanComments.shift();
@@ -577,9 +599,10 @@ export async function runOperator(
 
   // Single-flight per task (NFR16, B6): one operator coordinates a task at a
   // time. A trigger arriving while the lease is held — e.g. create-time
-  // auto-invoke racing an "@operator …" comment — is QUEUED (newest wins) and
-  // fired when the in-flight coordination truly ends, so no trigger is ever
-  // silently dropped and no two drives overlap. The process lease also covers
+  // auto-invoke racing an "@operator …" comment — is QUEUED (machine triggers
+  // newest-wins, human questions kept in order; see the lease doc) and fired
+  // when the in-flight coordination truly ends, so no trigger is ever silently
+  // dropped and no two drives overlap. The process lease also covers
   // Codex plan execution after the provider run finishes.
   const leaseKey = leaseKeyFor(input.projectSlug, input.taskKey);
   const lease = leaseState();
@@ -1718,7 +1741,14 @@ function operatorTurnInstruction(
     const by = humanCommentBy?.trim();
     return (
       `A human${by ? ` (${by})` : ""} addressed you directly: "${humanComment.trim()}" Respond from the live task state, ` +
-      "then take only the coordination action it warrants. If none is needed, leave one concise reply." +
+      "then take only the coordination action it warrants — ONE reply that answers everything quoted above, not one per message. If no action is needed, leave one concise reply." +
+      // A queued question drains as its own governed turn, and
+      // `open_decision_packet` REPLACES the open packet: a second packet
+      // strands whoever is mid-answer on the first ("This decision was
+      // replaced by a newer one"). Same clause as the pr-diverged branch.
+      (snapshot.openPacket
+        ? " A decision packet is ALREADY OPEN on this task and may already cover what they are asking: answer from it, and amend or `resolve_decision_packet` it rather than opening a second one — a new packet REPLACES the open one and strands whoever is answering it. Open a new packet only when the question is genuinely about something else."
+        : "") +
       // NEW-4: an @mention is what notifies the person — an untagged reply
       // lands on the timeline but never pings them.
       (by
@@ -1729,7 +1759,10 @@ function operatorTurnInstruction(
   if (trigger === "goal-updated") {
     return (
       "The goal was edited. If it now supplies the input requested by the open packet, resolve that packet as moot. " +
-      "Continue the current stage using the new goal. If it is still not actionable, state the missing input once; do not open a duplicate packet."
+      "Continue the current stage using the new goal. If it is still not actionable, state the missing input once; do not open a duplicate packet. " +
+      // F15-14: the edit that follows a vague goal is exactly where the gate is
+      // needed — an edit that stays vague must not buy a forward transition.
+      triageQualityGate(snapshot)
     );
   }
   if (trigger === "agent-reply") {

@@ -100,12 +100,49 @@ describe("getMentionables", () => {
     expect(arda.email).toBe(store.users.arda.email);
   });
 
-  it("returns the reserved backend/role handles with labels", () => {
+  it("returns the reserved role handles, and names the profile each backend handle reaches", () => {
     expect(call().reserved).toEqual([
       { handle: "operator", label: "Operator" },
       { handle: "agent", label: "Primary specialist" },
-      { handle: "claude", label: "Claude specialist" },
-      { handle: "codex", label: "Codex specialist" },
+      { handle: "claude", label: "Claude specialist — dev" },
+      { handle: "codex", label: "Codex specialist — qa" },
+    ]);
+  });
+
+  /**
+   * B-AG2: `@claude` names a RUNTIME. With two claude profiles deployed the
+   * resolver engages nobody, so offering the handle promises a target that
+   * cannot be reached — the composer suggested it anyway, and the comment
+   * routed nowhere.
+   */
+  it("does NOT offer a backend handle that covers more than one deployed specialist", () => {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    const claudeSpecialist = (profileId: string, name: string) => ({
+      profileId,
+      capabilities: [],
+      extras: [],
+      definition: {
+        kind: "specialist",
+        name,
+        role: name,
+        backends: ["claude"],
+        model: "claude-sonnet",
+      },
+    });
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        claudeSpecialist("docs-writer", "Docs Writer"),
+        claudeSpecialist("security-reviewer", "Security Reviewer"),
+      ] as never,
+    });
+    const { reserved, agents } = call();
+    expect(reserved.map((r) => r.handle)).toEqual(["operator", "agent", "codex"]);
+    // The precise handles the human must tag instead are still offered.
+    expect(agents.map((a) => a.handle)).toEqual([
+      "docs-writer",
+      "security-reviewer",
     ]);
   });
 
@@ -114,7 +151,7 @@ describe("getMentionables", () => {
       .parsed.frontmatter;
     writeProject(store.dataRoot, { ...fm, agents: [] });
     expect(call().agents).toEqual([]);
-    // Users + reserved still populated.
+    // Users + reserved still populated (no deployment ⇒ no backend is ambiguous).
     expect(call().reserved).toHaveLength(4);
     expect(call().users.length).toBeGreaterThan(0);
   });

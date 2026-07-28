@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { insertUser } from "~/server/auth/user-store.server";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -1399,5 +1400,44 @@ describe("operatorPostComment", () => {
     );
     expect(notes).toHaveLength(1);
     expect(notes[0]!.from).toMatchObject({ kind: "agent", name: "Operator" });
+  });
+
+  /**
+   * S5-G3: the B-FD2 ladder drops an ambiguous handle for EVERY caller, but the
+   * non-delivery note was planned for human comments only — so the operator,
+   * which is explicitly instructed to tag by handle, tagged a name that matched
+   * two people and reached nobody, with no trace anywhere. The old behavior was
+   * noisy and wrong; this one was silent, which is worse.
+   */
+  it("an AMBIGUOUS @tag in an operator comment discloses the non-delivery instead of dropping it (S5-G3)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    insertUser(store.db, {
+      id: "u_arda_second",
+      email: "arda.yilmaz@viberr.test",
+      name: "Arda Yilmaz",
+      role: "member",
+    });
+    const firstName = store.users.arda.name.split(" ")[0]!.toLowerCase();
+    await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${firstName} the reviewer approved — acceptance is yours.`,
+      },
+      authority("supervised"),
+    );
+    const top = task().timeline[0]!;
+    expect(top.actor.kind).toBe("operator");
+    expect(top.text).toContain(`@${firstName}`);
+    expect(top.text).toContain("nobody was notified");
+    // …and it really did notify nobody, so the disclosure is the only signal.
+    expect(
+      listNotifications(store.db, store.users.arda.id).filter(
+        (n) => n.kind === "mention",
+      ),
+    ).toHaveLength(0);
   });
 });

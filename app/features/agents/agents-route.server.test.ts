@@ -463,6 +463,68 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
     });
   });
 
+  /**
+   * B-AG1's other half: the notice reached the AUDIT LOG only. The route dropped
+   * `result.notice` and answered with the plain success toast, so the single
+   * outcome a live admin can produce from the editor (`withheld` — the modal
+   * materializes every capability id, so the headline is never merely absent)
+   * was silent non-repair: the profile saves, cannot deliver, and says nothing.
+   */
+  it("the action result carries the delivery notice so the save is not silently non-repairing (B-AG1)", async () => {
+    const contradictory = (name: string) => ({
+      name,
+      role: "No repo writes",
+      backend: "claude",
+      stages: ["impl"],
+      definition: "Headline explicitly off; scoped delivery left on.",
+      caps: {
+        "execute-code-or-write-repo": "off",
+        "commit-push-branch": "direct",
+      },
+      resources: { skills: [], mcps: [], kb: [] },
+    });
+    const created = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify(contradictory("Silent Dev")),
+    })) as {
+      ok: boolean;
+      toast: string;
+      notice?: { kind: string; message: string };
+    };
+    expect(created.ok).toBe(true);
+    expect(created.notice?.kind).toBe("withheld");
+    expect(created.notice?.message).toContain("cannot deliver");
+
+    // Editing it (the real path an admin walks into a legacy VIB-1 profile on)
+    // reports the same thing rather than a bare "updated" tick.
+    const updated = (await postAction(ids.arda, {
+      intent: "update-profile",
+      profileId: "silent-dev",
+      payload: JSON.stringify(contradictory("Silent Dev")),
+    })) as {
+      ok: boolean;
+      toast: string;
+      notice?: { kind: string; message: string };
+    };
+    expect(updated.ok).toBe(true);
+    expect(updated.notice?.kind).toBe("withheld");
+    expect(updated.notice?.message).toContain("Commit");
+
+    // A profile with nothing to decide carries no notice at all.
+    const clean = (await postAction(ids.arda, {
+      intent: "create-profile",
+      payload: JSON.stringify({
+        ...contradictory("Plain Dev"),
+        caps: { "execute-code-or-write-repo": "direct" },
+      }),
+    })) as { ok: boolean; notice?: unknown };
+    expect(clean.notice).toBeUndefined();
+
+    for (const profileId of ["silent-dev", "plain-dev"]) {
+      await postAction(ids.arda, { intent: "delete-profile", profileId });
+    }
+  });
+
   it("R7-5 — a specialist `recommend` grant coerces to `direct` ('Allowed') on create", async () => {
     // The specialist picker no longer offers `recommend`, but a hostile/legacy
     // form might still submit it. `recommend` is operator-only (runtime-
@@ -778,6 +840,72 @@ describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
       projectSlug: "viberr-core",
       actorUserId: ids.arda,
     });
+  });
+
+  /**
+   * B-AG1's shape, one call site over: the library deploy ran the grants through
+   * `normalizeDeliveryGrants`, which throws the notice away. A template whose
+   * scoped delivery is on while the headline is explicitly off deploys as a
+   * profile that CANNOT deliver, and nothing — toast or audit — said so.
+   */
+  it("deploy-profile reports a contradictory template's delivery withholding (B-AG1 shape)", async () => {
+    const templateId = "withheld-template";
+    const templatePath = path.join(
+      app.dataRoot,
+      "agents",
+      "profiles",
+      `${templateId}.md`,
+    );
+    const { serializeAgentProfile } = await import(
+      "~/server/files/agent-profile-file.server"
+    );
+    writeFileSync(
+      templatePath,
+      serializeAgentProfile({
+        frontmatter: {
+          id: templateId,
+          kind: "specialist",
+          name: "Withheld Template",
+          role: "Probe",
+          desc: "Scoped delivery on, headline off.",
+          icon: "cpu",
+          backends: ["claude"],
+          model: "",
+          scope: "Global base",
+          stages: ["impl"],
+          spanAll: false,
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode: "off" },
+            { capabilityId: "commit-push-branch", mode: "direct" },
+          ],
+          extras: [],
+          resources: { skills: [], mcps: [], kb: [] },
+        },
+        description: "Probe persona.",
+      }),
+      "utf8",
+    );
+
+    const result = (await postAction(ids.arda, {
+      intent: "deploy-profile",
+      profileId: templateId,
+    })) as { ok: boolean; notice?: { kind: string; message: string } };
+    expect(result.ok).toBe(true);
+    expect(result.notice?.kind).toBe("withheld");
+    expect(result.notice?.message).toContain("cannot deliver");
+
+    const audit = listAuditEvents(app.db, {
+      action: "project.agent_profile.deployed",
+    }).find((e) => e.subjectId === templateId)!;
+    expect((audit.details ?? {}) as { deliveryGrants?: string }).toMatchObject({
+      deliveryGrants: "withheld",
+    });
+
+    await postAction(ids.arda, {
+      intent: "delete-profile",
+      profileId: templateId,
+    });
+    rmSync(templatePath, { force: true });
   });
 
   it("refuses a duplicate deploy, an unknown id, and a non-admin", async () => {

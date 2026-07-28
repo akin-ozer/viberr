@@ -1,6 +1,12 @@
+import { existsSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SseEvent } from "~/schemas/sse-event.schema";
 import { sseScopes } from "~/features/live-updates/event-types";
+import {
+  acquireDataRootLock,
+  heldDataRootLock,
+} from "~/server/db/data-root-lock.server";
+import { createTestDbContext } from "../../../test-support/test-db";
 import {
   closeAllSseConnections,
   connectSseClient,
@@ -13,8 +19,11 @@ import {
   resetSseBrokerForTests,
   RING_BUFFER_SIZE,
   routeMatchesConnection,
+  runProcessShutdown,
   type SseScope,
 } from "./sse-broker.server";
+
+const lockCtx = createTestDbContext();
 
 function taskEvent(slug: string, key: string): SseEvent {
   return {
@@ -85,6 +94,7 @@ function connect(
 beforeEach(() => resetSseBrokerForTests());
 afterEach(() => {
   resetSseBrokerForTests();
+  lockCtx.cleanup();
   vi.useRealTimers();
 });
 
@@ -394,5 +404,25 @@ describe("shutdown", () => {
     expect(a.closed).toBe(true);
     expect(b.closed).toBe(true);
     expect(getSseBrokerStats().connections).toBe(0);
+  });
+
+  // G1: the SIGINT/SIGTERM handler ends in a re-raise, so Node's `exit` event
+  // never fires — everything the process owes the disk has to happen HERE. A
+  // stranded writer.lock is what bricks the next `docker compose up`.
+  it("the shutdown sequence closes connections AND releases the data-root writer lock", () => {
+    const dataRoot = lockCtx.makeTempDir();
+    const lock = acquireDataRootLock({
+      dataRoot,
+      self: { pid: 4242, hostname: "viberr", startedAt: "2026-07-28T10:00:00.000Z" },
+      isAlive: () => true,
+    });
+    expect(existsSync(lock.path)).toBe(true);
+    const conn = connect("u1", [{ kind: "user" }]);
+
+    runProcessShutdown();
+
+    expect(conn.closed).toBe(true);
+    expect(existsSync(lock.path)).toBe(false);
+    expect(heldDataRootLock()).toBeNull();
   });
 });

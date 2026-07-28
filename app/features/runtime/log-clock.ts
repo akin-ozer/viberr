@@ -9,14 +9,21 @@
  *
  * The line carries no ISO of its own, so the UTC wall clock is re-anchored to
  * the run's own day and reprojected locally. `anchorIso` is the run's
- * `startedAt`; a run that crosses UTC midnight is handled by picking the
- * calendar day that puts the line NEAREST its anchor.
+ * `startedAt`, and a line is never logged BEFORE its run started — so the day
+ * is picked forward from the anchor, not by nearest distance: a nearest-day
+ * rule sent every line logged more than 12 h after `startedAt` (a long run) to
+ * the previous calendar day, which renders a different wall clock across a DST
+ * edge. With no anchor at all the reference is `now`, where a line can sit on
+ * either side, so nearest-day is the honest rule there.
  */
 
 const UTC_CLOCK = /^(\d{2}):(\d{2}):(\d{2})$/;
 
 const HALF_DAY_MS = 12 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Tolerance for a line whose clock reads just before `startedAt` (the run row
+ *  is written after the provider's first envelopes). Inside it, keep the day. */
+const ANCHOR_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * "17:46:46" (UTC) → "20:46:46" for a UTC+3 viewer. Values that are not a UTC
@@ -31,7 +38,8 @@ export function localLogClock(
   const parts = UTC_CLOCK.exec(t);
   if (!parts) return t;
   const anchor = anchorIso ? new Date(anchorIso) : now;
-  const base = Number.isNaN(anchor.getTime()) ? now : anchor;
+  const anchored = Boolean(anchorIso) && !Number.isNaN(anchor.getTime());
+  const base = anchored ? anchor : now;
   let stamp = Date.UTC(
     base.getUTCFullYear(),
     base.getUTCMonth(),
@@ -41,10 +49,16 @@ export function localLogClock(
     Number(parts[3]),
   );
   // The clock has no date, so a run started at 23:50 UTC logging 00:05 must
-  // land on the NEXT day, not 24h earlier. Snap to whichever calendar day puts
-  // the line within half a day of the anchor.
-  if (stamp - base.getTime() > HALF_DAY_MS) stamp -= DAY_MS;
-  else if (base.getTime() - stamp > HALF_DAY_MS) stamp += DAY_MS;
+  // land on the NEXT day, not 24h earlier.
+  if (anchored) {
+    // Forward from the run's start — a line can only be logged after it.
+    if (stamp < base.getTime() - ANCHOR_SKEW_MS) stamp += DAY_MS;
+  } else {
+    // No anchor: `now` is the reference and the line sits on either side of it,
+    // so take whichever calendar day puts it within half a day.
+    if (stamp - base.getTime() > HALF_DAY_MS) stamp -= DAY_MS;
+    else if (base.getTime() - stamp > HALF_DAY_MS) stamp += DAY_MS;
+  }
   const local = new Date(stamp);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(local.getHours())}:${pad(local.getMinutes())}:${pad(local.getSeconds())}`;

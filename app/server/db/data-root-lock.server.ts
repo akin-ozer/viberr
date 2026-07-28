@@ -1,4 +1,5 @@
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
 import { getEnv, type Env } from "../config/env.server";
@@ -46,6 +47,19 @@ export interface LockHolder {
   hostname: string;
   /** ISO timestamp of when the holder acquired the lock. */
   startedAt: string;
+  /**
+   * Per-PROCESS identity, stable across an HMR module reload (it lives on
+   * `globalThis`) and unique to every new process. `pid` + `hostname` cannot
+   * play this role: `compose.yml` pins the hostname so a recreated container
+   * can probe its predecessor, which makes "same host" trivially true for
+   * every container from that file — and two containers over one data root
+   * routinely land on the same low pid. Without this discriminator the
+   * self-reclaim branch would hand a LIVE holder's lock to a second writer:
+   * the exact corruption the lock exists to prevent.
+   * Absent on locks written before this field existed — those fall through to
+   * the liveness probe, which is the correct answer for them.
+   */
+  bootId?: string;
 }
 
 /** Why an existing lock could not simply be taken. */
@@ -68,7 +82,9 @@ export interface AcquireDataRootLockOptions {
   self?: LockHolder;
   /** Liveness probe for a same-host pid. Injected by tests. */
   isAlive?: (pid: number) => boolean;
-  /** Register a process-exit release. Off in tests (they release explicitly). */
+  /** Publish this as the lock THIS PROCESS holds: released by the `exit` hook
+   *  and by the signal shutdown ({@link releaseDataRootLock}). Off in tests,
+   *  which take many temp-root locks and release them explicitly. */
   releaseOnExit?: boolean;
 }
 
@@ -96,6 +112,49 @@ export class DataRootLockedError extends Error {
   }
 }
 
+/** The lock THIS process holds. A global symbol so an HMR module reload — and
+ *  the shutdown handler, which lives in another module — sees the same one. */
+const HELD_LOCK_KEY = Symbol.for("viberr.dataRootLock");
+
+function heldLockSlot(): Record<symbol, DataRootLock | null | undefined> {
+  return globalThis as unknown as Record<symbol, DataRootLock | null | undefined>;
+}
+
+/** The lock this process holds, or null. */
+export function heldDataRootLock(): DataRootLock | null {
+  return heldLockSlot()[HELD_LOCK_KEY] ?? null;
+}
+
+/** Same global-slot trick, for the per-process identity in the lock file: one
+ *  id per OS process, preserved across an HMR module reload. */
+const BOOT_ID_KEY = Symbol.for("viberr.processBootId");
+
+export function processBootId(): string {
+  const slot = globalThis as unknown as Record<symbol, string | undefined>;
+  const existing = slot[BOOT_ID_KEY];
+  if (existing) return existing;
+  const created = randomUUID();
+  slot[BOOT_ID_KEY] = created;
+  return created;
+}
+
+/**
+ * Release the writer lock this process holds, if any. Idempotent, and safe on a
+ * process that never took one.
+ *
+ * The `exit` hook alone is not enough: the app's signal handler re-raises
+ * SIGINT/SIGTERM (sse-broker.server.ts), whose default action terminates the
+ * process, so Node's `exit` event never fires on a `docker compose stop` or a
+ * Ctrl-C. The lock file then outlives its holder, and because a recreated
+ * container comes up under a NEW hostname, `classifyLock` refuses a foreign-host
+ * lock it cannot probe — the app never boots again until someone deletes the
+ * file inside the volume. So the shutdown path releases explicitly, BEFORE the
+ * re-raise.
+ */
+export function releaseDataRootLock(): void {
+  heldDataRootLock()?.release();
+}
+
 /** Is a takeover forced by the environment? Read by boot, not by `acquire`. */
 export function forceDataRootTakeover(env: Pick<Env, "VIBERR_FORCE_DATA_ROOT_LOCK"> = getEnv()): boolean {
   const raw = env.VIBERR_FORCE_DATA_ROOT_LOCK?.trim().toLowerCase();
@@ -120,7 +179,13 @@ function readHolder(lockPath: string): LockHolder | null {
     const { pid, hostname: host, startedAt } = parsed as Record<string, unknown>;
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
     if (typeof host !== "string" || host.length === 0) return null;
-    return { pid, hostname: host, startedAt: typeof startedAt === "string" ? startedAt : "" };
+    const { bootId } = parsed as Record<string, unknown>;
+    return {
+      pid,
+      hostname: host,
+      startedAt: typeof startedAt === "string" ? startedAt : "",
+      ...(typeof bootId === "string" && bootId ? { bootId } : {}),
+    };
   } catch {
     return null;
   }
@@ -133,8 +198,9 @@ export function classifyLock(
 ): LockVerdict {
   if (!holder) return "unknown-holder";
   // A lock left behind by THIS very process (a re-entrant boot after an HMR
-  // reload that dropped the module state) is ours to reclaim.
-  if (holder.hostname === self.hostname && holder.pid === self.pid) return "stale";
+  // reload that dropped the module state) is ours to reclaim — proven by the
+  // per-process boot id, never by pid+hostname alone (see LockHolder.bootId).
+  if (holder.bootId && holder.bootId === self.bootId) return "stale";
   if (holder.hostname !== self.hostname) return "held";
   return isAlive(holder.pid) ? "held" : "stale";
 }
@@ -190,6 +256,7 @@ export function acquireDataRootLock(
     pid: process.pid,
     hostname: hostname(),
     startedAt: new Date().toISOString(),
+    bootId: processBootId(),
   };
   const isAlive = options.isAlive ?? isProcessAlive;
   const force = options.force ?? false;
@@ -222,10 +289,15 @@ export function acquireDataRootLock(
       continue;
     }
 
+    const tracked = options.releaseOnExit !== false;
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
+      if (tracked) {
+        process.off("exit", release);
+        if (heldDataRootLock() === lock) heldLockSlot()[HELD_LOCK_KEY] = null;
+      }
       try {
         closeSync(fd);
       } catch {
@@ -233,9 +305,15 @@ export function acquireDataRootLock(
       }
       rmSync(lockPath, { force: true });
     };
-    if (options.releaseOnExit !== false) process.once("exit", release);
+    const lock: DataRootLock = { path: lockPath, holder: self, release };
+    if (tracked) {
+      // Both ends of the process's life: `exit` covers a normal return, and the
+      // signal handler calls releaseDataRootLock() before it re-raises.
+      process.once("exit", release);
+      heldLockSlot()[HELD_LOCK_KEY] = lock;
+    }
     logger.info("data-root writer lock acquired", { lockPath, ...self });
-    return { path: lockPath, holder: self, release };
+    return lock;
   }
 
   throw new DataRootLockedError({

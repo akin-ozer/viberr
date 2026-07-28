@@ -1022,6 +1022,74 @@ describe("commentToAgent", () => {
     expect(plain.logThreadId).toBeNull();
   });
 
+  /**
+   * B-AG2, the other half: the REFUSAL shipped without the reply. An ambiguous
+   * `@claude` resolved to nobody and `commentToAgent` returned on the spot — no
+   * run, no note, not even the routed tint — while the composer kept offering
+   * the handle. Loudly wrong became quietly nothing, which is harder to notice.
+   */
+  it("an AMBIGUOUS backend handle posts the policy note naming the candidates and starts NO run (B-AG2)", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const specialist = (profileId: string, name: string) => ({
+      profileId,
+      capabilities: [],
+      extras: [],
+      definition: {
+        kind: "specialist",
+        name,
+        role: name,
+        backends: ["claude"],
+        model: "claude-sonnet",
+      },
+    });
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        specialist("docs-writer", "Docs Writer"),
+        specialist("security-reviewer", "Security Reviewer"),
+      ] as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@claude please look at this" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.agent).toBeNull();
+    expect(result.triggered).toBeNull();
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1").length).toBe(before);
+
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const note = timeline.find(
+      (e) => e.type === "note" && e.actor.kind === "system",
+    );
+    expect(note, "the refusal must say so on the timeline").toBeTruthy();
+    expect(note!.text).toContain("@docs-writer");
+    expect(note!.text).toContain("@security-reviewer");
+    expect(
+      listAuditEvents(store.db, { action: "task.comment.unrouted" }).length,
+    ).toBe(1);
+
+    // Naming one profile still engages it — the refusal is scoped to the
+    // ambiguity, not to backend handles as a class.
+    const named = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@security-reviewer take a look" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(named.agent).toMatchObject({ profileId: "security-reviewer" });
+    expect(named.triggered).toBe("started");
+  }, 20_000);
+
   it("records a viewer/reviewer @mention but does NOT trigger a run (RBAC)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;

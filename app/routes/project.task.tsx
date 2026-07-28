@@ -55,6 +55,7 @@ import {
   type OperatorAutonomy,
 } from "~/server/tasks/operator-actions.server";
 import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
+import { requireVisibleProject } from "./project-visibility.server";
 import {
   requireRunAgents,
   type AuthorityProject,
@@ -93,6 +94,18 @@ import { Icon } from "~/ui/icon";
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
+  // R15-4 on the READ side of THIS loader, not only the layout's.
+  // Single-fetch honors a client-supplied `?_routes=` filter, so
+  // `GET /projects/<slug>/tasks/<key>.data?_routes=routes/project.task` runs
+  // this loader ALONE — the layout's membership refusal never executes. The
+  // gate has to live on every loader that serves project content, exactly as
+  // it already does on this route's action.
+  requireVisibleProject(
+    db,
+    params.slug,
+    { userId: user.id, label: user.email },
+    "read this project",
+  );
   const detail = getTaskDetail(db, params.slug, params.key);
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
@@ -292,6 +305,11 @@ export async function action({ request, params }: Route.ActionArgs) {
   } = await requireFormAction(request);
   const projectSlug = params.slug;
   const taskKey = params.key;
+  // R15-4: the layout loader's membership refusal does NOT cover this action —
+  // React Router runs a child action without its parent's loader. Outside the
+  // try so the refusal stays a thrown 404 Response (the unknown-slug body),
+  // never an `appErrorResponse` 403 that would confirm the project exists.
+  requireVisibleProject(db, projectSlug, actor, "act on this project");
 
   try {
     switch (intent) {

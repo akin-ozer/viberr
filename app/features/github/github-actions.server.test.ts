@@ -153,6 +153,11 @@ describe("runReconcile on a project with no branched tasks", () => {
  * multi-connection org that silently swapped a project onto another owner's
  * PAT — and the damage only surfaced later, as a repo-access miss blamed on
  * the token.
+ *
+ * S4-1: the owner match is a PREFERENCE, not a gate. `connection.owner` is the
+ * account a PAT was added under, not the set of repos it reaches, so requiring
+ * one stranded every org-repo / collaborator-repo project on a permanent
+ * refusal. GitHub answers the access question, and only its "no" refuses.
  */
 describe("runSetCredential binds by repo owner, not by org default", () => {
   const CLASSIC = (owner: string) =>
@@ -201,7 +206,40 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
     expect(outcome.toast).toContain("akin-ozer");
   });
 
-  it("refuses — with the owner named — when no connection covers the repo owner", async () => {
+  it("borrows another owner's connection when GitHub says that token reaches the repo", async () => {
+    const store = setupTestStore(ctx);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    // The one PAT in the org is labelled "hepapi" — but it is a collaborator on
+    // akin-ozer/viberr, which is the whole point of this shape.
+    await createConnection(
+      store.db,
+      { owner: "hepapi", token: "ghp_hepapi_token_4444", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("hepapi").fetchImpl },
+    );
+
+    const attach = fakeGithubFetch({
+      "GET /user": { body: { login: "hepapi" }, headers: { "x-oauth-scopes": "repo" } },
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO } },
+      [`GET /repos/${REPO}/pulls`]: { body: [] },
+    });
+    const outcome = await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: attach.fetchImpl,
+    });
+    // Fails on the B-GH3 shape: result was "no_owner_connection" and nothing
+    // was ever bound — a working setup refused forever.
+    expect(outcome.result).toBe("attached");
+    expect(getProjectCredential(store.db, store.slug)!.id).toBe(
+      getConnection(store.db, "hepapi")!.patId,
+    );
+    // The toast is honest about WHY it used a differently-labelled connection.
+    expect(outcome.toast).toContain("no akin-ozer PAT");
+    expect(outcome.toast).toContain(REPO);
+  });
+
+  it("refuses — naming the probe result — when the fallback token cannot reach the repo", async () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
@@ -212,13 +250,15 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
       { fetchImpl: CLASSIC("hepapi").fetchImpl },
     );
 
+    // Every route 404s — GitHub's own answer is "this token cannot see it".
     const outcome = await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
       fetchImpl: fakeGithubFetch({}).fetchImpl,
     });
-    // Fails on main: it happily bound hepapi's PAT to an akin-ozer repo.
-    expect(outcome.result).toBe("no_owner_connection");
-    expect(outcome.toast).toContain("akin-ozer");
+    // Fails on main: it happily bound hepapi's PAT to an unreachable repo.
+    expect(outcome.result).toBe("no_repo_access");
+    expect(outcome.toast).toContain(REPO);
+    expect(outcome.toast).toContain("404");
     expect(getProjectCredential(store.db, store.slug)).toBeNull();
   });
 });

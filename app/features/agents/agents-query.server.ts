@@ -287,8 +287,8 @@ export function effectiveProfileView(
     desc: def?.desc ?? (template?.desc || template?.description) ?? "",
     // The profile's long persona/instructions (D6): deployment override
     // first (project-created/edited profiles), else the template BODY —
-    // startAgentRun feeds it to the run when no agents/definitions/<id>.md
-    // override ships.
+    // startAgentRun feeds THIS to the run as the profile's only persona source
+    // (F10-30 removed the parallel `agents/definitions/<id>.md` override).
     definition: def?.persona ?? template?.description ?? "",
     stages: def?.stages ?? template?.stages ?? [],
     spanAll: def?.spanAll ?? template?.spanAll ?? false,

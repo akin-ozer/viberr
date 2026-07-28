@@ -5,7 +5,6 @@ import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
-  normalizeDeliveryGrants,
   repairDeliveryGrants,
   type DeliveryGrantNotice,
 } from "~/shared/capabilities";
@@ -385,7 +384,7 @@ export async function deployAgentProfileFromLibrary(
   input: { projectSlug: string; profileId: string },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
-): Promise<{ profileId: string; name: string }> {
+): Promise<ProfileSaveResult> {
   const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const profileId = input.profileId.trim();
   if (!profileId) throw AppError.validation("Pick a profile to add.");
@@ -412,6 +411,25 @@ export async function deployAgentProfileFromLibrary(
     );
   }
   const fm = parsed.frontmatter;
+
+  // AP-06 / P14-LV-01: explicit grants, never an empty list — the template's own
+  // grants when it has them, else the CONSERVATIVE set (delivery withheld), the
+  // same list org-level create persists. B-AG1: the delivery-headline decision
+  // is REPORTED here too. `normalizeDeliveryGrants` drops the notice, which is
+  // the no-audit shape B-AG1 was filed against: a template whose scoped delivery
+  // is on with the headline explicitly off deploys as a profile that cannot
+  // deliver, and nothing said so.
+  const deployDelivery = repairDeliveryGrants(
+    (fm.capabilities.length
+      ? fm.capabilities
+      : conservativeGrantsFor("agent")
+    ).map((g) => ({
+      capabilityId: g.capabilityId,
+      mode: (ALWAYS_HUMAN.has(g.capabilityId)
+        ? "human"
+        : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
+    })),
+  );
 
   await updateProjectFile(
     { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
@@ -443,20 +461,7 @@ export async function deployAgentProfileFromLibrary(
       };
       const deployment: AgentDeployment = {
         profileId,
-        // AP-06 / P14-LV-01: explicit grants, never an empty list — the
-        // template's own grants when it has them, else the CONSERVATIVE set
-        // (delivery withheld), the same list org-level create persists.
-        capabilities: normalizeDeliveryGrants(
-          (fm.capabilities.length
-            ? fm.capabilities
-            : conservativeGrantsFor("agent")
-          ).map((g) => ({
-            capabilityId: g.capabilityId,
-            mode: (ALWAYS_HUMAN.has(g.capabilityId)
-              ? "human"
-              : coerceSpecialistCapabilityMode(g.mode)) as CapabilityMode,
-          })),
-        ),
+        capabilities: deployDelivery.grants,
         extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
       };
       (deployment as Record<string, unknown>).definition = definition;
@@ -471,9 +476,23 @@ export async function deployAgentProfileFromLibrary(
     subjectKind: "agent_profile",
     subjectId: profileId,
     projectSlug: input.projectSlug,
-    details: { name: fm.name, source: "library", projectName },
+    details: {
+      name: fm.name,
+      source: "library",
+      projectName,
+      ...(deployDelivery.notice
+        ? {
+            deliveryGrants: deployDelivery.notice.kind,
+            deliveryNote: deployDelivery.notice.message,
+          }
+        : {}),
+    },
   });
-  return { profileId, name: fm.name };
+  return {
+    profileId,
+    name: fm.name,
+    ...(deployDelivery.notice ? { notice: deployDelivery.notice } : {}),
+  };
 }
 
 // ------------------------------------------------------------------ update

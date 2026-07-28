@@ -36,7 +36,10 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { effectiveProfileView } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { notifyMentionedUsers } from "./mention-notify.server";
+import {
+  notifyMentionedUsers,
+  withAmbiguityDisclosure,
+} from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   defaultModelFor,
@@ -317,6 +320,11 @@ async function writeOperatorComment(
   if (guardrailOn(ctx, projectSlug, "operator-brevity")) {
     text = enforceOperatorBrevity(text);
   }
+  // S5-G3: the operator is instructed to tag the human it answers, so a handle
+  // that matches two people is a NEW-4 failure the operator cannot fix on its
+  // own — the comment discloses the non-delivery instead of dropping it in
+  // silence. Applied after brevity so the disclosure is never trimmed away.
+  text = withAmbiguityDisclosure(db, text);
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -418,6 +426,12 @@ async function addRecommendation(
     ...(rec.profileId ? { profileId: rec.profileId } : {}),
     ...(rec.toStageId ? { toStageId: rec.toStageId } : {}),
   };
+  // Same disclosure the narration path carries (S5-G3): the reasoning is
+  // operator prose and can tag a human, so an ambiguous handle must not vanish.
+  const commentText = withAmbiguityDisclosure(
+    db,
+    `**Recommendation:** ${rec.label}. ${reasoning}`,
+  );
   let wasNew = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const dup = parsed.frontmatter.recommendations.some(
@@ -436,7 +450,7 @@ async function addRecommendation(
       type: "comment",
       actor: { kind: "operator" },
       title: null,
-      text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+      text: commentText,
       toAgent: false,
       evidence: null,
     });
@@ -453,7 +467,7 @@ async function addRecommendation(
   });
   // NEW-4: recommendation reasoning that tags a person pings them too.
   notifyMentionedUsers(db, {
-    text: `**Recommendation:** ${rec.label}. ${reasoning}`,
+    text: commentText,
     projectSlug,
     taskKey,
     from: { kind: "agent", name: "Operator" },

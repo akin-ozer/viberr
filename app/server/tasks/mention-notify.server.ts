@@ -29,9 +29,10 @@ import { extractMentions } from "~/ui/mention-spans";
  * The first tier with any candidate decides; more than one candidate in that
  * tier is AMBIGUOUS and notifies nobody, because guessing is worse than a
  * visible non-delivery. {@link MentionFanout.ambiguous} carries those handles
- * so a human's comment can say so on the timeline instead of the mention
- * silently going nowhere. A person tagged twice in one comment (by handle and
- * by name) is notified once.
+ * so the comment can say so on the timeline instead of the mention silently
+ * going nowhere — a human comment gets a policy note, a machine-authored one
+ * carries {@link withAmbiguityDisclosure}. A person tagged twice in one comment
+ * (by handle and by name) is notified once.
  */
 
 /** Single-token mention grammar. Kept exported for callers that only need the
@@ -121,15 +122,57 @@ export function resolveMentionTargets(
 }
 
 /**
- * The timeline note a HUMAN comment carries when one of its @handles matched
- * several people. Non-delivery has to be visible: the author is the only one
- * who can retag, and they are still looking at the task.
+ * The timeline note a comment carries when one of its @handles matched several
+ * people. Non-delivery has to be visible: on a human comment the author is the
+ * only one who can retag and is still looking at the task; on a machine-authored
+ * comment (agent / operator) nobody would ever learn the tag reached no one.
  */
 export function ambiguousMentionNote(handles: readonly string[]): string {
   if (handles.length === 0) return "";
   const list = handles.map((h) => `@${h}`).join(", ");
   const subject = handles.length === 1 ? "matches" : "match";
   return `_${list} ${subject} more than one person here, so nobody was notified — mention the full name (“@First Last”) or the email handle._`;
+}
+
+/** The enabled users the fan-out and the ambiguity report both resolve against. */
+function enabledUsers(db: DatabaseSync): MentionableUser[] {
+  return db
+    .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
+    .all() as unknown as MentionableUser[];
+}
+
+/**
+ * The @handles in `text` that route to nobody, resolved against the same user
+ * set the fan-out uses. Callers that must disclose the non-delivery need the
+ * handles BEFORE anything is written, so the disclosure and the comment land in
+ * one write.
+ */
+export function ambiguousMentionHandles(
+  db: DatabaseSync,
+  text: string,
+): string[] {
+  return resolveMentionTargets(enabledUsers(db), text).ambiguous;
+}
+
+/**
+ * `text` with the non-delivery disclosure appended when one of its @handles is
+ * ambiguous — the form MACHINE authors (agents, the operator) use.
+ *
+ * B-FD2 dropped the ambiguous handle for every caller, but only a human comment
+ * was ever going to carry a note about it: an agent or operator tag that matched
+ * two people notified nobody and left no trace anywhere, which is a quieter
+ * version of the NEW-4 gap the fan-out exists to close. A machine author cannot
+ * retag itself and its comment is the only surface a human reads, so the
+ * disclosure rides the comment. Idempotent: the appended line's own `@handle` is
+ * the ambiguous one, which still routes to nobody.
+ */
+export function withAmbiguityDisclosure(
+  db: DatabaseSync,
+  text: string,
+): string {
+  const ambiguous = ambiguousMentionHandles(db, text);
+  if (ambiguous.length === 0) return text;
+  return `${text}\n\n${ambiguousMentionNote(ambiguous)}`;
 }
 
 export interface NotifyMentionsInput {
@@ -165,11 +208,10 @@ export function fanOutMentions(
   db: DatabaseSync,
   input: NotifyMentionsInput,
 ): MentionFanout {
-  const users = db
-    .prepare(`SELECT id, email, name FROM users WHERE disabled = 0`)
-    .all() as unknown as MentionableUser[];
-
-  const { userIds, ambiguous } = resolveMentionTargets(users, input.text);
+  const { userIds, ambiguous } = resolveMentionTargets(
+    enabledUsers(db),
+    input.text,
+  );
   const mentioned: string[] = [];
   for (const userId of userIds) {
     if (input.excludeUserId && userId === input.excludeUserId) continue;

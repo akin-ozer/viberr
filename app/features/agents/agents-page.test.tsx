@@ -248,6 +248,12 @@ describe("ProfileDetail", () => {
       container.querySelector(".cap-col.direct")!.textContent,
     ).not.toContain("Read the repository & diff");
     expect(getByText(/Advisory guidance, not policy/)).toBeTruthy();
+    // …and it keeps each label's MODE. Concatenating the three buckets made an
+    // advisory capability an admin set to human-only read exactly like one left
+    // at "acts directly" — the same disagreement class F15-05 was filed for,
+    // one level quieter (the matrix still tells them apart).
+    const advisoryLine = container.querySelector(".def-note")!.textContent!;
+    expect(advisoryLine).toContain("Read the repository & diff (acts directly)");
     // The structural human-only locks still render as such.
     expect(
       container.querySelector(".cap-col.forbidden")!.textContent,
@@ -256,6 +262,39 @@ describe("ProfileDetail", () => {
     expect(container.querySelectorAll(".res-group").length).toBe(3);
     expect(queryByText("reviewer-expertise")).toBeNull();
     expect(container.querySelectorAll(".res-chip").length).toBe(0);
+  });
+
+  it("the advisory line keeps each label's mode instead of flattening them", () => {
+    const { container } = render(
+      <ProfileDetail
+        a={mkProfile({
+          id: "docs-writer",
+          name: "Docs writer",
+          role: "Docs",
+          actions: {
+            direct: ["Read the repository & diff"],
+            recommend: [],
+            // An advisory capability the admin explicitly reserved for humans:
+            // it used to read identically to the `direct` one above.
+            forbidden: ["Approve the review"],
+            off: [],
+          },
+          capabilities: [],
+          resources: { skills: [], mcps: [], kb: [] },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const advisoryLine = container.querySelector(".def-note")!.textContent!;
+    expect(advisoryLine).toContain("Read the repository & diff (acts directly)");
+    expect(advisoryLine).toContain("Approve the review (reserved for humans)");
   });
 
   it("operator: no Delete button, real backend + autonomy cells, lifecycle hint", () => {

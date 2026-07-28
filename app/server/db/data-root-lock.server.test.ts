@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -8,6 +8,8 @@ import {
   acquireDataRootLock,
   classifyLock,
   forceDataRootTakeover,
+  heldDataRootLock,
+  releaseDataRootLock,
   type LockHolder,
 } from "./data-root-lock.server";
 
@@ -121,9 +123,62 @@ describe("acquireDataRootLock", () => {
   });
 });
 
+describe("releaseDataRootLock (G1)", () => {
+  // The signal handler re-raises, so `process.once("exit")` never fires on a
+  // SIGTERM: the shutdown path must be able to release the lock by itself, or a
+  // `docker compose stop` strands the file and the next boot is refused.
+  it("releases the lock THIS process holds, and is idempotent when it holds none", () => {
+    const dataRoot = ctx.makeTempDir();
+    releaseDataRootLock(); // nothing held — a no-op, never a throw
+    const lock = acquireDataRootLock({ dataRoot, self: HOST_A, isAlive: alive });
+    expect(heldDataRootLock()).toBe(lock);
+
+    releaseDataRootLock();
+
+    expect(existsSync(lock.path)).toBe(false);
+    expect(heldDataRootLock()).toBeNull();
+    // The root is genuinely free again: the next boot acquires without force.
+    const next = acquireDataRootLock({ dataRoot, self: HOST_A_OTHER, isAlive: alive });
+    next.release();
+  });
+
+  it("an explicitly-released tracked lock stops being the process's lock", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquireDataRootLock({ dataRoot, self: HOST_A, isAlive: alive });
+    lock.release();
+    expect(heldDataRootLock()).toBeNull();
+  });
+
+  it("a test-scoped lock (releaseOnExit: false) is never the process's lock", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquire(dataRoot, HOST_A);
+    expect(heldDataRootLock()).toBeNull();
+    lock.release();
+  });
+});
+
 describe("classifyLock", () => {
-  it("re-entrant boot of the SAME pid reclaims its own lock", () => {
-    expect(classifyLock(HOST_A, HOST_A, alive)).toBe("stale");
+  it("re-entrant boot of the SAME PROCESS reclaims its own lock — proven by bootId", () => {
+    const self = { ...HOST_A, bootId: "boot-1" };
+    expect(classifyLock({ ...HOST_A, bootId: "boot-1" }, self, alive)).toBe("stale");
+  });
+
+  it("a DIFFERENT process that happens to share pid+hostname does NOT reclaim a live lock", () => {
+    // `compose.yml` pins the hostname so a recreated container can probe its
+    // predecessor, which makes "same host" trivially true for every container
+    // from that file — and two containers over one data root routinely land on
+    // the same low pid. Without the bootId discriminator this handed a LIVE
+    // holder's lock to a second writer: the corruption the lock exists to stop.
+    const holder = { ...HOST_A, bootId: "boot-1" };
+    const self = { ...HOST_A, bootId: "boot-2" };
+    expect(classifyLock(holder, self, alive)).toBe("held");
+    // …and it is still taken over once that pid is genuinely gone.
+    expect(classifyLock(holder, self, dead)).toBe("stale");
+  });
+
+  it("a lock written before bootId existed falls through to the liveness probe", () => {
+    expect(classifyLock(HOST_A, { ...HOST_A, bootId: "boot-2" }, alive)).toBe("held");
+    expect(classifyLock(HOST_A, { ...HOST_A, bootId: "boot-2" }, dead)).toBe("stale");
   });
 
   it("an unreadable holder is never assumed dead", () => {

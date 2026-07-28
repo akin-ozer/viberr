@@ -308,7 +308,14 @@ button.top-search:hover { border-color: var(--border); }
 .top-search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--fg); font-size: .88rem; }
 .top-search input::placeholder { color: var(--placeholder); }
 /* The shortcut chip is the palette's affordance on Home (R15-5), so it reacts. */
-button.kbd { cursor: pointer; transition: border-color .14s ease, color .14s ease; }
+button.kbd {
+  cursor: pointer;
+  /* R15-5 turned this chip into a real button on Home, which brought the UA
+     `buttonface` background with it — the contrast pair axe then measured was
+     the chip's text against THAT, not against the field it sits in. */
+  background: transparent;
+  transition: border-color .14s ease, color .14s ease;
+}
 button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .kbd {
   font-family: var(--font-mono);
@@ -316,7 +323,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .1rem .35rem;
   border-radius: 5px;
   border: 1px solid var(--hairline);
-  color: var(--faint);
+  /* `--muted`, not `--faint`: at .68rem this is small text, and the shortcut
+     chip sits on the palette trigger's own surface — `--faint` there misses the
+     4.5:1 AA threshold (axe flagged it on the dark home). */
+  color: var(--muted);
 }
 
 .live {

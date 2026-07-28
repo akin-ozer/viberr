@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -27,11 +27,30 @@ import {
   BRANCH_CLEANUP_GUARDRAIL_DESC,
   BRANCH_CLEANUP_GUARDRAIL_ID,
 } from "./branch-cleanup.server";
+/** Post-merge cleanup reads the projection, appends an event and reprojects —
+ *  all AFTER GitHub has merged. This lets one test make that housekeeping
+ *  throw; pass-through otherwise, so every other test sees the real module. */
+const cleanupFault = vi.hoisted(() => ({ throws: false }));
+vi.mock("./branch-cleanup.server", async () => {
+  const actual =
+    await vi.importActual<typeof import("./branch-cleanup.server")>(
+      "./branch-cleanup.server",
+    );
+  return {
+    ...actual,
+    branchCleanupOnMerge: (...args: Parameters<typeof actual.branchCleanupOnMerge>) => {
+      if (cleanupFault.throws) throw new Error("projection read failed");
+      return actual.branchCleanupOnMerge(...args);
+    },
+  };
+});
+
 import {
   mergeTaskPr,
   RECONCILE_TASK_CONCURRENCY,
   reconcileProject,
   reconcileTask,
+  resetReconcileCursorsForTests,
 } from "./github-reconciler.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -1309,6 +1328,30 @@ describe("R15-6 post-merge branch cleanup", () => {
       text: expect.stringContaining("was **not** deleted after the merge"),
     });
   });
+
+  it("a THROWING cleanup never demotes the merge either", async () => {
+    const { store, actor } = mergeableTask();
+    const gh = fakeGithubFetch(mergeRoutes());
+    cleanupFault.throws = true;
+    try {
+      const result = await mergeTaskPr(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-410" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+      );
+      // Fails on wave-2b: the cleanup block was unguarded, so a post-merge
+      // housekeeping throw escaped mergeTaskPr and the caller surfaced a
+      // COMPLETED merge as a failed acceptance.
+      expect(result.status).toBe("merged");
+    } finally {
+      cleanupFault.throws = false;
+    }
+    // The merge itself is still fully recorded.
+    expect(
+      listAuditEvents(store.db, { action: "github.pr.merged" }),
+    ).toHaveLength(1);
+  });
 });
 
 /**
@@ -1317,6 +1360,10 @@ describe("R15-6 post-merge branch cleanup", () => {
  * rate-limit budget in a single burst on a large board.
  */
 describe("reconcileProject fan-out control", () => {
+  // The rotation cursor is module-global and keyed by slug — without this a
+  // second budgeted test inherits the first one's resume point.
+  beforeEach(resetReconcileCursorsForTests);
+
   function boardOf(count: number): ReturnType<typeof setup> {
     const { store, actor } = setup();
     for (let i = 0; i < count; i++) {
@@ -1421,5 +1468,94 @@ describe("reconcileProject fan-out control", () => {
     });
     expect(summary.results).toHaveLength(10);
     expect(summary.skipped).toBe(0);
+  });
+
+  /**
+   * R15-6 + B-GH5 compounding: cleanup deletes the remote ref but `branch:`
+   * stays on the task, so merged tasks kept matching the reconcile selection
+   * and kept buying a guaranteed 404 compare every pass. Under the poll budget
+   * they also ate the rotation — and they sort FIRST here, so the live tasks
+   * were the ones starved.
+   */
+  function zombieBoard(merged: number, live: number): ReturnType<typeof setup> {
+    const { store, actor } = setup(); // VIB-301: branched, no PR — live
+    for (let i = 0; i < merged; i++) {
+      const key = `VIB-8${String(i).padStart(2, "0")}`;
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, {
+          stage: "review",
+          branch: key.toLowerCase(),
+          ownerUserId: store.users.arda.id,
+          pr: { number: 800 + i, state: "merged", title: `Merged ${key}` },
+        }),
+      });
+    }
+    for (let i = 0; i < live; i++) {
+      const key = `VIB-9${String(i).padStart(2, "0")}`;
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, {
+          stage: "review",
+          branch: key.toLowerCase(),
+          ownerUserId: store.users.arda.id,
+        }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return { store, actor };
+  }
+
+  it("a budgeted pass spends the whole budget on live tasks, not on merged-and-cleaned ones", async () => {
+    const { store, actor } = zombieBoard(6, 2);
+    const gh = fakeGithubFetch(boardRoutes(store));
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+      taskBudget: 4,
+    });
+    // Fails on wave-2b: the 4-task budget was spent on VIB-301 + the first
+    // three merged zombies, and the live VIB-900/901 waited for a later tick.
+    expect(reconciledKeys(summary).sort()).toEqual([
+      "VIB-301",
+      "VIB-900",
+      "VIB-901",
+    ]);
+    expect(summary.skipped).toBe(0);
+    // Not one GitHub call is spent on a merged task's deleted branch.
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-800`)).toHaveLength(0);
+  });
+
+  it("a budgeted pass still visits a CLOSED PR — it can be reopened", async () => {
+    // A closed PR is not terminal: GitHub allows reopening, and this
+    // reconciler is the only thing that notices — it writes the "PR live
+    // again" note, alerts the watchers and re-invokes the operator to withdraw
+    // the moot recovery packet. Folding `closed` into the terminal filter made
+    // all three unreachable from the poller, the only budgeted caller.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-777", {
+        stage: "review",
+        branch: "vib-777",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 777, state: "closed", title: "Closed VIB-777" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch(boardRoutes(store));
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+      taskBudget: 4,
+    });
+    expect(reconciledKeys(summary)).toContain("VIB-777");
+  });
+
+  it("a manual Update status still re-checks a merged task", async () => {
+    const { store, actor } = zombieBoard(6, 2);
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch(boardRoutes(store)).fetchImpl,
+    });
+    expect(reconciledKeys(summary)).toContain("VIB-800");
+    expect(summary.results).toHaveLength(9);
   });
 });

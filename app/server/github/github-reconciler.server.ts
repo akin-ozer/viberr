@@ -563,6 +563,12 @@ export const RECONCILE_POLL_TASK_BUDGET = 20;
  */
 const reconcileCursors = new Map<string, string>();
 
+/** The cursor map is module-global, so a second budgeted test in the same file
+ *  would otherwise inherit the first one's resume point. */
+export function resetReconcileCursorsForTests(): void {
+  reconcileCursors.clear();
+}
+
 /**
  * Reconciles every task of the project that has a branch (the GitHub
  * view's Reconcile button). Configuration gaps short-circuit before any
@@ -590,14 +596,37 @@ export async function reconcileProject(
 
   const rows = db
     .prepare(
-      `SELECT task_key FROM task_projections
+      `SELECT task_key,
+              (archived = 1
+               OR COALESCE(json_extract(pr_json, '$.state'), '') = 'merged')
+              AS terminal
+       FROM task_projections
        WHERE project_slug = ? AND branch IS NOT NULL
        ORDER BY task_key ASC`,
     )
-    .all(projectSlug) as { task_key: string }[];
+    .all(projectSlug) as { task_key: string; terminal: number }[];
 
-  const allKeys = rows.map((row) => row.task_key);
   const budget = ctx.taskBudget ?? 0;
+  // R15-6 + B-GH5: cleanup deletes the remote ref but `branch:` stays in the
+  // task file (it is the historical record of where the work was delivered), so
+  // a merged-and-cleaned task keeps matching `branch IS NOT NULL` and keeps
+  // buying a guaranteed 404 compare every pass — forever. Under the poll budget
+  // those zombies also eat the rotation: 100 merged + 5 live tasks meant the
+  // live PRs were visited every fifth tick. A terminal task has nothing left to
+  // learn from GitHub, so a BUDGETED pass skips it outright. Manual "Update
+  // status" carries no budget and still re-checks the whole board, which is the
+  // way back if a terminal task's GitHub state ever needs re-reading.
+  //
+  // "Terminal" is archived-or-MERGED, deliberately not closed: GitHub lets a
+  // closed PR be reopened, and this reconciler is the only thing that notices —
+  // it writes the "PR live again" note, alerts the watchers, and re-invokes the
+  // operator to WITHDRAW the now-moot recovery packet. The poller is the only
+  // budgeted caller, so folding `closed` into terminal would have made all
+  // three unreachable from the only automatic path.
+  const allKeys = rows
+    .filter((row) => budget === 0 || row.terminal !== 1)
+    .map((row) => row.task_key);
+  const terminal = rows.length - allKeys.length;
   let selected = allKeys;
   if (budget > 0 && allKeys.length > budget) {
     // Resume where the last budgeted pass stopped and wrap — every task gets
@@ -654,7 +683,14 @@ export async function reconcileProject(
       subjectKind: "project",
       subjectId: projectSlug,
       projectSlug,
-      details: { tasks: rows.length, reconciled, changed, failed, skipped },
+      details: {
+        tasks: rows.length,
+        reconciled,
+        changed,
+        failed,
+        skipped,
+        terminal,
+      },
     });
   }
   // F15-02: a successful pass over ZERO branched tasks is still an observation
@@ -871,28 +907,36 @@ export async function mergeTaskPr(
     // (including a refusal) lands as a plain-words note and the result stays
     // `merged`. `deleteTaskRemoteBranch` re-reads the task, so it sees the
     // `merged` state just written and its open-PR refusal correctly stands down.
-    if (branchCleanupOnMerge(db, input.projectSlug)) {
-      const cleanup = await deleteTaskRemoteBranch(db, input, actor, ctx);
-      const note =
-        cleanup.status === "deleted" || cleanup.status === "no_branch"
-          ? null
-          : cleanup.status === "already_gone"
-            ? `Branch \`${cleanup.branch}\` was already gone on GitHub — nothing left to clean up.`
-            : cleanup.status === "refused"
-              ? `Branch \`${cleanup.branch}\` was **not** deleted after the merge — ${cleanup.message}`
-              : "The merged branch was **not** deleted — this project has no GitHub repo or credential configured.";
-      if (note) {
-        await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: POLICY_ENGINE_ACTOR,
-          title: null,
-          text: note,
-          toAgent: false,
-          evidence: null,
-        });
-        rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    // The try/catch is the contract, not caution: the DB read, the file append
+    // and the reprojection below can all THROW after GitHub has already merged,
+    // and an acceptance that reported failure over a completed merge is the one
+    // outcome this block must never produce.
+    try {
+      if (branchCleanupOnMerge(db, input.projectSlug)) {
+        const cleanup = await deleteTaskRemoteBranch(db, input, actor, ctx);
+        const note =
+          cleanup.status === "deleted" || cleanup.status === "no_branch"
+            ? null
+            : cleanup.status === "already_gone"
+              ? `Branch \`${cleanup.branch}\` was already gone on GitHub — nothing left to clean up.`
+              : cleanup.status === "refused"
+                ? `Branch \`${cleanup.branch}\` was **not** deleted after the merge — ${cleanup.message}`
+                : "The merged branch was **not** deleted — this project has no GitHub repo or credential configured.";
+        if (note) {
+          await appendTimelineEvent(ref, {
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: POLICY_ENGINE_ACTOR,
+            title: null,
+            text: note,
+            toAgent: false,
+            evidence: null,
+          });
+          rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+        }
       }
+    } catch {
+      // The branch survives; the next manual cleanup (or archive) can retry.
     }
     return { status: "merged", prNumber, sha };
   }

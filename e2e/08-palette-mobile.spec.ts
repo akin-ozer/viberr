@@ -15,9 +15,13 @@ test("⌘K opens the palette and Enter jumps to the task", async ({ page }) => {
   await page.goto("/projects/viberr-core/board");
   await page.waitForURL("**/projects/viberr-core/board");
 
-  await page.keyboard.press("ControlOrMeta+k");
   const palette = page.locator("dialog.cmdk-card");
-  await expect(palette).toBeVisible();
+  // The shortcut is a hydrated keydown listener, so retry until React has
+  // attached it — a bare press can land on server-rendered HTML and be lost.
+  await expect(async () => {
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(palette).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
 
   await palette.getByRole("textbox").fill("VIB-142");
   const firstRow = palette.locator(".cmdk-row").first();
@@ -53,10 +57,24 @@ test("at 375px the rail collapses behind a toggle and nothing scrolls sideways",
   );
   expect(overflow).toBeLessThanOrEqual(1);
 
-  await page.getByLabel("Project navigation").click();
+  // Same hydration caveat as the palette: the toggle is a React onClick, so
+  // retry until it takes — but only click while it is still CLOSED, or the
+  // retry toggles it shut again (the .2s slide means the first assertion can
+  // read a mid-transition box).
+  const toggle = page.getByLabel("Project navigation");
+  await expect(async () => {
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+      await toggle.click();
+    }
+    await expect(toggle).toHaveAttribute("aria-expanded", "true", {
+      timeout: 1000,
+    });
+  }).toPass({ timeout: 15_000 });
   await expect(rail).toBeVisible();
-  const openBox = await rail.boundingBox();
-  expect(openBox!.x).toBeGreaterThanOrEqual(-1);
+  // …and only then assert the slide landed, once the transition settles.
+  await expect
+    .poll(async () => (await rail.boundingBox())!.x, { timeout: 5_000 })
+    .toBeGreaterThanOrEqual(-1);
 });
 
 test("a non-member gets the unknown-slug 404 on a project board (R15-4)", async ({
