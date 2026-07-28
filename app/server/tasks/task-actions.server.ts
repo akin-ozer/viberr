@@ -4406,7 +4406,13 @@ function acceptanceStageBlockedReason(
   const reviewName = roles.reviewId
     ? stageName(project, roles.reviewId)
     : "the review stage";
-  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName} — a completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first, or ask an admin to force-accept it.`;
+  // No force-accept suggestion here: the DG-2 override exists for a WEDGED
+  // acceptance (a verdict that can no longer be recorded, a stale blocked
+  // packet), and the task page only offers it for those. A task that simply
+  // has not reached the boundary yet is not wedged — it has stages left to
+  // cross — so naming an escape hatch that is neither offered nor appropriate
+  // just sends the reader looking for a button that is not there.
+  return `${taskKey} is at ${stageName(project, fromStageId)}, not ${reviewName} — a completion can only be accepted from the boundary the workflow puts before ${stageName(project, terminalId)}. Move the task through the workflow first.`;
 }
 
 /**
