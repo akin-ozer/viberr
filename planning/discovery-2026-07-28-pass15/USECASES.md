@@ -7,39 +7,39 @@ Status: ☐ planned · ▶ running · ✅ done (verdict) · ⚠ done-with-findin
 | id | area | case | status |
 |----|------|------|--------|
 | UC-01 | setup | Create project Viberr (VIB), Balanced, repo auto-attach | ⚠ F15-01/02/03/04 |
-| UC-02 | KB | Author a knowledge base in-app (editor cluster), verify store files + freshness stamp | ☐ |
-| UC-03 | MCP | Register a real MCP server (HTTP, host-side), credential, handshake, tools listed | ☐ |
-| UC-04 | skills | Create new skill in-app (write mode) + one from files; verify summaries | ☐ |
-| UC-05 | agents | New agent profiles (Docs-writer/Claude + another Codex), per-project grants, delivery-withheld default | ☐ |
-| UC-06 | users | Add local users: maintainer, contributor, viewer personas; project roles | ☐ |
-| UC-07 | flow | VIB task end-to-end: triage → operator assigns Developer(Codex) → implement on branch → Review PR | ☐ |
-| UC-08 | flow | Accept completion in review queue → app merges PR → Done | ☐ |
-| UC-09 | review | Reviewer engagement + approve verdict (revision-bound) | ☐ |
-| UC-10 | review | Request-changes → rework → re-review → accept | ☐ |
-| UC-11 | recovery | Close PR via gh (reject) → pr-diverged trigger → recovery packet (incl. archive+deleteBranch option) | ☐ |
-| UC-12 | recovery | Merge PR out-of-band via gh while task in Review → reconciler + operator handle it | ☐ |
-| UC-13 | engagement | Two specialists engaged simultaneously (developer + reviewer); panel clarity | ☐ |
-| UC-14 | comments | Human @mentions agent → agent answers AND @tags human, notification fires (NEW-4) | ☐ |
-| UC-15 | operator | @mention operator with a question → one @tag answer, no phantom runs (liveRuns truth) | ☐ |
-| UC-16 | github | gh merge one PR / gh close another; viberr reflects both correctly | ☐ |
-| UC-17 | RBAC | Contributor & viewer sessions: hidden vs disabled controls, rendered reasons, no privileged actions | ☐ |
-| UC-18 | transitions | Manual backward move by maintainer; operator re-trigger carries fromName/toName/byHuman; honors steer | ☐ |
-| UC-19 | stages | Custom stage graph (add "QA", rename); structural-role eligibility; no stranded tasks | ☐ |
-| UC-20 | archive | Archive mid-flight task: packets/recs/schedules cancelled; no operator run after | ☐ |
-| UC-21 | validation | Validation lifecycle: changed → "awaiting verdict" chip; healthy only via real verdict | ☐ |
-| UC-22 | parity | Same task shape run by Codex vs Claude profile — identical lifecycle from viberr's view | ☐ |
-| UC-23 | skills | Run spec mounts ONLY relevant granted skills (unrelated skill stays unmounted) | ☐ |
-| UC-24 | KB | KB grant reaches the run; rename KB → grants rewritten (no silent orphan) | ☐ |
-| UC-25 | MCP | MCP grant reaches run; up:false server does NOT mount (LV-09b); rename follows | ☐ |
-| UC-26 | operator | Operator chooses correct specialist from role summaries (3+ profiles to pick from) | ☐ |
-| UC-27 | policy | Second project with Strict human-gate (different repo, non-PR): every agent action gated | ☐ |
-| UC-28 | policy | Autonomous-within-policy: operator with Accept-into-Done grant completes a task itself (disclosed) | ☐ |
-| UC-29 | notifications | Bell lifecycle: mentions/packets/acceptance; mark-read; See-all page | ☐ |
-| UC-30 | search | ⌘K search across tasks/branches/agents | ☐ |
-| UC-31 | governance | Admin force-accept at the boundary (DG-2 path) — never live-proven in pass 14 | ☐ |
-| UC-32 | operator | Underspecified task → triage quality gate flags → blocking packet → human redirect → recovery | ☐ |
-| UC-33 | schedules | FR39 scheduled operator re-run actually fires while nobody watches | ☐ |
-| UC-34 | github | Pre-existing remote branch with the task's key (collision) — how execution/delivery handles it | ☐ |
+| UC-02 | KB | Author a knowledge base in-app (editor cluster), verify store files + freshness stamp | ✅ |
+| UC-03 | MCP | Register a real MCP server (stdio + a dead HTTP one), handshake, tools listed | ✅ |
+| UC-04 | skills | Create new skill in-app (write mode); verify summaries | ✅ |
+| UC-05 | agents | New agent profiles, per-project grants, delivery-withheld default | ⚠ F15-05/06 |
+| UC-06 | users | Add local users: maintainer, contributor, viewer personas; project roles | ✅ |
+| UC-07 | flow | VIB task end-to-end: triage → assign → implement → Review PR | ✅ |
+| UC-08 | flow | Accept completion → app merges PR → Done | ✅ |
+| UC-09 | review | Reviewer engagement + approve verdict (revision-bound) | ✅ |
+| UC-10 | review | Request-changes → rework → re-review → accept | ✅ |
+| UC-11 | recovery | Close PR via gh → pr-diverged → recovery packet (archive+deleteBranch) | ✅ |
+| UC-12 | recovery | Merge PR out-of-band via gh while in Review → reconciler + operator | ⚠ F15-13 (fixed) |
+| UC-13 | engagement | Two specialists engaged simultaneously; panel clarity | ✅ |
+| UC-14 | comments | Human @mentions agent → agent answers AND @tags human, notification fires | ✅ |
+| UC-15 | operator | @mention operator → one @tag answer, no phantom runs | ✅ |
+| UC-16 | github | gh merge one PR / gh close another; viberr reflects both | ✅ |
+| UC-17 | RBAC | Contributor & viewer sessions: hidden vs disabled controls, rendered reasons | ⚠ F15-12 (fixed) · re-proven post-R15-4 |
+| UC-18 | transitions | Manual backward move; operator re-trigger carries byHuman; honors steer | ✅ |
+| UC-19 | stages | Custom stage graph (add QA); structural-role eligibility | ⚠ F15-17 (fixed) |
+| UC-20 | archive | Archive mid-flight: packets/recs/schedules cancelled; no run after | ✅ |
+| UC-21 | validation | Validation lifecycle: changed → awaiting verdict; healthy only via real verdict | ✅ (see post-fix §) |
+| UC-22 | parity | Codex vs Claude profile — identical lifecycle from viberr's view | ✅ |
+| UC-23 | skills | Run mounts ONLY granted skills | ✅ (re-proven post-fix) |
+| UC-24 | KB | KB grant reaches the run | ✅ (re-proven post-fix) |
+| UC-25 | MCP | MCP grant reaches the run; a down server is honest about it | ✅ (re-proven post-fix) |
+| UC-26 | operator | Operator chooses the right specialist from role summaries | ✅ |
+| UC-27 | policy | Strict human-gate project: every boundary gated | ✅ |
+| UC-28 | policy | Full autonomy + explicit accept grant: operator closes a task itself | ✅ |
+| UC-29 | notifications | Bell lifecycle; mark-read; See-all page | ✅ |
+| UC-30 | search | ⌘K search across tasks/branches/agents | ⚠ F15-16 → R15-5 palette built, ✅ post-fix |
+| UC-31 | governance | Admin force-accept (DG-2) — never live-proven before this pass | ✅ (see post-fix §) |
+| UC-32 | operator | Underspecified task → triage gate → packet → recovery | ⚠ F15-14 (fixed) |
+| UC-33 | schedules | FR39 scheduled operator re-run fires unattended | ✅ |
+| UC-34 | github | Pre-existing remote branch collision | ❌→✅ F15-15 (fixed + re-proven) |
 
 ## Ledger (chronological verdicts)
 
