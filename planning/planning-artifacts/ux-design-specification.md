@@ -937,7 +937,9 @@ These journeys should be explicitly tested across breakpoints and with assistive
 - use CSS grid and flexible layout primitives rather than hard-coded page assumptions
 - preserve hierarchy when stacking content: current state, latest packet, and next action first
 - use relative sizing and fluid spacing where appropriate, but maintain dense operational rhythm
-- treat mobile as a review-first surface, not a full parity environment
+- narrow viewports get the same surface reflowed — nothing is gated on viewport (amended
+  2026-07-28 to match the §Responsive amendment of 2026-07-25; the earlier "review-first
+  mobile" guidance here was a leftover this document had already retired)
 
 **Accessibility development**
 - use semantic landmarks, headings, and list structures consistently
