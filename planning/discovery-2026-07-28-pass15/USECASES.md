@@ -102,3 +102,28 @@ KB authored in-app (2 docs, files verified on disk). time-mcp (stdio, 2 tools di
 
 ### UC-01 — Create project ⚠
 Created Viberr (VIB) via dialog; repo name auto-derived; Balanced preset. Found F15-01 (false "Every provable scope verified" with zero proven scopes), F15-02 (Update status silent no-op), F15-03 (watcher remove-reconcile on create), F15-04 (no navigation to new project). Details in NOTES.md.
+
+
+## Post-fix live verification (2026-07-29, rebuilt container)
+
+Rebuilt the compose image and re-ran the repros against the real app on the SAME data root
+(3 projects, 11 tasks, 4 users — all intact through the upgrade; no migration).
+
+| what | evidence |
+|------|----------|
+| **B-FD1 lock** | boot log `data-root writer lock acquired … bootId 97e423fc…`; `compose stop` → **lock file gone**; `down`+`up` → clean boot. Live-caught first failure: with `npm run start`, npm was pid 1 and node its child, so SIGTERM never reached the holder — fixed by exec'ing the server binary (8a95d92) |
+| **B-OP1 doctrine refresh** | boot log `refreshed an unedited shipped agent asset · agents/definitions/operator.md was da9cf46677bd now 03a4f8b7a1c2` — the stale live-store doctrine my instance had been running is gone |
+| **F15-01** | credential card now reads "Credential attached — scopes not yet verified against GitHub (repo, pull_request:write). Run Grant scope to validate." — no green claim over zero proven scopes |
+| **F15-05/06** | Docs writer's ACTS DIRECTLY no longer lists Approve the review / Request changes; unenforced entries render under an explicit "Advisory guidance, not policy" line |
+| **R15-5** | ⌘K opens the palette on the board; typing `VIB-4` matches the task across the workspace |
+| **F15-11** | on a Done task the accept button is gone entirely and Run controls are disabled (+ a rendered "Task closed — reopen it to run the operator", since a `title` is unreachable on a disabled control) |
+| **F15-18** | 375px: horizontal overflow **0**, rail off-canvas at x=-234, content full width |
+| **F15-08** | agent-log and timeline stamps now share one clock (both 20:xx local) |
+| **R15-2** | VIB-10: the operator called `mcp__viberr__deliver_for_review` **itself** and pushed + opened PR #118 while the task was still In Progress — delivery is its decision, not a stage side-effect |
+| **F15-15** | the reviewer's verdict reads "Checked the delivered revision ec0685a directly — confirmed HEAD on vib-10 equals the pinned commit" — review binds to the delivered SHA, not the local tree |
+| **F15-19 / R15-1** | before the verdict: rendered "Acceptance is blocked: VIB-10's delivered revision has no approving verdict yet — run a review for a verdict, or an admin can force-accept" + the audited Force-accept affordance. No silent refusal |
+| **F15-10 / R15-1** | accepting opens a confirm dialog naming PR #118 · review into main, revision ec0685a0736c, verdict validation healthy, "Merging is one-way" |
+| **R15-6** | acceptance merged PR #118 **and** deleted the remote `vib-10` branch — timeline: "Deleted branch vib-10 from GitHub." |
+| **F15-17** | with QA inserted after Review, acceptance is refused from the wrong stage with a rendered reason ("VIB-10 is at In Progress, not QA — a completion can only be accepted from the boundary the workflow puts before Done") |
+
+Final gates on the merged tree: typecheck clean · **2418 unit tests** · build · **25 e2e** (incl. WCAG in both themes).

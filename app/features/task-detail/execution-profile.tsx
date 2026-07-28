@@ -553,6 +553,13 @@ function OperatorRunControl({
         <Icon name="shield" />
         {busy ? "Running…" : "Run operator"}
       </button>
+      {/* P14 ruling: a `title` is unreachable on a DISABLED control (no hover
+          target for keyboard or touch), so the reason a control is dead has to
+          be rendered copy — the reviewer panel already says this for its own
+          closed state. */}
+      {disabled && (
+        <span className="sub">Task closed — reopen it to run the operator.</span>
+      )}
     </span>
   );
 }
