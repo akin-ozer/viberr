@@ -9,7 +9,7 @@ Severity: C=critical H=high M=medium L=low D=doc/copy.
 | id | sev | status | finding (detail in NOTES.md) |
 |----|-----|--------|------------------------------|
 | F15-01 | M | OPEN | Credential card: `assumed` scopes dodge both the `unverified` branch and proven chips → green "Every provable scope verified" with ZERO proven scopes; attach-at-project-creation never ran the write probes ([credential-card.tsx:77-121](app/features/github/credential-card.tsx:77)) |
-| F15-02 | M | OPEN | Project GitHub panel "Synced: not yet synced with GitHub" renders while PR/merge state is clearly live; "Update status" gives zero feedback (14ms no-op POST). Sync-freshness copy + action need truth |
+| F15-02 | M | DONE 7d602ea | Project GitHub panel "Synced: not yet synced with GitHub" renders while PR/merge state is clearly live; "Update status" gives zero feedback (14ms no-op POST). Sync-freshness copy + action need truth |
 | F15-03 | L | OPEN | Watcher logs "reconciled removed directory" for a project dir at creation (transient race; verify no state-loss path) |
 | F15-04 | M(UX) | OPEN | Create-project returns to home grid instead of opening the new project |
 | F15-05 | H | OPEN | Profile DETAIL panel auto-shows `reviewer-expertise` + wrong default caps for NEW profiles (display layer; stored grants honest — matrix disagrees with detail panel). Org "1 context resource" count same bug |
@@ -17,16 +17,16 @@ Severity: C=critical H=high M=medium L=low D=doc/copy.
 | F15-07 | — | n/a | (withdrawn — KB chips were in a collapsed group, working as designed) |
 | F15-08 | L | OPEN | Agent-log timestamps render UTC while timeline renders local (same page, 3h apart) |
 | F15-09 | L | OPEN | Board card duplicates the "agent working" badge (chip + footer) |
-| F15-10 | M | RULED? | Accept completion merges a PR with NO confirmation dialog (owner Q — see D) |
-| F15-11 | M | OPEN | Done/archived tasks keep live controls: active "Accept completion", Run/Run-operator buttons, schedule form |
-| F15-12 | M | OPEN | Contributor task-owner sees Apply/Dismiss on a STAGE rec; Apply 403s silently (server refuses `approve-transition`; UI swallows). Gate the buttons per-kind or extend owner authority (owner Q) |
-| F15-13 | L | OPEN | Out-of-band-merged PR: acceptance timeline claims "Merged PR #n into main" as the human's act |
+| F15-10 | M | DONE 7d602ea (R15-1 confirm dialog) | Accept completion merges a PR with NO confirmation dialog (owner Q — see D) |
+| F15-11 | M | DONE 7d602ea | Done/archived tasks keep live controls: active "Accept completion", Run/Run-operator buttons, schedule form |
+| F15-12 | M | DONE 7d602ea (R15-3) | Contributor task-owner sees Apply/Dismiss on a STAGE rec; Apply 403s silently (server refuses `approve-transition`; UI swallows). Gate the buttons per-kind or extend owner authority (owner Q) |
+| F15-13 | L | DONE 7d602ea (all 3 writers) | Out-of-band-merged PR: acceptance timeline claims "Merged PR #n into main" as the human's act |
 | F15-14 | H | OPEN | Triage quality gate never fired on a textbook-vague goal; operator improvised scope and burned a 91-turn run. Tighten operator triage doctrine + consider a server-side nudge (dialog promises flagging) |
-| F15-15 | C | OPEN | Pre-existing remote task-key branch: push fails non-FF → copy blames credential → PR opened on stale junk → **reviewer approves from LOCAL branch, never the PR head** → acceptance would merge junk. Fix cluster: distinct non-FF detection + honest copy; never open/keep PR whose head ≠ delivered commit; bind review/acceptance to PR head SHA |
+| F15-15 | C | DONE 7d602ea | Pre-existing remote task-key branch: push fails non-FF → copy blames credential → PR opened on stale junk → **reviewer approves from LOCAL branch, never the PR head** → acceptance would merge junk. Fix cluster: distinct non-FF detection + honest copy; never open/keep PR whose head ≠ delivered commit; bind review/acceptance to PR head SHA |
 | F15-16 | L | OPEN | Board search placeholder promises "agents"; agent names don't match; global-⌘K mock promise still dangling (owner Q3, product-intent) |
-| F15-17 | H | OPEN | Delivery binds to structural final-adjacent stage (`reviewStageIdOf`): inserting QA after Review silently moves push+PR to QA; entering literal "Review" delivers nothing, no event. Needs ruling + a visible signal either way |
+| F15-17 | H | DONE 7d602ea (R15-2) | Delivery binds to structural final-adjacent stage (`reviewStageIdOf`): inserting QA after Review silently moves push+PR to QA; entering literal "Review" delivers nothing, no event. Needs ruling + a visible signal either way |
 | F15-18 | M | OPEN | 375px viewport keeps fixed sidebar; content ~140px. D-29 "reflow" unmet |
-| F15-19 | H | OPEN | Human acceptance succeeds with NO verdict on the delivered revision (chip "awaiting verdict"), async with zero feedback (~30s), then merges. Verdict requirement only binds operator-direct path + blockReason wedges. Owner Q on required gate |
+| F15-19 | H | DONE 7d602ea (R15-1, all 3 writers) | Human acceptance succeeds with NO verdict on the delivered revision (chip "awaiting verdict"), async with zero feedback (~30s), then merges. Verdict requirement only binds operator-direct path + blockReason wedges. Owner Q on required gate |
 
 Facts (not defects) worth keeping: Developer-Claude pushes its branch at creation, Codex doesn't (parity nuance; made F15-17 visible). Operator honored backward-move-without-note by asking via one @tag (ruling working). Archive cancelled packets+schedules provably (RV-03 live-verified). Full-autonomy self-accept requires the explicit grant and discloses correctly; merge stays human. Strict preset lives in workflow rules, not operator caps.
 
@@ -35,10 +35,10 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 ### Delivery / GitHub (pairs with F15-15/17)
 | id | sev | status | item |
 |----|-----|--------|------|
-| B-GH1 | H | OPEN | Non-FF push: detect distinctly, stop blaming credentials, offer recovery (rename/reset-branch packet) — github-credentials §5 + F15-15 |
+| B-GH1 | H | DONE 7d602ea | Non-FF push: detect distinctly, stop blaming credentials, offer recovery (rename/reset-branch packet) — github-credentials §5 + F15-15 |
 | B-GH2 | M | OPEN | `failureMessage` still names dropped `workflow` scope (connections.server.ts:190-195) |
 | B-GH3 | M | OPEN | Rotate/Attach rebinds to DEFAULT connection regardless of repo owner (github-actions.server.ts:110-119) — multi-connection footgun |
-| B-GH4 | L | OPEN | `github.pr.opened` audit row on every reuse (pr-open.server.ts:369-377) |
+| B-GH4 | L | DONE 7d602ea | `github.pr.opened` audit row on every reuse (pr-open.server.ts:369-377) |
 | B-GH5 | M | OPEN | Reconciler: unbounded parallel task reconcile per tick; no concurrency cap/backoff |
 | B-GH6 | L | OPEN | Required-scope set defined twice (pat-store vs connections) — unify |
 | B-GH7 | M | OPEN | Connection `valid` state trusted forever; no periodic revalidation of org connections |
@@ -47,12 +47,12 @@ Facts (not defects) worth keeping: Developer-Claude pushes its branch at creatio
 ### Workflow core / acceptance (pairs with F15-19)
 | id | sev | status | item |
 |----|-----|--------|------|
-| B-WF1 | H | OPEN | Direct `acceptCompletion` lacks in-lock re-check after merge await (P14-GV-05 fixed only the packet path) — workflow-core §3 |
+| B-WF1 | H | DONE 7d602ea (direct + packet paths) | Direct `acceptCompletion` lacks in-lock re-check after merge await (P14-GV-05 fixed only the packet path) — workflow-core §3 |
 | B-WF2 | H | OPEN | `block_on_policy` writes `validation:"failing"` directly (single-writer violation; next derive reverts it) + hold packets never clear/un-hold (no affordance) |
 | B-WF3 | M | OPEN | Scheduled runs fire as bare `trigger:"manual"` — note/identity never reach the operator directive |
-| B-WF4 | M | OPEN | Terminal/review stage resolved 3 ways (schedule positional, task-actions structural, operatorAccept positional) — one resolver |
+| B-WF4 | M | DONE 7d602ea | Terminal/review stage resolved 3 ways (schedule positional, task-actions structural, operatorAccept positional) — one resolver |
 | B-WF5 | L | OPEN | `fireDueSchedules` LIKE-scan on JSON status; stale header comment describing the pre-fix flow |
-| B-WF6 | M | OPEN | `operatorAcceptCompletion` re-implements Done inline (drift-prone mirror of acceptCompletion) — share one path (operator map §4) |
+| B-WF6 | M | DONE 7d602ea (shared core, 3 writers) | `operatorAcceptCompletion` re-implements Done inline (drift-prone mirror of acceptCompletion) — share one path (operator map §4) |
 | B-WF7 | L | OPEN | `reorderTask` can 403 after passing visible gate (reorder-board vs approve-transition split — currently same tier, add test tying them) |
 
 ### Operator (map §Suspects)
