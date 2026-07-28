@@ -4072,7 +4072,11 @@ export async function resolvePacket(
       mutate = (fm) => {
         fm.readiness = "blocked";
         fm.waiting = "human";
-        fm.validation = "failing"; // a policy block is an unhealthy state (FR24)
+        // B-WF2: `validation` has ONE writer (deriveValidation, F10-15). This
+        // used to stamp "failing" for a POLICY hold — a review verdict the
+        // reviewers never gave — and the next derive (review entry, a
+        // completion) silently reverted it. The hold is `readiness: blocked`;
+        // the review cache keeps telling the truth about the review.
       };
       break;
     }
@@ -4236,7 +4240,21 @@ export async function resolvePacket(
     },
   });
 
-  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  // B-WF2: only a decision that is actually SETTLED stops waiting on a human.
+  // The hold options keep their packet open on purpose (re-resolving it with a
+  // different option is the un-hold path), so consuming the approval left a
+  // blocked task with an open decision and nothing in anyone's inbox pointing
+  // at it. `edit_goal` is the same shape and clears when the edit lands.
+  // B-WF2: only a decision that is actually SETTLED stops waiting on a human.
+  // The hold options keep their packet open on purpose (re-resolving it with a
+  // different option is the un-hold path), so consuming the approval left a
+  // blocked task with an open decision and nothing in anyone's inbox pointing
+  // at it. `edit_goal` is the same shape and clears when the edit lands.
+  const stillAwaitingHuman =
+    !clearPacket && option.kind !== "edit_goal";
+  if (!stillAwaitingHuman) {
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  }
 
   // When a human sends work back to the agent side (request_edit / redirect /
   // custom), the packet event PROMISES "the operator re-engages the specialist"

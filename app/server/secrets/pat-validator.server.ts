@@ -409,6 +409,9 @@ export const REVALIDATE_COOLDOWN_MS = 60_000;
  * reprojects it, and audits via the violations API. SSE fan-out rides the
  * emitted projection/violation events.
  */
+/** Scopes whose violations need PROVEN write evidence to clear (B-GH8). */
+const WRITE_EVIDENCE_SCOPES = new Set(["repo", "pull_request:write"]);
+
 export async function revalidateProjectCredential(
   db: DatabaseSync,
   projectSlug: string,
@@ -508,11 +511,23 @@ export async function revalidateProjectCredential(
   const grantedScopes = new Set(
     validation.scopes.flatMap((s) => (s.ok ? [s.id] : [])),
   );
+  // B-GH8: a WRITE scope may only be cleared by WRITE evidence. `assumed` means
+  // the dry-run probe never answered — resolving on it turns "we don't know"
+  // into "granted", and the human learns otherwise at the next failed delivery.
+  // Read-only scopes keep the historical assumed-ok behaviour.
+  const provenScopes = new Set(
+    validation.scopes.flatMap((s) =>
+      s.ok && (s.source === "header" || s.source === "probe") ? [s.id] : [],
+    ),
+  );
   const resolvedViolations: ScopeViolationRecord[] = [];
   for (const violation of listScopeViolations(db, projectSlug, {
     status: "open",
   })) {
-    if (!grantedScopes.has(violation.scope)) continue;
+    const enough = WRITE_EVIDENCE_SCOPES.has(violation.scope)
+      ? provenScopes.has(violation.scope)
+      : grantedScopes.has(violation.scope);
+    if (!enough) continue;
     const result = await resolveScopeViolationWithEvent(
       db,
       violation.id,

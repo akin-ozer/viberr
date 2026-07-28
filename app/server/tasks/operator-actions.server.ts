@@ -135,6 +135,18 @@ function readAutonomy(definition: unknown): OperatorAutonomy {
  * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
  * when no operator is deployed (the same default the run path uses).
  */
+/**
+ * The ONE rule for "which backend does a deployment run on" (B-OP5): the first
+ * declared real backend, Claude when nothing declares one. Both the standalone
+ * lookup below and the authority resolver read it, so a change to the picking
+ * rule cannot land in one place and miss the other.
+ */
+export function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
+  return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
+    ? "codex"
+    : "claude";
+}
+
 export function operatorBackendFor(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -145,10 +157,7 @@ export function operatorBackendFor(
       (a) => effectiveProfileView(a, ctx.dataRoot).kind === "operator",
     );
     if (!deployment) return "claude";
-    const view = effectiveProfileView(deployment, ctx.dataRoot);
-    return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
-      ? "codex"
-      : "claude";
+    return deploymentBackend(effectiveProfileView(deployment, ctx.dataRoot));
   } catch {
     return "claude";
   }
@@ -191,11 +200,8 @@ export function resolveOperatorAuthority(
     deployment.capabilities.map((c) => [c.capabilityId, c.mode]),
   );
   const definition = (deployment as Record<string, unknown>).definition;
-  const deploymentBackend: RealBackend =
-    view.backends.find((b) => b === "claude" || b === "codex") === "codex"
-      ? "codex"
-      : "claude";
-  const backend: RealBackend = overrides.backend ?? deploymentBackend;
+  const declaredBackend = deploymentBackend(view);
+  const backend: RealBackend = overrides.backend ?? declaredBackend;
 
   // The deployment's model is specific to its own backend (e.g. a Claude model).
   // When a run overrides to a DIFFERENT backend, the stored model is invalid for
@@ -203,7 +209,7 @@ export function resolveOperatorAuthority(
   // resolveRunModel also rejects display placeholders ("orchestration runtime")
   // and any other non-catalog value, so nothing invalid leaks into the run.
   const model =
-    backend === deploymentBackend
+    backend === declaredBackend
       ? resolveRunModel(backend, view.model)
       : defaultModelFor(backend);
 
@@ -212,7 +218,7 @@ export function resolveOperatorAuthority(
     autonomy: overrides.autonomy ?? readAutonomy(definition),
     backend,
     model,
-    effort: backend === deploymentBackend ? view.effort || "" : "",
+    effort: backend === declaredBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
     kb: view.resources.kb ?? [],

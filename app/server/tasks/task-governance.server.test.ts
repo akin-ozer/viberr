@@ -14,8 +14,12 @@ import {
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { createNotification } from "~/server/projections/notifications.server";
+import {
+  createNotification,
+  listNotifications,
+} from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard } from "~/server/projections/board-query.server";
 import {
@@ -817,13 +821,47 @@ describe("resolvePacket kind matrix", () => {
     );
     expect(task.readiness).toBe("blocked");
     expect(task.waiting).toBe("human");
-    expect(task.validation).toBe("failing"); // a policy block is unhealthy (FR24)
+    // B-WF2: `validation` is the REVIEW cache with one writer (deriveValidation).
+    // A policy hold is not a review verdict — this used to stamp "failing" and
+    // the next derive silently reverted it. The hold lives in `readiness`.
+    expect(task.validation).toBe("none");
     expect(task.packet).not.toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({
       type: "blocked",
       text: "**Decision:** hold on policy. VIB-1 stays blocked until the project credential policy is updated.",
     });
+  });
+
+  it("B-WF2: a hold keeps its decision in the inbox — the packet it left open is the un-hold path", async () => {
+    // Fails before B-WF2: the hold options keep their packet open on purpose
+    // (re-resolving it with a different option is how a human lifts the hold),
+    // but the resolution consumed the packet/approval notifications anyway —
+    // so the task sat blocked with an open decision that had vanished from
+    // every inbox.
+    const store = prepared();
+    withTask(store, { stage: "review", waiting: "human" }, PACKET);
+    createNotification(store.db, {
+      userId: store.users.murat.id,
+      kind: "packet",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      title: "Decision required",
+      text: "hold or proceed",
+      bypassPrefs: true,
+    });
+    const unreadFor = () =>
+      listNotifications(store.db, store.users.murat.id).filter(
+        (n) => n.taskKey === "VIB-1" && n.kind === "packet" && n.unread,
+      );
+    expect(unreadFor()).toHaveLength(1); // the decision is in the inbox
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(unreadFor()).toHaveLength(1); // …and the hold leaves it there
   });
 
   it("hold_runtime_debug: readiness→blocked, packet KEPT, waiting untouched", async () => {

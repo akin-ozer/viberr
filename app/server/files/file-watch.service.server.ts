@@ -1,5 +1,5 @@
 import path from "node:path";
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
@@ -147,6 +147,12 @@ export function startFileWatcher(
       const db = resolveDb();
       const rel = path.relative(watchedDir, absDir);
       if (rel.startsWith("..")) return;
+      // F15-03: `rename` fires for directory CREATION too, so creating a
+      // project logged "watcher reconciled removed directory" for the directory
+      // that had just appeared and re-read every task of that project. A
+      // directory that is still there was not removed — the file-level handlers
+      // already project its contents.
+      if (existsSync(absDir)) return;
       const segments = rel === "" ? [] : rel.split(path.sep);
 
       const reconcileProject = (slug: string) => {
