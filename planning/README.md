@@ -10,10 +10,12 @@ These are living documents. When the app and a document disagree and the app is 
 the document is corrected — with a note saying when and why — rather than the app being
 "fixed" back. Read a requirement's amendment notes before treating it as an instruction.
 
-`design/` holds the build inputs, not the canon: the HTML mock, the design system, and an
-older working copy of the PRD. That copy carried the 2026-07-04 reviewer and commenting
-amendments (FR4, FR14, FR37, FR38) for a while and the canon copy did not; the amendments
-were folded back in on 2026-07-25, so the two agree again. On any future divergence,
+`design/` holds the build inputs, not the canon: the HTML mock, the design system, and a
+working copy of the PRD. The two copies have drifted in both directions — the design copy
+carried the 2026-07-04 reviewer and commenting amendments (FR4, FR14, FR37, FR38) before
+the canon did, and the canon then carried the 2026-07-25 live-use amendments the design
+copy lacked. On 2026-07-28 the design copy absorbed the full 2026-07-25 set plus the
+pass-15 rulings (FR4, FR27, FR31), so the two agree again. On any future divergence,
 `planning-artifacts/` wins.
 
 Implementation behavior is verified by the source and test suite; completed discovery

@@ -13,10 +13,10 @@ stepsCompleted:
   - step-09-functional
   - step-10-nonfunctional
   - step-11-polish
-inputDocuments:
-  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr.md
-  - /Users/akinozer/projects/viberr/_bmad-output/planning-artifacts/product-brief-viberr-distillate.md
-  - /Users/akinozer/projects/viberr/_bmad-output/brainstorming/brainstorming-session-2026-03-29-12-02-32.md
+# The input documents (product brief, its distillate, and the 2026-03-29 brainstorming
+# session) were consumed into this PRD at drafting time; their _bmad-output copies were
+# deleted in the pre-pass-13 cleanup. This document is self-standing.
+inputDocuments: []
 workflowType: 'prd'
 documentCounts:
   briefCount: 1
@@ -33,7 +33,7 @@ classification:
 # Product Requirements Document - Viberr
 
 **Author:** akin-ozer
-**Date:** 2026-03-30 (scope simplified 2026-06-08; reviewer & commenting amendments 2026-07-04)
+**Date:** 2026-03-30 (scope simplified 2026-06-08; reviewer & commenting amendments 2026-07-04; live-use amendments 2026-07-25; delivery, acceptance & visibility rulings 2026-07-28)
 
 ## Executive Summary
 
@@ -111,7 +111,7 @@ V1 targets GitHub-backed delivery for small teams through a familiar board/task 
 
 - Human and agent permissions stay distinct and enforceable.
 - The system defines which actions agents may perform directly, which they may only recommend, and which are reserved for humans.
-- Governance-critical transitions — especially task completion — stay explicitly human-authorized.
+- Governance-critical transitions — especially task completion — stay explicitly human-authorized, with one narrow, deliberate exception: a project configured for full operator autonomy may additionally grant its operator the completion-for-acceptance capability in `direct` mode, and that operator then accepts and closes tasks itself. The grant is explicit and audited, never implied by raising autonomy, and it is disclosed in the UI wherever the human-only claim would otherwise be made. Every other path to `done` remains human. (Owner ruling Q1; recorded here 2026-07-25.)
 
 **Runtime continuity.**
 
@@ -122,7 +122,7 @@ V1 targets GitHub-backed delivery for small teams through a familiar board/task 
 **GitHub integration.**
 
 - Authenticated access to repositories, branch creation, commit association, PR creation, and review-state awareness.
-- Project-level default repository with task-level override.
+- One GitHub repository per project; every task in it executes against that repository.
 - Repo-linked execution context reflected back into the task artifact compactly.
 - Branch and PR status stay visible alongside task state.
 
@@ -158,7 +158,7 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - **Type:** single-page web app optimized for multi-user team workflows and agent-governance interactions — an internal operational workspace, not a public/marketing surface. SEO and crawlability are not requirements; on-premises, authenticated deployment is assumed and should inform architecture, configuration, and session handling.
 - **Architecture:** prioritize fast transitions between board supervision and task intervention, and dense-timeline rendering without overwhelming the user. Near-real-time updates matter because multiple humans and multiple agent threads change task state concurrently; the platform also retains explicit recovery actions such as manual re-scan and rebuild.
 - **Browser matrix:** current Chromium-based browsers, current Safari, and current Firefox desktop. Mobile and legacy browsers are not V1 targets.
-- **Responsive:** desktop-first; common laptop resolutions fully support board supervision, task detail, and multi-panel workflows. Tablet/narrow screens get review-first access (current state, latest packet, ownership/waiting status, safe lightweight actions), not full supervision.
+- **Responsive:** desktop-first; common laptop resolutions fully support board supervision, task detail, and multi-panel workflows. Narrower viewports get the **same surface, reflowed** — multi-column layouts collapse to one column, the board's columns narrow, and secondary topbar chrome hides — not a reduced review-first mode. Every action available at desktop width, including destructive and governance actions, remains available and is expected to be used with care. (V1 planned a review-first mode below 768px; it was never built, desktop-first is the declared browser context, and the intent was retired 2026-07-25 rather than left as an instruction to build it.)
 - **Performance:** board and task views feel immediate under typical small-team use; task detail stays fast on long histories via compact rendering and progressive disclosure; state updates appear quickly enough to trust Viberr as a live shared surface.
 - **Accessibility:** core workflows meet a WCAG 2.2 AA baseline in V1, with light and dark mode; broader accessibility work outside core workflows may phase after MVP.
 
@@ -175,12 +175,12 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - Canonical task files in stable task directories
 - Rule-driven workflow with explicit stage transitions and approval boundaries
 - Dedicated operator agent per task
-- Primary specialist owner plus persistent consultant specialists
+- Primary specialist plus persistent consultant specialists, with the task's human owner tracked separately
 - Codex / Claude Code backed non-interactive runs
 - Separate human RBAC and project-scoped agent capability policy
-- Single GitHub repo attachment per task
+- One GitHub repo per project; every task executes against it
 - Task-key branch creation and commit traceability
-- PR-backed review stage; human-only transition to `done`
+- PR-backed review stage; human-only transition to `done`, except for a full-autonomy operator holding an explicit completion-for-acceptance grant
 - Board cards with current stage, waiting state, assigned agent, and validation status
 - Task detail page with current state, execution profile, latest decision packet, and unified timeline
 - Typed important events for quality flags, transition requests, blocked decisions, completion reports, and policy violations
@@ -204,22 +204,22 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - FR1: Team members can sign in to Viberr and access shared workspaces.
 - FR2: Admin users can manage team membership and human roles, and the system enforces project and task permissions based on those roles.
 - FR3: Users can collaborate in the same project with shared visibility into task state changes.
-- FR4: Users can comment on tasks, addressing instructions or questions to specific agents or teammates in one unified timeline. *(Amended 2026-07-04)* Commenting is app-wide: every registered user may comment on any task, including tasks in projects they are not a member of, and non-member comments are visibly labeled as such.
-- FR37 *(added 2026-07-04, revised)*: Each task can have one human owner who acts as its reviewer and acceptance authority; owner rights are scoped to that task only — they may comment, review, and accept or reject that task's boundaries, but gain no rights over other tasks or project configuration. A task may be unowned until a member takes it. Extends FR14/FR27.
+- FR4: Users can comment on tasks, addressing instructions or questions to specific agents or teammates in one unified timeline. *(Amended 2026-07-04)* Commenting is app-wide: every registered user may comment on any task, including tasks in projects they are not a member of, and non-member comments are visibly labeled as such. *(Amended 2026-07-28 — owner ruling R15-4.)* Projects are members-only surfaces: a user who is not a member of a project cannot open its board or tasks at all — the routes behave as if the project does not exist, because workflow secrecy (WI-13) wins. "App-wide" therefore means across the projects the user can see; within that visibility, cross-project commenting and its labeling stand as written.
+- FR37 *(added 2026-07-04, revised)*: Each task can have one human owner who acts as its reviewer and acceptance authority; owner rights are scoped to that task only — they may comment, review, and accept or reject that task's boundaries, but gain no rights over other tasks or project configuration. A task may be unowned until a member takes it. Extends FR14/FR27. *(Amended 2026-07-25 — the "partly implemented" annotation was itself stale, and the requirement is now WIDER than it was written.)* The acceptance-authority clause ships: a task's live owner (contributor or above) accepts its completion at every acceptance writer, alongside the project's admins and maintainers. Owner ruling R14-2 then widened it — the owner governs **any** open decision on their own task, not only acceptance: resolving decision packets, applying the recommendations whose underlying action they hold, and dismissing any recommendation. The scoping clause is unchanged and is what keeps the widening safe: the authority is over that task's decisions only, and each decision's inner action keeps its own capability gate (an owner who is not a maintainer still cannot run agents or edit project policy). This closes the dead-end where the decisions inbox counted an owned task as "waiting on you" and every action on it returned 403. *(Amended 2026-07-28 — owner ruling R15-3.)* The widening now covers stage-transition recommendations too: a task's owner may apply or dismiss **any** operator recommendation on their own task, including a move the owner's own role could not authorize from the stage menu. The Apply click IS the authorization for that one recommended move — it does not grant the underlying action anywhere else, and every other capability gate still applies.
 - FR38 *(added 2026-07-04, revised)*: Any member assigned to the project can take or release task ownership (self-service, no admin involvement); project admins can additionally release any owner. Ownership changes are recorded as typed events in the task timeline, and admin releases also land in the audit trail. Extends FR2/FR16.
 
 ### Project Governance & Policy
 
 - FR5: Admin users can create and configure governed delivery projects.
 - FR6: Admin users can define workflow stages, allowed transitions, and approval boundaries for a project.
-- FR7: Admin users can define a default GitHub repository for a project and allow task-level overrides.
+- FR7: Admin users can define the GitHub repository for a project. One project, one repository. *(Amended 2026-07-25 — the "and allow task-level overrides" clause was struck by owner ruling. The override was half-built: nothing ever wrote a task-level repo, the admin toggle that claimed to govern it enforced nothing, and a task pointing at another owner's repo would authenticate with the project's credential anyway. Rather than finish a feature nobody had asked for, the toggle and its copy were deleted.)*
 - FR8: Admin users can define separate human access policies (RBAC) and agent capability policies for each project.
 - FR9: Admin users can define reusable agent profiles (global base definitions with project customization), including each profile's eligible stages, permitted actions, permitted context resources (skills, MCPs, knowledge bases), and supported execution backend.
 
 ### Task Records & Lifecycle
 
 - FR10: The system can maintain projects and task records in a file-native store that remains inspectable outside the application, and can recognize and reconcile task files that are created or edited directly in the store.
-- FR11: Users and authorized agents can create tasks within a project.
+- FR11: Users can create tasks within a project. Agents cannot: task creation is a human act, and an agent that believes a task is needed routes it to a human through a decision packet. (The V1 clause "and authorized agents" was struck 2026-07-25 — it was never implemented on any layer, and task-graph and subtask orchestration is scoped post-MVP.)
 - FR12: Each task can maintain a canonical operating record containing identity, goal, state, execution context, timeline, decisions, and execution references.
 - FR13: Tasks can move through project-defined workflow stages under governed transition rules.
 - FR14: Each task can have one primary specialist and additional consultant specialists doing the execution work; the task's human owner (FR37) is tracked separately as its reviewer and acceptance authority.
@@ -235,25 +235,26 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 - FR21: Specialist agents can execute stage work and append outcomes, blockers, and evidence to the task record.
 - FR22: Persistent agent threads can be resumed across stages and later consultations, and reactivated agents can continue from the current canonical task state even when prior runtime history is unavailable.
 - FR23: Authorized users can access an agent's native runtime session for deeper debugging or intervention when needed.
+- FR39 *(added 2026-07-25, recording shipped behavior)*: Authorized users can schedule a future operator re-run on a task — "re-check this in 24 hours" — which a server-side runner fires when it comes due, without a human present at the moment of execution. Scheduling is itself a governed action: only a role that may run agents can create one, the scheduled entry is canonical in the task file so it survives a projection rebuild, the run carries the backend and autonomy level chosen at schedule time, and it never fires on a task that has reached a terminal stage. This is the one capability that lets an agent act with no human watching, so it must stay visible on the task, cancellable, and auditable. (Built under O-3; the ruling previously lived only in code comments and git history.)
 
 ### Oversight Views & Human Governance
 
 - FR24: Users can view tasks on a board organized by workflow stage, with each card showing current stage, assigned agent, waiting state (human vs agent), and validation status.
 - FR25: Users can open a task detail view that prioritizes current state, execution profile, and latest decision packet before the ongoing timeline.
 - FR26: The system can generate structured blocking and decision packets for human review when agent work requires intervention.
-- FR27: Human users can approve, reject, or redirect consequential task changes (including stage advancement and completion), and only human users can transition a task to `done`.
+- FR27: Human users can approve, reject, or redirect consequential task changes (including stage advancement and completion). Transition to `done` is human by default and enforced server-side; the single exception is a project running its operator at full autonomy with an explicit `direct` completion-for-acceptance grant, in which case that operator accepts and closes the task itself (it still refuses a task with failing validation). Raising autonomy alone never confers this — the capability must be granted deliberately, and it is audited. *(Amended 2026-07-28 — owner ruling R15-1.)* Human acceptance is verdict-gated: accepting completion requires a review PR whose head carries the delivered revision and a healthy reviewer verdict on that revision, enforced at every acceptance writer. An explicit Force-accept is the only bypass for a missing or failing verdict — audited as such, and never a bypass for a PR head that does not match the delivered work. Every acceptance, gated or forced, passes through a confirmation dialog stating what will merge and naming any missing signals before the click counts.
 - FR28: Users can review current task progress without needing raw provider logs or raw validation output.
 
 ### GitHub Delivery & Traceability
 
 - FR29: The system can authenticate to GitHub and access authorized repositories for task execution.
-- FR30: Each task can attach to one GitHub repository in V1, inheriting the project default unless overridden.
-- FR31: The system can create and manage task-key execution branches and associate commits, changed-file references, and review-stage pull requests with the originating task.
+- FR30: Each task executes against its project's repository. One repository per project in V1; there is no per-task override (see FR7).
+- FR31: The system can create and manage task-key execution branches and associate commits, changed-file references, and review-stage pull requests with the originating task. *(Amended 2026-07-28 — owner ruling R15-2.)* Delivery — pushing the task branch and opening the review pull request — is an operator decision, not a side-effect bound to any fixed stage. The operator weighs the task's remaining stages and delivers when it judges the work plausibly ready for review; when unsure, it opens a decision packet asking whether to push and open the PR, and it may offer early delivery when later stages (such as QA) are not needed for the task. The server still executes the mechanics, a human can trigger delivery directly (audited), and specialist agents never push or open PRs themselves. Reaching a review stage with no PR is announced with a typed event, never silently.
 - FR32: Users can view branch and pull request status alongside task state.
 
 ### Integrity, Audit & Recovery
 
-- FR33: The system can preserve an auditable history of human decisions, agent actions, workflow changes, and policy-relevant events.
+- FR33: The system can preserve an auditable history of human decisions, agent actions, workflow changes, and policy-relevant events. *(Bounded 2026-07-25.)* Audit rows are retained for **90 days** and then hard-deleted by a retention pass that runs on every boot; there is no export path in V1. Task-scoped history is unaffected in practice because it is also written to the canonical `task.md` and survives indefinitely. Org- and auth-scoped events have no file counterpart — sign-in outcomes, user administration, connection token replacement, and PAT changes are genuinely gone at 90 days. Anyone who needs a longer window snapshots the data root on a schedule. Audit export is Phase 2.
 - FR34: The system can isolate secrets and credentials from task-visible artifacts, comments, and audit records.
 - FR35: The system can record task quality issues and policy violations as first-class events.
 - FR36: Users can trigger manual project re-scan and state reconciliation when automated change detection misses updates.
@@ -291,4 +292,4 @@ The strongest early signal is repeated use on complex tasks where multiple agent
 
 ### Auditability
 
-- NFR18: The system must preserve a durable audit trail of human approvals, workflow transitions, assignment changes, policy-relevant events, and agent-generated important events — enough for an authorized user to reconstruct who initiated a consequential action, when it occurred, and which task or project state changed — and must keep it available after application restarts, resynchronization events, and runtime failures.
+- NFR18: The system must preserve a durable audit trail of human approvals, workflow transitions, assignment changes, policy-relevant events, and agent-generated important events — enough for an authorized user to reconstruct who initiated a consequential action, when it occurred, and which task or project state changed — and must keep it available after application restarts, resynchronization events, and runtime failures. Durability here means across those events, not indefinitely: retention is bounded per FR33.
